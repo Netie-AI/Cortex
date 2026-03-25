@@ -1,0 +1,17 @@
+skill_id: web_search_v1
+name: Web Search
+description: Search the web for current information, news, and facts.
+category: search
+example_intents:
+  - "Search the web for recent news about quantum computing."
+  - "Find the latest stock price of AAPL."
+  - "Look up the population of Tokyo."
+required_tools:
+  - http_get
+required_network:
+  - "*.google.com"
+  - "*.bing.com"
+  - "*.duckduckgo.com"
+max_tier: 2
+version: "1.0.0"
+author: "community"

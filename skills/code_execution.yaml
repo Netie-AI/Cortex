@@ -1,0 +1,18 @@
+skill_id: code_execution_v1
+name: Code Execution
+description: Execute Python scripts in a sandboxed environment.
+category: coding
+example_intents:
+  - "Run a python script to calculate fibonacci of 10."
+  - "Execute code to plot a chart."
+  - "Test this python function locally."
+required_tools:
+  - wasm_subprocess
+required_network: []
+annotations:
+  execution_model: wasm_sandboxed
+  wasm_phase: "1b"
+  phase1_fallback: restricted_subprocess
+max_tier: 2
+version: "1.0.0"
+author: "community"

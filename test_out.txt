@@ -1,0 +1,47 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.11, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\user\Cortex\Cortex
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0, respx-0.22.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4 items
+
+tests\test_fabrication\test_skillmesh.py ...F                            [100%]
+
+================================== FAILURES ===================================
+________________________ test_skillmesh_near_boundary _________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000011EBDC21CF0>
+
+    def test_skillmesh_near_boundary(monkeypatch):
+        """
+        Near-boundary detection: artificially craft a nonsense intent and
+        verify top_k is reduced to 3 (unit test with mock cosine scores)
+        """
+        skills_dir = Path(__file__).parent.parent.parent / "skills"
+        registry = SkillRegistry(load_skill_cards(skills_dir))
+        mesh = SkillMesh(registry)
+    
+        # Force _rerank_with_scores to return artificially spread scores (stddev > 0.4)
+        # to trigger the near_boundary check.
+        def mock_rerank_scores(*args, **kwargs):
+            cards = registry.all()
+            # Create standard deviation > 0.4: scores [1.0, 0.0] gives stddev 0.5
+            scores = [1.0] + [0.0] * (len(cards) - 1)
+            return cards, scores
+    
+        monkeypatch.setattr(mesh.reranker, "_rerank_with_scores", mock_rerank_scores)
+    
+        res = mesh.retrieve("adversarial input to trigger boundary", top_k=8)
+        # Should get reduced to 3
+>       assert len(res.value) == 3
+E       assert 0 == 3
+E        +  where 0 = len([])
+E        +    where [] = Ok(value=[]).value
+
+tests\test_fabrication\test_skillmesh.py:68: AssertionError
+---------------------------- Captured stderr call -----------------------------
+\rLoading weights:   0%|          | 0/103 [00:00<?, ?it/s]\rLoading weights: 100%|\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588| 103/103 [00:00<00:00, 7708.19it/s]\n\x1b[1mBertModel LOAD REPORT\x1b[0m from: sentence-transformers/all-MiniLM-L6-v2\nKey                     | Status     |  | \n------------------------+------------+--+-\nembeddings.position_ids | UNEXPECTED |  | \n\n\x1b[3mNotes:\n- UNEXPECTED\x1b[3m\t:can be ignored when loading from different task/architecture; not ok if you expect identical arch.\x1b[0m
+=========================== short test summary info ===========================
+FAILED tests/test_fabrication/test_skillmesh.py::test_skillmesh_near_boundary
+======================== 1 failed, 3 passed in 18.52s =========================

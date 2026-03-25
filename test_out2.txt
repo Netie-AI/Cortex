@@ -1,0 +1,45 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.11, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\user\Cortex\Cortex
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0, respx-0.22.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4 items
+
+tests\test_fabrication\test_skillmesh.py ...F                            [100%]
+
+================================== FAILURES ===================================
+________________________ test_skillmesh_near_boundary _________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021D9B827160>
+
+    def test_skillmesh_near_boundary(monkeypatch):
+        """
+        Near-boundary detection: artificially craft a nonsense intent and
+        verify top_k is reduced to 3 (unit test with mock cosine scores)
+        """
+        skills_dir = Path(__file__).parent.parent.parent / "skills"
+        registry = SkillRegistry(load_skill_cards(skills_dir))
+        mesh = SkillMesh(registry)
+    
+        # Force _rerank_with_scores to return artificially spread scores (stddev > 0.4)
+        # to trigger the near_boundary check.
+        def mock_rerank_scores(*args, **kwargs):
+            cards = registry.all()
+            # Create standard deviation > 0.4: scores [1.0, 0.0] gives stddev 0.5
+            scores = [1.0] + [0.0] * (len(cards) - 1)
+            return cards, scores
+    
+        monkeypatch.setattr(mesh.reranker, "_rerank_with_scores", mock_rerank_scores)
+    
+        res = mesh.retrieve("search the web and calculate fibonacci and summarize and webhook", top_k=8)
+        # Should get reduced to 3
+>       assert len(res.value) == 3
+E       AssertionError: assert 6 == 3
+E        +  where 6 = len([SkillCard(skill_id='api_call_v1', name='Generic API Call', description='Make arbitrary HTTP requests to external serv...0', author='community', mean_latency_ms=0.0, p99_latency_ms=0.0, mean_token_cost=0.0, acceptance_rate=1.0, weight=1.0)])
+E        +    where [SkillCard(skill_id='api_call_v1', name='Generic API Call', description='Make arbitrary HTTP requests to external serv...0', author='community', mean_latency_ms=0.0, p99_latency_ms=0.0, mean_token_cost=0.0, acceptance_rate=1.0, weight=1.0)] = Ok(value=[SkillCard(skill_id='api_call_v1', name='Generic API Call', description='Make arbitrary HTTP requests to exte...', author='community', mean_latency_ms=0.0, p99_latency_ms=0.0, mean_token_cost=0.0, acceptance_rate=1.0, weight=1.0)]).value
+
+tests\test_fabrication\test_skillmesh.py:68: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_fabrication/test_skillmesh.py::test_skillmesh_near_boundary
+========================= 1 failed, 3 passed in 3.88s =========================

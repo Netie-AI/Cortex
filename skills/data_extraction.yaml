@@ -1,0 +1,18 @@
+skill_id: data_extraction_v1
+name: Data Extraction
+description: Extract structured data from unstructured text using regex or JSON paths.
+category: data
+example_intents:
+  - "Extract all email addresses from this text."
+  - "Parse out the dates and events from this log."
+  - "Get the user.name field from this JSON response."
+required_tools:
+  - regex_extract
+  - json_parse
+required_network:
+  - "*.openai.com"
+  - "*.anthropic.com"
+  - "*.mistral.ai"
+max_tier: 1
+version: "1.0.0"
+author: "community"

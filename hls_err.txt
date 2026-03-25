@@ -1,0 +1,112 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.11, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\user\Cortex\Cortex
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0, respx-0.22.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+tests\test_fabrication\test_hls_compiler.py FF.                          [100%]
+
+================================== FAILURES ===================================
+___________________________ test_hls_compiler_valid ___________________________
+
+mock_mesh = <test_hls_compiler.mock_mesh.<locals>.MockMesh object at 0x000001CD6378A020>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CD63789FC0>
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_hls_compiler_valid(mock_mesh, monkeypatch):
+        compiler = HLSCompiler(mock_mesh)
+        compiler.config.api_key = "test"
+        compiler.config.synthesis_model = "gpt-4"
+    
+        valid_dsl = """
+        {
+          "version": "1.0",
+          "entry_node_id": "start",
+          "output_node_id": "end",
+          "nodes": [
+            {"id": "start", "type": "TOOL_CALL", "tier": 0, "inputs": []},
+            {"id": "end", "type": "EMIT", "tier": 0, "inputs": ["start"]}
+          ]
+        }
+        """
+    
+        async def mock_send(*args, **kwargs):
+            class MockResponse:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    return {"choices": [{"message": {"content": valid_dsl}}]}
+                @property
+                def content(self):
+                    return json.dumps(self.json()).encode()
+                @property
+                def text(self):
+                    return json.dumps(self.json())
+                def headers(self): return {}
+            return MockResponse()
+    
+        monkeypatch.setattr("httpx.AsyncClient.send", mock_send)
+    
+        res = await compiler.synthesize("test intent")
+>       assert isinstance(res, Ok)
+E       assert False
+E        +  where False = isinstance(Err(code='E003', message="LLM API Call failed: litellm.InternalServerError: InternalServerError: OpenAIException - 'MockResponse' object has no attribute 'reason_phrase'", detail={}), Ok)
+
+tests\test_fabrication\test_hls_compiler.py:54: AssertionError
+---------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+___________________________ test_hls_compiler_retry ___________________________
+
+mock_mesh = <test_hls_compiler.mock_mesh.<locals>.MockMesh object at 0x000001CD6458B520>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CD63789540>
+
+    @pytest.mark.asyncio
+    async def test_hls_compiler_retry(mock_mesh, monkeypatch):
+        compiler = HLSCompiler(mock_mesh)
+        compiler.config.api_key = "test"
+        compiler.config.synthesis_model = "gpt-4"
+    
+        invalid_dsl = "NOT JSON"
+        call_events = []
+    
+        async def mock_send(*args, **kwargs):
+            call_events.append(1)
+            class MockResponse:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    return {"choices": [{"message": {"content": invalid_dsl}}]}
+                @property
+                def content(self):
+                    return json.dumps(self.json()).encode()
+                @property
+                def text(self):
+                    return json.dumps(self.json())
+                def headers(self): return {}
+            return MockResponse()
+    
+        monkeypatch.setattr("httpx.AsyncClient.send", mock_send)
+    
+        res = await compiler.synthesize("test intent")
+        assert isinstance(res, Err)
+        # Ensure it tried exactly 2 times (initial + 1 retry)
+>       assert len(call_events) == 2
+E       assert 1 == 2
+E        +  where 1 = len([1])
+
+tests\test_fabrication\test_hls_compiler.py:87: AssertionError
+---------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+=========================== short test summary info ===========================
+FAILED tests/test_fabrication/test_hls_compiler.py::test_hls_compiler_valid
+FAILED tests/test_fabrication/test_hls_compiler.py::test_hls_compiler_retry
+========================= 2 failed, 1 passed in 6.95s =========================

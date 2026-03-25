@@ -1,0 +1,17 @@
+skill_id: summarization_v1
+name: Summarization
+description: Summarize long text or documents into concise bullet points.
+category: text_processing
+example_intents:
+  - "Summarize this long article."
+  - "Give me the TLDR of this document."
+  - "Extract the key points from this meeting transcript."
+required_tools:
+  - text_concat
+required_network:
+  - "*.openai.com"
+  - "*.anthropic.com"
+  - "*.mistral.ai"
+max_tier: 1
+version: "1.0.0"
+author: "community"

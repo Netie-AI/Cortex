@@ -1,0 +1,15 @@
+skill_id: file_operations_v1
+name: File Operations
+description: Read and write files to the local filesystem.
+category: system
+example_intents:
+  - "Read the contents of config.json."
+  - "Write this text to output.txt."
+  - "Save the summary to a new markdown file."
+required_tools:
+  - file_read
+  - file_write
+required_network: []
+max_tier: 0
+version: "1.0.0"
+author: "community"

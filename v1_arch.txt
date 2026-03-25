@@ -1,0 +1,371 @@
+
+
+
+
+NETIE CORTEX v1
+Full Technical Architecture Document
+ 
+
+A Unified, Cross-Platform, Quantum-Resistant Agentic Runtime
+
+
+
+
+
+
+Classification: Technical Design — Confidential
+Version: 1.0.0  |  Date: March 22, 2026
+
+Executive Summary
+Netie Cortex v1 is a next-generation agentic runtime engineered to replace monolithic, continuously-looping LLM orchestration frameworks. It unifies the best-proven concepts from two competing design proposals into a single architecture that simultaneously achieves cross-platform portability, drastically reduced token costs, verifiable kernel-level security, post-quantum cryptographic resilience, and a self-improving skill library.
+
+The three core design axioms driving every architectural decision are:
+Individual accessibility — runs on any hardware, any OS, at 10–50× lower API token cost than incumbent systems.
+Deterministic correctness — execution follows statically-compiled Directed Acyclic Graphs (DAGs), eliminating non-deterministic LLM feedback loops.
+Verifiable sovereignty — all security boundaries are auditable via Capability Manifests; cryptographic keys never exist in unprotected host memory.
+
+The architecture is organized into five interlocked phases: (1) Fabrication Pipeline, (2) Wasm-First Execution Layer, (3) Cryptographic Sovereignty, (4) Continuous Improvement, and (5) Adoption Strategy.
+
+Table of Contents
+
+1. Design Foundations & Comparative Analysis
+Netie Cortex v1 emerged from a rigorous head-to-head evaluation of two independently authored architectural proposals. Understanding this comparison is essential context for every design decision in this document.
+
+1.1 Proposal Comparison Matrix
+
+
+ℹ  Neither proposal alone is sufficient. Netie Cortex v1 takes the fabrication brain from Proposal 2 and the execution body from Proposal 1, adds a platform security adapter for defense-in-depth everywhere, and layers in local inference + continuous learning.
+
+1.2 Key Weaknesses Resolved by the Unified Design
+Proposal 1 weakness: No local inference tier — resolved by embedding quantized GGUF models inside Wasm isolates (Tier 1 inference).
+Proposal 1 weakness: Hand-waved fabrication pipeline — resolved by adopting Proposal 2's full HLS compiler, DSL, and DAG optimizer.
+Proposal 1 weakness: WBC treated as absolute — resolved by using WBC only as a time-delay fallback with ephemeral keys and short-lived isolates.
+Proposal 2 weakness: Linux-only — resolved by wrapping all execution in Wasm with platform-adaptive security adapters per OS.
+Proposal 2 weakness: Requires HSM/TEE hardware — resolved by tiering crypto: hardware-backed when available, WBC + ephemeral keys as fallback.
+Proposal 2 weakness: No PQC — resolved by adopting ML-KEM (FIPS 203) + X25519 hybrid transport from Proposal 1.
+Proposal 2 weakness: Telegram-only — resolved by a platform-agnostic webhook encryption layer supporting any messaging system.
+
+2. System Architecture Overview
+Netie Cortex v1 is composed of five architectural layers stacked in a strict dependency hierarchy. The data-flow moves top-to-bottom during normal execution, with feedback loops flowing bottom-to-top for the continuous improvement subsystem.
+
+2.1 Layer Stack
+
+
+2.2 Data-Flow Narrative
+User submits natural language intent via any supported messaging platform (Telegram, WhatsApp, Discord, Slack, Matrix) or direct API.
+The Fabrication Pipeline (Layer 1) scores the intent against the SkillMesh registry, calls the frontier LLM once to synthesize an Agentic DSL program, compiles it into an AOT DAG, eliminates dead nodes, and emits a Capability Manifest.
+The Wasm Runtime (Layer 2) loads the DAG, instantiates per-agent Wasm isolates, and routes each node to the appropriate inference tier: deterministic tool (Tier 0), local quantized model (Tier 1), or frontier API (Tier 2).
+The Platform Security Adapter (Layer 3) enforces the Capability Manifest using OS-native primitives: Landlock + seccomp-bpf on Linux, sdTEE micro-VM on Windows, Hypervisor.framework on macOS.
+All inter-node and external communication is encrypted via the Hybrid PQC Transport (Layer 4), protecting against both classical and quantum adversaries.
+On cycle completion, the Wasm runtime performs deterministic deallocation (drop linear memory block). Execution telemetry is captured and routed to the Sovereign Skill Library (Layer 5) for RLHF weight updates.
+
+3. Phase 1 — Fabrication Pipeline
+The Fabrication Pipeline is the intelligence core of Netie Cortex. It transforms raw user intent into a minimal, deterministic, statically-verified execution graph before any tool or model is invoked for execution. This is the primary source of token cost savings.
+
+3.1 Intent Router with SkillMesh
+Incoming user intent is processed through a two-stage retrieval system called SkillMesh. The goal is to reduce the frontier LLM's synthesis context to the smallest possible set of relevant skill cards.
+
+3.1.1 Stage 1: BM25 Lexical Scoring
+A BM25 inverted index is maintained over all skill card titles, descriptions, and example utterances. BM25 scoring provides fast, interpretable lexical relevance without requiring GPU inference. The top-N candidates (N=50 by default) are forwarded to Stage 2.
+
+3.1.2 Stage 2: Dense Vector Re-ranking
+A lightweight bi-encoder model (384-dimension, quantized to INT8, <50 MB) computes dense embedding similarity between the user intent and each BM25 candidate. The top-K results (K=8 by default) are selected as the synthesis context. Combined with BM25 pre-filtering, total context injected into the frontier LLM is kept below 2,000 tokens of tool metadata — versus 10,000+ in incumbent monolithic systems.
+
+ℹ  Token savings target: 80–90% reduction in synthesis context size versus naive full-registry injection.
+
+3.2 HLS Compiler — Frontier LLM as Synthesis Engine
+The frontier LLM is invoked exactly once per user intent cycle. Its role is strictly that of a High-Level Synthesis (HLS) compiler: it takes the intent plus the top-K skill cards and produces an Agentic DSL program. It does not execute any tool, call any API, or iterate on outputs. This eliminates the open-ended feedback loops that make incumbent systems expensive and non-deterministic.
+
+3.2.1 Agentic DSL Specification
+The Agentic DSL is a minimal, declarative language with the following node types:
+
+
+3.2.2 Synthesis Prompt Contract
+The synthesis prompt sent to the frontier LLM is strictly structured to ensure a machine-parseable response. The LLM is instructed to:
+Output only valid Agentic DSL — no prose, no explanations.
+Reference only skill cards from the injected SkillMesh top-K set.
+Declare every external dependency (network endpoint, file path, system call) as a DAG node annotation.
+Mark each node with its required inference tier.
+
+3.3 AOT DAG Compiler
+The Agentic DSL program emitted by the HLS Compiler is compiled Ahead-of-Time into a typed, immutable DAG before any execution begins. The compiler performs the following passes:
+
+Parsing: Tokenize and validate the DSL syntax against the grammar schema.
+Type-checking: Verify input/output type compatibility at every node edge.
+Dependency resolution: Walk the DAG topologically and resolve all tool and model references to versioned, content-addressed artifacts.
+Parallelism extraction: Identify independent subgraphs that can be executed concurrently in separate Wasm isolates.
+Emit typed DAG IR: Produce an immutable intermediate representation ready for the dead-code eliminator.
+
+3.4 Dead-Code Elimination
+The DAG optimizer performs backward reachability analysis from the EMIT output node. Any node, edge, tool dependency, or library that is not reachable from the output is pruned. This is performed at the AST level, distinguishing claimed dependencies from actual runtime dependencies based on the annotated node types.
+
+Dead-code elimination serves two purposes: it minimizes the Capability Manifest surface area (reducing the attack surface for privilege escalation) and it eliminates redundant tool instantiation costs.
+
+3.5 Capability Manifest Generation
+The final output of the Fabrication Pipeline is a Capability Manifest — a signed, machine-readable declaration of every resource the compiled DAG requires at runtime. The manifest specifies:
+
+
+ℹ  The Capability Manifest is cryptographically signed by the Fabrication Pipeline. Tampering invalidates the signature and aborts execution. In enterprise deployments, manifests are archived for audit trail purposes.
+
+4. Phase 2 — Wasm-First Execution Layer
+The execution layer implements the compiled DAG using a Wasm-first, platform-adaptive security model. Every agent node executes inside a WebAssembly isolate regardless of the host operating system. The platform security adapter then adds OS-native enforcement on top of the Wasm capability sandbox.
+
+4.1 Wasm Nano-Isolates
+All agent logic executes inside WebAssembly modules compiled for the WASI (WebAssembly System Interface) target. The Wasm runtime (Wasmtime or WasmEdge) enforces capability-based, deny-by-default access control. No resource — filesystem, network, host process, or clock — is accessible unless explicitly granted via the Capability Manifest through typed WASI file descriptors.
+
+4.1.1 Instantiation Performance
+AOT-compiled Wasm modules achieve sub-millisecond cold-start instantiation times on modern hardware. Wasmtime's Cranelift backend and WasmEdge's LLVM backend both produce native machine code during compilation, eliminating interpretation overhead at execution time.
+
+
+4.2 Tiered Inference Architecture
+A critical design principle of Netie Cortex is that expensive frontier model calls are reserved exclusively for synthesis (Fabrication Pipeline) and truly novel reasoning tasks. Execution-phase inference is routed through a three-tier hierarchy to minimize API token consumption.
+
+
+4.2.1 Local Model Embedding
+Tier 1 inference uses GGUF-format models (1–3B parameters, INT4 quantized) embedded as WASI preloaded resources within the Wasm isolate. The llama.cpp inference engine, compiled to Wasm, handles model loading and generation. Model selection per DAG node is determined by the Capability Manifest's inference.tiers field.
+
+4.2.2 Token Cost Projection
+Combined SkillMesh context pruning (80–90% synthesis context reduction) and tiered inference routing (Tier 0/1 handling 80–95% of execution nodes) projects a 10–50× reduction in total API token consumption versus monolithic continuous-loop architectures.
+
+4.3 Deterministic Deallocation
+On cycle completion — regardless of success or failure — the Wasm runtime drops the entire linear memory block associated with each isolate. This is a deterministic, synchronous operation with no garbage collection pauses, no async cleanup tasks, and no risk of state bleed between cycles. On Linux, the platform security adapter additionally reclaims kernel namespace resources.
+
+ℹ  Zero persistent state across cycles means zero data retention liability in regulated environments. Each execution leaves no recoverable in-memory artifacts.
+
+5. Phase 2 (cont.) — Platform Security Adapter
+The Platform Security Adapter provides defense-in-depth by layering OS-native isolation primitives on top of the Wasm capability sandbox. This is the mechanism that allows Netie Cortex to claim strong security guarantees on every major platform while using a single portable execution model.
+
+5.1 Linux — Landlock + seccomp-bpf
+On Linux (kernel 5.13+), each Wasm isolate is additionally constrained by:
+
+5.1.1 Landlock Filesystem Rules
+A Landlock ruleset is programmatically generated from the Capability Manifest's filesystem.read and filesystem.write fields. The ruleset is applied before the Wasm module starts executing, restricting filesystem access to the exact paths declared in the manifest. Any attempt to access an undeclared path is blocked at the kernel level — not the application level.
+
+5.1.2 seccomp-bpf Syscall Filters
+A seccomp-bpf filter program is generated from the manifest's syscalls.allowed field. The filter uses a default-deny policy: all syscalls not explicitly listed in the manifest return EPERM. The BPF program is verified and loaded by the kernel before isolate execution begins.
+
+ℹ  Defense-in-depth: A Wasm sandbox escape — even a zero-day — cannot access undeclared filesystem paths or invoke undeclared syscalls on Linux, because the restriction is enforced at the kernel level independently of the Wasm runtime.
+
+5.1.3 Kernel Namespace Isolation
+Each parallel agent receives its own mount namespace, PID namespace, and network namespace derived from the Capability Manifest's network.endpoints allowlist. Namespaces are created using clone(2) with CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET flags.
+
+5.2 Windows — sdTEE via Hyperlight
+On Windows (with Hyper-V / VTL support), Wasm isolates execute inside Hyperlight micro-VMs. Hyperlight uses the Windows Hypervisor Platform (WHP) API to create lightweight Virtual Trust Level (VTL) boundaries around each isolate. This provides hypervisor-level memory isolation: a compromised Wasm module cannot read memory belonging to the host process or other isolates, even if the host OS kernel is compromised.
+
+⚠  Hyperlight is early-stage software. Enterprise deployments on Windows should validate against the current Hyperlight stability matrix before production use.
+
+5.3 macOS — Hypervisor.framework + Sandbox-exec
+On macOS, Wasm isolates are wrapped in lightweight virtual machines using Apple's Hypervisor.framework (Apple Silicon and Intel with VMX). On Apple Silicon devices, cryptographic key operations are opportunistically delegated to the Secure Enclave via CryptoKit. Where full VM overhead is undesirable (e.g., low-latency scenarios), sandbox-exec profiles derived from the Capability Manifest provide process-level restriction.
+
+5.4 Mobile — Wasm-only + WBC Fallback
+On Android and iOS, kernel-level namespace and seccomp extensions are not available to user-space applications. The security model degrades gracefully to Wasm capability isolation only. White-Box Cryptography (WBC) is used as a key-protection fallback, combined with ephemeral key derivation and short-lived isolate lifetimes.
+
+⚠  Mobile WBC provides time-delay hardening only, not absolute key protection. Treat mobile deployments as a reduced-assurance tier.
+
+5.5 Platform Security Comparison Matrix
+
+6. Phase 3 — Cryptographic Sovereignty
+The cryptographic layer ensures that data remains encrypted and keys remain protected even if the host OS is partially compromised. The design uses a tiered key-protection model (hardware-backed → software fallback) combined with post-quantum transport encryption.
+
+6.1 Key Protection Hierarchy
+6.1.1 Tier A — Hardware-Backed (Preferred)
+When the executing device has a hardware security element — TPM 2.0 (Linux, Windows), Apple Secure Enclave (macOS, iOS), or Android StrongBox HSM — all key derivation and signing operations are performed inside the hardware boundary. Keys are generated inside the HSM and never exported to host memory. The Wasm isolate communicates with the HSM via the Capability Manifest's declared crypto.key_ops field.
+
+6.1.2 Tier B — Software Fallback (WBC + Ephemeral Keys)
+On hardware without HSMs — cheap commodity laptops, developer machines, generic cloud VMs — the system falls back to White-Box Cryptography (WBC). WBC is explicitly treated as a time-delay hardening mechanism, not an absolute cryptographic guarantee. The following mitigations are layered on top:
+Ephemeral keys: A new key pair is derived per execution session, using HKDF-SHA3-256 from a hardware-sourced entropy seed.
+Short-lived isolates: Keys exist for the duration of one execution cycle (target: < 1 second in most cases). The attack window for DCA/DFA attacks is correspondingly small.
+Memory XOR masking: Within the Wasm linear memory, key material is XOR-masked with a random pad stored in a separate, non-exported linear memory region.
+
+⚠  WBC schemes (Chow-Eisen, etc.) have been broken by academic DCA/DFA attacks. Never represent WBC as providing equivalent security to hardware-backed key storage to end users or auditors.
+
+6.2 Hybrid Post-Quantum Transport
+All inter-node communication, external API calls, and messaging platform webhooks use a hybrid key encapsulation mechanism combining:
+
+
+ℹ  The hybrid approach ensures security under both classical and quantum adversary models. If either ML-KEM or X25519 is compromised in isolation, the combined shared secret remains secure.
+
+6.3 Platform-Agnostic Webhook Encryption
+The webhook receiver is a platform-agnostic ingress layer that accepts encrypted payloads from any supported messaging platform. The receiver decrypts the outer transport envelope using the hybrid PQC mechanism, then routes the plaintext payload into a Wasm isolate for processing. Plaintext never exists in the receiver process's memory for more than the duration of a single memcpy.
+
+Supported messaging platforms: Telegram, WhatsApp, Discord, Signal, Slack, Matrix. Adding a new platform requires only implementing a thin adapter that conforms to the webhook ingress interface — no changes to the core execution engine are needed.
+
+7. Phase 4 — Continuous Improvement & Learning
+Netie Cortex's Continuous Improvement subsystem enables the system to become faster and cheaper over time without requiring central training runs or leaking user data.
+
+7.1 Sovereign Skill Library
+The Sovereign Skill Library is a versioned, local repository of skill sequences, API toolchains, and compiled DAG templates. Each skill entry contains:
+Skill identifier (SHA-256 content hash of the skill DSL program)
+SkillMesh embedding vector for retrieval scoring
+Performance telemetry: mean latency, P99 latency, token cost per execution, user acceptance rate
+Dependency graph: all tools, models, and endpoints the skill requires
+Version history with diff-based changelogs
+
+Skills are stored locally and are not shared without explicit user consent. The library is the ground truth for the SkillMesh retrieval index.
+
+7.2 Edge RLHF
+User accept/reject signals (explicit thumbs-up/down, or implicit signals such as task abandonment) update skill weights locally via a lightweight reinforcement learning algorithm. The update rule is:
+
+// Simplified Edge RLHF weight update
+new_weight[skill_id] = old_weight[skill_id]
+  + α × (reward - baseline)
+ 
+// Where:
+//   α       = learning rate (default: 0.01)
+//   reward  = +1 (accept) | -1 (reject) | 0 (no signal)
+//   baseline = exponential moving average of recent rewards
+
+High-performing deterministic toolchains (Tier 0 / Tier 1) are progressively promoted over API-dependent paths (Tier 2) in future DAG compilations. Over time, this continuously drives down token costs without any central model retraining.
+
+7.3 FlowMesh Content-Addressable Store (CAS)
+The CAS records immutable execution outputs keyed by the SHA-256 hash of (skill_id, input_hash, manifest_hash). Identical sub-computations — common in enterprise multi-tenant deployments where multiple users submit similar tasks — are served from cache, eliminating redundant LLM inference calls entirely.
+
+ℹ  CAS entries are cryptographically signed with the producing isolate's ephemeral key and include the full execution lineage (DAG structure, model versions, tool versions). This provides an auditable, tamper-evident record of how each cached output was produced.
+
+7.4 Federated Skill Sharing
+Anonymized skill performance metrics (not user data, not input/output content) can be optionally shared across a federated Netie Cortex network. The sharing protocol uses differential privacy (ε = 1.0, δ = 1e-5) to prevent inference of individual user behavior from aggregate telemetry. High-performing skill sequences propagate to peer installations, collectively improving the global skill library without any centralized data collection.
+
+8. Phase 5 — Adoption Strategy
+Netie Cortex targets three distinct adoption vectors, each with differentiated value propositions aligned to the specific pain points of that audience segment.
+
+
+9. Implementation Roadmap
+The implementation plan is organized into six milestones spanning 13 months. Each milestone is independently shippable and provides tangible benchmarked value.
+
+
+10. Incumbent Replacement Analysis
+Netie Cortex v1 is designed as a direct replacement for the following incumbent system components. This section maps each replaced component to the Netie Cortex equivalent.
+
+
+11. Security Threat Model
+This section enumerates the primary threat categories facing an agentic runtime and documents the specific Netie Cortex controls that mitigate each threat.
+
+
+12. Known Limitations & Open Engineering Questions
+
+12.1 Acknowledged Limitations
+White-Box Cryptography fragility: WBC is not a cryptographic guarantee. It must never be represented as equivalent to hardware-backed key storage. The implementation's reliance on WBC as a fallback is an architectural compromise for commodity hardware support.
+Hyperlight immaturity: The Windows sdTEE path via Hyperlight is early-stage software. Production Windows deployments carry higher risk than Linux deployments.
+Local model quality ceiling: Tier 1 quantized models (1–3B parameters) have a quality ceiling below frontier models. Tasks requiring complex multi-step reasoning, tool chaining across ambiguous inputs, or novel synthesis must be escalated to Tier 2 — incurring API costs.
+Nix cold-start contradiction: If Nix is used for dependency management in development tooling (not in the production runtime), the sub-millisecond instantiation claim applies only to Wasmtime isolates, not to the Nix environment setup. These must be clearly distinguished in benchmarks.
+Mobile security tier: Android and iOS deployments provide materially weaker isolation than Linux or Windows deployments. This must be clearly communicated to end users.
+
+12.2 Open Engineering Questions
+Wasm SIMD and GPGPU access for Tier 1 models: Current WASI does not provide a stable GPU interface. Tier 1 inference performance on CPU-only Wasm is adequate for 1–3B parameter models but may constrain future model size growth.
+Federated skill sharing adversarial robustness: The differential privacy budget (ε = 1.0) may be insufficient against a large-scale aggregation adversary with access to many nodes' metric streams. Further analysis is required.
+DAG synthesis failure modes: When the frontier LLM produces syntactically invalid or type-incorrect DSL, the current design falls back to an error state. A graceful degradation path (retry with simplified prompt, fall back to a previous successful DAG for similar intents) should be designed.
+Long-running agent cycles: The current design assumes short execution cycles (TTL < 60 seconds). Workflows requiring long-running agents (data pipeline jobs, multi-hour research tasks) require a persistent state serialization mechanism compatible with the deterministic deallocation model.
+
+13. Glossary
+
+
+14. Conclusion
+Netie Cortex v1 represents a fundamentally new approach to agentic AI runtime design — one that refuses to accept the false trade-off between portability and security, or between cost efficiency and correctness.
+
+By unifying the fabrication intelligence of Proposal 2 with the execution portability of Proposal 1, and by adding a platform-adaptive security layer and a self-improving skill library, the architecture achieves all three of its founding axioms: individual accessibility on cheap hardware, deterministic correctness through AOT-compiled DAGs, and verifiable cryptographic sovereignty across all major platforms.
+
+The six-milestone implementation roadmap delivers independently verifiable value at each stage, allowing the project to demonstrate token savings, security isolation, and cross-platform support incrementally — reducing execution risk for the organization committing to the build.
+
+ℹ  This document is a living technical specification. As Hyperlight matures, as WASI GPU interfaces stabilize, and as the Edge RLHF feedback loop accumulates telemetry, specific architectural decisions in this document should be revisited and updated. The version history should be maintained in the Sovereign Skill Library's documentation index.
+Dimension | Winner | Rationale
+Cross-platform reach | Proposal 1 (Wasm) | Wasm + sdTEE runs on Windows, macOS, Linux, mobile. No OS-specific syscall dependencies.
+Token cost reduction | Proposal 2 (Linux) | Tiered local inference eliminates API calls entirely for execution tier. Proposal 1 only reduces context size.
+Security depth | Proposal 2 (Linux) | Landlock + seccomp-bpf are production-proven, mainline kernel primitives. WBC has known DCA/DFA vulnerabilities.
+Generic hardware | Proposal 1 (Wasm) | No HSM/TEE silicon required. Proposal 2 assumes Intel SGX or Apple Secure Enclave.
+Fabrication pipeline | Proposal 2 (Linux) | HLS compiler, DSL, AST pruning, dead-code elimination fully specified. Proposal 1 hand-waves this.
+Future-proofing (crypto) | Proposal 1 (Wasm) | Hybrid ML-KEM + X25519 PQC. Proposal 2 uses classical AES-256/DH only.
+Execution speed | Proposal 1 (Wasm) | Sub-millisecond Wasm instantiation vs. Nix-based namespace creation (seconds).
+Continuous improvement | Proposal 2 (Linux) | Sovereign Skill Library + RLHF feedback loop. Proposal 1 has no learning mechanism.
+Enterprise safety | Tie | Both strong; different vectors — Proposal 1: crypto sovereignty; Proposal 2: kernel isolation.
+Layer | Name | Components
+Layer 5 | Continuous Improvement | Sovereign Skill Library, Edge RLHF, FlowMesh CAS, Federated Skill Sharing
+Layer 4 | Cryptographic Sovereignty | Hybrid PQC Transport (ML-KEM+X25519), HSM/TEE Primary, WBC Fallback, Webhook Encryption
+Layer 3 | Platform Security Adapter | Linux: Landlock+seccomp-bpf | Windows: sdTEE (Hyperlight) | macOS: Hypervisor.framework | Mobile: Wasm-only+WBC
+Layer 2 | Wasm Nano-Isolate Execution | Wasmtime/WasmEdge isolates, Tiered Inference (Tier 0/1/2), Capability Manifest enforcement, Deterministic deallocation
+Layer 1 | Fabrication Pipeline | Intent Router + SkillMesh BM25/Dense, HLS Compiler (Frontier LLM), AOT DAG Compiler, Dead-Code Eliminator, Capability Manifest Generator
+Node Type | Semantics | Inference Tier
+TOOL_CALL | Invokes a deterministic external tool (OCR, regex, HTTP GET, database query) | Tier 0
+INFER_LOCAL | Invokes a quantized local model embedded in the Wasm isolate | Tier 1
+INFER_REMOTE | Invokes a remote frontier LLM API endpoint | Tier 2
+BRANCH | Conditional routing based on the output of a preceding node | —
+MERGE | Aggregates outputs from multiple parallel branches into a single value | —
+EMIT | Writes the final result to the output channel | —
+Manifest Field | Semantics
+filesystem.read | Exact absolute file paths permitted for read access
+filesystem.write | Exact absolute file paths permitted for write access
+network.endpoints | Allowlisted hostnames and ports for outbound connections
+syscalls.allowed | Exhaustive list of permitted Linux syscall numbers (for Landlock/seccomp)
+inference.tiers | Per-node inference tier assignment (Tier 0 / 1 / 2)
+models.required | Versioned content hashes of local GGUF models required for Tier 1 nodes
+crypto.key_ops | Key derivation operations permitted within the isolate
+ttl_ms | Maximum wall-clock lifetime of the entire execution cycle in milliseconds
+Runtime | Cold Start | Warm Start | OS Support
+Wasmtime (Cranelift AOT) | < 1 ms | < 2 ms | Any (x86-64, ARM64)
+WasmEdge (LLVM AOT) | < 1 ms | < 3 ms | Any
+Docker container (cold) | ~800 ms | ~200 ms | Linux only
+Nix environment spin-up | ~5–30 s | ~500 ms | Linux only
+Node.js v8 context | ~50 ms | ~10 ms | Any
+T | Name | Use Cases | Token Cost | Latency | Requirements
+0 | Deterministic Tool | OCR, regex, HTTP GET, SQL query, file parser, JSON transform | 0 | < 1 ms | None
+1 | Local Quantized Model | Summarization, extraction, simple code generation, classification | 0 (local compute) | 50–500 ms | GGUF model embedded in Wasm isolate
+2 | Remote Frontier API | Complex multi-step reasoning, novel synthesis, adversarial robustness | Full API cost | 500 ms – 5 s | External LLM API endpoint
+Control | Linux | Windows | macOS | Mobile
+Wasm capability sandbox | ✓ | ✓ | ✓ | ✓
+Filesystem path restriction (kernel) | ✓ Landlock | ✓ Hyperlight VM | ✓ Hypervisor.fw | ✗
+Syscall filter (kernel) | ✓ seccomp-bpf | ✓ VTL boundary | ✓ sandbox-exec | ✗
+Network namespace isolation | ✓ Netns | ✓ VM network | Partial | ✗
+Hardware key protection | ✓ TPM 2.0 | ✓ TPM/HSM | ✓ Secure Enclave | ✓ Android Strongbox / iOS SE
+PQC transport | ✓ ML-KEM+X25519 | ✓ ML-KEM+X25519 | ✓ ML-KEM+X25519 | ✓ ML-KEM+X25519
+Key fallback (no HW) | WBC + ephemeral | WBC + ephemeral | WBC + ephemeral | WBC + ephemeral
+Algorithm | Standard | Role | Mode
+ML-KEM (Kyber) | FIPS 203 (NIST standardized) | Post-quantum IND-CCA2 KEM — resistant to quantum harvest-now-decrypt-later attacks | Primary
+X25519 (ECDH) | RFC 7748 | Classical elliptic-curve DH — provides security if the post-quantum primitive has an undiscovered weakness | Hybrid co-KEM
+AES-256-GCM | NIST FIPS 197 | Symmetric AEAD for payload encryption, key derived from combined ML-KEM + X25519 shared secret | Data encryption
+HKDF-SHA3-256 | RFC 5869 | Key derivation function for session key expansion | KDF
+Audience | Primary Driver | Key Features | UX/Ops Benefit
+Individuals | 10–50× cheaper than OpenClaw. Runs on a $200 laptop. | SkillMesh context pruning + Tier 0/1 local inference eliminate most API costs. Wasm runs on any OS without special hardware. | Zero hardware prerequisites. One-command installer. Telegram/WhatsApp native.
+Developers | Faster, deterministic, reproducible pipelines. | AOT DAG compilation, dead-code elimination, sub-ms cold starts. No debugging of non-deterministic LLM loops. | CLI-first development workflow. DSL is human-readable and version-controllable. Capability Manifests are diff-able artifacts.
+Enterprises | Verifiable security and compliance posture. | Capability Manifests are auditable artifacts. Landlock/seccomp on Linux, sdTEE on Windows, HSM integration. Hybrid PQC for forward regulatory compliance. | Zero persistent state = zero data retention liability. Signed execution lineage via CAS for audit trail.
+Governments / Air-gapped | Post-quantum safe, fully local, no cloud dependency. | ML-KEM encryption. Full Tier 0/1 execution requires no external API calls. Optional Federated Skill Sharing is opt-in only. | Fully air-gappable mode. Sovereign Skill Library runs entirely on-device. No telemetry transmitted without explicit consent.
+ | Timeline | Name | Deliverables & Success Criteria
+M1 | Months 1–3 | Core Fabrication Pipeline | HLS compiler, SkillMesh BM25+dense retriever, AOT DAG compiler, dead-code eliminator. CLI interface. Frontier API for synthesis. Prove token savings on standard agent benchmarks. Deliver: 10× context reduction vs. baseline.
+M2 | Months 3–5 | Wasm Execution Runtime | Wasmtime-based isolate runtime. Capability Manifest parser and enforcement. WASI capability injection. Sub-ms cold start benchmarks. Linux Landlock + seccomp-bpf integration. Deliver: parallel agent execution, deterministic deallocation.
+M3 | Months 5–7 | Local Inference Tier | GGML/llama.cpp compiled to Wasm. Tier 0/1/2 routing. GGUF model management. Benchmark total token cost vs. OpenClaw on standard task suite. Deliver: 10–50× token cost reduction demonstrated end-to-end.
+M4 | Months 7–9 | Cryptographic Layer | Hybrid PQC transport (ML-KEM + X25519). HSM integration (TPM 2.0, Apple SE, Android StrongBox). WBC fallback with ephemeral key derivation. Platform-agnostic webhook encryption for Telegram + WhatsApp + Discord. Deliver: FIPS 203 compliance.
+M5 | Months 9–11 | Cross-Platform Expansion | Windows sdTEE via Hyperlight. macOS Hypervisor.framework adapter. Android/iOS Wasm-only mode. Universal installer and packaging for all platforms. Deliver: single codebase running on Windows/macOS/Linux/Android/iOS.
+M6 | Months 11–13 | Learning Layer + Public Beta | Sovereign Skill Library. Edge RLHF. FlowMesh CAS. Federated skill sharing with differential privacy. Full security audit by external red team. Public beta release. Deliver: self-improving system with documented audit trail.
+Replaced Component | Problem | Netie Cortex Replacement
+OpenClaw monolithic Node.js runtime | Non-deterministic, stateful, memory-leaking agent loop | Ephemeral Wasm isolates executing AOT-compiled DAGs — stateless, deterministic, sub-ms cold start
+OpenClaw context windows (10K+ tokens) | Entire tool registry injected per call — dominated by irrelevant context | SkillMesh top-K retrieval — < 2K tokens of relevant tool metadata per synthesis call
+OpenClaw continuous API loops | Frontier model called repeatedly for both synthesis and execution | Tiered inference: frontier only for synthesis (once), local models and tools for execution
+ZeroClaw Linux-only Rust daemon | Hard dependency on Linux kernel features; excludes Windows/macOS/mobile | Cross-platform Wasm with platform-adaptive security adapter
+Both frameworks' plaintext-in-RAM | Session keys and key material persist in host process memory | HSM-backed keys (when available), WBC + ephemeral keys + memory XOR masking (fallback)
+OpenClaw's non-auditable execution | No record of what tools or models were invoked or with what parameters | Signed Capability Manifests + FlowMesh CAS execution lineage — full tamper-evident audit trail
+ID | Threat | Attack Vector | Netie Cortex Mitigations
+T1 | Prompt Injection via Tool Output | An adversarially crafted tool output attempts to hijack the agent's execution path by injecting LLM instructions. | The DAG is compiled and AOT-locked before execution. No LLM inference occurs during execution-phase tool output processing on Tier 0. Tier 1/2 node inputs are validated against the type schema declared in the Capability Manifest before being passed to inference.
+T2 | Privilege Escalation via Wasm Sandbox Escape | A zero-day in the Wasm runtime allows the agent to escape the Wasm capability boundary and access the host OS. | Defense-in-depth: on Linux, Landlock + seccomp-bpf block undeclared filesystem paths and syscalls at the kernel level — independently of the Wasm runtime. A Wasm escape cannot bypass kernel-enforced restrictions.
+T3 | Key Extraction from Host Memory | An adversary with read access to host memory attempts to extract cryptographic keys in use by an agent. | Hardware-backed keys never leave HSM/TEE silicon. WBC fallback keys are ephemeral (< 1 session lifetime) and XOR-masked in Wasm linear memory, minimizing the extraction window.
+T4 | Quantum Harvest-Now-Decrypt-Later | An adversary captures encrypted traffic today with the intent to decrypt using a future quantum computer. | All transport is protected by hybrid ML-KEM (FIPS 203) + X25519. ML-KEM provides IND-CCA2 security against quantum adversaries. Even if X25519 is broken by a quantum computer, the ML-KEM component preserves secrecy.
+T5 | Capability Manifest Tampering | An adversary modifies the Capability Manifest to grant an agent broader resource access than the Fabrication Pipeline intended. | Capability Manifests are cryptographically signed by the Fabrication Pipeline. The Platform Security Adapter verifies the signature before applying any OS-level restrictions. A tampered manifest fails verification and aborts execution.
+T6 | Skill Library Poisoning | An adversary injects malicious skill sequences into the Sovereign Skill Library via Federated Skill Sharing. | Federated sharing transmits only anonymized performance metrics, not skill DSL programs. Skill programs are only added to the local library by the local Fabrication Pipeline after synthesis. Differential privacy mitigates inference attacks on metric data.
+Term | Definition
+AOT (Ahead-of-Time) Compilation | Compilation of Wasm modules to native machine code before execution begins, eliminating interpretation overhead.
+Agentic DSL | The declarative domain-specific language emitted by the HLS Compiler, encoding a task execution plan as a typed DAG.
+BM25 | Best Match 25 — a probabilistic lexical ranking function used in Stage 1 of SkillMesh retrieval.
+Capability Manifest | A signed, machine-readable document declaring the exact resources (filesystem paths, network endpoints, syscalls, model tiers) an execution cycle is permitted to access.
+CAS (Content-Addressable Store) | A storage system where entries are indexed by the cryptographic hash of their content. Used in FlowMesh for execution output caching.
+DAG (Directed Acyclic Graph) | A graph with directed edges and no cycles, used to represent the execution plan of an agent task.
+Dead-Code Elimination | A compiler optimization that removes unreachable nodes from a DAG by backward reachability analysis from the output node.
+GGUF | GGML Unified Format — a binary file format for quantized LLM model weights used by llama.cpp.
+HLS (High-Level Synthesis) | A design methodology borrowed from hardware engineering in which a high-level description is compiled into a lower-level implementation. In Netie Cortex, the frontier LLM acts as an HLS engine.
+Hybrid PQC | A key encapsulation mechanism that combines a post-quantum algorithm (ML-KEM) with a classical algorithm (X25519) to provide security under both threat models.
+Landlock | A Linux Security Module (mainline since kernel 5.13) enabling processes to sandbox themselves with filesystem access rules.
+ML-KEM (Kyber) | Module Lattice-based Key Encapsulation Mechanism — a post-quantum KEM standardized as NIST FIPS 203.
+RLHF (Reinforcement Learning from Human Feedback) | A technique for updating model or skill weights based on human acceptance/rejection signals. In Netie Cortex, RLHF runs locally on-device (Edge RLHF).
+sdTEE (Software-Defined Trusted Execution Environment) | A TEE implemented using hypervisor isolation rather than dedicated hardware, as in Hyperlight on Windows.
+seccomp-bpf | A Linux kernel mechanism for filtering system calls using Berkeley Packet Filter programs.
+SkillMesh | The two-stage retrieval system (BM25 + dense bi-encoder) used to select relevant skill cards for injection into the synthesis prompt.
+Sovereign Skill Library | A versioned, local repository of skill sequences and performance telemetry, forming the ground truth for the SkillMesh retrieval index.
+Wasm (WebAssembly) | A portable binary instruction format with a well-defined memory model and capability-based security, executable across all major platforms.
+WASI (WebAssembly System Interface) | A standardized API for Wasm modules to interact with host OS resources in a capability-controlled manner.
+WBC (White-Box Cryptography) | A software technique for implementing cryptographic operations such that an adversary with full access to the program cannot easily extract key material. Subject to DCA/DFA attacks.

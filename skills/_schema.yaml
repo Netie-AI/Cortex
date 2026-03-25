@@ -1,0 +1,38 @@
+title: SkillCard Schema
+type: object
+required:
+  - skill_id
+  - name
+  - description
+  - category
+  - example_intents
+  - required_tools
+properties:
+  skill_id:
+    type: string
+  name:
+    type: string
+  description:
+    type: string
+  category:
+    type: string
+  example_intents:
+    type: array
+    items:
+      type: string
+  required_tools:
+    type: array
+    items:
+      type: string
+  required_network:
+    type: array
+    items:
+      type: string
+  annotations:
+    type: object
+  max_tier:
+    type: string
+  version:
+    type: string
+  author:
+    type: string

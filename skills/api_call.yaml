@@ -1,0 +1,16 @@
+skill_id: api_call_v1
+name: Generic API Call
+description: Make arbitrary HTTP requests to external services.
+category: network
+example_intents:
+  - "Hit the GitHub API to check my repositories."
+  - "Call the weather service to get the forecast."
+  - "Send a POST request to this webhook."
+required_tools:
+  - http_get
+  - http_post
+required_network:
+  - "*"  # Context: wildcard intentional, manifest enforcer overrides at runtime from node annotations
+max_tier: 2
+version: "1.0.0"
+author: "community"

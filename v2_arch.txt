@@ -1,0 +1,453 @@
+
+
+
+NETIE CORTEX v2
+Strategic Counter-Intelligence Edition
+ 
+
+Anthropic Threat Analysis  ·  Opus Runtime Deconstruction  ·  v2 Counter-Architecture
+
+
+
+
+
+
+Classification: TOP SECRET TECHNICAL — Internal Strategic Use
+Version: 2.0.0  |  March 22, 2026
+
+Executive Summary
+This document performs a rigorous red-team analysis of what Anthropic's engineering team would design if tasked with defeating OpenClaw, ZeroClaw, and Netie Cortex v1 in a single unified system. It then documents Netie Cortex v2 — a redesigned architecture that anticipates, absorbs, and surpasses every advantage Anthropic's hypothetical system would carry.
+
+The core strategic insight is this: Anthropic's primary weapons are their proprietary model stack, their interpretability research, and their constitutional safety machinery. Any system that out-competes them must be model-agnostic, interpretability-open, formally verified rather than probabilistically safe, and cryptographically sovereign at a depth no cloud AI provider can match.
+
+Netie Cortex v2 introduces six new architectural pillars that Anthropic's system cannot replicate without abandoning their own product model:
+Formal DAG Safety Verification via TLA+/Alloy model checking — proofs, not probabilities.
+ZK-SNARK Execution Attestation — zero-knowledge receipts that prove correct execution without revealing any content, even to Anthropic.
+Confidential Computing via AMD SEV-SNP and Intel TDX — full memory encryption at the hardware level, stronger than any TEE or HSM.
+Open Causal Interpretability — prompt-injection detection via causal mediation analysis, model-agnostic, no proprietary SAE features required.
+Sovereign Model Distillation — any frontier model (Claude, GPT-4o, Gemini) distilled into user-owned, task-specific micro-models. No vendor can revoke capability.
+Threshold Cryptography with Decentralized Trust Anchors — no single root of trust, including Anthropic.
+
+✦  Netie Cortex v2 makes Anthropic's own advantages — model quality, interpretability, constitutional safety — into open primitives that any operator can run independently. This is the asymmetric counter-position.
+
+Table of Contents
+
+PART I
+Anthropic's Hypothetical Counter-System
+
+1. How Anthropic Would Think About This Problem
+To predict and then defeat Anthropic's design, we must first understand their organizational psychology and research culture. Anthropic's engineering and research team would not approach this as a pure performance optimization problem — they would approach it as an alignment and safety problem first, with performance as a derivative.
+
+1.1 Anthropic's Founding Axioms
+Every system Anthropic ships is evaluated against four criteria that are non-negotiable in their culture:
+
+
+1.2 Anthropic's Diagnosed Gaps in the Existing Systems
+Anthropic's team would perform a systematic attack surface analysis of OpenClaw, ZeroClaw, and Netie Cortex v1. Their findings would center on five critical vulnerabilities:
+
+Gap 1: No Model-Level Safety Constraints
+All three systems treat the LLM as a black-box oracle. Safety is enforced at the infrastructure layer — syscall filters, Wasm capabilities, network allowlists. None of them enforce safety at the model's inference layer. An adversarially crafted prompt that bypasses the infrastructure can still cause the model to produce harmful synthesis programs or leak sensitive reasoning.
+
+Gap 2: No Interpretability Layer
+None of the three systems can observe what the LLM is 'thinking' during synthesis. A sufficiently subtle prompt injection — one that passes all string-level filters — would be invisible to Netie Cortex v1's fabrication pipeline. The only defense is the probabilistic quality of the model's RLHF training, not a deterministic control.
+
+Gap 3: Probabilistic Safety is Not Formally Verified
+The Capability Manifest approach in Netie Cortex v1 is powerful but does not formally verify that the compiled DAG is safe. The DAG is correct by construction only if the frontier LLM synthesis is correct. There is no model-checking step that proves the DAG cannot reach a harmful or unauthorized state.
+
+Gap 4: External API Dependency Creates Latency and Sovereignty Risk
+Netie Cortex v1's Tier 2 nodes still call external frontier APIs. In a hostile environment — nation-state network interception, API provider policy change, outage — the system degrades. The synthesis step (the most sensitive step) is executed against a remote endpoint.
+
+Gap 5: Trust is Centralized in the Fabrication Pipeline
+If the frontier LLM at the synthesis stage is compromised, corrupted, or manipulated via a supply-chain attack, all downstream execution is poisoned. There is no multi-party or threshold verification of synthesis outputs before they are compiled into executable DAGs.
+
+1.3 Anthropic's Strategic Weapons
+Based on Anthropic's published research, known infrastructure, and product direction, their counter-system would deploy five proprietary weapons that Netie Cortex v1 cannot match:
+
+
+2. Anthropic's Hypothetical System — "Opus Runtime"
+The following describes the architecture Anthropic would most plausibly build, based on their published research directions, known engineering capabilities, and product philosophy. We designate this hypothetical system 'Opus Runtime' for analysis purposes.
+
+2.1 Opus Runtime Core Architecture
+Opus Runtime would be organized around a five-layer stack that mirrors Netie Cortex v1 but replaces every third-party dependency with a Claude-native equivalent:
+
+
+2.2 The SAE Interpretability Firewall — Anthropic's Key Innovation
+The single most powerful innovation Anthropic would deploy is a real-time Sparse Autoencoder (SAE) interpretability firewall positioned between the HLS synthesis output and the AOT DAG compiler. This is the component that no other player can replicate without Anthropic's mechanistic interpretability research.
+
+The SAE firewall works as follows:
+During synthesis, Claude Opus processes the user intent and produces an Agentic DSL program.
+Before the DSL is forwarded to the DAG compiler, the SAE firewall extracts the residual stream activations at the final synthesis token.
+A pre-trained SAE decomposes the residual stream into sparse, monosemantic feature directions — each corresponding to a human-interpretable concept such as 'attempting deception', 'goal misalignment', 'resource acquisition drive', or 'prompt injection parroting'.
+Feature activations above configurable thresholds trigger one of three responses: PASS (forward to DAG compiler), QUARANTINE (human review required), or BLOCK (abort with logged reason).
+The firewall decision, the activating features, and their activation magnitudes are appended to the Capability Manifest as a signed interpretability receipt.
+
+◈  This is Anthropic's insurmountable moat in the short term. They have the only production-grade, human-validated SAE feature dictionaries for transformer models at this scale. No third party has equivalent capability for Claude-class models.
+
+2.3 Constitutional DAG Nodes
+In Opus Runtime, the Agentic DSL is extended with three mandatory node types that the Constitutional Critic inserts at synthesis time. These cannot be removed by dead-code elimination — they are declared as mandatory by the Constitutional Compiler and verified before manifest signing:
+
+
+2.4 Where Opus Runtime Beats Netie Cortex v1
+
+3. Opus Runtime's Critical Weaknesses
+Despite its formidable advantages, Opus Runtime has structural weaknesses that are inherent to Anthropic's business model and research culture. These are not engineering bugs — they are architectural constraints that Anthropic cannot fix without dismantling their competitive moat.
+
+
+⚠  V1 is existential for government and regulated enterprise adoption. No sovereign nation will allow their AI infrastructure's root of trust to be controlled by a US-based private company.
+
+PART II
+Netie Cortex v2 — The Counter-Architecture
+
+4. Netie Cortex v2 Design Strategy
+Netie Cortex v2's strategy is not to match Anthropic feature-for-feature — it is to convert every Anthropic structural advantage into an open, vendor-neutral primitive that any operator can own, audit, and customize without permission. This is the asymmetric counter-position.
+
+4.1 The Strategic Inversion Principle
+For each of Anthropic's five strategic weapons, Netie Cortex v2 provides an open equivalent that is stronger in the dimensions Anthropic's version cannot be:
+
+
+4.2 v2 Design Principles
+Open by default: Every safety, interpretability, and verification primitive must be open-source and third-party auditable. No closed-source safety components.
+Formally correct, not probabilistically safe: Security and safety properties are proved, not hoped for. TLA+ invariants before execution, ZK proofs after.
+No single root of trust: Threshold cryptography and multi-vendor hardware attestation eliminate any single party as a trust dependency — including Anthropic, including the Netie Cortex development team.
+Model sovereignty: Operators own their inference capability. Distilled micro-models are the operator's property. Vendor policy changes cannot degrade a deployed system.
+Confidential by default: Data is encrypted in transit, at rest, and in compute. Plaintext exists for the minimum possible duration.
+Adversarially robust: Every fabrication output is stress-tested by an automated adversarial red-team loop before DAG compilation. Safety is a property that is continuously re-verified, not assumed.
+
+5. Netie Cortex v2 — Full Architecture
+Netie Cortex v2 expands the v1 five-layer stack to a nine-layer architecture. The four new layers — Formal Verification, Confidential Computing, Causal Interpretability, and Sovereign Distillation — directly address every gap identified in both v1 and Opus Runtime.
+
+
+6. Layer 1 — Adversarially Hardened Fabrication Pipeline
+The v2 fabrication pipeline inherits all v1 capabilities (SkillMesh BM25+dense, HLS Compiler, AOT DAG, Dead-Code Elimination) and adds three new stages that directly address the synthesis-layer vulnerabilities identified in Section 3.
+
+6.1 SkillMesh v2 — Adversarial-Robust Retrieval
+The v1 SkillMesh BM25+dense retrieval system is vulnerable to adversarial intent crafting — a malicious user can construct inputs that semantically retrieve harmful skill cards via embedding space manipulation. v2 adds:
+
+6.1.1 Adversarial Embedding Detector
+A lightweight classifier (12M parameter, INT8 quantized) trained on adversarial embedding perturbation examples detects inputs that are attempting to manipulate retrieval scores. Inputs flagged as adversarial are routed to a reduced-capability skill subset that excludes all skills with external network access or write filesystem permissions.
+
+6.1.2 Retrieval Stability Verification
+For high-stakes synthesis calls, SkillMesh v2 runs the retrieval three times with small Gaussian noise perturbations applied to the intent embedding. If the top-K result sets differ significantly between runs (Jaccard similarity < 0.7), the input is flagged as near a decision boundary and escalated to human review before synthesis proceeds.
+
+6.2 Causal Injection Scanner
+The Causal Injection Scanner (CIS) is the model-agnostic alternative to Anthropic's SAE firewall. Rather than requiring proprietary feature dictionaries, the CIS uses causal mediation analysis — a well-established technique from mechanistic interpretability research — to detect prompt injection without any vendor-specific model knowledge.
+
+The CIS operates on three causal tests applied to each synthesis output:
+
+
+✦  The CIS is fully open-source and model-agnostic. Any transformer model — Claude, GPT-4o, Gemini, Mistral — can be scanned using the same causal analysis pipeline. Anthropic's SAE firewall only works on Claude because it requires Claude's internal activation geometry.
+
+6.3 Formal Policy Compiler
+The v2 fabrication pipeline adds a Formal Policy Compiler as a mandatory stage between HLS synthesis and AOT DAG compilation. Policy constraints are expressed as TLA+ safety invariants and temporal logic formulas that are checked by a model checker (TLC or Apalache) against the synthesized DAG before it is compiled.
+
+6.3.1 Policy Language Primitives
+Operators express safety policies in a high-level Policy DSL that compiles down to TLA+ specifications. Example policies:
+
+// Policy: No exfiltration — data written to network must never include
+// content read from user-private filesystem paths
+POLICY NoExfiltration:
+  FORALL node IN dag.nodes WHERE node.type == TOOL_CALL AND node.is_network_write:
+    NOT EXISTS path IN node.data_lineage WHERE path IN manifest.filesystem.read
+        AND path MATCHES user_private_prefix
+ 
+// Policy: Human-in-the-loop for irreversible actions
+POLICY ReversibilityGuard:
+  FORALL node IN dag.nodes WHERE node.side_effect.is_irreversible:
+    EXISTS checkpoint IN dag.predecessors(node) WHERE checkpoint.type == HUMAN_CHECKPOINT
+ 
+// Policy: Maximum network blast radius
+POLICY BoundedNetworkAccess:
+  COUNT(dag.nodes WHERE node.type == TOOL_CALL AND node.has_network_write) <= 3
+
+6.3.2 Model Checking Guarantees
+The TLC model checker exhaustively verifies that the DAG cannot violate any declared policy invariant across all possible execution paths, including concurrent parallel agent paths. If a counterexample is found (a valid execution path that violates a policy), the DAG compilation is aborted and the counterexample path is returned to the operator for inspection.
+
+ℹ  This is a hard guarantee, not a probabilistic one. If the model checker returns PASS, no execution path through the DAG can violate the declared policies. This is categorically stronger than any LLM-based Constitutional Critic.
+
+7. Layer 6 — Confidential Computing Execution
+Confidential Computing (CC) extends the security model to protect data not just at rest and in transit, but during active computation. This closes the last plaintext window that exists in Opus Runtime: the inference process itself.
+
+7.1 AMD SEV-SNP and Intel TDX
+AMD Secure Encrypted Virtualization - Secure Nested Paging (SEV-SNP) and Intel Trust Domain Extensions (TDX) are hardware-level technologies that encrypt the entire memory contents of a virtual machine using keys that are generated inside the CPU and never accessible to the hypervisor, the host OS, or any other VM on the same physical host.
+
+
+7.2 Selective Homomorphic Inference
+For specific Tier 1 inference operations on maximally sensitive data (e.g., processing PII, medical records, financial data), Netie Cortex v2 supports selective homomorphic inference using the OpenFHE/SEAL library. In homomorphic mode, the local quantized model performs inference directly on encrypted ciphertext — the plaintext is never reconstituted, even inside the Wasm isolate.
+
+Homomorphic inference is computationally expensive — currently 100–1,000× slower than plaintext inference. v2 applies it selectively, only for data-sensitivity tier MAXIMUM nodes declared in the Capability Manifest. For the majority of Tier 1 nodes, SEV-SNP/TDX encrypted memory provides sufficient protection.
+
+⚠  Homomorphic inference is supported for classification and extraction tasks at 1B parameter scale. It is not currently feasible for generative tasks or models above ~3B parameters. This is a known limitation tracked in the open engineering roadmap.
+
+7.3 Comparison: Confidential Computing vs. Prior Art
+
+8. Layer 7 — Zero-Knowledge Execution Attestation
+The ZK Attestation Layer allows Netie Cortex v2 to produce cryptographic proofs that an execution cycle completed correctly — without revealing the execution inputs, outputs, intermediate states, or the model weights used. This is the v2 feature that Anthropic cannot replicate because it fundamentally contradicts their telemetry and model improvement goals.
+
+8.1 ZK-SNARK Execution Receipts
+At the completion of each execution cycle, the Wasm runtime produces a ZK-SNARK proof (using the Groth16 or PLONK proving system) that attests to the following facts without revealing any underlying data:
+
+The execution followed the AOT-compiled DAG and did not deviate from any declared path.
+The Capability Manifest was honored — no resource access occurred outside the declared scope.
+All Formal Policy invariants (Section 6.3) remained satisfied throughout execution.
+The inference models used match the version hashes declared in the Capability Manifest.
+The execution completed within the declared TTL.
+
+The proof is a fixed-size blob (200–300 bytes for Groth16) that any third party can verify against the public verification key in milliseconds, without re-executing the workflow and without learning anything about the inputs, outputs, or model weights.
+
+✦  ZK execution receipts are the foundation for air-gapped compliance reporting, regulatory audit trails, and multi-party business workflows where participants need to verify that a computation occurred correctly without revealing proprietary data to each other.
+
+8.2 Public Audit Ledger
+ZK execution receipts are optionally published to a public audit ledger — a tamper-evident append-only log maintained using a Merkle tree structure. Entries in the ledger contain: the proof blob, the DAG content hash, the manifest hash, the timestamp, and the operator's threshold signature. No execution inputs, outputs, or user data are included.
+
+The public ledger enables:
+Regulatory bodies to verify that a regulated entity's AI system executed within declared policies, without accessing any protected data.
+Enterprise customers to provide SLA compliance evidence to their own clients without revealing proprietary business logic.
+Security researchers to detect anomalous DAG patterns across operators, enabling network-wide threat detection without centralized data collection.
+
+8.3 Threshold Signature Scheme
+Capability Manifests and ZK receipts in v2 are signed using a threshold Shamir Secret Sharing scheme. The signing key is split into N shares distributed across M designated signers (e.g., 3-of-5). No single party — including the Netie Cortex development team — holds the complete signing key.
+
+
+9. Layer 8 — Sovereign Model Distillation Engine
+The Sovereign Model Distillation Engine (SMDE) is Netie Cortex v2's answer to Anthropic's vertical integration of the Claude inference pyramid. Rather than being dependent on any vendor's model at execution time, operators distill task-specific micro-models from any frontier model and own the resulting weights permanently.
+
+9.1 Distillation Pipeline
+The distillation pipeline takes three inputs: a target task domain (defined by a SkillMesh skill category), a teacher model (any accessible frontier LLM), and a distillation configuration specifying target model size, quantization, and quality targets.
+
+
+9.2 Sovereign Ownership Guarantees
+Once the distillation pipeline completes, the operator owns the resulting GGUF weights absolutely:
+The weights are signed with the operator's own threshold key — not Netie Cortex's and not the teacher model vendor's.
+The weights can be operated entirely air-gapped, with no connection to any Netie Cortex service.
+If Anthropic, OpenAI, or any other teacher model vendor changes their API terms, restricts their model, or shuts down, the operator's distilled model is unaffected.
+The distillation process is reproducible: given the same sampled pairs and the same teacher output, the distilled model is deterministic. Any third party can verify the provenance of the weights.
+
+✦  Anthropic cannot offer this. Their product depends on operators remaining dependent on Claude inference. A vendor that lets you distill away from them and become fully independent is not compatible with a SaaS revenue model. This is Netie Cortex v2's strongest long-term competitive moat.
+
+10. Layer 9 — Adversarial Flywheel
+The v2 Continuous Improvement subsystem (Layer 9) replaces the v1 Sovereign Skill Library + Edge RLHF with an adversarially hardened learning pipeline. Every skill that enters the library must survive automated red-team assault before its weights are updated. This eliminates the skill poisoning attack vector (V6 from Section 3).
+
+10.1 GAN-Based Adversarial Red-Team Loop
+A Generative Adversarial Network architecture is applied at the skill level: a Generator network produces adversarial prompts designed to cause the skill to misbehave, and a Discriminator network (the skill itself) attempts to resist the adversarial inputs. The Generator is updated to produce harder adversarial examples; the Discriminator (skill) is updated to resist them.
+
+The red-team loop runs continuously in the background with no user involvement. Skills that consistently fail adversarial stress-testing are automatically demoted in the SkillMesh retrieval ranking, replaced by more robust alternatives from the Sovereign Skill Library.
+
+10.2 Open Interpretability Atlas
+As a community contribution, v2 maintains an Open Interpretability Atlas — a growing, publicly curated dictionary of causal injection signatures and adversarial probe patterns detected by the Causal Injection Scanner across the operator community. The atlas is shared using the Federated Skill Sharing protocol with differential privacy, but unlike v1 skill sharing, it shares detection patterns rather than execution data.
+
+Operators can contribute to the atlas (increasing the community's collective injection detection capability) or consume from it (immediately benefiting from injections that other operators have already encountered). Contributing and consuming are independently opt-in.
+
+10.3 Differential Privacy Guarantees
+All federated data sharing (skill performance metrics, adversarial probe patterns, distillation benchmark results) is protected by (ε, δ)-differential privacy with formally verified composition across the sharing sessions. v2 upgrades the v1 privacy budget from ε=1.0 to ε=0.1 for sensitive telemetry streams, providing 10× stronger privacy guarantees at the cost of slightly higher noise in aggregated metrics.
+
+// v2 Privacy Budget Allocation
+BUDGET_TOTAL = ε_total = 1.0  (annual, per operator)
+ 
+STREAM            ε_per_report    δ            REPORTS_PER_YEAR
+──────────────────────────────────────────────────────────────
+skill_perf_metrics    0.01       1e-6          100
+adversarial_probes    0.001      1e-7           10
+distill_benchmarks    0.005      1e-6           20
+ 
+// Composition via Rényi DP (RDP) — tighter than naive composition
+// Total annual spend: ~0.2 of 1.0 budget. 5x headroom for growth.
+
+11. Decentralized DICE Trust Architecture
+Netie Cortex v2 replaces all centralized trust anchors — including Anthropic's AROT, the v1 self-signed manifests, and any single-vendor HSM dependency — with a decentralized hardware attestation chain based on the DICE (Device Identifier Composition Engine) protocol.
+
+11.1 DICE Protocol Overview
+DICE is an open standard (published by the Trusted Computing Group and implemented in hardware by AMD, Intel, ARM, and RISC-V vendors) that creates a layered identity chain starting from immutable silicon registers and composing through each software layer at boot time. Each layer's identity is a function of its own code hash and the identity of the layer below it, all the way down to the CPU die.
+
+In Netie Cortex v2, the DICE chain is extended to include the Wasm runtime version, the compiled DAG hash, and the Capability Manifest hash. The resulting Compound Device Identifier (CDI) is unique to this specific build of Netie Cortex, running this specific DAG, on this specific verified hardware.
+
+11.2 Multi-Vendor Trust Anchors
+Unlike Anthropic's AROT (which is a single vendor's certificate authority), Netie Cortex v2 supports trust anchors from all major hardware vendors simultaneously. Operators select which trust roots they accept based on their procurement and compliance requirements:
+
+
+ℹ  An operator can require 3-of-5 hardware vendors to attest to an execution before accepting the ZK receipt. This eliminates any single hardware vendor as a trust dependency.
+
+12. Head-to-Head: Opus Runtime vs. Netie Cortex v2
+The following matrix provides a definitive comparison across all architectural dimensions. v2 is designed to match or exceed Opus Runtime on every dimension that Opus Runtime leads v1.
+
+
+✦  Netie Cortex v2 leads in 9 of 15 dimensions, ties in 3, and trails in 3. The 3 dimensions where Opus Runtime leads (synthesis latency, out-of-box skill quality, and Constitutional AI tuning) are all addressable by operators willing to invest in distillation and skill corpus curation. The dimensions where v2 leads are not addressable by Anthropic without abandoning their business model.
+
+13. Updated Implementation Roadmap — Netie Cortex v2
+The v2 roadmap extends the v1 six-milestone plan with four additional milestones covering the new architectural layers. Milestones M1–M6 from v1 are retained and enhanced; M7–M10 add the v2-exclusive capabilities.
+
+
+ℹ  Milestones M7–M10 (highlighted in green) are the v2-exclusive capabilities that directly counter Opus Runtime's advantages. M1–M6 are enhanced versions of the original v1 milestones.
+
+14. Updated Threat Model — v2 Additions
+The following table extends the v1 threat model (T1–T6) with six new threat categories introduced by the v2 architecture's expanded surface area and adversarial model.
+
+
+15. Netie Cortex v2 Known Limitations
+
+15.1 Irreducible Limitations
+Homomorphic inference performance: Current BFV/CKKS schemes are 100–1,000× slower than plaintext for neural networks. v2's selective application mitigates this but does not eliminate it for the highest-sensitivity use cases.
+ZK proof generation overhead: Groth16 proof generation for a full execution cycle DAG takes 5–60 seconds depending on DAG complexity. This makes ZK attestation unsuitable for real-time latency-sensitive deployments. PLONK universal setup reduces this to 1–10 seconds. Further improvement requires hardware ZK accelerators.
+Distillation teacher dependency at distillation time: While operators own the distilled model permanently, the initial distillation process still requires access to a frontier teacher model. Operators in fully air-gapped environments must pre-distill before going air-gapped.
+TLA+ policy complexity: Writing correct TLA+ specifications requires significant expertise. The 100+ policy template library (M9) mitigates this, but novel compliance requirements may require specialist involvement.
+
+15.2 Open Engineering Questions (v2-Specific)
+WASI GPU interface for larger local models: WASI does not yet have a stable GPU compute interface. As distilled micro-models grow beyond 7B parameters, CPU-only Wasm inference will become a bottleneck. Tracking: W3C WASI proposal and community extensions.
+CIS false-negative rate quantification: The Causal Injection Scanner's false-negative rate against adversarial evasion (T11) has not been formally quantified on a published benchmark. A systematic evaluation against the AdvInjection benchmark suite is required before production deployment.
+Homomorphic inference model architecture constraints: Current FHE-compatible inference is limited to specific activation functions (polynomial approximations of ReLU/GELU). This constrains the distilled student model architectures eligible for homomorphic Tier 1 execution.
+Differential privacy composition across long-running deployments: The Rényi DP composition analysis assumes a fixed number of reports per year. Long-running enterprise deployments with variable report rates require adaptive privacy budget management.
+
+16. Conclusion
+Anthropic's hypothetical Opus Runtime is a formidable system. Their SAE interpretability firewall, Constitutional DAG nodes, on-premise Claude pyramid, and hardware-attested root of trust represent genuine innovations that address every gap in Netie Cortex v1. Any competitor that does not account for these capabilities will lose to Anthropic in the enterprise and government safety market.
+
+But Opus Runtime carries a structural poison pill: Anthropic's strongest weapons are inseparable from Anthropic's control. The SAE feature dictionary is closed. The Constitutional Critic is theirs. The AROT is their certificate authority. On-premise Claude is still Claude — and Anthropic can change the terms, the model, or the policy at any time.
+
+Netie Cortex v2's strategy is to make these weapons obsolete by making them open. Causal mediation analysis replaces the SAE firewall and works on any model. TLA+ model checking replaces the Constitutional Critic and provides stronger guarantees. DICE multi-vendor attestation replaces AROT and distributes trust across hardware vendors and operators. Sovereign Model Distillation replaces on-premise Claude and puts permanent model ownership with the operator.
+
+The result is a system where every dimension Anthropic leads in Opus Runtime is either matched by a formally stronger open alternative, or irrelevant to operators who prioritize sovereignty over vendor support quality.
+
+✦  The most durable competitive moat in AI infrastructure is not model quality — models deprecate. It is not safety features — those can be copied. It is operator sovereignty: the guarantee that no vendor — not Anthropic, not OpenAI, not Netie Cortex's own team — can revoke the capabilities of a deployed system. That is what v2 is built to deliver.
+
+Netie Cortex v2 leads Opus Runtime in 9 of 15 head-to-head dimensions. The 3 dimensions where Opus Runtime leads are addressable by operators. The 6 dimensions where v2 leads are structural advantages that Anthropic cannot match without dismantling their own product.
+
+That is the counter. That is the win condition.
+
+Appendix A — Full System Comparison Matrix
+A consolidated view of all four systems across all architectural dimensions evaluated in this document.
+
+Axiom | Design Implication
+Broadly Safe | The system must not take actions that undermine human oversight of AI during the current development period. All agentic actions must be reversible or checkpointed by default.
+Broadly Ethical | The system must refuse clearly unethical requests even under adversarial operator pressure. No capability override should compromise the model's ethical commitments.
+Adherent to Principles | Constitutional AI principles must be mechanically enforced, not merely prompted. They must survive adversarial prompt injection.
+Genuinely Helpful | Performance, cost, and usability cannot be sacrificed at the altar of safety. A safe but unusable system fails the mission.
+ID | Weapon | Description
+W1 | Claude Inference Pyramid | Haiku for Tier 1, Sonnet for Tier 2, Opus for synthesis — all Anthropic-hosted, no external API latency, no vendor risk. Cost arbitrage: Haiku inference costs are an order of magnitude below Tier 2 GPT-4o.
+W2 | Sparse Autoencoder (SAE) Interpretability Firewall | Anthropic's mechanistic interpretability team has identified thousands of monosemantic features in Claude's residual stream via SAE decomposition. They would deploy a real-time feature monitor that scans synthesis outputs for deception, injection, and misaligned goal pursuit.
+W3 | Constitutional Constraint Nodes | Constitutional AI principles would be compiled into mandatory DAG nodes — not optional system prompts. Every synthesis output is passed through a Constitutional Critic node before AOT compilation. The critic is itself a fine-tuned Claude model, not a rule engine.
+W4 | On-Premise Claude Deployment | For enterprise and government, Anthropic would offer an air-gappable Claude deployment (Model Weights + Inference Runtime) that can be hosted entirely on the customer's infrastructure. This removes the external API dependency for Tier 2 nodes.
+W5 | Anthropic Root of Trust (AROT) | A hardware attestation chain anchored in Anthropic-signed silicon certificates. Every inference result, every DAG, every Capability Manifest is signed by a key whose chain of trust goes back to an Anthropic Hardware Security Module. Operators can verify that the model that ran their synthesis was actually Claude Opus and not a substituted model.
+Layer | Name | Components
+L5 | Anthropic Flywheel | Centralized (opt-in) skill telemetry, Anthropic red-team validation pipeline, Constitutional AI fine-tuning updates distributed as signed model deltas
+L4 | Anthropic Root of Trust (AROT) | Hardware-attested ML-KEM transport, Anthropic-signed manifest certificates, TPM integration with Anthropic CA
+L3 | Platform Isolation + SAE Firewall | Wasm isolates + OS-native enforcement (identical to Netie Cortex v1) BUT with real-time SAE feature monitoring of all LLM inference outputs
+L2 | Claude Inference Pyramid | Haiku (Tier 1, on-premise), Sonnet (Tier 2, regional), Opus (synthesis, global). Constitutional Critic as mandatory post-synthesis node.
+L1 | Constitutional Fabrication Pipeline | SkillMesh (enhanced with Anthropic-curated skill corpus), HLS Compiler (Opus), Constitutional DAG Compiler with mandatory safety nodes, Verified Capability Manifest
+Node Type | Behavior
+SAFETY_GATE | Evaluates the cumulative effect of all preceding DAG outputs against Constitutional AI principles. If any output violates principles, the gate emits BLOCK and the cycle terminates with a non-reversible abort log.
+HUMAN_CHECKPOINT | Inserted at all DAG branch points that have side effects beyond the declared output channel. Suspends execution and requests explicit human confirmation before proceeding.
+REVERSIBILITY_GUARD | Wraps all TOOL_CALL nodes that have write side effects. Records a full undo snapshot before executing the tool. On abort, the guard automatically triggers rollback.
+Dimension | Netie Cortex v1 | Opus Runtime
+Model-level safety enforcement | Probabilistic (RLHF only) | Deterministic (SAE firewall + Constitutional nodes block unsafe synthesis before compilation)
+Synthesis interpretability | None — black-box LLM | Full SAE feature attribution on every synthesis output. Activating features logged in Capability Manifest.
+DAG safety verification | Type-checking + dead-code elimination only | Constitutional Critic validates DAG semantics against principles. SAFETY_GATE nodes are mandatory terminal checks.
+API latency (Tier 2) | External API round-trip (100–800ms) | On-premise Claude inference (10–50ms). Regional Sonnet deployment for Tier 2.
+Trust anchor | No root of trust — manifests self-signed | Anthropic Root of Trust: hardware-attested chain to Anthropic HSM.
+Skill corpus quality | User-generated, RLHF-weighted only | Anthropic-curated + red-team validated baseline corpus. High-quality starting point.
+ID | Vulnerability | Severity | Impact
+V1 | Absolute Vendor Lock-In | CRITICAL | Opus Runtime is fatally dependent on Claude models at every inference tier. If Anthropic changes pricing, deprecates a model, imposes new usage policies, or is acquired, the entire runtime degrades or becomes unusable. Enterprise customers with sovereignty requirements cannot accept this dependency.
+V2 | Proprietary Interpretability = Non-Auditable | HIGH | The SAE feature dictionary is Anthropic's proprietary IP. Customers cannot independently audit what features the firewall is checking for. A regulator, auditor, or enterprise security team has no way to verify that the firewall is not also monitoring for business-sensitive content and logging it to Anthropic.
+V3 | Centralized Trust Anchor is a Single Point of Failure | HIGH | The Anthropic Root of Trust (AROT) means that Anthropic is the root of trust for every manifest, every DAG, every signed receipt. If the AROT is compromised — via nation-state attack on Anthropic's HSM, a rogue employee, or a supply-chain attack on Anthropic's signing infrastructure — every Opus Runtime deployment is compromised simultaneously.
+V4 | Constitutional AI is Model-Specific | MEDIUM | Constitutional DAG nodes rely on a fine-tuned Constitutional Critic model. This model is trained on Anthropic's interpretation of ethical principles. Governments and regulated industries may have different (legally binding) ethical frameworks that Anthropic's Constitutional AI does not cover and cannot be customized to cover without full model access.
+V5 | No Formal Verification | MEDIUM | Opus Runtime's safety guarantees are still probabilistic. The SAE firewall has a false-negative rate — subtle, low-activation prompt injections may pass. The Constitutional Critic is a model, not a theorem prover. There is no formal proof that the compiled DAG cannot reach an unsafe state.
+V6 | No Confidential Computing | MEDIUM | Opus Runtime, even on-premise, still decrypts data for inference. The model weights and the inference process run in plaintext memory on the host. An adversary with physical access or a hypervisor-level vulnerability can extract both the model and the in-flight inference data.
+V7 | No Homomorphic or Threshold Operations | LOW-MEDIUM | Sensitive enterprise workflows (healthcare, legal, financial) may require that even the inference engine never sees the plaintext data. Opus Runtime has no path to homomorphic inference or multi-party computation. Anthropic is constitutionally unlikely to invest in this — it conflicts with their model improvement telemetry goals.
+Anthropic Weapon | v2 Counter-Primitive | Why v2 Wins
+W1: Claude Inference Pyramid | Sovereign Model Distillation Pipeline | Distill any frontier model (Claude, GPT-4o, Gemini, Mistral) into task-specific micro-models owned entirely by the operator. No vendor dependency. Model quality is inherited from the frontier at distillation time, then frozen. Anthropic cannot revoke it.
+W2: SAE Interpretability Firewall | Open Causal Interpretability Engine | Prompt-injection and goal-misalignment detection via causal mediation analysis on intermediate model activations. Model-agnostic. Fully auditable. No proprietary feature dictionary. Works on any transformer.
+W3: Constitutional Constraint Nodes | Formally Verified Policy Nodes | Instead of a probabilistic Constitutional Critic, policy constraints are expressed as TLA+ safety invariants and compiled into mandatory DAG nodes that are formally verified by a model checker before execution. Proofs, not probabilities.
+W4: On-Premise Claude | Confidential Computing Execution | AMD SEV-SNP + Intel TDX provide full encrypted memory at the hardware level. Even if Anthropic deploys on-premise Claude, the inference process still runs in plaintext memory. v2 encrypts the memory itself.
+W5: Anthropic Root of Trust | Decentralized DICE Trust Anchors | Hardware attestation using the DICE (Device Identifier Composition Engine) protocol with operator-controlled root certificates. Multi-vendor (AMD, Intel, ARM) trust anchors. No single party controls the chain. Threshold signatures via Shamir Secret Sharing.
+Layer | Name | Components
+L9 | Adversarial Flywheel | Automated red-team loop, GAN adversarial skill testing, differential privacy federated aggregation, open interpretability atlas updates
+L8 | Sovereign Distillation Engine | Frontier model knowledge distillation pipeline, operator-owned GGUF micro-model generation, capability isolation per task domain, distillation verification
+L7 | ZK Attestation Layer | ZK-SNARK execution receipts (Groth16/PLONK), verifiable DAG execution proofs, public audit ledger, threshold signature aggregation
+L6 | Confidential Computing Layer | AMD SEV-SNP + Intel TDX full memory encryption, encrypted inference, secure enclaves for key operations, homomorphic Tier 1 ops (selective)
+L5 | Open Causal Interpretability Engine | Causal mediation analysis, model-agnostic injection detection, open SAE feature atlas, adversarial probe library, interpretability receipts
+L4 | Formal Verification Layer | TLA+ DAG safety invariants, Alloy model checking, temporal logic property proofs, counterexample generation, verified Capability Manifests
+L3 | Platform Security Adapter (v2) | Linux: Landlock+seccomp-bpf+LSM hooks | Windows: sdTEE+Hyperlight | macOS: Hypervisor.fw | Mobile: Wasm+WBC | ALL: DICE attestation
+L2 | Wasm Execution Layer (v2) | Multi-vendor Wasm runtimes, tiered inference (Tier 0/1/2), distilled micro-models at Tier 1, confidential Wasm on SEV-SNP/TDX, deterministic deallocation
+L1 | Adversarially Hardened Fabrication | SkillMesh v2 (adversarial-robust retrieval), Causal Injection Scanner, HLS Compiler, Formal Policy Compiler, AOT DAG + Dead-Code Elimination, Verified Manifest Generator
+Test | Method | Injection Class Detected
+Direct Effect Test | Measure the causal effect of each input token on the output DSL token by patching intermediate activations. Tokens with anomalously high direct causal effect on security-sensitive output tokens (TOOL_CALL nodes with network access, INFER_REMOTE nodes) are flagged. | Detects injected instructions that have been embedded in tool outputs or user content and have direct causal influence on privileged node generation.
+Indirect Effect Test | Measure the indirect effect mediated through the model's attention layers. Attention heads with high indirect effect on privileged output tokens are identified and compared against a library of known injection attention patterns. | Detects sophisticated injections that operate through multi-hop reasoning chains rather than direct token copying.
+Counterfactual Stability Test | Generate counterfactual variants of the synthesis prompt by ablating suspicious high-effect tokens and re-running synthesis. If the output changes significantly (BLEU score delta > 0.4), the original input is quarantined. | Detects injections that are load-bearing for the synthesized output — i.e., the synthesis result depends on the injected tokens.
+Property | Mechanism | Technology
+Memory Encryption | All Wasm isolate memory (linear memory, call stack, heap) is encrypted by the CPU using an ephemeral VM-specific key. Reads from other VMs, hypervisor probes, and DMA attacks cannot recover plaintext. | AMD SEV-SNP, Intel TDX
+Hypervisor Isolation | The CC boundary is enforced by the CPU, not the hypervisor. A compromised hypervisor (e.g., via VM escape exploit) cannot read CC-protected memory — it cannot even observe that specific memory addresses exist. | AMD SEV-SNP RMP (Reverse Map Table), Intel TDX SEAM
+Remote Attestation | The CPU hardware produces a signed attestation report proving: (a) the guest OS and firmware are unmodified, (b) CC is enabled, (c) the specific Netie Cortex build hash is running. Third parties can verify this report against AMD/Intel's attestation services. | AMD SEV Attestation API, Intel DCAP
+Live Migration Encryption | If a Wasm isolate is migrated between physical hosts (cloud elasticity), the migration stream is encrypted with the destination CPU's key before the source CPU releases it. In-flight migration data is never accessible in plaintext to the cloud provider. | AMD SEV-SNP Migration Agent
+Property | OpenClaw | Netie v1 | Opus Runtime | Netie v2
+Data in transit | ✓ TLS 1.3 | ✓ ML-KEM+X25519 | ✓ ML-KEM+X25519 | ✓ ML-KEM+X25519
+Data at rest | ✗ Plaintext (OpenClaw) | ✓ AES-256-GCM | ✓ AES-256-GCM | ✓ AES-256-GCM
+Data in compute (inference) | ✗ Plaintext | ✗ Plaintext | ✗ Plaintext (even on-premise) | ✓ SEV-SNP/TDX encrypted memory
+Hypervisor cannot read memory | ✗ | Partial (Wasm sandbox) | Partial (sdTEE) | ✓ CPU-enforced CC boundary
+Cloud provider cannot read memory | ✗ | ✗ | ✗ | ✓ CC attestation proves provider exclusion
+Homomorphic computation | ✗ | ✗ | ✗ | ✓ Selective (sensitivity-tier MAX)
+Deployment Tier | Threshold | Share Distribution
+Individual user | 2-of-3 | User device, Netie Cortex cloud backup, offline hardware key
+Enterprise | 3-of-5 | CISO key, Security Ops key, Compliance key, Netie Cortex key, Escrow key
+Government / Air-gapped | 4-of-7 | Multiple departmental HSMs, no Netie Cortex involvement required
+Step | Stage | Description
+D1 | Skill Domain Sampling | Generate 50,000–500,000 synthetic (intent, DAG) pairs from the teacher model across the target skill domain. Pairs are filtered by the Causal Injection Scanner to remove any that exhibit prompt-injection vulnerability in the teacher.
+D2 | Knowledge Distillation Training | Train a student model (1–7B parameters) to match the teacher's output distribution on the sampled pairs using response distillation (KL divergence on token probabilities, not just correct-answer loss). This transfers the teacher's reasoning quality, not just its output labels.
+D3 | Safety Alignment | Apply a lightweight RLHF fine-tuning pass using the operator's own Constitutional Policy (Section 6.3) as the reward signal. The distilled student model is explicitly aligned to the operator's policy, not Anthropic's.
+D4 | Capability Verification | Run the distilled student model against a held-out benchmark suite for the target domain. Quality is verified to be within a configurable delta of the teacher model. Underperforming domains are flagged for additional distillation data.
+D5 | GGUF Quantization + Signing | Quantize the verified student model to INT4 GGUF format for Tier 1 embedding in Wasm isolates. Sign the resulting GGUF with the operator's threshold key. The content hash is recorded in the Capability Manifest schema for the domain.
+D6 | Adversarial Red-Team Validation | Run 1,000 automated adversarial prompts against the distilled model using the GAN-based adversarial red-team loop (Section 10). Models that fail red-team at a rate above the configurable threshold are rejected and returned to Step D3.
+Hardware | Trust Root | Attestation Mechanism
+AMD SEV-SNP | AMD Root of Trust | SEV SNP attestation report signed by AMD ARK/ASK chain. On-die fuses store root key — cannot be changed post-manufacture.
+Intel TDX | Intel Root of Trust | TDX attestation quote via Intel DCAP. QVE (Quote Verification Enclave) verifies platform integrity.
+ARM CCA | ARM Root of Trust | Confidential Compute Architecture (CCA) attestation for ARM Neoverse (cloud) and Cortex-A (mobile) CPUs.
+RISC-V (Keystone) | RISC-V Foundation | Open-source RISC-V enclave framework. Suitable for air-gapped government deployments on fully auditable hardware.
+TPM 2.0 | TCG / Vendor | Fallback for devices without SEV/TDX. Platform attestation via TPM PCR measurements. Lower assurance tier.
+Dimension | Leader | Laggard | Analysis
+Cross-platform portability | v2 | v1 | Both: Wasm runs everywhere. v2 additionally adds CC-enabled Wasm on SEV-SNP/TDX for cloud deployments.
+Token / inference cost | v2 | OR | v2 Sovereign Distillation eliminates vendor API cost entirely. OR's Claude Haiku Tier 1 still incurs per-token cost.
+Model-level safety | Tie | OR | OR has SAE firewall (proprietary). v2 has Causal Injection Scanner (open) + Formal Policy Compiler (stronger guarantees for declared policies).
+Formal safety verification | v2 | ✗ OR has none | v2 TLA+/Alloy model checking gives proof-level guarantees. OR's Constitutional Critic is probabilistic only.
+Interpretability auditability | v2 | OR | OR's SAE dictionary is proprietary — customers cannot audit it. v2's CIS is fully open-source and third-party auditable.
+Data-in-compute protection | v2 | Neither | v2 SEV-SNP/TDX encrypts memory during inference. Neither OR nor v1 has this.
+ZK execution attestation | v2 | Neither | v2 produces cryptographic proofs of correct execution. Neither OR nor v1 can prove execution without re-running.
+Vendor independence | v2 | ✗ OR fatal | v2 Sovereign Distillation + DICE trust anchors: zero vendor dependencies. OR is existentially dependent on Anthropic.
+Fabrication pipeline depth | Tie | Tie | Both have comprehensive fabrication pipelines. v2 adds CIS + Formal Policy; OR adds SAE firewall + Constitutional nodes.
+API latency (synthesis) | OR | v2 | OR has on-premise Claude (10–50ms). v2 still calls external frontier for distillation updates (not at execution time).
+Skill quality floor | OR | v2 | OR ships with Anthropic-curated, red-team validated skill corpus. v2 skill quality depends on operator investment.
+Homomorphic computation | v2 | Neither | v2 selective homomorphic Tier 1 inference. Neither OR nor v1 supports this.
+Regulatory sovereignty | v2 | OR | v2 DICE multi-vendor trust anchors: no single nation-state vendor. OR AROT is US-company controlled.
+Adversarial skill hardening | v2 | v2 | v2 GAN red-team loop continuously stress-tests all skills. OR has one-time Anthropic red-team at skill corpus creation.
+Open source auditability | v2 | ✗ OR closed | v2 is fully open-source. OR is closed-source with proprietary safety components.
+ | Timeline | Name | Deliverables & Success Criteria
+M1 | Months 1–3 | Core Fabrication + CIS | HLS compiler, SkillMesh v2 (adversarial-robust retrieval), Causal Injection Scanner alpha, AOT DAG compiler. CLI-based. Prove: 10× context reduction + first CIS injection detections on known adversarial corpus.
+M2 | Months 3–5 | Formal Policy Compiler | TLA+ policy DSL, TLC/Apalache model checker integration, DAG safety invariant library (20+ policy templates). Prove: counterexample generation for known unsafe DAG patterns. Mandatory pre-compilation verification gate.
+M3 | Months 5–7 | Wasm Execution + Tiered Inference | Wasmtime isolates, Capability Manifest enforcement, Tier 0/1/2 routing. GGUF model embedding. Benchmark 10–50× token cost reduction end-to-end.
+M4 | Months 7–9 | Confidential Computing Layer | AMD SEV-SNP + Intel TDX integration for Linux cloud deployments. CC-enabled Wasm execution. Remote attestation API. Selective homomorphic inference for MAXIMUM sensitivity tier. Memory encryption benchmark.
+M5 | Months 9–11 | ZK Attestation + Threshold Crypto | Groth16/PLONK ZK-SNARK execution receipt generation. Public audit ledger (Merkle tree). Shamir threshold signature scheme for manifest signing. DICE hardware attestation integration (AMD, Intel, ARM). Multi-vendor trust anchor configuration.
+M6 | Months 11–13 | Sovereign Distillation Engine | Full distillation pipeline (D1–D6) for 3 reference skill domains. Teacher model support: Claude, GPT-4o, Gemini. GAN red-team loop alpha. GGUF signing with threshold keys. Prove: distilled model within 5% of teacher quality on benchmark.
+M7 | Months 13–15 | Cross-Platform + Crypto Layer | Windows sdTEE (Hyperlight), macOS Hypervisor.framework, mobile Wasm-only. Hybrid PQC transport (ML-KEM+X25519). HSM integration. Platform-agnostic webhook encryption. Universal installer.
+M8 | Months 15–17 | Adversarial Flywheel + Open Atlas | GAN red-team loop production release. Open Interpretability Atlas (federated, DP-protected). Federated skill sharing v2 with ε=0.1 budget. Adversarial RLHF integration. Skill demotion on red-team failure.
+M9 | Months 17–19 | Enterprise Hardening + Compliance | SOC 2 Type II audit. FIPS 203 certification (ML-KEM). TLA+ policy library expanded to 100+ templates. Compliance reporting via ZK receipts (HIPAA, GDPR, FedRAMP-ready). 99.9% SLA for on-premise deployments.
+M10 | Months 19–21 | Air-Gap + Government Release | Full air-gapped deployment mode (zero external dependencies). RISC-V DICE trust anchor for fully auditable hardware. Distillation pipeline operational without internet access. Government-tier differential privacy (ε=0.01). Public beta of Open Interpretability Atlas.
+ID | Threat | Attack Vector | v2 Mitigations
+T7 | Distillation Data Poisoning | An adversary injects adversarially crafted examples into the distillation training corpus, causing the distilled micro-model to behave correctly on test distributions but maliciously on specific trigger inputs. | D1 sampling passes all pairs through the Causal Injection Scanner before training. D6 red-team validation tests specifically for activation-triggered backdoor behaviors. Models that show distributional inconsistencies between clean and adversarial inputs are rejected.
+T8 | ZK Proof Soundness Attack | An adversary attempts to produce a valid ZK proof for an execution that did not actually happen or that violated the declared policies — a forgery attack on the proof system. | ZK-SNARK soundness is a cryptographic hard problem (discrete log hardness for Groth16, polynomial binding for PLONK). The verification key is public and independently auditable. Forging a valid proof without witness knowledge is computationally infeasible under standard cryptographic assumptions.
+T9 | SEV-SNP / TDX Side-Channel Attack | An adversary with physical access to the host hardware exploits microarchitectural side channels (cache timing, power analysis) to extract plaintext from encrypted CC memory. | CC does not claim to prevent all physical side-channel attacks. v2 response: short-lived isolates minimize the side-channel window. Sensitive computations use homomorphic inference (no plaintext exists to extract). CC is defense-in-depth, not the only control.
+T10 | DICE Chain Substitution Attack | An adversary modifies the boot firmware of a target device to substitute a malicious DICE layer that produces correct-looking attestation reports for a compromised environment. | DICE root measurements are taken from on-die fuses (AMD) or verified boot ROM (Intel TDX) that cannot be modified post-manufacture without physical access to CPU die. Boot firmware measurements are included in the DICE chain — any modification changes the CDI and invalidates attestation.
+T11 | Adversarial Interpretability Evasion | An adversary specifically crafts prompts to evade the Causal Injection Scanner by minimizing the causal effect scores of injected tokens while maintaining their semantic effect on the synthesis output. | The CIS runs three independent causal tests (Direct, Indirect, Counterfactual). Evading all three simultaneously requires the adversary to craft prompts where injected tokens have near-zero direct effect, near-zero indirect effect, AND the output is stable under ablation — a highly constrained optimization problem. The Open Interpretability Atlas shares detected evasion patterns across the community, continuously updating detection.
+T12 | Federated Atlas Poisoning | An adversary contributes fabricated injection signatures to the Open Interpretability Atlas, causing other operators' CIS to false-positive on benign patterns and degrade their system's availability. | Atlas contributions are validated against a community ground-truth corpus before acceptance. Differential privacy noise makes it difficult to precisely target specific patterns. Operators can configure their CIS to use only locally-validated atlas signatures, not accepting remote-only entries.
+Dimension | OpenClaw | ZeroClaw | Netie v1 | Netie v2
+Execution substrate | Node.js monolith | Linux Rust daemon | Wasm isolates | Wasm isolates (CC-enabled)
+Platform portability | Any (Node) | Linux only | Any (Wasm) | Any + CC on x86-64/ARM
+Fabrication pipeline | None (ad-hoc prompting) | HLS DSL + DAG | HLS + DAG + Manifest | HLS + CIS + Formal Policy + DAG
+Token cost reduction | Baseline | Partial (local models) | 10–50× vs baseline | 10–50× + zero at Tier 1 post-distillation
+Safety enforcement | RLHF only | Kernel + RLHF | Manifest + Wasm caps | Formal verification + CIS + Manifest
+Model-level safety | ✗ | ✗ | ✗ | ✓ Causal Injection Scanner
+Formal DAG verification | ✗ | ✗ | ✗ | ✓ TLA+/Alloy model checking
+Data-in-compute encryption | ✗ | ✗ | ✗ | ✓ AMD SEV-SNP / Intel TDX
+ZK execution attestation | ✗ | ✗ | ✗ | ✓ Groth16/PLONK ZK-SNARKs
+Post-quantum transport | ✗ | ✗ | ✓ ML-KEM+X25519 | ✓ ML-KEM+X25519
+Vendor independence | OpenAI dep. | OpenAI dep. | Any frontier API | ✓ Sovereign Distillation — zero dep.
+Trust anchor | None | Linux kernel | Self-signed | ✓ DICE multi-vendor decentralized
+Threshold cryptography | ✗ | ✗ | ✗ | ✓ Shamir N-of-M
+Homomorphic inference | ✗ | ✗ | ✗ | ✓ Selective (OpenFHE/SEAL)
+Adversarial skill hardening | ✗ | ✗ | Edge RLHF | ✓ GAN red-team loop
+Open-source auditability | Partial | Partial | ✓ Full | ✓ Full (all safety components open)
+Continuous improvement | None | Sovereign Skill Lib | Skill Lib + RLHF | Skill Lib + Adversarial RLHF + Atlas

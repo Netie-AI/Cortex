@@ -1,0 +1,67 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "netie"
+version = "0.1.0"
+description = "Netie Cortex OS Edition — AI Coding Agent"
+authors = [
+    {name = "Open Source"}
+]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13",
+    "rank-bm25>=0.2",
+    "sentence-transformers>=3",
+    "numpy>=1.26",
+    "litellm>=1",
+    "wasmtime>=24",
+    "pydantic>=2",
+    "pyyaml>=6",
+    "toml>=0.10",
+    "cryptography>=42",
+    "diskcache>=5",
+    "sqlite-utils>=3"
+]
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21"]
+local-inference = ["llama-cpp-python>=0.2"]
+gpu = ["torch>=2", "llama-cpp-python>=0.2"]
+
+[tool.poetry]
+name = "netie"
+version = "0.1.0"
+description = "Netie Cortex OS Edition — AI Coding Agent"
+authors = ["Open Source"]
+packages = [
+    { include = "netie" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+typer = "^0.12"
+rich = "^13"
+rank-bm25 = "^0.2"
+sentence-transformers = "^3"
+numpy = "^1.26"
+litellm = "^1"
+wasmtime = "^24"
+pydantic = "^2"
+pyyaml = "^6"
+toml = "^0.10"
+cryptography = "^42"
+diskcache = "^5"
+sqlite-utils = "^3"
+pytest = {version = "^8", optional = true}
+pytest-asyncio = {version = "^0.23", optional = true}
+respx = {version = "^0.21", optional = true}
+llama-cpp-python = {version = "^0.2", optional = true}
+torch = {version = "^2", optional = true}
+
+[tool.poetry.extras]
+dev = ["pytest", "pytest-asyncio", "respx"]
+local-inference = ["llama-cpp-python"]
+gpu = ["torch", "llama-cpp-python"]
