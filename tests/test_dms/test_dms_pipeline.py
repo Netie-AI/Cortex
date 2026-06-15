@@ -71,7 +71,7 @@ def test_sql_guardrail_passes_select_with_limit():
 
     sem = load_semantic_layer()
     r = validate_sql(
-        "SELECT sku, quantity_kg, reorder_level FROM inventory WHERE quantity_kg < reorder_level",
+        "SELECT sku, quantity_kg, reorder_level_kg FROM inventory WHERE quantity_kg < reorder_level_kg",
         sem,
     )
     assert r.passed

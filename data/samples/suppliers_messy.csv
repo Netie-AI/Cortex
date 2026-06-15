@@ -1,0 +1,221 @@
+supplier_id,supplier_name,contact_person,email,phone,country,lead_time_days,payment_terms,last_audit_date,risk_score
+SUP-001,Malaysia Supplier 001 Sdn Bhd,Ahmad 1,procurement1@supplier001.example.com,+60171054447,Malaysia,19,NET 15,11/08/2023,0.12
+SUP-002,MALAYSIA SUPPLIER 002 SDN BHD,Kumar 2,procurement2@supplier002.example.com,+60184337174,Malaysia,12,Net 60,24/02/2023,0.35
+SUP-003,Malaysia Supplier 003 Sdn Bhd,Nurul 3,procurement3@supplier003.example.com,,Malaysia,34,Net 30,2024-02-03,0.37
+SUP-004,MALAYSIA SUPPLIER 004 SDN BHD,Ahmad 4,procurement4@supplier004.example.com,+60105041154,Malaysia,39,Net 30,07/06/2023,0.61
+SUP-005,MALAYSIA SUPPLIER 005 SDN BHD,Nurul 5,procurement5@supplier005.example.com,,Malaysia,45,COD,05/02/2023,0.49
+SUP-006,China Supplier 006 Sdn Bhd,Nurul 6,procurement6@supplier006.example.com,+60164553384,China,37,NET 45,Sep 28 2023,0.15
+SUP-007,Malaysia Supplier 007 Sdn Bhd,Kumar 7,procurement7@supplier007.example.com,+60179683481,Malaysia,31,Net 30,2023-12-10,0.29
+SUP-008,Malaysia Supplier 008 Sdn Bhd,Lee 8,,+60194860684,Malaysia,40,Net 45,Jun 23 2023,0.18
+SUP-009,MALAYSIA SUPPLIER 009 SDN BHD,Lee 9,procurement9@supplier009.example.com,+60132130789,Malaysia,5,Net 60,20/11/2023,0.09
+SUP-010,Malaysia Supplier 010 Sdn Bhd,Tan 10,,+60133219824,Malaysia,39,NET 15,2023-05-23,0.36
+SUP-011,Malaysia Supplier 011 Sdn Bhd,Tan 11,procurement11@supplier011.example.com,+60132582524,Malaysia,9,COD,Aug 31 2023,0.20
+SUP-012,Malaysia Supplier 012 Sdn Bhd,Lee 12,procurement12@supplier012.example.com,+60112016911,Malaysia,28,NET 60,2023-08-28,0.30
+SUP-013,Malaysia Supplier 013 Sdn Bhd,Nurul 13,,,Malaysia,30,Net 45,2023-04-08,0.20
+SUP-014,Malaysia Supplier 014 Sdn Bhd,Tan 14,procurement14@supplier014.example.com,+60182642635,Malaysia,6,Net 15,2023-02-08,0.33
+SUP-015,Malaysia Supplier 015 Sdn Bhd,Ahmad 15,procurement15@supplier015.example.com,+60127818496,Malaysia,34,COD,Jan 21 2024,0.63
+SUP-016,MALAYSIA SUPPLIER 016 SDN BHD,Ahmad 16,procurement16@supplier016.example.com,+60161036161,Malaysia,27,NET 60,Jan 31 2023,0.57
+SUP-017,Malaysia Supplier 017 Sdn Bhd,Nurul 17,,+60173597059,Malaysia,15,Net 60,23/12/2023,0.22
+SUP-018,Malaysia Supplier 018 Sdn Bhd,Nurul 18,procurement18@supplier018.example.com,+60106261415,Malaysia,6,NET 30,24/10/2023,0.63
+SUP-019,Singapore Supplier 019 Sdn Bhd,Ahmad 19,procurement19@supplier019.example.com,+60109519948,Singapore,8,NET 45,29/09/2023,0.34
+SUP-020,Malaysia Supplier 020 Sdn Bhd,Ahmad 20,procurement20@supplier020.example.com,,Malaysia,39,Net 45,12/12/2023,0.41
+SUP-021,SINGAPORE SUPPLIER 021 SDN BHD,Lee 21,procurement21@supplier021.example.com,+60169770838,Singapore,23,Net 60,2023-11-14,0.41
+SUP-022,Malaysia Supplier 022 Sdn Bhd,Ahmad 22,procurement22@supplier022.example.com,+60147640184,Malaysia,11,Net 60,10/06/2023,0.45
+SUP-023,MALAYSIA SUPPLIER 023 SDN BHD,Lee 23,procurement23@supplier023.example.com,+60108688755,Malaysia,42,Net 15,Jan 20 2024,0.24
+SUP-024,Malaysia Supplier 024 Sdn Bhd,Nurul 24,,+60143222252,Malaysia,25,NET 30,20/04/2023,0.09
+SUP-025,Malaysia Supplier 025 Sdn Bhd,Tan 25,,+60186075395,Malaysia,42,Net 15,2023-03-22,0.27
+SUP-026,MALAYSIA SUPPLIER 026 SDN BHD,Kumar 26,,,Malaysia,19,Net 30,2023-10-11,0.45
+SUP-027,Malaysia Supplier 027 Sdn Bhd,Kumar 27,procurement27@supplier027.example.com,+60144533779,Malaysia,24,Net 45,21/03/2023,0.50
+SUP-028,Thailand Supplier 028 Sdn Bhd,Nurul 28,procurement28@supplier028.example.com,+60175213115,Thailand,6,Net 30,May 16 2023,0.43
+SUP-029,Thailand Supplier 029 Sdn Bhd,Lee 29,procurement29@supplier029.example.com,+60106596150,Thailand,11,Net 60,22/05/2023,0.30
+SUP-030,MALAYSIA SUPPLIER 030 SDN BHD,Tan 30,procurement30@supplier030.example.com,+60181162230,Malaysia,10,Net 30,Oct 10 2023,0.90
+SUP-031,Malaysia Supplier 031 Sdn Bhd,Nurul 31,procurement31@supplier031.example.com,+60183484601,Malaysia,30,Net 45,09/07/2023,0.38
+SUP-032,Malaysia Supplier 032 Sdn Bhd,Kumar 32,,+60135186414,Malaysia,45,Net 30,Jan 21 2023,0.23
+SUP-033,Malaysia Supplier 033 Sdn Bhd,Nurul 33,procurement33@supplier033.example.com,+60124971793,Malaysia,13,NET 45,28/07/2023,0.52
+SUP-034,Malaysia Supplier 034 Sdn Bhd,Kumar 34,procurement34@supplier034.example.com,+60165163555,Malaysia,20,Net 45,Jan 13 2024,0.06
+SUP-035,MALAYSIA SUPPLIER 035 SDN BHD,Tan 35,procurement35@supplier035.example.com,+60134348276,Malaysia,32,Net 60,Jan 20 2023,0.28
+SUP-036,MALAYSIA SUPPLIER 036 SDN BHD,Ahmad 36,procurement36@supplier036.example.com,+60104240180,Malaysia,28,Net 60,2023-04-27,0.54
+SUP-037,MALAYSIA SUPPLIER 037 SDN BHD,Kumar 37,procurement37@supplier037.example.com,+60159546409,Malaysia,28,Net 15,2024-01-31,0.57
+SUP-038,Malaysia Supplier 038 Sdn Bhd,Kumar 38,procurement38@supplier038.example.com,+60125453786,Malaysia,5,Net 30,Mar 01 2023,0.61
+SUP-039,SINGAPORE SUPPLIER 039 SDN BHD,Kumar 39,procurement39@supplier039.example.com,+60169580255,Singapore,10,COD,Jan 09 2024,0.31
+SUP-040,Singapore Supplier 040 Sdn Bhd,Tan 40,,+60109722815,Singapore,37,NET 45,Jan 23 2023,0.16
+SUP-041,Malaysia Supplier 041 Sdn Bhd,Kumar 41,procurement41@supplier041.example.com,+60196266630,Malaysia,45,Net 30,2023-12-07,0.31
+SUP-042,Malaysia Supplier 042 Sdn Bhd,Tan 42,procurement42@supplier042.example.com,+60157751158,Malaysia,21,Net 15,2023-12-08,0.35
+SUP-043,Malaysia Supplier 043 Sdn Bhd,Tan 43,,,Malaysia,28,Net 15,2023-12-07,0.17
+SUP-044,Malaysia Supplier 044 Sdn Bhd,Tan 44,procurement44@supplier044.example.com,+60196406444,Malaysia,32,COD,2023-04-18,0.23
+SUP-045,Malaysia Supplier 045 Sdn Bhd,Tan 45,,,Malaysia,21,Net 15,19/09/2023,0.46
+SUP-046,Thailand Supplier 046 Sdn Bhd,Lee 46,,+60136207974,Thailand,17,NET 45,2023-06-21,0.43
+SUP-047,Malaysia Supplier 047 Sdn Bhd,Tan 47,procurement47@supplier047.example.com,+60192221854,Malaysia,32,COD,May 06 2023,0.06
+SUP-048,Thailand Supplier 048 Sdn Bhd,Tan 48,procurement48@supplier048.example.com,,Thailand,18,Net 45,03/01/2024,0.40
+SUP-049,Thailand Supplier 049 Sdn Bhd,Lee 49,procurement49@supplier049.example.com,+60164671545,Thailand,14,Net 15,Jan 20 2024,0.46
+SUP-050,MALAYSIA SUPPLIER 050 SDN BHD,Lee 50,procurement50@supplier050.example.com,+60173237058,Malaysia,32,Net 15,2023-05-08,0.08
+SUP-051,China Supplier 051 Sdn Bhd,Tan 51,procurement51@supplier051.example.com,+60199468772,China,30,NET 15,Jan 22 2024,0.41
+SUP-052,MALAYSIA SUPPLIER 052 SDN BHD,Tan 52,procurement52@supplier052.example.com,+60175348512,Malaysia,18,Net 60,Jan 16 2024,0.59
+SUP-053,China Supplier 053 Sdn Bhd,Kumar 53,procurement53@supplier053.example.com,+60172299954,China,21,Net 45,03/05/2023,0.34
+SUP-054,Malaysia Supplier 054 Sdn Bhd,Lee 54,procurement54@supplier054.example.com,,Malaysia,17,COD,Oct 04 2023,0.25
+SUP-055,Malaysia Supplier 055 Sdn Bhd,Tan 55,,+60166551268,Malaysia,37,COD,2023-02-02,0.47
+SUP-056,Malaysia Supplier 056 Sdn Bhd,Tan 56,procurement56@supplier056.example.com,+60191327691,Malaysia,39,COD,04/08/2023,0.09
+SUP-057,MALAYSIA SUPPLIER 057 SDN BHD,Kumar 57,procurement57@supplier057.example.com,+60168030010,Malaysia,37,Net 15,2023-06-30,0.05
+SUP-058,Singapore Supplier 058 Sdn Bhd,Ahmad 58,procurement58@supplier058.example.com,+60148312114,Singapore,34,Net 30,07/09/2023,0.59
+SUP-059,Malaysia Supplier 059 Sdn Bhd,Tan 59,procurement59@supplier059.example.com,+60128841505,Malaysia,11,Net 15,14/12/2023,0.25
+SUP-060,CHINA SUPPLIER 060 SDN BHD,Nurul 60,procurement60@supplier060.example.com,+60191454696,China,8,COD,2023-07-21,0.07
+SUP-061,Malaysia Supplier 061 Sdn Bhd,Lee 61,,+60147360307,Malaysia,23,Net 45,Apr 04 2023,0.57
+SUP-062,Malaysia Supplier 062 Sdn Bhd,Tan 62,procurement62@supplier062.example.com,+60148072684,Malaysia,19,Net 30,25/01/2024,0.25
+SUP-063,Malaysia Supplier 063 Sdn Bhd,Lee 63,procurement63@supplier063.example.com,+60154761823,Malaysia,44,NET 30,2023-10-04,0.06
+SUP-064,Thailand Supplier 064 Sdn Bhd,Ahmad 64,procurement64@supplier064.example.com,+60131341919,Thailand,42,Net 45,16/01/2023,0.07
+SUP-065,MALAYSIA SUPPLIER 065 SDN BHD,Lee 65,procurement65@supplier065.example.com,+60194656838,Malaysia,32,Net 60,09/12/2023,0.13
+SUP-066,Malaysia Supplier 066 Sdn Bhd,Lee 66,,+60126218367,Malaysia,9,NET 15,Nov 07 2023,0.15
+SUP-067,Malaysia Supplier 067 Sdn Bhd,Tan 67,procurement67@supplier067.example.com,+60164327421,Malaysia,7,Net 15,2023-10-22,0.61
+SUP-068,Thailand Supplier 068 Sdn Bhd,Kumar 68,procurement68@supplier068.example.com,+60193030966,Thailand,39,NET 30,2023-12-23,0.20
+SUP-069,MALAYSIA SUPPLIER 069 SDN BHD,Kumar 69,procurement69@supplier069.example.com,,Malaysia,44,Net 60,Dec 05 2023,0.86
+SUP-070,MALAYSIA SUPPLIER 070 SDN BHD,Lee 70,procurement70@supplier070.example.com,+60167076506,Malaysia,43,COD,Sep 08 2023,0.56
+SUP-071,Malaysia Supplier 071 Sdn Bhd,Nurul 71,procurement71@supplier071.example.com,,Malaysia,32,COD,2024-01-11,0.31
+SUP-072,Singapore Supplier 072 Sdn Bhd,Lee 72,,+60148563202,Singapore,18,COD,06/05/2023,0.21
+SUP-073,SINGAPORE SUPPLIER 073 SDN BHD,Kumar 73,procurement73@supplier073.example.com,+60109293086,Singapore,23,NET 45,2023-07-14,0.42
+SUP-074,MALAYSIA SUPPLIER 074 SDN BHD,Kumar 74,,+60145635017,Malaysia,38,Net 30,May 13 2023,0.18
+SUP-075,CHINA SUPPLIER 075 SDN BHD,Ahmad 75,,+60169196976,China,38,Net 45,Feb 13 2023,0.62
+SUP-076,MALAYSIA SUPPLIER 076 SDN BHD,Tan 76,procurement76@supplier076.example.com,+60102561176,Malaysia,21,Net 45,2023-09-09,0.44
+SUP-077,Malaysia Supplier 077 Sdn Bhd,Nurul 77,procurement77@supplier077.example.com,+60158939993,Malaysia,38,Net 15,Jun 06 2023,0.47
+SUP-078,Malaysia Supplier 078 Sdn Bhd,Nurul 78,procurement78@supplier078.example.com,+60156902401,Malaysia,32,Net 60,Jan 17 2024,0.31
+SUP-079,Malaysia Supplier 079 Sdn Bhd,Ahmad 79,procurement79@supplier079.example.com,+60153005795,Malaysia,37,Net 45,Mar 03 2023,0.20
+SUP-080,Malaysia Supplier 080 Sdn Bhd,Kumar 80,procurement80@supplier080.example.com,+60199801946,Malaysia,41,Net 60,2023-09-05,0.18
+SUP-081,MALAYSIA SUPPLIER 081 SDN BHD,Ahmad 81,procurement81@supplier081.example.com,+60154010529,Malaysia,22,Net 30,2023-06-01,0.55
+SUP-082,CHINA SUPPLIER 082 SDN BHD,Lee 82,procurement82@supplier082.example.com,+60185901239,China,11,COD,2023-01-24,0.13
+SUP-083,Malaysia Supplier 083 Sdn Bhd,Kumar 83,procurement83@supplier083.example.com,+60179031491,Malaysia,31,Net 60,2023-10-21,0.57
+SUP-084,Malaysia Supplier 084 Sdn Bhd,Tan 84,procurement84@supplier084.example.com,+60112096280,Malaysia,28,COD,2023-05-10,0.63
+SUP-085,Malaysia Supplier 085 Sdn Bhd,Lee 85,procurement85@supplier085.example.com,+60123503120,Malaysia,39,Net 60,2023-12-18,0.40
+SUP-086,MALAYSIA SUPPLIER 086 SDN BHD,Nurul 86,procurement86@supplier086.example.com,+60164786401,Malaysia,36,COD,2023-03-02,0.65
+SUP-087,Malaysia Supplier 087 Sdn Bhd,Nurul 87,procurement87@supplier087.example.com,+60166123430,Malaysia,39,Net 15,Jun 02 2023,0.60
+SUP-088,MALAYSIA SUPPLIER 088 SDN BHD,Lee 88,procurement88@supplier088.example.com,+60134540415,Malaysia,19,Net 30,Jan 14 2024,0.42
+SUP-089,Malaysia Supplier 089 Sdn Bhd,Lee 89,procurement89@supplier089.example.com,,Malaysia,29,COD,Oct 10 2023,0.19
+SUP-090,Singapore Supplier 090 Sdn Bhd,Ahmad 90,,+60145743227,Singapore,32,Net 30,17/01/2023,0.33
+SUP-091,THAILAND SUPPLIER 091 SDN BHD,Nurul 91,procurement91@supplier091.example.com,+60138132648,Thailand,10,NET 15,2023-05-16,0.19
+SUP-092,MALAYSIA SUPPLIER 092 SDN BHD,Ahmad 92,procurement92@supplier092.example.com,+60112000560,Malaysia,13,Net 60,17/05/2023,0.44
+SUP-093,Singapore Supplier 093 Sdn Bhd,Kumar 93,procurement93@supplier093.example.com,+60173086308,Singapore,32,NET 60,2023-10-19,0.50
+SUP-094,Malaysia Supplier 094 Sdn Bhd,Nurul 94,procurement94@supplier094.example.com,+60178344375,Malaysia,8,Net 15,Sep 14 2023,0.62
+SUP-095,MALAYSIA SUPPLIER 095 SDN BHD,Kumar 95,,+60195200476,Malaysia,4,Net 30,12/01/2024,0.58
+SUP-096,Malaysia Supplier 096 Sdn Bhd,Nurul 96,procurement96@supplier096.example.com,+60105521644,Malaysia,39,Net 30,2023-10-22,0.63
+SUP-097,Malaysia Supplier 097 Sdn Bhd,Tan 97,procurement97@supplier097.example.com,+60144044882,Malaysia,40,COD,2023-11-30,0.33
+SUP-098,THAILAND SUPPLIER 098 SDN BHD,Tan 98,procurement98@supplier098.example.com,+60157850944,Thailand,24,Net 60,16/02/2023,0.54
+SUP-099,Thailand Supplier 099 Sdn Bhd,Kumar 99,procurement99@supplier099.example.com,+60169312590,Thailand,21,COD,24/03/2023,0.11
+SUP-100,China Supplier 100 Sdn Bhd,Kumar 100,,+60146423634,China,10,COD,Feb 15 2023,0.07
+SUP-101,CHINA SUPPLIER 101 SDN BHD,Nurul 101,procurement101@supplier101.example.com,+60177933143,China,6,NET 45,01/01/2023,0.54
+SUP-102,China Supplier 102 Sdn Bhd,Tan 102,procurement102@supplier102.example.com,+60171865901,China,16,NET 60,Jan 23 2024,0.27
+SUP-103,China Supplier 103 Sdn Bhd,Tan 103,,,China,4,Net 15,28/05/2023,0.13
+SUP-104,Malaysia Supplier 104 Sdn Bhd,Nurul 104,,+60107844947,Malaysia,8,Net 45,2023-06-09,0.48
+SUP-105,MALAYSIA SUPPLIER 105 SDN BHD,Ahmad 105,,+60175896624,Malaysia,35,NET 60,Mar 02 2023,0.33
+SUP-106,Malaysia Supplier 106 Sdn Bhd,Ahmad 106,procurement106@supplier106.example.com,+60173426689,Malaysia,27,NET 45,30/08/2023,0.55
+SUP-107,SINGAPORE SUPPLIER 107 SDN BHD,Lee 107,procurement107@supplier107.example.com,+60147961578,Singapore,24,NET 15,Mar 11 2023,0.35
+SUP-108,Malaysia Supplier 108 Sdn Bhd,Kumar 108,procurement108@supplier108.example.com,+60199214801,Malaysia,12,COD,May 25 2023,0.54
+SUP-109,China Supplier 109 Sdn Bhd,Nurul 109,,+60187328534,China,32,Net 60,Jun 20 2023,0.34
+SUP-110,MALAYSIA SUPPLIER 110 SDN BHD,Nurul 110,procurement110@supplier110.example.com,,Malaysia,29,Net 30,2023-05-03,0.64
+SUP-111,Malaysia Supplier 111 Sdn Bhd,Tan 111,procurement111@supplier111.example.com,+60163551903,Malaysia,34,Net 30,2023-12-28,0.50
+SUP-112,Malaysia Supplier 112 Sdn Bhd,Kumar 112,procurement112@supplier112.example.com,,Malaysia,9,Net 15,30/10/2023,0.35
+SUP-113,MALAYSIA SUPPLIER 113 SDN BHD,Tan 113,procurement113@supplier113.example.com,+60122255409,Malaysia,33,NET 60,15/03/2023,0.06
+SUP-114,Malaysia Supplier 114 Sdn Bhd,Lee 114,procurement114@supplier114.example.com,+60159952696,Malaysia,27,Net 60,23/07/2023,0.42
+SUP-115,THAILAND SUPPLIER 115 SDN BHD,Tan 115,procurement115@supplier115.example.com,+60181602286,Thailand,42,Net 30,2024-01-24,0.48
+SUP-116,Malaysia Supplier 116 Sdn Bhd,Ahmad 116,procurement116@supplier116.example.com,+60118280833,Malaysia,9,Net 30,2023-05-28,0.43
+SUP-117,MALAYSIA SUPPLIER 117 SDN BHD,Lee 117,procurement117@supplier117.example.com,+60106442103,Malaysia,6,Net 60,2023-06-03,0.15
+SUP-118,MALAYSIA SUPPLIER 118 SDN BHD,Ahmad 118,procurement118@supplier118.example.com,+60187913081,Malaysia,39,Net 45,2023-03-16,0.27
+SUP-119,MALAYSIA SUPPLIER 119 SDN BHD,Tan 119,procurement119@supplier119.example.com,,Malaysia,34,Net 15,2023-11-09,0.16
+SUP-120,Malaysia Supplier 120 Sdn Bhd,Kumar 120,procurement120@supplier120.example.com,+60175283671,Malaysia,45,Net 30,Nov 23 2023,0.19
+SUP-121,Malaysia Supplier 121 Sdn Bhd,Nurul 121,procurement121@supplier121.example.com,+60122239197,Malaysia,31,Net 60,13/12/2023,0.59
+SUP-122,Singapore Supplier 122 Sdn Bhd,Kumar 122,procurement122@supplier122.example.com,,Singapore,15,COD,06/08/2023,0.23
+SUP-123,Malaysia Supplier 123 Sdn Bhd,Nurul 123,procurement123@supplier123.example.com,+60155963914,Malaysia,21,Net 30,2023-07-15,0.11
+SUP-124,THAILAND SUPPLIER 124 SDN BHD,Nurul 124,procurement124@supplier124.example.com,+60109333700,Thailand,21,NET 45,Jan 05 2023,0.29
+SUP-125,Singapore Supplier 125 Sdn Bhd,Ahmad 125,procurement125@supplier125.example.com,+60195204819,Singapore,45,Net 45,Apr 23 2023,0.53
+SUP-126,THAILAND SUPPLIER 126 SDN BHD,Lee 126,,+60148395785,Thailand,5,Net 15,Nov 18 2023,0.11
+SUP-127,Malaysia Supplier 127 Sdn Bhd,Kumar 127,procurement127@supplier127.example.com,+60157970985,Malaysia,14,Net 45,2023-02-16,0.49
+SUP-128,Malaysia Supplier 128 Sdn Bhd,Nurul 128,procurement128@supplier128.example.com,+60185572250,Malaysia,13,Net 60,07/07/2023,0.52
+SUP-129,Malaysia Supplier 129 Sdn Bhd,Kumar 129,procurement129@supplier129.example.com,+60118857296,Malaysia,7,Net 45,2023-06-01,0.63
+SUP-130,Malaysia Supplier 130 Sdn Bhd,Tan 130,procurement130@supplier130.example.com,+60187136687,Malaysia,8,COD,Jan 06 2024,0.57
+SUP-131,Malaysia Supplier 131 Sdn Bhd,Tan 131,procurement131@supplier131.example.com,,Malaysia,40,COD,05/03/2023,0.21
+SUP-132,Thailand Supplier 132 Sdn Bhd,Ahmad 132,procurement132@supplier132.example.com,,Thailand,42,Net 15,25/02/2023,0.61
+SUP-133,Malaysia Supplier 133 Sdn Bhd,Lee 133,procurement133@supplier133.example.com,+60176069909,Malaysia,44,COD,24/04/2023,0.60
+SUP-134,MALAYSIA SUPPLIER 134 SDN BHD,Kumar 134,procurement134@supplier134.example.com,+60172948178,Malaysia,9,Net 45,2023-01-20,0.13
+SUP-135,China Supplier 135 Sdn Bhd,Kumar 135,procurement135@supplier135.example.com,+60188031780,China,40,NET 45,Aug 21 2023,0.13
+SUP-136,Malaysia Supplier 136 Sdn Bhd,Nurul 136,procurement136@supplier136.example.com,+60165693260,Malaysia,5,NET 60,08/09/2023,0.44
+SUP-137,MALAYSIA SUPPLIER 137 SDN BHD,Kumar 137,,+60117162857,Malaysia,37,Net 60,May 01 2023,0.32
+SUP-138,Malaysia Supplier 138 Sdn Bhd,Lee 138,procurement138@supplier138.example.com,,Malaysia,45,Net 45,2023-04-08,0.83
+SUP-139,Thailand Supplier 139 Sdn Bhd,Lee 139,,+60155086407,Thailand,11,Net 15,11/01/2023,0.43
+SUP-140,Malaysia Supplier 140 Sdn Bhd,Nurul 140,procurement140@supplier140.example.com,+60134623062,Malaysia,17,Net 60,2024-01-27,0.09
+SUP-141,Malaysia Supplier 141 Sdn Bhd,Lee 141,procurement141@supplier141.example.com,+60143427461,Malaysia,11,Net 15,Nov 02 2023,0.52
+SUP-142,MALAYSIA SUPPLIER 142 SDN BHD,Lee 142,,+60121249314,Malaysia,25,Net 45,26/02/2023,0.53
+SUP-143,SINGAPORE SUPPLIER 143 SDN BHD,Kumar 143,procurement143@supplier143.example.com,+60103126655,Singapore,29,Net 15,2023-03-31,0.24
+SUP-144,MALAYSIA SUPPLIER 144 SDN BHD,Tan 144,procurement144@supplier144.example.com,+60159610704,Malaysia,40,Net 30,2023-09-01,0.50
+SUP-145,Malaysia Supplier 145 Sdn Bhd,Lee 145,procurement145@supplier145.example.com,+60186060517,Malaysia,32,Net 30,Nov 11 2023,0.35
+SUP-146,Malaysia Supplier 146 Sdn Bhd,Tan 146,procurement146@supplier146.example.com,+60119225346,Malaysia,31,Net 30,2023-07-25,0.65
+SUP-147,Malaysia Supplier 147 Sdn Bhd,Lee 147,,+60125614002,Malaysia,42,Net 15,17/03/2023,0.24
+SUP-148,China Supplier 148 Sdn Bhd,Nurul 148,procurement148@supplier148.example.com,,China,32,Net 15,15/07/2023,0.48
+SUP-149,Singapore Supplier 149 Sdn Bhd,Lee 149,procurement149@supplier149.example.com,+60184607488,Singapore,30,COD,Dec 26 2023,0.31
+SUP-150,Malaysia Supplier 150 Sdn Bhd,Tan 150,procurement150@supplier150.example.com,,Malaysia,23,COD,Aug 21 2023,0.30
+SUP-151,Malaysia Supplier 151 Sdn Bhd,Ahmad 151,procurement151@supplier151.example.com,+60172126310,Malaysia,8,NET 30,Jul 11 2023,0.45
+SUP-152,Malaysia Supplier 152 Sdn Bhd,Kumar 152,procurement152@supplier152.example.com,+60122006313,Malaysia,40,Net 15,Jan 17 2024,0.31
+SUP-153,China Supplier 153 Sdn Bhd,Tan 153,procurement153@supplier153.example.com,+60158095702,China,6,Net 60,2023-03-04,0.25
+SUP-154,Singapore Supplier 154 Sdn Bhd,Nurul 154,procurement154@supplier154.example.com,+60184569164,Singapore,12,COD,Feb 23 2023,0.24
+SUP-155,Malaysia Supplier 155 Sdn Bhd,Nurul 155,procurement155@supplier155.example.com,+60152927455,Malaysia,20,Net 15,29/06/2023,0.56
+SUP-156,Malaysia Supplier 156 Sdn Bhd,Nurul 156,procurement156@supplier156.example.com,+60191440466,Malaysia,41,Net 60,15/10/2023,0.53
+SUP-157,Malaysia Supplier 157 Sdn Bhd,Kumar 157,procurement157@supplier157.example.com,+60156889195,Malaysia,3,Net 45,2023-12-26,0.16
+SUP-158,Malaysia Supplier 158 Sdn Bhd,Lee 158,procurement158@supplier158.example.com,+60121514340,Malaysia,8,Net 15,25/07/2023,0.39
+SUP-159,Malaysia Supplier 159 Sdn Bhd,Kumar 159,procurement159@supplier159.example.com,+60127208460,Malaysia,22,Net 60,Aug 21 2023,0.28
+SUP-160,Singapore Supplier 160 Sdn Bhd,Ahmad 160,procurement160@supplier160.example.com,,Singapore,8,NET 60,2023-01-27,0.41
+SUP-161,MALAYSIA SUPPLIER 161 SDN BHD,Nurul 161,procurement161@supplier161.example.com,,Malaysia,20,Net 45,Sep 06 2023,0.45
+SUP-162,China Supplier 162 Sdn Bhd,Lee 162,procurement162@supplier162.example.com,+60149164342,China,36,NET 60,09/08/2023,0.12
+SUP-163,Malaysia Supplier 163 Sdn Bhd,Lee 163,procurement163@supplier163.example.com,,Malaysia,22,Net 45,03/11/2023,0.18
+SUP-164,MALAYSIA SUPPLIER 164 SDN BHD,Kumar 164,procurement164@supplier164.example.com,+60111129686,Malaysia,34,COD,May 29 2023,0.51
+SUP-165,Malaysia Supplier 165 Sdn Bhd,Ahmad 165,procurement165@supplier165.example.com,+60186941939,Malaysia,7,COD,2023-09-30,0.78
+SUP-166,Malaysia Supplier 166 Sdn Bhd,Lee 166,procurement166@supplier166.example.com,+60158202195,Malaysia,39,COD,2023-08-24,0.31
+SUP-167,Thailand Supplier 167 Sdn Bhd,Tan 167,procurement167@supplier167.example.com,+60106448705,Thailand,13,Net 15,2023-02-28,0.30
+SUP-168,Malaysia Supplier 168 Sdn Bhd,Lee 168,procurement168@supplier168.example.com,+60162776088,Malaysia,18,COD,2023-07-05,0.55
+SUP-169,Singapore Supplier 169 Sdn Bhd,Tan 169,procurement169@supplier169.example.com,+60146696087,Singapore,17,Net 60,10/02/2023,0.29
+SUP-170,Malaysia Supplier 170 Sdn Bhd,Lee 170,procurement170@supplier170.example.com,+60189555575,Malaysia,15,Net 60,2023-11-21,0.10
+SUP-171,Malaysia Supplier 171 Sdn Bhd,Ahmad 171,procurement171@supplier171.example.com,+60132724773,Malaysia,12,Net 60,27/11/2023,0.49
+SUP-172,Malaysia Supplier 172 Sdn Bhd,Lee 172,procurement172@supplier172.example.com,+60129289908,Malaysia,32,Net 15,20/03/2023,0.15
+SUP-173,SINGAPORE SUPPLIER 173 SDN BHD,Nurul 173,procurement173@supplier173.example.com,+60156303930,Singapore,12,COD,2023-10-17,0.32
+SUP-174,Malaysia Supplier 174 Sdn Bhd,Kumar 174,procurement174@supplier174.example.com,+60141942411,Malaysia,25,Net 15,20/11/2023,0.33
+SUP-175,Malaysia Supplier 175 Sdn Bhd,Lee 175,,+60107186390,Malaysia,21,Net 30,Aug 20 2023,0.81
+SUP-176,Thailand Supplier 176 Sdn Bhd,Nurul 176,procurement176@supplier176.example.com,+60199507186,Thailand,27,COD,16/02/2023,0.57
+SUP-177,Singapore Supplier 177 Sdn Bhd,Lee 177,procurement177@supplier177.example.com,+60174158134,Singapore,23,Net 15,Jan 14 2024,0.38
+SUP-178,Malaysia Supplier 178 Sdn Bhd,Tan 178,procurement178@supplier178.example.com,+60116761929,Malaysia,8,Net 15,2023-02-01,0.35
+SUP-179,Thailand Supplier 179 Sdn Bhd,Tan 179,,+60179792411,Thailand,36,NET 15,2023-05-07,0.15
+SUP-180,Malaysia Supplier 180 Sdn Bhd,Tan 180,procurement180@supplier180.example.com,,Malaysia,41,Net 30,25/05/2023,0.27
+SUP-181,Thailand Supplier 181 Sdn Bhd,Kumar 181,procurement181@supplier181.example.com,+60117485471,Thailand,21,Net 60,03/02/2023,0.44
+SUP-182,Thailand Supplier 182 Sdn Bhd,Ahmad 182,procurement182@supplier182.example.com,+60152367376,Thailand,40,Net 45,2023-11-05,0.63
+SUP-183,Malaysia Supplier 183 Sdn Bhd,Tan 183,procurement183@supplier183.example.com,+60122421349,Malaysia,22,Net 15,Dec 02 2023,0.24
+SUP-184,Malaysia Supplier 184 Sdn Bhd,Ahmad 184,procurement184@supplier184.example.com,+60182567880,Malaysia,44,COD,18/06/2023,0.44
+SUP-185,China Supplier 185 Sdn Bhd,Kumar 185,procurement185@supplier185.example.com,,China,24,COD,Jul 05 2023,0.82
+SUP-186,MALAYSIA SUPPLIER 186 SDN BHD,Ahmad 186,procurement186@supplier186.example.com,+60115962567,Malaysia,9,Net 15,2023-03-12,0.19
+SUP-187,CHINA SUPPLIER 187 SDN BHD,Lee 187,procurement187@supplier187.example.com,+60153198638,China,41,COD,Sep 27 2023,0.55
+SUP-188,Malaysia Supplier 188 Sdn Bhd,Nurul 188,,+60128342941,Malaysia,5,COD,2023-12-21,0.15
+SUP-189,Malaysia Supplier 189 Sdn Bhd,Tan 189,procurement189@supplier189.example.com,,Malaysia,31,NET 45,02/05/2023,0.46
+SUP-190,China Supplier 190 Sdn Bhd,Ahmad 190,procurement190@supplier190.example.com,,China,32,Net 60,2023-08-29,0.19
+SUP-191,Malaysia Supplier 191 Sdn Bhd,Ahmad 191,procurement191@supplier191.example.com,+60133321942,Malaysia,19,Net 30,Aug 03 2023,0.35
+SUP-192,Thailand Supplier 192 Sdn Bhd,Nurul 192,procurement192@supplier192.example.com,+60119655523,Thailand,10,NET 60,Jul 10 2023,0.34
+SUP-193,Malaysia Supplier 193 Sdn Bhd,Tan 193,procurement193@supplier193.example.com,,Malaysia,30,NET 30,May 20 2023,0.90
+SUP-194,Malaysia Supplier 194 Sdn Bhd,Lee 194,procurement194@supplier194.example.com,+60161893502,Malaysia,28,Net 15,2023-06-28,0.54
+SUP-195,Malaysia Supplier 195 Sdn Bhd,Kumar 195,procurement195@supplier195.example.com,+60131472908,Malaysia,23,Net 30,11/02/2023,0.19
+SUP-196,Thailand Supplier 196 Sdn Bhd,Ahmad 196,procurement196@supplier196.example.com,+60105813037,Thailand,33,Net 45,2023-03-16,0.25
+SUP-197,Malaysia Supplier 197 Sdn Bhd,Lee 197,procurement197@supplier197.example.com,+60105293691,Malaysia,16,Net 45,2023-01-03,0.84
+SUP-198,CHINA SUPPLIER 198 SDN BHD,Nurul 198,procurement198@supplier198.example.com,,China,21,NET 45,08/11/2023,0.61
+SUP-199,Malaysia Supplier 199 Sdn Bhd,Tan 199,procurement199@supplier199.example.com,+60198669093,Malaysia,7,NET 30,03/05/2023,0.12
+SUP-200,Malaysia Supplier 200 Sdn Bhd,Nurul 200,procurement200@supplier200.example.com,+60195059048,Malaysia,12,Net 60,09/01/2023,0.41
+SUP-068,Thailand Supplier 068 Sdn Bhd,Kumar 68,procurement68@supplier068.example.com,+60193030966,Thailand,39,NET 30,2023-12-23,0.20
+SUP-153,China Supplier 153 Sdn Bhd,Tan 153,procurement153@supplier153.example.com,+60158095702,China,6,Net 60,2023-03-04,0.25
+SUP-102,China Supplier 102 Sdn Bhd,Tan 102,procurement102@supplier102.example.com,+60171865901,China,16,NET 60,Jan 23 2024,0.27
+SUP-177,Singapore Supplier 177 Sdn Bhd,Lee 177,procurement177@supplier177.example.com,+60174158134,Singapore,23,Net 15,Jan 14 2024,0.38
+SUP-187,CHINA SUPPLIER 187 SDN BHD,Lee 187,procurement187@supplier187.example.com,+60153198638,China,41,COD,Sep 27 2023,0.55
+SUP-131,Malaysia Supplier 131 Sdn Bhd,Tan 131,procurement131@supplier131.example.com,,Malaysia,40,COD,05/03/2023,0.21
+SUP-075,CHINA SUPPLIER 075 SDN BHD,Ahmad 75,,+60169196976,China,38,Net 45,Feb 13 2023,0.62
+SUP-089,Malaysia Supplier 089 Sdn Bhd,Lee 89,procurement89@supplier089.example.com,,Malaysia,29,COD,Oct 10 2023,0.19
+SUP-161,MALAYSIA SUPPLIER 161 SDN BHD,Nurul 161,procurement161@supplier161.example.com,,Malaysia,20,Net 45,Sep 06 2023,0.45
+SUP-193,Malaysia Supplier 193 Sdn Bhd,Tan 193,procurement193@supplier193.example.com,,Malaysia,30,NET 30,May 20 2023,0.90
+SUP-124,THAILAND SUPPLIER 124 SDN BHD,Nurul 124,procurement124@supplier124.example.com,+60109333700,Thailand,21,NET 45,Jan 05 2023,0.29
+SUP-016,MALAYSIA SUPPLIER 016 SDN BHD,Ahmad 16,procurement16@supplier016.example.com,+60161036161,Malaysia,27,NET 60,Jan 31 2023,0.57
+SUP-113,MALAYSIA SUPPLIER 113 SDN BHD,Tan 113,procurement113@supplier113.example.com,+60122255409,Malaysia,33,NET 60,15/03/2023,0.06
+SUP-199,Malaysia Supplier 199 Sdn Bhd,Tan 199,procurement199@supplier199.example.com,+60198669093,Malaysia,7,NET 30,03/05/2023,0.12
+SUP-022,Malaysia Supplier 022 Sdn Bhd,Ahmad 22,procurement22@supplier022.example.com,+60147640184,Malaysia,11,Net 60,10/06/2023,0.45
+SUP-112,Malaysia Supplier 112 Sdn Bhd,Kumar 112,procurement112@supplier112.example.com,,Malaysia,9,Net 15,30/10/2023,0.35
+SUP-037,MALAYSIA SUPPLIER 037 SDN BHD,Kumar 37,procurement37@supplier037.example.com,+60159546409,Malaysia,28,Net 15,2024-01-31,0.57
+SUP-062,Malaysia Supplier 062 Sdn Bhd,Tan 62,procurement62@supplier062.example.com,+60148072684,Malaysia,19,Net 30,25/01/2024,0.25
+SUP-001,Malaysia Supplier 001 Sdn Bhd,Ahmad 1,procurement1@supplier001.example.com,+60171054447,Malaysia,19,NET 15,11/08/2023,0.12
+SUP-081,MALAYSIA SUPPLIER 081 SDN BHD,Ahmad 81,procurement81@supplier081.example.com,+60154010529,Malaysia,22,Net 30,2023-06-01,0.55
