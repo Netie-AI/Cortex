@@ -9,6 +9,11 @@ class NettieConfig(BaseModel):
     synthesis_model: str = Field(default="gpt-4o-mini")
     tier2_model: str = Field(default="gpt-4o")
     default_local_model: str = Field(default="microsoft/Phi-3-mini-4k-instruct-gguf")
+    # Phase 1 RAG / Phase 0 DB
+    database_url: str | None = Field(default=None)
+    qdrant_url: str | None = Field(default=None)
+    qdrant_collection_listings: str = Field(default="listings_dense_v1")
+    embedder_model: str = Field(default="BAAI/bge-m3")
 
 _cached_config: NettieConfig | None = None
 
@@ -37,6 +42,16 @@ def load_config() -> NettieConfig:
         data["tier2_model"] = os.environ["NETIE_TIER2_MODEL"]
     if os.environ.get("NETIE_DEFAULT_LOCAL_MODEL"):
         data["default_local_model"] = os.environ["NETIE_DEFAULT_LOCAL_MODEL"]
+    if os.environ.get("NETIE_DATABASE_URL"):
+        data["database_url"] = os.environ["NETIE_DATABASE_URL"]
+    if os.environ.get("NETIE_QDRANT_URL"):
+        data["qdrant_url"] = os.environ["NETIE_QDRANT_URL"]
+    if os.environ.get("NETIE_QDRANT_COLLECTION"):
+        data["qdrant_collection_listings"] = os.environ["NETIE_QDRANT_COLLECTION"]
+    if os.environ.get("NETIE_EMBEDDER_MODEL"):
+        data["embedder_model"] = os.environ["NETIE_EMBEDDER_MODEL"]
+    if os.environ.get("EMBEDDER_MODEL"):
+        data["embedder_model"] = os.environ["EMBEDDER_MODEL"]
         
     _cached_config = NettieConfig(**data)
     return _cached_config

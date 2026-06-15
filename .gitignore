@@ -31,6 +31,10 @@ MANIFEST
 ~/.netie/
 .netie/
 .env
+key.md
+utputFormat
+myenv/
+activeflow/
 
 # Unit test / coverage reports
 htmlcov/

@@ -1,0 +1,6 @@
+rules:
+  - id: tenancy_must_have_term
+    when_doc_type: tenancy
+    require_key: tenancy_term_months
+    severity: error
+    description: "Tenancy agreement must include lease term."

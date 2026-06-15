@@ -30,6 +30,12 @@ requires-python = ">=3.10"
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21"]
 local-inference = ["llama-cpp-python>=0.2"]
 gpu = ["torch>=2", "llama-cpp-python>=0.2"]
+rag = ["qdrant-client>=1.9", "tantivy>=0.22"]
+a2a = ["websockets>=12"]
+personality = ["redis>=5", "sqlalchemy>=2", "APScheduler>=3.10"]
+postgres = ["sqlalchemy[asyncio]>=2", "asyncpg>=0.29"]
+tokens = ["tiktoken>=0.7"]
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 
 [tool.poetry]
 name = "netie"
@@ -60,8 +66,21 @@ pytest-asyncio = {version = "^0.23", optional = true}
 respx = {version = "^0.21", optional = true}
 llama-cpp-python = {version = "^0.2", optional = true}
 torch = {version = "^2", optional = true}
+sqlalchemy = {version = "^2.0", optional = true, extras = ["asyncio"]}
+asyncpg = {version = "^0.29", optional = true}
+tiktoken = {version = "^0.7", optional = true}
+qdrant-client = {version = "^1.9", optional = true}
+fastapi = {version = "^0.115", optional = true}
+uvicorn = {version = "^0.30", extras = ["standard"], optional = true}
+tantivy = {version = "^0.22", optional = true}
 
 [tool.poetry.extras]
 dev = ["pytest", "pytest-asyncio", "respx"]
 local-inference = ["llama-cpp-python"]
 gpu = ["torch", "llama-cpp-python"]
+rag = ["qdrant-client", "tantivy"]
+a2a = []
+personality = []
+postgres = ["sqlalchemy", "asyncpg"]
+tokens = ["tiktoken"]
+api = ["fastapi", "uvicorn"]

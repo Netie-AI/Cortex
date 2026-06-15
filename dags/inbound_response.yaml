@@ -1,0 +1,25 @@
+version: "2.0"
+nodes:
+  - id: parse_query
+    kind: llm_cached
+    default_tier: T1
+    max_tier: T2
+    cache_ttl: 6h
+    inputs: []
+  - id: respond
+    kind: llm_judged
+    default_tier: T1
+    max_tier: T3
+    cost_ceiling_myr: 0.5
+    provider: BIG_API_PLACEHOLDER
+    inputs: [parse_query]
+  - id: compliance_final_check
+    kind: deterministic_rule
+    ruleset: netie/compliance/rules/spa_v1.yaml
+    inputs: [respond]
+  - id: emit
+    kind: EMIT
+    tier: 0
+    inputs: [compliance_final_check]
+entry_node_id: parse_query
+output_node_id: emit

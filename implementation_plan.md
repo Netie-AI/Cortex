@@ -1,3 +1,4 @@
+
 # Netie Cortex — Implementation Plan
 # Open Source Edition (GitHub)
 # AI Coding Agent Reference Document

@@ -1,0 +1,6 @@
+rules:
+  - id: rpgt_disclosure_required
+    when_doc_type: spa
+    require_key: rpgt_disclosed
+    severity: warning
+    description: "RPGT disclosure should be present."
