@@ -15,7 +15,7 @@ nodes:
     inputs: [parse_query]
   - id: compliance_final_check
     kind: deterministic_rule
-    ruleset: netie/compliance/rules/spa_v1.yaml
+    ruleset: packs/ruma/rules/spa_v1.yaml
     inputs: [respond]
   - id: emit
     kind: EMIT

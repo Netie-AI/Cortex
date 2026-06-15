@@ -1,0 +1,8 @@
+Acme Corp — Supplier Agreement (SKU-001, SKU-002)
+
+Minimum order quantity: 50 units per SKU.
+Reorder notification: Acme will auto-replenish when stock falls below agreed reorder level for contracted SKUs.
+Payment terms: Net 30 from invoice date.
+Delivery SLA: 5 business days to WH-A or WH-B.
+
+According to this contract, Acme Corp is the preferred supplier for steel fasteners and hydraulic components.

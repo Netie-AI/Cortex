@@ -1,0 +1,971 @@
+{"row_id": 0, "col": "quantity_kg", "old_value": "83 KG", "new_value": 83.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.990702+00:00"}
+{"row_id": 0, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.993706+00:00"}
+{"row_id": 1, "col": "quantity_kg", "old_value": "71kg", "new_value": 71.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.994705+00:00"}
+{"row_id": 1, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.994705+00:00"}
+{"row_id": 2, "col": "quantity_kg", "old_value": "73", "new_value": 73.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.994705+00:00"}
+{"row_id": 2, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.995706+00:00"}
+{"row_id": 3, "col": "quantity_kg", "old_value": "113", "new_value": 113.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.995706+00:00"}
+{"row_id": 3, "col": "last_updated", "old_value": "04/01/2024", "new_value": "2024-01-04", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.995706+00:00"}
+{"row_id": 3, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.996705+00:00"}
+{"row_id": 4, "col": "quantity_kg", "old_value": "99kilogram", "new_value": 99.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.996705+00:00"}
+{"row_id": 4, "col": "last_updated", "old_value": "05/01/2024", "new_value": "2024-01-05", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.996705+00:00"}
+{"row_id": 4, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.996705+00:00"}
+{"row_id": 4, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.997706+00:00"}
+{"row_id": 5, "col": "quantity_kg", "old_value": "70kilogram", "new_value": 70.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.997706+00:00"}
+{"row_id": 5, "col": "last_updated", "old_value": "Jan 06 2024", "new_value": "2024-01-06", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.997706+00:00"}
+{"row_id": 5, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.998706+00:00"}
+{"row_id": 6, "col": "quantity_kg", "old_value": "10kg", "new_value": 10.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.998706+00:00"}
+{"row_id": 7, "col": "quantity_kg", "old_value": "83 KG", "new_value": 83.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.998706+00:00"}
+{"row_id": 7, "col": "last_updated", "old_value": "Jan 08 2024", "new_value": "2024-01-08", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:53.999707+00:00"}
+{"row_id": 7, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.000212+00:00"}
+{"row_id": 7, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.000212+00:00"}
+{"row_id": 8, "col": "quantity_kg", "old_value": "84 KG", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.000212+00:00"}
+{"row_id": 8, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.001222+00:00"}
+{"row_id": 9, "col": "quantity_kg", "old_value": "120kilogram", "new_value": 120.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.001222+00:00"}
+{"row_id": 9, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.002220+00:00"}
+{"row_id": 9, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.002220+00:00"}
+{"row_id": 10, "col": "quantity_kg", "old_value": "53kilogram", "new_value": 53.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.003220+00:00"}
+{"row_id": 10, "col": "sku", "old_value": "SKU001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.003220+00:00"}
+{"row_id": 10, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.003220+00:00"}
+{"row_id": 10, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.004219+00:00"}
+{"row_id": 11, "col": "quantity_kg", "old_value": "84kilogram", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.004219+00:00"}
+{"row_id": 11, "col": "sku", "old_value": "SKU002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.004219+00:00"}
+{"row_id": 11, "col": "last_updated", "old_value": "Jan 12 2024", "new_value": "2024-01-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.004219+00:00"}
+{"row_id": 11, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.005221+00:00"}
+{"row_id": 11, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.005221+00:00"}
+{"row_id": 12, "col": "quantity_kg", "old_value": "30kg", "new_value": 30.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.005221+00:00"}
+{"row_id": 12, "col": "sku", "old_value": "SKU003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.005221+00:00"}
+{"row_id": 12, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.006219+00:00"}
+{"row_id": 13, "col": "quantity_kg", "old_value": "89", "new_value": 89.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.006219+00:00"}
+{"row_id": 13, "col": "sku", "old_value": "SKU004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.006219+00:00"}
+{"row_id": 13, "col": "last_updated", "old_value": "Jan 14 2024", "new_value": "2024-01-14", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.006219+00:00"}
+{"row_id": 13, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.007220+00:00"}
+{"row_id": 14, "col": "quantity_kg", "old_value": "3kilogram", "new_value": 3.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.007220+00:00"}
+{"row_id": 14, "col": "sku", "old_value": "SKU005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.007220+00:00"}
+{"row_id": 14, "col": "last_updated", "old_value": "Jan 15 2024", "new_value": "2024-01-15", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.007220+00:00"}
+{"row_id": 14, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.008220+00:00"}
+{"row_id": 14, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.008220+00:00"}
+{"row_id": 15, "col": "quantity_kg", "old_value": "22kilogram", "new_value": 22.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.008220+00:00"}
+{"row_id": 15, "col": "sku", "old_value": "SKU006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.008220+00:00"}
+{"row_id": 15, "col": "last_updated", "old_value": "Jan 16 2024", "new_value": "2024-01-16", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.008220+00:00"}
+{"row_id": 15, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.008220+00:00"}
+{"row_id": 15, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.009727+00:00"}
+{"row_id": 16, "col": "quantity_kg", "old_value": "113 KG", "new_value": 113.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.009727+00:00"}
+{"row_id": 16, "col": "sku", "old_value": "SKU007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.009727+00:00"}
+{"row_id": 16, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.009727+00:00"}
+{"row_id": 16, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.009727+00:00"}
+{"row_id": 17, "col": "quantity_kg", "old_value": "101", "new_value": 101.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.010733+00:00"}
+{"row_id": 17, "col": "sku", "old_value": "SKU008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.010733+00:00"}
+{"row_id": 18, "col": "quantity_kg", "old_value": "108kg", "new_value": 108.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.010733+00:00"}
+{"row_id": 18, "col": "sku", "old_value": "SKU009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.010733+00:00"}
+{"row_id": 18, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.011733+00:00"}
+{"row_id": 18, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.011733+00:00"}
+{"row_id": 19, "col": "quantity_kg", "old_value": "70 KG", "new_value": 70.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.011733+00:00"}
+{"row_id": 19, "col": "sku", "old_value": "SKU010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.011733+00:00"}
+{"row_id": 19, "col": "last_updated", "old_value": "20/01/2024", "new_value": "2024-01-20", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.011733+00:00"}
+{"row_id": 19, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.011733+00:00"}
+{"row_id": 19, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.012853+00:00"}
+{"row_id": 20, "col": "quantity_kg", "old_value": "98", "new_value": 98.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.012853+00:00"}
+{"row_id": 20, "col": "sku", "old_value": "sku 001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.012853+00:00"}
+{"row_id": 20, "col": "last_updated", "old_value": "Jan 21 2024", "new_value": "2024-01-21", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.012853+00:00"}
+{"row_id": 20, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.013852+00:00"}
+{"row_id": 20, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.013852+00:00"}
+{"row_id": 21, "col": "quantity_kg", "old_value": "59kg", "new_value": 59.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.013852+00:00"}
+{"row_id": 21, "col": "sku", "old_value": "sku 002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.013852+00:00"}
+{"row_id": 21, "col": "last_updated", "old_value": "Jan 22 2024", "new_value": "2024-01-22", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.014853+00:00"}
+{"row_id": 21, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.014853+00:00"}
+{"row_id": 22, "col": "quantity_kg", "old_value": "11kg", "new_value": 11.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.014853+00:00"}
+{"row_id": 22, "col": "sku", "old_value": "sku 003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.015854+00:00"}
+{"row_id": 22, "col": "last_updated", "old_value": "23/01/2024", "new_value": "2024-01-23", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.015854+00:00"}
+{"row_id": 22, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.015854+00:00"}
+{"row_id": 23, "col": "quantity_kg", "old_value": "87", "new_value": 87.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.016854+00:00"}
+{"row_id": 23, "col": "sku", "old_value": "sku 004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.016854+00:00"}
+{"row_id": 23, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.016854+00:00"}
+{"row_id": 24, "col": "quantity_kg", "old_value": "14", "new_value": 14.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 24, "col": "sku", "old_value": "sku 005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 24, "col": "last_updated", "old_value": "Jan 25 2024", "new_value": "2024-01-25", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 24, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 25, "col": "quantity_kg", "old_value": "84kg", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 25, "col": "sku", "old_value": "sku 006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 25, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.017854+00:00"}
+{"row_id": 25, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.019358+00:00"}
+{"row_id": 26, "col": "quantity_kg", "old_value": "19kg", "new_value": 19.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.019358+00:00"}
+{"row_id": 26, "col": "sku", "old_value": "sku 007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.019358+00:00"}
+{"row_id": 26, "col": "last_updated", "old_value": "27/01/2024", "new_value": "2024-01-27", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.019358+00:00"}
+{"row_id": 27, "col": "quantity_kg", "old_value": "71 KG", "new_value": 71.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 27, "col": "sku", "old_value": "sku 008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 27, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 27, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 28, "col": "quantity_kg", "old_value": "112kg", "new_value": 112.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 28, "col": "sku", "old_value": "sku 009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 28, "col": "last_updated", "old_value": "29/01/2024", "new_value": "2024-01-29", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.020362+00:00"}
+{"row_id": 28, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.021865+00:00"}
+{"row_id": 29, "col": "quantity_kg", "old_value": "91", "new_value": 91.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.021865+00:00"}
+{"row_id": 29, "col": "sku", "old_value": "sku 010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.021865+00:00"}
+{"row_id": 29, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.021865+00:00"}
+{"row_id": 29, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.021865+00:00"}
+{"row_id": 30, "col": "quantity_kg", "old_value": "9kilogram", "new_value": 9.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.022868+00:00"}
+{"row_id": 30, "col": "sku", "old_value": "sku-001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.022868+00:00"}
+{"row_id": 31, "col": "quantity_kg", "old_value": "119kg", "new_value": 119.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.022868+00:00"}
+{"row_id": 31, "col": "sku", "old_value": "sku-002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.022868+00:00"}
+{"row_id": 31, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.023869+00:00"}
+{"row_id": 32, "col": "quantity_kg", "old_value": "118 KG", "new_value": 118.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.023869+00:00"}
+{"row_id": 32, "col": "sku", "old_value": "sku-OO2", "new_value": "SKU-OO2", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.023869+00:00"}
+{"row_id": 32, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.023869+00:00"}
+{"row_id": 33, "col": "quantity_kg", "old_value": "53kg", "new_value": 53.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.023869+00:00"}
+{"row_id": 33, "col": "sku", "old_value": "sku-003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.024869+00:00"}
+{"row_id": 33, "col": "last_updated", "old_value": "Feb 02 2024", "new_value": "2024-02-02", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.024869+00:00"}
+{"row_id": 34, "col": "quantity_kg", "old_value": "74kilogram", "new_value": 74.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.024869+00:00"}
+{"row_id": 34, "col": "sku", "old_value": "sku-004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.025871+00:00"}
+{"row_id": 34, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.025871+00:00"}
+{"row_id": 35, "col": "quantity_kg", "old_value": "84kg", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.025871+00:00"}
+{"row_id": 35, "col": "sku", "old_value": "sku-005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.026869+00:00"}
+{"row_id": 35, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.026869+00:00"}
+{"row_id": 36, "col": "quantity_kg", "old_value": "14 KG", "new_value": 14.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.026869+00:00"}
+{"row_id": 36, "col": "sku", "old_value": "sku-006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.026869+00:00"}
+{"row_id": 36, "col": "last_updated", "old_value": "05/02/2024", "new_value": "2024-02-05", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.027870+00:00"}
+{"row_id": 37, "col": "quantity_kg", "old_value": "22kg", "new_value": 22.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.027870+00:00"}
+{"row_id": 37, "col": "sku", "old_value": "sku-007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.027870+00:00"}
+{"row_id": 37, "col": "last_updated", "old_value": "Feb 06 2024", "new_value": "2024-02-06", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.027870+00:00"}
+{"row_id": 37, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.029375+00:00"}
+{"row_id": 38, "col": "quantity_kg", "old_value": "114 KG", "new_value": 114.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.029375+00:00"}
+{"row_id": 38, "col": "sku", "old_value": "sku-008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.029375+00:00"}
+{"row_id": 38, "col": "last_updated", "old_value": "07/02/2024", "new_value": "2024-02-07", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.029375+00:00"}
+{"row_id": 38, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.030379+00:00"}
+{"row_id": 39, "col": "quantity_kg", "old_value": "45", "new_value": 45.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.030379+00:00"}
+{"row_id": 39, "col": "sku", "old_value": "sku-009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.031381+00:00"}
+{"row_id": 39, "col": "last_updated", "old_value": "08/02/2024", "new_value": "2024-02-08", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.031381+00:00"}
+{"row_id": 40, "col": "quantity_kg", "old_value": "108 KG", "new_value": 108.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.031381+00:00"}
+{"row_id": 40, "col": "sku", "old_value": "sku-010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.032380+00:00"}
+{"row_id": 40, "col": "last_updated", "old_value": "Feb 09 2024", "new_value": "2024-02-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.032380+00:00"}
+{"row_id": 40, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.033469+00:00"}
+{"row_id": 40, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.033469+00:00"}
+{"row_id": 41, "col": "quantity_kg", "old_value": "72kg", "new_value": 72.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.033469+00:00"}
+{"row_id": 41, "col": "last_updated", "old_value": "Feb 10 2024", "new_value": "2024-02-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.034468+00:00"}
+{"row_id": 41, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.034468+00:00"}
+{"row_id": 41, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.035469+00:00"}
+{"row_id": 42, "col": "quantity_kg", "old_value": "71kilogram", "new_value": 71.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.035469+00:00"}
+{"row_id": 42, "col": "last_updated", "old_value": "Feb 10 2024", "new_value": "2024-02-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.035469+00:00"}
+{"row_id": 42, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.036467+00:00"}
+{"row_id": 42, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.036467+00:00"}
+{"row_id": 43, "col": "quantity_kg", "old_value": "76kilogram", "new_value": 76.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.036467+00:00"}
+{"row_id": 43, "col": "last_updated", "old_value": "11/02/2024", "new_value": "2024-02-11", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.037468+00:00"}
+{"row_id": 43, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.037468+00:00"}
+{"row_id": 44, "col": "quantity_kg", "old_value": "33", "new_value": 33.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.038467+00:00"}
+{"row_id": 44, "col": "last_updated", "old_value": "Feb 12 2024", "new_value": "2024-02-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.038467+00:00"}
+{"row_id": 44, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.038467+00:00"}
+{"row_id": 44, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.039468+00:00"}
+{"row_id": 45, "col": "quantity_kg", "old_value": "104 KG", "new_value": 104.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.039468+00:00"}
+{"row_id": 45, "col": "last_updated", "old_value": "Feb 13 2024", "new_value": "2024-02-13", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.040492+00:00"}
+{"row_id": 45, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.040492+00:00"}
+{"row_id": 45, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.040492+00:00"}
+{"row_id": 46, "col": "quantity_kg", "old_value": "112kg", "new_value": 112.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.041491+00:00"}
+{"row_id": 46, "col": "last_updated", "old_value": "14/02/2024", "new_value": "2024-02-14", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.041491+00:00"}
+{"row_id": 46, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.041491+00:00"}
+{"row_id": 47, "col": "quantity_kg", "old_value": "106 KG", "new_value": 106.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.042491+00:00"}
+{"row_id": 48, "col": "quantity_kg", "old_value": "44kilogram", "new_value": 44.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.042491+00:00"}
+{"row_id": 48, "col": "last_updated", "old_value": "16/02/2024", "new_value": "2024-02-16", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.043715+00:00"}
+{"row_id": 48, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.043715+00:00"}
+{"row_id": 49, "col": "quantity_kg", "old_value": "70kilogram", "new_value": 70.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.043715+00:00"}
+{"row_id": 49, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.044715+00:00"}
+{"row_id": 50, "col": "quantity_kg", "old_value": "57kg", "new_value": 57.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.044715+00:00"}
+{"row_id": 50, "col": "last_updated", "old_value": "18/02/2024", "new_value": "2024-02-18", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.045715+00:00"}
+{"row_id": 50, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.045715+00:00"}
+{"row_id": 51, "col": "quantity_kg", "old_value": "56", "new_value": 56.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.045715+00:00"}
+{"row_id": 51, "col": "last_updated", "old_value": "18/02/2024", "new_value": "2024-02-18", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.046718+00:00"}
+{"row_id": 51, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.046718+00:00"}
+{"row_id": 52, "col": "quantity_kg", "old_value": "2 KG", "new_value": 2.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.046718+00:00"}
+{"row_id": 52, "col": "last_updated", "old_value": "19/02/2024", "new_value": "2024-02-19", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.046718+00:00"}
+{"row_id": 52, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.047716+00:00"}
+{"row_id": 53, "col": "quantity_kg", "old_value": "119kg", "new_value": 119.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.047716+00:00"}
+{"row_id": 53, "col": "sku", "old_value": "SKU001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.047716+00:00"}
+{"row_id": 53, "col": "last_updated", "old_value": "Feb 20 2024", "new_value": "2024-02-20", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.047716+00:00"}
+{"row_id": 53, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.048715+00:00"}
+{"row_id": 54, "col": "quantity_kg", "old_value": "54 KG", "new_value": 54.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.048715+00:00"}
+{"row_id": 54, "col": "sku", "old_value": "SKU002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.048715+00:00"}
+{"row_id": 54, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.048715+00:00"}
+{"row_id": 55, "col": "quantity_kg", "old_value": "88kilogram", "new_value": 88.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.049715+00:00"}
+{"row_id": 55, "col": "sku", "old_value": "SKU003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.049715+00:00"}
+{"row_id": 55, "col": "last_updated", "old_value": "22/02/2024", "new_value": "2024-02-22", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.049715+00:00"}
+{"row_id": 55, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.049715+00:00"}
+{"row_id": 56, "col": "quantity_kg", "old_value": "57", "new_value": 57.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.049715+00:00"}
+{"row_id": 56, "col": "sku", "old_value": "SKU004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.050806+00:00"}
+{"row_id": 56, "col": "last_updated", "old_value": "23/02/2024", "new_value": "2024-02-23", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.050806+00:00"}
+{"row_id": 56, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.050806+00:00"}
+{"row_id": 56, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.050806+00:00"}
+{"row_id": 57, "col": "quantity_kg", "old_value": "62 KG", "new_value": 62.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.051806+00:00"}
+{"row_id": 57, "col": "sku", "old_value": "SKU005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.051806+00:00"}
+{"row_id": 57, "col": "last_updated", "old_value": "Feb 24 2024", "new_value": "2024-02-24", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.051806+00:00"}
+{"row_id": 57, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.052807+00:00"}
+{"row_id": 58, "col": "quantity_kg", "old_value": "83 KG", "new_value": 83.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.052807+00:00"}
+{"row_id": 58, "col": "sku", "old_value": "SKU006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.052807+00:00"}
+{"row_id": 58, "col": "last_updated", "old_value": "Feb 25 2024", "new_value": "2024-02-25", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.052807+00:00"}
+{"row_id": 58, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.052807+00:00"}
+{"row_id": 59, "col": "quantity_kg", "old_value": "20kg", "new_value": 20.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.054037+00:00"}
+{"row_id": 59, "col": "sku", "old_value": "SKU007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.054037+00:00"}
+{"row_id": 59, "col": "last_updated", "old_value": "26/02/2024", "new_value": "2024-02-26", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.054037+00:00"}
+{"row_id": 59, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.054037+00:00"}
+{"row_id": 59, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.055037+00:00"}
+{"row_id": 60, "col": "quantity_kg", "old_value": "93 KG", "new_value": 93.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.055037+00:00"}
+{"row_id": 60, "col": "sku", "old_value": "SKU008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.055037+00:00"}
+{"row_id": 60, "col": "last_updated", "old_value": "Feb 27 2024", "new_value": "2024-02-27", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.055037+00:00"}
+{"row_id": 60, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.056037+00:00"}
+{"row_id": 61, "col": "quantity_kg", "old_value": "30", "new_value": 30.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.056037+00:00"}
+{"row_id": 61, "col": "sku", "old_value": "SKU009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.056037+00:00"}
+{"row_id": 61, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.056037+00:00"}
+{"row_id": 62, "col": "quantity_kg", "old_value": "104kilogram", "new_value": 104.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.057036+00:00"}
+{"row_id": 62, "col": "sku", "old_value": "SKU010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.057036+00:00"}
+{"row_id": 62, "col": "last_updated", "old_value": "29/02/2024", "new_value": "2024-02-29", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.057036+00:00"}
+{"row_id": 62, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.057036+00:00"}
+{"row_id": 63, "col": "quantity_kg", "old_value": "22 KG", "new_value": 22.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 63, "col": "sku", "old_value": "sku 001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 63, "col": "last_updated", "old_value": "Mar 01 2024", "new_value": "2024-03-01", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 63, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 63, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 64, "col": "quantity_kg", "old_value": "32 KG", "new_value": 32.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 64, "col": "sku", "old_value": "sku 002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.058036+00:00"}
+{"row_id": 64, "col": "last_updated", "old_value": "02/03/2024", "new_value": "2024-03-02", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.059539+00:00"}
+{"row_id": 64, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.059539+00:00"}
+{"row_id": 65, "col": "quantity_kg", "old_value": "12 KG", "new_value": 12.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.059539+00:00"}
+{"row_id": 65, "col": "sku", "old_value": "sku 003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.059539+00:00"}
+{"row_id": 65, "col": "last_updated", "old_value": "Mar 03 2024", "new_value": "2024-03-03", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.060543+00:00"}
+{"row_id": 65, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.060543+00:00"}
+{"row_id": 66, "col": "quantity_kg", "old_value": "44", "new_value": 44.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.060543+00:00"}
+{"row_id": 66, "col": "sku", "old_value": "sku 004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.060543+00:00"}
+{"row_id": 66, "col": "last_updated", "old_value": "04/03/2024", "new_value": "2024-03-04", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.061543+00:00"}
+{"row_id": 67, "col": "quantity_kg", "old_value": "2", "new_value": 2.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.061543+00:00"}
+{"row_id": 67, "col": "sku", "old_value": "sku 005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.061543+00:00"}
+{"row_id": 67, "col": "last_updated", "old_value": "Mar 05 2024", "new_value": "2024-03-05", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.061543+00:00"}
+{"row_id": 67, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.063048+00:00"}
+{"row_id": 68, "col": "quantity_kg", "old_value": "57", "new_value": 57.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.063048+00:00"}
+{"row_id": 68, "col": "sku", "old_value": "sku 006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.063048+00:00"}
+{"row_id": 68, "col": "last_updated", "old_value": "Mar 06 2024", "new_value": "2024-03-06", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.064053+00:00"}
+{"row_id": 68, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.064053+00:00"}
+{"row_id": 68, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.065052+00:00"}
+{"row_id": 69, "col": "quantity_kg", "old_value": "81kg", "new_value": 81.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.065052+00:00"}
+{"row_id": 69, "col": "sku", "old_value": "sku 007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.065052+00:00"}
+{"row_id": 69, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.066052+00:00"}
+{"row_id": 69, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.066052+00:00"}
+{"row_id": 70, "col": "quantity_kg", "old_value": "25", "new_value": 25.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.066052+00:00"}
+{"row_id": 70, "col": "sku", "old_value": "sku 008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.067052+00:00"}
+{"row_id": 70, "col": "last_updated", "old_value": "08/03/2024", "new_value": "2024-03-08", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.067052+00:00"}
+{"row_id": 70, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.068052+00:00"}
+{"row_id": 71, "col": "quantity_kg", "old_value": "108kg", "new_value": 108.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.068052+00:00"}
+{"row_id": 71, "col": "sku", "old_value": "sku 009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.068052+00:00"}
+{"row_id": 71, "col": "last_updated", "old_value": "Mar 09 2024", "new_value": "2024-03-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.068052+00:00"}
+{"row_id": 72, "col": "quantity_kg", "old_value": "10kg", "new_value": 10.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.069556+00:00"}
+{"row_id": 72, "col": "sku", "old_value": "sku 010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.069556+00:00"}
+{"row_id": 72, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.069556+00:00"}
+{"row_id": 72, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.070562+00:00"}
+{"row_id": 73, "col": "quantity_kg", "old_value": "32 KG", "new_value": 32.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.070562+00:00"}
+{"row_id": 73, "col": "sku", "old_value": "sku-001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.070562+00:00"}
+{"row_id": 73, "col": "last_updated", "old_value": "11/03/2024", "new_value": "2024-03-11", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.071560+00:00"}
+{"row_id": 73, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.071560+00:00"}
+{"row_id": 74, "col": "quantity_kg", "old_value": "79 KG", "new_value": 79.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.072561+00:00"}
+{"row_id": 74, "col": "sku", "old_value": "sku-002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.072561+00:00"}
+{"row_id": 74, "col": "last_updated", "old_value": "12/03/2024", "new_value": "2024-03-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.072561+00:00"}
+{"row_id": 74, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.073560+00:00"}
+{"row_id": 75, "col": "quantity_kg", "old_value": "78kilogram", "new_value": 78.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.074066+00:00"}
+{"row_id": 75, "col": "sku", "old_value": "sku-OO2", "new_value": "SKU-OO2", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.074066+00:00"}
+{"row_id": 75, "col": "last_updated", "old_value": "12/03/2024", "new_value": "2024-03-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.074066+00:00"}
+{"row_id": 75, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.075067+00:00"}
+{"row_id": 76, "col": "quantity_kg", "old_value": "75 KG", "new_value": 75.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.075067+00:00"}
+{"row_id": 76, "col": "sku", "old_value": "sku-003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.076067+00:00"}
+{"row_id": 76, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.076067+00:00"}
+{"row_id": 76, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.076067+00:00"}
+{"row_id": 77, "col": "quantity_kg", "old_value": "40kg", "new_value": 40.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.077067+00:00"}
+{"row_id": 77, "col": "sku", "old_value": "sku-004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.077067+00:00"}
+{"row_id": 77, "col": "last_updated", "old_value": "14/03/2024", "new_value": "2024-03-14", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.078067+00:00"}
+{"row_id": 77, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.078067+00:00"}
+{"row_id": 77, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.078067+00:00"}
+{"row_id": 78, "col": "quantity_kg", "old_value": "66", "new_value": 66.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.078067+00:00"}
+{"row_id": 78, "col": "sku", "old_value": "sku-005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.078067+00:00"}
+{"row_id": 78, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.078067+00:00"}
+{"row_id": 78, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.079571+00:00"}
+{"row_id": 79, "col": "quantity_kg", "old_value": "108kilogram", "new_value": 108.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.079571+00:00"}
+{"row_id": 79, "col": "sku", "old_value": "sku-006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.079571+00:00"}
+{"row_id": 79, "col": "last_updated", "old_value": "Mar 16 2024", "new_value": "2024-03-16", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.079571+00:00"}
+{"row_id": 79, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.080576+00:00"}
+{"row_id": 80, "col": "quantity_kg", "old_value": "95kg", "new_value": 95.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.080576+00:00"}
+{"row_id": 80, "col": "sku", "old_value": "sku-007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.080576+00:00"}
+{"row_id": 80, "col": "last_updated", "old_value": "17/03/2024", "new_value": "2024-03-17", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.080576+00:00"}
+{"row_id": 80, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.080576+00:00"}
+{"row_id": 81, "col": "quantity_kg", "old_value": "74", "new_value": 74.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.081576+00:00"}
+{"row_id": 81, "col": "sku", "old_value": "sku-008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.081576+00:00"}
+{"row_id": 81, "col": "last_updated", "old_value": "18/03/2024", "new_value": "2024-03-18", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.081576+00:00"}
+{"row_id": 81, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.081576+00:00"}
+{"row_id": 82, "col": "quantity_kg", "old_value": "104kilogram", "new_value": 104.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 82, "col": "sku", "old_value": "sku-009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 82, "col": "last_updated", "old_value": "Mar 19 2024", "new_value": "2024-03-19", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 83, "col": "quantity_kg", "old_value": "12 KG", "new_value": 12.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 83, "col": "sku", "old_value": "sku-010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 83, "col": "last_updated", "old_value": "Mar 20 2024", "new_value": "2024-03-20", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 83, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.082575+00:00"}
+{"row_id": 84, "col": "quantity_kg", "old_value": "59", "new_value": 59.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.084079+00:00"}
+{"row_id": 84, "col": "last_updated", "old_value": "Mar 21 2024", "new_value": "2024-03-21", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.084079+00:00"}
+{"row_id": 84, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.084079+00:00"}
+{"row_id": 84, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.084079+00:00"}
+{"row_id": 85, "col": "quantity_kg", "old_value": "49kilogram", "new_value": 49.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.085084+00:00"}
+{"row_id": 85, "col": "last_updated", "old_value": "22/03/2024", "new_value": "2024-03-22", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.085084+00:00"}
+{"row_id": 85, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.085084+00:00"}
+{"row_id": 86, "col": "quantity_kg", "old_value": "31 KG", "new_value": 31.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.085084+00:00"}
+{"row_id": 86, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.086085+00:00"}
+{"row_id": 87, "col": "quantity_kg", "old_value": "94kilogram", "new_value": 94.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.086085+00:00"}
+{"row_id": 87, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.086085+00:00"}
+{"row_id": 88, "col": "quantity_kg", "old_value": "24kilogram", "new_value": 24.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.086085+00:00"}
+{"row_id": 88, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.087085+00:00"}
+{"row_id": 89, "col": "quantity_kg", "old_value": "18kg", "new_value": 18.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.087085+00:00"}
+{"row_id": 89, "col": "last_updated", "old_value": "Mar 26 2024", "new_value": "2024-03-26", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.087085+00:00"}
+{"row_id": 89, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.087085+00:00"}
+{"row_id": 89, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.087085+00:00"}
+{"row_id": 90, "col": "quantity_kg", "old_value": "45", "new_value": 45.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.088085+00:00"}
+{"row_id": 91, "col": "quantity_kg", "old_value": "75kilogram", "new_value": 75.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.088085+00:00"}
+{"row_id": 91, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.088085+00:00"}
+{"row_id": 91, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.088085+00:00"}
+{"row_id": 92, "col": "quantity_kg", "old_value": "55", "new_value": 55.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.088085+00:00"}
+{"row_id": 92, "col": "last_updated", "old_value": "29/03/2024", "new_value": "2024-03-29", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.088085+00:00"}
+{"row_id": 92, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.089590+00:00"}
+{"row_id": 93, "col": "quantity_kg", "old_value": "56kg", "new_value": 56.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.089590+00:00"}
+{"row_id": 93, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.089590+00:00"}
+{"row_id": 94, "col": "quantity_kg", "old_value": "22kg", "new_value": 22.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.090594+00:00"}
+{"row_id": 94, "col": "sku", "old_value": "SKU001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.090594+00:00"}
+{"row_id": 94, "col": "last_updated", "old_value": "01/01/2024", "new_value": "2024-01-01", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.090594+00:00"}
+{"row_id": 94, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.091595+00:00"}
+{"row_id": 95, "col": "quantity_kg", "old_value": "39", "new_value": 39.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.091595+00:00"}
+{"row_id": 95, "col": "sku", "old_value": "SKU002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.091595+00:00"}
+{"row_id": 95, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.091595+00:00"}
+{"row_id": 96, "col": "quantity_kg", "old_value": "82", "new_value": 82.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.092596+00:00"}
+{"row_id": 96, "col": "sku", "old_value": "SKU003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.092596+00:00"}
+{"row_id": 96, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.092596+00:00"}
+{"row_id": 97, "col": "quantity_kg", "old_value": "36kilogram", "new_value": 36.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.093596+00:00"}
+{"row_id": 97, "col": "sku", "old_value": "SKU004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.093596+00:00"}
+{"row_id": 97, "col": "last_updated", "old_value": "Jan 04 2024", "new_value": "2024-01-04", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.094595+00:00"}
+{"row_id": 97, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.095101+00:00"}
+{"row_id": 97, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.095101+00:00"}
+{"row_id": 98, "col": "quantity_kg", "old_value": "90", "new_value": 90.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.095101+00:00"}
+{"row_id": 98, "col": "sku", "old_value": "SKU005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.095101+00:00"}
+{"row_id": 98, "col": "last_updated", "old_value": "05/01/2024", "new_value": "2024-01-05", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.096107+00:00"}
+{"row_id": 99, "col": "quantity_kg", "old_value": "89", "new_value": 89.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.096107+00:00"}
+{"row_id": 99, "col": "last_updated", "old_value": "05/01/2024", "new_value": "2024-01-05", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.096107+00:00"}
+{"row_id": 100, "col": "quantity_kg", "old_value": "96 KG", "new_value": 96.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.096107+00:00"}
+{"row_id": 100, "col": "sku", "old_value": "SKU006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.097106+00:00"}
+{"row_id": 100, "col": "last_updated", "old_value": "Jan 06 2024", "new_value": "2024-01-06", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.097106+00:00"}
+{"row_id": 101, "col": "quantity_kg", "old_value": "75", "new_value": 75.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.097106+00:00"}
+{"row_id": 101, "col": "sku", "old_value": "SKU007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.097106+00:00"}
+{"row_id": 101, "col": "last_updated", "old_value": "07/01/2024", "new_value": "2024-01-07", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 101, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 102, "col": "quantity_kg", "old_value": "106", "new_value": 106.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 102, "col": "sku", "old_value": "SKU008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 102, "col": "last_updated", "old_value": "08/01/2024", "new_value": "2024-01-08", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 102, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 103, "col": "quantity_kg", "old_value": "22", "new_value": 22.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.098106+00:00"}
+{"row_id": 103, "col": "sku", "old_value": "SKU009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.099610+00:00"}
+{"row_id": 103, "col": "last_updated", "old_value": "Jan 09 2024", "new_value": "2024-01-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.099610+00:00"}
+{"row_id": 104, "col": "quantity_kg", "old_value": "21kilogram", "new_value": 21.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.099610+00:00"}
+{"row_id": 104, "col": "last_updated", "old_value": "Jan 09 2024", "new_value": "2024-01-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.100616+00:00"}
+{"row_id": 105, "col": "quantity_kg", "old_value": "43kg", "new_value": 43.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.100616+00:00"}
+{"row_id": 105, "col": "sku", "old_value": "SKU010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.100616+00:00"}
+{"row_id": 105, "col": "last_updated", "old_value": "Jan 10 2024", "new_value": "2024-01-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.101621+00:00"}
+{"row_id": 105, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.101621+00:00"}
+{"row_id": 106, "col": "quantity_kg", "old_value": "42kilogram", "new_value": 42.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.101621+00:00"}
+{"row_id": 106, "col": "last_updated", "old_value": "Jan 10 2024", "new_value": "2024-01-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.102621+00:00"}
+{"row_id": 106, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.102621+00:00"}
+{"row_id": 107, "col": "quantity_kg", "old_value": "81kg", "new_value": 81.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.102621+00:00"}
+{"row_id": 107, "col": "sku", "old_value": "sku 001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.102621+00:00"}
+{"row_id": 107, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.103622+00:00"}
+{"row_id": 107, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.103622+00:00"}
+{"row_id": 108, "col": "quantity_kg", "old_value": "38kg", "new_value": 38.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.103622+00:00"}
+{"row_id": 108, "col": "sku", "old_value": "sku 002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.103622+00:00"}
+{"row_id": 108, "col": "last_updated", "old_value": "Jan 12 2024", "new_value": "2024-01-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.104621+00:00"}
+{"row_id": 108, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.105126+00:00"}
+{"row_id": 109, "col": "quantity_kg", "old_value": "72kg", "new_value": 72.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.105126+00:00"}
+{"row_id": 109, "col": "sku", "old_value": "sku 003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.105126+00:00"}
+{"row_id": 109, "col": "last_updated", "old_value": "13/01/2024", "new_value": "2024-01-13", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.106132+00:00"}
+{"row_id": 110, "col": "quantity_kg", "old_value": "65", "new_value": 65.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.106132+00:00"}
+{"row_id": 110, "col": "sku", "old_value": "sku 004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.107132+00:00"}
+{"row_id": 110, "col": "last_updated", "old_value": "14/01/2024", "new_value": "2024-01-14", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.107132+00:00"}
+{"row_id": 110, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.107132+00:00"}
+{"row_id": 110, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.108131+00:00"}
+{"row_id": 111, "col": "quantity_kg", "old_value": "20 KG", "new_value": 20.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.108131+00:00"}
+{"row_id": 111, "col": "sku", "old_value": "sku 005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.108131+00:00"}
+{"row_id": 111, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.108131+00:00"}
+{"row_id": 112, "col": "quantity_kg", "old_value": "102kilogram", "new_value": 102.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.108131+00:00"}
+{"row_id": 112, "col": "sku", "old_value": "sku 006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.109637+00:00"}
+{"row_id": 112, "col": "last_updated", "old_value": "Jan 16 2024", "new_value": "2024-01-16", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.109637+00:00"}
+{"row_id": 112, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.110644+00:00"}
+{"row_id": 113, "col": "quantity_kg", "old_value": "63", "new_value": 63.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.110644+00:00"}
+{"row_id": 113, "col": "sku", "old_value": "sku 007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.110644+00:00"}
+{"row_id": 113, "col": "last_updated", "old_value": "17/01/2024", "new_value": "2024-01-17", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.110644+00:00"}
+{"row_id": 113, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.111643+00:00"}
+{"row_id": 114, "col": "quantity_kg", "old_value": "32", "new_value": 32.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.111643+00:00"}
+{"row_id": 114, "col": "sku", "old_value": "sku 008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.111643+00:00"}
+{"row_id": 114, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.111643+00:00"}
+{"row_id": 115, "col": "quantity_kg", "old_value": "118 KG", "new_value": 118.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.112643+00:00"}
+{"row_id": 115, "col": "sku", "old_value": "sku 009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.112643+00:00"}
+{"row_id": 115, "col": "last_updated", "old_value": "19/01/2024", "new_value": "2024-01-19", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.112643+00:00"}
+{"row_id": 115, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.112643+00:00"}
+{"row_id": 116, "col": "quantity_kg", "old_value": "77", "new_value": 77.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.112643+00:00"}
+{"row_id": 116, "col": "sku", "old_value": "sku 010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.113645+00:00"}
+{"row_id": 116, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.113645+00:00"}
+{"row_id": 117, "col": "quantity_kg", "old_value": "54", "new_value": 54.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.113645+00:00"}
+{"row_id": 117, "col": "sku", "old_value": "sku-001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.113645+00:00"}
+{"row_id": 117, "col": "last_updated", "old_value": "21/01/2024", "new_value": "2024-01-21", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.113645+00:00"}
+{"row_id": 117, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.113645+00:00"}
+{"row_id": 117, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.115152+00:00"}
+{"row_id": 118, "col": "quantity_kg", "old_value": "85", "new_value": 85.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.115152+00:00"}
+{"row_id": 118, "col": "sku", "old_value": "sku-002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.115152+00:00"}
+{"row_id": 118, "col": "last_updated", "old_value": "22/01/2024", "new_value": "2024-01-22", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.115152+00:00"}
+{"row_id": 118, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.116159+00:00"}
+{"row_id": 119, "col": "quantity_kg", "old_value": "84kg", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.116159+00:00"}
+{"row_id": 119, "col": "sku", "old_value": "sku-OO2", "new_value": "SKU-OO2", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.116159+00:00"}
+{"row_id": 119, "col": "last_updated", "old_value": "22/01/2024", "new_value": "2024-01-22", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.116159+00:00"}
+{"row_id": 119, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.116159+00:00"}
+{"row_id": 120, "col": "quantity_kg", "old_value": "32 KG", "new_value": 32.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.117159+00:00"}
+{"row_id": 120, "col": "sku", "old_value": "sku-003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.117159+00:00"}
+{"row_id": 120, "col": "last_updated", "old_value": "Jan 23 2024", "new_value": "2024-01-23", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.117159+00:00"}
+{"row_id": 120, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.117159+00:00"}
+{"row_id": 121, "col": "quantity_kg", "old_value": "99 KG", "new_value": 99.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 121, "col": "sku", "old_value": "sku-004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 121, "col": "last_updated", "old_value": "Jan 24 2024", "new_value": "2024-01-24", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 121, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 121, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 122, "col": "quantity_kg", "old_value": "98kg", "new_value": 98.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 122, "col": "sku", "old_value": "sku-OO4", "new_value": "SKU-OO4", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.118159+00:00"}
+{"row_id": 122, "col": "last_updated", "old_value": "Jan 24 2024", "new_value": "2024-01-24", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.119666+00:00"}
+{"row_id": 122, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.119666+00:00"}
+{"row_id": 122, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.119666+00:00"}
+{"row_id": 123, "col": "quantity_kg", "old_value": "39", "new_value": 39.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.119666+00:00"}
+{"row_id": 123, "col": "sku", "old_value": "sku-005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.120673+00:00"}
+{"row_id": 123, "col": "last_updated", "old_value": "Jan 25 2024", "new_value": "2024-01-25", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.120673+00:00"}
+{"row_id": 123, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.120673+00:00"}
+{"row_id": 124, "col": "quantity_kg", "old_value": "80", "new_value": 80.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.120673+00:00"}
+{"row_id": 124, "col": "sku", "old_value": "sku-006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.120673+00:00"}
+{"row_id": 124, "col": "last_updated", "old_value": "Jan 26 2024", "new_value": "2024-01-26", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.121679+00:00"}
+{"row_id": 124, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.121679+00:00"}
+{"row_id": 124, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.121679+00:00"}
+{"row_id": 125, "col": "quantity_kg", "old_value": "34", "new_value": 34.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.121679+00:00"}
+{"row_id": 125, "col": "sku", "old_value": "sku-007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.122680+00:00"}
+{"row_id": 125, "col": "last_updated", "old_value": "27/01/2024", "new_value": "2024-01-27", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.122680+00:00"}
+{"row_id": 125, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.122680+00:00"}
+{"row_id": 126, "col": "quantity_kg", "old_value": "46kilogram", "new_value": 46.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.122680+00:00"}
+{"row_id": 126, "col": "sku", "old_value": "sku-008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.123680+00:00"}
+{"row_id": 126, "col": "last_updated", "old_value": "28/01/2024", "new_value": "2024-01-28", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.123680+00:00"}
+{"row_id": 126, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.123680+00:00"}
+{"row_id": 127, "col": "quantity_kg", "old_value": "111kilogram", "new_value": 111.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.123680+00:00"}
+{"row_id": 127, "col": "sku", "old_value": "sku-009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.124680+00:00"}
+{"row_id": 127, "col": "last_updated", "old_value": "Jan 29 2024", "new_value": "2024-01-29", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.124680+00:00"}
+{"row_id": 127, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.124680+00:00"}
+{"row_id": 127, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.124680+00:00"}
+{"row_id": 128, "col": "quantity_kg", "old_value": "108kg", "new_value": 108.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.125679+00:00"}
+{"row_id": 128, "col": "sku", "old_value": "sku-010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.125679+00:00"}
+{"row_id": 128, "col": "last_updated", "old_value": "Jan 30 2024", "new_value": "2024-01-30", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.126186+00:00"}
+{"row_id": 128, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.126186+00:00"}
+{"row_id": 128, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.126186+00:00"}
+{"row_id": 129, "col": "quantity_kg", "old_value": "31 KG", "new_value": 31.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.126186+00:00"}
+{"row_id": 129, "col": "last_updated", "old_value": "Jan 31 2024", "new_value": "2024-01-31", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.127193+00:00"}
+{"row_id": 129, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.127193+00:00"}
+{"row_id": 130, "col": "quantity_kg", "old_value": "100kg", "new_value": 100.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.127193+00:00"}
+{"row_id": 130, "col": "last_updated", "old_value": "Feb 01 2024", "new_value": "2024-02-01", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.127193+00:00"}
+{"row_id": 130, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.127193+00:00"}
+{"row_id": 131, "col": "quantity_kg", "old_value": "6kilogram", "new_value": 6.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 131, "col": "last_updated", "old_value": "02/02/2024", "new_value": "2024-02-02", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 131, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 132, "col": "quantity_kg", "old_value": "102kilogram", "new_value": 102.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 132, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 133, "col": "quantity_kg", "old_value": "39", "new_value": 39.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 133, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.128192+00:00"}
+{"row_id": 133, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.129698+00:00"}
+{"row_id": 134, "col": "quantity_kg", "old_value": "94kilogram", "new_value": 94.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.129698+00:00"}
+{"row_id": 134, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.129698+00:00"}
+{"row_id": 134, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.129698+00:00"}
+{"row_id": 135, "col": "quantity_kg", "old_value": "17kilogram", "new_value": 17.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.129698+00:00"}
+{"row_id": 135, "col": "last_updated", "old_value": "Feb 06 2024", "new_value": "2024-02-06", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.130705+00:00"}
+{"row_id": 135, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.130705+00:00"}
+{"row_id": 136, "col": "quantity_kg", "old_value": "15kilogram", "new_value": 15.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.130705+00:00"}
+{"row_id": 136, "col": "last_updated", "old_value": "Feb 07 2024", "new_value": "2024-02-07", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.130705+00:00"}
+{"row_id": 136, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.131712+00:00"}
+{"row_id": 136, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.131712+00:00"}
+{"row_id": 137, "col": "quantity_kg", "old_value": "14", "new_value": 14.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.131712+00:00"}
+{"row_id": 137, "col": "last_updated", "old_value": "Feb 07 2024", "new_value": "2024-02-07", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.132711+00:00"}
+{"row_id": 137, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.132711+00:00"}
+{"row_id": 137, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.132711+00:00"}
+{"row_id": 138, "col": "quantity_kg", "old_value": "118 KG", "new_value": 118.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.132711+00:00"}
+{"row_id": 138, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.133711+00:00"}
+{"row_id": 139, "col": "quantity_kg", "old_value": "16", "new_value": 16.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.133711+00:00"}
+{"row_id": 139, "col": "last_updated", "old_value": "09/02/2024", "new_value": "2024-02-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.133711+00:00"}
+{"row_id": 139, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.133711+00:00"}
+{"row_id": 140, "col": "quantity_kg", "old_value": "91 KG", "new_value": 91.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.133711+00:00"}
+{"row_id": 140, "col": "sku", "old_value": "SKU001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.134710+00:00"}
+{"row_id": 140, "col": "last_updated", "old_value": "10/02/2024", "new_value": "2024-02-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.134710+00:00"}
+{"row_id": 141, "col": "quantity_kg", "old_value": "37", "new_value": 37.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.134710+00:00"}
+{"row_id": 141, "col": "sku", "old_value": "SKU002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.134710+00:00"}
+{"row_id": 141, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.135710+00:00"}
+{"row_id": 142, "col": "quantity_kg", "old_value": "49kg", "new_value": 49.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.135710+00:00"}
+{"row_id": 142, "col": "sku", "old_value": "SKU003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.135710+00:00"}
+{"row_id": 142, "col": "last_updated", "old_value": "12/02/2024", "new_value": "2024-02-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.136710+00:00"}
+{"row_id": 142, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.136710+00:00"}
+{"row_id": 143, "col": "quantity_kg", "old_value": "110kg", "new_value": 110.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.136710+00:00"}
+{"row_id": 143, "col": "sku", "old_value": "SKU004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.136710+00:00"}
+{"row_id": 143, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.137710+00:00"}
+{"row_id": 143, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.137710+00:00"}
+{"row_id": 144, "col": "quantity_kg", "old_value": "102 KG", "new_value": 102.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.137710+00:00"}
+{"row_id": 144, "col": "sku", "old_value": "SKU005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.137710+00:00"}
+{"row_id": 144, "col": "last_updated", "old_value": "Feb 14 2024", "new_value": "2024-02-14", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.138711+00:00"}
+{"row_id": 144, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.138711+00:00"}
+{"row_id": 145, "col": "quantity_kg", "old_value": "20 KG", "new_value": 20.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.138711+00:00"}
+{"row_id": 145, "col": "sku", "old_value": "SKU006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.138711+00:00"}
+{"row_id": 145, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.138711+00:00"}
+{"row_id": 145, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.139710+00:00"}
+{"row_id": 146, "col": "quantity_kg", "old_value": "112 KG", "new_value": 112.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.139710+00:00"}
+{"row_id": 146, "col": "sku", "old_value": "SKU007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.139710+00:00"}
+{"row_id": 146, "col": "last_updated", "old_value": "Feb 16 2024", "new_value": "2024-02-16", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.139710+00:00"}
+{"row_id": 146, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.139710+00:00"}
+{"row_id": 146, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.141369+00:00"}
+{"row_id": 147, "col": "quantity_kg", "old_value": "8kg", "new_value": 8.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.141369+00:00"}
+{"row_id": 147, "col": "sku", "old_value": "SKU008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.141369+00:00"}
+{"row_id": 147, "col": "last_updated", "old_value": "17/02/2024", "new_value": "2024-02-17", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.142376+00:00"}
+{"row_id": 147, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.142376+00:00"}
+{"row_id": 148, "col": "quantity_kg", "old_value": "15kg", "new_value": 15.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.142376+00:00"}
+{"row_id": 148, "col": "sku", "old_value": "SKU009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.143376+00:00"}
+{"row_id": 148, "col": "last_updated", "old_value": "Feb 18 2024", "new_value": "2024-02-18", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.143376+00:00"}
+{"row_id": 148, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.143376+00:00"}
+{"row_id": 149, "col": "quantity_kg", "old_value": "5", "new_value": 5.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.143376+00:00"}
+{"row_id": 149, "col": "sku", "old_value": "SKU010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.144375+00:00"}
+{"row_id": 149, "col": "last_updated", "old_value": "Feb 19 2024", "new_value": "2024-02-19", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.144375+00:00"}
+{"row_id": 150, "col": "quantity_kg", "old_value": "58 KG", "new_value": 58.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.144375+00:00"}
+{"row_id": 150, "col": "sku", "old_value": "sku 001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.144375+00:00"}
+{"row_id": 150, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.144375+00:00"}
+{"row_id": 151, "col": "quantity_kg", "old_value": "76kilogram", "new_value": 76.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.145376+00:00"}
+{"row_id": 151, "col": "sku", "old_value": "sku 002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.145376+00:00"}
+{"row_id": 151, "col": "last_updated", "old_value": "21/02/2024", "new_value": "2024-02-21", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.145376+00:00"}
+{"row_id": 151, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.145376+00:00"}
+{"row_id": 152, "col": "quantity_kg", "old_value": "16 KG", "new_value": 16.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.146376+00:00"}
+{"row_id": 152, "col": "sku", "old_value": "sku 003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.146376+00:00"}
+{"row_id": 152, "col": "last_updated", "old_value": "22/02/2024", "new_value": "2024-02-22", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.146376+00:00"}
+{"row_id": 152, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.146376+00:00"}
+{"row_id": 152, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.146376+00:00"}
+{"row_id": 153, "col": "quantity_kg", "old_value": "107kilogram", "new_value": 107.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.147376+00:00"}
+{"row_id": 153, "col": "sku", "old_value": "sku 004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.147376+00:00"}
+{"row_id": 153, "col": "last_updated", "old_value": "23/02/2024", "new_value": "2024-02-23", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.147376+00:00"}
+{"row_id": 153, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.147376+00:00"}
+{"row_id": 154, "col": "quantity_kg", "old_value": "21kg", "new_value": 21.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.148376+00:00"}
+{"row_id": 154, "col": "sku", "old_value": "sku 005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.148376+00:00"}
+{"row_id": 154, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.148376+00:00"}
+{"row_id": 154, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.148376+00:00"}
+{"row_id": 155, "col": "quantity_kg", "old_value": "49kilogram", "new_value": 49.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.148376+00:00"}
+{"row_id": 155, "col": "sku", "old_value": "sku 006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.149376+00:00"}
+{"row_id": 155, "col": "last_updated", "old_value": "Feb 25 2024", "new_value": "2024-02-25", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.149376+00:00"}
+{"row_id": 155, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.149881+00:00"}
+{"row_id": 156, "col": "quantity_kg", "old_value": "87kg", "new_value": 87.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.149881+00:00"}
+{"row_id": 156, "col": "sku", "old_value": "sku 007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.149881+00:00"}
+{"row_id": 156, "col": "last_updated", "old_value": "26/02/2024", "new_value": "2024-02-26", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.149881+00:00"}
+{"row_id": 156, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.150887+00:00"}
+{"row_id": 156, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.150887+00:00"}
+{"row_id": 157, "col": "quantity_kg", "old_value": "66kg", "new_value": 66.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.150887+00:00"}
+{"row_id": 157, "col": "sku", "old_value": "sku 008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.150887+00:00"}
+{"row_id": 157, "col": "last_updated", "old_value": "27/02/2024", "new_value": "2024-02-27", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.151887+00:00"}
+{"row_id": 157, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.151887+00:00"}
+{"row_id": 158, "col": "quantity_kg", "old_value": "75kg", "new_value": 75.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.152392+00:00"}
+{"row_id": 158, "col": "sku", "old_value": "sku 009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.152392+00:00"}
+{"row_id": 158, "col": "last_updated", "old_value": "Feb 28 2024", "new_value": "2024-02-28", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.152392+00:00"}
+{"row_id": 158, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.152392+00:00"}
+{"row_id": 159, "col": "quantity_kg", "old_value": "91kg", "new_value": 91.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.152392+00:00"}
+{"row_id": 159, "col": "sku", "old_value": "sku 010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.153398+00:00"}
+{"row_id": 159, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.153398+00:00"}
+{"row_id": 159, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.153398+00:00"}
+{"row_id": 160, "col": "quantity_kg", "old_value": "10kg", "new_value": 10.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.153398+00:00"}
+{"row_id": 160, "col": "sku", "old_value": "sku-001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.154398+00:00"}
+{"row_id": 160, "col": "last_updated", "old_value": "Mar 01 2024", "new_value": "2024-03-01", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.156397+00:00"}
+{"row_id": 160, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.156397+00:00"}
+{"row_id": 161, "col": "quantity_kg", "old_value": "45kg", "new_value": 45.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.157398+00:00"}
+{"row_id": 161, "col": "sku", "old_value": "sku-002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.157398+00:00"}
+{"row_id": 161, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.157398+00:00"}
+{"row_id": 162, "col": "quantity_kg", "old_value": "8", "new_value": 8.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.157398+00:00"}
+{"row_id": 162, "col": "sku", "old_value": "sku-003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.157398+00:00"}
+{"row_id": 162, "col": "last_updated", "old_value": "03/03/2024", "new_value": "2024-03-03", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.158397+00:00"}
+{"row_id": 162, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.158397+00:00"}
+{"row_id": 162, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.158397+00:00"}
+{"row_id": 163, "col": "quantity_kg", "old_value": "98kilogram", "new_value": 98.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.158397+00:00"}
+{"row_id": 163, "col": "sku", "old_value": "sku-004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159397+00:00"}
+{"row_id": 163, "col": "last_updated", "old_value": "Mar 04 2024", "new_value": "2024-03-04", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159397+00:00"}
+{"row_id": 163, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159900+00:00"}
+{"row_id": 163, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159900+00:00"}
+{"row_id": 164, "col": "quantity_kg", "old_value": "7kg", "new_value": 7.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159900+00:00"}
+{"row_id": 164, "col": "sku", "old_value": "sku-005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159900+00:00"}
+{"row_id": 164, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.159900+00:00"}
+{"row_id": 165, "col": "quantity_kg", "old_value": "99", "new_value": 99.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 165, "col": "sku", "old_value": "sku-006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 165, "col": "last_updated", "old_value": "Mar 06 2024", "new_value": "2024-03-06", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 165, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 166, "col": "quantity_kg", "old_value": "70kilogram", "new_value": 70.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 166, "col": "sku", "old_value": "sku-007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 166, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.160905+00:00"}
+{"row_id": 166, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.162410+00:00"}
+{"row_id": 167, "col": "quantity_kg", "old_value": "69kg", "new_value": 69.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.162410+00:00"}
+{"row_id": 167, "col": "sku", "old_value": "sku-OO7", "new_value": "SKU-OO7", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.162410+00:00"}
+{"row_id": 167, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.162410+00:00"}
+{"row_id": 167, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.163416+00:00"}
+{"row_id": 168, "col": "quantity_kg", "old_value": "60", "new_value": 60.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.163416+00:00"}
+{"row_id": 168, "col": "sku", "old_value": "sku-008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.163416+00:00"}
+{"row_id": 168, "col": "last_updated", "old_value": "Mar 08 2024", "new_value": "2024-03-08", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.163416+00:00"}
+{"row_id": 168, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.164461+00:00"}
+{"row_id": 169, "col": "quantity_kg", "old_value": "4", "new_value": 4.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.164461+00:00"}
+{"row_id": 169, "col": "sku", "old_value": "sku-009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.164461+00:00"}
+{"row_id": 169, "col": "last_updated", "old_value": "Mar 09 2024", "new_value": "2024-03-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.165415+00:00"}
+{"row_id": 169, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.165415+00:00"}
+{"row_id": 170, "col": "quantity_kg", "old_value": "15kg", "new_value": 15.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.165415+00:00"}
+{"row_id": 170, "col": "sku", "old_value": "sku-010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.165415+00:00"}
+{"row_id": 170, "col": "last_updated", "old_value": "10/03/2024", "new_value": "2024-03-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.165415+00:00"}
+{"row_id": 170, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.166413+00:00"}
+{"row_id": 171, "col": "quantity_kg", "old_value": "44kg", "new_value": 44.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.166413+00:00"}
+{"row_id": 171, "col": "last_updated", "old_value": "Mar 11 2024", "new_value": "2024-03-11", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.166413+00:00"}
+{"row_id": 171, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.166413+00:00"}
+{"row_id": 171, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.167415+00:00"}
+{"row_id": 172, "col": "quantity_kg", "old_value": "106 KG", "new_value": 106.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.167415+00:00"}
+{"row_id": 172, "col": "last_updated", "old_value": "12/03/2024", "new_value": "2024-03-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.167415+00:00"}
+{"row_id": 172, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.167415+00:00"}
+{"row_id": 172, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.168416+00:00"}
+{"row_id": 173, "col": "quantity_kg", "old_value": "99", "new_value": 99.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.168416+00:00"}
+{"row_id": 173, "col": "last_updated", "old_value": "13/03/2024", "new_value": "2024-03-13", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.168416+00:00"}
+{"row_id": 173, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.168416+00:00"}
+{"row_id": 173, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.169417+00:00"}
+{"row_id": 174, "col": "quantity_kg", "old_value": "74kilogram", "new_value": 74.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.169417+00:00"}
+{"row_id": 174, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.169924+00:00"}
+{"row_id": 174, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.169924+00:00"}
+{"row_id": 175, "col": "quantity_kg", "old_value": "82kilogram", "new_value": 82.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.169924+00:00"}
+{"row_id": 175, "col": "last_updated", "old_value": "Mar 15 2024", "new_value": "2024-03-15", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.170929+00:00"}
+{"row_id": 176, "col": "quantity_kg", "old_value": "6kg", "new_value": 6.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.170929+00:00"}
+{"row_id": 176, "col": "last_updated", "old_value": "Mar 16 2024", "new_value": "2024-03-16", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.170929+00:00"}
+{"row_id": 176, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.171927+00:00"}
+{"row_id": 177, "col": "quantity_kg", "old_value": "103 KG", "new_value": 103.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.171927+00:00"}
+{"row_id": 177, "col": "last_updated", "old_value": "17/03/2024", "new_value": "2024-03-17", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.171927+00:00"}
+{"row_id": 177, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.171927+00:00"}
+{"row_id": 177, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.171927+00:00"}
+{"row_id": 178, "col": "quantity_kg", "old_value": "9kilogram", "new_value": 9.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.172927+00:00"}
+{"row_id": 178, "col": "last_updated", "old_value": "Mar 18 2024", "new_value": "2024-03-18", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.172927+00:00"}
+{"row_id": 178, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.172927+00:00"}
+{"row_id": 179, "col": "quantity_kg", "old_value": "7 KG", "new_value": 7.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.172927+00:00"}
+{"row_id": 179, "col": "last_updated", "old_value": "19/03/2024", "new_value": "2024-03-19", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.173989+00:00"}
+{"row_id": 179, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.173989+00:00"}
+{"row_id": 180, "col": "quantity_kg", "old_value": "101kilogram", "new_value": 101.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.173989+00:00"}
+{"row_id": 180, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.174991+00:00"}
+{"row_id": 181, "col": "quantity_kg", "old_value": "51 KG", "new_value": 51.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.174991+00:00"}
+{"row_id": 181, "col": "sku", "old_value": "SKU001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.174991+00:00"}
+{"row_id": 181, "col": "last_updated", "old_value": "21/03/2024", "new_value": "2024-03-21", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.174991+00:00"}
+{"row_id": 182, "col": "quantity_kg", "old_value": "119", "new_value": 119.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.175988+00:00"}
+{"row_id": 182, "col": "sku", "old_value": "SKU002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.175988+00:00"}
+{"row_id": 183, "col": "quantity_kg", "old_value": "84kg", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.175988+00:00"}
+{"row_id": 183, "col": "sku", "old_value": "SKU003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.175988+00:00"}
+{"row_id": 183, "col": "last_updated", "old_value": "Mar 23 2024", "new_value": "2024-03-23", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.176988+00:00"}
+{"row_id": 183, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.176988+00:00"}
+{"row_id": 183, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.176988+00:00"}
+{"row_id": 184, "col": "quantity_kg", "old_value": "48", "new_value": 48.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.177988+00:00"}
+{"row_id": 184, "col": "sku", "old_value": "SKU004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.177988+00:00"}
+{"row_id": 184, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.177988+00:00"}
+{"row_id": 185, "col": "quantity_kg", "old_value": "39kg", "new_value": 39.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.177988+00:00"}
+{"row_id": 185, "col": "sku", "old_value": "SKU005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.179490+00:00"}
+{"row_id": 185, "col": "last_updated", "old_value": "Mar 25 2024", "new_value": "2024-03-25", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.179490+00:00"}
+{"row_id": 185, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.179490+00:00"}
+{"row_id": 185, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.180493+00:00"}
+{"row_id": 186, "col": "quantity_kg", "old_value": "50 KG", "new_value": 50.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.180493+00:00"}
+{"row_id": 186, "col": "sku", "old_value": "SKU006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.180493+00:00"}
+{"row_id": 186, "col": "last_updated", "old_value": "Mar 26 2024", "new_value": "2024-03-26", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.181495+00:00"}
+{"row_id": 186, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.181495+00:00"}
+{"row_id": 187, "col": "quantity_kg", "old_value": "88kilogram", "new_value": 88.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.181495+00:00"}
+{"row_id": 187, "col": "sku", "old_value": "SKU007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.181495+00:00"}
+{"row_id": 187, "col": "last_updated", "old_value": "Mar 27 2024", "new_value": "2024-03-27", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.182998+00:00"}
+{"row_id": 187, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.182998+00:00"}
+{"row_id": 187, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.182998+00:00"}
+{"row_id": 188, "col": "quantity_kg", "old_value": "41 KG", "new_value": 41.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.184002+00:00"}
+{"row_id": 188, "col": "sku", "old_value": "SKU008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.184002+00:00"}
+{"row_id": 188, "col": "last_updated", "old_value": "28/03/2024", "new_value": "2024-03-28", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.184002+00:00"}
+{"row_id": 188, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.185002+00:00"}
+{"row_id": 188, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.185002+00:00"}
+{"row_id": 189, "col": "quantity_kg", "old_value": "101 KG", "new_value": 101.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.186001+00:00"}
+{"row_id": 189, "col": "sku", "old_value": "SKU009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.186001+00:00"}
+{"row_id": 189, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.186001+00:00"}
+{"row_id": 190, "col": "quantity_kg", "old_value": "100", "new_value": 100.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.187003+00:00"}
+{"row_id": 190, "col": "location", "old_value": "Warehouse A", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.187003+00:00"}
+{"row_id": 191, "col": "quantity_kg", "old_value": "113kg", "new_value": 113.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.187003+00:00"}
+{"row_id": 191, "col": "sku", "old_value": "SKU010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.187003+00:00"}
+{"row_id": 191, "col": "last_updated", "old_value": "30/03/2024", "new_value": "2024-03-30", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 192, "col": "quantity_kg", "old_value": "117 KG", "new_value": 117.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 192, "col": "sku", "old_value": "sku 001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 192, "col": "last_updated", "old_value": "01/01/2024", "new_value": "2024-01-01", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 192, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 192, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 193, "col": "quantity_kg", "old_value": "52kg", "new_value": 52.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.188003+00:00"}
+{"row_id": 193, "col": "sku", "old_value": "sku 002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.189507+00:00"}
+{"row_id": 193, "col": "last_updated", "old_value": "02/01/2024", "new_value": "2024-01-02", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.189507+00:00"}
+{"row_id": 193, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.189507+00:00"}
+{"row_id": 194, "col": "quantity_kg", "old_value": "14 KG", "new_value": 14.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.189507+00:00"}
+{"row_id": 194, "col": "sku", "old_value": "sku 003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.190511+00:00"}
+{"row_id": 194, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.190511+00:00"}
+{"row_id": 195, "col": "quantity_kg", "old_value": "62", "new_value": 62.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.190511+00:00"}
+{"row_id": 195, "col": "sku", "old_value": "sku 004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.190511+00:00"}
+{"row_id": 195, "col": "last_updated", "old_value": "04/01/2024", "new_value": "2024-01-04", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.191511+00:00"}
+{"row_id": 195, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.191511+00:00"}
+{"row_id": 196, "col": "quantity_kg", "old_value": "61 KG", "new_value": 61.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.191511+00:00"}
+{"row_id": 196, "col": "sku", "old_value": "sku OO4", "new_value": "SKUOO4", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.191511+00:00"}
+{"row_id": 196, "col": "last_updated", "old_value": "04/01/2024", "new_value": "2024-01-04", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.191511+00:00"}
+{"row_id": 196, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.192512+00:00"}
+{"row_id": 197, "col": "quantity_kg", "old_value": "108", "new_value": 108.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.192512+00:00"}
+{"row_id": 197, "col": "sku", "old_value": "sku 005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.192512+00:00"}
+{"row_id": 197, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.192512+00:00"}
+{"row_id": 198, "col": "quantity_kg", "old_value": "8", "new_value": 8.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.193580+00:00"}
+{"row_id": 198, "col": "sku", "old_value": "sku 006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.193580+00:00"}
+{"row_id": 199, "col": "quantity_kg", "old_value": "4 KG", "new_value": 4.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.194584+00:00"}
+{"row_id": 199, "col": "sku", "old_value": "sku 007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.194584+00:00"}
+{"row_id": 199, "col": "last_updated", "old_value": "07/01/2024", "new_value": "2024-01-07", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.194584+00:00"}
+{"row_id": 199, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.195583+00:00"}
+{"row_id": 199, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.195583+00:00"}
+{"row_id": 200, "col": "quantity_kg", "old_value": "32kg", "new_value": 32.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.195583+00:00"}
+{"row_id": 200, "col": "sku", "old_value": "sku 008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.195583+00:00"}
+{"row_id": 200, "col": "last_updated", "old_value": "Jan 08 2024", "new_value": "2024-01-08", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.196583+00:00"}
+{"row_id": 200, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.196583+00:00"}
+{"row_id": 201, "col": "quantity_kg", "old_value": "71kg", "new_value": 71.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.196583+00:00"}
+{"row_id": 201, "col": "sku", "old_value": "sku 009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.196583+00:00"}
+{"row_id": 201, "col": "last_updated", "old_value": "09/01/2024", "new_value": "2024-01-09", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.196583+00:00"}
+{"row_id": 201, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.197583+00:00"}
+{"row_id": 202, "col": "quantity_kg", "old_value": "49kg", "new_value": 49.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.197583+00:00"}
+{"row_id": 202, "col": "sku", "old_value": "sku 010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.197583+00:00"}
+{"row_id": 202, "col": "last_updated", "old_value": "10/01/2024", "new_value": "2024-01-10", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.197583+00:00"}
+{"row_id": 202, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.198584+00:00"}
+{"row_id": 203, "col": "quantity_kg", "old_value": "15 KG", "new_value": 15.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.198584+00:00"}
+{"row_id": 203, "col": "sku", "old_value": "sku-001", "new_value": "SKU-001", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.198584+00:00"}
+{"row_id": 203, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.198584+00:00"}
+{"row_id": 203, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.198584+00:00"}
+{"row_id": 204, "col": "quantity_kg", "old_value": "84", "new_value": 84.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.199583+00:00"}
+{"row_id": 204, "col": "sku", "old_value": "sku-002", "new_value": "SKU-002", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.199583+00:00"}
+{"row_id": 204, "col": "last_updated", "old_value": "Jan 12 2024", "new_value": "2024-01-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.199583+00:00"}
+{"row_id": 204, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.199583+00:00"}
+{"row_id": 205, "col": "quantity_kg", "old_value": "83", "new_value": 83.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.200626+00:00"}
+{"row_id": 205, "col": "sku", "old_value": "sku-OO2", "new_value": "SKU-OO2", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.200626+00:00"}
+{"row_id": 205, "col": "last_updated", "old_value": "Jan 12 2024", "new_value": "2024-01-12", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.200626+00:00"}
+{"row_id": 205, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.200626+00:00"}
+{"row_id": 206, "col": "quantity_kg", "old_value": "6kg", "new_value": 6.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.201627+00:00"}
+{"row_id": 206, "col": "sku", "old_value": "sku-003", "new_value": "SKU-003", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.201627+00:00"}
+{"row_id": 206, "col": "last_updated", "old_value": "13/01/2024", "new_value": "2024-01-13", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.201627+00:00"}
+{"row_id": 206, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.202628+00:00"}
+{"row_id": 207, "col": "quantity_kg", "old_value": "106 KG", "new_value": 106.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.202628+00:00"}
+{"row_id": 207, "col": "sku", "old_value": "sku-004", "new_value": "SKU-004", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.202628+00:00"}
+{"row_id": 207, "col": "last_updated", "old_value": "14/01/2024", "new_value": "2024-01-14", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.203627+00:00"}
+{"row_id": 207, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.203627+00:00"}
+{"row_id": 208, "col": "quantity_kg", "old_value": "44", "new_value": 44.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.203627+00:00"}
+{"row_id": 208, "col": "sku", "old_value": "sku-005", "new_value": "SKU-005", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.203627+00:00"}
+{"row_id": 208, "col": "last_updated", "old_value": "Jan 15 2024", "new_value": "2024-01-15", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.204626+00:00"}
+{"row_id": 208, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.204626+00:00"}
+{"row_id": 208, "col": "reorder_level", "old_value": "", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.204626+00:00"}
+{"row_id": 209, "col": "quantity_kg", "old_value": "25kilogram", "new_value": 25.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.204626+00:00"}
+{"row_id": 209, "col": "sku", "old_value": "sku-006", "new_value": "SKU-006", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.204626+00:00"}
+{"row_id": 209, "col": "location", "old_value": "wh_b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.205763+00:00"}
+{"row_id": 210, "col": "quantity_kg", "old_value": "107kg", "new_value": 107.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.205763+00:00"}
+{"row_id": 210, "col": "sku", "old_value": "sku-007", "new_value": "SKU-007", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.205763+00:00"}
+{"row_id": 210, "col": "last_updated", "old_value": "17/01/2024", "new_value": "2024-01-17", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.205763+00:00"}
+{"row_id": 210, "col": "location", "old_value": "whse a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.205763+00:00"}
+{"row_id": 211, "col": "quantity_kg", "old_value": "93", "new_value": 93.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.206763+00:00"}
+{"row_id": 211, "col": "sku", "old_value": "sku-008", "new_value": "SKU-008", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.206763+00:00"}
+{"row_id": 211, "col": "location", "old_value": "whse b", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.206763+00:00"}
+{"row_id": 212, "col": "quantity_kg", "old_value": "37kg", "new_value": 37.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.206763+00:00"}
+{"row_id": 212, "col": "sku", "old_value": "sku-009", "new_value": "SKU-009", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 212, "col": "last_updated", "old_value": "Jan 19 2024", "new_value": "2024-01-19", "rule_id": "normalize_dates", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 212, "col": "location", "old_value": "wh_a", "new_value": "WH-A", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 212, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 213, "col": "quantity_kg", "old_value": "97", "new_value": 97.0, "rule_id": "normalize_units", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 213, "col": "sku", "old_value": "sku-010", "new_value": "SKU-010", "rule_id": "normalize_sku", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 213, "col": "location", "old_value": "Warehouse B", "new_value": "WH-B", "rule_id": "canonicalize_location", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.207762+00:00"}
+{"row_id": 213, "col": "reorder_level", "old_value": "N/A", "new_value": "0", "rule_id": "fill_nulls", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.209266+00:00"}
+{"row_id": 10, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.209266+00:00"}
+{"row_id": 11, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.209266+00:00"}
+{"row_id": 12, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.209266+00:00"}
+{"row_id": 13, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.209266+00:00"}
+{"row_id": 14, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.210270+00:00"}
+{"row_id": 15, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.210270+00:00"}
+{"row_id": 16, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.210270+00:00"}
+{"row_id": 17, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.210270+00:00"}
+{"row_id": 18, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.210270+00:00"}
+{"row_id": 19, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.211271+00:00"}
+{"row_id": 20, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.211271+00:00"}
+{"row_id": 21, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.211271+00:00"}
+{"row_id": 22, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.211271+00:00"}
+{"row_id": 23, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.211271+00:00"}
+{"row_id": 24, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.212270+00:00"}
+{"row_id": 25, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.212270+00:00"}
+{"row_id": 26, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.212270+00:00"}
+{"row_id": 27, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.212270+00:00"}
+{"row_id": 28, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.212270+00:00"}
+{"row_id": 29, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.213271+00:00"}
+{"row_id": 30, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.213271+00:00"}
+{"row_id": 31, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.213271+00:00"}
+{"row_id": 33, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.213271+00:00"}
+{"row_id": 34, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.213271+00:00"}
+{"row_id": 35, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.213271+00:00"}
+{"row_id": 36, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.214775+00:00"}
+{"row_id": 37, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.214775+00:00"}
+{"row_id": 38, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.214775+00:00"}
+{"row_id": 39, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.214775+00:00"}
+{"row_id": 40, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.214775+00:00"}
+{"row_id": 41, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.215779+00:00"}
+{"row_id": 43, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.215779+00:00"}
+{"row_id": 44, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.215779+00:00"}
+{"row_id": 45, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.215779+00:00"}
+{"row_id": 46, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.215779+00:00"}
+{"row_id": 47, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.216780+00:00"}
+{"row_id": 48, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.216780+00:00"}
+{"row_id": 49, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.216780+00:00"}
+{"row_id": 50, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.217781+00:00"}
+{"row_id": 52, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.217781+00:00"}
+{"row_id": 53, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.217781+00:00"}
+{"row_id": 54, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.217781+00:00"}
+{"row_id": 55, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.217781+00:00"}
+{"row_id": 56, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.217781+00:00"}
+{"row_id": 57, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.219286+00:00"}
+{"row_id": 58, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.219286+00:00"}
+{"row_id": 59, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.219815+00:00"}
+{"row_id": 60, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.219815+00:00"}
+{"row_id": 61, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.219815+00:00"}
+{"row_id": 62, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.220819+00:00"}
+{"row_id": 63, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.220819+00:00"}
+{"row_id": 64, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.220819+00:00"}
+{"row_id": 65, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.220819+00:00"}
+{"row_id": 66, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.221818+00:00"}
+{"row_id": 67, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.221818+00:00"}
+{"row_id": 68, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.221818+00:00"}
+{"row_id": 69, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.221818+00:00"}
+{"row_id": 70, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.221818+00:00"}
+{"row_id": 71, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.222819+00:00"}
+{"row_id": 72, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.222819+00:00"}
+{"row_id": 73, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.222819+00:00"}
+{"row_id": 74, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.222819+00:00"}
+{"row_id": 75, "col": "*", "old_value": "SKU-OO2|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.223818+00:00"}
+{"row_id": 76, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.223818+00:00"}
+{"row_id": 77, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.223818+00:00"}
+{"row_id": 78, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.223818+00:00"}
+{"row_id": 79, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.223818+00:00"}
+{"row_id": 80, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.224818+00:00"}
+{"row_id": 81, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.224818+00:00"}
+{"row_id": 82, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.224818+00:00"}
+{"row_id": 83, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.224818+00:00"}
+{"row_id": 84, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.224818+00:00"}
+{"row_id": 85, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.225861+00:00"}
+{"row_id": 86, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.225861+00:00"}
+{"row_id": 87, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.225861+00:00"}
+{"row_id": 88, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.225861+00:00"}
+{"row_id": 89, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.225861+00:00"}
+{"row_id": 90, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.226862+00:00"}
+{"row_id": 91, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.226862+00:00"}
+{"row_id": 92, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.226862+00:00"}
+{"row_id": 93, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.226862+00:00"}
+{"row_id": 94, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.226862+00:00"}
+{"row_id": 95, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 96, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 97, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 98, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 100, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 101, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 102, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 103, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.227861+00:00"}
+{"row_id": 105, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.229365+00:00"}
+{"row_id": 107, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.229365+00:00"}
+{"row_id": 108, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.229365+00:00"}
+{"row_id": 109, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.229365+00:00"}
+{"row_id": 110, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.230371+00:00"}
+{"row_id": 111, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.230371+00:00"}
+{"row_id": 112, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.230371+00:00"}
+{"row_id": 113, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.230371+00:00"}
+{"row_id": 114, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.230371+00:00"}
+{"row_id": 115, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.231370+00:00"}
+{"row_id": 116, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.231370+00:00"}
+{"row_id": 117, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.231370+00:00"}
+{"row_id": 118, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.231370+00:00"}
+{"row_id": 119, "col": "*", "old_value": "SKU-OO2|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.231370+00:00"}
+{"row_id": 120, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.232370+00:00"}
+{"row_id": 121, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.232370+00:00"}
+{"row_id": 123, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.232370+00:00"}
+{"row_id": 124, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.232370+00:00"}
+{"row_id": 125, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.233371+00:00"}
+{"row_id": 126, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.233371+00:00"}
+{"row_id": 127, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.233371+00:00"}
+{"row_id": 128, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.233371+00:00"}
+{"row_id": 129, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.233371+00:00"}
+{"row_id": 130, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.234875+00:00"}
+{"row_id": 131, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.234875+00:00"}
+{"row_id": 132, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.234875+00:00"}
+{"row_id": 133, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.234875+00:00"}
+{"row_id": 134, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.234875+00:00"}
+{"row_id": 135, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.235880+00:00"}
+{"row_id": 136, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.235880+00:00"}
+{"row_id": 138, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.235880+00:00"}
+{"row_id": 139, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.235880+00:00"}
+{"row_id": 140, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.235880+00:00"}
+{"row_id": 141, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.236879+00:00"}
+{"row_id": 142, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.236879+00:00"}
+{"row_id": 143, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.236879+00:00"}
+{"row_id": 144, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.236879+00:00"}
+{"row_id": 145, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 146, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 147, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 148, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 149, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 150, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 151, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.237879+00:00"}
+{"row_id": 152, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.239383+00:00"}
+{"row_id": 153, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.239383+00:00"}
+{"row_id": 154, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.239383+00:00"}
+{"row_id": 155, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.239383+00:00"}
+{"row_id": 156, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.239383+00:00"}
+{"row_id": 157, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.240387+00:00"}
+{"row_id": 158, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.240387+00:00"}
+{"row_id": 159, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.240387+00:00"}
+{"row_id": 160, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.240387+00:00"}
+{"row_id": 161, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.240387+00:00"}
+{"row_id": 162, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.241387+00:00"}
+{"row_id": 163, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.241387+00:00"}
+{"row_id": 164, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.241387+00:00"}
+{"row_id": 165, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.241387+00:00"}
+{"row_id": 166, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.241387+00:00"}
+{"row_id": 168, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.242387+00:00"}
+{"row_id": 169, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.242387+00:00"}
+{"row_id": 170, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.242387+00:00"}
+{"row_id": 171, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.242387+00:00"}
+{"row_id": 172, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.243386+00:00"}
+{"row_id": 173, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.243386+00:00"}
+{"row_id": 174, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.243386+00:00"}
+{"row_id": 175, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.243386+00:00"}
+{"row_id": 176, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.243386+00:00"}
+{"row_id": 177, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.244386+00:00"}
+{"row_id": 178, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.244386+00:00"}
+{"row_id": 179, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.244386+00:00"}
+{"row_id": 180, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.244386+00:00"}
+{"row_id": 181, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.244386+00:00"}
+{"row_id": 182, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.245387+00:00"}
+{"row_id": 183, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.245387+00:00"}
+{"row_id": 184, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.245387+00:00"}
+{"row_id": 185, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.245387+00:00"}
+{"row_id": 186, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.245387+00:00"}
+{"row_id": 187, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.246498+00:00"}
+{"row_id": 188, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.246498+00:00"}
+{"row_id": 189, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.246498+00:00"}
+{"row_id": 190, "col": "*", "old_value": "SKUOO9|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.246498+00:00"}
+{"row_id": 191, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.246498+00:00"}
+{"row_id": 192, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.247498+00:00"}
+{"row_id": 193, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.247498+00:00"}
+{"row_id": 194, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.247498+00:00"}
+{"row_id": 195, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.247498+00:00"}
+{"row_id": 197, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.248501+00:00"}
+{"row_id": 198, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.248501+00:00"}
+{"row_id": 199, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.249500+00:00"}
+{"row_id": 200, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.249500+00:00"}
+{"row_id": 201, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.249500+00:00"}
+{"row_id": 202, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.249500+00:00"}
+{"row_id": 203, "col": "*", "old_value": "SKU-001|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.250564+00:00"}
+{"row_id": 204, "col": "*", "old_value": "SKU-002|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.250564+00:00"}
+{"row_id": 205, "col": "*", "old_value": "SKU-OO2|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.250564+00:00"}
+{"row_id": 206, "col": "*", "old_value": "SKU-003|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.251569+00:00"}
+{"row_id": 207, "col": "*", "old_value": "SKU-004|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.251569+00:00"}
+{"row_id": 208, "col": "*", "old_value": "SKU-005|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.251569+00:00"}
+{"row_id": 209, "col": "*", "old_value": "SKU-006|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.251569+00:00"}
+{"row_id": 210, "col": "*", "old_value": "SKU-007|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.252568+00:00"}
+{"row_id": 211, "col": "*", "old_value": "SKU-008|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.252568+00:00"}
+{"row_id": 212, "col": "*", "old_value": "SKU-009|WH-A", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.252568+00:00"}
+{"row_id": 213, "col": "*", "old_value": "SKU-010|WH-B", "new_value": "DROPPED", "rule_id": "dedup_fuzzy", "approved_by": "demo_auto", "timestamp": "2026-06-15T17:10:54.252568+00:00"}

@@ -1,11 +1,10 @@
 """FastAPI application shell (DB bootstrap on lifespan)."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from netie.config import get_config
 from netie.db.lifespan import database_lifespan_factory
+from netie.packs.loader import load_pack, resolve_pack_dir
 
 
 def create_app() -> Any:
@@ -15,11 +14,26 @@ def create_app() -> Any:
         raise ImportError('Install API extras: pip install "netie[api]"') from exc
 
     cfg = get_config()
+    pack = load_pack(cfg.pack, resolve_pack_dir(cfg.pack_dir))
     app = FastAPI(
         title="Cortex Netie",
         version="0.2.0",
         lifespan=database_lifespan_factory(cfg.database_url),
     )
+    app.state.pack = pack
+
+    if pack.name == "dms":
+        try:
+            from fastapi.middleware.cors import CORSMiddleware
+
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        except ImportError:
+            pass
 
     from netie.api.search import register_search_routes
     from netie.api.dag_run import register_dag_run_routes
@@ -27,9 +41,14 @@ def create_app() -> Any:
     register_search_routes(app)
     register_dag_run_routes(app)
 
+    if pack.name == "dms":
+        from netie.api.dms_query import register_dms_routes
+
+        register_dms_routes(app)
+
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "pack": pack.name}
 
     @app.get("/health/db")
     async def health_db(request: Request) -> dict[str, bool]:

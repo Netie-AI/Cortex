@@ -12,6 +12,13 @@ class RuleViolation:
 
 
 def _rules_dir() -> Path:
+    from netie.config import get_config
+    from netie.packs.loader import load_pack, resolve_pack_dir
+
+    cfg = get_config()
+    pack = load_pack(cfg.pack, resolve_pack_dir(cfg.pack_dir))
+    if pack.rules_dir.is_dir():
+        return pack.rules_dir
     return Path(__file__).resolve().parent / "rules"
 
 

@@ -14,6 +14,9 @@ class NettieConfig(BaseModel):
     qdrant_url: str | None = Field(default=None)
     qdrant_collection_listings: str = Field(default="listings_dense_v1")
     embedder_model: str = Field(default="BAAI/bge-m3")
+    # Vertical pack (Cortex OS)
+    pack: str = Field(default="ruma", description="Active vertical pack: ruma | dms")
+    pack_dir: str = Field(default="packs", description="Root directory for vertical packs")
 
 _cached_config: NettieConfig | None = None
 
@@ -52,6 +55,12 @@ def load_config() -> NettieConfig:
         data["embedder_model"] = os.environ["NETIE_EMBEDDER_MODEL"]
     if os.environ.get("EMBEDDER_MODEL"):
         data["embedder_model"] = os.environ["EMBEDDER_MODEL"]
+    if os.environ.get("PACK"):
+        data["pack"] = os.environ["PACK"]
+    if os.environ.get("NETIE_PACK"):
+        data["pack"] = os.environ["NETIE_PACK"]
+    if os.environ.get("NETIE_PACK_DIR"):
+        data["pack_dir"] = os.environ["NETIE_PACK_DIR"]
         
     _cached_config = NettieConfig(**data)
     return _cached_config
@@ -60,7 +69,7 @@ def save_config(config: NettieConfig) -> None:
     path = get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        toml.dump(config.model_dump(exclude_none=True), f)
+        toml.dump(config.model_dump(exclude_none=True, mode="json"), f)
     
     global _cached_config
     _cached_config = config

@@ -5,6 +5,16 @@ from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
+def reset_config_cache():
+    """Prevent config.toml roundtrip tests from polluting pack path resolution."""
+    import netie.config
+
+    netie.config._cached_config = None
+    yield
+    netie.config._cached_config = None
+
+
+@pytest.fixture(autouse=True)
 def mock_sentence_transformer(monkeypatch):
     """
     Mocks sentence_transformers before any importer loads the real stack

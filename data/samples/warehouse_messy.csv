@@ -1,0 +1,215 @@
+sku,product_name,quantity_kg,last_updated,location,reorder_level,supplier_name,supplier_contact_email
+SKU-001,Steel Bolt M8,83 KG,2024-01-01,WH-A,,Acme corp.,contact0@supplier.example.com
+SKU-002,,71kg,2024-01-02,Warehouse B,10,Global parts ltd,contact1@supplier.example.com
+SKU-003,Pallet Wrap Roll,73,2024-01-03,wh_a,15,metro supply co,contact2@supplier.example.com
+SKU-004,Forklift Battery,113,04/01/2024,whse b,10,Acme Corp,contact3@supplier.example.com
+SKU-005,Safety Gloves L,99kilogram,05/01/2024,whse a,,Global Parts Ltd,contact4@supplier.example.com
+SKU-006,Conveyor Belt Patch,70kilogram,Jan 06 2024,whse b,10,metro supply co,contact5@supplier.example.com
+SKU-007,Shrink Wrap Film,10kg,2024-01-07,WH-A,10,ACME CORP,contact6@supplier.example.com
+SKU-008,Label Printer Ribbon,83 KG,Jan 08 2024,whse b,,Global parts ltd,contact7@supplier.example.com
+SKU-009,Dock Leveler Seal,84 KG,2024-01-09,wh_a,10,METRO SUPPLY,contact8@supplier.example.com
+SKU-010,LED Warehouse Light,120kilogram,2024-01-10,Warehouse B,N/A,Acme Corp,contact9@supplier.example.com
+SKU001,Steel Bolt M8,53kilogram,2024-01-11,wh_a,,GLOBAL PARTS LTD,contact10@supplier.example.com
+SKU002,Hydraulic Hose 2in,84kilogram,Jan 12 2024,wh_b,,metro supply co,contact11@supplier.example.com
+SKU003,Pallet Wrap Roll,30kg,2024-01-13,Warehouse A,15,Acme corp.,contact0@supplier.example.com
+SKU004,Forklift Battery,89,Jan 14 2024,whse b,25,Global parts ltd,contact1@supplier.example.com
+SKU005,Safety Gloves L,3kilogram,Jan 15 2024,whse a,N/A,Metro Supply,contact2@supplier.example.com
+SKU006,Conveyor Belt Patch,22kilogram,Jan 16 2024,Warehouse B,,Acme corp.,contact3@supplier.example.com
+SKU007,Shrink Wrap Film,113 KG,2024-01-17,whse a,N/A,Global Parts Ltd,contact4@supplier.example.com
+SKU008,Label Printer Ribbon,101,2024-01-18,WH-B,30,METRO SUPPLY,contact5@supplier.example.com
+SKU009,Dock Leveler Seal,108kg,2024-01-19,wh_a,,Acme Corp,contact6@supplier.example.com
+SKU010,LED Warehouse Light,70 KG,20/01/2024,wh_b,,Global Parts Ltd,contact7@supplier.example.com
+sku 001,Steel Bolt M8,98,Jan 21 2024,whse a,N/A,METRO SUPPLY,contact8@supplier.example.com
+sku 002,Hydraulic Hose 2in,59kg,Jan 22 2024,Warehouse B,10,Acme corp.,contact9@supplier.example.com
+sku 003,Pallet Wrap Roll,11kg,23/01/2024,WH-A,N/A,Global parts ltd,contact10@supplier.example.com
+sku 004,Forklift Battery,87,2024-01-24,wh_b,25,METRO SUPPLY,contact11@supplier.example.com
+sku 005,Safety Gloves L,14,Jan 25 2024,WH-A,N/A,Acme corp.,contact0@supplier.example.com
+sku 006,Conveyor Belt Patch,84kg,2024-01-26,Warehouse B,,Global Parts Ltd,contact1@supplier.example.com
+sku 007,Shrink Wrap Film,19kg,27/01/2024,WH-A,25,Metro Supply,contact2@supplier.example.com
+sku 008,Label Printer Ribbon,71 KG,2024-01-28,wh_b,,ACME CORP,contact3@supplier.example.com
+sku 009,Dock Leveler Seal,112kg,29/01/2024,whse a,25,GLOBAL PARTS LTD,contact4@supplier.example.com
+sku 010,LED Warehouse Light,91,2024-01-30,Warehouse B,N/A,METRO SUPPLY,contact5@supplier.example.com
+sku-001,Steel Bolt M8,9kilogram,2024-01-31,WH-A,30,Acme corp.,contact6@supplier.example.com
+sku-002,Hydraulic Hose 2in,119kg,2024-02-01,WH-B,,Global parts ltd,contact7@supplier.example.com
+sku-OO2,Hydraulic Hose 2in,118 KG,2024-02-01,WH-B,,Global parts ltd,contact7@supplier.example.com
+sku-003,Pallet Wrap Roll,53kg,Feb 02 2024,WH-A,10,METRO SUPPLY,contact8@supplier.example.com
+sku-004,Forklift Battery,74kilogram,2024-02-03,whse b,30,ACME CORP,contact9@supplier.example.com
+sku-005,Safety Gloves L,84kg,2024-02-04,wh_a,20,Global parts ltd,contact10@supplier.example.com
+sku-006,Conveyor Belt Patch,14 KG,05/02/2024,WH-B,10,Metro Supply,contact11@supplier.example.com
+sku-007,Shrink Wrap Film,22kg,Feb 06 2024,whse a,25,Acme corp.,contact0@supplier.example.com
+sku-008,Label Printer Ribbon,114 KG,07/02/2024,whse b,15,Global parts ltd,contact1@supplier.example.com
+sku-009,Dock Leveler Seal,45,08/02/2024,WH-A,15,Metro Supply,contact2@supplier.example.com
+sku-010,LED Warehouse Light,108 KG,Feb 09 2024,whse b,,Acme Corp,contact3@supplier.example.com
+SKU-001,,72kg,Feb 10 2024,Warehouse A,N/A,Global parts ltd,contact4@supplier.example.com
+SKU-OO1,,71kilogram,Feb 10 2024,Warehouse A,N/A,Global parts ltd,contact4@supplier.example.com
+SKU-002,Hydraulic Hose 2in,76kilogram,11/02/2024,WH-B,,METRO SUPPLY,contact5@supplier.example.com
+SKU-003,Pallet Wrap Roll,33,Feb 12 2024,Warehouse A,,Acme Corp,contact6@supplier.example.com
+SKU-004,Forklift Battery,104 KG,Feb 13 2024,whse b,,GLOBAL PARTS LTD,contact7@supplier.example.com
+SKU-005,Safety Gloves L,112kg,14/02/2024,WH-A,N/A,METRO SUPPLY,contact8@supplier.example.com
+SKU-006,Conveyor Belt Patch,106 KG,2024-02-15,WH-B,25,Acme corp.,contact9@supplier.example.com
+SKU-007,Shrink Wrap Film,44kilogram,16/02/2024,wh_a,20,Global parts ltd,contact10@supplier.example.com
+SKU-008,Label Printer Ribbon,70kilogram,2024-02-17,whse b,20,Metro Supply,contact11@supplier.example.com
+SKU-009,Dock Leveler Seal,57kg,18/02/2024,Warehouse A,20,ACME CORP,contact0@supplier.example.com
+SKU-OO9,Dock Leveler Seal,56,18/02/2024,Warehouse A,20,ACME CORP,contact0@supplier.example.com
+SKU-010,LED Warehouse Light,2 KG,19/02/2024,wh_b,30,Global Parts Ltd,contact1@supplier.example.com
+SKU001,Steel Bolt M8,119kg,Feb 20 2024,whse a,20,metro supply co,contact2@supplier.example.com
+SKU002,Hydraulic Hose 2in,54 KG,2024-02-21,wh_b,20,Acme corp.,contact3@supplier.example.com
+SKU003,Pallet Wrap Roll,88kilogram,22/02/2024,WH-A,N/A,GLOBAL PARTS LTD,contact4@supplier.example.com
+SKU004,Forklift Battery,57,23/02/2024,wh_b,,metro supply co,contact5@supplier.example.com
+SKU005,Safety Gloves L,62 KG,Feb 24 2024,WH-A,,ACME CORP,contact6@supplier.example.com
+SKU006,Conveyor Belt Patch,83 KG,Feb 25 2024,whse b,30,Global Parts Ltd,contact7@supplier.example.com
+SKU007,Shrink Wrap Film,20kg,26/02/2024,wh_a,,metro supply co,contact8@supplier.example.com
+SKU008,Label Printer Ribbon,93 KG,Feb 27 2024,WH-B,N/A,Acme Corp,contact9@supplier.example.com
+SKU009,Dock Leveler Seal,30,2024-02-28,Warehouse A,15,Global Parts Ltd,contact10@supplier.example.com
+SKU010,LED Warehouse Light,104kilogram,29/02/2024,wh_b,25,metro supply co,contact11@supplier.example.com
+sku 001,Steel Bolt M8,22 KG,Mar 01 2024,whse a,N/A,Acme corp.,contact0@supplier.example.com
+sku 002,Hydraulic Hose 2in,32 KG,02/03/2024,whse b,20,GLOBAL PARTS LTD,contact1@supplier.example.com
+sku 003,Pallet Wrap Roll,12 KG,Mar 03 2024,Warehouse A,15,Metro Supply,contact2@supplier.example.com
+sku 004,Forklift Battery,44,04/03/2024,WH-B,30,Acme corp.,contact3@supplier.example.com
+sku 005,Safety Gloves L,2,Mar 05 2024,Warehouse A,20,GLOBAL PARTS LTD,contact4@supplier.example.com
+sku 006,Conveyor Belt Patch,57,Mar 06 2024,Warehouse B,,METRO SUPPLY,contact5@supplier.example.com
+sku 007,Shrink Wrap Film,81kg,2024-03-07,wh_a,,Acme Corp,contact6@supplier.example.com
+sku 008,Label Printer Ribbon,25,08/03/2024,whse b,10,GLOBAL PARTS LTD,contact7@supplier.example.com
+sku 009,Dock Leveler Seal,108kg,Mar 09 2024,WH-A,25,METRO SUPPLY,contact8@supplier.example.com
+sku 010,,10kg,2024-03-10,Warehouse B,,Acme Corp,contact9@supplier.example.com
+sku-001,Steel Bolt M8,32 KG,11/03/2024,whse a,15,GLOBAL PARTS LTD,contact10@supplier.example.com
+sku-002,Hydraulic Hose 2in,79 KG,12/03/2024,WH-B,N/A,metro supply co,contact11@supplier.example.com
+sku-OO2,Hydraulic Hose 2in,78kilogram,12/03/2024,WH-B,N/A,metro supply co,contact11@supplier.example.com
+sku-003,Pallet Wrap Roll,75 KG,2024-03-13,Warehouse A,N/A,Acme Corp,contact0@supplier.example.com
+sku-004,Forklift Battery,40kg,14/03/2024,wh_b,,Global parts ltd,contact1@supplier.example.com
+sku-005,Safety Gloves L,66,2024-03-15,wh_a,N/A,METRO SUPPLY,contact2@supplier.example.com
+sku-006,Conveyor Belt Patch,108kilogram,Mar 16 2024,wh_b,25,ACME CORP,contact3@supplier.example.com
+sku-007,Shrink Wrap Film,95kg,17/03/2024,wh_a,30,Global Parts Ltd,contact4@supplier.example.com
+sku-008,Label Printer Ribbon,74,18/03/2024,Warehouse B,30,METRO SUPPLY,contact5@supplier.example.com
+sku-009,Dock Leveler Seal,104kilogram,Mar 19 2024,WH-A,20,Acme corp.,contact6@supplier.example.com
+sku-010,LED Warehouse Light,12 KG,Mar 20 2024,wh_b,15,Global parts ltd,contact7@supplier.example.com
+SKU-001,Steel Bolt M8,59,Mar 21 2024,Warehouse A,,METRO SUPPLY,contact8@supplier.example.com
+SKU-002,Hydraulic Hose 2in,49kilogram,22/03/2024,wh_b,25,ACME CORP,contact9@supplier.example.com
+SKU-003,Pallet Wrap Roll,31 KG,2024-03-23,Warehouse A,10,Global parts ltd,contact10@supplier.example.com
+SKU-004,Forklift Battery,94kilogram,2024-03-24,Warehouse B,30,METRO SUPPLY,contact11@supplier.example.com
+SKU-005,Safety Gloves L,24kilogram,2024-03-25,WH-A,,Acme corp.,contact0@supplier.example.com
+SKU-006,Conveyor Belt Patch,18kg,Mar 26 2024,whse b,N/A,GLOBAL PARTS LTD,contact1@supplier.example.com
+SKU-007,Shrink Wrap Film,45,2024-03-27,WH-A,15,METRO SUPPLY,contact2@supplier.example.com
+SKU-008,Label Printer Ribbon,75kilogram,2024-03-28,Warehouse B,N/A,Acme Corp,contact3@supplier.example.com
+SKU-009,Dock Leveler Seal,55,29/03/2024,wh_a,30,GLOBAL PARTS LTD,contact4@supplier.example.com
+SKU-010,LED Warehouse Light,56kg,2024-03-30,Warehouse B,20,METRO SUPPLY,contact5@supplier.example.com
+SKU001,Steel Bolt M8,22kg,01/01/2024,wh_a,15,Acme corp.,contact6@supplier.example.com
+SKU002,Hydraulic Hose 2in,39,2024-01-02,Warehouse B,10,GLOBAL PARTS LTD,contact7@supplier.example.com
+SKU003,Pallet Wrap Roll,82,2024-01-03,Warehouse A,30,metro supply co,contact8@supplier.example.com
+SKU004,Forklift Battery,36kilogram,Jan 04 2024,whse b,,ACME CORP,contact9@supplier.example.com
+SKU005,Safety Gloves L,90,05/01/2024,WH-A,20,Global parts ltd,contact10@supplier.example.com
+SKUOO5,Safety Gloves L,89,05/01/2024,WH-A,20,Global parts ltd,contact10@supplier.example.com
+SKU006,,96 KG,Jan 06 2024,WH-B,20,metro supply co,contact11@supplier.example.com
+SKU007,Shrink Wrap Film,75,07/01/2024,Warehouse A,10,Acme corp.,contact0@supplier.example.com
+SKU008,Label Printer Ribbon,106,08/01/2024,whse b,25,Global parts ltd,contact1@supplier.example.com
+SKU009,Dock Leveler Seal,22,Jan 09 2024,WH-A,20,METRO SUPPLY,contact2@supplier.example.com
+SKUOO9,Dock Leveler Seal,21kilogram,Jan 09 2024,WH-A,20,METRO SUPPLY,contact2@supplier.example.com
+SKU010,LED Warehouse Light,43kg,Jan 10 2024,wh_b,10,ACME CORP,contact3@supplier.example.com
+SKUO1O,LED Warehouse Light,42kilogram,Jan 10 2024,wh_b,10,ACME CORP,contact3@supplier.example.com
+sku 001,Steel Bolt M8,81kg,2024-01-11,whse a,,Global parts ltd,contact4@supplier.example.com
+sku 002,Hydraulic Hose 2in,38kg,Jan 12 2024,Warehouse B,25,metro supply co,contact5@supplier.example.com
+sku 003,Pallet Wrap Roll,72kg,13/01/2024,WH-A,10,Acme corp.,contact6@supplier.example.com
+sku 004,Forklift Battery,65,14/01/2024,wh_b,N/A,Global Parts Ltd,contact7@supplier.example.com
+sku 005,Safety Gloves L,20 KG,2024-01-15,whse a,25,METRO SUPPLY,contact8@supplier.example.com
+sku 006,,102kilogram,Jan 16 2024,wh_b,30,Acme Corp,contact9@supplier.example.com
+sku 007,Shrink Wrap Film,63,17/01/2024,whse a,20,Global Parts Ltd,contact10@supplier.example.com
+sku 008,Label Printer Ribbon,32,2024-01-18,whse b,30,metro supply co,contact11@supplier.example.com
+sku 009,Dock Leveler Seal,118 KG,19/01/2024,WH-A,,Acme Corp,contact0@supplier.example.com
+sku 010,LED Warehouse Light,77,2024-01-20,wh_b,20,Global Parts Ltd,contact1@supplier.example.com
+sku-001,Steel Bolt M8,54,21/01/2024,whse a,,metro supply co,contact2@supplier.example.com
+sku-002,Hydraulic Hose 2in,85,22/01/2024,wh_b,10,Acme corp.,contact3@supplier.example.com
+sku-OO2,Hydraulic Hose 2in,84kg,22/01/2024,wh_b,10,Acme corp.,contact3@supplier.example.com
+sku-003,Pallet Wrap Roll,32 KG,Jan 23 2024,WH-A,N/A,GLOBAL PARTS LTD,contact4@supplier.example.com
+sku-004,Forklift Battery,99 KG,Jan 24 2024,whse b,N/A,Metro Supply,contact5@supplier.example.com
+sku-OO4,Forklift Battery,98kg,Jan 24 2024,whse b,N/A,Metro Supply,contact5@supplier.example.com
+sku-005,Safety Gloves L,39,Jan 25 2024,Warehouse A,20,Acme Corp,contact6@supplier.example.com
+sku-006,Conveyor Belt Patch,80,Jan 26 2024,Warehouse B,,Global Parts Ltd,contact7@supplier.example.com
+sku-007,,34,27/01/2024,Warehouse A,25,Metro Supply,contact8@supplier.example.com
+sku-008,Label Printer Ribbon,46kilogram,28/01/2024,whse b,30,Acme Corp,contact9@supplier.example.com
+sku-009,Dock Leveler Seal,111kilogram,Jan 29 2024,whse a,,Global parts ltd,contact10@supplier.example.com
+sku-010,,108kg,Jan 30 2024,wh_b,N/A,METRO SUPPLY,contact11@supplier.example.com
+SKU-001,Steel Bolt M8,31 KG,Jan 31 2024,whse a,30,Acme corp.,contact0@supplier.example.com
+SKU-002,Hydraulic Hose 2in,100kg,Feb 01 2024,WH-B,N/A,GLOBAL PARTS LTD,contact1@supplier.example.com
+SKU-003,Pallet Wrap Roll,6kilogram,02/02/2024,wh_a,30,Metro Supply,contact2@supplier.example.com
+SKU-004,Forklift Battery,102kilogram,2024-02-03,whse b,30,ACME CORP,contact3@supplier.example.com
+SKU-005,Safety Gloves L,39,2024-02-04,Warehouse A,N/A,Global Parts Ltd,contact4@supplier.example.com
+SKU-006,Conveyor Belt Patch,94kilogram,2024-02-05,wh_b,N/A,Metro Supply,contact5@supplier.example.com
+SKU-007,Shrink Wrap Film,17kilogram,Feb 06 2024,wh_a,25,Acme corp.,contact6@supplier.example.com
+SKU-008,,15kilogram,Feb 07 2024,Warehouse B,N/A,Global parts ltd,contact7@supplier.example.com
+SKU-OO8,,14,Feb 07 2024,Warehouse B,N/A,Global parts ltd,contact7@supplier.example.com
+SKU-009,Dock Leveler Seal,118 KG,2024-02-08,WH-A,N/A,METRO SUPPLY,contact8@supplier.example.com
+SKU-010,LED Warehouse Light,16,09/02/2024,whse b,10,Acme corp.,contact9@supplier.example.com
+SKU001,Steel Bolt M8,91 KG,10/02/2024,WH-A,30,GLOBAL PARTS LTD,contact10@supplier.example.com
+SKU002,Hydraulic Hose 2in,37,2024-02-11,whse b,10,Metro Supply,contact11@supplier.example.com
+SKU003,Pallet Wrap Roll,49kg,12/02/2024,whse a,30,Acme Corp,contact0@supplier.example.com
+SKU004,Forklift Battery,110kg,2024-02-13,whse b,,Global Parts Ltd,contact1@supplier.example.com
+SKU005,Safety Gloves L,102 KG,Feb 14 2024,Warehouse A,30,Metro Supply,contact2@supplier.example.com
+SKU006,,20 KG,2024-02-15,whse b,,Acme Corp,contact3@supplier.example.com
+SKU007,Shrink Wrap Film,112 KG,Feb 16 2024,whse a,,Global Parts Ltd,contact4@supplier.example.com
+SKU008,Label Printer Ribbon,8kg,17/02/2024,wh_b,15,METRO SUPPLY,contact5@supplier.example.com
+SKU009,Dock Leveler Seal,15kg,Feb 18 2024,whse a,25,ACME CORP,contact6@supplier.example.com
+SKU010,LED Warehouse Light,5,Feb 19 2024,WH-B,10,GLOBAL PARTS LTD,contact7@supplier.example.com
+sku 001,Steel Bolt M8,58 KG,2024-02-20,Warehouse A,10,METRO SUPPLY,contact8@supplier.example.com
+sku 002,Hydraulic Hose 2in,76kilogram,21/02/2024,wh_b,30,Acme Corp,contact9@supplier.example.com
+sku 003,Pallet Wrap Roll,16 KG,22/02/2024,wh_a,,Global Parts Ltd,contact10@supplier.example.com
+sku 004,Forklift Battery,107kilogram,23/02/2024,whse b,25,metro supply co,contact11@supplier.example.com
+sku 005,Safety Gloves L,21kg,2024-02-24,wh_a,N/A,Acme Corp,contact0@supplier.example.com
+sku 006,Conveyor Belt Patch,49kilogram,Feb 25 2024,WH-B,,GLOBAL PARTS LTD,contact1@supplier.example.com
+sku 007,Shrink Wrap Film,87kg,26/02/2024,whse a,,METRO SUPPLY,contact2@supplier.example.com
+sku 008,Label Printer Ribbon,66kg,27/02/2024,whse b,15,Acme Corp,contact3@supplier.example.com
+sku 009,Dock Leveler Seal,75kg,Feb 28 2024,whse a,15,Global Parts Ltd,contact4@supplier.example.com
+sku 010,LED Warehouse Light,91kg,2024-02-29,Warehouse B,,metro supply co,contact5@supplier.example.com
+sku-001,Steel Bolt M8,10kg,Mar 01 2024,Warehouse A,15,ACME CORP,contact6@supplier.example.com
+sku-002,Hydraulic Hose 2in,45kg,2024-03-02,Warehouse B,15,Global Parts Ltd,contact7@supplier.example.com
+sku-003,Pallet Wrap Roll,8,03/03/2024,wh_a,,METRO SUPPLY,contact8@supplier.example.com
+sku-004,Forklift Battery,98kilogram,Mar 04 2024,wh_b,,Acme corp.,contact9@supplier.example.com
+sku-005,Safety Gloves L,7kg,2024-03-05,whse a,15,Global Parts Ltd,contact10@supplier.example.com
+sku-006,Conveyor Belt Patch,99,Mar 06 2024,wh_b,20,Metro Supply,contact11@supplier.example.com
+sku-007,Shrink Wrap Film,70kilogram,2024-03-07,wh_a,N/A,Acme corp.,contact0@supplier.example.com
+sku-OO7,Shrink Wrap Film,69kg,2024-03-07,wh_a,N/A,Acme corp.,contact0@supplier.example.com
+sku-008,Label Printer Ribbon,60,Mar 08 2024,wh_b,10,GLOBAL PARTS LTD,contact1@supplier.example.com
+sku-009,Dock Leveler Seal,4,Mar 09 2024,whse a,20,Metro Supply,contact2@supplier.example.com
+sku-010,LED Warehouse Light,15kg,10/03/2024,whse b,15,Acme corp.,contact3@supplier.example.com
+SKU-001,Steel Bolt M8,44kg,Mar 11 2024,Warehouse A,,GLOBAL PARTS LTD,contact4@supplier.example.com
+SKU-002,Hydraulic Hose 2in,106 KG,12/03/2024,Warehouse B,N/A,Metro Supply,contact5@supplier.example.com
+SKU-003,Pallet Wrap Roll,99,13/03/2024,wh_a,,Acme corp.,contact6@supplier.example.com
+SKU-004,Forklift Battery,74kilogram,2024-03-14,wh_b,N/A,Global Parts Ltd,contact7@supplier.example.com
+SKU-005,Safety Gloves L,82kilogram,Mar 15 2024,WH-A,20,METRO SUPPLY,contact8@supplier.example.com
+SKU-006,Conveyor Belt Patch,6kg,Mar 16 2024,wh_b,10,ACME CORP,contact9@supplier.example.com
+SKU-007,Shrink Wrap Film,103 KG,17/03/2024,wh_a,N/A,Global parts ltd,contact10@supplier.example.com
+SKU-008,Label Printer Ribbon,9kilogram,Mar 18 2024,WH-B,,metro supply co,contact11@supplier.example.com
+SKU-009,Dock Leveler Seal,7 KG,19/03/2024,whse a,15,ACME CORP,contact0@supplier.example.com
+SKU-010,LED Warehouse Light,101kilogram,2024-03-20,whse b,20,Global Parts Ltd,contact1@supplier.example.com
+SKU001,Steel Bolt M8,51 KG,21/03/2024,WH-A,20,metro supply co,contact2@supplier.example.com
+SKU002,Hydraulic Hose 2in,119,2024-03-22,WH-B,20,ACME CORP,contact3@supplier.example.com
+SKU003,Pallet Wrap Roll,84kg,Mar 23 2024,wh_a,,Global parts ltd,contact4@supplier.example.com
+SKU004,Forklift Battery,48,2024-03-24,Warehouse B,20,Metro Supply,contact5@supplier.example.com
+SKU005,Safety Gloves L,39kg,Mar 25 2024,whse a,,Acme corp.,contact6@supplier.example.com
+SKU006,Conveyor Belt Patch,50 KG,Mar 26 2024,wh_b,15,Global Parts Ltd,contact7@supplier.example.com
+SKU007,Shrink Wrap Film,88kilogram,Mar 27 2024,wh_a,N/A,Metro Supply,contact8@supplier.example.com
+SKU008,Label Printer Ribbon,41 KG,28/03/2024,wh_b,,ACME CORP,contact9@supplier.example.com
+SKU009,Dock Leveler Seal,101 KG,2024-03-29,Warehouse A,25,GLOBAL PARTS LTD,contact10@supplier.example.com
+SKUOO9,Dock Leveler Seal,100,2024-03-29,Warehouse A,25,GLOBAL PARTS LTD,contact10@supplier.example.com
+SKU010,LED Warehouse Light,113kg,30/03/2024,WH-B,20,Metro Supply,contact11@supplier.example.com
+sku 001,Steel Bolt M8,117 KG,01/01/2024,whse a,,Acme Corp,contact0@supplier.example.com
+sku 002,Hydraulic Hose 2in,52kg,02/01/2024,Warehouse B,30,Global Parts Ltd,contact1@supplier.example.com
+sku 003,Pallet Wrap Roll,14 KG,2024-01-03,WH-A,,METRO SUPPLY,contact2@supplier.example.com
+sku 004,Forklift Battery,62,04/01/2024,WH-B,N/A,Acme Corp,contact3@supplier.example.com
+sku OO4,Forklift Battery,61 KG,04/01/2024,WH-B,N/A,Acme Corp,contact3@supplier.example.com
+sku 005,Safety Gloves L,108,2024-01-05,whse a,15,Global Parts Ltd,contact4@supplier.example.com
+sku 006,Conveyor Belt Patch,8,2024-01-06,WH-B,15,METRO SUPPLY,contact5@supplier.example.com
+sku 007,Shrink Wrap Film,4 KG,07/01/2024,wh_a,N/A,Acme Corp,contact6@supplier.example.com
+sku 008,Label Printer Ribbon,32kg,Jan 08 2024,whse b,30,Global Parts Ltd,contact7@supplier.example.com
+sku 009,Dock Leveler Seal,71kg,09/01/2024,wh_a,30,Metro Supply,contact8@supplier.example.com
+sku 010,LED Warehouse Light,49kg,10/01/2024,Warehouse B,20,Acme corp.,contact9@supplier.example.com
+sku-001,Steel Bolt M8,15 KG,2024-01-11,whse a,,Global parts ltd,contact10@supplier.example.com
+sku-002,Hydraulic Hose 2in,84,Jan 12 2024,Warehouse B,15,Metro Supply,contact11@supplier.example.com
+sku-OO2,Hydraulic Hose 2in,83,Jan 12 2024,Warehouse B,15,Metro Supply,contact11@supplier.example.com
+sku-003,Pallet Wrap Roll,6kg,13/01/2024,whse a,20,Acme corp.,contact0@supplier.example.com
+sku-004,,106 KG,14/01/2024,whse b,30,Global Parts Ltd,contact1@supplier.example.com
+sku-005,Safety Gloves L,44,Jan 15 2024,wh_a,,METRO SUPPLY,contact2@supplier.example.com
+sku-006,Conveyor Belt Patch,25kilogram,2024-01-16,wh_b,25,Acme Corp,contact3@supplier.example.com
+sku-007,Shrink Wrap Film,107kg,17/01/2024,whse a,15,GLOBAL PARTS LTD,contact4@supplier.example.com
+sku-008,Label Printer Ribbon,93,2024-01-18,whse b,25,metro supply co,contact5@supplier.example.com
+sku-009,Dock Leveler Seal,37kg,Jan 19 2024,wh_a,N/A,ACME CORP,contact6@supplier.example.com
+sku-010,,97,2024-01-20,Warehouse B,N/A,Global Parts Ltd,contact7@supplier.example.com

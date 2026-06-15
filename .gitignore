@@ -35,6 +35,9 @@ key.md
 utputFormat
 myenv/
 activeflow/
+demo/dms-ui/node_modules/
+demo/dms-ui/.next/
+data/dms_demo.duckdb
 
 # Unit test / coverage reports
 htmlcov/

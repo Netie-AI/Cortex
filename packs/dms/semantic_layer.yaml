@@ -1,0 +1,26 @@
+glossary:
+  - term: "stock on hand"
+    maps_to: quantity_kg
+    table: inventory
+  - term: "reorder level"
+    maps_to: reorder_level
+    table: inventory
+  - term: "low stock"
+    definition: "quantity_kg < reorder_level"
+  - term: "warehouse"
+    maps_to: location
+    table: inventory
+joins: []
+sensitive_columns:
+  - supplier_contact_email
+tables:
+  inventory:
+    columns:
+      - sku
+      - product_name
+      - quantity_kg
+      - last_updated
+      - location
+      - reorder_level
+      - supplier_name
+      - supplier_contact_email

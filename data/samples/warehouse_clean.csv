@@ -1,0 +1,21 @@
+sku,product_name,quantity_kg,last_updated,location,reorder_level,supplier_name,supplier_contact_email
+SKU-001,Steel Bolt M8,83.0,2024-01-01,WH-A,0,Acme corp.,contact0@supplier.example.com
+SKU-002,,71.0,2024-01-02,WH-B,10,Global parts ltd,contact1@supplier.example.com
+SKU-003,Pallet Wrap Roll,73.0,2024-01-03,WH-A,15,metro supply co,contact2@supplier.example.com
+SKU-004,Forklift Battery,113.0,2024-01-04,WH-B,10,Acme Corp,contact3@supplier.example.com
+SKU-005,Safety Gloves L,99.0,2024-01-05,WH-A,0,Global Parts Ltd,contact4@supplier.example.com
+SKU-006,Conveyor Belt Patch,70.0,2024-01-06,WH-B,10,metro supply co,contact5@supplier.example.com
+SKU-007,Shrink Wrap Film,10.0,2024-01-07,WH-A,10,ACME CORP,contact6@supplier.example.com
+SKU-008,Label Printer Ribbon,83.0,2024-01-08,WH-B,0,Global parts ltd,contact7@supplier.example.com
+SKU-009,Dock Leveler Seal,84.0,2024-01-09,WH-A,10,METRO SUPPLY,contact8@supplier.example.com
+SKU-010,LED Warehouse Light,120.0,2024-01-10,WH-B,0,Acme Corp,contact9@supplier.example.com
+SKU-OO2,Hydraulic Hose 2in,118.0,2024-02-01,WH-B,0,Global parts ltd,contact7@supplier.example.com
+SKU-OO1,,71.0,2024-02-10,WH-A,0,Global parts ltd,contact4@supplier.example.com
+SKU-OO9,Dock Leveler Seal,56.0,2024-02-18,WH-A,20,ACME CORP,contact0@supplier.example.com
+SKUOO5,Safety Gloves L,89.0,2024-01-05,WH-A,20,Global parts ltd,contact10@supplier.example.com
+SKUOO9,Dock Leveler Seal,21.0,2024-01-09,WH-A,20,METRO SUPPLY,contact2@supplier.example.com
+SKUO1O,LED Warehouse Light,42.0,2024-01-10,WH-B,10,ACME CORP,contact3@supplier.example.com
+SKU-OO4,Forklift Battery,98.0,2024-01-24,WH-B,0,Metro Supply,contact5@supplier.example.com
+SKU-OO8,,14.0,2024-02-07,WH-B,0,Global parts ltd,contact7@supplier.example.com
+SKU-OO7,Shrink Wrap Film,69.0,2024-03-07,WH-A,0,Acme corp.,contact0@supplier.example.com
+SKUOO4,Forklift Battery,61.0,2024-01-04,WH-B,0,Acme Corp,contact3@supplier.example.com
