@@ -1,0 +1,48 @@
+---
+description: Session handoff — read STATUS and CONTEXT before any work
+alwaysApply: true
+---
+
+# Handoff protocol
+
+Before coding, read:
+1. `CURSOR_HANDOFF.md` — builder role, loop, anti-scope
+2. `STATUS.md` — current gate, debt, next feature
+3. `CONTEXT.md` — locked decisions and constraints
+4. `ARCHITECTURE.md` — honest built vs partial inventory
+5. `PARKING_LOT.md` — do not build from here
+
+After shipping: update `STATUS.md`, append `CHANGELOG_DMS.md`, run `pytest -q`, then `python scripts/handoff.py --write`.
+After gate PASS/FAIL: refresh `CLAUDE_HANDOFF.md` via `--write`.
+
+## Subagents
+
+| Need | Action |
+|------|--------|
+| Ship F/V feature (sequential) | `Use dms-subagent-dispatch` |
+| Read-only codebase research | Task `explore` — parallel OK |
+| Gate verification | `Use dms-claude-gate` — read-only |
+| Multi-module audit | Parallel `explore` subagents, then one synthesis |
+
+Never parallelize dependent feature builds (F1→F7→V0→V1).
+
+## Claude handoff
+
+Run `python scripts/handoff.py --claude` or paste `CLAUDE_HANDOFF.md` into new Claude chat.
+
+## Cursor handoff
+
+Run `python scripts/handoff.py --cursor` or read `CURSOR_HANDOFF.md` at session start.
+
+## Ponytail
+
+Use YAGNI / stdlib-first (`PONYTAIL_DEFAULT_MODE=full`). Review for over-engineering before merge.
+
+## Demo
+
+```powershell
+pip install -e ".[dev,api,dms]"
+.\demo\run_demo.ps1
+```
+
+Seed must use `python -m CortexOS.dms.seed_demo` (not bare script path without editable install).

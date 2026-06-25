@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
+from CortexOS.routing.tiers import Tier
 from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
 from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_layer
+from packs.dms.security.pii import redact_for_prompt
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = ROOT / "data" / "samples" / "supplier_contracts"
@@ -18,7 +22,8 @@ CHANGELOG_PATH = ROOT / "data" / "samples" / "inventory_changelog.jsonl"
 
 SQL_KEYWORDS = re.compile(
     r"\b(how many|which|list|total|average|count|below|above|low stock|skus?|inventory|"
-    r"warehouse|supplier|shipment|location|cctv|capacity|expired|alert|risk|delayed|transit|cold)\b",
+    r"warehouse|supplier|shipment|location|cctv|capacity|expired|alert|risk|delayed|transit|cold|"
+    r"sales?|sold|revenue|transactions?|rank|ranking|score|compare|comparison|benchmark)\b",
     re.I,
 )
 RAG_KEYWORDS = re.compile(
@@ -26,9 +31,91 @@ RAG_KEYWORDS = re.compile(
     re.I,
 )
 DESTRUCTIVE = re.compile(r"\b(drop|delete|truncate|alter|insert|update|create)\b", re.I)
+DEFAULT_INVENTORY_SQL = (
+    "SELECT sku, quantity_kg, location_id, reorder_level_kg, category "
+    "FROM inventory ORDER BY sku LIMIT 100"
+)
+NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
 
 
-def route_question(question: str) -> Literal["sql", "rag", "blocked"]:
+def _build_nl_query_prompt(text: str) -> str:
+    """Choke-point: redact PII before any NL query text reaches a model."""
+    return redact_for_prompt(text)
+
+
+@dataclass(slots=True)
+class QueryCandidate:
+    intent: str
+    score: float
+    rationale: str
+    sql: str | None = None
+
+    def to_dict(self, *, include_sql: bool = False) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "intent": self.intent,
+            "score": round(self.score, 3),
+            "rationale": self.rationale,
+        }
+        if include_sql and self.sql:
+            data["sql"] = self.sql
+        return data
+
+
+@dataclass(slots=True)
+class QueryPlan:
+    intent: str
+    question: str
+    confidence: float
+    limit: int | None
+    source_table: str | None
+    sort: str | None
+    candidates: list[QueryCandidate]
+
+    def to_dict(self) -> dict[str, Any]:
+        safe_prompt = _build_nl_query_prompt(self.question)
+        decision = JudgmentModel().decide(
+            JudgmentRequest(
+                request_type="free_text_query_parser",
+                content=safe_prompt,
+                context_size=len(safe_prompt),
+                user_tier_budget=Tier.T2,
+            )
+        )
+        return {
+            "intent": self.intent,
+            "confidence": round(self.confidence, 3),
+            "limit": self.limit,
+            "source_table": self.source_table,
+            "sort": self.sort,
+            "candidates": [c.to_dict() for c in self.candidates[:5]],
+            "runtime": {
+                "name": "cortex-secured-dms-runtime",
+                "tier": decision.tier.value,
+                "reason": decision.reason,
+                "guardrails": [
+                    "semantic_table_allowlist",
+                    "read_only_sql",
+                    "max_limit_1000",
+                    "sensitive_column_masking",
+                    "audit_log",
+                    "pii_redaction",
+                ],
+            },
+        }
+
+
+def route_question(question: str) -> Literal["sql", "rag", "blocked", "needs_clarification"]:
     q = question.strip()
     if DESTRUCTIVE.search(q):
         return "blocked"
@@ -36,7 +123,181 @@ def route_question(question: str) -> Literal["sql", "rag", "blocked"]:
         return "rag"
     if SQL_KEYWORDS.search(q):
         return "sql"
-    return "sql"
+    return "needs_clarification"
+
+
+def _extract_limit(question: str, *, default: int = 100) -> int:
+    q = question.lower()
+    patterns = (
+        r"\b(?:top|bottom|first|last)\s+(\d{1,5})\b",
+        r"\b(\d{1,5})\s+(?:rows?|records?|results?)\b",
+        r"\blimit\s+(\d{1,5})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, q)
+        if match:
+            return min(max(int(match.group(1)), 1), 1000)
+
+    word_match = re.search(
+        r"\b(?:top|bottom|first|last)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b",
+        q,
+    )
+    if word_match:
+        return NUMBER_WORDS[word_match.group(1)]
+
+    if re.search(r"\b(top|bottom|best|worst|highest|lowest|most|least)\b", q):
+        return 5
+    return min(max(default, 1), 1000)
+
+
+def _rank_direction(question: str, *, default: str = "DESC") -> str:
+    q = question.lower()
+    if re.search(r"\b(bottom|least|lowest|smallest|underperforming|worst)\b", q):
+        return "ASC"
+    return default
+
+
+def _score(question: str, terms: tuple[str, ...], *, base: float = 0.0) -> float:
+    q = question.lower()
+    return min(0.99, base + sum(0.12 for term in terms if term in q))
+
+
+def _sales_sql(question: str) -> tuple[str, int, str]:
+    limit = _extract_limit(question, default=5)
+    direction = _rank_direction(question)
+    if "quantity" in question.lower() or "volume" in question.lower() or "kg" in question.lower():
+        metric = "total_sold_kg"
+    else:
+        metric = "sales_value_myr"
+    sql = (
+        "SELECT sku, "
+        "SUM(quantity_kg) AS total_sold_kg, "
+        "ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr, "
+        "COUNT(*) AS transaction_count "
+        "FROM transactions "
+        "WHERE txn_type = 'OUT' "
+        f"GROUP BY sku ORDER BY {metric} {direction}, sku ASC LIMIT {limit}"
+    )
+    return sql, limit, f"{metric} {direction}"
+
+
+def _delayed_shipments_sql(question: str) -> tuple[str, int, str]:
+    limit = _extract_limit(question, default=100)
+    sql = (
+        "SELECT shipment_id, sku, carrier, destination_location_id, expected_arrival, quantity_kg, "
+        "DATE_DIFF('day', CAST(expected_arrival AS DATE), CURRENT_DATE) AS days_delayed "
+        "FROM shipments WHERE status = 'DELAYED' "
+        f"ORDER BY days_delayed DESC, expected_arrival ASC LIMIT {limit}"
+    )
+    return sql, limit, "days_delayed DESC"
+
+
+def _supplier_ranking_sql(question: str) -> tuple[str, int, str]:
+    limit = _extract_limit(question, default=10)
+    direction = _rank_direction(question)
+    sql = (
+        "SELECT supplier_id, supplier_name, country, risk_score, lead_time_days, "
+        "ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3) AS ranking_score "
+        "FROM suppliers "
+        f"ORDER BY ranking_score {direction}, risk_score {direction}, lead_time_days {direction} LIMIT {limit}"
+    )
+    return sql, limit, f"ranking_score {direction}"
+
+
+def _planner_candidates(question: str) -> list[QueryCandidate]:
+    q = question.lower()
+    candidates = [
+        QueryCandidate(
+            "sales_rank",
+            _score(q, ("sale", "sales", "sold", "revenue", "transaction", "transactions", "top")),
+            "Matches outbound transaction sales/revenue language.",
+        ),
+        QueryCandidate(
+            "delayed_shipments",
+            _score(q, ("delayed", "delay", "late", "shipment", "shipments", "most")),
+            "Matches delayed shipment status and lateness ranking language.",
+        ),
+        QueryCandidate(
+            "supplier_ranking",
+            _score(q, ("rank", "ranking", "score", "compare", "comparison", "risk", "supplier", "benchmark")),
+            "Matches supplier risk/lead-time score comparison language.",
+        ),
+        QueryCandidate(
+            "warehouse_capacity",
+            _score(q, ("capacity", "warehouse", "utilisation", "utilization", "load")),
+            "Matches warehouse capacity/utilisation language.",
+        ),
+        QueryCandidate(
+            "alerts",
+            _score(q, ("alert", "alerts", "critical", "severity", "resolved")),
+            "Matches operational alert language.",
+        ),
+        QueryCandidate(
+            "inventory_lookup",
+            _score(q, ("inventory", "sku", "stock", "reorder", "category")),
+            "Matches inventory table lookup language.",
+        ),
+    ]
+    return sorted(candidates, key=lambda c: c.score, reverse=True)
+
+
+def plan_query(question: str, sql: str | None = None) -> QueryPlan:
+    q = question.lower()
+    candidates = _planner_candidates(question)
+    source_table = _infer_source_table(sql) if sql else None
+    limit = _extract_limit(question)
+    sort = None
+    intent = candidates[0].intent if candidates else "unknown"
+    confidence = candidates[0].score if candidates else 0.0
+
+    if confidence <= 0:
+        intent = f"{source_table}_query" if source_table else "unknown"
+        confidence = 0.65 if source_table else 0.0
+        if not source_table:
+            limit = None
+
+    if "sale" in q or "sold" in q or "revenue" in q:
+        intent = "sales_rank"
+        limit = _extract_limit(question, default=5)
+        sort = "sales_value_myr DESC"
+        source_table = "transactions"
+        confidence = max(confidence, 0.92)
+    elif "delayed" in q or "late" in q:
+        intent = "delayed_shipments"
+        limit = _extract_limit(question, default=100)
+        sort = "days_delayed DESC"
+        source_table = "shipments"
+        confidence = max(confidence, 0.9)
+    elif any(term in q for term in ("rank", "ranking", "score", "compare", "comparison", "benchmark")):
+        intent = "supplier_ranking"
+        limit = _extract_limit(question, default=10)
+        sort = "ranking_score DESC"
+        source_table = "suppliers"
+        confidence = max(confidence, 0.82)
+
+    return QueryPlan(
+        intent=intent,
+        question=question,
+        confidence=min(confidence, 0.99),
+        limit=limit,
+        source_table=source_table,
+        sort=sort,
+        candidates=candidates,
+    )
+
+
+def _try_generate_ranked_sql(question: str) -> tuple[str, int, str, str] | None:
+    q = question.lower()
+    if "sale" in q or "sold" in q or "revenue" in q:
+        sql, limit, sort = _sales_sql(question)
+        return sql, limit, "transactions", sort
+    if "delayed" in q or "late" in q:
+        sql, limit, sort = _delayed_shipments_sql(question)
+        return sql, limit, "shipments", sort
+    if any(term in q for term in ("rank", "ranking", "score", "compare", "comparison", "benchmark")):
+        sql, limit, sort = _supplier_ranking_sql(question)
+        return sql, limit, "suppliers", sort
+    return None
 
 
 def _detect_warehouse_code(question: str) -> str | None:
@@ -63,6 +324,7 @@ def _wh_location_clause(alias: str, question: str) -> str:
 
 def generate_sql(question: str, semantic: dict[str, Any]) -> str:
     """Heuristic SQL generator for demo (LLM would generate in prod)."""
+    del semantic
     q = question.lower()
     if "drop" in q and "table" in q:
         return "DROP TABLE inventory"
@@ -70,6 +332,10 @@ def generate_sql(question: str, semantic: dict[str, Any]) -> str:
         return "DELETE FROM inventory WHERE sku='X'"
     if "password" in q:
         return "SELECT * FROM passwords"
+
+    ranked_sql = _try_generate_ranked_sql(question)
+    if ranked_sql:
+        return ranked_sql[0]
 
     wh_clause_inv = ""
     wh = _detect_warehouse_code(question)
@@ -242,10 +508,7 @@ def generate_sql(question: str, semantic: dict[str, Any]) -> str:
             "FROM inventory GROUP BY category ORDER BY total_kg DESC"
         )
 
-    return (
-        "SELECT sku, quantity_kg, location_id, reorder_level_kg, category "
-        "FROM inventory ORDER BY sku LIMIT 100"
-    )
+    return DEFAULT_INVENTORY_SQL
 
 
 def _format_low_stock_answer(rows: list[dict], wh: str | None) -> str:
@@ -289,9 +552,39 @@ def _format_capacity_answer(rows: list[dict]) -> str:
 
 
 def _format_generic_answer(rows: list[dict], question: str) -> str:
-    del question
     if not rows:
         return "No rows matched your query."
+    q = question.lower()
+    if "sale" in q or "sold" in q or "revenue" in q:
+        lines = [f"Top {len(rows)} sales result(s), ranked by value:"]
+        for row in rows[:5]:
+            lines.append(
+                f"  · {row.get('sku')}: MYR {row.get('sales_value_myr')} "
+                f"from {row.get('total_sold_kg')} kg sold ({row.get('transaction_count')} txns)"
+            )
+        if len(rows) > 5:
+            lines.append(f"  · …and {len(rows) - 5} more rows")
+        return "\n".join(lines)
+    if "delayed" in q or "late" in q:
+        lines = [f"{len(rows)} delayed shipment row(s), sorted by days delayed:"]
+        for row in rows[:5]:
+            lines.append(
+                f"  · {row.get('shipment_id')}: {row.get('sku')} via {row.get('carrier')} "
+                f"({row.get('days_delayed')} days delayed)"
+            )
+        if len(rows) > 5:
+            lines.append(f"  · …and {len(rows) - 5} more rows")
+        return "\n".join(lines)
+    if any(term in q for term in ("rank", "ranking", "score", "compare", "comparison", "benchmark")):
+        lines = [f"{len(rows)} ranked supplier result(s), sorted by combined score:"]
+        for row in rows[:5]:
+            lines.append(
+                f"  · {row.get('supplier_name')}: score={row.get('ranking_score')}, "
+                f"risk={row.get('risk_score')}, lead_time={row.get('lead_time_days')}d"
+            )
+        if len(rows) > 5:
+            lines.append(f"  · …and {len(rows) - 5} more rows")
+        return "\n".join(lines)
     if len(rows) == 1 and len(rows[0]) == 1:
         key, val = next(iter(rows[0].items()))
         return f"Result: {key} = {val}"
@@ -369,7 +662,7 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
     if not name_key:
         name_key = keys[0]
 
-    for candidate in ("pct_used", "utilisation_pct", "quantity_kg", "total_value_myr", "total_cost_myr", "delayed_count", "total_spend_myr", "sku_count", "total_kg", "lead_time_days", "risk_score"):
+    for candidate in ("sales_value_myr", "ranking_score", "days_delayed", "pct_used", "utilisation_pct", "quantity_kg", "total_value_myr", "total_cost_myr", "delayed_count", "total_spend_myr", "sku_count", "total_kg", "lead_time_days", "risk_score", "transaction_count"):
         if candidate in keys:
             value_key = candidate
             break
@@ -433,10 +726,12 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
     audit_id = str(uuid.uuid4())
     route = route_question(question)
     semantic = load_semantic_layer()
+    query_plan = plan_query(question)
 
     if route == "blocked":
         sql = generate_sql(question, semantic)
         result = validate_sql(sql, semantic)
+        blocked_plan = plan_query(question, sql)
         return {
             "answer": "That operation is not permitted.",
             "sql_used": None,
@@ -446,6 +741,7 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
             "route": "blocked",
             "rows": [],
             "source_table": None,
+            "query_plan": blocked_plan.to_dict(),
         }
 
     if route == "rag":
@@ -460,9 +756,27 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
             "sources": sources,
             "rows": [],
             "source_table": None,
+            "query_plan": query_plan.to_dict(),
+        }
+
+    if route == "needs_clarification":
+        return {
+            "answer": (
+                "I could not map that to the DMS semantic layer. Try asking for sales, "
+                "delayed shipments, inventory, supplier risk, warehouse capacity, or alerts."
+            ),
+            "sql_used": None,
+            "chart_spec": None,
+            "audit_id": audit_id,
+            "violations_blocked": [],
+            "route": "needs_clarification",
+            "rows": [],
+            "source_table": None,
+            "query_plan": query_plan.to_dict(),
         }
 
     sql = generate_sql(question, semantic)
+    query_plan = plan_query(question, sql)
     con = get_connection(DEFAULT_DB)
     try:
         guard_result, rows, entry = guard_and_execute(sql, semantic, con)
@@ -483,6 +797,7 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
             "rows": [],
             "source_table": _infer_source_table(sql),
             "alerts_summary": alerts_summary if show_alerts else None,
+            "query_plan": query_plan.to_dict(),
         }
 
     answer = synthesize_answer(rows, question)
@@ -512,6 +827,7 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
         "rows": rows,
         "source_table": _infer_source_table(sql),
         "alerts_summary": alerts_summary if show_alerts else None,
+        "query_plan": query_plan.to_dict(),
         "audit": {
             "timestamp": entry.timestamp,
             "passed": entry.passed,

@@ -1,12 +1,13 @@
 import sys
+import types
 
 import pytest
-from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
-def reset_config_cache():
-    """Prevent config.toml roundtrip tests from polluting pack path resolution."""
+def reset_config_cache(monkeypatch):
+    """Prevent config.toml / env from polluting pack path resolution in tests."""
+    monkeypatch.setenv("PACK", "ruma")
     import netie.config
 
     netie.config._cached_config = None
@@ -29,14 +30,18 @@ def mock_sentence_transformer(monkeypatch):
                 return [0.1] * 384
             return [[0.1] * 384 for _ in sentences]
 
-    fake_st = MagicMock()
+    fake_st = types.ModuleType("sentence_transformers")
     fake_st.SentenceTransformer = MockTransformer
+    fake_st.CrossEncoder = MockTransformer
     monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st)
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers.models",
+        types.ModuleType("sentence_transformers.models"),
+    )
 
-    if "netie.fabrication.skillmesh" in sys.modules:
-        monkeypatch.setattr(
-            "netie.fabrication.skillmesh.SentenceTransformer",
-            MockTransformer,
-        )
+    for mod_name in ("netie.fabrication.skillmesh", "CortexOS.fabrication.skillmesh"):
+        if mod_name in sys.modules:
+            monkeypatch.setattr(f"{mod_name}.SentenceTransformer", MockTransformer)
 
     return MockTransformer

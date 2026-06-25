@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { proposeEdits } from "../lib/api";
 import { useRole } from "../context/RoleContext";
 
-function downloadCsv(rows, columns) {
+function downloadCsv(rows, columns, sourceTable) {
   if (!rows?.length) return;
   const cols = columns.length ? columns : Object.keys(rows[0]);
   const lines = [cols.join(",")];
@@ -15,7 +15,8 @@ function downloadCsv(rows, columns) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "cortex_export.csv";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  a.download = `cortex_${sourceTable || "query"}_${stamp}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -25,6 +26,7 @@ export default function ResultGrid({
   sourceTable = "inventory",
   tableMeta = null,
   onLoadRange,
+  queryPlan = null,
 }) {
   const { role } = useRole();
   const [sortCol, setSortCol] = useState(null);
@@ -131,6 +133,7 @@ export default function ResultGrid({
         <span>
           SOURCE <strong>{meta.name}</strong> · {meta.row_count?.toLocaleString()} rows ·{" "}
           {meta.column_count || columns.length} columns ·{" "}
+          {queryPlan?.sort ? `sorted by ${queryPlan.sort} · ` : ""}
         </span>
         <button type="button" className="cx-grid-link-btn" onClick={() => setExploreOpen(true)}>
           EXPLORE →
@@ -154,8 +157,8 @@ export default function ResultGrid({
           >
             PIVOT
           </button>
-          <button type="button" className="cx-grid-btn" onClick={() => downloadCsv(displayRows, columns)}>
-            EXPORT CSV
+          <button type="button" className="cx-grid-btn" onClick={() => downloadCsv(displayRows, columns, sourceTable)}>
+            DOWNLOAD SORTED CSV
           </button>
         </div>
       </div>

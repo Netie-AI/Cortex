@@ -79,6 +79,7 @@ export default function QueryPage() {
   const blocked = active?.violations_blocked?.length > 0 && !active?.apiError;
   const guardStatus = blocked ? "BLOCKED" : "PASS";
   const alerts = active?.alerts_summary;
+  const plan = active?.query_plan;
 
   const tableMetaForGrid = gridSource
     ? {
@@ -197,6 +198,50 @@ export default function QueryPage() {
                 </div>
               )}
 
+              {plan && (
+                <div className="cx-result-section">
+                  <div className="cx-label" style={{ marginBottom: 12 }}>
+                    AI PLAN
+                  </div>
+                  <div className="cx-plan-card">
+                    <div className="cx-plan-line">
+                      <span>INTENT</span>
+                      <strong>{plan.intent}</strong>
+                    </div>
+                    <div className="cx-plan-line">
+                      <span>CONFIDENCE</span>
+                      <strong>{Math.round((plan.confidence || 0) * 100)}%</strong>
+                    </div>
+                    {plan.limit && (
+                      <div className="cx-plan-line">
+                        <span>LIMIT</span>
+                        <strong>{plan.limit}</strong>
+                      </div>
+                    )}
+                    {plan.sort && (
+                      <div className="cx-plan-line">
+                        <span>SORT</span>
+                        <strong>{plan.sort}</strong>
+                      </div>
+                    )}
+                    <div className="cx-plan-runtime">
+                      {plan.runtime?.name || "cortex-secured-dms-runtime"} ·{" "}
+                      {plan.runtime?.tier || "T1"} · guardrailed SQL
+                    </div>
+                    {plan.candidates?.length > 0 && (
+                      <div className="cx-plan-candidates">
+                        {plan.candidates.slice(0, 3).map((candidate) => (
+                          <div key={candidate.intent} className="cx-plan-candidate">
+                            <span>{candidate.intent}</span>
+                            <span>{Math.round((candidate.score || 0) * 100)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {!blocked && active.chart_spec && (
                 <div className="cx-result-section">
                   <div className="cx-label" style={{ marginBottom: 12 }}>
@@ -222,6 +267,7 @@ export default function QueryPage() {
                     sourceTable={gridSource?.name}
                     tableMeta={tableMetaForGrid}
                     onLoadRange={handleLoadRange}
+                    queryPlan={plan}
                   />
                 </div>
               )}

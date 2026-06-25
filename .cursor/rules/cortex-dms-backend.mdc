@@ -1,0 +1,17 @@
+---
+description: DMS backend conventions — CortexOS/dms and packs/dms
+globs: CortexOS/dms/**,packs/dms/**,CortexOS/api/dms_query.py,tests/test_dms/**
+alwaysApply: false
+---
+
+# DMS Backend
+
+- SQL: always through `sql_guardrail.py` (sqlglot parse + allowlist). Parameterize queries.
+- NL queries: `query_service.py` → judgment model → guard_and_execute. Never raw LLM SQL.
+- Compliance: call `CortexOS/compliance/engine.py` — LLM extracts, rules decide pass/fail.
+- Tiering: classification/suggestion/PII = T0/T1/T2 local only. No T3 in hot loops.
+- New DMS tables: Postgres migrations + RLS policies. DuckDB for analytics warehouse only.
+
+## API routes
+
+Register in `CortexOS/api/dms_query.py`. Use `register_dms_routes(app)`.

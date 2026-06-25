@@ -33,6 +33,7 @@ class DMSQueryResponse(BaseModel):
     source_table: str | None = None
     alerts_summary: dict[str, int] | None = None
     audit: dict[str, Any] | None = None
+    query_plan: dict[str, Any] | None = None
 
 
 class AnalyseEntryRequest(BaseModel):
@@ -213,3 +214,9 @@ def register_dms_routes(app: Any) -> None:
         from CortexOS.dms.entry_analyser import add_inventory_entry
 
         return add_inventory_entry(body.proposed, approved_by=body.approved_by)
+
+    from CortexOS.api.chat_routes import register_chat_routes
+    from CortexOS.api.warehouse_routes import register_warehouse_routes
+
+    register_chat_routes(app)
+    register_warehouse_routes(app)

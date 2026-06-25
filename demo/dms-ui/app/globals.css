@@ -494,6 +494,46 @@ table {
   color: var(--cx-red);
 }
 
+.cx-plan-card {
+  border: 1px solid var(--netie-border);
+  background: #0b0b0b;
+  padding: 12px;
+}
+
+.cx-plan-line,
+.cx-plan-candidate {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--netie-muted);
+  padding: 4px 0;
+}
+
+.cx-plan-line strong {
+  color: var(--netie-text);
+  text-align: right;
+}
+
+.cx-plan-runtime {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #222222;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--cx-green);
+  text-transform: uppercase;
+}
+
+.cx-plan-candidates {
+  margin-top: 8px;
+}
+
+.cx-plan-candidate {
+  border-top: 1px solid #1a1a1a;
+}
+
 .cx-audit-line {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1161,4 +1201,139 @@ table {
   font-size: 11px;
   color: var(--netie-muted);
   margin: 0;
+}
+
+/* Warehouse V0 */
+.cx-warehouse-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  min-height: 60vh;
+}
+
+.cx-warehouse-node {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-left: 2px solid transparent;
+}
+
+.cx-warehouse-node.active {
+  border-left-color: var(--cx-green);
+  background: var(--cx-surface);
+}
+
+.cx-warehouse-meta {
+  font-size: 11px;
+  margin: 8px 0 12px;
+  color: var(--netie-muted);
+  word-break: break-all;
+}
+
+.cx-warehouse-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cx-warehouse-items {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.cx-warehouse-status {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--cx-green);
+}
+
+.cx-input {
+  background: var(--netie-panel);
+  border: 1px solid var(--netie-border);
+  color: var(--netie-text);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+/* Chat F2 */
+.cx-chat-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  min-height: 60vh;
+}
+
+.cx-chat-threads,
+.cx-chat-pane {
+  background: var(--netie-panel);
+  border: 1px solid var(--netie-border);
+  padding: 16px;
+}
+
+.cx-chat-new,
+.cx-chat-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.cx-chat-thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cx-chat-thread-item {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-left: 2px solid transparent;
+}
+
+.cx-chat-thread-item.active {
+  border-left-color: var(--cx-green);
+  background: var(--cx-surface);
+}
+
+.cx-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 240px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.cx-chat-message {
+  border-left: 2px solid var(--netie-border);
+  padding-left: 12px;
+}
+
+.cx-chat-message-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.cx-chat-message-body {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.cx-chat-textarea {
+  resize: vertical;
+  min-height: 72px;
 }

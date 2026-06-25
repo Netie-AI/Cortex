@@ -115,8 +115,12 @@ def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
             if col.name not in all_cols and col.name != "*" and col.name not in select_aliases:
                 violations.append(f"UNKNOWN_COLUMN:{col.name}")
 
-    star = stmt.find(exp.Star)
-    if star and sensitive:
+    selected_star = any(
+        isinstance(expr, exp.Star)
+        or (isinstance(expr, exp.Column) and expr.name == "*")
+        for expr in stmt.expressions
+    )
+    if selected_star and sensitive:
         inv_cols = [c for c in _allowed_columns(semantic, "inventory") if c not in sensitive]
         stmt.set("expressions", [exp.column(c) for c in inv_cols])
 

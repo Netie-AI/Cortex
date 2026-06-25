@@ -21,7 +21,7 @@ def test_sentiment_intent_stub_shape():
 def test_tone_profile_yaml_and_compose():
     from netie.personality import compose_system_prompt, load_tone_agent_yaml
 
-    path = ROOT / "netie" / "personality" / "profiles" / "ai_buyer_v1.yaml"
+    path = ROOT / "CortexOS" / "personality" / "profiles" / "ai_buyer_v1.yaml"
     loaded = load_tone_agent_yaml(path)
     assert loaded.agent_id == "ai_buyer_v1"
     system = compose_system_prompt(loaded.agent_id, loaded.tone)

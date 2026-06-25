@@ -5,7 +5,6 @@ import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 import ApiOfflineBanner from "./ApiOfflineBanner";
 import ProgressBar from "./ProgressBar";
-import { RoleProvider } from "../context/RoleContext";
 import { useApiHealth } from "../hooks/useApiHealth";
 import { fetchTables } from "../lib/api";
 
@@ -40,9 +39,5 @@ function ShellInner({ children, loading = false }) {
 }
 
 export default function AppShell({ children, loading = false }) {
-  return (
-    <RoleProvider>
-      <ShellInner loading={loading}>{children}</ShellInner>
-    </RoleProvider>
-  );
+  return <ShellInner loading={loading}>{children}</ShellInner>;
 }

@@ -106,6 +106,49 @@ def test_query_low_stock(loaded_db, monkeypatch):
     assert result.get("row_count", 0) >= 0
 
 
+def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
+    from netie.dms import query_service
+    from netie.dms.warehouse_db import get_connection
+
+    monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
+    monkeypatch.setattr(
+        "netie.dms.query_service.get_connection",
+        lambda _=None: get_connection(loaded_db),
+    )
+    result = query_service.answer_question("top 5 sales")
+    assert result["violations_blocked"] == []
+    assert result["source_table"] == "transactions"
+    assert result["row_count"] == 5
+    assert "LIMIT 5" in result["sql_used"].upper()
+    assert result["query_plan"]["intent"] == "sales_rank"
+
+
+def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
+    from netie.dms import query_service
+    from netie.dms.warehouse_db import get_connection
+
+    monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
+    monkeypatch.setattr(
+        "netie.dms.query_service.get_connection",
+        lambda _=None: get_connection(loaded_db),
+    )
+    result = query_service.answer_question("return most delayed 1000 rows")
+    assert result["violations_blocked"] == []
+    assert result["source_table"] == "shipments"
+    assert result["row_count"] <= 1000
+    assert "LIMIT 1000" in result["sql_used"].upper()
+    assert result["query_plan"]["intent"] == "delayed_shipments"
+
+
+def test_query_random_question_asks_for_dms_clarification():
+    from netie.dms import query_service
+
+    result = query_service.answer_question("how do I lean back in my chair?")
+    assert result["route"] == "needs_clarification"
+    assert result["sql_used"] is None
+    assert "DMS semantic layer" in result["answer"]
+
+
 def test_query_blocks_drop(loaded_db, monkeypatch):
     from netie.dms import query_service
 

@@ -5,6 +5,7 @@ import RoleSwitcher from "./RoleSwitcher";
 
 const PAGE_NAMES = {
   "/": "QUERY",
+  "/warehouse": "WAREHOUSE",
   "/data": "DATA",
   "/audit": "AUDIT",
 };

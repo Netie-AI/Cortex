@@ -1,0 +1,15 @@
+---
+description: Warehouse vision module V0–V3
+globs: packs/dms/vision/**,tests/dms/test_v*.py
+alwaysApply: false
+---
+
+# Vision Module
+
+- Code lives in `packs/dms/vision/` (create when shipping V0).
+- Placeholders: `VISION_MODEL`, `DEPTH_SOURCE`, `OCR_MODEL` — never hardcode providers.
+- Generation models are NEVER used for measurement. Detection + depth/reference-marker only.
+- Strip EXIF GPS on photo ingest. Blur/redact faces/plates before any off-box transfer.
+- No auto-commit below confidence. Suggestions until human confirm + F5 compliance gate.
+- Every vision fact writes to F1 ledger; success becomes Cortex skill via F6.
+- Sequence: V0 (no ML) → V1 dimension → V2 slotting → V3 movement/map. See `docs/dms/VISION_GOVERNANCE.md`.

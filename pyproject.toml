@@ -36,7 +36,7 @@ personality = ["redis>=5", "sqlalchemy>=2", "APScheduler>=3.10"]
 postgres = ["sqlalchemy[asyncio]>=2", "asyncpg>=0.29"]
 tokens = ["tiktoken>=0.7"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
-dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1"]
+dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=10"]
 
 [tool.poetry]
 name = "netie"
@@ -44,7 +44,9 @@ version = "0.1.0"
 description = "Netie Cortex OS Edition — AI Coding Agent"
 authors = ["Open Source"]
 packages = [
-    { include = "netie" }
+    { include = "netie" },
+    { include = "CortexOS" },
+    { include = "packs" }
 ]
 
 [tool.poetry.dependencies]
@@ -88,4 +90,4 @@ personality = []
 postgres = ["sqlalchemy", "asyncpg"]
 tokens = ["tiktoken"]
 api = ["fastapi", "uvicorn"]
-dms = ["duckdb", "sqlglot", "openpyxl"]
+dms = ["duckdb", "sqlglot", "openpyxl", "qrcode", "pillow"]
