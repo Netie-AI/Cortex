@@ -14,7 +14,7 @@ from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
 from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
 from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_layer
-from packs.dms.security.pii import redact_for_prompt
+from packs.dms.security.prompt_harness import secure_for_prompt
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = ROOT / "data" / "samples" / "supplier_contracts"
@@ -50,8 +50,11 @@ NUMBER_WORDS = {
 
 
 def _build_nl_query_prompt(text: str) -> str:
-    """Choke-point: redact PII before any NL query text reaches a model."""
-    return redact_for_prompt(text)
+    """Choke-point: PII + injection guard before any NL query text reaches a model."""
+    result = secure_for_prompt(text, block_injection=True, block_scam=False)
+    if result.blocked:
+        return "[BLOCKED:security_gate]"
+    return result.safe_text
 
 
 @dataclass(slots=True)

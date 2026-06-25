@@ -220,7 +220,11 @@ def append_message(
         con.close()
 
     ledger_seq = None
+    classification = None
     if direction == "inbound":
+        from packs.dms.classify.intent import classify
+
+        classification = classify(body)
         ledger_entry = ledger_append(
             actor,
             "message.inbound",
@@ -229,15 +233,28 @@ def append_message(
                 "message_id": message_id,
                 "sender": sender,
                 "body_len": len(body),
+                "intent": classification.intent,
+                "sentiment": classification.sentiment,
+                "blocked": classification.blocked,
+                "psychological_state": classification.psychological_state,
             },
             db_path=path,
         )
         ledger_seq = ledger_entry.seq
 
-    return {
+    out: dict[str, Any] = {
         "message": _message_to_dict(message),
         "ledger_seq": ledger_seq,
     }
+    if classification is not None:
+        out["classification"] = {
+            "intent": classification.intent,
+            "sentiment": classification.sentiment,
+            "confidence": classification.confidence,
+            "blocked": classification.blocked,
+            "psychological_state": classification.psychological_state,
+        }
+    return out
 
 
 def list_threads(

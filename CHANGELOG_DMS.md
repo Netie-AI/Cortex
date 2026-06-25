@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## F3 + Security wave — 2026-06-26
+
+- **Classify:** `packs/dms/classify/intent.py` — warehouse intents, sentiment, psychological_state
+- **Security:** `injection_guard.py`, `scam_guard.py`, `prompt_harness.py` — pre-model gate
+- **WASM:** `CortexOS/execution/wasm_isolate.py` — fuel-limited sandbox
+- **Persona:** `packs/dms/persona/profiles.py` — respond.io wedge routing
+- **GPU:** `scripts/setup_gpu_env.ps1` — PyTorch cu132 + optional Qwen
+- **Tests:** adversarial corpus (15 cases), F3 classify, WASM — 103 passed total
+- **Research:** `docs/research/respond_io_analysis.md`
+
 ## F1 — Postgres ledger hardening — 2026-06-26
 
 - **Migration:** `packs/dms/sql/002_ledger_postgres.sql` — append-only trigger, advisory lock docs

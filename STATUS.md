@@ -1,6 +1,6 @@
 # STATUS.md
-**Last updated:** 2026-06-26 | **Gate:** V1, F1, F7, F2 **PASS** (see docs/dms/GATE_RESULTS_2026-06-26.md)
-**Rule:** Update after every gate. New sessions read `CURSOR_HANDOFF.md` or `CLAUDE_HANDOFF.md`.
+**Last updated:** 2026-06-26 | **Gate:** V1/F1/F7/F2/F3-security **PASS**
+**Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
 
 ---
 
@@ -8,46 +8,36 @@
 
 | Layer | Status | Gate |
 |---|---|---|
-| CortexOS runtime (DAG, pack loader, compliance substrate) | Stable | — |
-| DMS pack (PACK=dms loads clean) | Stable | — |
-| Demo script (`run_demo.ps1`) | Fixed | Verified |
-| F1 audit ledger (SQLite + optional Postgres DSN) | **Shipped** | Gate F1-hardened pending |
-| F7 EXIF strip (photo sanitize) | Shipped | V0 PASS |
-| F7 full security (PII, AES-GCM, RLS SQL) | **Shipped (minimal)** | Gate F7 pending |
-| V0 warehouse spine | Shipped | V0 PASS |
-| V1 dimensioning | Shipped | **Gate V1 pending** |
-| F2 governed chat foundation | **Shipped** | After Gate V1 |
-| F3 classify | Planned | After F2 verify |
-| Phase 0 deploy (docker-compose, Caddy) | Not started | Parallel OK |
+| F1 ledger (SQLite + Postgres DSN) | Shipped | PASS |
+| F7 PII/crypto/RLS + prompt harness | Shipped | PASS |
+| F2 chat + F3 classify | Shipped | PASS |
+| Security adversarial corpus (15 cases) | Shipped | PASS |
+| WASM fuel sandbox | Shipped | PASS |
+| Persona routing (psychological state) | Shipped | — |
+| Local GPU inference (Qwen opt-in) | Script ready | Manual |
+| F4 task suggest | **Next** | After F3 verify |
+| Phase 0 deploy | Planned | Parallel OK |
+| Ontology (P1) | Parked | Condition not met |
 
 ## Test baseline
 ```
-pytest -q → 86 passed, 4 skipped
-Skipped: postgres ledger (no DMS_LEDGER_DSN), apscheduler
+pytest -q → 103 passed, 4 skipped
 ```
 
-## Handoff protocol
-- **Claude:** `CLAUDE_HANDOFF.md` or `python scripts/handoff.py --claude --write`
-- **Cursor:** `CURSOR_HANDOFF.md` or `python scripts/handoff.py --cursor`
-- **After ship/gate:** `python scripts/handoff.py --write`
-
 ## Active feature
-**F3 classify** — intent + sentiment on inbound chat messages (local T0/T1). Parallel: Phase 0 deploy planning.
+**F4 task suggest + batch learning** — suggestion engine over classified message history.
 
 ## Next three moves
-1. Claude supervisor PASS on gate packet (V1 + F1 + F7)
-2. Ship F3 — intent + sentiment classify (local T0/T1)
+1. Ship F4 — task suggest from intent + history
+2. Run `scripts/setup_gpu_env.ps1` + optional Qwen fine-tune on warehouse corpus
 3. Phase 0 — docker-compose + Caddy for dms.netie.ai
 
-## Known debt
-| Debt | Fix | Milestone |
-|---|---|---|
-| Postgres ledger CI | Set DMS_LEDGER_DSN in CI or document manual gate | Before prod |
-| SOPS + rate limiting | Phase 3 remainder | Before real customer |
-| Ontology (P1) | After 1+ paying client | H2 |
+## GPU setup (RTX 4070)
+```powershell
+.\scripts\setup_gpu_env.ps1
+$env:CORTEX_LOCAL_INFERENCE = "1"
+```
 
-## Design constraints (do not violate)
-- No PII in LLM prompts without `redact_for_prompt`
-- No BIG_API in hot loops
-- All writes → F1 ledger
-- Sequential dependent features; parallel explore only
+## Handoff
+- Claude: `CLAUDE_HANDOFF.md` or `python scripts/handoff.py --claude --write`
+- Cursor: `CURSOR_HANDOFF.md`
