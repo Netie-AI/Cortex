@@ -31,3 +31,5 @@ description: Prepares Claude supervisor gate verification packet after a DMS mil
 ```
 
 Do not implement the next feature. Read-only verification only.
+
+After gate PASS/FAIL: update `STATUS.md`, run `python scripts/handoff.py --write`.

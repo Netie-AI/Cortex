@@ -7,12 +7,13 @@ Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 | File | When |
 |------|------|
 | [STATUS.md](STATUS.md) | Current gate, debt, next feature |
-| [CONTEXT.md](CONTEXT.md) | Paste into new Claude chat |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Built vs partial inventory |
-| [PARKING_LOT.md](PARKING_LOT.md) | Deferred ideas |
+| [CURSOR_HANDOFF.md](CURSOR_HANDOFF.md) | Cursor builder startup |
+| [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) | Claude supervisor paste |
+| [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md) | One-call `plug_in(app)` integration |
 
 ```powershell
-python scripts/handoff.py   # clipboard-ready block for Claude
+python scripts/handoff.py --cursor   # builder
+python scripts/handoff.py --claude   # supervisor
 ```
 
 ## Quick start

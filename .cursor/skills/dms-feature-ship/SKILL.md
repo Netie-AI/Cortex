@@ -16,13 +16,9 @@ description: Ships one DMS feature (F1-F7 or V0-V3) from docs/dms/BUILD_PLAN.md 
 1. **Plan** — list files to create/edit; STOP if user asked for plan review.
 2. **Implement** — smallest diff; obey ANTI-SCOPE block verbatim.
 3. **Test** — feature smoke tests + `python -m pytest tests/ -q`.
-4. **Log** — append to `CHANGELOG_DMS.md`:
-   ```markdown
-   ## [Feature ID] — [date]
-   - Files: ...
-   - Config/env: ...
-   - Smoke: ...
-   ```
+4. **Log** — append to `CHANGELOG_DMS.md`
+5. **Handoff** — update `STATUS.md`, run `python scripts/handoff.py --write`
+6. **Ponytail** — review diff for over-engineering (see `docs/PONYTAIL.md`)
 
 ## Hard stops
 
