@@ -50,6 +50,11 @@ YOLO / Grounding DINO / Label Studio self-hosted. **Condition:** 50+ real wareho
 ## P13 — Blockchain / Web3 / Talkie / ASA / AIM / NetieX / Vanguard
 **Condition:** H2, DMS profitable.
 
+## P14 — Captured skills modify compliance gate thresholds
+Let F6 learned skills change F5 YAML rules, value thresholds, or executable verdicts.
+**Condition:** Separate architecture gate — violates current invariant (skills → suggest only; rules → gate).
+**Never:** blur suggest ranking with compliance execution without explicit supervisor approval.
+
 ---
 
 ## Move out of parking lot

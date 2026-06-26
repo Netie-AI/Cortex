@@ -165,9 +165,23 @@ export async function acknowledgeGate({ eventId, actor = "steward" }) {
   });
 }
 
-export async function fetchTaskSuggestions({ useLlm = false } = {}) {
+export async function fetchTaskSuggestions({ useLlm = false, triggerText } = {}) {
   return request("/dms/brain/suggest", {
     method: "POST",
-    body: JSON.stringify({ use_llm: useLlm }),
+    body: JSON.stringify({
+      use_llm: useLlm,
+      trigger_text: triggerText || undefined,
+    }),
+  });
+}
+
+export async function fetchSkills() {
+  return request("/dms/skills");
+}
+
+export async function deactivateSkill(skillId, actor = "demo_steward") {
+  return request(`/dms/skills/${skillId}/deactivate`, {
+    method: "POST",
+    body: JSON.stringify({ actor }),
   });
 }

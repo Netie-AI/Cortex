@@ -16,11 +16,11 @@ Netie forward-deployed AI platform. Focus: **DMS Brain** — governed warehouse/
 
 ## Gates
 - V0 PASSED 2026-06-25
-- V1, F1-hardened, F7, F2, F3-security, F4 PASS 2026-06-26
-- **F5 shipped** — Gate F5 pending (Claude)
+- V1, F1-hardened, **F7 PASS**, F2, F3-security, F4, F5, **F6 PASS** 2026-06-26
+- Phase 0 deploy — planning (`docs/dms/PHASE0_PLAN.md`)
 
 ## Tests
-`pytest -q` → 141 passed, 4 skipped
+`pytest tests/ -q` → 145 passed, 4 skipped
 
 ## Handoff files
 | Audience | File |

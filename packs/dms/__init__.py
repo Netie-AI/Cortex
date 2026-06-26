@@ -95,6 +95,13 @@ def plug_in(app: Any | None = None, *, pack: str = "dms") -> dict[str, Any]:
             registered.append("brain_routes")
         except ImportError:
             pass
+        try:
+            from CortexOS.api.skill_routes import register_skill_routes
+
+            register_skill_routes(app)
+            registered.append("skill_routes")
+        except ImportError:
+            pass
     return {
         "pack": pack,
         "version": "0.1.0",

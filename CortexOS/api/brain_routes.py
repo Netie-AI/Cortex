@@ -58,6 +58,7 @@ class ReportRequest(BaseModel):
 
 class TaskSuggestRequest(BaseModel):
     use_llm: bool = False
+    trigger_text: Optional[str] = None
 
 
 class TaskChoiceRequest(BaseModel):
@@ -72,6 +73,9 @@ class TaskChoiceRequest(BaseModel):
 class TaskOutcomeRequest(BaseModel):
     task_id: str
     outcome: str  # "success" | "partial" | "failed"
+    event_id: Optional[str] = None
+    trigger_text: Optional[str] = None
+    actor: str = "user"
 
 
 class PonytailRequest(BaseModel):
@@ -218,7 +222,7 @@ def task_suggest(req: TaskSuggestRequest):
     except Exception:
         pass
 
-    return {"suggestions": suggest(state, use_llm=req.use_llm)}
+    return {"suggestions": suggest(state, use_llm=req.use_llm, trigger_text=req.trigger_text)}
 
 
 @router.post("/suggest/choice")
@@ -259,10 +263,21 @@ def task_choice(req: TaskChoiceRequest):
 
 @router.post("/suggest/outcome")
 def task_outcome(req: TaskOutcomeRequest):
-    """Record outcome of an accepted task."""
+    """Record outcome of an accepted task; optionally capture skill on success."""
     from packs.dms.tasks.suggest import record_outcome
+
     record_outcome(req.task_id, req.outcome)
-    return {"ok": True}
+    captured = None
+    if req.event_id and req.trigger_text:
+        from packs.dms.skills.capture import capture_from_event
+
+        captured = capture_from_event(
+            req.event_id,
+            trigger_text=req.trigger_text,
+            outcome=req.outcome,
+            actor=req.actor,
+        )
+    return {"ok": True, "captured": captured}
 
 
 @router.post("/suggest/refresh-stats")

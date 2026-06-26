@@ -2,10 +2,28 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
-## Gate F4 — PASS 2026-06-26
+## Gate F5 — PASS 2026-06-26
 
-- Supervisor verified: F4 task suggest, Ponytail, Brain generative routes, 134 tests green
-- Next: F5 compliance gate (see section below when shipped)
+- Supervisor verified: deterministic compliance gate, PII-before-classify, 141 tests green
+- Next: F6 skill capture (shipped below)
+
+## Gate F6 — PASS 2026-06-26
+
+- Supervisor verified: opt-in capture, gate-pass-only, ledger auditable, suggest boost deterministic, steward deactivate
+- Invariant preserved: skills → suggest ranking; YAML rules → gate execution
+- Next: Phase 0 deploy planning
+
+## F6 — Skill capture (consented, opt-in) — 2026-06-26
+
+- **Capture:** `packs/dms/skills/capture.py` — `capture_from_event()` after gate pass + outcome success only
+- **Embed:** `packs/dms/skills/embed.py` — deterministic T0 local vectors (no BIG_API)
+- **Migration:** `packs/dms/sql/006_skills_v0.sql`
+- **Suggest boost:** `packs/dms/tasks/suggest.py` — `w4*skill_match` via active skills
+- **API:** `CortexOS/api/skill_routes.py` — list, deactivate, capture-status; outcome hook in `brain_routes.py`
+- **Config:** `DMS_SKILL_CAPTURE_ENABLED` default OFF (opt-in required)
+- **UI:** `demo/dms-ui/app/skills/page.jsx` — steward list + deactivate + recording banner
+- **Tests:** `tests/dms/test_skill_capture.py` (4) — **145 passed, 4 skipped** total
+- **verify_all.ps1:** ASCII-safe for Windows PS5; skills import + default-OFF governance check
 
 ## F5 — Compliance gate — 2026-06-26
 

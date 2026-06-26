@@ -1,50 +1,33 @@
 # CLAUDE_HANDOFF — Supervisor / Gate Session
-**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-06-26T01:26:08+00:00
+**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate.
 **Paste this entire file into a new Claude chat.**
 
 ---
 
 ## Your role
-You are the **external supervisor**. You do NOT implement code. Verify gate packets and return PASS/FAIL.
+External supervisor. Verify gate packets; return PASS/FAIL. No code implementation.
 
-## Current gate
+## Current state
 | Field | Value |
 |---|---|
-| Last gates PASS | V0, V1, F1-hardened, F7, F2, F3-security, F4 |
-| Gate pending | **F5** — compliance gate on tasks |
-| Next build after PASS | **F6** skill capture (consented, opt-in) |
+| F1–F6 + Ponytail + Brain | **All PASS** |
+| F7 core | **PASS** (SOPS + rate limit = pre-pilot debt) |
+| Active | **Phase 0 deploy planning** |
 
-## Shipped this session (F5)
-- `packs/dms/compliance/dms_rules_v1.yaml` — 3 field rules + Python value threshold
-- `packs/dms/tasks/gate.py` — `check_task()`, `ComplianceVerdict`, ledger events
-- `packs/dms/tasks/extract.py` — T2 extract only; rules decide verdict
-- `packs/dms/sql/005_task_events_v0.sql`
-- `CortexOS/api/task_routes.py` — `/dms/tasks/gate/check`, `/choose`, `/gate/acknowledge`
-- PII-before-classify fix in `packs/dms/classify/intent.py`
-- UI: chat verdict banner + brain gate inline; `demo/dms-ui/lib/api.js` restored
+## Phase 0 scope (`docs/dms/PHASE0_PLAN.md`)
+- `run_demo.ps1` green without manual env prep
+- `verify_all.ps1` 19/19 on clean machine (demo running)
+- Postgres DSN wired (`DMS_LEDGER_DSN`, ops migrations)
+- docker-compose + Caddy (TLS)
 
 ## Test snapshot
-Run locally: `pytest -q` — **141 passed, 4 skipped**
+`pytest tests/ -q` → **145 passed, 4 skipped**
 
-## Gate F5 checklist (verify now)
-- [ ] test_missing_field_blocks
-- [ ] test_pass_marks_executable
-- [ ] test_value_threshold_requires_human
-- [ ] test_verdict_deterministic (100× loop)
-- [ ] test_llm_never_decides_verdict
-- [ ] test_pii_redacted_before_classify
-- [ ] Full suite green
-- [ ] Manual UI verdict colors
+## Architecture doc
+`ARCHITECTURE.md` synced — F3–F6 marked Shipped | F6 PASS.
 
-## Output format (mandatory)
-```markdown
-## Gate: F5
-**Verdict:** PASS | FAIL
-### Checklist
-- [x] item — evidence
-### Next dispatch for Cursor
-One paragraph.
-```
+## Invariant (do not blur)
+F6 skills feed suggest only. F5 YAML rules govern execution. P14 in PARKING_LOT if ever proposed.
 
-## Anti-scope reminder
-No ontology, no engine rewrite, no F6 until Gate F5 PASS.
+## Next builder dispatch (after P0 plan approval)
+Ship **P0.1** — `demo/env.example` + run_demo env bootstrap.

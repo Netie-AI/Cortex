@@ -1,5 +1,5 @@
 # STATUS.md
-**Last updated:** 2026-06-26 | **Gate:** F5 shipped → **Gate F5 pending (Claude)**
+**Last updated:** 2026-06-26 | **Gate:** F6 PASS → **Phase 0 deploy planning**
 **Rule:** Update after every gate. New Claude/Cursor sessions read this first.
 
 ---
@@ -8,25 +8,25 @@
 
 | Layer | Status | Gate |
 |---|---|---|
-| F1–F4, Ponytail, Brain | Shipped | PASS |
-| **F5 compliance gate** | **Shipped** | Gate F5 pending |
-| F6 skill capture | Planned | After Gate F5 |
-| Phase 0 deploy | Planned | Parallel-plan only |
+| F1–F6, Ponytail, Brain | Shipped | PASS |
+| F7 core (PII/crypto/RLS SQL) | Shipped | F7 PASS — SOPS + rate limit debt |
+| **Phase 0 deploy** | **Planning** | Gate P0 pending |
+| V2/V3 vision | Planned | After pilot |
 
 ## Test baseline
 ```
-pytest -q → 141 passed, 4 skipped
+pytest tests/ -q → 145 passed, 4 skipped
 ```
 
-## Active feature
-**Gate F5** — paste `CLAUDE_HANDOFF.md` + `docs/dms/GATE_F5_PACKET.md` to Claude.
+## Active work
+**Phase 0 deploy planning** — see `docs/dms/PHASE0_PLAN.md`  
+**Doc sync:** `ARCHITECTURE.md` updated (F3–F6 Shipped | F6 PASS)
 
 ## Next three moves
-1. Claude verifies Gate F5
-2. After PASS → F6 skill capture
-3. Phase 0 deploy planning (parallel OK)
+1. Supervisor approves Phase 0 plan scope
+2. Ship P0.1 — `demo/env.example` + run_demo self-bootstrap
+3. F7 remainder (SOPS, rate limit) — parallel pre-pilot track
 
 ## Handoff
 - **Claude:** `CLAUDE_HANDOFF.md`
-- **Spec:** `docs/dms/F5_PLAN.md`, `docs/dms/GATE_F5_PACKET.md`
-
+- **Spec:** `docs/dms/PHASE0_PLAN.md`

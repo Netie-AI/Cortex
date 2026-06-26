@@ -36,13 +36,16 @@ DATA       DuckDB (analytics demo) | SQLite ops (V0 ledger+warehouse) | Postgres
 ### DMS pack
 | Feature | State | Gate |
 |---|---|---|
-| F1 ledger (SQLite + Postgres DSN) | Shipped | F1-hardened pending |
+| F1 ledger (SQLite + Postgres DSN) | Shipped | F1-hardened PASS |
 | F7 EXIF strip | Shipped | V0 |
-| F7 PII/crypto/RLS SQL | Shipped (minimal) | F7 pending |
-| V0 warehouse | Shipped | V0 |
-| V1 dimensioning | Shipped | V1 pending |
-| F2 chat foundation | Shipped | — |
-| F3–F6 loop | Planned | BUILD_PLAN.md |
+| F7 PII/crypto/RLS SQL | Shipped (minimal) | F7 PASS — SOPS + rate limit remainder |
+| V0 warehouse | Shipped | V0 PASS |
+| V1 dimensioning | Shipped | V1 PASS |
+| F2 chat foundation | Shipped | F2 PASS |
+| F3 classify (intent + PII-before-model) | Shipped | F3-security PASS |
+| F4 task suggest + Ponytail + Brain | Shipped | F4 PASS |
+| F5 compliance gate | Shipped | F5 PASS |
+| F6 skill capture (opt-in) | Shipped | F6 PASS |
 | V2/V3 vision | Planned | VISION_GOVERNANCE.md |
 
 ### Demo
@@ -58,11 +61,11 @@ DATA       DuckDB (analytics demo) | SQLite ops (V0 ledger+warehouse) | Postgres
 ## 3. Not built (do not demo as built)
 - Palantir ontology / full AIP lineage
 - Production WASM / microVM
-- Postgres ledger CI verification (DSN optional locally)
+- Postgres ledger CI verification (DSN optional locally — wire in Phase 0)
 - Live Qdrant RAG in demo
-- F3–F6 classify/task/skill loop
 - V2/V3 vision movement
 - respond.io-style messaging endpoint
+- Phase 0 production deploy (docker-compose + Caddy + TLS) — **planned, see `docs/dms/PHASE0_PLAN.md`**
 
 ---
 
@@ -84,7 +87,7 @@ POST /dms/query                     → sqlglot → DuckDB
 |---|---|---|
 | API | FastAPI + uvicorn | Shipped |
 | Analytics | DuckDB + sqlglot | Shipped |
-| Ops DB | SQLite (demo) → Postgres | Partial |
+| Ops DB | SQLite (demo) → Postgres | Partial — Phase 0 wires DSN |
 | Frontend | Next.js 14 | Shipped |
 | QR / photos | qrcode, Pillow | Shipped |
 | Vector / vision | Placeholders | Planned |

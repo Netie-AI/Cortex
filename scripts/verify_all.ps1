@@ -17,27 +17,27 @@ function Check($label, $block) {
     try {
         $result = & $block
         if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
-        Write-Host "  ✓ $label" -ForegroundColor Green
+        Write-Host "  OK $label" -ForegroundColor Green
     } catch {
-        Write-Host "  ✗ $label — $_" -ForegroundColor Red
+        Write-Host "  FAIL $label - $_" -ForegroundColor Red
         $script:errors++
     }
 }
 
-Write-Host "`n═══ CortexOS / DMS Brain — Full Verification ═══" -ForegroundColor Cyan
+Write-Host "`n=== CortexOS / DMS Brain - Full Verification ===" -ForegroundColor Cyan
 Write-Host "  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
 
-# ── Environment ───────────────────────────────────────────────────────────────
+# Environment
 Write-Host "`n[1] Environment" -ForegroundColor Yellow
 Check "Python 3.10+" { python --version }
 Check "pip available" { pip --version }
 Check "node available" { node --version }
 
-# ── Package install ───────────────────────────────────────────────────────────
+# Package install
 Write-Host "`n[2] Package install" -ForegroundColor Yellow
 Check "pip install -e (dev+api+dms)" { pip install -e ".[dev,api,dms]" -q }
 
-# ── Core imports ──────────────────────────────────────────────────────────────
+# Core imports
 Write-Host "`n[3] Import smoke" -ForegroundColor Yellow
 Check "packs.dms plug_in" {
     python -c "from packs.dms import plug_in, secure_message, classify_message; print('ok')"
@@ -51,20 +51,23 @@ Check "packs.dms.tasks.suggest" {
 Check "packs.dms.generative.brain" {
     python -c "from packs.dms.generative.brain import run; print('ok')"
 }
+Check "packs.dms.skills.capture" {
+    python -c "from packs.dms.skills.capture import is_capture_enabled, capture_from_event; print('ok')"
+}
 Check "packs.dms.security.pii" {
     python -c "from packs.dms.security.pii import redact_for_prompt; print('ok')"
 }
 
-# ── pytest ────────────────────────────────────────────────────────────────────
+# pytest
 Write-Host "`n[4] Test suite" -ForegroundColor Yellow
 Check "pytest -q" {
     $env:SQLITE_DB_PATH = ":memory:"
     $env:DB_DRIVER = "sqlite"
     $env:ANTHROPIC_API_KEY = ""
-    pytest -q --tb=short
+    python -m pytest tests/ -q --tb=short
 }
 
-# ── API health ────────────────────────────────────────────────────────────────
+# API health
 Write-Host "`n[5] API health (requires running API)" -ForegroundColor Yellow
 $apiAlive = $false
 try {
@@ -76,21 +79,23 @@ try {
         Invoke-RestMethod "http://localhost:8000/dms/brain/suggest" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 5
     }
 } catch {
-    Write-Host "  ~ API not running (skip live checks — start with run_demo.ps1)" -ForegroundColor Gray
+    Write-Host "  ~ API not running (skip live checks - start with run_demo.ps1)" -ForegroundColor Gray
 }
 
-# ── UI health ─────────────────────────────────────────────────────────────────
+# UI health
 Write-Host "`n[6] UI health (requires running UI)" -ForegroundColor Yellow
 try {
     $resp = Invoke-WebRequest "http://localhost:3000" -TimeoutSec 3 -ErrorAction Stop
     Check "GET :3000/ 200" { if ($resp.StatusCode -eq 200) { "ok" } else { throw } }
     $resp2 = Invoke-WebRequest "http://localhost:3000/brain" -TimeoutSec 3 -ErrorAction Stop
     Check "GET :3000/brain 200" { if ($resp2.StatusCode -eq 200) { "ok" } else { throw } }
+    $resp3 = Invoke-WebRequest "http://localhost:3000/skills" -TimeoutSec 3 -ErrorAction Stop
+    Check "GET :3000/skills 200" { if ($resp3.StatusCode -eq 200) { "ok" } else { throw } }
 } catch {
-    Write-Host "  ~ UI not running (skip — start with run_demo.ps1)" -ForegroundColor Gray
+    Write-Host "  ~ UI not running (skip - start with run_demo.ps1)" -ForegroundColor Gray
 }
 
-# ── Security checks ───────────────────────────────────────────────────────────
+# Security checks
 Write-Host "`n[7] Security sanity" -ForegroundColor Yellow
 Check "PII redact (NRIC)" {
     python -c "
@@ -125,7 +130,7 @@ print('ok')
 "
 }
 
-# ── Governance checks ─────────────────────────────────────────────────────────
+# Governance checks
 Write-Host "`n[8] Governance sanity" -ForegroundColor Yellow
 Check "All brain intents known" {
     python -c "
@@ -147,6 +152,15 @@ assert result['requires_confirm'] is True, 'email must require_confirm'
 print('ok')
 "
 }
+Check "Skill capture default OFF" {
+    python -c "
+import os
+os.environ.pop('DMS_SKILL_CAPTURE_ENABLED', None)
+from packs.dms.skills.capture import is_capture_enabled
+assert is_capture_enabled() is False
+print('ok')
+"
+}
 Check "Chart never requires_confirm" {
     python -c "
 from unittest.mock import patch
@@ -160,14 +174,14 @@ print('ok')
 "
 }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# Summary
 Write-Host ""
-Write-Host "═══ Result: $($checks - $errors)/$checks checks passed ═══" -ForegroundColor $(if ($errors -eq 0) { "Green" } else { "Red" })
+Write-Host "=== Result: $($checks - $errors)/$checks checks passed ===" -ForegroundColor $(if ($errors -eq 0) { "Green" } else { "Red" })
 
 if ($errors -eq 0) {
-    Write-Host "`n  ✓ Everything looks good. Safe to push." -ForegroundColor Green
+    Write-Host "`n  OK Everything looks good. Safe to push." -ForegroundColor Green
     Write-Host "    Run: .\scripts\git_push_all.ps1 -Message 'your message'" -ForegroundColor Gray
 } else {
-    Write-Host "`n  ✗ $errors check(s) failed. Fix before pushing." -ForegroundColor Red
+    Write-Host "`n  FAIL $errors check(s) failed. Fix before pushing." -ForegroundColor Red
     exit 1
 }

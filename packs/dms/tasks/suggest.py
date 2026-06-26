@@ -13,6 +13,7 @@ from typing import Optional
 from packs.dms.audit.ledger import default_db_path
 
 BIG_API_PLACEHOLDER = os.getenv("ANTHROPIC_API_KEY", "")
+SKILL_BOOST_WEIGHT = 0.25
 
 
 def _sqlite_path() -> str:
@@ -109,6 +110,52 @@ def _score_by_history(candidates: list[dict], history: list[dict]) -> list[dict]
     return sorted(candidates, key=lambda x: (-x["confidence"], x["priority"] == "critical"))
 
 
+def _score_by_skills(
+    candidates: list[dict],
+    trigger_text: str | None,
+    skills: list[dict],
+) -> list[dict]:
+    if not trigger_text or not skills:
+        return candidates
+
+    from packs.dms.skills.capture import SKILL_MATCH_THRESHOLD
+    from packs.dms.skills.embed import cosine_similarity, local_embed
+
+    query_vec = local_embed(trigger_text)
+    best_by_task: dict[str, float] = {}
+    for skill in skills:
+        try:
+            skill_vec = json.loads(skill.get("embedding") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        score = cosine_similarity(query_vec, skill_vec)
+        if score < SKILL_MATCH_THRESHOLD:
+            continue
+        tid = skill["task_id"]
+        best_by_task[tid] = max(best_by_task.get(tid, 0.0), score)
+
+    for c in candidates:
+        match = best_by_task.get(c["task_id"])
+        if match is None:
+            c["skill_match"] = None
+            continue
+        boosted = min(1.0, (1.0 - SKILL_BOOST_WEIGHT) * c["confidence"] + SKILL_BOOST_WEIGHT * match)
+        c["confidence"] = round(boosted, 4)
+        c["skill_match"] = round(match, 3)
+        c["source"] = f"{c.get('source', 'rule')}+skill"
+
+    return sorted(candidates, key=lambda x: (-x["confidence"], x["priority"] == "critical"))
+
+
+def _load_active_skills() -> list[dict]:
+    try:
+        from packs.dms.skills.capture import load_active_skills
+
+        return load_active_skills()
+    except Exception:
+        return []
+
+
 def _llm_rank_and_explain(candidates: list[dict], context: str) -> list[dict]:
     if not BIG_API_PLACEHOLDER or len(candidates) <= 3:
         return candidates
@@ -162,13 +209,15 @@ def _load_history(limit: int = 200) -> list[dict]:
         return []
 
 
-def suggest(state: dict, use_llm: bool = False) -> list[dict]:
+def suggest(state: dict, use_llm: bool = False, trigger_text: str | None = None) -> list[dict]:
     candidates = _rule_candidates(state)
     if not candidates:
         return []
 
     history = _load_history()
     candidates = _score_by_history(candidates, history)
+    skills = _load_active_skills()
+    candidates = _score_by_skills(candidates, trigger_text, skills)
 
     if use_llm:
         context_summary = (
