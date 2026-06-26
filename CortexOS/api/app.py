@@ -43,8 +43,14 @@ def create_app() -> Any:
 
     if pack.name == "dms":
         from netie.api.dms_query import register_dms_routes
+        from netie.api.chat_routes import register_chat_routes
+        from netie.api.brain_routes import register_brain_routes
+        from netie.api.task_routes import register_task_routes
 
         register_dms_routes(app)
+        register_chat_routes(app)
+        register_brain_routes(app)
+        register_task_routes(app)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

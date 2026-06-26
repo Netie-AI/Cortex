@@ -21,6 +21,7 @@ def master_key_env(monkeypatch):
 def test_pii_redacted_before_prompt(monkeypatch):
     """Critical: raw PII must not reach JudgmentModel via the NL query choke-point."""
     from CortexOS.dms.query_service import answer_question
+    from CortexOS.dms.sql_guardrail import AuditEntry, GuardrailResult
     from CortexOS.routing.judgment_model import JudgmentModel
 
     captured: list[str] = []
@@ -30,7 +31,18 @@ def test_pii_redacted_before_prompt(monkeypatch):
         captured.append(req.content)
         return original(self, req)
 
+    def fake_guard(sql, semantic, con):
+        entry = AuditEntry(
+            timestamp="2026-01-01T00:00:00+00:00",
+            original_sql=sql,
+            safe_sql=sql,
+            violations=[],
+            passed=True,
+        )
+        return GuardrailResult(passed=True, safe_sql=sql), [], entry
+
     monkeypatch.setattr(JudgmentModel, "decide", spy_decide)
+    monkeypatch.setattr("CortexOS.dms.query_service.guard_and_execute", fake_guard)
 
     raw_nric = "S1234567A"
     raw_phone = "91234567"

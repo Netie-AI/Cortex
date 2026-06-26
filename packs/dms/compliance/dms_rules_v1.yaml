@@ -1,0 +1,26 @@
+rules:
+  - id: quote_total_present
+    when_doc_type: dms_task
+    when_matches:
+      task_action: send_quote
+    require_key: quote_total_myr
+    severity: error
+    description: "Quote total (MYR) must be present before sending a quote."
+
+  - id: pickup_address_required
+    when_doc_type: dms_task
+    when_matches:
+      task_action: schedule_pickup
+    require_key: pickup_address
+    severity: error
+    description: "Pickup address is required for schedule_pickup tasks."
+
+  - id: no_outbound_unverified
+    when_doc_type: dms_task
+    when_matches:
+      task_action: send_outbound
+    unless_matches:
+      customer_verified: true
+    require_key: customer_verified
+    severity: error
+    description: "Outbound send blocked until customer identity is verified."

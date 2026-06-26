@@ -1,68 +1,50 @@
 # CLAUDE_HANDOFF — Supervisor / Gate Session
-**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-06-25T17:06:33+00:00
+**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-06-26T01:26:08+00:00
 **Paste this entire file into a new Claude chat.**
 
 ---
 
 ## Your role
-You are the **external supervisor**. You do NOT implement code. You:
-1. Verify gate packets against `docs/dms/SUPERVISOR_GATE.md`
-2. PASS or FAIL with explicit checklist
-3. Block the next feature until PASS
-4. Return a one-paragraph "next dispatch" for Cursor
+You are the **external supervisor**. You do NOT implement code. Verify gate packets and return PASS/FAIL.
 
 ## Current gate
 | Field | Value |
 |---|---|
-| Last gate PASS | V0 (2026-06-25) |
-| Gate pending | **V1** — dimensioning + free-space + no-gen-model |
-| Next build after PASS | F1 Postgres hardening → F7 security → F2 chat (F2 shipped, verify) |
+| Last gates PASS | V0, V1, F1-hardened, F7, F2, F3-security, F4 |
+| Gate pending | **F5** — compliance gate on tasks |
+| Next build after PASS | **F6** skill capture (consented, opt-in) |
 
-## Shipped since last gate (from CHANGELOG)
-- V1 dimensioning, space calc, confirm-dims API
-- F1 Postgres ledger path (SQLite default; `DMS_LEDGER_DSN` for prod)
-- F7 PII redact choke-point, AES-GCM envelope, RLS SQL
-- F2 governed chat foundation (threads, messages, ledger events)
+## Shipped this session (F5)
+- `packs/dms/compliance/dms_rules_v1.yaml` — 3 field rules + Python value threshold
+- `packs/dms/tasks/gate.py` — `check_task()`, `ComplianceVerdict`, ledger events
+- `packs/dms/tasks/extract.py` — T2 extract only; rules decide verdict
+- `packs/dms/sql/005_task_events_v0.sql`
+- `CortexOS/api/task_routes.py` — `/dms/tasks/gate/check`, `/choose`, `/gate/acknowledge`
+- PII-before-classify fix in `packs/dms/classify/intent.py`
+- UI: chat verdict banner + brain gate inline; `demo/dms-ui/lib/api.js` restored
 
 ## Test snapshot
-Run locally: `pytest -q` — **86 passed, 4 skipped, 1 warning in 11.55s**
+Run locally: `pytest -q` — **141 passed, 4 skipped**
 
-## Gate V1 checklist (verify now)
-- [ ] `pytest tests/dms/test_v1_dimension.py -q` green
-- [ ] Free-space math: occupied + free = bin volume within tolerance
-- [ ] No generation model in measurement path (placeholder only)
-- [ ] Ledger events for `item.dimensioned`
+## Gate F5 checklist (verify now)
+- [ ] test_missing_field_blocks
+- [ ] test_pass_marks_executable
+- [ ] test_value_threshold_requires_human
+- [ ] test_verdict_deterministic (100× loop)
+- [ ] test_llm_never_decides_verdict
+- [ ] test_pii_redacted_before_classify
 - [ ] Full suite green
-
-## Gate F1-hardened checklist (after V1 PASS)
-- [ ] `tests/dms/test_f1_ledger.py` — chain, tamper, 20-thread concurrent
-- [ ] Postgres tests pass when `DMS_LEDGER_DSN` set (optional)
-- [ ] Append-only trigger in `002_ledger_postgres.sql`
-
-## Gate F7 checklist
-- [ ] `test_pii_redacted_before_prompt` passes (critical)
-- [ ] encrypt/decrypt roundtrip
-- [ ] RLS SQL exists in `003_rls_policies.sql`
+- [ ] Manual UI verdict colors
 
 ## Output format (mandatory)
 ```markdown
-## Gate: [ID]
+## Gate: F5
 **Verdict:** PASS | FAIL
-
 ### Checklist
 - [x] item — evidence
-
-### Blockers (if FAIL)
-- ...
-
 ### Next dispatch for Cursor
-One paragraph: exact feature, files, acceptance tests.
+One paragraph.
 ```
 
-## Uncertain / needs human
-- Postgres ledger not CI-tested without DMS_LEDGER_DSN
-- SOPS secrets + rate limiting deferred (documented debt)
-- Ontology layer (P1) not started — condition not met
-
-## Do not build
-Anything in `PARKING_LOT.md` unless condition met + explicit gate approval.
+## Anti-scope reminder
+No ontology, no engine rewrite, no F6 until Gate F5 PASS.

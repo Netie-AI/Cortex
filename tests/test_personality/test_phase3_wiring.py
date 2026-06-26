@@ -54,4 +54,3 @@ def test_weekly_summarizer_registers_on_scheduler():
     sch = AsyncIOScheduler()
     register_weekly_summarizer(sch)
     assert len(sch.get_jobs()) >= 1
-    sch.shutdown(wait=False)

@@ -1337,3 +1337,9 @@ table {
   resize: vertical;
   min-height: 72px;
 }
+
+.cx-gate-verdict {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid;
+}

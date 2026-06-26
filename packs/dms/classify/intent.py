@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from packs.dms.security.prompt_harness import secure_for_prompt
+from packs.dms.security.prompt_harness import HarnessResult, secure_for_prompt
 
 # Warehouse/logistics intent set (BUILD_PLAN F3)
 WAREHOUSE_INTENTS: tuple[str, ...] = (
@@ -60,20 +60,19 @@ def _psychological_state(sentiment: float, intent: str, scam_risk: float) -> str
     return "neutral"
 
 
-def classify_heuristic(text: str) -> ClassifyResult:
-    harness = secure_for_prompt(text, block_injection=True, block_scam=False)
-    if harness.blocked:
-        return ClassifyResult(
-            intent="other",
-            sentiment=0.0,
-            confidence=1.0,
-            blocked=True,
-            block_reason=harness.block_reason,
-            language_mix={"en": 1.0},
-            psychological_state="suspicious",
-        )
+def _blocked_result(block_reason: str | None) -> ClassifyResult:
+    return ClassifyResult(
+        intent="other",
+        sentiment=0.0,
+        confidence=1.0,
+        blocked=True,
+        block_reason=block_reason,
+        language_mix={"en": 1.0},
+        psychological_state="suspicious",
+    )
 
-    safe = harness.safe_text
+
+def _classify_safe_text(safe: str, harness: HarnessResult) -> ClassifyResult:
     best_intent = "other"
     best_score = 0.45
     for name, pattern, base in _INTENT_RULES:
@@ -102,11 +101,23 @@ def classify_heuristic(text: str) -> ClassifyResult:
     )
 
 
+def classify_heuristic(text: str) -> ClassifyResult:
+    harness = secure_for_prompt(text, block_injection=True, block_scam=False)
+    if harness.blocked:
+        return _blocked_result(harness.block_reason)
+    return _classify_safe_text(harness.safe_text, harness)
+
+
 def classify(text: str) -> ClassifyResult:
-    """Public API — tries optional local model, falls back to heuristic."""
+    """Public API — security harness first, then optional local model or heuristic."""
+    harness = secure_for_prompt(text, block_injection=True, block_scam=False)
+    if harness.blocked:
+        return _blocked_result(harness.block_reason)
+
+    safe = harness.safe_text
     try:
         from CortexOS.nlp.local_inference import classify_with_model
 
-        return classify_with_model(text)
+        return classify_with_model(safe)
     except Exception:
-        return classify_heuristic(text)
+        return _classify_safe_text(safe, harness)

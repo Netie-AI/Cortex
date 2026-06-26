@@ -1,6 +1,6 @@
 # STATUS.md
-**Last updated:** 2026-06-26 | **Gate:** V1/F1/F7/F2/F3-security **PASS**
-**Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
+**Last updated:** 2026-06-26 | **Gate:** F5 shipped → **Gate F5 pending (Claude)**
+**Rule:** Update after every gate. New Claude/Cursor sessions read this first.
 
 ---
 
@@ -8,36 +8,25 @@
 
 | Layer | Status | Gate |
 |---|---|---|
-| F1 ledger (SQLite + Postgres DSN) | Shipped | PASS |
-| F7 PII/crypto/RLS + prompt harness | Shipped | PASS |
-| F2 chat + F3 classify | Shipped | PASS |
-| Security adversarial corpus (15 cases) | Shipped | PASS |
-| WASM fuel sandbox | Shipped | PASS |
-| Persona routing (psychological state) | Shipped | — |
-| Local GPU inference (Qwen opt-in) | Script ready | Manual |
-| F4 task suggest | **Next** | After F3 verify |
-| Phase 0 deploy | Planned | Parallel OK |
-| Ontology (P1) | Parked | Condition not met |
+| F1–F4, Ponytail, Brain | Shipped | PASS |
+| **F5 compliance gate** | **Shipped** | Gate F5 pending |
+| F6 skill capture | Planned | After Gate F5 |
+| Phase 0 deploy | Planned | Parallel-plan only |
 
 ## Test baseline
 ```
-pytest -q → 103 passed, 4 skipped
+pytest -q → 141 passed, 4 skipped
 ```
 
 ## Active feature
-**F4 task suggest + batch learning** — suggestion engine over classified message history.
+**Gate F5** — paste `CLAUDE_HANDOFF.md` + `docs/dms/GATE_F5_PACKET.md` to Claude.
 
 ## Next three moves
-1. Ship F4 — task suggest from intent + history
-2. Run `scripts/setup_gpu_env.ps1` + optional Qwen fine-tune on warehouse corpus
-3. Phase 0 — docker-compose + Caddy for dms.netie.ai
-
-## GPU setup (RTX 4070)
-```powershell
-.\scripts\setup_gpu_env.ps1
-$env:CORTEX_LOCAL_INFERENCE = "1"
-```
+1. Claude verifies Gate F5
+2. After PASS → F6 skill capture
+3. Phase 0 deploy planning (parallel OK)
 
 ## Handoff
-- Claude: `CLAUDE_HANDOFF.md` or `python scripts/handoff.py --claude --write`
-- Cursor: `CURSOR_HANDOFF.md`
+- **Claude:** `CLAUDE_HANDOFF.md`
+- **Spec:** `docs/dms/F5_PLAN.md`, `docs/dms/GATE_F5_PACKET.md`
+

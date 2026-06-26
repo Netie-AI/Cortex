@@ -2,6 +2,33 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Gate F4 — PASS 2026-06-26
+
+- Supervisor verified: F4 task suggest, Ponytail, Brain generative routes, 134 tests green
+- Next: F5 compliance gate (see section below when shipped)
+
+## F5 — Compliance gate — 2026-06-26
+
+- **Rules:** `packs/dms/compliance/dms_rules_v1.yaml` (quote, pickup, outbound verify)
+- **Gate:** `packs/dms/tasks/gate.py` — `check_task()`, value threshold Python post-rule
+- **Extract:** `packs/dms/tasks/extract.py` — LLM/heuristic extract only; rules decide
+- **Migration:** `packs/dms/sql/005_task_events_v0.sql`
+- **API:** `CortexOS/api/task_routes.py` — gate/check, choose, acknowledge
+- **PII fix:** `classify()` runs `secure_for_prompt()` before all paths (Gate F4 conditional)
+- **UI:** chat verdict banner, brain gate inline; `demo/dms-ui/lib/api.js` restored
+- **Tests:** `tests/dms/test_gate.py` (6) — **141 passed, 4 skipped** total
+
+## F4 + Ponytail + Brain — 2026-06-26
+
+- **F4 tasks:** `packs/dms/tasks/suggest.py`, `learn.py` — rule T0 + history T1 + optional LLM T2 rank
+- **Ponytail:** `CortexOS/ponytail/middleware.py` — prefetch, compress, route, cache, security gate, ledger
+- **Brain:** `packs/dms/generative/brain.py` — chart, CSV, email, WhatsApp, analysis, CEO report
+- **API:** `CortexOS/api/brain_routes.py` — `/dms/brain/*` (12 routes)
+- **UI:** `demo/dms-ui/app/brain/page.jsx` + Sidebar BRAIN nav
+- **Scripts:** `scripts/verify_all.ps1`, `scripts/git_push_all.ps1`
+- **Tests:** F4 (12), Ponytail (9), generative (12) — **134 passed, 4 skipped** total
+- **CI:** import smoke for F4/Ponytail/Brain in `.github/workflows/test.yml`
+
 ## F3 + Security wave — 2026-06-26
 
 - **Classify:** `packs/dms/classify/intent.py` — warehouse intents, sentiment, psychological_state

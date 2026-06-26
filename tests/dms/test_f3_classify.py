@@ -46,3 +46,19 @@ def test_classify_public_api() -> None:
     r = classify("Hello, thanks for the quick delivery")
     assert r.intent in ("chit_chat", "other", "order_status")
     assert not r.blocked
+
+
+def test_classify_redacts_pii_before_matching() -> None:
+    from unittest.mock import patch
+
+    captured: list[str] = []
+
+    def fake_model(text: str):
+        captured.append(text)
+        raise RuntimeError("use heuristic")
+
+    with patch("CortexOS.nlp.local_inference.classify_with_model", fake_model):
+        r = classify("Quote for customer 900101-14-5678 please")
+    assert not r.blocked
+    if captured:
+        assert "900101-14-5678" not in captured[0]

@@ -35,7 +35,14 @@ jobs:
 
       - name: Verify import surface
         run: |
-          python -c "import CortexOS; import packs.dms; from packs.dms import plug_in; print(plug_in())"
+          python -c "
+          from packs.dms import plug_in, secure_message, classify_message
+          from CortexOS.ponytail.middleware import ponytail_process, route_tier
+          from packs.dms.tasks.suggest import suggest
+          from packs.dms.tasks.gate import check_task, evaluate_template
+          from packs.dms.generative.brain import run as brain_run
+          print('All imports OK')
+          "
 
       - name: Run tests
         run: python -m pytest tests/ -q --tb=short
