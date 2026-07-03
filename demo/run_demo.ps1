@@ -33,6 +33,24 @@ function Write-Ok($msg) { Write-Host "OK  $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "WARN $msg" -ForegroundColor Yellow }
 function Write-Err($msg) { Write-Host "ERROR $msg" -ForegroundColor Red }
 
+function Import-EnvLocal {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    Get-Content $Path -Encoding UTF8 | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#")) { return }
+        $eq = $line.IndexOf("=")
+        if ($eq -lt 1) { return }
+        $key = $line.Substring(0, $eq).Trim()
+        $val = $line.Substring($eq + 1).Trim()
+        if (($val.StartsWith('"') -and $val.EndsWith('"')) -or ($val.StartsWith("'") -and $val.EndsWith("'"))) {
+            $val = $val.Substring(1, $val.Length - 2)
+        }
+        if ($key) { Set-Item -Path "env:$key" -Value $val }
+    }
+    return $true
+}
+
 function Stop-PortListener {
     param([int]$Port)
     $lines = netstat -ano | Select-String ":$Port\s"
@@ -61,6 +79,14 @@ function Wait-HttpOk {
 
 Set-Location $Root
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+$envFile = Join-Path $Root "env.local"
+if (Import-EnvLocal -Path $envFile) {
+    Write-Ok "Loaded env.local"
+} else {
+    Write-Warn "No env.local — LLM features use mock mode. Copy env.local.example to env.local"
+}
+
 $env:PYTHONPATH = $Root
 $env:PACK = "dms"
 $env:DMS_API_KEYS = "viewer:dms-demo-viewer-key;steward:dms-demo-steward-key;admin:dms-demo-admin-key"

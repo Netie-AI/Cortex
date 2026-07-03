@@ -33,6 +33,7 @@ MANIFEST
 ~/.netie/
 .netie/
 .env
+env.local
 key.md
 utputFormat
 myenv/

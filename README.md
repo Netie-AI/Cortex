@@ -18,8 +18,10 @@ python scripts/handoff.py --claude   # supervisor
 
 ## Quick start (demo now)
 
+**New laptop?** Full guide: [docs/SETUP_NEW_MACHINE.md](docs/SETUP_NEW_MACHINE.md)
+
 ```powershell
-pip install -e ".[dev,api,dms]"
+# 1. Clone, copy env.local to repo root, then:
 .\demo\run_demo.ps1          # first run (~2 min data build)
 .\demo\run_demo.ps1 -Fast    # restart in ~30s
 ```

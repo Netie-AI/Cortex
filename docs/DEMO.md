@@ -50,6 +50,7 @@ Get-Content demo\logs\ui.err.log -Tail 30
 
 - Python 3.10+
 - Node.js 18+ (`npm`)
+- `env.local` in repo root (copy from your main machine — see [SETUP_NEW_MACHINE.md](SETUP_NEW_MACHINE.md))
 - `pip install -e ".[dev,api,dms]"` (run_demo does this automatically)
 
 ## Stop demo
