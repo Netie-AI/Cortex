@@ -16,16 +16,20 @@ python scripts/handoff.py --cursor   # builder
 python scripts/handoff.py --claude   # supervisor
 ```
 
-## Quick start
+## Quick start (demo now)
 
 ```powershell
 pip install -e ".[dev,api,dms]"
-.\demo\run_demo.ps1
+.\demo\run_demo.ps1          # first run (~2 min data build)
+.\demo\run_demo.ps1 -Fast    # restart in ~30s
 ```
 
 - UI: http://localhost:3000
 - Warehouse: http://localhost:3000/warehouse
+- Chat: http://localhost:3000/chat
 - API: http://localhost:8000/health
+
+**Show script:** [docs/DEMO.md](docs/DEMO.md)
 
 ## Tests
 

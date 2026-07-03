@@ -1,4 +1,7 @@
 # DMS Brain demo — one-command startup (Windows)
+param(
+    [switch]$Fast
+)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $LogDir = Join-Path $Root "demo\logs"
@@ -86,19 +89,27 @@ if (-not (Test-PythonImports -PythonExe $Python -RepoRoot $Root)) {
 }
 Write-Ok "Python ready: $Python"
 
-Write-Step "Generating / cleaning warehouse sample..."
-& $Python -m CortexOS.dms.generate_sample
-if ($LASTEXITCODE -ne 0) { Write-Err "generate_sample failed"; exit 1 }
-& $Python -m CortexOS.dms.cleaner
-if ($LASTEXITCODE -ne 0) { Write-Err "cleaner failed"; exit 1 }
-& $Python -m CortexOS.dms.warehouse_db
-if ($LASTEXITCODE -ne 0) { Write-Err "warehouse_db failed"; exit 1 }
-& $Python -m CortexOS.dms.seed_demo
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "seed_demo failed - warehouse bins missing"
-    exit 1
+$DuckDb = Join-Path $Root "data\dms_demo.duckdb"
+if ($Fast -and (Test-Path $DuckDb)) {
+    Write-Step "Fast mode: skipping dataset regen (existing DuckDB)"
+    & $Python -m CortexOS.dms.seed_demo
+    if ($LASTEXITCODE -ne 0) { Write-Err "seed_demo failed"; exit 1 }
+    Write-Ok "Warehouse locations verified"
+} else {
+    Write-Step "Generating / cleaning warehouse sample..."
+    & $Python -m CortexOS.dms.generate_sample
+    if ($LASTEXITCODE -ne 0) { Write-Err "generate_sample failed"; exit 1 }
+    & $Python -m CortexOS.dms.cleaner
+    if ($LASTEXITCODE -ne 0) { Write-Err "cleaner failed"; exit 1 }
+    & $Python -m CortexOS.dms.warehouse_db
+    if ($LASTEXITCODE -ne 0) { Write-Err "warehouse_db failed"; exit 1 }
+    & $Python -m CortexOS.dms.seed_demo
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "seed_demo failed - warehouse bins missing"
+        exit 1
+    }
+    Write-Ok "DuckDB + warehouse locations seeded"
 }
-Write-Ok "DuckDB + warehouse locations seeded"
 
 Stop-PortListener -Port 8000
 Stop-PortListener -Port 3000
@@ -154,7 +165,9 @@ Write-Host ""
 Write-Host "Demo running:" -ForegroundColor Green
 Write-Host "  UI:        http://localhost:3000"
 Write-Host "  Warehouse: http://localhost:3000/warehouse"
+Write-Host "  Chat:      http://localhost:3000/chat"
 Write-Host "  API:       http://localhost:8000/health"
+Write-Host "  Show guide: docs/DEMO.md"
 Write-Host "  Logs:      demo/logs/api.*.log, demo/logs/ui.*.log"
 Write-Host ""
 Write-Host "Diagnostics: scripts/diagnose_demo.ps1"
