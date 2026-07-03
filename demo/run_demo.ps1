@@ -141,6 +141,12 @@ if (-not $npmCmd) { $npmCmd = "npm.cmd" }
 
 Write-Step "Starting Next.js UI on :3000..."
 Set-Location "$Root\demo\dms-ui"
+# App Router project — Next dev still scans pages/; missing dir causes 500
+$pagesDir = Join-Path (Get-Location) "pages"
+if (-not (Test-Path $pagesDir)) {
+    New-Item -ItemType Directory -Force -Path $pagesDir | Out-Null
+    New-Item -ItemType File -Force -Path (Join-Path $pagesDir ".gitkeep") | Out-Null
+}
 if (-not (Test-Path "node_modules")) {
     npm install
     if ($LASTEXITCODE -ne 0) { Write-Err "npm install failed"; exit 1 }

@@ -33,6 +33,13 @@ cd C:\Users\user\RUMA\Cortex
 
 ## If something fails
 
+**UI shows blank / 500:** Next.js dev server needs an empty `demo/dms-ui/pages/` folder (App Router quirk). Fixed in repo; or run:
+```powershell
+mkdir demo\dms-ui\pages -Force
+Remove-Item -Recurse -Force demo\dms-ui\.next -ErrorAction SilentlyContinue
+.\demo\run_demo.ps1 -Fast
+```
+
 ```powershell
 .\scripts\diagnose_demo.ps1
 Get-Content demo\logs\api.err.log -Tail 30
