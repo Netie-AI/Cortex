@@ -7,33 +7,31 @@
 Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened.
 
 ## P2 — WASM / Firecracker production hardening
-**Condition:** First enterprise client conversation.
+**Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*
 
 ## P3 — DAG token optimization + Temporal durable execution
-**Condition:** 100+ DAG runs/day from real clients.
+**Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`.)*
 
 ## P4 — respond.io-style endpoint / Closer auto-reply
-WhatsApp/email in, sentiment score, warmed delayed draft (2–5s), human approve before send. **No em dash** in generated replies. **Condition:** DMS paying partner OR explicit RUMA priority.
+WhatsApp/email in, sentiment score, warmed delayed draft (2–5s), human approve before send. **No em dash** in generated replies. **Condition:** DMS paying partner OR explicit RUMA priority. *(Research: `docs/research/respond_io_analysis.md`.)*
 
 ## P5 — Full F2–F7 if pilot asks for chat loop before we planned
-**Condition:** V0+V1 live + client confirms they want task-suggest chat next.
+**Condition:** V0+V1 live + client confirms they want task-suggest chat next. *(Note: F2–F5 now shipped in codebase; pilot confirmation still required before sales promise.)*
 
 ## P6 — SQL automation / CSV-Excel ingest pipeline
-Folder watch, schema infer, agentic cleaning (AI proposes, deterministic applies), Splink dedup, standard output format, Claude export script.
+Folder watch, schema infer, agentic cleaning (AI proposes, deterministic applies), Splink dedup, standard output format.
 **Condition:** V1 gated + pilot has dirty imports.
 **Research when building:**
 - great-expectations/great_expectations
 - dbt-labs/dbt-core
 - moj-analytical-services/splink
 - cleanlab/cleanlab
-- argilla-io/argilla
-- GitHub search "agentic data cleaning" by stars at build time
 
 ## P7 — Annotation / labeling pipeline
 YOLO / Grounding DINO / Label Studio self-hosted. **Condition:** 50+ real warehouse interactions from pilot.
 
-## P8 — Automated handoff script (beyond manual STATUS paste)
-**Condition:** Manual STATUS discipline breaks down. Until then: `python scripts/handoff.py`.
+## P8 — Automated handoff ~~(beyond manual STATUS paste)~~
+**SHIPPED 2026-06-26** — `CLAUDE_HANDOFF.md`, `CURSOR_HANDOFF.md`, `python scripts/handoff.py --write`. Keep this entry as historical; do not re-build.
 
 ## P9 — Cortex as respond.io replacement (full)
 **Condition:** DMS revenue + RUMA Closer validates sentiment draft loop.
