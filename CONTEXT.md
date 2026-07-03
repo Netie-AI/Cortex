@@ -30,10 +30,11 @@ Cortex/
 ## Gates
 - V0 PASSED 2026-06-25
 - V1, F1-hardened, F7, F2, F3-security, F4 PASS 2026-06-26
-- **F5 shipped** — Gate F5 pending (Claude supervisor)
+- **F5 PASS** 2026-07-03 — compliance gate on tasks
+- **F6 shipped** — Gate F6 pending (skill capture, opt-in)
 
 ## Tests
-`pytest -q` → **141 passed, 4 skipped**
+`pytest -q` → **145 passed, 4 skipped**
 
 ## Demo (show now)
 ```powershell

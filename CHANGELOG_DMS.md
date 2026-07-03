@@ -2,6 +2,22 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Gate F5 — PASS 2026-07-03
+
+- Supervisor verified: all 6 `test_gate.py` checklist tests by name; F3 classify PII case green
+- Local re-run: **141 passed, 4 skipped**; supervisor sandbox 133 passed (ML-dep files excluded)
+- Next: **F6** skill capture (consented, opt-in) — see BUILD_PLAN § FEATURE 6
+
+## F6 — Skill capture — 2026-07-03
+
+- **Capture:** `packs/dms/skills/capture.py` — opt-in (`DMS_SKILL_CAPTURE_ENABLED`), gate=pass + outcome=success only
+- **Schema:** `packs/dms/sql/006_dms_skills_v0.sql` — `dms_skills` + task event outcome columns
+- **Suggest boost:** `suggest(state, trigger_text=...)` — `w4*skill_match` from captured skills
+- **API:** `CortexOS/api/skill_routes.py` — list, config toggle, complete, deactivate
+- **UI:** `demo/dms-ui/app/skills/page.jsx` — steward admin view + capture on/off
+- **Ledger:** `skill.captured`, `skill.deactivated` events
+- **Tests:** `tests/dms/test_skill_capture.py` (4) — **145 passed, 4 skipped** total
+
 ## Gate F4 — PASS 2026-06-26
 
 - Supervisor verified: F4 task suggest, Ponytail, Brain generative routes, 134 tests green

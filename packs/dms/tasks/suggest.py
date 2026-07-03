@@ -162,7 +162,7 @@ def _load_history(limit: int = 200) -> list[dict]:
         return []
 
 
-def suggest(state: dict, use_llm: bool = False) -> list[dict]:
+def suggest(state: dict, use_llm: bool = False, trigger_text: str | None = None) -> list[dict]:
     candidates = _rule_candidates(state)
     if not candidates:
         return []
@@ -177,6 +177,11 @@ def suggest(state: dict, use_llm: bool = False) -> list[dict]:
             f"Recent movements: {len(state.get('recent_movements', []))}"
         )
         candidates = _llm_rank_and_explain(candidates, context_summary)
+
+    if trigger_text:
+        from packs.dms.skills.capture import boost_candidates_from_skills
+
+        candidates = boost_candidates_from_skills(candidates, trigger_text)
 
     for c in candidates:
         c["requires_confirm"] = True

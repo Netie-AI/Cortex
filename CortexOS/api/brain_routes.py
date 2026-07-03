@@ -58,6 +58,7 @@ class ReportRequest(BaseModel):
 
 class TaskSuggestRequest(BaseModel):
     use_llm: bool = False
+    trigger_text: Optional[str] = None
 
 
 class TaskChoiceRequest(BaseModel):
@@ -218,7 +219,7 @@ def task_suggest(req: TaskSuggestRequest):
     except Exception:
         pass
 
-    return {"suggestions": suggest(state, use_llm=req.use_llm)}
+    return {"suggestions": suggest(state, use_llm=req.use_llm, trigger_text=req.trigger_text)}
 
 
 @router.post("/suggest/choice")

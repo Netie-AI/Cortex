@@ -165,9 +165,42 @@ export async function acknowledgeGate({ eventId, actor = "steward" }) {
   });
 }
 
-export async function fetchTaskSuggestions({ useLlm = false } = {}) {
+export async function fetchTaskSuggestions({ useLlm = false, triggerText = null } = {}) {
   return request("/dms/brain/suggest", {
     method: "POST",
-    body: JSON.stringify({ use_llm: useLlm }),
+    body: JSON.stringify({ use_llm: useLlm, trigger_text: triggerText }),
+  });
+}
+
+export async function fetchSkills(activeOnly = false) {
+  return request(`/dms/skills?active_only=${activeOnly}`);
+}
+
+export async function fetchSkillCaptureConfig() {
+  return request("/dms/skills/config");
+}
+
+export async function setSkillCaptureConfig(enabled) {
+  return request("/dms/skills/config", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function deactivateSkill(skillId, actor = "steward") {
+  return request(`/dms/skills/${skillId}/deactivate?actor=${encodeURIComponent(actor)}`, {
+    method: "POST",
+  });
+}
+
+export async function completeTaskEvent({ eventId, outcome, triggerText, actor = "user" }) {
+  return request("/dms/skills/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      event_id: eventId,
+      outcome,
+      trigger_text: triggerText,
+      actor,
+    }),
   });
 }
