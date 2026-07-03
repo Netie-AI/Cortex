@@ -29,12 +29,13 @@ Cortex/
 
 ## Gates
 - V0 PASSED 2026-06-25
-- V1, F1-hardened, F7, F2, F3-security, F4 PASS 2026-06-26
-- **F5 PASS** 2026-07-03 — compliance gate on tasks
-- **F6 shipped** — Gate F6 pending (skill capture, opt-in)
+- V1, F1-hardened, F7 (PII harness), F2, F3-security, F4 PASS 2026-06-26
+- **F5 PASS** 2026-07-03
+- **F6 PASS** 2026-07-03 — skill capture
+- **Active:** F7 remainder (RBAC/RLS/rate limit)
 
 ## Tests
-`pytest -q` → **145 passed, 4 skipped**
+`pytest -q` → **153 passed, 4 skipped**
 
 ## Demo (show now)
 ```powershell

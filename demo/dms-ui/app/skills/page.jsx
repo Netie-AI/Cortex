@@ -35,7 +35,7 @@ export default function SkillsPage() {
     setBusy(true);
     setError("");
     try {
-      await deactivateSkill(skillId, role.id === "ADMIN" ? "admin" : "steward");
+      await deactivateSkill(skillId);
       mutateSkills();
     } catch (e) {
       if (!(e instanceof ApiOfflineError)) setError(String(e.message || e));

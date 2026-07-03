@@ -35,6 +35,10 @@ def create_app() -> Any:
         except ImportError:
             pass
 
+        from packs.dms.security.rate_limit import DMSRateLimitMiddleware
+
+        app.add_middleware(DMSRateLimitMiddleware)
+
     from netie.api.search import register_search_routes
     from netie.api.dag_run import register_dag_run_routes
 

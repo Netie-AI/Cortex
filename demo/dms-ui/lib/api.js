@@ -1,5 +1,22 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+const DEMO_API_KEYS = {
+  ANALYST: "dms-demo-viewer-key",
+  STEWARD: "dms-demo-steward-key",
+  ADMIN: "dms-demo-admin-key",
+};
+
+let _roleId = "ANALYST";
+
+export function setApiRoleKey(roleId) {
+  _roleId = roleId || "ANALYST";
+}
+
+function authHeaders(extra = {}) {
+  const key = DEMO_API_KEYS[_roleId] || DEMO_API_KEYS.ANALYST;
+  return { "X-API-Key": key, ...extra };
+}
+
 export class ApiOfflineError extends Error {
   constructor(message = "API offline") {
     super(message);
@@ -15,6 +32,7 @@ async function request(path, options = {}) {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...authHeaders(),
         ...(options.headers || {}),
       },
     });
@@ -187,20 +205,19 @@ export async function setSkillCaptureConfig(enabled) {
   });
 }
 
-export async function deactivateSkill(skillId, actor = "steward") {
-  return request(`/dms/skills/${skillId}/deactivate?actor=${encodeURIComponent(actor)}`, {
+export async function deactivateSkill(skillId) {
+  return request(`/dms/skills/${skillId}/deactivate`, {
     method: "POST",
   });
 }
 
-export async function completeTaskEvent({ eventId, outcome, triggerText, actor = "user" }) {
+export async function completeTaskEvent({ eventId, outcome, triggerText }) {
   return request("/dms/skills/complete", {
     method: "POST",
     body: JSON.stringify({
       event_id: eventId,
       outcome,
       trigger_text: triggerText,
-      actor,
     }),
   });
 }

@@ -8,6 +8,20 @@ Agents append one section per shipped feature. Sequential build log.
 - Local re-run: **141 passed, 4 skipped**; supervisor sandbox 133 passed (ML-dep files excluded)
 - Next: **F6** skill capture (consented, opt-in) — see BUILD_PLAN § FEATURE 6
 
+## Gate F6 — PASS 2026-07-03
+
+- Supervisor verified all 4 `test_skill_capture.py` tests by name; ledger events confirmed in code
+- Known gap (client `actor`) addressed in F7 remainder RBAC slice
+- Next: F7 remainder completion → F8
+
+## F7 remainder (RBAC slice) — 2026-07-03
+
+- **Auth:** `packs/dms/security/api_auth.py` — `X-API-Key` / Bearer → viewer/steward/admin
+- **Rate limit:** `packs/dms/security/rate_limit.py` — 429 on `/dms/*` when bucket exceeded
+- **Routes:** `skill_routes.py` — steward+ for config/deactivate/complete; actor from key
+- **Demo:** UI role switcher maps to demo API keys; `run_demo.ps1` sets `DMS_API_KEYS`
+- **Tests:** `tests/dms/test_f7_rbac.py` (8) — **153 passed, 4 skipped** total
+
 ## F6 — Skill capture — 2026-07-03
 
 - **Capture:** `packs/dms/skills/capture.py` — opt-in (`DMS_SKILL_CAPTURE_ENABLED`), gate=pass + outcome=success only

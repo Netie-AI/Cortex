@@ -63,6 +63,7 @@ Set-Location $Root
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $env:PYTHONPATH = $Root
 $env:PACK = "dms"
+$env:DMS_API_KEYS = "viewer:dms-demo-viewer-key;steward:dms-demo-steward-key;admin:dms-demo-admin-key"
 
 $Python = Resolve-PythonExe -RepoRoot $Root
 

@@ -1,38 +1,36 @@
-<!-- generated 2026-07-03T05:06:23+00:00 -->
+<!-- generated 2026-07-03T05:16:44+00:00 -->
 # CURSOR_HANDOFF — Builder Session Startup
-**Read this file first.** Then `STATUS.md` → `CONTEXT.md` → `docs/dms/GATE_F6_PACKET.md`.
+**Read this file first.** Then `STATUS.md` → `docs/dms/BUILD_PLAN.md` § FEATURE 7 remainder.
 
 ---
 
 ## Your role
-Builder. One feature per run. **Do not start F7 remainder until Gate F6 PASS.**
+Builder. **F7 remainder in progress** — F6 PASS (2026-07-03). F8 blocked.
 
 ## Current state
 | Item | Status |
 |---|---|
-| V0–V1, F1, F7, F2, F3, F4, F5, **F6** | Shipped — **Gate F6 pending** |
-| Demo | Live: `.\demo\run_demo.ps1 -Fast` |
-| After F6 PASS | F7 remainder (RBAC/RLS/rate limit) |
+| F6 skill capture | PASS |
+| F7 remainder | RBAC on `/dms/skills/*` + rate limit shipped; RLS/SOPS next |
+| Tests | **153 passed, 4 skipped** |
 
-## Startup checklist
-- [ ] `git checkout dms-v2 && git pull`
-- [ ] `pip install -e ".[dev,api,dms]"`
-- [ ] `pytest -q` — expect **145 passed, 4 skipped**
+## F7 remainder — done this slice
+- `packs/dms/security/api_auth.py` — API-key → viewer/steward/admin
+- `packs/dms/security/rate_limit.py` — token bucket on `/dms/*`
+- Skill routes use `Depends(require_role(...))`; actor from key, not body
+- Demo UI sends `X-API-Key` per role switcher
+
+## F7 remainder — still to ship
+- RBAC on task/brain/audit mutators
+- Postgres RLS proof test (`DMS_LEDGER_DSN` / CI)
+- SOPS + secrets hygiene
+- Gate packet when complete
 
 ## Build loop
-1. Gate F6 only — no new features until supervisor PASS
-2. If fixing F6 blockers, stay in F6 scope
-3. `pytest -q` green
-4. Append `CHANGELOG_DMS.md` on fixes
-5. Update `STATUS.md` + `python scripts/handoff.py --write`
-6. Paste `CLAUDE_HANDOFF.md` to Claude → wait for PASS
-7. **Stop** until gate clears
+1. Smallest diff per slice → `pytest -q` → CHANGELOG → STATUS → `handoff.py --write` → **git push**
 
 ## Demo
 ```powershell
 .\demo\run_demo.ps1 -Fast
 ```
-Skills admin: http://localhost:3000/skills
-
-## Ponytail
-`PONYTAIL_DEFAULT_MODE=full` — see `docs/PONYTAIL.md`
+Skills: http://localhost:3000/skills (switch to STEWARD to toggle capture)

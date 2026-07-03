@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { setApiRoleKey } from "../lib/api";
 
 export const ROLES = {
   ANALYST: {
@@ -27,6 +28,9 @@ const RoleContext = createContext(null);
 
 export function RoleProvider({ children }) {
   const [role, setRole] = useState(ROLES.ANALYST);
+  useEffect(() => {
+    setApiRoleKey(role.id);
+  }, [role]);
   return (
     <RoleContext.Provider value={{ role, setRole }}>
       {children}
