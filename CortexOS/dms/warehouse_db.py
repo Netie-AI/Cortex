@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "data" / "dms_demo.duckdb"
+# DMS_WAREHOUSE_DB mirrors DMS_OPS_DB (audit ledger): lets a host app isolate
+# the warehouse outside the repo. Must be set before this module is imported.
+DEFAULT_DB = Path(os.environ.get("DMS_WAREHOUSE_DB") or ROOT / "data" / "dms_demo.duckdb")
 DEFAULT_SEMANTIC = ROOT / "packs" / "dms" / "semantic_layer.yaml"
 SAMPLES = ROOT / "data" / "samples"
 
