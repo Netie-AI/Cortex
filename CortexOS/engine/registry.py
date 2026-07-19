@@ -94,11 +94,28 @@ OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
         "Block KV cache, near-zero fragmentation. Orthogonal to quant — always safe.",
         default=True, backends=("vllm", "sglang"),
     ),
+    # C1 finding (docs/research/findings/C1_C3_turboquant_awq.md): NOT in llama.cpp
+    # mainline (PRs #21089/#21307 declined); vLLM merge (PR #38479) medium-confidence;
+    # no CUDA kernel in the fork. Demoted default→research until bench/needle.py passes.
     OptimizerDescriptor(
         "turboquant", "TurboQuant (KV)", "kv_quant",
-        "Global-rotation KV quant; best accuracy (Needle ~0.997). Proposed GPU default.",
-        default=True, bench_gate="C1: confirm llama.cpp/vLLM support + reproduce Needle>=0.95",
-        backends=("llamacpp",),
+        "Global-rotation KV quant (Needle ~0.997 claimed). Fork-only in llama.cpp; "
+        "vLLM --kv-cache-dtype turboquant_3bit_nc unverified. Use asymmetric K4/V3 if enabled.",
+        research=True, bench_gate="C1: verify backend support on-box + Needle>=0.95 vs q8_0 baseline",
+        backends=("llamacpp", "vllm"),
+    ),
+    # G2 finding: the real shippable KV defaults today.
+    OptimizerDescriptor(
+        "kv_q8_0", "KV q8_0 (llama.cpp/Ollama)", "kv_quant",
+        "8-bit KV via --cache-type-k/v q8_0 (llama.cpp) / OLLAMA_KV_CACHE_TYPE=q8_0 "
+        "(requires OLLAMA_FLASH_ATTENTION=1). Halves KV VRAM at negligible loss.",
+        default=True, backends=("llamacpp", "ollama"),
+    ),
+    OptimizerDescriptor(
+        "kv_fp8", "KV FP8 (vLLM/SGLang)", "kv_quant",
+        "--kv-cache-dtype fp8 — halves KV VRAM; the safe GPU-server default. "
+        "On 12GB: 8B-AWQ ≈5.4GB weights + FP8 KV → comfortable 16k ctx.",
+        default=True, backends=("vllm", "sglang"),
     ),
     OptimizerDescriptor(
         "awq", "AWQ weights", "weight_quant",
@@ -120,10 +137,14 @@ OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
         "Sparse-context select/compress/sliding (AirGPT ditch/index analog).", default=True),
     OptimizerDescriptor("moe_stream", "MoE expert streaming", "moe",
         "Stream inactive experts from NVMe (Colibri).", backends=("colibri",)),
+    # B4 finding: native disk-KV exists only in vLLM (TieringOffloadingSpec fs tier)
+    # and SGLang (--hicache-storage-backend file); llama.cpp/Ollama offload KV to CPU
+    # RAM only (--no-kv-offload) — their mmap lever moves weights, not KV.
     OptimizerDescriptor("tiering", "Predictive memory tiering", "tiering",
-        "MVP: orchestrate backend offload knobs + NVMe KV page cache + prefetch (no-OOM).",
+        "MVP ladder: compress KV first (fp8/q8_0) → CPU-RAM KV → disk KV where native "
+        "(vLLM fs tier, SGLang hicache file) → weights offload (--cpu-offload-gb) last.",
         default=True, bench_gate="E4: model+KV 2–3× VRAM runs; TTFT within gate",
-        backends=("vllm", "llamacpp", "colibri")),
+        backends=("vllm", "sglang", "llamacpp", "colibri")),
 )
 
 BACKEND_BY_ID = {b.id: b for b in BACKENDS}

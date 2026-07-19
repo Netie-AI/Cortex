@@ -23,9 +23,9 @@ from typing import Iterable, Literal, Protocol, runtime_checkable
 Scope = Literal["personal", "company"]
 Tier = Literal["hot", "warm", "cold"]
 
-# Auto-select crossover: below this many vectors, brute-force beats index
-# build+load (confirm with research brief D5 bench → update this constant).
-BRUTE_FORCE_MAX = 10_000
+# Auto-select crossover per D5 finding (docs/research/findings/D1_D5_D6_vector_memory.md):
+# brute force wins <=100k; 100k-1M is access-pattern dependent; HNSW/IVF wins >1M.
+BRUTE_FORCE_MAX = 100_000
 
 
 @dataclass(slots=True)
@@ -123,10 +123,10 @@ def select_store(collection_size: int, hardware: dict | None = None) -> str:
     Returns a store id; the factory that maps id→impl is filled as backends land.
     """
     if collection_size <= BRUTE_FORCE_MAX:
-        return "rawknn"          # mmap brute-force / in-memory
+        return "rawknn"          # mmap brute-force — exact, ~0 idle RAM (D5)
     if collection_size <= 500_000:
-        return "sqlitevec"       # personal default
-    return "qdrant"              # business scale, low-RAM on-disk
+        return "sqlitevec"       # personal default; needs int8 quant above ~100k (D1)
+    return "qdrant"              # business scale, low-RAM on-disk HNSW
 
 
 def conformance_check(store: VectorStore) -> dict:

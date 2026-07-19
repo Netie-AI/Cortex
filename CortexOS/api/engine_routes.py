@@ -38,6 +38,12 @@ class EngineConfigIn(BaseModel):
     optimizers: Optional[List[str]] = None   # explicit toggle set; None = auto
     research: bool = False                   # allow research-flagged optimizers
     hardware: Optional[HardwareIn] = None    # driver-probed hardware snapshot
+    # Orchestrator cascade: user picks the primary (any BYOK/free key) from a
+    # dropdown; the rest is the fallback order. Target: primary → groq →
+    # openrouter → sea-lion, free tiers last. Benchmark-driven per-role ranking
+    # (verifier/router/normal) lands with the bench harness.
+    primary_provider: Optional[str] = None
+    provider_order: Optional[List[str]] = None
 
 
 def _load_state() -> Dict[str, Any]:
@@ -117,12 +123,17 @@ async def engine_config(body: EngineConfigIn) -> Dict[str, Any]:
             return {"ok": False, "error": f"research-gated (pass research=true): {blocked}"}
         state["optimizers"] = body.optimizers
     state["research"] = bool(body.research)
+    if body.primary_provider is not None:
+        state["primary_provider"] = body.primary_provider[:40]
+    if body.provider_order is not None:
+        state["provider_order"] = [str(p)[:40] for p in body.provider_order][:12]
     if body.hardware is not None:
         state["hardware"] = body.hardware.model_dump(exclude_none=True)
     _save_state(state)
     hw = state.get("hardware") or None
     return {"ok": True, "config": {k: state.get(k) for k in
-            ("backend", "agents_runtime", "optimizers", "research")},
+            ("backend", "agents_runtime", "optimizers", "research",
+             "primary_provider", "provider_order")},
             "auto_profile": registry.auto_profile(hw)}
 
 

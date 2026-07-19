@@ -3,7 +3,11 @@
 **Date:** 2026-07-18  
 **Gate:** Unblocks real backends (E1 install managers)  
 **Hardware context:** RTX 4070 12 GB, Win11, Docker Desktop + WSL2  
-**Status:** RESEARCH COMPLETE — host + Docker GPU smokes passed 2026-07-18 (see Local confirm log). Remaining: WSL-native `nvidia-smi`, `ollama run`, and 8B-AWQ load VRAM.
+**Status:** **GATE GREEN 2026-07-19** — all smokes passed on-box:
+- Host + Docker GPU ✓ (2026-07-18, see Local confirm log)
+- WSL-inside `nvidia-smi` ✓ (2026-07-19): `wsl -d Ubuntu nvidia-smi` → RTX 4070, driver 595.79, CUDA 13.2. *Trap: the default distro is `docker-desktop` (no nvidia-smi) — always target `-d Ubuntu`.*
+- `ollama run` ✓ (2026-07-19): Ollama 0.32.1 native, `qwen2.5:0.5b` pull + generate — **100% GPU** per `ollama ps`, warm decode **172.6 tok/s**, load 465 ms. (Cold first-gen measured 1.9 tok/s under saturated disk/network — always bench warm.)
+Remaining (non-blocking): 8B-AWQ load VRAM measurement once a Docker vLLM container is first run.
 
 ---
 

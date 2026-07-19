@@ -5,6 +5,16 @@
 **Hardware context:** Personal laptop class (32 GB RAM, Win11, Python 3.10)  
 **Status:** RESEARCH COMPLETE — latency cells marked MEASURED (cited) vs ESTIMATED.
 
+**LOCAL RE-BENCH 2026-07-19 (i5-13490F, criteria #2/#3):** `rawknn` mmap store
+(`CortexOS/memory/stores/rawknn.py`, D6 layout + norms.bin sidecar) measured
+on-box, warm, exact top-1 verified: **10k×384 → 4.3 ms**, **100k×384 → 76.8 ms**
+per query (unfiltered fast path: no-copy `mm @ q` + top-k-only SQL fetch).
+100k lands slightly above the 50 ms Apple-silicon figure but the ≤100k
+brute-force crossover holds on this CPU. Implementation traps found:
+(1) never open `vectors.bin` in append mode — O_APPEND breaks in-place row
+overwrite (writes silently go to EOF); (2) per-query full-table SQL candidate
+fetch dominates at 100k (was 284 ms) — score first, fetch only top-k rows.
+
 ---
 
 ## D1 — sqlite-vec (personal default)
