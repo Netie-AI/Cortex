@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Netie Engine Up — E0/M0 scaffold — 2026-07-19 (`netie-engine-up`)
+
+- **E0 registry:** `CortexOS/engine/registry.py` + `/api/engine/{specs,backends,config}`
+- **M0 memory:** `CortexOS/memory/store.py` + `/api/memory/{upsert,query,stats}` (named `memory`, not `brain`)
+- **AirGPT sidecar:** `/dms/secure|classify|audit/*` for `cortex_client.py`
+- **CORS:** demo UI :3000 + AirGPT :8765
+- **Mirrors:** `scripts/sync_mirrors.ps1` + `install_sync_hook.ps1`; start via `scripts/start_cortex_engine.ps1`
+- **Tests:** `test_sidecar_routes.py`, `test_engine_routes.py`
+
+
 ## Gate F5 — PASS 2026-07-03
 
 - Supervisor verified: all 6 `test_gate.py` checklist tests by name; F3 classify PII case green

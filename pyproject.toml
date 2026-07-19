@@ -91,3 +91,7 @@ postgres = ["sqlalchemy", "asyncpg"]
 tokens = ["tiktoken"]
 api = ["fastapi", "uvicorn"]
 dms = ["duckdb", "sqlglot", "openpyxl", "qrcode", "pillow"]
+
+[tool.pytest.ini_options]
+# AirGPT and its vendored third_party ship their own test suites - keep collection on the Cortex suite
+testpaths = ["tests"]

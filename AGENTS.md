@@ -1,6 +1,7 @@
 # Cortex DMS — Agent Roles
 
 See `.cursor/AGENTS.md` for full subagent definitions.
+**Touchability guardrails (all agents, read before editing):** `docs/ontology/TOUCH_MAP.md`
 
 **Quick invoke:** `Use dms-subagent-dispatch to ship the next feature`
 

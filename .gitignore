@@ -44,6 +44,7 @@ demo/logs/
 data/dms_demo.duckdb
 data/dms_ops.db
 data/dms_photos/
+data/engine/config.json
 
 # Unit test / coverage reports
 htmlcov/
