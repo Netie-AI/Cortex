@@ -28,13 +28,12 @@ Write-Host "Sync mirrors from $Root ($Branch)" -ForegroundColor Cyan
 if (Test-Path (Join-Path $CortexMirror ".git")) {
     Write-Host "`n→ $CortexMirror" -ForegroundColor Yellow
     git -C $CortexMirror fetch origin --prune 2>&1 | Out-Host
-    $cur = (git -C $CortexMirror branch --show-current).Trim()
-    if ($cur -ne $Branch) {
-        git -C $CortexMirror checkout $Branch 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            git -C $CortexMirror checkout -B $Branch "origin/$Branch" 2>&1 | Out-Host
-        }
+    $dirty = git -C $CortexMirror status --porcelain
+    if ($dirty) {
+        Write-Host "  Stashing local WIP before sync…" -ForegroundColor DarkYellow
+        git -C $CortexMirror stash push -u -m "auto-sync before $Branch $(Get-Date -Format yyyyMMdd-HHmm)" 2>&1 | Out-Host
     }
+    git -C $CortexMirror checkout -B $Branch "origin/$Branch" 2>&1 | Out-Host
     git -C $CortexMirror pull --ff-only origin $Branch 2>&1 | Out-Host
     Write-Host "  HEAD: $(git -C $CortexMirror rev-parse --short HEAD)" -ForegroundColor Green
 } else {
