@@ -36,7 +36,7 @@ personality = ["redis>=5", "sqlalchemy>=2", "APScheduler>=3.10"]
 postgres = ["sqlalchemy[asyncio]>=2", "asyncpg>=0.29"]
 tokens = ["tiktoken>=0.7"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
-dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=10"]
+dms = ["duckdb>=1.5.2", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=10"]
 
 [tool.poetry]
 name = "netie"
@@ -76,7 +76,7 @@ qdrant-client = {version = "^1.9", optional = true}
 fastapi = {version = "^0.115", optional = true}
 uvicorn = {version = "^0.30", extras = ["standard"], optional = true}
 tantivy = {version = "^0.22", optional = true}
-duckdb = {version = "^1.1", optional = true}
+duckdb = {version = "^1.5.2", optional = true}
 sqlglot = {version = "^25", optional = true}
 openpyxl = {version = "^3.1", optional = true}
 

@@ -2,6 +2,41 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## L0 — Lakehouse foundation (DuckLake) — 2026-07-20 (`netie-engine-up`)
+
+- **Core:** `packs/dms/lakehouse/catalog.py` (attach + schema bootstrap + honest fallback) +
+  `tables.py` (write/read/append, snapshots, `AT (VERSION => N)` time travel, additive-only
+  evolution guard, identifier/schema allowlist)
+- **DuckLake verified on-box:** duckdb 1.5.4, `ducklake` extension installs; SQLite catalog +
+  Parquet data at `data/lakehouse/`. Fallback mode (plain DuckDB, no time travel) auto-engages
+  air-gapped and reports `lakehouse_mode` honestly — tests run in BOTH modes.
+- **Migration:** `scripts/lakehouse_migrate.py` — bronze (messy CSV, permissive VARCHAR +
+  `_source_file`/`_loaded_at`) / silver (clean, typed) / gold (sales_by_sku, capacity_by_location
+  incl. `free_kg`, supplier_risk). Seeds 6+6+3 tables; ~28k/25k/716 rows.
+- **API:** `CortexOS/api/lakehouse_routes.py` (`/dms/lakehouse/{status,tables,.../snapshots,
+  .../preview,query}`) — reads through the existing sqlglot guardrail (DDL/DML → 400), F7 RBAC.
+  Registered in `api/app.py`.
+- **Deps:** `duckdb>=1.5.2` (DuckLake v1.0 floor).
+- **Tests:** `tests/dms/test_l0_lakehouse.py` (7 × 2 modes = 14). Full suite **180 passed, 4
+  skipped**; bench core/safety still 100%.
+- **Naming:** module docstrings adopt the **OpenDMS** product name (see plan); no code-symbol
+  mass-rename this pass.
+
+## B0/Q0 — Accuracy benchmark + stress harness v0 + BUILD_PLAN_V2 — 2026-07-20 (`netie-engine-up`)
+
+- **Plan:** `docs/dms/BUILD_PLAN_V2_LAKEHOUSE.md` — lakehouse (DuckLake), 99% answer engine,
+  streaming agents, Data Studio; parking-lot P3/P6/P12 activated (P1 partial), see plan §8
+- **Research:** `docs/research/findings/{LAKEHOUSE_2026,NL2SQL_ACCURACY_2026,STREAMING_ORCH_2026}.md`
+- **Benchmark:** `bench/accuracy.py` + `bench/golden/dms_golden_v1.yaml` (36 items, 3 tiers) +
+  `tests/dms/test_accuracy_benchmark.py` — baseline core 18/18 (100%), safety 4/4, target 0/14
+  (target tier = machine-checked Q2 backlog: dead keyword branches, silent LIMIT truncation,
+  DEFAULT_INVENTORY_SQL confident-wrong fallback)
+- **Stress:** `bench/stress.py` — ledger append storm (chain valid, ~200/s) + NL→SQL concurrency
+  (p95 ~56ms @ 6 threads); full suite specced as B1
+- **Fix:** `query_service.build_chart_spec` no longer crashes on non-numeric value columns
+  (alert listings previously raised ValueError end-to-end)
+- **Tests:** 166 passed, 4 skipped
+
 ## Netie Engine Up — E0/M0 scaffold — 2026-07-19 (`netie-engine-up`)
 
 - **E0 registry:** `CortexOS/engine/registry.py` + `/api/engine/{specs,backends,config}`

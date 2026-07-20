@@ -1,6 +1,13 @@
 # STATUS.md
-**Last updated:** 2026-07-03 | **Gate:** F6 **PASS** | **Active:** F7 remainder (RBAC slice shipped)
+**Last updated:** 2026-07-20 | **Gate:** F6 **PASS** | **Active:** BUILD_PLAN_V2 wave 1 (L0 next) + F7 remainder
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
+
+> **2026-07-20:** `docs/dms/BUILD_PLAN_V2_LAKEHOUSE.md` is the active master plan
+> (lakehouse + 99% answer engine + streaming agents + Data Studio). Accuracy benchmark
+> baseline: core 100%, safety 100%, target 0/14 (`python -m bench.accuracy`). Parking-lot
+> P3/P6/P12 activated, P1 partial.
+> **L0 lakehouse LANDED** (DuckLake, `python -m scripts.lakehouse_migrate`, `/dms/lakehouse/*`).
+> Test baseline now **180 passed, 4 skipped**. Next: Q1 semantic-layer v2 → Q2 answer engine.
 
 ---
 
