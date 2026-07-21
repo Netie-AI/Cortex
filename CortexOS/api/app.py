@@ -28,7 +28,12 @@ def create_app() -> Any:
 
             app.add_middleware(
                 CORSMiddleware,
-                allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+                allow_origins=[
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000",
+                    "http://localhost:8765",
+                    "http://127.0.0.1:8765",
+                ],
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
@@ -41,9 +46,13 @@ def create_app() -> Any:
 
     from netie.api.search import register_search_routes
     from netie.api.dag_run import register_dag_run_routes
+    from netie.api.engine_routes import register_engine_routes
+    from netie.api.memory_routes import register_memory_routes
 
     register_search_routes(app)
     register_dag_run_routes(app)
+    register_engine_routes(app)
+    register_memory_routes(app)
 
     if pack.name == "dms":
         from netie.api.dms_query import register_dms_routes
@@ -51,12 +60,16 @@ def create_app() -> Any:
         from netie.api.brain_routes import register_brain_routes
         from netie.api.task_routes import register_task_routes
         from netie.api.skill_routes import register_skill_routes
+        from netie.api.sidecar_routes import register_sidecar_routes
+        from netie.api.lakehouse_routes import register_lakehouse_routes
 
         register_dms_routes(app)
         register_chat_routes(app)
         register_brain_routes(app)
         register_task_routes(app)
         register_skill_routes(app)
+        register_sidecar_routes(app)
+        register_lakehouse_routes(app)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

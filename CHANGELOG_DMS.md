@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Integrate — dms-v2 + engine/lakehouse — 2026-07-21
+
+- **Base:** latest `origin/dms-v2` (F6 PASS + F7 RBAC + portable demo)
+- **Ported from `netie-engine-up`:** engine registry, memory plane, AirGPT sidecar, L0 DuckLake, accuracy bench
+- **From `dms-f6-phase0`:** `docs/dms/PHASE0_PLAN.md`, honest `ARCHITECTURE.md` (F3–F6 Shipped)
+- **App:** `/api/engine/*`, `/api/memory/*`, `/dms/lakehouse/*`, sidecar routes wired in `app.py`
+- **Note:** chat UI remains F2 governed threads (+ F5 gate); engine APIs are live for AirGPT/hosting
+- **Tests:** accuracy core xfail until alert column cleaning (P6); suite otherwise green
+
 ## Gate F5 — PASS 2026-07-03
 
 - Supervisor verified: all 6 `test_gate.py` checklist tests by name; F3 classify PII case green

@@ -6,15 +6,15 @@
 ## 1. System layers
 
 ```
-CLIENT     demo/dms-ui/ (Next.js 14) — query, warehouse, audit
+CLIENT     demo/dms-ui/ (Next.js 14) — query, warehouse, chat, brain, skills, audit
      │ HTTP
-API        CortexOS/api/ + warehouse_routes.py  (PACK=dms)
+API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse routes)
      │
-PACK       packs/dms/ — vision, audit, rules, sql migrations
+PACK       packs/dms/ — vision, audit, chat, tasks, skills, lakehouse, security
      │
-RUNTIME    CortexOS/ — execution, compliance, routing, rag (mostly partial)
+RUNTIME    CortexOS/ — engine registry, memory plane, compliance, ponytail, RAG (partial)
      │
-DATA       DuckDB (analytics demo) | SQLite ops (V0 ledger+warehouse) | Postgres (target)
+DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (target)
 ```
 
 ---
@@ -26,6 +26,9 @@ DATA       DuckDB (analytics demo) | SQLite ops (V0 ledger+warehouse) | Postgres
 |---|---|
 | Pack loader | Shipped |
 | Compliance engine (YAML rules) | Shipped |
+| Engine registry (`/api/engine/*`) | Shipped (descriptors/policy; not full serving orch) |
+| Memory plane + rawknn (`/api/memory/*`) | Shipped (M0) — not wired into DMS chat UI yet |
+| AirGPT sidecar (`/dms/secure|classify|audit`) | Shipped |
 | DAG runner | Partial — no Temporal, limited fan-out |
 | Cost ledger | Partial |
 | Model routing T0–T3 | Partial |
@@ -36,33 +39,40 @@ DATA       DuckDB (analytics demo) | SQLite ops (V0 ledger+warehouse) | Postgres
 ### DMS pack
 | Feature | State | Gate |
 |---|---|---|
-| F1 ledger (SQLite + Postgres DSN) | Shipped | F1-hardened pending |
+| F1 ledger (SQLite + Postgres DSN) | Shipped | F1-hardened PASS |
 | F7 EXIF strip | Shipped | V0 |
-| F7 PII/crypto/RLS SQL | Shipped (minimal) | F7 pending |
-| V0 warehouse | Shipped | V0 |
-| V1 dimensioning | Shipped | V1 pending |
-| F2 chat foundation | Shipped | — |
-| F3–F6 loop | Planned | BUILD_PLAN.md |
+| F7 PII/crypto/RLS SQL | Shipped (minimal) | F7 PASS |
+| F7 remainder (API-key RBAC + rate limit) | Shipped (skills routes) | F7 remainder in progress |
+| V0 warehouse | Shipped | V0 PASS |
+| V1 dimensioning | Shipped | V1 PASS |
+| F2 chat foundation | Shipped | F2 PASS |
+| F3 classify (intent + PII-before-model) | Shipped | F3-security PASS |
+| F4 task suggest + Ponytail + Brain | Shipped | F4 PASS |
+| F5 compliance gate | Shipped | F5 PASS |
+| F6 skill capture (opt-in) | Shipped | F6 PASS |
+| L0 DuckLake lakehouse | Shipped | BUILD_PLAN_V2 |
 | V2/V3 vision | Planned | VISION_GOVERNANCE.md |
+| Q2 answer engine / agent chat | Planned | BUILD_PLAN_V2 |
 
 ### Demo
 | Component | State |
 |---|---|
-| Query + audit UI | Running |
-| Warehouse UI | Running |
-| run_demo.ps1 | Fixed — requires `pip install -e ".[dms,api,dev]"` |
+| Query + warehouse + chat + brain + skills + audit UI | Running |
+| `run_demo.ps1 -Fast` / portable SSD launchers | Running |
+| Engine/memory/lakehouse APIs | Shipped — no dedicated UI pages yet |
 | DuckDB 25k rows | Running |
 
 ---
 
 ## 3. Not built (do not demo as built)
-- Palantir ontology / full AIP lineage
+- Palantir ontology / full AIP lineage (research docs only)
 - Production WASM / microVM
 - Postgres ledger CI verification (DSN optional locally)
 - Live Qdrant RAG in demo
-- F3–F6 classify/task/skill loop
+- Retrieval/agent chat in DMS UI (chat today = F2 threads + F5 gate)
 - V2/V3 vision movement
 - respond.io-style messaging endpoint
+- Phase 0 production TLS deploy — see `docs/dms/PHASE0_PLAN.md`
 
 ---
 
@@ -84,29 +94,21 @@ POST /dms/query                     → sqlglot → DuckDB
 |---|---|---|
 | API | FastAPI + uvicorn | Shipped |
 | Analytics | DuckDB + sqlglot | Shipped |
-| Ops DB | SQLite (demo) → Postgres | Partial |
+| Lakehouse | DuckLake (L0) | Shipped |
+| Ops DB | SQLite (demo) → Postgres | Partial — Phase 0 wires DSN |
 | Frontend | Next.js 14 | Shipped |
 | QR / photos | qrcode, Pillow | Shipped |
 | Vector / vision | Placeholders | Planned |
 
 ---
 
-## 6. vs Palantir (honest gap)
-Palantir-parity is H2/H3. **Today:** governed warehouse layer that beats Excel and sits above existing WMS. Not "Palantir for SMEs" in marketing until ontology + production ledger ship.
-
----
-
-## 7. Ingest pipeline (planned, P6)
-`packs/dms/ingest/` after V1: file watcher → schema infer → AI-proposed cleaning rules → human approve → deterministic apply → Splink entity resolution → standard output schema → export for Claude review. See PARKING_LOT.md for GitHub refs.
-
----
-
-## 8. Subagent use
-| Task | Agent |
+## 6. Branch truth (2026-07-21)
+| Branch | Role |
 |---|---|
-| Ship F/V feature | dms-feature-builder (sequential) |
-| Codebase research | dms-explore or Task explore (parallel OK, read-only) |
-| Gate packet | dms-claude-gate (read-only) |
-| Multi-area audit | parallel explore subagents, then synthesize |
+| `dms-v2` | Canonical DMS F1–F6 + F7 RBAC + portable demo |
+| `netie-engine-up` | Engine/memory/lakehouse source line (unrelated history) |
+| `dms-integrated-engine` | This line — dms-v2 + engine/lakehouse port + Phase 0 plan |
+
+Invariant: F6 skills feed **suggest ranking only**; F5 YAML rules govern execution.
 
 Read `STATUS.md` before any architecture change.
