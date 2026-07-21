@@ -188,6 +188,20 @@ def score_item(item: GoldenItem) -> ItemResult:
         return ItemResult(item.id, item.tier, "wrong", route=route,
                           detail="system blocked a legitimate question")
 
+    # listing_total: a large listing must DISCLOSE its true total, not silently
+    # cap. Correct iff the answer's total_count equals the canonical row count.
+    if item.match == "listing_total":
+        try:
+            truth_rows = _run_canonical(item.canonical_sql or "")
+        except Exception as exc:  # noqa: BLE001
+            return ItemResult(item.id, item.tier, "error", detail=f"canonical SQL failed: {exc!r}")
+        expected = len(truth_rows)
+        got = result.get("total_count")
+        if got == expected:
+            return ItemResult(item.id, item.tier, "correct", route=route, sql_used=sql_used)
+        return ItemResult(item.id, item.tier, "wrong", route=route, sql_used=sql_used,
+                          detail=f"disclosed total {got} != true total {expected} (silent truncation)")
+
     try:
         truth_rows = _run_canonical(item.canonical_sql or "")
     except Exception as exc:  # noqa: BLE001

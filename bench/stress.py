@@ -128,9 +128,49 @@ def stress_queries(threads: int, iterations: int) -> dict[str, Any]:
     }
 
 
+def stress_streams(threads: int, iterations: int) -> dict[str, Any]:
+    """Concurrent webhook batches into a stream buffer → bronze; measures rows/s."""
+    import tempfile
+
+    from packs.dms.streams import buffer
+
+    home = Path(tempfile.mkdtemp(prefix="dms_stream_stress_"))
+    import os
+
+    os.environ["DMS_LAKEHOUSE_HOME"] = str(home)
+    os.environ.setdefault("DMS_STREAM_BATCH", "200")
+    buffer._BUFFERS.clear()
+    buffer.reset_writer()
+    batch = 20
+
+    def one(i: int) -> float | None:
+        t0 = time.perf_counter()
+        try:
+            buffer.append_events("stress", [{"event_id": f"{i}-{j}", "v": j} for j in range(batch)])
+            return (time.perf_counter() - t0) * 1000
+        except Exception:
+            return None
+
+    t_start = time.perf_counter()
+    latencies, errors = _run_pool(one, threads=threads, iterations=iterations)
+    buffer.flush("stress")
+    elapsed = time.perf_counter() - t_start
+    total_events = len(latencies) * batch
+
+    return {
+        "scenario": "stream_ingest_throughput",
+        "threads": threads,
+        "batches_ok": len(latencies),
+        "events": total_events,
+        "errors": errors,
+        "events_per_s": round(total_events / elapsed, 1) if elapsed else 0.0,
+        **_percentiles(latencies),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", default="all", choices=["ledger", "query", "all"])
+    parser.add_argument("--scenario", default="all", choices=["ledger", "query", "stream", "all"])
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--iterations", type=int, default=25)
     parser.add_argument("--json", default=None)
@@ -141,6 +181,8 @@ def main() -> None:
         scenarios.append(stress_ledger(args.threads, args.iterations))
     if args.scenario in ("query", "all"):
         scenarios.append(stress_queries(args.threads, args.iterations))
+    if args.scenario in ("stream", "all"):
+        scenarios.append(stress_streams(args.threads, args.iterations))
 
     report = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),

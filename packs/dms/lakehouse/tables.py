@@ -91,6 +91,20 @@ def write_table(
     return int(count)
 
 
+def bulk_insert(con, target: str, cols: list[str], rows_values: list[list], *, chunk: int = 500) -> None:
+    """One multi-row INSERT per chunk. DuckLake turns each executemany row into a
+    separate commit (~40ms/row); a single VALUES statement is one write (~0.4ms/row)."""
+    if not rows_values:
+        return
+    collist = ", ".join(cols)
+    one = "(" + ",".join(["?"] * len(cols)) + ")"
+    for i in range(0, len(rows_values), chunk):
+        part = rows_values[i:i + chunk]
+        placeholders = ",".join([one] * len(part))
+        flat = [v for row in part for v in row]
+        con.execute(f"INSERT INTO {target} ({collist}) VALUES {placeholders}", flat)
+
+
 _PYTYPE_TO_DUCK = {bool: "BOOLEAN", int: "BIGINT", float: "DOUBLE", str: "VARCHAR"}
 
 
@@ -112,11 +126,7 @@ def _create_from_rows(con, target: str, rows: Sequence[dict]) -> None:
         _ident(c)
     coldefs = ", ".join(f"{c} {_duck_type(rows, c)}" for c in cols)
     con.execute(f"CREATE TABLE {target} ({coldefs})")
-    placeholders = ", ".join(["?"] * len(cols))
-    con.executemany(
-        f"INSERT INTO {target} ({', '.join(cols)}) VALUES ({placeholders})",
-        [[r.get(c) for c in cols] for r in rows],
-    )
+    bulk_insert(con, target, cols, [[r.get(c) for c in cols] for r in rows])
 
 
 def append_rows(schema: str, name: str, rows: Sequence[dict], *,
@@ -134,12 +144,7 @@ def append_rows(schema: str, name: str, rows: Sequence[dict], *,
         cols = [c for c in rows[0].keys() if c in existing] if rows else []
         for c in cols:
             _ident(c)
-        placeholders = ", ".join(["?"] * len(cols))
-        collist = ", ".join(cols)
-        con.executemany(
-            f"INSERT INTO {target} ({collist}) VALUES ({placeholders})",
-            [[r.get(c) for c in cols] for r in rows],
-        )
+        bulk_insert(con, target, cols, [[r.get(c) for c in cols] for r in rows])
         count = len(rows)
     finally:
         if owns:

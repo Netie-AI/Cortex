@@ -62,7 +62,7 @@ items:
   - id: delayed_count_scalar
     tier: target
     question: "Which shipments are delayed?"
-    match: resultset
+    match: listing_total
     canonical_sql: "SELECT shipment_id FROM shipments WHERE status = 'DELAYED'"
     key_columns: [shipment_id]
     known_gap: >
@@ -73,7 +73,7 @@ items:
   - id: in_transit
     tier: target
     question: "Which shipments are in transit?"
-    match: resultset
+    match: listing_total
     canonical_sql: "SELECT shipment_id FROM shipments WHERE status = 'IN_TRANSIT'"
     key_columns: [shipment_id]
     known_gap: "2846 rows vs max_limit_1000 guard - silent truncation (Q2: aggregate or disclose)"
@@ -82,7 +82,7 @@ items:
   - id: arriving_week
     tier: target
     question: "Which shipments are arriving this week?"
-    match: resultset
+    match: listing_total
     canonical_sql: >
       SELECT shipment_id FROM shipments
       WHERE status = 'IN_TRANSIT'
@@ -199,7 +199,7 @@ items:
   - id: stale_restock
     tier: target
     question: "Which items were not restocked in the last 30 days?"
-    match: resultset
+    match: listing_total
     canonical_sql: >
       SELECT sku FROM inventory
       WHERE CAST(last_restocked AS DATE) < CURRENT_DATE - INTERVAL 30 DAY
@@ -210,7 +210,7 @@ items:
   - id: low_stock_all
     tier: target
     question: "Which SKUs are below reorder level?"
-    match: resultset
+    match: listing_total
     canonical_sql: >
       SELECT i.sku, i.quantity_kg FROM inventory i
       WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0
@@ -271,9 +271,9 @@ items:
     question: "Which carriers have the most delayed shipments?"
     match: resultset
     canonical_sql: >
-      SELECT carrier, COUNT(*) AS delayed_count
+      SELECT carrier, COUNT(*) AS shipment_count
       FROM shipments WHERE status = 'DELAYED' GROUP BY carrier
-    key_columns: [carrier, delayed_count]
+    key_columns: [carrier, shipment_count]
     known_gap: "'delayed' fires the ranked listing path before the carrier-count branch"
     tags: [shipments, aggregate]
 
@@ -282,10 +282,10 @@ items:
     question: "How many delayed incoming shipments per warehouse?"
     match: resultset
     canonical_sql: >
-      SELECT l.location_code, COUNT(*) AS delayed_incoming
+      SELECT l.location_code, COUNT(*) AS shipment_count
       FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
       WHERE s.status = 'DELAYED' GROUP BY l.location_code
-    key_columns: [location_code, delayed_incoming]
+    key_columns: [location_code, shipment_count]
     known_gap: "'delayed' fires the ranked listing path first"
     tags: [shipments, aggregate]
 

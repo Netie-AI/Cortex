@@ -1,0 +1,166 @@
+# OpenDMS certified query repository (Q1) — the verified-query layer (L0) the
+# Q2 answer engine matches against first. Each entry is a human-verified
+# question→SQL pair; the loader executes every one at load time (must not error)
+# and the accuracy benchmark's core tier is the living proof these stay correct.
+#
+# Seeded from the 18 core golden items (bench/golden/dms_golden_v1.yaml). New
+# certified queries graduate here when an SME validates an answer (see plan §Q1).
+
+certified:
+  - id: cq_sku_count
+    question: "How many SKUs do we have in inventory?"
+    sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [inventory, count]
+
+  - id: cq_low_stock_wh_a
+    question: "Which SKUs are below reorder level in warehouse A?"
+    sql: >
+      SELECT i.sku, i.quantity_kg FROM inventory i
+      JOIN locations l ON i.location_id = l.location_id
+      WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0
+        AND l.location_code = 'WH-A' ORDER BY i.quantity_kg ASC
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [inventory, reorder]
+
+  - id: cq_sales_top5_value
+    question: "Top 5 selling SKUs by revenue"
+    sql: >
+      SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions WHERE txn_type = 'OUT'
+      GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [sales, rank]
+
+  - id: cq_sales_top3_volume
+    question: "Top 3 SKUs by quantity sold"
+    sql: >
+      SELECT sku, SUM(quantity_kg) AS total_sold_kg
+      FROM transactions WHERE txn_type = 'OUT'
+      GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [sales, rank]
+
+  - id: cq_supplier_ranking
+    question: "Rank suppliers by combined risk and lead time score"
+    sql: >
+      SELECT supplier_id,
+             ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3) AS ranking_score
+      FROM suppliers ORDER BY ranking_score DESC, risk_score DESC, lead_time_days DESC LIMIT 10
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [suppliers, rank]
+
+  - id: cq_capacity_utilisation
+    question: "Show warehouse capacity utilisation"
+    sql: >
+      SELECT location_code, ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used
+      FROM locations
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [locations, capacity]
+
+  - id: cq_capacity_above_90
+    question: "Which locations are above 90 percent capacity?"
+    sql: >
+      SELECT location_code FROM locations
+      WHERE 100.0 * current_load_kg / capacity_kg > 90
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [locations, capacity]
+
+  - id: cq_cold_storage
+    question: "Which locations are cold storage?"
+    sql: "SELECT location_code FROM locations WHERE is_cold_storage = true"
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [locations]
+
+  - id: cq_active_alerts
+    question: "List active alerts across the warehouse network"
+    sql: "SELECT alert_id FROM alerts WHERE resolved = false"
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [alerts]
+
+  - id: cq_stock_value_by_category
+    question: "What is total stock value by category?"
+    sql: >
+      SELECT category, SUM(quantity_kg * unit_cost_myr) AS total_value_myr
+      FROM inventory GROUP BY category
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [inventory, aggregate]
+
+  - id: cq_sku_count_by_category
+    question: "Show SKU count by category"
+    sql: "SELECT category, COUNT(*) AS sku_count FROM inventory GROUP BY category"
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [inventory, aggregate]
+
+  - id: cq_spend_by_country
+    question: "What is our total spend by supplier country?"
+    sql: >
+      SELECT s.country, SUM(i.quantity_kg * i.unit_cost_myr) AS total_spend_myr
+      FROM inventory i JOIN suppliers s ON i.supplier_id = s.supplier_id
+      GROUP BY s.country
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [suppliers, aggregate]
+
+  - id: cq_cost_by_destination
+    question: "Show shipment cost by destination"
+    sql: >
+      SELECT l.location_code, SUM(s.cost_myr) AS total_cost_myr
+      FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
+      GROUP BY l.location_code
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [shipments, aggregate]
+
+  - id: cq_expired_items
+    question: "Which items are expired?"
+    sql: >
+      SELECT sku FROM inventory
+      WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [inventory, time]
+
+  - id: cq_chemicals_list
+    question: "List chemicals in inventory"
+    sql: "SELECT sku FROM inventory WHERE category = 'CHEMICALS' ORDER BY sku"
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [inventory]
+
+  - id: cq_high_risk_pending
+    question: "Which high-risk suppliers have pending shipments?"
+    sql: >
+      SELECT DISTINCT s.supplier_name, sh.shipment_id
+      FROM suppliers s JOIN shipments sh ON s.supplier_id = sh.supplier_id
+      WHERE s.risk_score > 0.7 AND sh.status IN ('PENDING', 'IN_TRANSIT')
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [suppliers, shipments]
+
+  - id: cq_cctv_wh_a
+    question: "Show the CCTV camera for warehouse A"
+    sql: "SELECT location_code, cctv_camera_id FROM locations WHERE location_code = 'WH-A'"
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [locations]
+
+  - id: cq_audit_overdue
+    question: "Which suppliers have an audit overdue?"
+    sql: >
+      SELECT supplier_id FROM suppliers
+      WHERE CAST(last_audit_date AS DATE) < CURRENT_DATE - INTERVAL 90 DAY
+    verified_by: seed
+    verified_at: "2026-07-20"
+    tags: [suppliers, time]

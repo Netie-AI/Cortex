@@ -1,0 +1,27 @@
+# bronze.inventory_raw (messy, e.g. "5.0kg") → silver.inventory (typed, gated).
+id: inventory_silver
+source: bronze.inventory_raw
+target: silver.inventory
+transform_sql: |
+  SELECT
+    sku,
+    sku_name,
+    category,
+    supplier_id,
+    location_id,
+    storage_bin,
+    TRY_CAST(REGEXP_REPLACE(quantity_kg, '[^0-9.]', '', 'g') AS DOUBLE)      AS quantity_kg,
+    TRY_CAST(REGEXP_REPLACE(reorder_level_kg, '[^0-9.]', '', 'g') AS DOUBLE) AS reorder_level_kg,
+    TRY_CAST(unit_cost_myr AS DOUBLE)                                        AS unit_cost_myr,
+    is_hazardous
+  FROM {source}
+expectations:
+  - name: sku_present
+    constraint_sql: "sku IS NOT NULL AND sku <> ''"
+    action: drop
+  - name: quantity_non_negative
+    constraint_sql: "quantity_kg >= 0"
+    action: drop
+  - name: unit_cost_positive
+    constraint_sql: "unit_cost_myr > 0"
+    action: warn

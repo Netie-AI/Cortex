@@ -62,6 +62,10 @@ def create_app() -> Any:
         from netie.api.skill_routes import register_skill_routes
         from netie.api.sidecar_routes import register_sidecar_routes
         from netie.api.lakehouse_routes import register_lakehouse_routes
+        from netie.api.ingest_routes import register_ingest_routes
+        from netie.api.pipeline_routes import register_pipeline_routes
+        from netie.api.stream_routes import register_stream_routes
+        from netie.api.agent_routes import register_agent_routes
 
         register_dms_routes(app)
         register_chat_routes(app)
@@ -70,6 +74,10 @@ def create_app() -> Any:
         register_skill_routes(app)
         register_sidecar_routes(app)
         register_lakehouse_routes(app)
+        register_ingest_routes(app)
+        register_pipeline_routes(app)
+        register_stream_routes(app)
+        register_agent_routes(app)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

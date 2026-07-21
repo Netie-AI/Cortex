@@ -1,0 +1,288 @@
+# OpenDMS governed metrics (Q1) — the "trusted assets" the Q2 answer engine
+# compiles against. The LLM (Q2 L1) only picks a metric id + fills slots; the
+# SQL is compiled deterministically here and re-verified by the sqlglot guardrail.
+#
+# param kinds (enforced by loader._render_param):
+#   int    → validated to int within [min,max], rendered as a number
+#   enum   → validated against `values`, rendered as the bare token (ASC/DESC/…)
+#   value  → validated against the value dictionary for `column`, rendered '…'
+#   filter → optional; column+op; renders "AND <col> <op> '<value>'" or "" when absent
+#   nfilter→ optional numeric; renders "AND <col> <op> <number>" or "" when absent
+#
+# kind: scalar | listing | ranked | grouped  (hint for Q2 answer shaping)
+
+metrics:
+  # ── inventory ───────────────────────────────────────────────────────────────
+  - id: sku_count
+    kind: scalar
+    synonyms: ["how many skus", "number of skus", "sku count", "distinct skus", "count skus"]
+    result_columns: [sku_count]
+    sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+
+  - id: low_stock
+    kind: listing
+    synonyms: ["below reorder", "low stock", "understocked", "need reordering", "reorder"]
+    result_columns: [sku, quantity_kg]
+    sql: >
+      SELECT i.sku, i.quantity_kg
+      FROM inventory i LEFT JOIN locations l ON i.location_id = l.location_id
+      WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0 {wh}
+      ORDER BY i.quantity_kg ASC
+    params:
+      wh: {kind: filter, column: location_code, table: l, op: "=", optional: true}
+
+  - id: expired_items
+    kind: listing
+    synonyms: ["expired", "past expiry", "out of date"]
+    result_columns: [sku]
+    sql: >
+      SELECT sku FROM inventory
+      WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
+      ORDER BY expiry_date ASC
+
+  - id: stale_restock
+    kind: listing
+    synonyms: ["not restocked", "stale stock", "old stock"]
+    result_columns: [sku]
+    sql: >
+      SELECT sku FROM inventory
+      WHERE CAST(last_restocked AS DATE) < CURRENT_DATE - INTERVAL {days} DAY
+      ORDER BY last_restocked ASC
+    params:
+      days: {kind: int, default: 30, min: 1, max: 3650}
+
+  - id: items_by_category
+    kind: listing
+    synonyms: ["items in category", "list category", "products in"]
+    result_columns: [sku]
+    sql: "SELECT sku FROM inventory WHERE category = {category} ORDER BY sku"
+    params:
+      category: {kind: value, column: category, required: true}
+
+  - id: stock_value_by_category
+    kind: grouped
+    synonyms: ["stock value by category", "inventory value per category", "value by category"]
+    result_columns: [category, total_value_myr]
+    sql: >
+      SELECT category, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS total_value_myr
+      FROM inventory GROUP BY category ORDER BY total_value_myr DESC
+
+  - id: sku_count_by_category
+    kind: grouped
+    synonyms: ["sku count by category", "how many per category", "products per category"]
+    result_columns: [category, sku_count]
+    sql: >
+      SELECT category, COUNT(*) AS sku_count FROM inventory
+      GROUP BY category ORDER BY sku_count DESC
+
+  # ── transactions / sales ────────────────────────────────────────────────────
+  - id: sales_by_value
+    kind: ranked
+    synonyms: ["top selling", "best sellers", "revenue by sku", "sales by value", "highest revenue"]
+    result_columns: [sku, sales_value_myr]
+    sql: >
+      SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions WHERE txn_type = 'OUT'
+      GROUP BY sku ORDER BY sales_value_myr {direction}, sku ASC LIMIT {limit}
+    params:
+      limit: {kind: int, default: 5, min: 1, max: 1000}
+      direction: {kind: enum, values: [ASC, DESC], default: DESC}
+
+  - id: sales_by_volume
+    kind: ranked
+    synonyms: ["top by quantity", "most sold by kg", "volume sold", "quantity sold"]
+    result_columns: [sku, total_sold_kg]
+    sql: >
+      SELECT sku, SUM(quantity_kg) AS total_sold_kg
+      FROM transactions WHERE txn_type = 'OUT'
+      GROUP BY sku ORDER BY total_sold_kg {direction}, sku ASC LIMIT {limit}
+    params:
+      limit: {kind: int, default: 5, min: 1, max: 1000}
+      direction: {kind: enum, values: [ASC, DESC], default: DESC}
+
+  - id: revenue_windowed
+    kind: scalar
+    synonyms: ["revenue last", "sales in the last", "revenue in days", "recent revenue"]
+    result_columns: [revenue_myr]
+    sql: >
+      SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
+      FROM transactions
+      WHERE txn_type = 'OUT' AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL {days} DAY
+    params:
+      days: {kind: int, default: 30, min: 1, max: 3650}
+
+  # ── shipments ───────────────────────────────────────────────────────────────
+  - id: shipments_by_status
+    kind: listing
+    synonyms: ["shipments that are", "list shipments", "shipment status", "delayed shipments", "in transit"]
+    result_columns: [shipment_id]
+    sql: "SELECT shipment_id FROM shipments WHERE status = {status} ORDER BY shipment_id"
+    params:
+      status: {kind: value, column: status, required: true}
+
+  - id: count_by_carrier
+    kind: grouped
+    synonyms: ["by carrier", "per carrier", "which carriers", "carrier breakdown"]
+    result_columns: [carrier, shipment_count]
+    sql: >
+      SELECT carrier, COUNT(*) AS shipment_count FROM shipments
+      WHERE status = {status} GROUP BY carrier ORDER BY shipment_count DESC
+    params:
+      status: {kind: value, column: status, default: "DELAYED"}
+
+  - id: count_by_destination
+    kind: grouped
+    synonyms: ["per warehouse incoming", "by destination", "incoming per location"]
+    result_columns: [location_code, shipment_count]
+    sql: >
+      SELECT l.location_code, COUNT(*) AS shipment_count
+      FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
+      WHERE s.status = {status} GROUP BY l.location_code ORDER BY shipment_count DESC
+    params:
+      status: {kind: value, column: status, default: "DELAYED"}
+
+  - id: cost_by_destination
+    kind: grouped
+    synonyms: ["shipment cost by destination", "cost per warehouse", "delivery cost by location"]
+    result_columns: [location_code, total_cost_myr]
+    sql: >
+      SELECT l.location_code, ROUND(SUM(s.cost_myr), 2) AS total_cost_myr
+      FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
+      GROUP BY l.location_code ORDER BY total_cost_myr DESC
+
+  - id: arriving_window
+    kind: listing
+    synonyms: ["arriving this week", "arriving soon", "incoming within", "due to arrive"]
+    result_columns: [shipment_id]
+    sql: >
+      SELECT shipment_id FROM shipments
+      WHERE status = 'IN_TRANSIT'
+        AND CAST(expected_arrival AS DATE) <= CURRENT_DATE + INTERVAL {days} DAY
+      ORDER BY expected_arrival ASC
+    params:
+      days: {kind: int, default: 7, min: 1, max: 365}
+
+  # ── suppliers ───────────────────────────────────────────────────────────────
+  - id: supplier_ranking
+    kind: ranked
+    synonyms: ["rank suppliers", "supplier score", "compare suppliers", "supplier benchmark"]
+    result_columns: [supplier_id, ranking_score]
+    sql: >
+      SELECT supplier_id,
+             ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3) AS ranking_score
+      FROM suppliers
+      ORDER BY ranking_score {direction}, risk_score {direction}, lead_time_days {direction}
+      LIMIT {limit}
+    params:
+      limit: {kind: int, default: 10, min: 1, max: 1000}
+      direction: {kind: enum, values: [ASC, DESC], default: DESC}
+
+  - id: suppliers_by_risk
+    kind: listing
+    synonyms: ["risk score above", "high risk suppliers", "risky suppliers", "risk over"]
+    result_columns: [supplier_id]
+    sql: >
+      SELECT supplier_id FROM suppliers
+      WHERE risk_score {op} {threshold} ORDER BY risk_score DESC
+    params:
+      threshold: {kind: float, default: 0.7, min: 0.0, max: 1.0}
+      op: {kind: enum, values: [">", ">=", "<", "<="], default: ">"}
+
+  - id: avg_lead_time_by_country
+    kind: grouped
+    synonyms: ["average lead time by country", "mean lead time per country", "lead time by country"]
+    result_columns: [country, avg_lead_time_days]
+    sql: >
+      SELECT country, ROUND(AVG(lead_time_days), 2) AS avg_lead_time_days
+      FROM suppliers GROUP BY country ORDER BY avg_lead_time_days DESC
+
+  - id: spend_by_country
+    kind: grouped
+    synonyms: ["spend by country", "purchasing by country", "total spend per country"]
+    result_columns: [country, total_spend_myr]
+    sql: >
+      SELECT s.country, ROUND(SUM(i.quantity_kg * i.unit_cost_myr), 2) AS total_spend_myr
+      FROM inventory i JOIN suppliers s ON i.supplier_id = s.supplier_id
+      GROUP BY s.country ORDER BY total_spend_myr DESC
+
+  - id: audit_overdue
+    kind: listing
+    synonyms: ["audit overdue", "overdue audit", "suppliers needing audit"]
+    result_columns: [supplier_id]
+    sql: >
+      SELECT supplier_id FROM suppliers
+      WHERE CAST(last_audit_date AS DATE) < CURRENT_DATE - INTERVAL {days} DAY
+      ORDER BY last_audit_date ASC
+    params:
+      days: {kind: int, default: 90, min: 1, max: 3650}
+
+  - id: high_risk_pending
+    kind: listing
+    synonyms: ["high risk pending shipments", "risky suppliers pending", "high-risk with shipments"]
+    result_columns: [supplier_name, shipment_id]
+    sql: >
+      SELECT DISTINCT s.supplier_name, sh.shipment_id
+      FROM suppliers s JOIN shipments sh ON s.supplier_id = sh.supplier_id
+      WHERE s.risk_score > {threshold} AND sh.status IN ('PENDING', 'IN_TRANSIT')
+    params:
+      threshold: {kind: float, default: 0.7, min: 0.0, max: 1.0}
+
+  # ── locations ───────────────────────────────────────────────────────────────
+  - id: capacity_utilisation
+    kind: grouped
+    synonyms: ["capacity utilisation", "warehouse capacity", "how full", "utilization"]
+    result_columns: [location_code, pct_used]
+    sql: >
+      SELECT location_code, ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used
+      FROM locations ORDER BY pct_used DESC
+    params: {}
+
+  - id: capacity_above
+    kind: listing
+    synonyms: ["above capacity", "over percent capacity", "near full", "above 90"]
+    result_columns: [location_code]
+    sql: >
+      SELECT location_code FROM locations
+      WHERE 100.0 * current_load_kg / capacity_kg > {pct} ORDER BY location_code
+    params:
+      pct: {kind: int, default: 90, min: 0, max: 100}
+
+  - id: free_capacity
+    kind: ranked
+    synonyms: ["most free capacity", "free space", "available capacity", "spare capacity"]
+    result_columns: [location_code, free_kg]
+    sql: >
+      SELECT location_code, capacity_kg - current_load_kg AS free_kg
+      FROM locations ORDER BY free_kg {direction} LIMIT {limit}
+    params:
+      limit: {kind: int, default: 1, min: 1, max: 1000}
+      direction: {kind: enum, values: [ASC, DESC], default: DESC}
+
+  - id: cold_storage_list
+    kind: listing
+    synonyms: ["cold storage locations", "which are cold storage", "refrigerated warehouses"]
+    result_columns: [location_code]
+    sql: "SELECT location_code FROM locations WHERE is_cold_storage = true ORDER BY location_code"
+
+  - id: cold_storage_count
+    kind: scalar
+    synonyms: ["how many cold storage", "count cold storage", "number of cold storage"]
+    result_columns: [cold_count]
+    sql: "SELECT COUNT(*) AS cold_count FROM locations WHERE is_cold_storage = true"
+
+  - id: cctv_by_location
+    kind: listing
+    synonyms: ["cctv camera", "camera for warehouse", "surveillance camera"]
+    result_columns: [location_code, cctv_camera_id]
+    sql: >
+      SELECT location_code, cctv_camera_id FROM locations
+      WHERE location_code = {location} ORDER BY location_code
+    params:
+      location: {kind: value, column: location_code, required: true}
+
+  # ── alerts ──────────────────────────────────────────────────────────────────
+  - id: active_alerts
+    kind: listing
+    synonyms: ["active alerts", "open alerts", "unresolved alerts", "current alerts"]
+    result_columns: [alert_id]
+    sql: "SELECT alert_id FROM alerts WHERE resolved = false ORDER BY created_at DESC"

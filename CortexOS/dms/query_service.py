@@ -624,6 +624,15 @@ def _is_time_dimension(name: str) -> bool:
     return any(t in n for t in ("date", "time", "arrival", "restocked", "timestamp", "created_at"))
 
 
+def _to_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
     if not rows:
         return None
@@ -670,11 +679,25 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
             value_key = candidate
             break
     if not value_key:
-        value_key = keys[-1]
+        # Fall back to the last column whose value is actually numeric; text-only
+        # result sets (e.g. alert listings) get no chart instead of a crash.
+        for key in reversed(keys):
+            if _to_float(rows[0].get(key)) is not None:
+                value_key = key
+                break
+    if not value_key:
+        return None
 
     chart_type = "line" if _is_time_dimension(name_key) else "bar"
     slice_rows = rows[:20] if "capacity" in q else rows[:10]
-    data = [{"name": str(r.get(name_key, "")), "value": float(r.get(value_key) or 0)} for r in slice_rows]
+    data = []
+    for r in slice_rows:
+        val = _to_float(r.get(value_key))
+        if val is None:
+            continue
+        data.append({"name": str(r.get(name_key, "")), "value": val})
+    if not data:
+        return None
 
     title = question[:80]
     if "capacity" in q:
@@ -725,6 +748,18 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
 
 
 def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+    """Q2 — route through the layered answer engine (certified → governed metric →
+    abstain). Falls back to the legacy heuristic path only if the engine is
+    unavailable, so behavior degrades safely rather than breaking."""
+    try:
+        from CortexOS.dms.answer_engine import answer as _engine_answer
+
+        return _engine_answer(question, session_id=session_id)
+    except Exception:  # noqa: BLE001 — engine failure must not take the API down
+        return _answer_question_legacy(question, session_id=session_id)
+
+
+def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
     del session_id
     audit_id = str(uuid.uuid4())
     route = route_question(question)

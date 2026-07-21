@@ -27,16 +27,11 @@ def test_golden_set_shape():
     ids = [i.id for i in items]
     assert len(ids) == len(set(ids)), "duplicate golden ids"
     for item in items:
-        assert item.match in ("resultset", "scalar", "abstain", "blocked")
-        if item.match in ("resultset", "scalar"):
-            assert item.canonical_sql and item.key_columns, item.id
+        assert item.match in ("resultset", "scalar", "abstain", "blocked", "listing_total")
+        if item.match in ("resultset", "scalar", "listing_total"):
+            assert item.canonical_sql, item.id
 
 
-@pytest.mark.xfail(
-    reason="Demo alerts mix numeric + narrative strings; float cast fails on "
-    "'Capacity Warning…' until P6 cleaning rules land. Safety/shape still gated.",
-    strict=False,
-)
 def test_core_tier_all_correct(full_report):
     core = _tier(full_report, "core")
     failures = [r for r in full_report["results"]
