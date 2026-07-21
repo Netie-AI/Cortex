@@ -1,4 +1,4 @@
-# DMS Brain demo — one-command startup (Windows)
+﻿# DMS Brain demo - one-command startup (Windows)
 param(
     [switch]$Fast
 )
@@ -14,7 +14,19 @@ $PipExtras = '.[dev,api,dms]'
 function Resolve-PythonExe {
     param([string]$RepoRoot)
     $myenvPy = Join-Path $RepoRoot "myenv\Scripts\python.exe"
-    if (Test-Path $myenvPy) { return $myenvPy }
+    if (Test-Path $myenvPy) {
+        try {
+            $prev = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            & $myenvPy -c "import sys" 2>$null | Out-Null
+            $ok = ($LASTEXITCODE -eq 0)
+            $ErrorActionPreference = $prev
+            if ($ok) { return $myenvPy }
+        } catch {
+            $ErrorActionPreference = "Stop"
+        }
+        Write-Warn "myenv python broken - using system python"
+    }
     if (Get-Command python -ErrorAction SilentlyContinue) { return "python" }
     throw "No Python found. Install Python 3.10+ or create myenv."
 }
@@ -84,7 +96,7 @@ $envFile = Join-Path $Root "env.local"
 if (Import-EnvLocal -Path $envFile) {
     Write-Ok "Loaded env.local"
 } else {
-    Write-Warn "No env.local — LLM features use mock mode. Copy env.local.example to env.local"
+    Write-Warn "No env.local - LLM features use mock mode. Copy env.local.example to env.local"
 }
 
 $env:PYTHONPATH = $Root
@@ -168,7 +180,7 @@ if (-not $npmCmd) { $npmCmd = "npm.cmd" }
 
 Write-Step "Starting Next.js UI on :3000..."
 Set-Location "$Root\demo\dms-ui"
-# App Router project — Next dev still scans pages/; missing dir causes 500
+# App Router project - Next dev still scans pages/; missing dir causes 500
 $pagesDir = Join-Path (Get-Location) "pages"
 if (-not (Test-Path $pagesDir)) {
     New-Item -ItemType Directory -Force -Path $pagesDir | Out-Null
