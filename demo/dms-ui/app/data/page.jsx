@@ -51,10 +51,10 @@ export default function DataPage() {
     [variant, messyData]
   );
 
-  const highlights = useMemo(
-    () => buildMessyHighlights(cleanData?.changelog),
-    [cleanData]
-  );
+  const highlights = useMemo(() => {
+    const previewRows = messyData?.rows?.slice(0, 50) || [];
+    return buildMessyHighlights(messyData?.profile, previewRows);
+  }, [messyData]);
 
   const changelogAgg = useMemo(
     () => aggregateChangelog(cleanData?.changelog),
@@ -172,6 +172,7 @@ export default function DataPage() {
                   const val = String(row[c] ?? "");
                   const isMessy =
                     variant === "messy" &&
+                    typeof highlights?.has === "function" &&
                     highlights.has(`${i}|${c}|${val}`);
                   return (
                     <td key={c} className={isMessy ? "messy-val" : ""}>
