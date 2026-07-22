@@ -1,3 +1,4 @@
+<!-- generated 2026-07-22T03:57:27+00:00 -->
 <!-- generated 2026-07-03T05:16:44+00:00 -->
 # CURSOR_HANDOFF — Builder Session Startup
 **Read this file first.** Then `STATUS.md` → `docs/dms/BUILD_PLAN.md` § FEATURE 7 remainder.

@@ -250,7 +250,7 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
     suggestions = _suggestions(question)
     hint = " Try: " + " · ".join(f'"{s}"' for s in suggestions)
     return {
-        "answer": (f"I can't answer that from the DMS data with confidence ({reason})."
+        "answer": (f"I can't answer that from the DMS semantic layer with confidence ({reason})."
                    + hint),
         "sql_used": None,
         "chart_spec": None,

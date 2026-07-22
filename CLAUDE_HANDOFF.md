@@ -1,5 +1,5 @@
 # CLAUDE_HANDOFF — Supervisor / Gate Session
-**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-07-03T05:16:44+00:00
+**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-07-22T03:57:27+00:00
 **Paste for Gate F7 remainder when RBAC/RLS/SOPS slice is complete.**
 
 ---

@@ -750,11 +750,27 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
 def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
     """Q2 — route through the layered answer engine (certified → governed metric →
     abstain). Falls back to the legacy heuristic path only if the engine is
-    unavailable, so behavior degrades safely rather than breaking."""
+    unavailable, so behavior degrades safely rather than breaking.
+
+    Bridge: when the engine abstains but a ranked legacy SQL template still matches
+    (delayed shipments / sales / supplier ranking), serve the legacy path so
+    pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+    """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
 
-        return _engine_answer(question, session_id=session_id)
+        result = _engine_answer(question, session_id=session_id)
+        # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
+        # until a dedicated governed metric exists. Word-boundary match only — bare
+        # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
+        q = question.lower()
+        if (
+            result.get("route") == "needs_clarification"
+            and re.search(r"\b(delayed|late)\b", q)
+            and _try_generate_ranked_sql(question)
+        ):
+            return _answer_question_legacy(question, session_id=session_id)
+        return result
     except Exception:  # noqa: BLE001 — engine failure must not take the API down
         return _answer_question_legacy(question, session_id=session_id)
 

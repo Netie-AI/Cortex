@@ -10,7 +10,7 @@ Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F
 **Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*
 
 ## P3 — DAG token optimization + Temporal durable execution
-**Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`.)*
+**Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`. S1 watcher agents activate DBOS path per BUILD_PLAN_V2 — governed detect→draft→approve landed; durable resume still open.)*
 
 ## P4 — respond.io-style endpoint / Closer auto-reply
 WhatsApp/email in, sentiment score, warmed delayed draft (2–5s), human approve before send. **No em dash** in generated replies. **Condition:** DMS paying partner OR explicit RUMA priority. *(Research: `docs/research/respond_io_analysis.md`.)*

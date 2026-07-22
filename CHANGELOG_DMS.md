@@ -2,6 +2,13 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## S1 smoke + stream stress re-verify — 2026-07-22
+
+- **S1 tests:** `tests/dms/test_s1_agents.py` — detector pure SQL, approval gate, publish artifact, ledger chain, API RBAC (DBOS resume + @agent chat deferred/skipped)
+- **Stream stress:** `python -m bench.stress --scenario stream` → ~379 ev/s @ 8 threads, 0 errors (buffer concurrency fix holds)
+- **Q2 bridge:** narrow legacy fallback for `\b(delayed|late)\b` ranked queries; abstain copy restores "DMS semantic layer"
+- **Synced:** fast-forwarded `dms-integrated-engine` to wave1 pull (`4fb30ee`)
+
 ## Integrate — dms-v2 + engine/lakehouse — 2026-07-21
 
 - **Base:** latest `origin/dms-v2` (F6 PASS + F7 RBAC + portable demo)
