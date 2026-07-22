@@ -19,10 +19,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# GitHub tokens are opaque strings (Apr/May 2026 changelog): installation /
+# Actions ``ghs_`` tokens may be classic (~40) or JWT-shaped (~520 chars).
+# Do not pin a max length — only require the known prefix + non-trivial body.
+_GH_OPAQUE = r"[A-Za-z0-9._-]{20,}"
+
 PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("openai_style_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("github_token", re.compile(r"\bghp_[A-Za-z0-9]{36}\b")),
+    ("github_pat", re.compile(rf"\bghp_{_GH_OPAQUE}\b")),
+    ("github_installation_token", re.compile(rf"\bghs_{_GH_OPAQUE}\b")),
+    ("github_oauth_token", re.compile(rf"\bgho_{_GH_OPAQUE}\b")),
+    ("github_refresh_token", re.compile(rf"\bghr_{_GH_OPAQUE}\b")),
+    ("github_fine_grained_pat", re.compile(rf"\bgithub_pat_{_GH_OPAQUE}\b")),
     ("slack_token", re.compile(r"\bxox[bap]-[A-Za-z0-9-]{10,}\b")),
     ("age_secret_key", re.compile(r"\bAGE-SECRET-KEY-1[A-Z0-9]{20,}\b")),
     ("private_key_pem", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),

@@ -37,7 +37,8 @@ postgres = ["sqlalchemy[asyncio]>=2", "asyncpg>=0.29", "psycopg[binary]>=3.1"]
 agents = ["dbos>=2.28.0,<3"]
 tokens = ["tiktoken>=0.7"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
-dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=10"]
+# pytz: DuckDB timezone / DuckLake snapshot paths import it at runtime
+dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=10", "pytz>=2024.1"]
 
 [tool.poetry]
 name = "netie"
@@ -80,6 +81,11 @@ tantivy = {version = "^0.22", optional = true}
 duckdb = {version = "^1.1", optional = true}
 sqlglot = {version = "^25", optional = true}
 openpyxl = {version = "^3.1", optional = true}
+qrcode = {version = "^7.4", optional = true}
+pillow = {version = "^10", optional = true}
+pytz = {version = ">=2024.1", optional = true}
+# Extras live on the dependency; poetry.extras may only list package names (no [binary]).
+psycopg = {version = "^3.1", optional = true, extras = ["binary"]}
 dbos = {version = ">=2.28.0,<3", optional = true}
 
 [tool.poetry.extras]
@@ -89,8 +95,8 @@ gpu = ["torch", "llama-cpp-python"]
 rag = ["qdrant-client", "tantivy"]
 a2a = []
 personality = []
-postgres = ["sqlalchemy", "asyncpg", "psycopg[binary]"]
+postgres = ["sqlalchemy", "asyncpg", "psycopg"]
 agents = ["dbos"]
 tokens = ["tiktoken"]
 api = ["fastapi", "uvicorn"]
-dms = ["duckdb", "sqlglot", "openpyxl", "qrcode", "pillow"]
+dms = ["duckdb", "sqlglot", "openpyxl", "qrcode", "pillow", "pytz"]
