@@ -4,9 +4,13 @@
 Property: a `viewer` DB session cannot read steward-only or foreign-tenant audit-ledger rows.
 
 ## What proves it
-- `packs/dms/sql/003_rls_policies.sql` — `dms_audit_ledger_role_select` (viewers see `visibility='viewer'` within tenant; stewards/admins see all in tenant).
-- `packs/dms/sql/007_rls_ledger_force.sql` — `FORCE ROW LEVEL SECURITY` so the table owner is also subject (makes the deny observable in a single-connection test).
-- `tests/dms/test_rls_blocks_out_of_scope_read.py` — asserts deny for out-of-scope role AND foreign tenant; allow for in-scope. **Skips (does not pass) without `DMS_LEDGER_DSN`.**
+- `packs/dms/sql/001_warehouse_v0.sql` → `003_rls_policies.sql` → `007_rls_ledger_force.sql`
+  (`dms_audit_ledger_role_select`: viewers see `visibility='viewer'` within tenant).
+- `007` FORCE so **table owners** are subject to policies.
+- `tests/dms/test_rls_blocks_out_of_scope_read.py` — migrates as bootstrap DSN user, then
+  asserts as dedicated `dms_rls_app` (**NOSUPERUSER / NOBYPASSRLS**). Superusers bypass RLS
+  even with FORCE — the CI `postgres` role must not be the asserting session.
+- **Skips (does not pass) without `DMS_LEDGER_DSN`.**
 
 ## App-layer contract (already in code)
 Every request must stamp the session GUCs from the authenticated `api_auth.Caller` BEFORE any query:

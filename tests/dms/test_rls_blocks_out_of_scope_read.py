@@ -8,6 +8,11 @@ Property proven (fail-closed):
   * app.role='viewer'  → SELECT returns ONLY visibility='viewer' rows in tenant.
   * app.role='steward' → SELECT returns steward + viewer rows.
   * a foreign tenant_id is invisible regardless of role.
+
+Honesty: the DSN user is often the ``postgres`` superuser (CI default). Superusers
+bypass RLS even with FORCE ROW LEVEL SECURITY. The proof therefore migrates as
+the bootstrap role, then SETs ROLE to a dedicated NOSUPERUSER / NOBYPASSRLS
+login before asserting deny/allow.
 """
 from __future__ import annotations
 
@@ -30,6 +35,9 @@ MIGRATIONS = (
     "007_rls_ledger_force.sql",
 )
 
+APP_ROLE = "dms_rls_app"
+APP_PASSWORD = "dms_rls_app_pw"
+
 
 def _apply_migrations(conn):
     from pathlib import Path
@@ -37,6 +45,24 @@ def _apply_migrations(conn):
     sql_dir = Path(__file__).resolve().parents[2] / "packs" / "dms" / "sql"
     for name in MIGRATIONS:
         conn.exec_driver_sql((sql_dir / name).read_text(encoding="utf-8"))
+
+
+def _ensure_non_superuser(conn):
+    """Create a login that cannot bypass RLS (superusers always can)."""
+    conn.exec_driver_sql(f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{APP_ROLE}') THEN
+                CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'
+                    NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+            END IF;
+        END $$;
+    """)
+    conn.exec_driver_sql(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}")
+    conn.exec_driver_sql(
+        f"GRANT SELECT, INSERT ON dms_audit_ledger, dms_locations, dms_items, dms_movements "
+        f"TO {APP_ROLE}"
+    )
 
 
 def _insert(conn, *, seq, visibility, tenant):
@@ -49,28 +75,42 @@ def _insert(conn, *, seq, visibility, tenant):
     )
 
 
+def _app_dsn(bootstrap_dsn: str) -> str:
+    """Swap user/password in the SQLAlchemy URL for the non-superuser role."""
+    from sqlalchemy.engine import make_url
+
+    url = make_url(bootstrap_dsn)
+    return url.set(username=APP_ROLE, password=APP_PASSWORD).render_as_string(
+        hide_password=False
+    )
+
+
 @pytest.fixture
-def engine():
+def engines():
     sa = pytest.importorskip("sqlalchemy")
-    eng = sa.create_engine(DSN, pool_pre_ping=True)
-    yield eng
-    eng.dispose()
-
-
-def test_rls_blocks_out_of_scope_read(engine):
-    from sqlalchemy import text
-
-    with engine.begin() as conn:
+    bootstrap = sa.create_engine(DSN, pool_pre_ping=True)
+    with bootstrap.begin() as conn:
         _apply_migrations(conn)
-        # seed as admin so the insert WITH CHECK passes
+        _ensure_non_superuser(conn)
         conn.exec_driver_sql("SET app.tenant_id = 'default'")
         conn.exec_driver_sql("SET app.role = 'admin'")
         base = 900000
+        # Seed as table owner / superuser so WITH CHECK is not the thing under test
         _insert(conn, seq=base + 1, visibility="steward", tenant="default")
         _insert(conn, seq=base + 2, visibility="viewer", tenant="default")
-        _insert(conn, seq=base + 3, visibility="viewer", tenant="other")  # foreign tenant
+        _insert(conn, seq=base + 3, visibility="viewer", tenant="other")
 
-    with engine.connect() as conn:
+    app = sa.create_engine(_app_dsn(DSN), pool_pre_ping=True)
+    yield bootstrap, app
+    app.dispose()
+    bootstrap.dispose()
+
+
+def test_rls_blocks_out_of_scope_read(engines):
+    from sqlalchemy import text
+
+    _, app = engines
+    with app.connect() as conn:
         conn.exec_driver_sql("SET app.tenant_id = 'default'")
 
         conn.exec_driver_sql("SET app.role = 'viewer'")
