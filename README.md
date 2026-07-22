@@ -2,6 +2,8 @@
 
 Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
+Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
+
 ## Handoff (read first)
 
 | File | When |
