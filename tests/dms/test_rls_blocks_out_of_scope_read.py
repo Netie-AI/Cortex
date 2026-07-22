@@ -21,7 +21,14 @@ pytestmark = pytest.mark.skipif(
     not DSN, reason="DMS_LEDGER_DSN not set — RLS proof requires a live Postgres (skip != pass)"
 )
 
-MIGRATIONS = ("002_ledger_postgres.sql", "003_rls_policies.sql", "007_rls_ledger_force.sql")
+# 001 creates warehouse tables that 003's policies reference; 002 is IF NOT EXISTS
+# for the ledger (no-op when 001 already created it) + append-only trigger hygiene.
+MIGRATIONS = (
+    "001_warehouse_v0.sql",
+    "002_ledger_postgres.sql",
+    "003_rls_policies.sql",
+    "007_rls_ledger_force.sql",
+)
 
 
 def _apply_migrations(conn):

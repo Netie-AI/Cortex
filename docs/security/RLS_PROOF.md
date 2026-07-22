@@ -1,6 +1,6 @@
 # RLS proof (C-SEC-2 / F7 remainder) — design + CI wiring
 
-**Status: DESIGN + TEST LANDED; CI DSN job = Cursor slice (B3).**
+**Status: DESIGN + TEST + CI job landed; green when migrations include `001`→`007`.**
 Property: a `viewer` DB session cannot read steward-only or foreign-tenant audit-ledger rows.
 
 ## What proves it
