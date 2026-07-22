@@ -1,27 +1,47 @@
+import sys
+import types
+
 import pytest
-from unittest.mock import MagicMock
+
+
+@pytest.fixture(autouse=True)
+def reset_config_cache(monkeypatch):
+    """Prevent config.toml / env from polluting pack path resolution in tests."""
+    monkeypatch.setenv("PACK", "ruma")
+    import netie.config
+
+    netie.config._cached_config = None
+    yield
+    netie.config._cached_config = None
+
 
 @pytest.fixture(autouse=True)
 def mock_sentence_transformer(monkeypatch):
     """
-    Mocks sentence_transformers.SentenceTransformer globally so that test runs
-    do not attempt to download or load the 80MB all-MiniLM-L6-v2 embedding model.
+    Mocks sentence_transformers before any importer loads the real stack
+    (avoids heavyweight sklearn/scipy imports on constrained CI images).
     """
     class MockTransformer:
         def __init__(self, *args, **kwargs):
             pass
-        
+
         def encode(self, sentences, *args, **kwargs):
-            # return dummy vectors (list of floats)
             if isinstance(sentences, str):
                 return [0.1] * 384
             return [[0.1] * 384 for _ in sentences]
 
-    # Patch at the module level where it is used
-    try:
-        import netie.fabrication.skillmesh
-        monkeypatch.setattr("netie.fabrication.skillmesh.SentenceTransformer", MockTransformer)
-    except ImportError:
-        pass
-    
+    fake_st = types.ModuleType("sentence_transformers")
+    fake_st.SentenceTransformer = MockTransformer
+    fake_st.CrossEncoder = MockTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st)
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers.models",
+        types.ModuleType("sentence_transformers.models"),
+    )
+
+    for mod_name in ("netie.fabrication.skillmesh", "CortexOS.fabrication.skillmesh"):
+        if mod_name in sys.modules:
+            monkeypatch.setattr(f"{mod_name}.SentenceTransformer", MockTransformer)
+
     return MockTransformer

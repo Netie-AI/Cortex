@@ -1,6 +1,46 @@
 # Cortex
-Netie Cortex is an open source agentic AI runtime. Users install it locally, bring their own API key (OpenAI, Anthropic, Mistral, etc.), The System will 
-1. Takes a natural language task
-2. Synthesizes a minimal execution DAG
-3. Executes the DAG using own compute
-4. Applies Wasm sandboxing + platform security 
+
+Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
+
+Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
+
+## Handoff (read first)
+
+| File | When |
+|------|------|
+| [STATUS.md](STATUS.md) | Current gate, debt, next feature |
+| [CURSOR_HANDOFF.md](CURSOR_HANDOFF.md) | Cursor builder startup |
+| [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) | Claude supervisor paste |
+| [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md) | One-call `plug_in(app)` integration |
+
+```powershell
+python scripts/handoff.py --cursor   # builder
+python scripts/handoff.py --claude   # supervisor
+```
+
+## Quick start (demo now)
+
+**New laptop?** Full guide: [docs/SETUP_NEW_MACHINE.md](docs/SETUP_NEW_MACHINE.md)
+
+```powershell
+# 1. Clone, copy env.local to repo root, then:
+.\demo\run_demo.ps1          # first run (~2 min data build)
+.\demo\run_demo.ps1 -Fast    # restart in ~30s
+```
+
+- UI: http://localhost:3000
+- Warehouse: http://localhost:3000/warehouse
+- Chat: http://localhost:3000/chat
+- API: http://localhost:8000/health
+
+**Show script:** [docs/DEMO.md](docs/DEMO.md)
+
+## Tests
+
+```powershell
+python -m pytest tests/ -q
+```
+
+## Docs
+
+See [docs/README.md](docs/README.md) for build plans, gates, and Cursor governance.

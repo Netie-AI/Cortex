@@ -1,0 +1,11 @@
+rules:
+  - id: no_ddl
+    description: Reject any DDL/DML statements
+    severity: error
+  - id: row_cap
+    description: Enforce LIMIT on all SELECT queries
+    limit: 1000
+    severity: error
+  - id: readonly_only
+    description: Only SELECT statements allowed
+    severity: error

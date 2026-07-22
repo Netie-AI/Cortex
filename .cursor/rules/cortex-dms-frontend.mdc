@@ -1,0 +1,12 @@
+---
+description: DMS demo UI — Next.js house style
+globs: demo/dms-ui/**
+alwaysApply: false
+---
+
+# DMS Frontend
+
+- App Router (`demo/dms-ui/app/`). API base: `http://localhost:8000`.
+- House style: near-black canvas, mono (JetBrains Mono) for data/code, zero border-radius, no chat bubbles.
+- Tailwind: gradient-critical elements use inline `style`, not `bg-gradient-*` (purge risk).
+- Role context: `context/RoleContext.jsx`. Reuse `ResultGrid`, `SqlBlock` for data display.

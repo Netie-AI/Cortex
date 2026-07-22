@@ -1,0 +1,6 @@
+rules:
+  - id: stamp_duty_present
+    when_doc_type: spa
+    require_key: stamp_duty
+    severity: warning
+    description: "Stamp duty value should be extracted for verification."

@@ -1,0 +1,13 @@
+postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: netie
+      POSTGRES_PASSWORD: netie
+      POSTGRES_DB: netie
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

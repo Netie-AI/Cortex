@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "hooks": {
+    "subagentStop": [
+      {
+        "command": "python .cursor/hooks/dms_subagent_followup.py"
+      }
+    ]
+  }
+}

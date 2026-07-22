@@ -1,0 +1,13 @@
+---
+description: Governance, audit ledger, encryption, PII — F1 and F7
+globs: CortexOS/compliance/**,CortexOS/crypto/**,CortexOS/dms/**,packs/dms/rules/**
+alwaysApply: false
+---
+
+# Security & Governance
+
+- Audit ledger: append-only, SHA-256 hash-chained. Serialize appends (advisory lock). No update/delete paths.
+- At rest: AES-256-GCM. In transit: TLS 1.3. Keys on-box; use `cryptography` lib.
+- PII choke-point: all LLM prompts pass through redaction. Test must fail if raw PII reaches a model.
+- RBAC (app) + Postgres RLS (Supabase). High-value actions always human-gated.
+- SHA-256 is hashing, not encryption. No custom ciphers. PQC deferred until bank clients demand it.

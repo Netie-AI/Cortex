@@ -1,0 +1,26 @@
+# bronze.suppliers_raw (messy, all-VARCHAR) → silver.suppliers (typed, gated).
+id: suppliers_silver
+source: bronze.suppliers_raw
+target: silver.suppliers
+transform_sql: |
+  SELECT
+    supplier_id,
+    supplier_name,
+    country,
+    TRY_CAST(lead_time_days AS INTEGER)            AS lead_time_days,
+    TRY_CAST(risk_score AS DOUBLE)                 AS risk_score,
+    payment_terms
+  FROM {source}
+expectations:
+  - name: supplier_id_present
+    constraint_sql: "supplier_id IS NOT NULL AND supplier_id <> ''"
+    action: drop
+  - name: risk_score_parsed
+    constraint_sql: "risk_score IS NOT NULL"
+    action: drop
+  - name: risk_score_in_range
+    constraint_sql: "risk_score BETWEEN 0 AND 1"
+    action: warn
+  - name: lead_time_non_negative
+    constraint_sql: "lead_time_days >= 0"
+    action: warn

@@ -1,0 +1,28 @@
+rules:
+  - id: spa_must_have_buyer_nric
+    when_doc_type: spa
+    require_key: buyer_nric
+    severity: error
+    description: "Buyer NRIC must be present in SPA."
+  - id: spa_must_have_price
+    when_doc_type: spa
+    require_key: price
+    severity: error
+    description: "SPA must include transaction price."
+  - id: bumi_lot_disclosure
+    when_doc_type: spa
+    when_matches:
+      tenure: bumi_lot
+    unless_matches:
+      buyer_race: malay
+    require_key: bumi_release_consent_attached
+    severity: error
+    description: "Bumi lot release consent attachment is required when applicable."
+  - id: stamp_duty_calculation
+    when_doc_type: spa
+    description: "Stated stamp duty must match computed duty within tolerance."
+    severity: error
+    compare_numeric_ratio:
+      numerator_key: stamp_duty_stated_myr
+      denominator_key: stamp_duty_computed_myr
+      max_relative_deviation_pct: 1.0

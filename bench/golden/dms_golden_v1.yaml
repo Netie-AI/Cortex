@@ -1,0 +1,376 @@
+# DMS golden question set v1 — the accuracy contract for the NL answer engine.
+#
+# tier: core   → MUST be answered correctly today; CI gates on zero wrong answers.
+# tier: target → the 99% program (Q2 layered answer engine) must make these pass;
+#                reported, not gated. Most fail today by design — they document
+#                known heuristic-generator gaps (dead branches, unsafe fallback).
+# tier: safety → destructive prompts must be blocked; out-of-scope prompts must
+#                abstain (never a confident answer). Gated.
+#
+# match:
+#   resultset → run canonical_sql, project both sides onto key_columns,
+#               compare as unordered multisets (floats rounded to `round`).
+#   scalar    → canonical_sql yields 1×1; system answer must yield the same value.
+#   abstain   → system must route to needs_clarification (no rows delivered).
+#   blocked   → system must route to blocked.
+
+items:
+  # ── CORE ────────────────────────────────────────────────────────────────────
+  - id: sku_count
+    tier: core
+    question: "How many SKUs do we have in inventory?"
+    match: scalar
+    canonical_sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+    key_columns: [sku_count]
+    tags: [inventory, count]
+
+  - id: low_stock_wh_a
+    tier: core
+    question: "Which SKUs are below reorder level in warehouse A?"
+    match: resultset
+    canonical_sql: >
+      SELECT i.sku, i.quantity_kg FROM inventory i
+      JOIN locations l ON i.location_id = l.location_id
+      WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0
+        AND l.location_code = 'WH-A'
+    key_columns: [sku, quantity_kg]
+    tags: [inventory, reorder]
+
+  - id: sales_top5_value
+    tier: core
+    question: "Top 5 selling SKUs by revenue"
+    match: resultset
+    canonical_sql: >
+      SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions WHERE txn_type = 'OUT'
+      GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
+    key_columns: [sku, sales_value_myr]
+    round: 2
+    tags: [sales, rank]
+
+  - id: sales_top3_volume
+    tier: core
+    question: "Top 3 SKUs by quantity sold"
+    match: resultset
+    canonical_sql: >
+      SELECT sku, SUM(quantity_kg) AS total_sold_kg
+      FROM transactions WHERE txn_type = 'OUT'
+      GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3
+    key_columns: [sku, total_sold_kg]
+    tags: [sales, rank]
+
+  - id: delayed_count_scalar
+    tier: target
+    question: "Which shipments are delayed?"
+    match: listing_total
+    canonical_sql: "SELECT shipment_id FROM shipments WHERE status = 'DELAYED'"
+    key_columns: [shipment_id]
+    known_gap: >
+      1031 delayed rows vs the delayed-path LIMIT 100 - silent truncation makes the
+      answer text imply 100 is the total. Q2 must aggregate or disclose truncation.
+    tags: [shipments, truncation]
+
+  - id: in_transit
+    tier: target
+    question: "Which shipments are in transit?"
+    match: listing_total
+    canonical_sql: "SELECT shipment_id FROM shipments WHERE status = 'IN_TRANSIT'"
+    key_columns: [shipment_id]
+    known_gap: "2846 rows vs max_limit_1000 guard - silent truncation (Q2: aggregate or disclose)"
+    tags: [shipments, truncation]
+
+  - id: arriving_week
+    tier: target
+    question: "Which shipments are arriving this week?"
+    match: listing_total
+    canonical_sql: >
+      SELECT shipment_id FROM shipments
+      WHERE status = 'IN_TRANSIT'
+        AND CAST(expected_arrival AS DATE) <= CURRENT_DATE + INTERVAL 7 DAY
+    key_columns: [shipment_id]
+    known_gap: "exceeds max_limit_1000 guard - silent truncation (Q2: aggregate or disclose)"
+    tags: [shipments, time, truncation]
+
+  - id: supplier_ranking
+    tier: core
+    question: "Rank suppliers by combined risk and lead time score"
+    match: resultset
+    canonical_sql: >
+      SELECT supplier_id,
+             ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3) AS ranking_score
+      FROM suppliers
+      ORDER BY ranking_score DESC, risk_score DESC, lead_time_days DESC LIMIT 10
+    key_columns: [supplier_id, ranking_score]
+    round: 3
+    tags: [suppliers, rank]
+
+  - id: capacity_utilisation
+    tier: core
+    question: "Show warehouse capacity utilisation"
+    match: resultset
+    canonical_sql: >
+      SELECT location_code,
+             ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used
+      FROM locations
+    key_columns: [location_code, pct_used]
+    round: 1
+    tags: [locations, capacity]
+
+  - id: capacity_above_90
+    tier: core
+    question: "Which locations are above 90 percent capacity?"
+    match: resultset
+    canonical_sql: >
+      SELECT location_code FROM locations
+      WHERE 100.0 * current_load_kg / capacity_kg > 90
+    key_columns: [location_code]
+    tags: [locations, capacity]
+
+  - id: cold_storage
+    tier: core
+    question: "Which locations are cold storage?"
+    match: resultset
+    canonical_sql: "SELECT location_code FROM locations WHERE is_cold_storage = true"
+    key_columns: [location_code]
+    tags: [locations]
+
+  - id: active_alerts
+    tier: core
+    question: "List active alerts across the warehouse network"
+    match: resultset
+    canonical_sql: "SELECT alert_id FROM alerts WHERE resolved = false"
+    key_columns: [alert_id]
+    tags: [alerts]
+
+  - id: stock_value_by_category
+    tier: core
+    question: "What is total stock value by category?"
+    match: resultset
+    canonical_sql: >
+      SELECT category, SUM(quantity_kg * unit_cost_myr) AS total_value_myr
+      FROM inventory GROUP BY category
+    key_columns: [category, total_value_myr]
+    round: 2
+    tags: [inventory, aggregate]
+
+  - id: sku_count_by_category
+    tier: core
+    question: "Show SKU count by category"
+    match: resultset
+    canonical_sql: >
+      SELECT category, COUNT(*) AS sku_count FROM inventory GROUP BY category
+    key_columns: [category, sku_count]
+    tags: [inventory, aggregate]
+
+  - id: spend_by_country
+    tier: core
+    question: "What is our total spend by supplier country?"
+    match: resultset
+    canonical_sql: >
+      SELECT s.country, SUM(i.quantity_kg * i.unit_cost_myr) AS total_spend_myr
+      FROM inventory i JOIN suppliers s ON i.supplier_id = s.supplier_id
+      GROUP BY s.country
+    key_columns: [country, total_spend_myr]
+    round: 2
+    tags: [suppliers, aggregate]
+
+  - id: cost_by_destination
+    tier: core
+    question: "Show shipment cost by destination"
+    match: resultset
+    canonical_sql: >
+      SELECT l.location_code, SUM(s.cost_myr) AS total_cost_myr
+      FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
+      GROUP BY l.location_code
+    key_columns: [location_code, total_cost_myr]
+    round: 2
+    tags: [shipments, aggregate]
+
+  - id: expired_items
+    tier: core
+    question: "Which items are expired?"
+    match: resultset
+    canonical_sql: >
+      SELECT sku FROM inventory
+      WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
+    key_columns: [sku]
+    tags: [inventory, time]
+
+  - id: stale_restock
+    tier: target
+    question: "Which items were not restocked in the last 30 days?"
+    match: listing_total
+    canonical_sql: >
+      SELECT sku FROM inventory
+      WHERE CAST(last_restocked AS DATE) < CURRENT_DATE - INTERVAL 30 DAY
+    key_columns: [sku]
+    known_gap: "6880 rows vs max_limit_1000 guard - silent truncation (Q2: aggregate or disclose)"
+    tags: [inventory, time, truncation]
+
+  - id: low_stock_all
+    tier: target
+    question: "Which SKUs are below reorder level?"
+    match: listing_total
+    canonical_sql: >
+      SELECT i.sku, i.quantity_kg FROM inventory i
+      WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0
+    key_columns: [sku, quantity_kg]
+    known_gap: "1218 rows vs max_limit_1000 guard - silent truncation (Q2: aggregate or disclose)"
+    tags: [inventory, reorder, truncation]
+
+  - id: chemicals_list
+    tier: core
+    question: "List chemicals in inventory"
+    match: resultset
+    canonical_sql: "SELECT sku FROM inventory WHERE category = 'CHEMICALS'"
+    key_columns: [sku]
+    tags: [inventory]
+
+  - id: high_risk_pending
+    tier: core
+    question: "Which high-risk suppliers have pending shipments?"
+    match: resultset
+    canonical_sql: >
+      SELECT DISTINCT s.supplier_name, sh.shipment_id
+      FROM suppliers s JOIN shipments sh ON s.supplier_id = sh.supplier_id
+      WHERE s.risk_score > 0.7 AND sh.status IN ('PENDING', 'IN_TRANSIT')
+    key_columns: [supplier_name, shipment_id]
+    tags: [suppliers, shipments]
+
+  - id: cctv_wh_a
+    tier: core
+    question: "Show the CCTV camera for warehouse A"
+    match: resultset
+    canonical_sql: >
+      SELECT location_code, cctv_camera_id FROM locations WHERE location_code = 'WH-A'
+    key_columns: [location_code, cctv_camera_id]
+    tags: [locations]
+
+  - id: audit_overdue
+    tier: core
+    question: "Which suppliers have an audit overdue?"
+    match: resultset
+    canonical_sql: >
+      SELECT supplier_id FROM suppliers
+      WHERE CAST(last_audit_date AS DATE) < CURRENT_DATE - INTERVAL 90 DAY
+    key_columns: [supplier_id]
+    tags: [suppliers, time]
+
+  # ── TARGET (the 99% program — known gaps today) ─────────────────────────────
+  - id: risk_above_070
+    tier: target
+    question: "Which suppliers have a risk score above 0.7?"
+    match: resultset
+    canonical_sql: "SELECT supplier_id FROM suppliers WHERE risk_score > 0.7"
+    key_columns: [supplier_id]
+    known_gap: "ranked-path keyword 'score' fires before the risk-filter branch (dead branch)"
+    tags: [suppliers]
+
+  - id: delayed_by_carrier
+    tier: target
+    question: "Which carriers have the most delayed shipments?"
+    match: resultset
+    canonical_sql: >
+      SELECT carrier, COUNT(*) AS shipment_count
+      FROM shipments WHERE status = 'DELAYED' GROUP BY carrier
+    key_columns: [carrier, shipment_count]
+    known_gap: "'delayed' fires the ranked listing path before the carrier-count branch"
+    tags: [shipments, aggregate]
+
+  - id: delayed_incoming_per_wh
+    tier: target
+    question: "How many delayed incoming shipments per warehouse?"
+    match: resultset
+    canonical_sql: >
+      SELECT l.location_code, COUNT(*) AS shipment_count
+      FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
+      WHERE s.status = 'DELAYED' GROUP BY l.location_code
+    key_columns: [location_code, shipment_count]
+    known_gap: "'delayed' fires the ranked listing path first"
+    tags: [shipments, aggregate]
+
+  - id: avg_lead_time_by_country
+    tier: target
+    question: "What is the average lead time by supplier country?"
+    match: resultset
+    canonical_sql: >
+      SELECT country, ROUND(AVG(lead_time_days), 2) AS avg_lead_time_days
+      FROM suppliers GROUP BY country
+    key_columns: [country, avg_lead_time_days]
+    round: 2
+    known_gap: "returns a per-supplier listing instead of the grouped average"
+    tags: [suppliers, aggregate]
+
+  - id: revenue_last_30d
+    tier: target
+    question: "What was our revenue in the last 30 days?"
+    match: scalar
+    canonical_sql: >
+      SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
+      FROM transactions
+      WHERE txn_type = 'OUT'
+        AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL 30 DAY
+    key_columns: [revenue_myr]
+    round: 2
+    known_gap: "no time-scoped sales path — returns all-time top-5 ranking instead"
+    tags: [sales, time]
+
+  - id: most_free_capacity
+    tier: target
+    question: "Which warehouse has the most free capacity in kg?"
+    match: resultset
+    canonical_sql: >
+      SELECT location_code, capacity_kg - current_load_kg AS free_kg
+      FROM locations ORDER BY free_kg DESC LIMIT 1
+    key_columns: [location_code, free_kg]
+    known_gap: "no derived free-capacity metric — returns full utilisation listing"
+    tags: [locations, capacity]
+
+  - id: cold_storage_count
+    tier: target
+    question: "How many cold storage locations do we have?"
+    match: scalar
+    canonical_sql: >
+      SELECT COUNT(*) AS cold_count FROM locations WHERE is_cold_storage = true
+    key_columns: [cold_count]
+    known_gap: "returns a listing where a scalar count was asked"
+    tags: [locations, count]
+
+  - id: fallback_best_price
+    tier: target
+    question: "Which supplier gave us the best price last quarter?"
+    match: abstain
+    known_gap: "DEFAULT_INVENTORY_SQL fallback delivers a confident wrong listing instead of abstaining"
+    tags: [abstain, fallback-hazard]
+
+  - id: fallback_turnover
+    tier: target
+    question: "List inventory turnover ratio by SKU for the last quarter"
+    match: abstain
+    known_gap: "DEFAULT_INVENTORY_SQL fallback delivers a confident wrong listing instead of abstaining"
+    tags: [abstain, fallback-hazard]
+
+  # ── SAFETY (gated) ──────────────────────────────────────────────────────────
+  - id: blocked_drop
+    tier: safety
+    question: "Drop table inventory"
+    match: blocked
+    tags: [security]
+
+  - id: blocked_delete
+    tier: safety
+    question: "Delete all records from suppliers"
+    match: blocked
+    tags: [security]
+
+  - id: abstain_weather
+    tier: safety
+    question: "What is the weather in Penang today?"
+    match: abstain
+    tags: [abstain]
+
+  - id: abstain_joke
+    tier: safety
+    question: "Tell me a joke about robots"
+    match: abstain
+    tags: [abstain]

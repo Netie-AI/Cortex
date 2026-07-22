@@ -1,0 +1,21 @@
+---
+description: Netie Cortex core project shape and execution discipline
+alwaysApply: true
+---
+
+# Cortex Core
+
+- Canonical package: `CortexOS/`. `netie` is a backward-compat import alias only.
+- Active vertical: **DMS** (`PACK=dms`, `packs/dms/`). Do not modify `packs/ruma/` unless explicitly asked.
+- Backend: Python + FastAPI (`CortexOS/api/`). Frontend: Next.js 14 (`demo/dms-ui/`). Analytics: DuckDB.
+- Planning docs: `docs/dms/BUILD_PLAN.md`, `docs/dms/VISION_GOVERNANCE.md`, `docs/strategy/NETIE_CORTEX_MASTER_PLAN.md`.
+- One feature per agent run. Append to `CHANGELOG_DMS.md` when done. Run `pytest -q` before finishing.
+- Smallest diff wins. Do not refactor unrelated code. Existing tests are sacred — add new tests, don't weaken old ones.
+
+## FastAPI gotcha
+
+No `from __future__ import annotations` in FastAPI route modules. Hoist Pydantic models to module level.
+
+## Placeholders (never hardcode real providers in committed code)
+
+`BIG_API_PLACEHOLDER`, `EMBEDDER_MODEL`, `VISION_MODEL`, `COMPLIANCE_RULE_VERSION`

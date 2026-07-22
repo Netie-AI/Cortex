@@ -1,0 +1,158 @@
+glossary:
+  - term: "stock on hand"
+    maps_to: quantity_kg
+    table: inventory
+  - term: "reorder level"
+    maps_to: reorder_level_kg
+    table: inventory
+  - term: "low stock"
+    definition: "quantity_kg < reorder_level_kg AND reorder_level_kg > 0"
+  - term: "warehouse"
+    maps_to: location_code
+    table: locations
+  - term: "supplier"
+    maps_to: supplier_name
+    table: suppliers
+  - term: "cctv"
+    maps_to: cctv_camera_id
+    table: locations
+  - term: "capacity utilisation"
+    definition: "current_load_kg / capacity_kg * 100"
+    table: locations
+  - term: "expired"
+    definition: "expiry_date < CURRENT_DATE"
+    table: inventory
+  - term: "risk score"
+    maps_to: risk_score
+    table: suppliers
+  - term: "delayed shipment"
+    definition: "status = 'DELAYED'"
+    table: shipments
+  - term: "cold storage"
+    maps_to: is_cold_storage
+    table: locations
+
+joins:
+  - from_table: inventory
+    from_column: supplier_id
+    to_table: suppliers
+    to_column: supplier_id
+  - from_table: inventory
+    from_column: location_id
+    to_table: locations
+    to_column: location_id
+  - from_table: shipments
+    from_column: sku
+    to_table: inventory
+    to_column: sku
+  - from_table: shipments
+    from_column: supplier_id
+    to_table: suppliers
+    to_column: supplier_id
+  - from_table: shipments
+    from_column: destination_location_id
+    to_table: locations
+    to_column: location_id
+  - from_table: transactions
+    from_column: sku
+    to_table: inventory
+    to_column: sku
+  - from_table: transactions
+    from_column: location_id
+    to_table: locations
+    to_column: location_id
+  - from_table: alerts
+    from_column: related_sku
+    to_table: inventory
+    to_column: sku
+  - from_table: alerts
+    from_column: related_location
+    to_table: locations
+    to_column: location_id
+  - from_table: alerts
+    from_column: related_supplier
+    to_table: suppliers
+    to_column: supplier_id
+
+sensitive_columns:
+  - email
+  - phone
+  - contact_person
+
+tables:
+  inventory:
+    columns:
+      - sku
+      - sku_name
+      - category
+      - supplier_id
+      - location_id
+      - storage_bin
+      - quantity_kg
+      - reorder_level_kg
+      - unit_cost_myr
+      - last_restocked
+      - expiry_date
+      - is_hazardous
+  suppliers:
+    columns:
+      - supplier_id
+      - supplier_name
+      - contact_person
+      - email
+      - phone
+      - country
+      - lead_time_days
+      - payment_terms
+      - last_audit_date
+      - risk_score
+  locations:
+    columns:
+      - location_id
+      - location_code
+      - location_name
+      - city
+      - state
+      - latitude
+      - longitude
+      - capacity_kg
+      - current_load_kg
+      - cctv_camera_id
+      - is_cold_storage
+      - manager_name
+  shipments:
+    columns:
+      - shipment_id
+      - sku
+      - supplier_id
+      - destination_location_id
+      - quantity_kg
+      - status
+      - expected_arrival
+      - actual_arrival
+      - carrier
+      - tracking_number
+      - cost_myr
+  transactions:
+    columns:
+      - txn_id
+      - sku
+      - location_id
+      - txn_type
+      - quantity_kg
+      - unit_cost_myr
+      - operator_id
+      - timestamp
+      - reference_doc
+  alerts:
+    columns:
+      - alert_id
+      - alert_type
+      - severity
+      - related_sku
+      - related_location
+      - related_supplier
+      - message
+      - created_at
+      - resolved
+      - resolved_at

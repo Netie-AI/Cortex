@@ -111,3 +111,31 @@ def test_dsl_parser():
     res11 = parse_dsl(c11, "abc")
     assert not isinstance(res11, Ok)
     assert "Invalid JSON" in res11.message
+
+def test_dsl_parser_accepts_v2_kinds():
+    payload = make_json({
+        "version": "2.0",
+        "intent_hash": "dummy",
+        "entry_node_id": "n1",
+        "output_node_id": "n3",
+        "raw_dsl": "...",
+        "nodes": [
+            {
+                "id": "n1",
+                "kind": "llm_cached",
+                "default_tier": "T1",
+                "max_tier": "T2",
+                "inputs": [],
+            },
+            {
+                "id": "n2",
+                "kind": "llm_judged",
+                "default_tier": "T1",
+                "max_tier": "T3",
+                "cost_ceiling_myr": 0.5,
+                "inputs": ["n1"],
+            },
+            {"id": "n3", "kind": "EMIT", "tier": 0, "inputs": ["n2"]},
+        ],
+    })
+    assert isinstance(parse_dsl(payload, "abc"), Ok)

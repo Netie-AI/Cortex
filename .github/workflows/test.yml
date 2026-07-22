@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  push:
+    branches: [main, dms-v2]
+  pull_request:
+    branches: [main, dms-v2]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PACK: dms
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -e ".[dev,api,dms]"
+
+      - name: Verify import surface
+        run: |
+          python -c "
+          from packs.dms import plug_in, secure_message, classify_message
+          from CortexOS.ponytail.middleware import ponytail_process, route_tier
+          from packs.dms.tasks.suggest import suggest
+          from packs.dms.tasks.gate import check_task, evaluate_template
+          from packs.dms.generative.brain import run as brain_run
+          print('All imports OK')
+          "
+
+      - name: Run tests
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Handoff script smoke
+        run: python scripts/handoff.py --write
