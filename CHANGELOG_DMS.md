@@ -2,6 +2,14 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Research wave A1–A5 + truth-ground — 2026-07-22
+
+- **Findings (parallel explore):** `docs/research/findings/{S1_DBOS_RESUME,S2_BROKER_SHORTLIST,B1_STRESS_SUITE,S1_TOKEN_BUDGET,P0_SECURITY_GAPS}.md` + `P0_INDEX.md`
+- **Truth map:** `docs/dms/TRUTH_GROUND_MAP.md` — feature→file→test→state + cross-app links
+- **Claude Code packet:** `docs/dms/packets/CLAUDE_CODE_SECURITY_PACKET.md` — high-dimension security (RLS, SOPS, vault wire, WASM)
+- **ARCHITECTURE.md** updated: Q1/Q2/L1/L2/S0/S1-core marked shipped; remainders listed honest
+- **Verdicts:** DBOS for S1 resume; NATS JetStream for S2 V1; detect=0 LLM forever
+
 ## S1 smoke + stream stress re-verify — 2026-07-22
 
 - **S1 tests:** `tests/dms/test_s1_agents.py` — detector pure SQL, approval gate, publish artifact, ledger chain, API RBAC (DBOS resume + @agent chat deferred/skipped)

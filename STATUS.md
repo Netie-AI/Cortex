@@ -1,16 +1,13 @@
 # STATUS.md
-**Last updated:** 2026-07-22 | **Gate:** F6 **PASS** | **Active:** BUILD_PLAN_V2 wave 1 complete → S1 remainder + U0/F8
+**Last updated:** 2026-07-22 | **Gate:** F6 **PASS** | **Active:** research A1–A5 LANDED → Claude Code security + Cursor B3
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
 
-> **2026-07-22:** Wave1 (Q1/Q2/L1/L2/S0/S1-core) is on `dms-integrated-engine`.
-> S1 smoke tests landed (`tests/dms/test_s1_agents.py`); stream stress re-verified ~379 ev/s,
-> 0 errors. S1 remainder: DBOS durable resume, `@agent` chat dispatch, F8 publish tools.
-> Next feature choices: **U0 Data Studio** or **F8 tool-call** (after F7 remainder RLS/SOPS).
+> **2026-07-22 (PM):** Parallel research A1–A5 landed under `docs/research/findings/`.
+> Truth map: `docs/dms/TRUTH_GROUND_MAP.md`. Claude high-end security:
+> `docs/dms/packets/CLAUDE_CODE_SECURITY_PACKET.md`. `main` includes wave1+S1 @ `79ed093`.
 >
-> **2026-07-20:** `docs/dms/BUILD_PLAN_V2_LAKEHOUSE.md` is the active master plan
-> (lakehouse + 99% answer engine + streaming agents + Data Studio).
-> **L0/Q1/Q2/L1/L2/S0 LANDED.** S1 core (detectors/employee/registry/API) LANDED; DBOS slice open.
-> Stream stress-tuned (25→~380–419 ev/s). Accuracy gate MET (core/safety/target 100%, zero wrong).
+> **2026-07-22 (AM):** Wave1 on `dms-integrated-engine`. S1 smoke + stream ~379 ev/s.
+> S1 remainder: DBOS (A1 verdict), `@agent` chat, F8 publish.
 
 ---
 
@@ -41,15 +38,16 @@ python -m bench.stress --scenario stream → ~380 ev/s, 0 errors
 **F7 remainder** still open (RLS CI + SOPS) before full F8.
 
 ## Next three moves
-1. Merge `dms-integrated-engine` → `main` (PR)
-2. U0 Data Studio OR finish F7 remainder → F8 (governed publish for S1)
-3. S1 DBOS durable resume + `@agent` chat dispatch (parallelizable after F8 substrate)
+1. **Claude Code:** run `docs/dms/packets/CLAUDE_CODE_SECURITY_PACKET.md` (C-SEC-1…4 first)
+2. **Cursor:** B3 F7 remainder using Claude hand-backs → then B4 F8
+3. **Cursor:** B1 DBOS resume per `docs/research/findings/S1_DBOS_RESUME.md`
 
 ## Handoff
-- **Claude:** `CLAUDE_HANDOFF.md`
-- **Cursor:** `CURSOR_HANDOFF.md`
-- **Specs:** `docs/dms/BUILD_PLAN_V2_LAKEHOUSE.md`, `docs/dms/GATE_F8_PACKET.md`
-- **Cursor low-level packet:** see chat protocol block / `docs/dms/CURSOR_EXEC_PACKET_2026-07-22.md`
+- **Claude Code (security):** `docs/dms/packets/CLAUDE_CODE_SECURITY_PACKET.md`
+- **Claude supervisor:** `CLAUDE_HANDOFF.md`
+- **Cursor builder:** `CURSOR_HANDOFF.md` + `docs/dms/CURSOR_EXEC_PACKET_2026-07-22.md`
+- **Truth map:** `docs/dms/TRUTH_GROUND_MAP.md`
+- **Research index:** `docs/research/findings/P0_INDEX.md`
 
 ## Design constraints
 - API `actor` from authenticated key — never trust client-supplied role/actor on mutating routes

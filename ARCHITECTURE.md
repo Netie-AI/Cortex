@@ -51,8 +51,13 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 | F5 compliance gate | Shipped | F5 PASS |
 | F6 skill capture (opt-in) | Shipped | F6 PASS |
 | L0 DuckLake lakehouse | Shipped | BUILD_PLAN_V2 |
+| L1 ingest + L2 pipelines | Shipped | BUILD_PLAN_V2 |
+| Q1 semantic + Q2 answer engine | Shipped | BUILD_PLAN_V2 (accuracy gate MET) |
+| S0 streams → bronze | Shipped | BUILD_PLAN_V2 (~380 ev/s stress) |
+| S1 watcher agents (detect→draft→approve) | Core shipped | DBOS resume + @agent chat open |
+| U0 Data Studio | Planned | BUILD_PLAN_V2 |
 | V2/V3 vision | Planned | VISION_GOVERNANCE.md |
-| Q2 answer engine / agent chat | Planned | BUILD_PLAN_V2 |
+| S2 broker / F8 tool-call | Packet / research | GATE_F8 + findings/S2_* |
 
 ### Demo
 | Component | State |
@@ -67,12 +72,17 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 ## 3. Not built (do not demo as built)
 - Palantir ontology / full AIP lineage (research docs only)
 - Production WASM / microVM
-- Postgres ledger CI verification (DSN optional locally)
+- Postgres ledger CI verification / RLS proof (DSN optional locally) — Claude Code packet
+- SOPS production secrets hygiene — Claude Code packet
 - Live Qdrant RAG in demo
-- Retrieval/agent chat in DMS UI (chat today = F2 threads + F5 gate)
+- `@agent` chat dispatch + DBOS durable resume (S1 remainder)
+- U0 Data Studio single page
+- F8 governed tool-call publish
 - V2/V3 vision movement
 - respond.io-style messaging endpoint
 - Phase 0 production TLS deploy — see `docs/dms/PHASE0_PLAN.md`
+
+**Truth map:** `docs/dms/TRUTH_GROUND_MAP.md` · **Claude security:** `docs/dms/packets/CLAUDE_CODE_SECURITY_PACKET.md`
 
 ---
 
