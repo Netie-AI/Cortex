@@ -96,6 +96,12 @@ def require_role(min_role: Role):
                 status_code=403,
                 detail=f"Requires role {min_role!r} or higher (caller={caller.role!r})",
             )
+        try:
+            from packs.dms.audit.ledger import set_rls_context
+
+            set_rls_context(role=caller.role, tenant_id="default")
+        except Exception:
+            pass
         return caller
 
     return _dep

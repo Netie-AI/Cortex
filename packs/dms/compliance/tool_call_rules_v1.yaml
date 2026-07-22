@@ -1,0 +1,6 @@
+rules:
+  - id: title_required
+    when_doc_type: tool_call
+    require_key: title
+    severity: error
+    description: "export_pptx requires a non-empty title."

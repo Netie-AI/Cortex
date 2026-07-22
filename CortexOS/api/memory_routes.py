@@ -13,9 +13,10 @@ Pydantic models at module level.
 """
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from packs.dms.security.api_auth import Caller, require_role
 from netie.memory.store import (
     BRUTE_FORCE_MAX,
     Hit,
@@ -54,7 +55,11 @@ class QueryIn(BaseModel):
 
 
 @router.post("/upsert")
-async def memory_upsert(body: UpsertIn) -> Dict[str, Any]:
+async def memory_upsert(
+    body: UpsertIn,
+    caller: Caller = Depends(require_role("steward")),
+) -> Dict[str, Any]:
+    _ = caller
     recs = [
         MemoryRecord(
             id=r.id, text=r.text, vector=r.vector, meta=r.meta,
@@ -71,7 +76,11 @@ async def memory_upsert(body: UpsertIn) -> Dict[str, Any]:
 
 
 @router.post("/query")
-async def memory_query(body: QueryIn) -> Dict[str, Any]:
+async def memory_query(
+    body: QueryIn,
+    caller: Caller = Depends(require_role("viewer")),
+) -> Dict[str, Any]:
+    _ = caller
     hits: List[Hit] = _STORE.query(
         body.vector, k=body.k,
         scope=body.scope if body.scope in ("personal", "company") else None,
@@ -84,7 +93,8 @@ async def memory_query(body: QueryIn) -> Dict[str, Any]:
 
 
 @router.get("/stats")
-async def memory_stats() -> Dict[str, Any]:
+async def memory_stats(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+    _ = caller
     stats = _STORE.stats()
     return {"ok": True, **stats,
             "brute_force_max": BRUTE_FORCE_MAX,

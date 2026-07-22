@@ -3,7 +3,6 @@
 Reads go through the existing deterministic sqlglot guardrail (read-only,
 allowlist extended to lake schemas). RBAC via the F7 api_auth dependency.
 """
-from __future__ import annotations
 
 from typing import Any, Optional
 

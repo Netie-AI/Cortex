@@ -13,9 +13,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from packs.dms.security.api_auth import Caller, require_role
 from netie.engine import registry
 
 router = APIRouter(prefix="/api/engine", tags=["engine"])
@@ -62,8 +63,9 @@ def _save_state(state: Dict[str, Any]) -> None:
 
 
 @router.get("/specs")
-async def engine_specs() -> Dict[str, Any]:
+async def engine_specs(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
     """Merged capability surface — AirGPT's (i) popover reads this."""
+    _ = caller
     state = _load_state()
     hw = state.get("hardware") or None
     active = state.get("backends_active") or None
@@ -77,7 +79,8 @@ async def engine_specs() -> Dict[str, Any]:
 
 
 @router.get("/backends")
-async def engine_backends() -> Dict[str, Any]:
+async def engine_backends(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+    _ = caller
     state = _load_state()
     return {
         "ok": True,
@@ -103,7 +106,11 @@ async def engine_backends() -> Dict[str, Any]:
 
 
 @router.post("/config")
-async def engine_config(body: EngineConfigIn) -> Dict[str, Any]:
+async def engine_config(
+    body: EngineConfigIn,
+    caller: Caller = Depends(require_role("admin")),
+) -> Dict[str, Any]:
+    _ = caller
     state = _load_state()
     if body.backend is not None:
         if body.backend and body.backend not in registry.BACKEND_BY_ID and body.backend != "netie":

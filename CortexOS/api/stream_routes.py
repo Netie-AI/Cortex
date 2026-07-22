@@ -1,5 +1,4 @@
 """S0 — OpenDMS streaming intake API (register streams, post events → bronze)."""
-from __future__ import annotations
 
 from typing import Any, Optional
 

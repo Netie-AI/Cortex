@@ -219,7 +219,38 @@ async def execute_node(
         for i in node.inputs:
             merged[i] = _serializable_output(context.get(i))
         return NodeResult(node_id=node.id, output=merged, tier="emit", cost_myr=0.0)
+    if node.type == NodeType.TOOL_CALL:
+        return await execute_tool_call_node(node, context)
     raise UnsupportedDAGNodeKind(node.id, node.type)
+
+
+async def execute_tool_call_node(node: DSLNode, context: ExecutionContext) -> NodeResult:
+    """F8 — sandboxed TOOL_CALL via host tool_runner (allowlist + ledger)."""
+    from netie.execution.tool_runner import ToolCallError, run_tool_call
+
+    params: dict[str, Any] = {}
+    for inp_id in node.inputs:
+        val = context.get(inp_id)
+        if isinstance(val, dict):
+            params.update(val)
+        elif val is not None:
+            params[inp_id] = val
+    ann_params = node.annotations.get("params") if isinstance(node.annotations, dict) else None
+    if isinstance(ann_params, dict):
+        params.update(ann_params)
+
+    actor = str(context.get("actor") or "system")
+    tool = node.tool_name or ""
+    try:
+        result = run_tool_call(tool, params, actor=actor, run_id=context.run_id)
+    except ToolCallError as exc:
+        return NodeResult(
+            node_id=node.id,
+            output={"ok": False, "error": str(exc), "verdict": exc.verdict, **exc.detail},
+            tier="tool",
+            cost_myr=0.0,
+        )
+    return NodeResult(node_id=node.id, output=result, tier="tool", cost_myr=0.0)
 
 
 def _flatten_execution_order(program: AgenticDSLProgram) -> list[DSLNode]:

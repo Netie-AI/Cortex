@@ -1,6 +1,8 @@
 """S1 — watcher agents: detect → draft → compliance → human approve → publish."""
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 
@@ -9,10 +11,16 @@ def lake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("DMS_LAKEHOUSE_HOME", str(tmp_path / "lakehouse"))
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv("PACK", "dms")
+    monkeypatch.setenv("DBOS_RUN_ADMIN_SERVER", "0")
+    dbos_path = (tmp_path / "dbos_agents.sqlite").resolve()
+    monkeypatch.setenv("DBOS_SYSTEM_DATABASE_URL", f"sqlite:///{dbos_path.as_posix()}")
+    from packs.dms.agents import dbos_runtime
     from packs.dms.lakehouse import catalog
 
+    dbos_runtime.destroy()
     catalog.reset_mode_cache()
     yield tmp_path
+    dbos_runtime.destroy()
     catalog.reset_mode_cache()
 
 
@@ -183,9 +191,66 @@ def test_agent_api_rbac(lake_home):
     assert approved.json()["status"] == "approved"
 
 
-@pytest.mark.skip(reason="S1 slice: DBOS durable resume not landed yet (see BUILD_PLAN S1 anti-scope note in employee.py)")
-def test_workflow_resume_after_kill():
-    assert False, "placeholder for DBOS resume chaos-lite"
+@pytest.mark.parametrize("use_dbos_destroy", [False, True])
+def test_workflow_resume_after_kill(lake_home, monkeypatch, use_dbos_destroy):
+    """Chaos-lite: interrupt after draft / before approve → relaunch → one artifact.
+
+    Ops-DB step checkpoints always provide resume semantics. When ``dbos`` is
+    installed, also tear down + relaunch the DBOS runtime (admin server off).
+    """
+    from packs.dms.agents import dbos_runtime, employee, registry
+    from packs.dms.audit import ledger
+
+    if use_dbos_destroy and not dbos_runtime.HAS_DBOS:
+        pytest.skip("dbos not installed (pip install -e '.[agents]')")
+
+    out = lake_home / "outputs"
+    monkeypatch.setattr(employee, "OUTPUTS", out)
+
+    _seed_sensor_rows(10)
+    registry.create_agent(
+        "resume-w",
+        created_by="steward",
+        detector_cfg={
+            "type": "rowcount", "table": "bronze.stream_sensors", "op": ">", "bound": 1,
+        },
+    )
+
+    wf_id = f"wf-resume-chaos-{uuid.uuid4().hex[:10]}"
+    first = employee.run_agent("resume-w", actor="steward", workflow_id=wf_id)
+    assert first["status"] == "pending_approval"
+    run_id = first["run_id"]
+    assert registry.get_step(run_id, "draft") is not None
+    assert registry.get_run(run_id)["last_step"] == "draft"
+    assert (out / "steward" / run_id / "report.md").exists() is False
+
+    # Simulate process kill after draft, before human approve.
+    if use_dbos_destroy:
+        dbos_runtime.destroy()
+
+    resumed = employee.run_agent("resume-w", actor="steward", workflow_id=wf_id)
+    assert resumed["run_id"] == run_id
+    assert resumed["status"] == "pending_approval"
+    pending = registry.list_runs("resume-w", status="pending_approval")
+    assert len(pending) == 1
+    # Draft step must not have been duplicated as a second run.
+    assert len(registry.list_runs("resume-w")) == 1
+
+    published = employee.approve_run(run_id, approver="steward")
+    assert published["status"] == "approved"
+    artifacts = list(out.rglob("report.md"))
+    assert len(artifacts) == 1
+
+    # Idempotent re-approve: still exactly one artifact.
+    again = employee.approve_run(run_id, approver="steward")
+    assert again["status"] == "approved"
+    assert again["artifact_path"] == published["artifact_path"]
+    assert len(list(out.rglob("report.md"))) == 1
+
+    verify = ledger.verify()
+    assert verify.ok is True
+
+    dbos_runtime.destroy()
 
 
 @pytest.mark.skip(reason="S1 slice: @agent chat dispatch not landed yet")

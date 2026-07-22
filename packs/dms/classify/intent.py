@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from packs.dms.security.prompt_harness import HarnessResult, secure_for_prompt
+from packs.dms.security.prompt_harness import HarnessResult
+from packs.dms.security.reversible import secure_reversible
 
 # Warehouse/logistics intent set (BUILD_PLAN F3)
 WAREHOUSE_INTENTS: tuple[str, ...] = (
@@ -102,22 +103,22 @@ def _classify_safe_text(safe: str, harness: HarnessResult) -> ClassifyResult:
 
 
 def classify_heuristic(text: str) -> ClassifyResult:
-    harness = secure_for_prompt(text, block_injection=True, block_scam=False)
-    if harness.blocked:
-        return _blocked_result(harness.block_reason)
-    return _classify_safe_text(harness.safe_text, harness)
+    rev = secure_reversible(text, block_injection=True, block_scam=False)
+    if rev.blocked:
+        return _blocked_result(rev.block_reason)
+    return _classify_safe_text(rev.safe_text, rev.harness)
 
 
 def classify(text: str) -> ClassifyResult:
-    """Public API — security harness first, then optional local model or heuristic."""
-    harness = secure_for_prompt(text, block_injection=True, block_scam=False)
-    if harness.blocked:
-        return _blocked_result(harness.block_reason)
+    """Public API — security harness first (reversible when flagged), then model/heuristic."""
+    rev = secure_reversible(text, block_injection=True, block_scam=False)
+    if rev.blocked:
+        return _blocked_result(rev.block_reason)
 
-    safe = harness.safe_text
+    safe = rev.safe_text
     try:
         from CortexOS.nlp.local_inference import classify_with_model
 
         return classify_with_model(safe)
     except Exception:
-        return _classify_safe_text(safe, harness)
+        return _classify_safe_text(safe, rev.harness)

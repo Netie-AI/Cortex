@@ -2,6 +2,46 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## B3 — F7 remainder hardening — 2026-07-22
+
+- **CI:** `.github/workflows/rls.yml`, `.github/workflows/secrets.yml`, secrets step in `test.yml`
+- **Hooks:** `.githooks/pre-commit` + `scripts/install_git_hooks.ps1`
+- **Deps:** `psycopg[binary]` on `[postgres]`; `[agents]` for DBOS
+- **Reversible wire:** `secure_message` / classify / NL prompt → `secure_reversible`
+- **RBAC:** brain + memory + engine; RLS GUC stamp from `Caller` via `set_rls_context`
+- **C-SEC-8:** stripped `__future__` from 7 FastAPI route modules
+- **Intake:** guard `depth_map` + size budget on estimate-dims
+- **Tests:** `tests/dms/test_b3_f7_remainder.py`
+
+## B1 S1 — DBOS durable resume (smallest) — 2026-07-22
+
+- **Resume path:** `packs/dms/agents/employee.py` — detect / draft / publish / reject as
+  durable steps; ops-DB checkpoints always (`dms_agent_run_steps` + `workflow_id` /
+  `last_step` on `dms_agent_runs`). Re-enter with same `workflow_id` after draft does
+  **not** re-draft; `approve_run` publish is idempotent (one `report.md`).
+- **Optional DBOS:** `[project.optional-dependencies] agents = ["dbos>=2.28.0,<3"]`
+  (poetry extra `agents` mirrored). `packs/dms/agents/dbos_runtime.py` configures SQLite
+  system DB, `run_admin_server=False` under pytest / `DBOS_RUN_ADMIN_SERVER=0`. Without
+  `dbos`, sync path + ops checkpoints still resume.
+- **Anti-scope held:** no Temporal; no autonomous publish; detectors stay LLM-free.
+- **Test:** `test_workflow_resume_after_kill` unskipped (ops-DB + optional DBOS destroy/
+  relaunch). `@agent` chat dispatch remains skipped (B2).
+
+## F8 — Tool-call vertical slice (export_pptx) — 2026-07-22
+
+- **Host shim:** `packs/dms/actions/export_pptx.py` — stdlib `zipfile` minimal OOXML PPTX
+  (`[Content_Types].xml` + `ppt/slides/slide1.xml` title from params). No `python-pptx`.
+- **Runner:** `CortexOS/execution/tool_runner.py` — `ALLOWLIST={"export_pptx"}`, param sanitize
+  via `injection_guard` + `pii.redact_for_prompt`, compliance
+  `packs/dms/compliance/tool_call_rules_v1.yaml` (title required), writes only under
+  `outputs/<actor>/<run_id>/`, ledger `action.tool_call` / `action.tool_call_denied`.
+- **DAG:** `dag_runner.execute_tool_call_node` — `TOOL_CALL` no longer raises
+  `UnsupportedDAGNodeKind`.
+- **API:** `POST /dms/actions/{tool}` steward+; `GET /dms/actions` viewer+ — registered in
+  `app.py`.
+- **Tests:** `tests/dms/test_tool_call.py` — allowlist deny, viewer 403, steward success +
+  ledger, path escape deny.
+
 ## Claude Code security C-SEC-1..8 — 2026-07-22
 
 - **C-SEC-1 reversible PII:** `packs/dms/security/reversible.py` — `secure_reversible()`

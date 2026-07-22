@@ -142,16 +142,21 @@ def register_warehouse_routes(app: Any) -> None:
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         import base64
+        import os
+
+        from packs.dms.security.intake_policy import check_photo
+
+        max_mb = float(os.environ.get("DMS_INGEST_MAX_MB", "25"))
+        max_bytes = int(max_mb * 1024 * 1024)
 
         try:
             photo = base64.b64decode(body.photo, validate=True)
         except Exception as exc:
             raise HTTPException(status_code=400, detail="invalid base64 photo") from exc
-        from packs.dms.security.intake_policy import check_photo
-
+        if len(photo) > max_bytes:
+            raise HTTPException(status_code=413, detail="photo exceeds size budget")
         _guard = check_photo(photo)
         if not _guard.ok:
-            # C-SEC-4: spoofed/executable "photos" never reach the vision model.
             raise HTTPException(status_code=415, detail=f"photo rejected: {_guard.reason}")
         depth_map = None
         if body.depth_map:
@@ -159,6 +164,14 @@ def register_warehouse_routes(app: Any) -> None:
                 depth_map = base64.b64decode(body.depth_map, validate=True)
             except Exception as exc:
                 raise HTTPException(status_code=400, detail="invalid base64 depth_map") from exc
+            if len(depth_map) > max_bytes:
+                raise HTTPException(status_code=413, detail="depth_map exceeds size budget")
+            # Same magic-byte rail as photo — no unguarded binary sibling on this path.
+            _dguard = check_photo(depth_map)
+            if not _dguard.ok:
+                raise HTTPException(
+                    status_code=415, detail=f"depth_map rejected: {_dguard.reason}",
+                )
         try:
             suggestion = dimension.estimate_dims(
                 photo,

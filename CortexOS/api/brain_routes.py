@@ -11,8 +11,10 @@ Pydantic models at module level.
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from packs.dms.security.api_auth import Caller, require_role
 
 router = APIRouter(prefix="/dms/brain", tags=["brain"])
 
@@ -118,67 +120,75 @@ def _get_warehouse_context() -> Dict[str, Any]:
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.post("/run")
-def brain_run(req: BrainRunRequest):
+def brain_run(req: BrainRunRequest, caller: Caller = Depends(require_role("steward"))):
     """General brain dispatch — any intent."""
     from packs.dms.generative.brain import run
-    result = run(req.intent, req.params, actor=req.actor)
+    actor = caller.actor
+    result = run(req.intent, req.params, actor=actor)
     if result.get("error") and not result.get("mock"):
         raise HTTPException(status_code=500, detail=result["error"])
     return result
 
 
 @router.post("/chart")
-def brain_chart(req: ChartRequest):
+def brain_chart(req: ChartRequest, caller: Caller = Depends(require_role("viewer"))):
     """Generate a chart config from warehouse data."""
     from packs.dms.generative.brain import generate_chart
+    _ = caller
     data = req.data or _get_warehouse_context()
     return generate_chart(req.query, data)
 
 
 @router.post("/export")
-def brain_export(req: ExportRequest):
+def brain_export(req: ExportRequest, caller: Caller = Depends(require_role("steward"))):
     """Export warehouse table as CSV."""
     from packs.dms.generative.brain import export_csv
+    _ = caller
     rows = _get_db_data(req.table, req.limit)
     return export_csv(req.query, rows)
 
 
 @router.post("/email")
-def brain_email(req: EmailRequest):
+def brain_email(req: EmailRequest, caller: Caller = Depends(require_role("steward"))):
     """Draft a professional email about warehouse operations."""
     from packs.dms.generative.brain import draft_email
+    _ = caller
     context = req.context or _get_warehouse_context()
     return draft_email(req.request, context)
 
 
 @router.post("/whatsapp")
-def brain_whatsapp(req: WhatsAppRequest):
+def brain_whatsapp(req: WhatsAppRequest, caller: Caller = Depends(require_role("steward"))):
     """Draft a WhatsApp/messaging app message."""
     from packs.dms.generative.brain import draft_whatsapp
+    _ = caller
     context = req.context or _get_warehouse_context()
     return draft_whatsapp(req.request, context)
 
 
 @router.post("/analyze")
-def brain_analyze(req: AnalyzeRequest):
+def brain_analyze(req: AnalyzeRequest, caller: Caller = Depends(require_role("viewer"))):
     """Analyze warehouse operations for a period."""
     from packs.dms.generative.brain import analyze_sales
+    _ = caller
     data = _get_warehouse_context()
     return analyze_sales(req.period, data)
 
 
 @router.post("/auto-analysis")
-def brain_auto_analysis():
+def brain_auto_analysis(caller: Caller = Depends(require_role("viewer"))):
     """CEO-ready full warehouse executive summary."""
     from packs.dms.generative.brain import auto_analysis
+    _ = caller
     data = _get_warehouse_context()
     return auto_analysis(data)
 
 
 @router.post("/report")
-def brain_report(req: ReportRequest):
+def brain_report(req: ReportRequest, caller: Caller = Depends(require_role("viewer"))):
     """Organize data into a formatted markdown report."""
     from packs.dms.generative.brain import organize_report
+    _ = caller
     data = _get_warehouse_context()
     return organize_report(req.query, data)
 
@@ -186,11 +196,12 @@ def brain_report(req: ReportRequest):
 # ─── Task Suggest (F4) ────────────────────────────────────────────────────────
 
 @router.post("/suggest")
-def task_suggest(req: TaskSuggestRequest):
+def task_suggest(req: TaskSuggestRequest, caller: Caller = Depends(require_role("viewer"))):
     """Return ranked task suggestions based on warehouse state."""
     from packs.dms.tasks.suggest import suggest
     import sqlite3
 
+    _ = caller
     db_path = os.environ.get("DMS_OPS_DB") or os.environ.get("SQLITE_DB_PATH", "data/dms_ops.db")
     state: Dict[str, Any] = {"items": [], "locations": [], "recent_movements": [], "compliance_flags": []}
     try:
@@ -223,11 +234,12 @@ def task_suggest(req: TaskSuggestRequest):
 
 
 @router.post("/suggest/choice")
-def task_choice(req: TaskChoiceRequest):
+def task_choice(req: TaskChoiceRequest, caller: Caller = Depends(require_role("steward"))):
     """Record accept/dismiss for a task suggestion; optional compliance gate."""
     from packs.dms.tasks.suggest import record_choice
 
-    record_choice(req.task_id, req.accepted, req.actor)
+    actor = caller.actor
+    record_choice(req.task_id, req.accepted, actor)
     if not req.accepted or not req.filled_template:
         return {"ok": True}
 
@@ -239,13 +251,13 @@ def task_choice(req: TaskChoiceRequest):
         task_id=req.task_id,
         intent=None,
         filled_template=req.filled_template,
-        actor=req.actor,
+        actor=actor,
     )
     verdict = check_task(
         event_id,
         req.task_id,
         req.filled_template,
-        actor=req.actor,
+        actor=actor,
     )
     return {
         "ok": True,
@@ -259,26 +271,29 @@ def task_choice(req: TaskChoiceRequest):
 
 
 @router.post("/suggest/outcome")
-def task_outcome(req: TaskOutcomeRequest):
+def task_outcome(req: TaskOutcomeRequest, caller: Caller = Depends(require_role("steward"))):
     """Record outcome of an accepted task."""
     from packs.dms.tasks.suggest import record_outcome
+    _ = caller
     record_outcome(req.task_id, req.outcome)
     return {"ok": True}
 
 
 @router.post("/suggest/refresh-stats")
-def suggest_refresh():
+def suggest_refresh(caller: Caller = Depends(require_role("admin"))):
     """Trigger nightly batch stats refresh manually."""
     from packs.dms.tasks.learn import refresh_stats
+    _ = caller
     return refresh_stats()
 
 
 # ─── Ponytail ─────────────────────────────────────────────────────────────────
 
 @router.post("/ponytail")
-def ponytail_route(req: PonytailRequest):
+def ponytail_route(req: PonytailRequest, caller: Caller = Depends(require_role("viewer"))):
     """Run the Ponytail pipeline on raw text."""
     from CortexOS.ponytail.middleware import ponytail_process
+    _ = caller
     return ponytail_process(
         req.text,
         user_id=req.user_id,

@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [main, dms-v2]
+    branches: [main, dms-integrated-engine, dms-v2]
   pull_request:
-    branches: [main, dms-v2]
+    branches: [main, dms-integrated-engine, dms-v2]
 
 concurrency:
   group: test-${{ github.ref }}
@@ -32,6 +32,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel
           pip install -e ".[dev,api,dms]"
+
+      - name: Secrets scan
+        run: python -m scripts.secrets_scan
 
       - name: Verify import surface
         run: |

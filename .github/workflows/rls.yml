@@ -1,0 +1,46 @@
+# Postgres RLS proof (F7 remainder / C-SEC-2) — fails closed without a green DSN job.
+name: RLS Proof
+
+on:
+  push:
+    branches: [main, dms-integrated-engine, dms-v2]
+  pull_request:
+    branches: [main, dms-integrated-engine, dms-v2]
+
+concurrency:
+  group: rls-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rls-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cortex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PACK: dms
+      PYTHONUTF8: "1"
+      DMS_LEDGER_DSN: postgresql+psycopg://postgres:postgres@localhost:5432/cortex
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -e ".[dev,api,dms,postgres]"
+      - name: RLS deny proof
+        run: pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short

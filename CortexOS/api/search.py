@@ -1,6 +1,5 @@
 """RAG `/search` — dense + sparse (parallel), RRF, rerank, personalization."""
 
-from __future__ import annotations
 
 import asyncio
 import logging

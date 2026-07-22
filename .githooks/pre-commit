@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Pre-commit secrets gate (C-SEC-3 / B3)
+# Install:  git config core.hooksPath .githooks
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+python -m scripts.secrets_scan --staged

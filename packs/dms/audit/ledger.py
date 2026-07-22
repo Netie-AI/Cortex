@@ -8,6 +8,7 @@ import os
 import sqlite3
 import threading
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,30 @@ _POSTGRES_MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "002_ledger_
 _pg_engine = None
 _pg_engine_dsn: str | None = None
 _pg_schema_ready = False
+
+# RLS session GUCs — set ONLY from authenticated Caller (never client body fields).
+_rls_role: ContextVar[str] = ContextVar("dms_rls_role", default="admin")
+_rls_tenant: ContextVar[str] = ContextVar("dms_rls_tenant", default="default")
+
+
+def set_rls_context(*, role: str, tenant_id: str = "default") -> None:
+    """Stamp request-scoped Postgres RLS GUCs from api_auth.Caller."""
+    r = (role or "viewer").strip().lower()
+    if r not in ("viewer", "steward", "admin"):
+        r = "viewer"
+    _rls_role.set(r)
+    _rls_tenant.set((tenant_id or "default").strip() or "default")
+
+
+def _stamp_rls(conn) -> None:
+    """Apply app.role / app.tenant_id on a live Postgres connection."""
+    from sqlalchemy import text
+
+    conn.execute(text("SELECT set_config('app.role', :r, true)"), {"r": _rls_role.get()})
+    conn.execute(
+        text("SELECT set_config('app.tenant_id', :t, true)"),
+        {"t": _rls_tenant.get()},
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +251,7 @@ def _postgres_append(actor: str, event_type: str, payload: dict[str, Any]) -> Le
     _init_postgres_schema(engine)
     lock_key = pg_advisory_lock_key()
     with engine.begin() as conn:
+        _stamp_rls(conn)
         conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
         row = conn.execute(
             text(
@@ -326,6 +352,7 @@ def _postgres_verify(*, start_seq: int) -> VerifyResult:
     engine = _get_postgres_engine(dsn)
     _init_postgres_schema(engine)
     with engine.connect() as conn:
+        _stamp_rls(conn)
         rows = conn.execute(
             text("SELECT * FROM dms_audit_ledger WHERE seq >= :start_seq ORDER BY seq ASC"),
             {"start_seq": start_seq},
@@ -399,6 +426,7 @@ def _postgres_list_entries(
     engine = _get_postgres_engine(dsn)
     _init_postgres_schema(engine)
     with engine.connect() as conn:
+        _stamp_rls(conn)
         if event_type:
             rows = conn.execute(
                 text(

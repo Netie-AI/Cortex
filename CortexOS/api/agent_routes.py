@@ -1,5 +1,4 @@
 """S1 — OpenDMS watcher-agent API (hire agents, run, approve/reject publishes)."""
-from __future__ import annotations
 
 from typing import Any, Optional
 

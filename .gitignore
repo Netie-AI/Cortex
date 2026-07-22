@@ -65,3 +65,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 .portable-setup-done
+
+# DBOS local system DB
+data/dbos_agents.sqlite
+*.sqlite

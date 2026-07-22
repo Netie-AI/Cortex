@@ -1,5 +1,4 @@
 """L2 — OpenDMS pipeline API (run declarative pipelines, view events, govern proposals)."""
-from __future__ import annotations
 
 from typing import Any
 

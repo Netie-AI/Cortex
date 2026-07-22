@@ -14,16 +14,21 @@ __all__ = [
 
 
 def secure_message(text: str, *, block_scam: bool = True) -> dict[str, Any]:
-    """Bank-grade pre-LLM gate: scam → injection → PII."""
-    from packs.dms.security.prompt_harness import secure_for_prompt
+    """Bank-grade pre-LLM gate: scam → injection → PII (optionally reversible).
 
-    r = secure_for_prompt(text, block_injection=True, block_scam=block_scam)
+    Default (``DMS_REVERSIBLE_PII`` unset): identical to audited ``secure_for_prompt``.
+    Flag on: harness ∘ TokenVault via ``secure_reversible`` — vault never returned.
+    """
+    from packs.dms.security.reversible import secure_reversible
+
+    r = secure_reversible(text, block_injection=True, block_scam=block_scam)
     return {
         "safe_text": r.safe_text,
         "blocked": r.blocked,
         "block_reason": r.block_reason,
-        "scam_risk": r.scam_risk,
-        "pii_redacted": r.pii_redacted,
+        "scam_risk": r.harness.scam_risk,
+        "pii_redacted": r.harness.pii_redacted,
+        "reversible": r.reversible,
     }
 
 

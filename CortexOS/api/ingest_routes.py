@@ -4,7 +4,6 @@ Uploads arrive base64-encoded in a JSON body (no python-multipart dependency),
 are size-capped, written into a managed drop dir (never an arbitrary path), and
 run through the exactly-once bronze loader. Steward RBAC on writes.
 """
-from __future__ import annotations
 
 import base64
 import binascii
