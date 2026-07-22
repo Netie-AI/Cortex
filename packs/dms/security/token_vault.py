@@ -62,11 +62,17 @@ class TokenVault:
         if existing is not None:
             return existing
         digest = hmac.new(self.salt, f"{kind}:{value}".encode("utf-8"), sha256).hexdigest()
-        token = f"NETIE_{kind.upper()}_{digest[:6].upper()}"
+        # Split the hex so the audited phone regex cannot re-eat an all-digit
+        # suffix on the second secure_for_prompt pass (e.g. NETIE_PHONE_601234
+        # matched as a local number → NETIE_PHONE_[REDACTED:phone]). Underscore
+        # is intentionally outside the phone separator class [-.\\s].
+        h = digest[:6].upper()
+        token = f"NETIE_{kind.upper()}_{h[:3]}_{h[3:]}"
         # Vanishingly unlikely, but keep tokens injective under collision.
         while token in self._rev and self._rev[token] != value:
             digest = sha256((digest + value).encode("utf-8")).hexdigest()
-            token = f"NETIE_{kind.upper()}_{digest[:6].upper()}"
+            h = digest[:6].upper()
+            token = f"NETIE_{kind.upper()}_{h[:3]}_{h[3:]}"
         self._rev[token] = value
         self._fwd[value] = token
         return token
