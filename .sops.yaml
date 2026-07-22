@@ -1,0 +1,21 @@
+# C-SEC-3 — SOPS encryption policy for OpenDMS secrets.
+#
+# Encrypt real secrets with `sops` + age before they are ever committed. Only
+# encrypted `*.enc.yaml` / `*.enc.json` files belong in git; the plaintext
+# `env.local` / `key.md` stay gitignored (and the secrets scanner blocks them).
+#
+# Setup (once):
+#   age-keygen -o ~/.config/sops/age/keys.txt          # prints an age public key
+#   export SOPS_AGE_RECIPIENTS=age1<your-public-key>
+# Encrypt / edit:
+#   sops --encrypt secrets/dms.env.yaml > secrets/dms.env.enc.yaml
+#   sops secrets/dms.env.enc.yaml                        # decrypt-edit-reencrypt in place
+# Decrypt at runtime (never write plaintext to disk in CI):
+#   export DMS_API_KEYS=$(sops -d --extract '["DMS_API_KEYS"]' secrets/dms.env.enc.yaml)
+#
+# Replace the placeholder recipient below with your real age public key.
+creation_rules:
+  - path_regex: secrets/.*\.enc\.(yaml|json)$
+    encrypted_regex: "^(DMS_API_KEYS|DMS_MASTER_KEY|CORTEX_LEDGER_SIGNING_KEY|.*_KEY|.*_TOKEN|.*_SECRET|.*_DSN)$"
+    age: >-
+      age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3xxxxx

@@ -1,5 +1,5 @@
 # STATUS.md
-**Last updated:** 2026-07-22 | **Gate:** F6 **PASS** | **Active:** research A1–A5 LANDED → Claude Code security + Cursor B3
+**Last updated:** 2026-07-22 | **Gate:** F6 **PASS** | **Active:** Claude Code C-SEC-1..8 LANDED → Cursor B3 (RLS CI + secrets hook)
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
 
 > **2026-07-22 (PM):** Parallel research A1–A5 landed under `docs/research/findings/`.

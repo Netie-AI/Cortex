@@ -2,6 +2,31 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Claude Code security C-SEC-1..8 — 2026-07-22
+
+- **C-SEC-1 reversible PII:** `packs/dms/security/reversible.py` — `secure_reversible()`
+  composes the audited harness ∘ TokenVault, flag-gated (`DMS_REVERSIBLE_PII`). Flag off =
+  byte-identical to the one-way gate; blocked input never creates a vault; regex floor still
+  catches what a blind detector misses. `tests/security/test_secure_reversible.py` (8).
+- **C-SEC-2 RLS proof:** `packs/dms/sql/007_rls_ledger_force.sql` (FORCE RLS) +
+  `tests/dms/test_rls_blocks_out_of_scope_read.py` (skips ≠ pass without `DMS_LEDGER_DSN`) +
+  `docs/security/RLS_PROOF.md` (CI sketch). Viewer cannot read steward-only / foreign-tenant rows.
+- **C-SEC-3 SOPS + scanner:** `scripts/secrets_scan.py` (`--staged`), `.sops.yaml`,
+  `secrets/dms.env.example.yaml`, `.gitignore` hardening. Clean tree = 0 findings;
+  planted secrets caught. `tests/security/test_secrets_scan.py` (4).
+- **C-SEC-4 filetype choke:** `packs/dms/security/intake_policy.py` wires `filetype_guard`
+  before photo + ingest (`ingest_routes`, `loader`, `vision/intake`, `warehouse_routes`);
+  exe-as-csv/png rejected before disk. `tests/security/test_intake_filetype_wiring.py` (5).
+- **C-SEC-5 crypto/transport memo:** `docs/security/CRYPTO_TRANSPORT_MEMO.md` — AEAD accept
+  w/ key-separation contract; egress-allowlist gap + default-deny design.
+- **C-SEC-6 WASM honesty:** `tests/security/test_wasm_honesty.py` — kill-switch, no-WASI,
+  fuel accounting proven; adversarial modules honestly skipped (scaffold ≠ Firecracker).
+- **C-SEC-7 publish rail:** `tests/dms/test_agent_publish_rail.py` — detectors have no LLM;
+  no publish after reject; below-bound never fires.
+- **C-SEC-8 __future__ sweep:** ranked 10-module fix list for Cursor (mechanical).
+- **NEVER-TOUCH choke-points untouched; adversarial suite green before/after.** Suite: 260
+  passed, 8 skipped. Hand-back: `docs/dms/packets/CLAUDE_CODE_SECURITY_HANDBACK_2026-07-22.md`.
+
 ## Research wave A1–A5 + truth-ground — 2026-07-22
 
 - **Findings (parallel explore):** `docs/research/findings/{S1_DBOS_RESUME,S2_BROKER_SHORTLIST,B1_STRESS_SUITE,S1_TOKEN_BUDGET,P0_SECURITY_GAPS}.md` + `P0_INDEX.md`

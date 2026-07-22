@@ -56,6 +56,13 @@ def upload_file(req: UploadRequest, caller: Caller = Depends(require_role("stewa
     if len(data) > _max_bytes():
         raise HTTPException(status_code=413, detail=f"file exceeds {_max_bytes()} bytes")
 
+    from packs.dms.security.intake_policy import check_upload
+
+    guard = check_upload(data, name.rsplit(".", 1)[-1])
+    if not guard.ok:
+        # C-SEC-4: deny BEFORE any byte reaches disk.
+        raise HTTPException(status_code=415, detail=f"file type rejected: {guard.reason}")
+
     dest = _drop_dir() / name
     dest.write_bytes(data)
 

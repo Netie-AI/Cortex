@@ -40,6 +40,13 @@ def intake_item(
     except (binascii.Error, ValueError) as exc:
         raise ValueError("invalid base64 photo") from exc
 
+    from packs.dms.security.intake_policy import check_photo
+
+    _guard = check_photo(raw)
+    if not _guard.ok:
+        # C-SEC-4: reject spoofed/executable "photos" before EXIF handling.
+        raise ValueError(f"photo rejected: {_guard.reason}")
+
     clean = strip_exif_gps(raw)
     photo_path = photos_dir(db_path) / f"{sku.replace('/', '_')}.jpg"
     photo_path.write_bytes(clean)

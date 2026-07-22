@@ -187,6 +187,18 @@ def load_one(path: Path | str, *, con=None, actor: str = "system") -> IngestResu
         data = path.read_bytes()
         chash = _content_hash(data)
 
+        # C-SEC-4: magic-byte policy before any parser touches the bytes.
+        from packs.dms.security.intake_policy import check_upload
+
+        guard = check_upload(data, ext)
+        if not guard.ok:
+            _insert_ledger(con, path=path, chash=chash, status="failed",
+                           target=None, rows=0, error=f"filetype_guard:{guard.reason}")
+            _audit("ingest.rejected_filetype",
+                   {"path": str(path), "reason": guard.reason}, actor=actor)
+            return IngestResult("failed", None, 0, chash, str(path),
+                                error=f"filetype_guard:{guard.reason}")
+
         if _already_loaded(con, chash):
             _insert_ledger(con, path=path, chash=chash, status="skipped_duplicate",
                            target=None, rows=0)

@@ -35,6 +35,12 @@ MANIFEST
 .env
 env.local
 key.md
+# SOPS: only encrypted *.enc.* may be committed; plaintext secrets stay local
+secrets/*.yaml
+secrets/*.json
+!secrets/*.example.yaml
+!secrets/*.enc.yaml
+!secrets/*.enc.json
 utputFormat
 myenv/
 activeflow/

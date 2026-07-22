@@ -147,6 +147,12 @@ def register_warehouse_routes(app: Any) -> None:
             photo = base64.b64decode(body.photo, validate=True)
         except Exception as exc:
             raise HTTPException(status_code=400, detail="invalid base64 photo") from exc
+        from packs.dms.security.intake_policy import check_photo
+
+        _guard = check_photo(photo)
+        if not _guard.ok:
+            # C-SEC-4: spoofed/executable "photos" never reach the vision model.
+            raise HTTPException(status_code=415, detail=f"photo rejected: {_guard.reason}")
         depth_map = None
         if body.depth_map:
             try:

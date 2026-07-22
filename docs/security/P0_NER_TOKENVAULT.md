@@ -1,7 +1,14 @@
 # P0 — Data-protection security track (NER · reversible token vault · magic-byte)
 
-**Status: PARTIAL — 3 modules landed + tested this session (2026-07-20). Not yet wired into the live gate.**
-Owner-gate + adversarial re-test required before the choke-point adopts them (see `docs/ontology/TOUCH_MAP.md`).
+**Status (2026-07-22, Claude Code C-SEC-1..8):**
+- `filetype_guard` → **SHIPPED + WIRED** in front of photo + ingest (C-SEC-4); now NEVER-TOUCH, extend via `intake_policy.py`.
+- `secure_reversible()` (harness ∘ TokenVault) → **module SHIPPED, flag-gated** (`DMS_REVERSIBLE_PII`); live-callsite adoption still **PARTIAL** (default off) — C-SEC-1.
+- RLS proof → **test + FORCE migration SHIPPED**; CI-green **PARTIAL** (skips without `DMS_LEDGER_DSN`) — C-SEC-2.
+- SOPS + secrets scanner → **SHIPPED** (`.sops.yaml`, `scripts/secrets_scan.py`); team age-key rollout PARTIAL — C-SEC-3.
+- `pii_ner` real model → **still interface-only** (default regex).
+- Transport/egress allowlist → **DESIGN ONLY** (`docs/security/CRYPTO_TRANSPORT_MEMO.md`) — C-SEC-5.
+
+Hand-back + Cursor next slices: `docs/dms/packets/CLAUDE_CODE_SECURITY_HANDBACK_2026-07-22.md`.
 Read `STATUS.md` and `ARCHITECTURE.md` first. Honesty rule: planned ≠ shipped.
 
 This doc exists so no agent re-implements what is already done. Update the status column as waves land.
