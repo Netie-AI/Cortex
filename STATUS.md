@@ -1,6 +1,17 @@
 # STATUS.md
-**Last updated:** 2026-07-23 | **Gate:** O2 codebase map **PASS** | **Active:** O-series (next: O3)
+**Last updated:** 2026-07-23 | **Gate:** O5 sidecar-SDK bridge **PASS** | **Active:** P16 hardening → O7 new-pack gen (O6 stays owner-gated)
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
+
+> **2026-07-23 (O3+O4+O5 + evals):** O3 — F8 allowlist resolves from `ontology_action_types`
+> (`allowed_action_tools`; adding a tool = registering an action type). O4 — pack-agnostic
+> **Agent SDK** at `CortexOS/agent_sdk` (`query_objects` PII-scoped reads, `call_action`
+> registry→RBAC→confirm→F8→ledger; registry moved to engine home `CortexOS/ontology`, DMS shim
+> kept; synthetic non-DMS pack proves pack-agnosticism). O5 — sidecar bridge
+> `/dms/sidecar/{query-objects,call-action}` + AirGPT `dms_query`/`dms_action` tools, proven
+> live E2E (PII-clean read, confirm_required, rbac + unregistered denials, ledgered). P16 slice:
+> `agent_sdk/evals.py` scope-containment harness (**required gate before O6**). Secrets: Cortex
+> `.gitignore` now excludes `CortexOS/AirGPT` mirror (live `env.local` keys); AirGPT registry
+> paths F:→D: fixed. ⚠ `D:\AirGPT` repo has zero commits — initial commit pending owner.
 
 > **2026-07-23 (final goal set):** North-star sharpened — Cortex = **the best engine** (orchestration +
 > engine capability only; verticals are consumers). Two consumption modes (hosted API / downloadable
@@ -40,19 +51,23 @@
 | Q1/Q2/L0–L2/S0 | Shipped | BUILD_PLAN_V2 |
 | O1 ontology registry | YAML → `ontology_*` in ops DB | **PASS** |
 | O2 codebase knowledge map | ast index + `--covers` / `--gate` CLI | **PASS** |
+| O3 action-type registry (F8) | Allowlist from `ontology_action_types` | **PASS** |
+| O4 Agent SDK | `CortexOS/agent_sdk` — pack-agnostic reads/actions | **PASS** |
+| O5 sidecar-SDK bridge | `/dms/sidecar/*` + AirGPT `dms_query`/`dms_action` | **PASS** |
+| P16 evals harness | agent scope-containment (pre-O6 gate) | Shipped |
 | Context engineering | Layered assemble + compaction + NOTES API | Shipped (additive) |
 
 ## Test baseline
 ```
-pytest -q  (expect ≥283; local RLS skips without DSN)
+pytest -q  (expect ≥330; local RLS skips without DSN)
 python -m scripts.secrets_scan  → 0 findings
 CI: Test + Secrets Scan + RLS Proof → success
 ```
 
 ## Next three moves
-1. O3 action-type registry = F8 through ontology (`docs/strategy/FABLE5_HANDOFF_PROMPTS.md` Prompt 3)
+1. O7 new-pack generator (FDE payoff) + P16 hardening slices (`FABLE5_HANDOFF_PROMPTS.md` Prompts 8–9); O6 builder stays owner-gated
 2. `@agent` chat dispatch (last S1 skip)
-3. Architecture-preset MoE router + OpenVault manager/shipper (parking — not blocking O3)
+3. ~~Architecture-preset MoE router + OpenVault manager/shipper~~ — **started**: `PRODUCT_ROLES.md` + `architecture_presets` + `openvault_gate` client; OpenVault owns `/api/gate/check` + `/api/keyvault/*`
 
 ## Handoff
 - **Final goal (north-star): `docs/strategy/CORTEX_FINAL_GOAL.md`**
