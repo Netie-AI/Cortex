@@ -65,12 +65,12 @@ def test_primary_keys_are_declared_properties():
         assert o.primary_key in names, f"{o.id}: primary_key {o.primary_key!r} not a property"
 
 
-def test_tool_action_types_match_f8_allowlist():
-    """kind:tool entries mirror the F8 runner allowlist until O3 inverts the dependency."""
-    from netie.execution.tool_runner import ALLOWLIST
+def test_tool_action_types_drive_f8_allowlist():
+    """O3: the F8 runner allowlist is DERIVED from these kind:tool entries."""
+    from netie.execution.tool_runner import allowed_action_tools
 
     tools = {a.id for a in registry.load_action_types(PACK_DIR) if a.kind == "tool"}
-    assert tools == set(ALLOWLIST)
+    assert tools == set(allowed_action_tools())
 
 
 def test_event_action_types_are_registered_literals():

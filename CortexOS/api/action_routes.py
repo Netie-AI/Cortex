@@ -17,10 +17,10 @@ class ActionRequest(BaseModel):
 
 @router.get("")
 def list_actions(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
-    from netie.execution.tool_runner import ALLOWLIST
+    from netie.execution.tool_runner import allowed_action_tools
 
     _ = caller
-    return {"tools": sorted(ALLOWLIST)}
+    return {"tools": sorted(allowed_action_tools())}
 
 
 @router.get("/{tool}")
@@ -28,10 +28,10 @@ def describe_action(
     tool: str,
     caller: Caller = Depends(require_role("viewer")),
 ) -> Dict[str, Any]:
-    from netie.execution.tool_runner import ALLOWLIST
+    from netie.execution.tool_runner import allowed_action_tools
 
     _ = caller
-    return {"tool": tool, "allowed": tool in ALLOWLIST}
+    return {"tool": tool, "allowed": tool in allowed_action_tools()}
 
 
 @router.post("/{tool}")

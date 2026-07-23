@@ -1,8 +1,8 @@
 # Ontology O1 — action-type registry for the DMS pack.
 #
 # Two kinds of entry:
-#   kind: tool  — an invocable governed action. O3 makes the F8 runner
-#                 (CortexOS/execution/tool_runner.py ALLOWLIST) resolve from here.
+#   kind: tool  — an invocable governed action. O3: the F8 runner allowlist
+#                 (CortexOS/execution/tool_runner.py allowed_action_tools) resolves from here.
 #   kind: event — a ledger event type that already exists in code as a string
 #                 literal. Registering it here makes the event namespace one
 #                 describable list instead of implicit conventions. REGISTERED,

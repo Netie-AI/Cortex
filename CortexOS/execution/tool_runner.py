@@ -5,16 +5,46 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
 
-ALLOWLIST: frozenset[str] = frozenset({"export_pptx"})
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_\-.]{1,128}$")
 _RULESET = "packs/dms/compliance/tool_call_rules_v1.yaml"
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUTS = ROOT / "outputs"
+
+
+def allowed_action_tools(db_path: Path | str | None = None) -> frozenset[str]:
+    """Tool ids the F8 runner may execute — sourced from the governed ontology
+    action-type registry (``kind: tool``), never a hardcoded set (O3 = F8).
+
+    Reads the compiled ``ontology_action_types`` table in the ops DB when present,
+    and falls back to the pack's ``action_types.yaml`` so the allowlist is always
+    registry-derived. Adding a tool = registering an action type, not editing code.
+    """
+    from packs.dms.audit.ledger import default_db_path
+
+    path = Path(db_path) if db_path is not None else default_db_path()
+    if path.exists():
+        try:
+            conn = sqlite3.connect(path)
+            try:
+                rows = conn.execute(
+                    "SELECT id FROM ontology_action_types WHERE kind = 'tool'"
+                ).fetchall()
+            finally:
+                conn.close()
+            if rows:
+                return frozenset(str(r[0]) for r in rows)
+        except sqlite3.Error:
+            pass  # table absent / DB not compiled — fall through to the YAML source
+
+    from packs.dms.ontology.registry import load_action_types
+
+    return frozenset(a.id for a in load_action_types() if a.kind == "tool")
 
 
 class ToolCallError(RuntimeError):
@@ -125,8 +155,8 @@ def run_tool_call(
         _ledger(actor, "action.tool_call_denied", payload, db_path=db_path)
         raise ToolCallError(reason, verdict=verdict, detail=payload)
 
-    if tool_name not in ALLOWLIST:
-        _deny("allowlist", f"tool {tool_name!r} not in allowlist")
+    if tool_name not in allowed_action_tools(db_path):
+        _deny("allowlist", f"tool {tool_name!r} not a registered action type")
 
     try:
         out_dir = resolve_output_dir(actor, rid)
