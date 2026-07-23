@@ -48,11 +48,13 @@ def create_app() -> Any:
     from netie.api.dag_run import register_dag_run_routes
     from netie.api.engine_routes import register_engine_routes
     from netie.api.memory_routes import register_memory_routes
+    from netie.api.context_routes import register_context_routes
 
     register_search_routes(app)
     register_dag_run_routes(app)
     register_engine_routes(app)
     register_memory_routes(app)
+    register_context_routes(app)
 
     if pack.name == "dms":
         from netie.api.dms_query import register_dms_routes

@@ -135,6 +135,12 @@ OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
         research=True, bench_gate="C2 reproduce speedup + recall"),
     OptimizerDescriptor("dsa", "DeepSeek DSA context", "context",
         "Sparse-context select/compress/sliding (AirGPT ditch/index analog).", default=True),
+    OptimizerDescriptor(
+        "context_engineering", "Context engineering", "context",
+        "Layered assemble + compaction + NOTES.md (Anthropic-style attention budget). "
+        "API: /api/context/assemble|compact|notes.",
+        default=True,
+    ),
     OptimizerDescriptor("moe_stream", "MoE expert streaming", "moe",
         "Stream inactive experts from NVMe (Colibri).", backends=("colibri",)),
     # B4 finding: native disk-KV exists only in vLLM (TieringOffloadingSpec fs tier)

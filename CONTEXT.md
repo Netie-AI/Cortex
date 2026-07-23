@@ -26,6 +26,7 @@ Cortex/
 - **F7 PII:** `secure_for_prompt()` / `redact_for_prompt` before any model input.
 - **Vision:** suggest + confirm; never auto-commit measurements.
 - **Ponytail:** YAGNI token discipline — see `docs/PONYTAIL.md`.
+- **Context engineering:** layered assemble + compaction + NOTES — see `docs/CONTEXT_ENGINEERING.md`.
 
 ## Gates
 - V0 PASSED 2026-06-25

@@ -1,7 +1,15 @@
 # STATUS.md
-**Last updated:** 2026-07-23 | **Gate:** O1 ontology registry **PASS** | **Active:** O-series per `docs/strategy/FABLE5_HANDOFF_PROMPTS.md` (next: O2)
+**Last updated:** 2026-07-23 | **Gate:** O2 codebase map **PASS** | **Active:** O-series (next: O3)
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
 
+> **2026-07-23 (context engineering):** `CortexOS/context_engineering/` + `/api/context/*`;
+> ponytail + optimizer `context_engineering`. OpenIDE/AirGPT mirror is out-of-repo
+> (`AirGPT/context_engineering`, `OpenIDE/docs/PROMPT_LAYERS.md`) — additive, not an O-gate.
+>
+> **2026-07-23 (O2):** Codebase knowledge map — `scripts/build_codebase_ontology.py` (ast,
+> zero LLM) → `data/codebase_ontology.db`; `packs/dms/ontology/query.py` CLI
+> (`--covers` / `--gate` / `--module`). 8/8 `test_o2_codebase_map` + secrets clean.
+>
 > **2026-07-23 (O1):** Ontology registry shipped — `packs/dms/ontology/{object_types,link_types,
 > action_types,functions}.yaml` (transcribes `semantic_layer.yaml` + primary keys + `agent_visible`
 > folding `sensitive_columns`; registers 24 ledger event literals + `export_pptx` tool) and
@@ -27,6 +35,8 @@
 | S1 agents + durable resume | Ops-DB checkpoints + optional DBOS | Core+B1 |
 | Q1/Q2/L0–L2/S0 | Shipped | BUILD_PLAN_V2 |
 | O1 ontology registry | YAML → `ontology_*` in ops DB | **PASS** |
+| O2 codebase knowledge map | ast index + `--covers` / `--gate` CLI | **PASS** |
+| Context engineering | Layered assemble + compaction + NOTES API | Shipped (additive) |
 
 ## Test baseline
 ```
@@ -36,11 +46,12 @@ CI: Test + Secrets Scan + RLS Proof → success
 ```
 
 ## Next three moves
-1. O2 codebase knowledge map (`docs/strategy/FABLE5_HANDOFF_PROMPTS.md` Prompt 2)
-2. O3 action-type registry = F8 through ontology (Prompt 3)
-3. `@agent` chat dispatch (last S1 skip)
+1. O3 action-type registry = F8 through ontology (`docs/strategy/FABLE5_HANDOFF_PROMPTS.md` Prompt 3)
+2. `@agent` chat dispatch (last S1 skip)
+3. Architecture-preset MoE router + OpenVault manager/shipper (parking — not blocking O3)
 
 ## Handoff
 - Truth map: `docs/dms/TRUTH_GROUND_MAP.md`
 - Hand-back: `docs/dms/packets/CLAUDE_CODE_SECURITY_HANDBACK_2026-07-22.md`
 - Research: `docs/research/findings/P0_INDEX.md`
+- Context engineering: `docs/CONTEXT_ENGINEERING.md`

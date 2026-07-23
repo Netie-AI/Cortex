@@ -74,16 +74,19 @@ def _estimate_tokens(text: str) -> int:
 
 def _compress_context(text: str, budget: int) -> tuple[str, bool]:
     """
-    Truncate context to fit within token budget.
-    Returns (compressed_text, was_truncated).
-    No LLM used — deterministic string trimming with paragraph granularity.
+    Fit context within token budget via context_engineering (layer-aware trim).
+    Falls back to paragraph trim if the package is unavailable.
     """
+    try:
+        from CortexOS.context_engineering.budget import fit_text
+
+        return fit_text(text, budget, marker="[CONTEXT TRUNCATED — within token budget]")
+    except ImportError:
+        pass
     if _estimate_tokens(text) <= budget:
         return text, False
-    # Trim to budget character count
     char_limit = budget * 4
     trimmed = text[:char_limit]
-    # Try to break at last newline to avoid mid-sentence cuts
     last_nl = trimmed.rfind("\n")
     if last_nl > char_limit * 0.7:
         trimmed = trimmed[:last_nl]
@@ -253,12 +256,36 @@ def ponytail_process(
     tier = force_tier or route_tier(safe_text + " " + intent_hint)
     budget = TOKEN_BUDGETS.get(tier, 4096)
 
-    # 5. Build context string + compress
+    # 5. Build layered context + compress (context engineering)
     context_str = json.dumps(prefetch, default=str)
-    compressed_ctx, was_truncated = _compress_context(context_str, budget // 2)
+    assembled_meta: dict[str, Any] = {}
+    try:
+        from CortexOS.context_engineering import ContextRequest, assemble_context
+
+        assembled = assemble_context(
+            ContextRequest(
+                instructions="Governed warehouse assistant. Prefer deterministic facts from prefetch.",
+                retrieval=context_str,
+                state=f"tier_hint={tier} user_id={user_id}",
+                messages=[safe_text],
+                token_budget=max(256, budget),
+            )
+        )
+        compressed_ctx = assembled.user_context or context_str
+        was_truncated = bool(assembled.truncated_layers or assembled.compacted)
+        assembled_meta = {
+            "token_estimate": assembled.token_estimate,
+            "truncated_layers": assembled.truncated_layers,
+            "compacted": assembled.compacted,
+        }
+    except Exception:
+        compressed_ctx, was_truncated = _compress_context(context_str, max(64, budget // 2))
 
     # 6. Token estimate
-    token_estimate = _estimate_tokens(safe_text) + _estimate_tokens(compressed_ctx)
+    token_estimate = int(
+        assembled_meta.get("token_estimate")
+        or (_estimate_tokens(safe_text) + _estimate_tokens(compressed_ctx))
+    )
 
     # 7. Audit log (non-blocking)
     try:
@@ -285,6 +312,7 @@ def ponytail_process(
         "flags": flags,
         "cache_hit": False,
         "truncated": was_truncated,
+        "context_engineering": assembled_meta or None,
         "prefetch": {
             "total_items": prefetch.get("total_items", 0),
             "total_locations": prefetch.get("total_locations", 0),
