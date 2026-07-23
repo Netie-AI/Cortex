@@ -1,0 +1,13 @@
+link_types:
+  - id: contact_account
+    from_object: contact
+    from_property: account_id
+    to_object: account
+    to_property: account_id
+    cardinality: many_to_one
+  - id: opportunity_account
+    from_object: opportunity
+    from_property: account_id
+    to_object: account
+    to_property: account_id
+    cardinality: many_to_one

@@ -1,0 +1,39 @@
+glossary: []
+joins:
+- from_table: contact
+  from_column: account_id
+  to_table: account
+  to_column: account_id
+- from_table: opportunity
+  from_column: account_id
+  to_table: account
+  to_column: account_id
+sensitive_columns:
+- email
+- owner_email
+- phone
+tables:
+  account:
+    columns:
+    - account_id
+    - account_name
+    - industry
+    - annual_revenue
+    - owner_email
+  contact:
+    columns:
+    - contact_id
+    - account_id
+    - full_name
+    - title
+    - email
+    - phone
+  opportunity:
+    columns:
+    - opportunity_id
+    - account_id
+    - opp_name
+    - stage
+    - amount
+    - close_date
+    - probability

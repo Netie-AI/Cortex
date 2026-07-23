@@ -1,0 +1,18 @@
+action_types:
+  - id: account.created
+    kind: event
+    description: "A new account was created."
+    object_type: account
+    ledger_event_type: account.created
+  - id: opportunity.stage_changed
+    kind: event
+    description: "An opportunity moved to a new stage."
+    object_type: opportunity
+    ledger_event_type: opportunity.stage_changed
+  - id: crm.export
+    kind: tool
+    description: "Export a CRM view (demo tool — no runner handler yet, denies fail-closed)."
+    required_role: steward
+    ledger_event_type: action.tool_call
+    requires_confirm: true
+    params: [title]

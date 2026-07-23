@@ -1,6 +1,15 @@
 # STATUS.md
-**Last updated:** 2026-07-23 | **Gate:** O5 sidecar-SDK bridge **PASS** | **Active:** P16 hardening → O7 new-pack gen (O6 stays owner-gated)
+**Last updated:** 2026-07-23 | **Gate:** O7 new-pack generator **PASS** | **Active:** capability landings next gate (L0 DuckLake); O6 stays owner-gated
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
+
+> **2026-07-23 (O7 + P16 hooks + AirGPT commit):** O7 — `scripts/new_pack.py` scaffolds a full pack
+> (ontology trio → generated DDL + `semantic_layer.yaml` + compliance stub + audit that reuses the
+> F1 ledger) from a governed trio; demo `packs/crm/` (Account/Contact/Opportunity) shipped as the
+> worked example. "Companies make the app they want." P16 — `agent_sdk/hooks.py` lifecycle hooks
+> (before/after/on_denied, error-swallowing) + built-in output-secrets scanner. AirGPT initial
+> commit landed (`D:\AirGPT` `b0723db`, 314 files, local-only, secrets excluded); registry paths
+> F:→D: fixed. 343 pass (2 unrelated failures are the parallel track's untracked engine-autostart
+> test — missing `pwsh`).
 
 > **2026-07-23 (O3+O4+O5 + evals):** O3 — F8 allowlist resolves from `ontology_action_types`
 > (`allowed_action_tools`; adding a tool = registering an action type). O4 — pack-agnostic
@@ -54,7 +63,8 @@
 | O3 action-type registry (F8) | Allowlist from `ontology_action_types` | **PASS** |
 | O4 Agent SDK | `CortexOS/agent_sdk` — pack-agnostic reads/actions | **PASS** |
 | O5 sidecar-SDK bridge | `/dms/sidecar/*` + AirGPT `dms_query`/`dms_action` | **PASS** |
-| P16 evals harness | agent scope-containment (pre-O6 gate) | Shipped |
+| O7 new-pack generator | `scripts/new_pack.py` + demo `packs/crm/` | **PASS** |
+| P16 evals + hooks | scope-containment + lifecycle/output-secrets hooks | Shipped |
 | Context engineering | Layered assemble + compaction + NOTES API | Shipped (additive) |
 
 ## Test baseline

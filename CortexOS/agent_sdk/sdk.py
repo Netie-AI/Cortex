@@ -167,11 +167,14 @@ def call_action(
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Invoke a registered ``kind: tool`` action through the governed F8 path."""
+    from CortexOS.agent_sdk.hooks import fire
+
     name, role = _identity(actor)
     actions = {a.id: a for a in load_action_types(_resolve_pack_dir(pack, pack_dir))}
 
     def _deny(verdict: str, reason: str) -> None:
         _ledger_denial(name, action_id, verdict, reason, run_id=run_id, db_path=db_path)
+        fire("on_denied", {"action_id": action_id, "actor": name, "verdict": verdict, "reason": reason})
         raise SdkDenied(reason, verdict=verdict)
 
     action = actions.get(action_id)
@@ -187,7 +190,10 @@ def call_action(
 
     from netie.execution.tool_runner import run_tool_call
 
-    return run_tool_call(action_id, dict(params or {}), actor=name, run_id=run_id, db_path=db_path)
+    fire("before_action", {"action_id": action_id, "actor": name, "role": role, "confirmed": confirmed})
+    result = run_tool_call(action_id, dict(params or {}), actor=name, run_id=run_id, db_path=db_path)
+    fire("after_action", {"action_id": action_id, "actor": name, "result": result})
+    return result
 
 
 def _ledger_denial(

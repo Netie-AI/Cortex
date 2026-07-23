@@ -1,0 +1,31 @@
+object_types:
+  - id: account
+    description: "A company or organization the business sells to."
+    primary_key: account_id
+    properties:
+      - {name: account_id, type: string, agent_visible: true}
+      - {name: account_name, type: string, agent_visible: true}
+      - {name: industry, type: string, agent_visible: true}
+      - {name: annual_revenue, type: number, agent_visible: true}
+      - {name: owner_email, type: string, agent_visible: false}
+  - id: contact
+    description: "A person associated with an account."
+    primary_key: contact_id
+    properties:
+      - {name: contact_id, type: string, agent_visible: true}
+      - {name: account_id, type: string, agent_visible: true}
+      - {name: full_name, type: string, agent_visible: true}
+      - {name: title, type: string, agent_visible: true}
+      - {name: email, type: string, agent_visible: false}
+      - {name: phone, type: string, agent_visible: false}
+  - id: opportunity
+    description: "A potential sale tied to an account."
+    primary_key: opportunity_id
+    properties:
+      - {name: opportunity_id, type: string, agent_visible: true}
+      - {name: account_id, type: string, agent_visible: true}
+      - {name: opp_name, type: string, agent_visible: true}
+      - {name: stage, type: string, agent_visible: true}
+      - {name: amount, type: number, agent_visible: true}
+      - {name: close_date, type: date, agent_visible: true}
+      - {name: probability, type: number, agent_visible: true}

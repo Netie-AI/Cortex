@@ -26,14 +26,17 @@ from CortexOS.agent_sdk.sdk import (
     query_objects,
 )
 from CortexOS.agent_sdk.backends import register_query_backend
+from CortexOS.agent_sdk.hooks import clear_agent_hooks, register_agent_hook
 
 __all__ = [
     "AgentActor",
     "SdkDenied",
     "call_action",
+    "clear_agent_hooks",
     "list_action_types",
     "list_functions",
     "list_object_types",
     "query_objects",
+    "register_agent_hook",
     "register_query_backend",
 ]
