@@ -16,6 +16,8 @@ Read first: `ARCHITECTURE.md`, `CONTEXT.md`, `STATUS.md`, `PARKING_LOT.md`,
 This is the same throughline as the world-engine brief
 (`docs/dms/packets/CLAUDE_CODE_WORLD_ENGINE_BRIEF_2026-07-22.md`): *ontology-as-memory + LLM-as-reasoner + actions as the only write path*. This doc is the concrete build/reconciliation plan under that north star.
 
+> **Sharpened 2026-07-23 — see `docs/strategy/CORTEX_FINAL_GOAL.md`:** Cortex's final goal is to be **the best engine** — we improve only orchestration + engine capability; verticals (DMS, etc.) are *consumers*. The engine reaches outside builders two ways: a **hosted API** (use only the parts you need) and a **downloadable/self-host "netie engine"** (configure + run on your own base). Made adoptable by first-class **API docs + a whitepaper** (PARKING_LOT P17/P18). In this plan's terms: **Brain B (`netie-engine`) is the product; Brain A (`main`/DMS) is the first reference consumer.**
+
 ---
 
 ## 1. The "dual brain", concretely — and the git reality

@@ -57,6 +57,12 @@ The whole runtime packaged as an engine + SDK an FDE points at a customer's data
 ## P16 — Agentic hardening from research
 Fold in patterns from the Claude Code Ultimate Guide + Cursor changelog (July 2026): safety hooks (dangerous-action block → injection detect → output-secrets scan), Restrict/Allow/**Request** permission tiers, context-pressure thresholds, agent lifecycle hooks (`beforeSubmitPrompt`/`afterAgentResponse`/`stop`), an **evals harness** before the agent builder runs for a paying client, and an engine session/observability dashboard. **Condition:** before tool #2 / before the SDK loads any third-party MCP. *(Detail: plan §4.)*
 
+## P17 — Cortex Engine API layer + self-host packaging (the external product surface)
+Two ways for outside builders to consume Cortex (the final goal — `docs/strategy/CORTEX_FINAL_GOAL.md`): **(a) hosted API** to use only the parts they need (orchestration, retrieval, memory, model routing, ontology/action governance, context assembly); **(b) downloadable "netie engine"** to self-host, configure (models/storage/routing/governance), and run against their own data/base. Both hit the same governed core (actions-only write, RBAC + ledger). The Ontology Agent SDK (O4) is the in-process surface this wraps; the context-engineering API (shipped `be945ac`) is an early example of an engine surface to expose. **Condition:** O4 Agent SDK shipped (a stable in-process surface to wrap) + first external-consumer ask.
+
+## P18 — Engine API documentation + whitepaper + architecture reference
+Make the engine adoptable **without reading source**: strong per-surface API docs (contracts/examples/auth), the design **whitepaper** (ontology-as-memory + actions-as-only-write-path + dual-brain + hosted/self-host governance parity), and an architecture reference built on the O2 codebase map. First-class deliverables, not afterthoughts — the API *is* the product. **Condition:** P17 API layer has a stable surface to document.
+
 ---
 
 ## Move out of parking lot

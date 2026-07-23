@@ -2,6 +2,10 @@
 **Last updated:** 2026-07-23 | **Gate:** O2 codebase map **PASS** | **Active:** O-series (next: O3)
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
 
+> **2026-07-23 (final goal set):** North-star sharpened — Cortex = **the best engine** (orchestration +
+> engine capability only; verticals are consumers). Two consumption modes (hosted API / downloadable
+> self-host netie engine) + API docs + whitepaper. See `docs/strategy/CORTEX_FINAL_GOAL.md`, PARKING_LOT P17/P18.
+>
 > **2026-07-23 (context engineering):** `CortexOS/context_engineering/` + `/api/context/*`;
 > ponytail + optimizer `context_engineering`. OpenIDE/AirGPT mirror is out-of-repo
 > (`AirGPT/context_engineering`, `OpenIDE/docs/PROMPT_LAYERS.md`) — additive, not an O-gate.
@@ -51,6 +55,7 @@ CI: Test + Secrets Scan + RLS Proof → success
 3. Architecture-preset MoE router + OpenVault manager/shipper (parking — not blocking O3)
 
 ## Handoff
+- **Final goal (north-star): `docs/strategy/CORTEX_FINAL_GOAL.md`**
 - Truth map: `docs/dms/TRUTH_GROUND_MAP.md`
 - Hand-back: `docs/dms/packets/CLAUDE_CODE_SECURITY_HANDBACK_2026-07-22.md`
 - Research: `docs/research/findings/P0_INDEX.md`
