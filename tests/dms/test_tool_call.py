@@ -137,9 +137,9 @@ def test_compliance_empty_title_denied(ledger_db, tmp_path, monkeypatch):
 
 def test_allowlist_is_registry_sourced_not_hardcoded():
     from netie.execution.tool_runner import allowed_action_tools
-    from packs.dms.ontology.registry import load_action_types
+    from packs.dms.ontology.registry import PACK_DIR, load_action_types
 
-    reg_tools = {a.id for a in load_action_types() if a.kind == "tool"}
+    reg_tools = {a.id for a in load_action_types(PACK_DIR) if a.kind == "tool"}
     got = set(allowed_action_tools())
     assert got == reg_tools
     assert "export_pptx" in got

@@ -42,9 +42,11 @@ def allowed_action_tools(db_path: Path | str | None = None) -> frozenset[str]:
         except sqlite3.Error:
             pass  # table absent / DB not compiled — fall through to the YAML source
 
-    from packs.dms.ontology.registry import load_action_types
+    # Explicit pack dir: this runner's ruleset/sanitizers are the DMS-governed
+    # defaults, and ambient PACK must not swing the allowlist (conftest sets ruma).
+    from packs.dms.ontology.registry import PACK_DIR, load_action_types
 
-    return frozenset(a.id for a in load_action_types() if a.kind == "tool")
+    return frozenset(a.id for a in load_action_types(PACK_DIR) if a.kind == "tool")
 
 
 class ToolCallError(RuntimeError):
