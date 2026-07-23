@@ -48,6 +48,15 @@ YOLO / Grounding DINO / Label Studio self-hosted. **Condition:** 50+ real wareho
 ## P13 — Blockchain / Web3 / Talkie / ASA / AIM / NetieX / Vanguard
 **Condition:** H2, DMS profitable.
 
+## P14 — Engine-as-SDK / company dual-brain
+The whole runtime packaged as an engine + SDK an FDE points at a customer's data/use-case to generate a governed app. "Dual brain" = reasoning/runtime brain (`netie-engine`) + application/ontology brain (`main`), sharing one governance spine. This is the *how* under P1 (ontology parity) and P12 (company central brain). **Plan:** `docs/strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md`. **Condition:** reconciliation option chosen (plan §2) + Ontology O1/O3/O4 shipped. *(The "SDK" is O4 `agents/sdk.py`; the "make the app you want" is O7 `scripts/new_pack.py`.)*
+
+## P15 — netie-engine ↔ main capability landing
+`main` and `netie-engine` diverged by 327 files / +34.5k / −5.2k (branched at `dms-v2`). **Do not big-bang merge/rebase** (aborts on add/add conflicts across `registry.py`/`store.py`/engine routes). Land engine capabilities (L0 DuckLake, rawknn/hybrid-RAG memory, Q1/Q2, S0 streams, agent orchestration) into `main` **one gate + one green CI at a time**; pick a canonical home per duplicated core file. **Condition:** plan §2 decision made. *(netie-engine stays the R&D feeder; see plan §2 option C→B.)*
+
+## P16 — Agentic hardening from research
+Fold in patterns from the Claude Code Ultimate Guide + Cursor changelog (July 2026): safety hooks (dangerous-action block → injection detect → output-secrets scan), Restrict/Allow/**Request** permission tiers, context-pressure thresholds, agent lifecycle hooks (`beforeSubmitPrompt`/`afterAgentResponse`/`stop`), an **evals harness** before the agent builder runs for a paying client, and an engine session/observability dashboard. **Condition:** before tool #2 / before the SDK loads any third-party MCP. *(Detail: plan §4.)*
+
 ---
 
 ## Move out of parking lot
