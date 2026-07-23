@@ -52,6 +52,14 @@ data/dms_ops.db
 data/dms_photos/
 data/codebase_ontology.db
 
+# AirGPT/Vertex working mirrors + runtime artifacts live OUTSIDE this repo
+# (AirGPT app root = D:/AirGPT, its own git). The in-tree mirror carries a live
+# env.local with API keys — must never be committable here.
+CortexOS/AirGPT/
+CortexOS/Vertex/
+outputs/
+bench/results/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
