@@ -1,0 +1,75 @@
+# Ontology O1 — link types for the DMS pack.
+# TRANSCRIPTION of packs/dms/semantic_layer.yaml `joins:` (same 10 relationships,
+# 1:1 — tests/dms/test_ontology_registry.py enforces parity in both directions),
+# plus cardinality + a human-readable id. All joins are FK -> PK, so many_to_one.
+
+link_types:
+  - id: inventory_supplier
+    from_object: inventory
+    from_property: supplier_id
+    to_object: suppliers
+    to_property: supplier_id
+    cardinality: many_to_one
+
+  - id: inventory_location
+    from_object: inventory
+    from_property: location_id
+    to_object: locations
+    to_property: location_id
+    cardinality: many_to_one
+
+  - id: shipment_item
+    from_object: shipments
+    from_property: sku
+    to_object: inventory
+    to_property: sku
+    cardinality: many_to_one
+
+  - id: shipment_supplier
+    from_object: shipments
+    from_property: supplier_id
+    to_object: suppliers
+    to_property: supplier_id
+    cardinality: many_to_one
+
+  - id: shipment_destination
+    from_object: shipments
+    from_property: destination_location_id
+    to_object: locations
+    to_property: location_id
+    cardinality: many_to_one
+
+  - id: transaction_item
+    from_object: transactions
+    from_property: sku
+    to_object: inventory
+    to_property: sku
+    cardinality: many_to_one
+
+  - id: transaction_location
+    from_object: transactions
+    from_property: location_id
+    to_object: locations
+    to_property: location_id
+    cardinality: many_to_one
+
+  - id: alert_item
+    from_object: alerts
+    from_property: related_sku
+    to_object: inventory
+    to_property: sku
+    cardinality: many_to_one
+
+  - id: alert_location
+    from_object: alerts
+    from_property: related_location
+    to_object: locations
+    to_property: location_id
+    cardinality: many_to_one
+
+  - id: alert_supplier
+    from_object: alerts
+    from_property: related_supplier
+    to_object: suppliers
+    to_property: supplier_id
+    cardinality: many_to_one

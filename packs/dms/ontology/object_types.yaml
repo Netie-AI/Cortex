@@ -1,0 +1,102 @@
+# Ontology O1 — object types for the DMS pack.
+# TRANSCRIPTION of packs/dms/semantic_layer.yaml `tables:` — do not add tables here
+# that semantic_layer.yaml does not have (tests/dms/test_ontology_registry.py enforces
+# name parity in both directions). Three additions over the semantic layer, per
+# docs/ontology/CORTEX_ONTOLOGY_PLAN.md §2.1: primary_key, description, and a
+# per-property agent_visible flag (folds semantic_layer.yaml `sensitive_columns:`).
+# Property `type` is informative (string|number|integer|boolean|date|datetime).
+
+object_types:
+  - id: inventory
+    description: "A SKU held at a location: stock on hand (quantity_kg), reorder level, cost, expiry, and hazard state."
+    primary_key: sku
+    properties:
+      - {name: sku, type: string, agent_visible: true}
+      - {name: sku_name, type: string, agent_visible: true}
+      - {name: category, type: string, agent_visible: true}
+      - {name: supplier_id, type: string, agent_visible: true}
+      - {name: location_id, type: string, agent_visible: true}
+      - {name: storage_bin, type: string, agent_visible: true}
+      - {name: quantity_kg, type: number, agent_visible: true}
+      - {name: reorder_level_kg, type: number, agent_visible: true}
+      - {name: unit_cost_myr, type: number, agent_visible: true}
+      - {name: last_restocked, type: date, agent_visible: true}
+      - {name: expiry_date, type: date, agent_visible: true}
+      - {name: is_hazardous, type: boolean, agent_visible: true}
+
+  - id: suppliers
+    description: "A vendor inventory is sourced from, with lead time, payment terms, and audit risk score."
+    primary_key: supplier_id
+    properties:
+      - {name: supplier_id, type: string, agent_visible: true}
+      - {name: supplier_name, type: string, agent_visible: true}
+      - {name: contact_person, type: string, agent_visible: false}  # was semantic_layer.yaml sensitive_columns
+      - {name: email, type: string, agent_visible: false}           # was semantic_layer.yaml sensitive_columns
+      - {name: phone, type: string, agent_visible: false}           # was semantic_layer.yaml sensitive_columns
+      - {name: country, type: string, agent_visible: true}
+      - {name: lead_time_days, type: integer, agent_visible: true}
+      - {name: payment_terms, type: string, agent_visible: true}
+      - {name: last_audit_date, type: date, agent_visible: true}
+      - {name: risk_score, type: number, agent_visible: true}
+
+  - id: locations
+    description: "A warehouse site: capacity vs current load, cold-storage flag, CCTV camera, and geo position."
+    primary_key: location_id
+    properties:
+      - {name: location_id, type: string, agent_visible: true}
+      - {name: location_code, type: string, agent_visible: true}
+      - {name: location_name, type: string, agent_visible: true}
+      - {name: city, type: string, agent_visible: true}
+      - {name: state, type: string, agent_visible: true}
+      - {name: latitude, type: number, agent_visible: true}
+      - {name: longitude, type: number, agent_visible: true}
+      - {name: capacity_kg, type: number, agent_visible: true}
+      - {name: current_load_kg, type: number, agent_visible: true}
+      - {name: cctv_camera_id, type: string, agent_visible: true}
+      - {name: is_cold_storage, type: boolean, agent_visible: true}
+      - {name: manager_name, type: string, agent_visible: true}
+
+  - id: shipments
+    description: "An inbound consignment of a SKU from a supplier to a destination location, with status (e.g. DELAYED) and cost."
+    primary_key: shipment_id
+    properties:
+      - {name: shipment_id, type: string, agent_visible: true}
+      - {name: sku, type: string, agent_visible: true}
+      - {name: supplier_id, type: string, agent_visible: true}
+      - {name: destination_location_id, type: string, agent_visible: true}
+      - {name: quantity_kg, type: number, agent_visible: true}
+      - {name: status, type: string, agent_visible: true}
+      - {name: expected_arrival, type: date, agent_visible: true}
+      - {name: actual_arrival, type: date, agent_visible: true}
+      - {name: carrier, type: string, agent_visible: true}
+      - {name: tracking_number, type: string, agent_visible: true}
+      - {name: cost_myr, type: number, agent_visible: true}
+
+  - id: transactions
+    description: "A stock movement event (in/out/adjust) for a SKU at a location, tied to an operator and reference document."
+    primary_key: txn_id
+    properties:
+      - {name: txn_id, type: string, agent_visible: true}
+      - {name: sku, type: string, agent_visible: true}
+      - {name: location_id, type: string, agent_visible: true}
+      - {name: txn_type, type: string, agent_visible: true}
+      - {name: quantity_kg, type: number, agent_visible: true}
+      - {name: unit_cost_myr, type: number, agent_visible: true}
+      - {name: operator_id, type: string, agent_visible: true}
+      - {name: timestamp, type: datetime, agent_visible: true}
+      - {name: reference_doc, type: string, agent_visible: true}
+
+  - id: alerts
+    description: "An operational alert (low stock, expiry, delay) optionally linked to a SKU, location, or supplier."
+    primary_key: alert_id
+    properties:
+      - {name: alert_id, type: string, agent_visible: true}
+      - {name: alert_type, type: string, agent_visible: true}
+      - {name: severity, type: string, agent_visible: true}
+      - {name: related_sku, type: string, agent_visible: true}
+      - {name: related_location, type: string, agent_visible: true}
+      - {name: related_supplier, type: string, agent_visible: true}
+      - {name: message, type: string, agent_visible: true}
+      - {name: created_at, type: datetime, agent_visible: true}
+      - {name: resolved, type: boolean, agent_visible: true}
+      - {name: resolved_at, type: datetime, agent_visible: true}

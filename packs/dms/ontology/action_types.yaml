@@ -1,0 +1,141 @@
+# Ontology O1 — action-type registry for the DMS pack.
+#
+# Two kinds of entry:
+#   kind: tool  — an invocable governed action. O3 makes the F8 runner
+#                 (CortexOS/execution/tool_runner.py ALLOWLIST) resolve from here.
+#   kind: event — a ledger event type that already exists in code as a string
+#                 literal. Registering it here makes the event namespace one
+#                 describable list instead of implicit conventions. REGISTERED,
+#                 NOT RENAMED — ids must match the literals in packs/ exactly
+#                 (tests/dms/test_ontology_registry.py spot-checks this).
+#
+# required_role is only asserted on kind: tool entries; enforcement wires in at
+# O3/O4. Event entries record facts, they are not permission gates.
+
+action_types:
+  # ---- invocable tools (F8 governed write path) --------------------------
+  - id: export_pptx
+    kind: tool
+    description: "Export a title/body payload to a PowerPoint file under outputs/<actor>/<run_id>/."
+    object_type: null
+    required_role: steward
+    ledger_event_type: action.tool_call
+    requires_confirm: true      # per docs/dms/GATE_F8_PACKET.md
+    params: [title, body]
+
+  # ---- F8 runner outcome events -----------------------------------------
+  - id: action.tool_call
+    kind: event
+    description: "A governed tool call passed allowlist + sanitize + compliance and executed."
+    ledger_event_type: action.tool_call
+    params: [tool, params_hash, path, verdict, run_id]
+  - id: action.tool_call_denied
+    kind: event
+    description: "A tool call was denied (allowlist, path escape, or compliance fail)."
+    ledger_event_type: action.tool_call_denied
+    params: [tool, params_hash, path, verdict, reason, run_id]
+
+  # ---- warehouse item lifecycle (V0/V1 vision) --------------------------
+  - id: item.intake
+    kind: event
+    description: "Register a new item into a warehouse location."
+    object_type: inventory
+    ledger_event_type: item.intake
+  - id: item.moved
+    kind: event
+    description: "Move an item between warehouse locations."
+    object_type: inventory
+    ledger_event_type: item.moved
+  - id: item.dimensioned
+    kind: event
+    description: "Estimate item dimensions from vision input."
+    object_type: inventory
+    ledger_event_type: item.dimensioned
+
+  # ---- S1 agent lifecycle ------------------------------------------------
+  - id: agent.created
+    kind: event
+    description: "A watcher agent definition was created."
+    ledger_event_type: agent.created
+  - id: agent.checked
+    kind: event
+    description: "An agent run checked its watch condition."
+    ledger_event_type: agent.checked
+  - id: agent.detected
+    kind: event
+    description: "An agent run detected a condition worth acting on."
+    ledger_event_type: agent.detected
+  - id: agent.drafted
+    kind: event
+    description: "An agent drafted an action for human approval."
+    ledger_event_type: agent.drafted
+  - id: agent.published
+    kind: event
+    description: "An approved agent draft was published."
+    ledger_event_type: agent.published
+  - id: agent.rejected
+    kind: event
+    description: "An agent draft was rejected by the approver."
+    ledger_event_type: agent.rejected
+
+  # ---- S0 streams --------------------------------------------------------
+  - id: stream.created
+    kind: event
+    description: "A stream definition was created."
+    ledger_event_type: stream.created
+  - id: stream.flushed
+    kind: event
+    description: "A stream buffer flushed a batch."
+    ledger_event_type: stream.flushed
+
+  # ---- L1 ingest ---------------------------------------------------------
+  - id: ingest.loaded
+    kind: event
+    description: "A source file was ingested."
+    ledger_event_type: ingest.loaded
+  - id: ingest.skipped
+    kind: event
+    description: "A source file was skipped (already ingested by content hash)."
+    ledger_event_type: ingest.skipped
+  - id: ingest.failed
+    kind: event
+    description: "A source file failed to ingest."
+    ledger_event_type: ingest.failed
+  - id: ingest.rejected_filetype
+    kind: event
+    description: "A source file was rejected by file-type policy."
+    ledger_event_type: ingest.rejected_filetype
+
+  # ---- L2 pipelines ------------------------------------------------------
+  - id: pipeline.completed
+    kind: event
+    description: "A pipeline run completed."
+    ledger_event_type: pipeline.completed
+  - id: pipeline.failed
+    kind: event
+    description: "A pipeline run failed."
+    ledger_event_type: pipeline.failed
+  - id: pipeline.proposal_approved
+    kind: event
+    description: "A proposed pipeline change was approved by a human."
+    ledger_event_type: pipeline.proposal_approved
+
+  # ---- L0 lakehouse ------------------------------------------------------
+  - id: lakehouse.rows_appended
+    kind: event
+    description: "Rows were appended to a lakehouse table."
+    ledger_event_type: lakehouse.rows_appended
+  - id: lakehouse.column_added
+    kind: event
+    description: "A column was added to a lakehouse table."
+    ledger_event_type: lakehouse.column_added
+  - id: lakehouse.column_dropped
+    kind: event
+    description: "A column was dropped from a lakehouse table."
+    ledger_event_type: lakehouse.column_dropped
+
+  # ---- generative brain --------------------------------------------------
+  - id: brain.invoked
+    kind: event
+    description: "The generative brain ran an intent."
+    ledger_event_type: brain.invoked

@@ -1,0 +1,31 @@
+# Ontology O1 — function registry for the DMS pack.
+# Names the existing Foundry-Function-shaped callables (typed-ish Python that takes
+# structured input and returns structured output) so agents and the O6 builder can
+# discover "what business logic exists to call" — no new execution model.
+# module:callable must import (tests/dms/test_ontology_registry.py resolves each).
+
+functions:
+  - id: dms.brain.run
+    description: "Run a generative-brain intent with params; returns a structured result."
+    module: packs.dms.generative.brain
+    callable: run
+
+  - id: dms.tasks.suggest
+    description: "Suggest next warehouse tasks from current state (optional LLM boost)."
+    module: packs.dms.tasks.suggest
+    callable: suggest
+
+  - id: dms.tasks.extract_fields
+    description: "Extract structured fields from raw task text."
+    module: packs.dms.tasks.extract
+    callable: extract_fields
+
+  - id: dms.tasks.check_task
+    description: "Gate-check a task against compliance/template rules."
+    module: packs.dms.tasks.gate
+    callable: check_task
+
+  - id: dms.tasks.evaluate_template
+    description: "Evaluate a task template for gate compliance."
+    module: packs.dms.tasks.gate
+    callable: evaluate_template
