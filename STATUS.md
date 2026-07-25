@@ -1,6 +1,12 @@
 # STATUS.md
-**Last updated:** 2026-07-23 | **Gate:** O7 new-pack generator **PASS** | **Active:** capability landings next gate (L0 DuckLake); O6 stays owner-gated
+**Last updated:** 2026-07-25 | **Gate:** O7 new-pack generator **PASS** | **Active:** capability landings next gate (L0 DuckLake); O6 stays owner-gated
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first.
+
+> **2026-07-25 (CI/branch hygiene):** Latest `main` (`781c81b`) — Test + Secrets Scan + RLS Proof
+> all **success**. Deleted stale remotes `feat/context-engineering` (fully merged) and
+> `netie-engine` (old checkpoint; wave1 content already on `main` via `dms-integrated-engine`
+> merge). CI workflow triggers pruned to `main` only (dropped dead `dms-integrated-engine` /
+> `dms-v2` filters). Sole active branch: `main`.
 
 > **2026-07-23 (O7 + P16 hooks + AirGPT commit):** O7 — `scripts/new_pack.py` scaffolds a full pack
 > (ontology trio → generated DDL + `semantic_layer.yaml` + compliance stub + audit that reuses the
@@ -39,13 +45,13 @@
 > folding `sensitive_columns`; registers 24 ledger event literals + `export_pptx` tool) and
 > `registry.py` compiling `ontology_*` tables into the F1 ops DB. 10 parity/idempotency tests lock
 > it to `semantic_layer.yaml` and the F8 allowlist. Dual-brain decision: Option B via C
-> (`docs/strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md` §2); branches consolidated to
-> `main` + `netie-engine`.
+> (`docs/strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md` §2); branches later collapsed to
+> `main` only (2026-07-25 hygiene).
 >
 > **2026-07-22 (CI green):** Fixed Poetry `postgres` extra (`psycopg[binary]` invalid in
 > `tool.poetry.extras`), added `pytz` for DuckLake, opaque `ghs_` scanner (May 2026 token
 > changelog), and RLS proof as NOSUPERUSER `dms_rls_app` (superuser bypasses FORCE RLS).
-> `Test` + `Secrets Scan` + `RLS Proof` green on `main` / `dms-integrated-engine`.
+> `Test` + `Secrets Scan` + `RLS Proof` green on `main`.
 
 ---
 
@@ -71,7 +77,7 @@
 ```
 pytest -q  (expect ≥330; local RLS skips without DSN)
 python -m scripts.secrets_scan  → 0 findings
-CI: Test + Secrets Scan + RLS Proof → success
+CI: Test + Secrets Scan + RLS Proof → success (main tip green)
 ```
 
 ## Next three moves

@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [main, dms-integrated-engine, dms-v2]
+    branches: [main]
   pull_request:
-    branches: [main, dms-integrated-engine, dms-v2]
+    branches: [main]
 
 concurrency:
   group: test-${{ github.ref }}

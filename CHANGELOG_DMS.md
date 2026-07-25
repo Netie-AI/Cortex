@@ -2,6 +2,14 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CI/branch hygiene — 2026-07-25
+
+- **Branches:** deleted remote `feat/context-engineering` (merged) and `netie-engine`
+  (obsolete checkpoint; content already on `main`).
+- **Workflows:** `test.yml` / `secrets.yml` / `rls.yml` triggers now `main` only
+  (removed dead `dms-integrated-engine` / `dms-v2` branch filters).
+- **CI status:** tip of `main` green (Test + Secrets Scan + RLS Proof).
+
 ## B3 — F7 remainder hardening — 2026-07-22
 
 - **CI:** `.github/workflows/rls.yml`, `.github/workflows/secrets.yml`, secrets step in `test.yml`
