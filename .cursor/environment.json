@@ -1,0 +1,11 @@
+{
+  "snapshot": "POPULATE_FROM_SETTINGS",
+  "install": "curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH=\"$HOME/.local/bin:$PATH\" && cd /workspace/cortex && uv venv .venv && . .venv/bin/activate && uv pip install -e \".[api,dms]\" && uv pip install playwright && python -m playwright install chromium && cd /workspace/openvault/OpenMW && uv sync",
+  "start": "export PATH=\"$HOME/.local/bin:$PATH\" && export OPENVAULT_ROOT=/workspace/openvault && bash /workspace/cortex/scripts/start_demo_stack.sh",
+  "terminals": [
+    {
+      "name": "demo-stack",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; export OPENVAULT_ROOT=/workspace/openvault; bash /workspace/cortex/scripts/start_demo_stack.sh; tail -f /workspace/cortex/demo/logs/cortex.out.log"
+    }
+  ]
+}

@@ -59,6 +59,11 @@ CortexOS/AirGPT/
 CortexOS/Vertex/
 outputs/
 bench/results/
+.venv/
+demo/logs/
+video-assets/out/*.webm
+video-assets/out/concat.txt
+
 
 # Unit test / coverage reports
 htmlcov/
