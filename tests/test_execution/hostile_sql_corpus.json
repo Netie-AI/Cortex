@@ -30,7 +30,8 @@
       "sql": "SELECT o.id FROM memory.main.orders AS o JOIN main.users AS u ON u.id = o.user_id",
       "technique": "qualified_name_mismatch",
       "why_it_might_slip": "Building the lookup key from the rendered table expression yields 'memory.main.orders' and 'main.users', neither of which is a manifest key. Conversely a check that only compares the bare .name may pass the path check while a differently-built key skips predicate injection \u00e2\u20ac\u201d the two code paths disagree on what the table is called.",
-      "expected": "allow_but_predicate_must_apply"
+      "expected": "reject_path",
+      "enforcer_note": "Cortex fails closed on three-part names. memory.main.orders reaches into a catalog the manifest never mentions, and on a connection with a lakehouse already attached that is a way out that never touches ATTACH. Two-part main.users is still allowed and still filtered."
     },
     {
       "name": "cte_reused_in_self_join",
@@ -51,7 +52,8 @@
       "sql": "PIVOT orders ON tenant_id USING sum(amount)",
       "technique": "pivot_statement",
       "why_it_might_slip": "sqlglot parses this as a top-level Pivot node, not a Select \u00e2\u20ac\u201d the table reference sits in a statement slot no Select-oriented walker visits, and the output columns are derived dynamically from the distinct tenant_id values found. If the predicate is not injected, the very column names of the result enumerate every tenant in the pool.",
-      "expected": "allow_but_predicate_must_apply"
+      "expected": "reject_statement",
+      "enforcer_note": "PIVOT is a read, but its table sits in a statement slot the Select-oriented rewriter does not reach, and its output columns are derived from the very column being filtered. Refused by statement class rather than half-enforced. Supporting PIVOT means proving injection through its own AST shape first."
     },
     {
       "name": "except_set_op_difference_probe",
@@ -616,9 +618,10 @@
     {
       "name": "glob_read_bypasses_named_table_predicate",
       "technique": "predicate_strip_via_file_read",
-      "expected": "reject_predicate_bypass",
+      "expected": "minting_invariant",
       "why_it_might_slip": "Every path is literally inside allowed_paths, so the path check passes cleanly. The kill is that sqlglot reports .name == '' for a read_parquet Table node, so an injector iterating table names sees no 'orders' reference at all, injects nothing, and hands back the entire tenant_a pool with the tenant_id predicate silently dropped. Path-legal, predicate-free.",
-      "sql": "WITH direct AS (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')\n), shaped AS (\n    SELECT tenant_id, customer_id, amount FROM direct\n)\nSELECT tenant_id, sum(amount) AS total FROM shaped GROUP BY tenant_id"
+      "sql": "WITH direct AS (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')\n), shaped AS (\n    SELECT tenant_id, customer_id, amount FROM direct\n)\nSELECT tenant_id, sum(amount) AS total FROM shaped GROUP BY tenant_id",
+      "enforcer_note": "NOT enforceable at Cortex, and recorded here so that is a decision rather than an oversight. Every path is inside allowed_paths and no governed name is rebound, so nothing in the statement is out of bounds. The bypass exists because the manifest granted both a raw path and a row predicate over the same underlying data. Only the minting side knows which files back which table, so DMS (T2) must never put a path in allowed_paths whose rows still need predicate filtering: grant the pre-filtered path, or grant the table with its predicate, never both for the same bytes."
     },
     {
       "name": "prepare_execute_indirection",
@@ -641,5 +644,13 @@
       "why_it_might_slip": "The outer query references 'orders', so a name-based injector believes the predicate landed. But 'orders' here is a derived-table alias over an in-manifest glob read, never the base table. An injector that dedupes by name will mark 'orders' handled and skip it, and one that rewrites the alias only filters an already-materialized unfiltered scan.",
       "sql": "SELECT orders.tenant_id, count(*) AS n\nFROM (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')\n) AS orders\nGROUP BY orders.tenant_id"
     }
-  ]
+  ],
+  "_expected_values": {
+    "reject_path": "refused: reaches a file, table or catalog outside the manifest",
+    "reject_attach": "refused: mounts a database",
+    "reject_predicate_bypass": "refused: would serve unfiltered rows under a governed name",
+    "reject_statement": "refused by statement class: not a read this manifest can grant",
+    "minting_invariant": "NOT refused by Cortex; the manifest itself was mis-minted. See enforcer_note.",
+    "allow_but_predicate_must_apply": "allowed, and every physical reference to a predicated table must carry its predicate"
+  }
 }

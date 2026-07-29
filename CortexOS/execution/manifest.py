@@ -28,14 +28,20 @@ from __future__ import annotations
 import base64
 import json
 import os
+import posixpath
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import sqlglot
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from sqlglot import exp
+from sqlglot.errors import SqlglotError
+from sqlglot.optimizer.scope import build_scope
 
 from CortexOS.paths import data_path
 
@@ -51,9 +57,13 @@ __all__ = [
     "ManifestSignatureInvalid",
     "ManifestExpired",
     "ManifestNotYetValid",
+    "PathNotAllowed",
+    "StatementNotAllowed",
+    "SqlNotAnalyzable",
     "JwksCache",
     "ManifestVerifier",
     "VerifiedManifest",
+    "enforce_manifest",
 ]
 
 
@@ -98,6 +108,29 @@ class ManifestNotYetValid(ManifestError):
     """``issued_at`` is in the future by more than the allowed clock skew."""
 
     code = "manifest_not_yet_valid"
+
+
+class PathNotAllowed(ManifestError):
+    """The SQL reaches a file, database or URI outside ``allowed_paths``."""
+
+    code = "path_not_allowed"
+
+
+class StatementNotAllowed(ManifestError):
+    """A statement class a read manifest never grants — writes, ATTACH, extensions."""
+
+    code = "statement_not_allowed"
+
+
+class SqlNotAnalyzable(ManifestError):
+    """The enforcer could not fully analyse the SQL, so it refuses it.
+
+    Not a lesser failure than the others. A query this module cannot read is a
+    query it cannot prove safe, and approving it would make every check above
+    decorative.
+    """
+
+    code = "sql_not_analyzable"
 
 
 # ── time helpers ─────────────────────────────────────────────────────────────
@@ -397,3 +430,418 @@ class ManifestVerifier:
             raise ManifestSignatureInvalid(f"signature does not verify under key {kid!r}") from exc
 
         return VerifiedManifest(manifest=manifest, issuer_kid=kid, verified_at=when)
+
+
+# ── enforcement ──────────────────────────────────────────────────────────────
+# Everything below answers one question: does this SQL stay inside what the
+# manifest grants? Answered on the parse tree, never on the text. String
+# matching loses to the first nested CTE; an AST walk does not.
+
+
+#: Cap on SQL length before parsing. sqlglot raises RecursionError, not a
+#: SqlglotError, on deeply nested input — the stack blows around 50 nested
+#: parens — so size is refused before the parser is handed the string.
+MAX_SQL_CHARS = 100_000
+
+#: DuckDB functions that read a file. The three shapes are not interchangeable:
+#: ReadParquet keeps paths in ``expressions``, ReadCSV keeps the path in ``this``
+#: with options in ``expressions``, and everything else falls through to
+#: ``Anonymous``. Collecting string literals from the whole call covers all of
+#: them without depending on argument position.
+_FILE_FUNCTIONS = frozenset(
+    {
+        "read_parquet",
+        "parquet_scan",
+        "read_csv",
+        "read_csv_auto",
+        "read_json",
+        "read_json_auto",
+        "read_json_objects",
+        "read_ndjson",
+        "read_ndjson_auto",
+        "read_text",
+        "read_blob",
+        "read_xlsx",
+        "glob",
+        "sniff_csv",
+        "st_read",
+        "iceberg_scan",
+        "delta_scan",
+        "postgres_scan",
+        "postgres_scan_pushdown",
+        "mysql_scan",
+        "sqlite_scan",
+    }
+)
+
+#: Table functions that take SQL or a relation name as a *string* and resolve it
+#: at run time. They are refused outright rather than analysed: the AST holds a
+#: string literal where the relation should be, so every table check below sees
+#: an empty relation set and waves the statement through while DuckDB goes on to
+#: execute whatever the string said.
+_DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table"})
+
+#: Extensions that make a quoted identifier a file rather than a table name.
+_DATA_SUFFIXES = (
+    ".parquet",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".ndjson",
+    ".jsonl",
+    ".arrow",
+    ".feather",
+    ".db",
+    ".duckdb",
+    ".sqlite",
+    ".sqlite3",
+    ".xlsx",
+    ".txt",
+    ".gz",
+    ".zst",
+)
+
+#: Statement classes a *read* manifest can grant. Anything else is refused by
+#: class rather than analysed: a manifest lists paths to read, so a statement
+#: that writes, attaches, loads an extension or changes session state is out of
+#: scope by construction, not by accident.
+_ALLOWED_ROOTS = (exp.Select, exp.SetOperation, exp.Subquery)
+
+
+def _looks_like_a_path(text: str) -> bool:
+    """Whether a quoted identifier has to be treated as a file reference.
+
+    sqlglot 30.11 records that an identifier was quoted but not *which* quote
+    was used, so ``FROM '/data/x.parquet'`` and ``FROM "Orders"`` arrive as the
+    same node shape. DuckDB resolves the first as a file. Anything that could be
+    one is therefore screened as one.
+    """
+    lowered = text.lower()
+    return (
+        "/" in text
+        or "\\" in text
+        or "://" in text
+        or "*" in text
+        or "?" in text
+        or lowered.endswith(_DATA_SUFFIXES)
+    )
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Compile an allowed-path glob where ``*`` does not cross a separator.
+
+    ``fnmatch`` is wrong here: its ``*`` matches ``/`` too, so a manifest
+    granting ``/pool/a/*.parquet`` would also grant every nested directory
+    beneath it. ``**`` still spans separators, because a manifest that means
+    "everything below here" should be able to say so explicitly.
+    """
+    out: list[str] = ["^"]
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "*":
+            if pattern.startswith("**", i):
+                out.append(".*")
+                i += 2
+                continue
+            out.append("[^/]*")
+        elif char == "?":
+            out.append("[^/]")
+        else:
+            out.append(re.escape(char))
+        i += 1
+    out.append("$")
+    return re.compile("".join(out))
+
+
+def _normalize_path(raw: str) -> str | None:
+    """Resolve a path to the single form the allowlist is compared against.
+
+    Returns ``None`` for anything carrying a scheme (``s3://``, ``http://``,
+    ``md:``). Those are refused before normalisation rather than after: running
+    ``normpath`` over ``s3://bucket/../x`` produces something that looks local
+    and could then match a local glob.
+    """
+    text = raw.strip()
+    if not text:
+        return None
+    if "://" in text or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:(?![\\/])", text):
+        return None
+    unified = text.replace("\\", "/")
+    if unified.startswith("//"):  # UNC share — not a local path
+        return None
+    normalized = posixpath.normpath(unified)
+    # normpath cannot resolve a leading '..'; such a path escapes any root.
+    if normalized.startswith("../") or normalized == "..":
+        return None
+    return normalized
+
+
+def _path_allowed(raw: str, allowed: tuple[str, ...]) -> bool:
+    normalized = _normalize_path(raw)
+    if normalized is None:
+        return False
+    for pattern in allowed:
+        rooted = _normalize_path(pattern)
+        if rooted is None:
+            continue
+        if _glob_to_regex(rooted).match(normalized):
+            return True
+    return False
+
+
+@dataclass(frozen=True, slots=True)
+class _PathRef:
+    """One place the SQL names something on disk, and how it got there."""
+
+    origin: str
+    raw: str
+
+
+def _function_label(node: exp.Expression) -> str:
+    if isinstance(node, exp.Anonymous):
+        return str(node.this).lower()
+    return "read_parquet" if isinstance(node, exp.ReadParquet) else "read_csv"
+
+
+def _collect_path_refs(root: exp.Expression) -> list[_PathRef]:
+    """Every string in the tree that names something outside the database.
+
+    Three ways in, so three sources: a file-reading function anywhere in the
+    query, a bare quoted path in ``FROM``, and an ``ATTACH`` target.
+    """
+    refs: list[_PathRef] = []
+
+    for node in root.find_all(exp.ReadParquet, exp.ReadCSV, exp.Anonymous):
+        if isinstance(node, exp.Anonymous) and str(node.this).lower() not in _FILE_FUNCTIONS:
+            continue
+        label = _function_label(node)
+        for literal in node.find_all(exp.Literal):
+            if literal.is_string:
+                refs.append(_PathRef(origin=f"{label}()", raw=str(literal.this)))
+
+    for table in root.find_all(exp.Table):
+        identifier = table.this
+        if isinstance(identifier, exp.Identifier) and identifier.quoted:
+            text = str(identifier.this)
+            if _looks_like_a_path(text):
+                refs.append(_PathRef(origin="FROM", raw=text))
+
+    return refs
+
+
+def _physical_tables(root: exp.Expression) -> list[exp.Table]:
+    """Table nodes that are real relations — not CTE references, not functions.
+
+    A CTE reference parses as ``exp.Table`` like anything else. Injecting a row
+    predicate into one is wrong twice over: it re-filters an already-filtered
+    result, and if the CTE name shadows a real table it wraps the wrong
+    relation entirely. The scope resolver is the only thing that tells them
+    apart.
+    """
+    scope = build_scope(root)
+    if scope is None:
+        return [t for t in root.find_all(exp.Table) if isinstance(t.this, exp.Identifier)]
+    tables: list[exp.Table] = []
+    for inner in scope.traverse():
+        for table in inner.tables:
+            if not isinstance(table.this, exp.Identifier):
+                continue  # a table function; the path checks cover it
+            source = inner.sources.get(table.name)
+            if source is not None and not isinstance(source, exp.Table):
+                continue  # resolves to a CTE or a derived table
+            tables.append(table)
+    return tables
+
+
+def _wrap_with_predicate(table: exp.Table, predicate: str) -> exp.Subquery:
+    """Replace a table with ``(SELECT * FROM table WHERE predicate) AS alias``.
+
+    The alias has to be *moved* rather than rebuilt: it lives in
+    ``Table.args['alias']`` on the node being discarded, so a plain
+    ``.replace()`` drops it and every ``o.column`` in the query stops binding.
+    Where the original had no alias, one is synthesised from the bare name so
+    qualified ``orders.column`` references keep resolving.
+    """
+    inner = table.copy()
+    inner.set("alias", None)
+    existing = table.args.get("alias")
+    alias = existing or exp.TableAlias(
+        this=exp.to_identifier(table.name, quoted=table.this.quoted)
+    )
+    return exp.Subquery(
+        this=exp.select("*").from_(inner).where(predicate, dialect="duckdb"),
+        alias=alias,
+    )
+
+
+def _parse_single_statement(sql: str) -> exp.Expression:
+    if len(sql) > MAX_SQL_CHARS:
+        raise SqlNotAnalyzable(f"SQL exceeds {MAX_SQL_CHARS} characters; refusing to parse")
+    try:
+        statements = sqlglot.parse(sql, read="duckdb")
+    except SqlglotError as exc:
+        # TokenError is a sibling of ParseError, not a subclass — an
+        # unterminated string raises the former — so catch the base class.
+        raise SqlNotAnalyzable(f"SQL did not parse: {exc}") from exc
+    except RecursionError as exc:
+        raise SqlNotAnalyzable("SQL nests too deeply to analyse") from exc
+
+    real = [s for s in statements if s is not None]
+    if not real:
+        raise SqlNotAnalyzable("no statement to analyse")
+    if len(real) > 1:
+        raise StatementNotAllowed(
+            f"{len(real)} statements submitted; a manifest authorises one query, not a script"
+        )
+    root = real[0]
+    if isinstance(root, exp.Block):
+        # 30.11 wraps stacked statements in a Block rather than raising, and
+        # find_all would then only ever see the first one.
+        raise StatementNotAllowed("stacked statements are not authorised")
+    return root
+
+
+def _refuse_unanalyzable(root: exp.Expression) -> None:
+    if root.find(exp.Command) is not None:
+        # exp.Command means the parser gave up and stuffed the remainder into
+        # an opaque string. PREPARE, EXECUTE, LOAD and CALL all land here, and
+        # their bodies are invisible to every check below.
+        raise SqlNotAnalyzable(
+            "statement contains syntax sqlglot cannot analyse; refusing rather than guessing"
+        )
+
+
+def _refuse_dynamic_sql(root: exp.Expression) -> None:
+    """Refuse ``query('...')`` / ``query_table('...')``.
+
+    These build a relation from a string at run time. There is no ``exp.Table``
+    to check and no path argument to resolve, so an enforcer that only walks
+    tables reports a clean statement and DuckDB then executes text this module
+    never read.
+    """
+    for node in root.find_all(exp.Anonymous):
+        name = str(node.this).lower()
+        if name in _DYNAMIC_SQL_FUNCTIONS:
+            raise SqlNotAnalyzable(
+                f"{name}() builds a relation from a string at run time; "
+                "there is nothing here to check against the manifest"
+            )
+
+
+def _refuse_shadowing(root: exp.Expression, predicated: set[str]) -> None:
+    """Refuse binding a CTE or derived table to a predicated table's name.
+
+    ``WITH orders AS (SELECT * FROM read_parquet(...)) SELECT * FROM orders``
+    reads a path the manifest allows, then serves it under the name of a table
+    the manifest filters. Predicate injection sees a CTE reference and correctly
+    leaves it alone, so the rows come back unfiltered under a governed name. The
+    name is the grant; rebinding it is not allowed.
+    """
+    for cte in root.find_all(exp.CTE):
+        if cte.alias and cte.alias.lower() in predicated:
+            raise PathNotAllowed(
+                f"CTE {cte.alias!r} rebinds the name of a table this manifest filters"
+            )
+    for subquery in root.find_all(exp.Subquery):
+        alias = subquery.alias
+        if alias and alias.lower() in predicated:
+            raise PathNotAllowed(
+                f"derived table {alias!r} rebinds the name of a table this manifest filters"
+            )
+
+
+def _refuse_ungranted_tables(root: exp.Expression, granted: set[str]) -> None:
+    """Deny by default: a relation the manifest never names is not readable.
+
+    ``allowed_paths`` bounds what may be read out of files. Nothing bounds what
+    may be read out of the database itself unless the readable tables are
+    enumerated, and the only table-keyed field on a manifest is
+    ``row_predicates`` — so its keys are the grant, and a table needing no row
+    filter is granted with a predicate of ``TRUE``.
+
+    Without this, ``SELECT id FROM orders UNION ALL SELECT id FROM secrets``
+    passes every path check, because ``secrets`` is not a path.
+    """
+    for table in _physical_tables(root):
+        name = table.name.lower()
+        if name and name not in granted:
+            raise PathNotAllowed(
+                f"table {table.name!r} is not named by this manifest"
+            )
+
+
+def _refuse_cross_catalog(root: exp.Expression) -> None:
+    """Refuse three-part names, which reach across attached catalogs.
+
+    The manifest grants paths inside one pool. ``cat.db.tbl`` names a relation
+    in a catalog the manifest never mentioned, and on a connection that already
+    has a lakehouse attached that is a way out without touching ATTACH.
+    """
+    for table in root.find_all(exp.Table):
+        if isinstance(table.this, exp.Identifier) and table.catalog:
+            raise PathNotAllowed(
+                f"cross-catalog reference {table.catalog}.{table.db}.{table.name} "
+                "is outside this manifest"
+            )
+
+
+def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
+    """Return SQL that cannot leave the manifest, or raise a :class:`ManifestError`.
+
+    Takes a :class:`VerifiedManifest` rather than a ``Manifest`` so no call site
+    can enforce against something it never verified.
+
+    Order matters. Analysability is settled first, because every later check
+    reads the tree; then statement class; then paths; then predicates. A
+    rejection at any step is final — there is no partial enforcement.
+    """
+    root = _parse_single_statement(sql)
+    _refuse_unanalyzable(root)
+    _refuse_dynamic_sql(root)
+
+    for attach in root.find_all(exp.Attach, exp.Detach):
+        target = attach.this
+        if isinstance(target, exp.Alias):
+            target = target.this
+        shown = target.this if isinstance(target, exp.Literal) else target.sql(dialect="duckdb")
+        raise PathNotAllowed(
+            f"ATTACH target {shown!r} is outside this manifest; a manifest grants "
+            "paths to read, not databases to mount"
+        )
+
+    if not isinstance(root, _ALLOWED_ROOTS):
+        raise StatementNotAllowed(
+            f"{type(root).__name__.upper()} is not a read; this manifest authorises queries only"
+        )
+
+    allowed = verified.allowed_paths
+    for ref in _collect_path_refs(root):
+        if not _path_allowed(ref.raw, allowed):
+            raise PathNotAllowed(f"{ref.origin} reads {ref.raw!r}, which is outside allowed_paths")
+
+    _refuse_cross_catalog(root)
+
+    predicates = {name.lower(): body for name, body in verified.row_predicates.items()}
+    granted = set(predicates)
+    _refuse_ungranted_tables(root, granted)
+    _refuse_shadowing(root, granted)
+    if not predicates:
+        return root.sql(dialect="duckdb")
+
+    # Materialise before mutating. Replacing a Table never detaches another
+    # Table, so a lazy walk would also be sound here — but the list makes that
+    # a local guarantee rather than a fact about sqlglot's traversal order.
+    for table in list(_physical_tables(root)):
+        predicate = predicates.get(table.name.lower())
+        if predicate is None:
+            continue
+        try:
+            wrapped = _wrap_with_predicate(table, predicate)
+        except SqlglotError as exc:
+            raise SqlNotAnalyzable(
+                f"row predicate for {table.name!r} did not parse: {exc}"
+            ) from exc
+        table.replace(wrapped)
+
+    return root.sql(dialect="duckdb")
