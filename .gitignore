@@ -51,6 +51,17 @@ data/dms_demo.duckdb
 data/dms_ops.db
 data/dms_photos/
 data/codebase_ontology.db
+# Engine runtime state — written by a running appliance, never source.
+# Every one of these is regenerated on boot or on first run; committing them
+# makes the tree diverge per-machine and (for telemetry/keys) leaks material.
+data/engine/
+data/bench/
+data/workflows/
+data/apps/
+data/lakehouse/
+data/ingest_drop/
+data/samples/*.xlsx
+CortexOS/data/
 
 # AirGPT/Vertex working mirrors + runtime artifacts live OUTSIDE this repo
 # (AirGPT app root = D:/AirGPT, its own git). The in-tree mirror carries a live
