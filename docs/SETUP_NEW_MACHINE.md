@@ -74,6 +74,15 @@ Show script: [DEMO.md](DEMO.md)
 
 ## Troubleshooting
 
+**Python venv broken (`myenv` dead path, `.venv_gpu` has no interpreter)?**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap_venv.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_orchestration_tests.ps1
+```
+
+Bootstrap uses `uv` + Python 3.12 and installs `litellm==1.57.1` as a **binary wheel only** so Windows does not need MSVC `link.exe` or Rust.
+
 ```powershell
 .\scripts\diagnose_demo.ps1
 Get-Content demo\logs\api.err.log -Tail 30

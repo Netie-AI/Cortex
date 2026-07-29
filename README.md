@@ -2,6 +2,10 @@
 
 Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
+**Product roles:** Cortex = central brain (MoE / architecture presets / orchestrate). Keys + leave-machine gate + FreeRoute = **OpenVault**. See [`PRODUCT_ROLES.md`](PRODUCT_ROLES.md).
+
+**Whitepaper (architecture · apps · roadmap · branches):** [`docs/strategy/CORTEX_WHITEPAPER.md`](docs/strategy/CORTEX_WHITEPAPER.md)
+
 Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
 
 ## Handoff (read first)
@@ -36,6 +40,21 @@ python scripts/handoff.py --claude   # supervisor
 **Show script:** [docs/DEMO.md](docs/DEMO.md)
 
 ## Tests
+
+**Broken `myenv` / `.venv_gpu`?** Use the bootstrap venv (Windows, no MSVC/Rust build):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap_venv.ps1
+.\.venv\Scripts\python.exe -m pytest tests\test_openvault_client.py tests\test_openvault_gate.py tests\test_workflow_runner.py -q
+```
+
+Or one shot:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_orchestration_tests.ps1
+```
+
+Full suite (needs all optional deps):
 
 ```powershell
 python -m pytest tests/ -q

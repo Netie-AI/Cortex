@@ -13,6 +13,9 @@
 
 | Doc | Purpose |
 |-----|---------|
+| [strategy/CORTEX_WHITEPAPER.md](strategy/CORTEX_WHITEPAPER.md) | **Canonical** architecture thesis, apps, roadmap, branch map (P18) |
+| [strategy/CORTEX_FINAL_GOAL.md](strategy/CORTEX_FINAL_GOAL.md) | North star: best engine |
+| [strategy/DMS_SPACES_PRODUCT_2026-07-29.md](strategy/DMS_SPACES_PRODUCT_2026-07-29.md) | DMS Spaces / ChatGPT-for-Excel product lock |
 | [strategy/NETIE_CORTEX_MASTER_PLAN.md](strategy/NETIE_CORTEX_MASTER_PLAN.md) | Horizons, revenue path, scope kill-list |
 | [strategy/RUMA_PHASE3_5.md](strategy/RUMA_PHASE3_5.md) | RUMA vertical (parked until DMS pays) |
 

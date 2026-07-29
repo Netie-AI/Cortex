@@ -112,12 +112,18 @@ POST /dms/query                     → sqlglot → DuckDB
 
 ---
 
-## 6. Branch truth (2026-07-21)
-| Branch | Role |
-|---|---|
-| `dms-v2` | Canonical DMS F1–F6 + F7 RBAC + portable demo |
-| `netie-engine-up` | Engine/memory/lakehouse source line (unrelated history) |
-| `dms-integrated-engine` | This line — dms-v2 + engine/lakehouse port + Phase 0 plan |
+## 6. Branch truth (2026-07-29)
+
+**Canonical write-up:** [`docs/strategy/CORTEX_WHITEPAPER.md`](docs/strategy/CORTEX_WHITEPAPER.md) §7.
+
+| Branch | Tip (measured) | Role |
+|---|---|---|
+| **`main`** | `cd66578` | Integration trunk. Governance + landed engine + DMS pack. Ahead of `origin/main` by skill-embedding fix. **Use this.** |
+| `fix/deterministic-skill-embedding` | `cd66578` | Identical to `main` — already merged; delete after push. |
+| `feat/context-engineering` | `be945ac` | Fully merged into `main` (context assembler + `/api/context`). Historical — delete. |
+| `netie-engine` | `028fbfb` | Diverged Brain-B R&D feeder (not fully merged). Capabilities cherry-picked via path C. Do not rebase. Archive/read-only. |
+
+Retired names (`dms-v2`, `netie-engine-up`, `dms-integrated-engine`) are historical merge parents — not active trunks.
 
 Invariant: F6 skills feed **suggest ranking only**; F5 YAML rules govern execution.
 

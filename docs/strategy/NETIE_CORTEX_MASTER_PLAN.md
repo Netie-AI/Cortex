@@ -34,6 +34,8 @@
 - Consented task mining → digital workers (augmentation framing, PDPA-compliant)
 - Enterprise + bank tier with crypto-agility
 - Destination: category leader — not the input to daily decisions
+- **Near-term bridge (G2 / P21):** **proactive-first** ethical enterprise goal-seeking (act without waiting to be asked) + open-set reactive interrupt + JEPA action-value + compressible action telemetry + signed update port —
+  `docs/strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md` (folds into H3 dual-brain without a third orchestrator)
 
 ---
 

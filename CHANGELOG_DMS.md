@@ -2,6 +2,114 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
+
+**New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:
+85 ordinary paraphrases of the 36 golden intents, scored against the same canonical
+SQL. `bench.accuracy` cannot detect brittleness — the L1 router is hand-written
+regex, so it passes its own phrasings by construction. Baseline was **23.5%**
+robustness; now **64.7%**, with **0 confidently wrong** answers (100% answered
+precision) and golden still 36/36.
+
+**Routing fixes (a bad classifier failing in both directions):**
+- `destructive_intent()` replaces `\b(drop|delete|…|update|create)\b` over raw
+  English. It refused `"update me on the delayed shipments"` and `"cost by
+  drop-off point"`, and missed `"wipe all supplier records"`, `"remove the
+  inventory table"`, `"erase everything in inventory"`. Now SQL-statement shapes
+  + (mutation verb → data object), benign idioms stripped first, copula-preceded
+  verbs ignored; refusals carry an auditable cause. Enforcement is unchanged —
+  `sql_guardrail`'s sqlglot AST check was always the real gate.
+- `RAG_KEYWORDS` fired on the bare openers `what does` / `explain`, so analytics
+  questions were answered from the supplier-contract corpus. Now requires a
+  document noun.
+- Dead branch: `\b(utilis|utiliz|how full|usage)\b` could not match the word
+  "utilisation" (trailing `\b` fails before "ation"). Hidden because the golden
+  question hits L0 certified. Now `utilis\w*`.
+- `packs/dms/semantic/vocabulary.py` (new) — business phrasing → router
+  vocabulary in front of L1, the idea already declared as `synonyms:` on every
+  metric and read by nothing. **Slots stay on the original question**, so a
+  rewrite of the words can never move a number, a threshold or a direction;
+  asserted by test.
+
+**Perf — 85% of query latency was overhead, not work.** Single-thread
+**1090 ms → 80 ms/query (13.6×)**; 8-thread **3.4 → 38.5 q/s (11.3×)**, p50
+**1694 → 95 ms**, p95 **6048 → 727 ms**, errors 2 → 0. `pytest tests/dms`
+339 s → 156 s.
+- fresh DuckDB connection per question (~500 ms) → one cached read-only instance
+  per process, cursor per caller. A read-write open **evicts** the cached reader
+  first — DuckDB refuses two connections to one file with different
+  configurations, and without eviction the cached reader locks the writer out of
+  its own process (caught by the suite, fixed).
+- `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX` script on **every** query
+  (~440 ms, maintaining an index that is never read) → once per process
+- `Path.resolve()` / `mkdir()` per query → once
+- `table_row_counts` / `preview_table` are pure reads and no longer take the
+  write lock
+
+**Root cause found for the documented flaky golden benchmark.** `STATUS.md`
+recorded the cause as unestablished and suspected `packs/data/dms_ops.db`
+(SQLite). It is `data/dms_demo.duckdb`: DuckDB takes an **exclusive** file lock
+for read-write connections, so a live API process locks the benchmark out —
+`IO Error: … used by another process. File is already open in … (PID 27532)`.
+`get_connection(..., read_only=True)` + `DMS_READ_ONLY_QUERIES` fixes it (3
+consecutive clean runs with the server up). The same flag is the prerequisite for
+running more than one reader process — writer caveat documented in the audit.
+
+**Docs:** `docs/dms/ROUTER_STATES.md` (complete two-router state map, live-probed,
+including the finding that `query_skill` has 42 stored skills and 0 retrievals),
+`docs/dms/FOUNDATION_AUDIT_2026-07-27.md` (layer-by-layer vs Databricks/Snowflake,
+measured; the lakehouse is `built` but holds zero tables and the answer engine
+does not read from it).
+
+**Tests:** `test_destructive_intent.py` (30 cases), `test_vocabulary_normalization.py`
+(invariants: comparisons, directions, numbers and entities must survive
+normalization). Suite **668 passed, 6 skipped, 0 failures** with
+`DMS_READ_ONLY_QUERIES` both ON and OFF.
+
+## Seek learning UI + G2.3 Claude handoff — 2026-07-27
+
+- Seek UI: `value_why`, learned chip, Accept/Dismiss → `/outcome`, history, Not audited
+- Proxies: `/api/cortex/goals/{id}/outcome`, `/values`
+- G2.2 acknowledged SHIPPED; next Claude locked to G2.3 OSR
+  `docs/dms/packets/CURSOR_TO_CLAUDE_G2_3_OSR_2026-07-27.md`
+- `NEXT_LANES.md` refreshed
+
+## Seek UI + G2.2 Claude handoff — 2026-07-26
+
+- AirGPT Platform **Seek** page: bind `EnterpriseGoal` → Seek now → assumptions + proposals
+- Proxies: `/api/cortex/goals*`, `/api/engine/seek` (+ cortex_client helpers)
+- G2.0/G2.1 acknowledged SHIPPED (Claude); next packet
+  `docs/dms/packets/CURSOR_TO_CLAUDE_G2_2_ACTION_VALUE_2026-07-26.md`
+- Standing continue file: `docs/dms/packets/NEXT_LANES.md`
+
+## Cursor lane — Routines/Apps UI + G2 Claude handoff — 2026-07-26
+
+- AirGPT: Routines page → Cortex draft/preview/Create (`/api/cortex/routines*`)
+- AirGPT: Apps hub Cortex packages → `about` / `explained_reasons` / Dockerize (`/api/cortex/apps*`)
+- `cortex_client` helpers + clipdrop proxies (namespaced away from AirGPT `/api/apps` ports)
+- Removed redundant `monkeypatch.chdir` from DMS route fixtures
+- Claude build packet: `docs/dms/packets/CURSOR_TO_CLAUDE_G2_SEEK_2026-07-26.md` (G2.0/G2.1)
+
+## G2 plan — enterprise gen-cFSM loop — 2026-07-26
+
+- **Plan only (no runtime):** `docs/strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md`
+- **Key idea:** proactive-first (actively seek ethical enterprise goal; reactive ingress secondary)
+- Open-set interrupt path + JEPA action-value + DAG gen + ActionEvent compress/uplink +
+  pattern-armed assist + signed update port / minimal OAuth
+- Wired: `CORTEX_FINAL_GOAL.md`, PARKING_LOT **P21**, `STATUS.md`, `P0_INDEX.md` G2,
+  G1 continuation, master-plan H3 bridge
+- **Next code when owner asks:** G2.0 → G2.1 (seeker + silence litmus)
+
+## Oracle-scale E0 — engine unlock + memory/A2A/MCP — 2026-07-24
+
+- **A1 Autostart:** `scripts/install_engine_autostart.ps1`, hardened `start_cortex_engine.ps1` (pid/url hint, DryRun, port 8010); AirGPT `cortex_client.ensure_engine` / `spawn_engine` with `CORTEX_AUTOSPAWN`
+- **A2 Run plan:** `CortexOS/execution/run_plan.py` + `POST /api/engine/run` — dispatches dag/rag/memory/ontology; marketplace → `adapter_unavailable`
+- **A3 RAG DAG:** `RAG_RETRIEVE` / `RAG_RERANK` / `RAG_ANSWER` nodes + Modular-RAG templates (basic/high/max) in `CortexOS/rag/{lexical,templates}.py`
+- **A4 Memory:** `factory.get_store` (RawKnn), `MemoryContextProvider`, `semantic_cache`
+- **A5 A2A:** in-process runtime + `POST /a2a/messages`; DAG `A2A_CALL` executor
+- **A6 MCP (read-only):** `GET /mcp/tools`, `POST /mcp/call` — answer_engine / lakehouse / agent.status
+- **AirGPT B1–B4:** optional rerank (`AIRGPT_RERANK=1`), adaptive depth from benchmark, sqlite-vec install helper, citation chips + files-surfed + stream-guarded confirms
+
 ## B3 — F7 remainder hardening — 2026-07-22
 
 - **CI:** `.github/workflows/rls.yml`, `.github/workflows/secrets.yml`, secrets step in `test.yml`

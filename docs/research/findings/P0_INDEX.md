@@ -1,6 +1,6 @@
 # Research findings index (P0_INDEX)
 
-**Updated:** 2026-07-22 · Orchestrator-maintained  
+**Updated:** 2026-07-26 · Orchestrator-maintained  
 **Rule:** research agents write markdown only under this folder. No Python/JSX.
 
 ## Active packet findings (A1–A5) — LANDED
@@ -22,7 +22,16 @@
 | [CLAUDE_CODE_SECURITY_PACKET.md](../../dms/packets/CLAUDE_CODE_SECURITY_PACKET.md) | High-end security for Claude Code |
 | [P0_NER_TOKENVAULT.md](../../security/P0_NER_TOKENVAULT.md) | Security-track ontology |
 
+## Generative orchestration (G1) — MERGED · runtime P0/P1 shipped
+
+| ID | File | Status | Verdict (one line) | Consumed by |
+|---|---|---|---|---|
+| G1 | [G1_GEN_CFSM_JEPA.md](G1_GEN_CFSM_JEPA.md) | **MERGED** + **P0/P1 code** | Finite-horizon gen-DAG + JEPA collapse + vault habits; static DAG still wins known SOPs | `execution/gen_cfsm.py` |
+| G1b | [G1_STRESS_AGENT_BAKEOFF.md](G1_STRESS_AGENT_BAKEOFF.md) | **LANDED** | EST. composites DAG 4.1 > gen-cFSM 4.0 ≫ ReAct/OpenClaw; S1–S7 + claim gates | B6-style harness later |
+| G2 | [ENTERPRISE_GEN_CFSM_LOOP_PLAN.md](../../strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md) | **PLAN** | **Proactive-first** goal-seeking + ethical enterprise bind; reactive open-set secondary; JEPA + telemetry + update port | PARKING_LOT **P21** |
+
 ## Who runs next
 
-1. **Claude Code** → `CLAUDE_CODE_SECURITY_PACKET.md` (C-SEC-1…8), informed by A5  
-2. **Cursor** → B3 F7 remainder (after Claude RLS/SOPS designs) → B4 F8 → B1 DBOS (A1) → …
+1. **Claude — G2.3 OSR:** `docs/dms/packets/CURSOR_TO_CLAUDE_G2_3_OSR_2026-07-27.md`  
+2. **Cursor — optional CDP / app deep-link** — `docs/dms/packets/NEXT_LANES.md`  
+3. **Then** G2.4 telemetry (held until G2.3 hands back)
