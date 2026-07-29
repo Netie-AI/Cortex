@@ -19,8 +19,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _contract_schemas() -> dict[str, Any]:
-    """Build JSON Schema components from cortex_contract pydantic models."""
+def _contract_schemas() -> tuple[str, dict[str, Any]]:
+    """Build JSON Schema components from cortex_contract pydantic models.
+
+    Returns the contract version alongside the schemas so callers stamp the
+    spec with the contract line, never the engine line.
+    """
     from packages.cortex_contract.answer import AskRequest, Answer, Provenance
     from packages.cortex_contract.execution import (
         Manifest,

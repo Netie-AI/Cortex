@@ -157,6 +157,12 @@ ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = false
 pretty = true
+# The contract package is distributed as top-level `cortex_contract`. Without
+# this, mypy resolves packages/cortex_contract/*.py as both `cortex_contract.*`
+# (the __init__.py walk-up) and `packages.cortex_contract.*` (as a namespace
+# package from the root) and refuses to run at all.
+mypy_path = "packages"
+namespace_packages = false
 # Packaging / release infra only — engine modules remain gradually typed.
 files = [
     "CortexOS/packaging.py",
