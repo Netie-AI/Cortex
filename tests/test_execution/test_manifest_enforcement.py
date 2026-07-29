@@ -291,3 +291,88 @@ def test_cte_still_shadows_legitimately(verified: VerifiedManifest) -> None:
         "WITH recent AS (SELECT * FROM orders WHERE amount > 1) SELECT * FROM recent", verified
     )
     assert "tenant_id" in out
+
+
+# ── false positives the hardening introduced, and their fixes ────────────────
+# Deny-by-default is only correct if it denies the right things. These were
+# found by the same adversarial review, attacking usability rather than
+# security: a control that refuses ordinary analytics gets switched off.
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM read_csv('/data/pool/tenant_a/e.csv', delim=';', header=true)",
+        "SELECT * FROM read_csv('/data/pool/tenant_a/e.csv', columns={'id':'INTEGER'})",
+        "SELECT * FROM read_csv('/data/pool/tenant_a/e.csv', compression='gzip')",
+        "SELECT * FROM read_json('/data/pool/tenant_a/e.json', format='newline_delimited')",
+    ],
+    ids=["delim", "columns", "compression", "json_format"],
+)
+def test_reader_options_are_not_checked_as_paths(sql: str) -> None:
+    """delim=';' is configuration, not a file.
+
+    Sweeping every string literal in the call caught option values too, so a
+    semicolon-delimited CSV sitting squarely inside the grant was refused — and
+    the error blamed the manifest for it.
+    """
+    manifest = Manifest(
+        session_id="s", org_id="acme", pool_id="p", issuer_key_id="int-1",
+        allowed_paths=["/data/pool/tenant_a/*.csv", "/data/pool/tenant_a/*.json"],
+        row_predicates={"orders": "tenant_id = 'a'"},
+        issued_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        signature="x",
+    )
+    verified = VerifiedManifest(manifest=manifest, issuer_kid="int-1",
+                                verified_at=datetime.now(timezone.utc))
+    enforce_manifest(sql, verified)
+
+
+def test_an_option_value_cannot_smuggle_a_path(verified: VerifiedManifest) -> None:
+    """Skipping option values must not skip the path itself."""
+    with pytest.raises(PathNotAllowed):
+        enforce_manifest("SELECT * FROM read_csv('/etc/passwd', delim=';')", verified)
+
+
+def test_a_computed_path_is_refused_not_ignored(verified: VerifiedManifest) -> None:
+    """An argument the enforcer cannot resolve is refused, not assumed harmless."""
+    with pytest.raises(PathNotAllowed):
+        enforce_manifest(
+            "SELECT * FROM read_parquet('/data/pool/tenant_a/x' || '/../../etc/p.parquet')",
+            verified,
+        )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM generate_series(1, 10)",
+        "SELECT * FROM range(5)",
+        "SELECT d FROM generate_series(DATE '2024-01-01', DATE '2024-03-01', INTERVAL 1 MONTH) t(d)",
+    ],
+    ids=["generate_series", "range", "date_spine"],
+)
+def test_row_generators_are_allowed(sql: str, verified: VerifiedManifest) -> None:
+    """A date spine touches no storage; refusing it buys nothing and costs a lot."""
+    enforce_manifest(sql, verified)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT o.* FROM orders o QUALIFY row_number() OVER (PARTITION BY o.uid ORDER BY o.amount DESC) = 1",
+        "SELECT region, sum(amount) FROM orders GROUP BY ROLLUP(region)",
+        "SELECT * FROM orders WHERE amount > (SELECT avg(amount) FROM orders)",
+    ],
+    ids=["qualify", "rollup", "correlated_aggregate"],
+)
+def test_ordinary_analytics_still_passes(sql: str, verified: VerifiedManifest) -> None:
+    out = enforce_manifest(sql, verified)
+    assert "tenant_id" in out
+
+
+def test_metadata_functions_stay_refused(verified: VerifiedManifest) -> None:
+    """Allowing generators must not have opened the engine-introspection door."""
+    with pytest.raises(SqlNotAnalyzable):
+        enforce_manifest("SELECT * FROM duckdb_settings()", verified)

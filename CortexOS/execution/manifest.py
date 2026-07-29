@@ -506,6 +506,18 @@ _FILE_FUNCTIONS = frozenset(
 #: execute whatever the string said.
 _DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table"})
 
+#: Table functions that manufacture rows from their arguments and touch no
+#: storage at all. They are named explicitly rather than left to the
+#: deny-by-default rule because ``generate_series`` and ``range`` are the
+#: ordinary DuckDB idiom for a date spine, and refusing them would refuse a
+#: large share of real analytics for no security gain. Anything that reads a
+#: file, a catalog or engine metadata stays refused.
+#: Matched on the sqlglot node class name, because these get dedicated nodes:
+#: both ``generate_series(...)`` and ``range(...)`` parse to ``GenerateSeries``.
+_GENERATOR_FUNCTIONS = frozenset(
+    {"generateseries", "repeat", "unnest", "values", "generate_series", "range"}
+)
+
 #: Extensions that make a quoted identifier a file rather than a table name.
 _DATA_SUFFIXES = (
     ".parquet",
@@ -629,6 +641,61 @@ def _function_label(node: exp.Expression) -> str:
     return "read_parquet" if isinstance(node, exp.ReadParquet) else "read_csv"
 
 
+#: Argument nodes that carry a reader *option* rather than a path. ``delim=';'``
+#: and ``columns={'id':'INTEGER'}`` are configuration; checking their values
+#: against allowed_paths refuses ordinary reads whose path is squarely inside
+#: the grant, and blames the manifest for it.
+_KEYWORD_ARGUMENT_NODES: tuple[type[exp.Expression], ...] = tuple(
+    node
+    for node in (
+        getattr(exp, "PropertyEQ", None),
+        getattr(exp, "Kwarg", None),
+        getattr(exp, "EQ", None),
+    )
+    if node is not None
+)
+
+
+def _reader_path_arguments(node: exp.Expression) -> list[str]:
+    """String literals in a reader call that are actually paths.
+
+    Positional arguments only, descending into a list argument. Everything
+    under a keyword argument is configuration and is left alone — but the
+    *shape* still has to be recognised: an argument this function cannot
+    classify is not silently skipped, it is returned so the path check refuses
+    it. Being unable to tell a path from an option is a reason to stop, not a
+    reason to assume the safe answer.
+    """
+    positional: list[exp.Expression] = []
+    if isinstance(node, exp.ReadCSV):
+        # ReadCSV is the odd one: the path is in `this`, options in `expressions`.
+        if node.this is not None:
+            positional.append(node.this)
+    else:
+        for argument in node.expressions:
+            if _KEYWORD_ARGUMENT_NODES and isinstance(argument, _KEYWORD_ARGUMENT_NODES):
+                continue
+            positional.append(argument)
+
+    out: list[str] = []
+    for argument in positional:
+        if isinstance(argument, exp.Literal) and argument.is_string:
+            out.append(str(argument.this))
+        elif isinstance(argument, exp.Array):
+            for item in argument.expressions:
+                if isinstance(item, exp.Literal) and item.is_string:
+                    out.append(str(item.this))
+                else:
+                    out.append(item.sql(dialect="duckdb"))
+        elif isinstance(argument, exp.Literal):
+            continue  # a numeric positional argument names no file
+        else:
+            # A computed path — concatenation, a column, a subquery. Not
+            # resolvable here, so hand it to the path check, which refuses it.
+            out.append(argument.sql(dialect="duckdb"))
+    return out
+
+
 def _collect_path_refs(root: exp.Expression) -> list[_PathRef]:
     """Every string in the tree that names something outside the database.
 
@@ -641,9 +708,8 @@ def _collect_path_refs(root: exp.Expression) -> list[_PathRef]:
         if isinstance(node, exp.Anonymous) and str(node.this).lower() not in _FILE_FUNCTIONS:
             continue
         label = _function_label(node)
-        for literal in node.find_all(exp.Literal):
-            if literal.is_string:
-                refs.append(_PathRef(origin=f"{label}()", raw=str(literal.this)))
+        for raw in _reader_path_arguments(node):
+            refs.append(_PathRef(origin=f"{label}()", raw=raw))
 
     for table in root.find_all(exp.Table):
         identifier = table.this
@@ -725,7 +791,7 @@ def _refuse_unknown_table_functions(root: exp.Expression) -> None:
             continue
         else:
             name = type(source).__name__.lower()
-        if name not in _FILE_FUNCTIONS:
+        if name not in _FILE_FUNCTIONS and name not in _GENERATOR_FUNCTIONS:
             raise SqlNotAnalyzable(
                 f"{name}() is not a table function this manifest can bound; "
                 "refusing rather than assuming it reads nothing"
