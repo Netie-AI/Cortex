@@ -1,0 +1,2071 @@
+{
+  "version": 1,
+  "count": 153,
+  "items": [
+    {
+      "id": "subagent:rohitg00-pro-workflow",
+      "kind": "subagent",
+      "name": "pro-workflow",
+      "description": "| 1,800+ | Battle-tested Claude Code workflows from power users. Self-correcting memory, parallel worktrees, wrap-up rituals, 8 hook types, 5 agents, and the 80/20 AI coding ratio. Install: /plugin marketplace add rohitg00/pro-workflow |",
+      "url": "https://github.com/rohitg00/pro-workflow",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Featured",
+      "tags": [
+        "test",
+        "memory",
+        "agent"
+      ],
+      "install_hint": "Review github.com/rohitg00/pro-workflow then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:garrytan-gstack",
+      "kind": "toolkit",
+      "name": "gstack",
+      "description": "| 68,200+ | Garry Tan's exact Claude Code setup: 6 opinionated tools that serve as CEO, Eng Manager, Release Manager, and QA Engineer. |",
+      "url": "https://github.com/garrytan/gstack",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Featured",
+      "tags": [],
+      "install_hint": "Review github.com/garrytan/gstack then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:emaarco-agento-patronum",
+      "kind": "subagent",
+      "name": "agento-patronum",
+      "description": "| Protects sensitive files, credentials, and shell commands from unintended AI access via Claude Code hooks. Unlike settings.json deny rules, hooks are an enforcement layer you own and can verify. Ships with defaults for .env files, SSH keys, AWS credentials, and kubeconfig. |",
+      "url": "https://github.com/emaarco/agento-patronum",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "aws",
+        "agent"
+      ],
+      "install_hint": "Review github.com/emaarco/agento-patronum then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:avelikiy-great_cto",
+      "kind": "subagent",
+      "name": "greatcto",
+      "description": "| Full SDLC pipeline plugin with 7 agents (tech-lead, senior-dev, qa-engineer, security-officer, devops, l3-support, project-auditor), 12-angle code review, 10 project archetypes, 13 compliance frameworks (SOC2/HIPAA/PCI-DSS/GDPR/ISO 27001), two-gate approval flow. Opus 4.7 advisor escalation, file-based, MIT |",
+      "url": "https://github.com/avelikiy/great_cto",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "security",
+        "agent"
+      ],
+      "install_hint": "Review github.com/avelikiy/great_cto then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:prajapatimehul-aws-cost-saver",
+      "kind": "subagent",
+      "name": "aws-cost-saver",
+      "description": "| AWS cost optimization scanner with 173 automated checks, ML-powered rightsizing, and Zero Hallucination Pricing - Real result: 60% cost reduction |",
+      "url": "https://github.com/prajapatimehul/aws-cost-saver",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "aws"
+      ],
+      "install_hint": "Review github.com/prajapatimehul/aws-cost-saver then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:piebald-ai-claude-code-system-prompts",
+      "kind": "subagent",
+      "name": "claude-code-system-prompts",
+      "description": "| Extracted system prompts from Claude Code -- 18 builtin tool descriptions, sub-agent prompts, utility prompts. Updated for each release. 5,900+ stars |",
+      "url": "https://github.com/Piebald-AI/claude-code-system-prompts",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/Piebald-AI/claude-code-system-prompts then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:rmolines-fractal",
+      "kind": "subagent",
+      "name": "fractal",
+      "description": "| Recursive project management for Claude Code. Decomposes goals into predicates, works the riskiest piece first, and re-evaluates as it learns |",
+      "url": "https://github.com/rmolines/fractal",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/rmolines/fractal then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:0xmariowu-agentlint",
+      "kind": "subagent",
+      "name": "AgentLint",
+      "description": "| Lint your repo for AI agent compatibility. 33 evidence-backed checks across 5 dimensions. Claude Code plugin. |",
+      "url": "https://github.com/0xmariowu/AgentLint",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/0xmariowu/AgentLint then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:hyhmrright-brooks-lint",
+      "kind": "subagent",
+      "name": "brooks-lint",
+      "description": "| AI code reviews grounded in six classic engineering books (Brooks, Fowler, Martin, McConnell, Hunt & Thomas, Evans). Diagnoses code across 6 decay risk dimensions with structured findings (Symptom \u2192 Source \u2192 Consequence \u2192 Remedy). Supports PR review, architecture audit, tech debt assessment, and test quality review. ",
+      "url": "https://github.com/hyhmrright/brooks-lint",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test"
+      ],
+      "install_hint": "Review github.com/hyhmrright/brooks-lint then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:kbwo-ccmanager",
+      "kind": "subagent",
+      "name": "ccmanager",
+      "description": "| Coding agent session manager supporting Claude Code, Gemini CLI, Codex, Cursor, Copilot, Cline, OpenCode, Kimi CLI. Smart auto-approval via Haiku, devcontainer support. 940+ stars |",
+      "url": "https://github.com/kbwo/ccmanager",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/kbwo/ccmanager then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:automazeio-ccpm",
+      "kind": "subagent",
+      "name": "ccpm",
+      "description": "| Project management using GitHub Issues + Git worktrees for parallel agent execution. Issue-analyze, epic-start, epic-merge commands. 7,600+ stars |",
+      "url": "https://github.com/automazeio/ccpm",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "github",
+        "agent"
+      ],
+      "install_hint": "Review github.com/automazeio/ccpm then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ryoppippi-ccusage",
+      "kind": "subagent",
+      "name": "ccusage",
+      "description": "| CLI for analyzing Claude Code/Codex usage from local JSONL files. Daily, monthly, session, billing-window reports. Offline, zero API calls. 11,500+ stars |",
+      "url": "https://github.com/ryoppippi/ccusage",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/ryoppippi/ccusage then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:lob-labs-cc-cost",
+      "kind": "subagent",
+      "name": "cc-cost",
+      "description": "| Single-file Python CLI that parses Claude Code transcript JSONL and reports cost, prompt-cache hit rate, tool-call distribution, top expensive turns, and actionable optimization recommendations (--diagnose, --md, --top N). MIT, no third-party deps. |",
+      "url": "https://github.com/lob-labs/cc-cost",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/lob-labs/cc-cost then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:garvitsurana271-burnd",
+      "kind": "subagent",
+      "name": "getburnd",
+      "description": "| Local-first cost-control CLI for Claude Code. Reads ~/.claude/projects/.jsonl, identifies 8 leak patterns (verbose context, tool loops, large file re-reads), prints savings estimates, generates a shareable report URL. MIT, zero telemetry. |",
+      "url": "https://github.com/garvitsurana271/burnd",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/garvitsurana271/burnd then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:2389-research-building-multiagent-systems",
+      "kind": "subagent",
+      "name": "building-multiagent-systems",
+      "description": "| Architecture patterns for multi-agent systems: orchestrator-worker, pipeline, debate, and MapReduce topologies |",
+      "url": "https://github.com/2389-research/building-multiagent-systems",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/2389-research/building-multiagent-systems then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:minicodemonkey-chief",
+      "kind": "subagent",
+      "name": "chief",
+      "description": "| CLI that wraps Claude Code in a loop. Define a PRD, run chief, go do anything else. Commits after each task, picks up where it left off. Homebrew installable. 380+ stars |",
+      "url": "https://github.com/MiniCodeMonkey/chief",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/MiniCodeMonkey/chief then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:disler-claude-code-hooks-mastery",
+      "kind": "subagent",
+      "name": "claude-hooks-mastery",
+      "description": "| Complete mastery guide for Claude Code hooks -- UV single-file Python scripts, sub-agents, meta-agent, team-based validation, AI-generated audio feedback. 3,300+ stars |",
+      "url": "https://github.com/disler/claude-code-hooks-mastery",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/disler/claude-code-hooks-mastery then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:thedotmack-claude-mem",
+      "kind": "subagent",
+      "name": "claude-mem",
+      "description": "| Automatically captures everything Claude does, compresses with AI, injects relevant context into future sessions. SQLite + full-text search. 35,900+ stars |",
+      "url": "https://github.com/thedotmack/claude-mem",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "sqlite",
+        "search"
+      ],
+      "install_hint": "Review github.com/thedotmack/claude-mem then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:777genius-claude-notifications-go",
+      "kind": "subagent",
+      "name": "claude-notifications-go",
+      "description": "| Cross-platform smart notifications -- 6 types, click-to-focus, context analysis, webhooks. Single Go binary, zero deps. 340+ stars |",
+      "url": "https://github.com/777genius/claude-notifications-go",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/777genius/claude-notifications-go then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:lifecycle-innovations-limited-claude-ops",
+      "kind": "subagent",
+      "name": "claude-ops",
+      "description": "| Business operating system plugin for Claude Code. Morning briefings, unified inbox, autonomous PR merge, infrastructure monitoring, and YOLO autonomous mode. |",
+      "url": "https://github.com/Lifecycle-Innovations-Limited/claude-ops",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/Lifecycle-Innovations-Limited/claude-ops then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:hatawong-claude-recap",
+      "kind": "subagent",
+      "name": "claude-recap",
+      "description": "| Per-topic session memory using Shell hooks \u2014 archives each conversation topic as a separate Markdown summary. Two hooks, bash + Node.js, 100% local |",
+      "url": "https://github.com/hatawong/claude-recap",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "memory"
+      ],
+      "install_hint": "Review github.com/hatawong/claude-recap then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:kosoukhov-cht-cli",
+      "kind": "subagent",
+      "name": "/cht",
+      "description": "| Chat persistence for Claude Code \u2014 13 slash commands + hooks for saving conversations as local markdown files. Crash-proof auto-save via hooks, project-based organization, search, and management. npm: @kosoukhov/cht-cli |",
+      "url": "https://github.com/kosoukhov/cht-cli",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "search"
+      ],
+      "install_hint": "Review github.com/kosoukhov/cht-cli then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:houseofmvps-claude-rank",
+      "kind": "subagent",
+      "name": "claude-rank",
+      "description": "| SEO/GEO/AEO audit plugin \u2014 tells you why AI won't cite your site, then auto-fixes robots.txt, sitemap.xml, llms.txt, and JSON-LD. 170+ rules across 10 scanners, zero config |",
+      "url": "https://github.com/Houseofmvps/claude-rank",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/Houseofmvps/claude-rank then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:culminationai-claude-sounds",
+      "kind": "subagent",
+      "name": "claude-sounds",
+      "description": "| Audio feedback for Claude Code hooks \u2014 10 events, 21 sounds, random rotation. macOS (afplay). |",
+      "url": "https://github.com/culminationAI/claude-sounds",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/culminationAI/claude-sounds then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:yurukusa-claude-code-hooks",
+      "kind": "subagent",
+      "name": "claude-code-hooks",
+      "description": "| 15 production-tested hooks from 160+ hours of autonomous operation. Destructive command blocker, branch guard, syntax check, context monitor, permission auto-approver. Bash, zero deps |",
+      "url": "https://github.com/yurukusa/claude-code-hooks",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test"
+      ],
+      "install_hint": "Review github.com/yurukusa/claude-code-hooks then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:geiserx-cc-aws-keepalive",
+      "kind": "subagent",
+      "name": "cc-aws-keepalive",
+      "description": "| Keep Claude Code sessions alive through AWS credential expiry -- proactive expiration warnings, credential refresh bypass for Bedrock SSO/SAML, optional statusline countdown timer. 4 hook scripts, zero dependencies |",
+      "url": "https://github.com/GeiserX/cc-aws-keepalive",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "aws"
+      ],
+      "install_hint": "Review github.com/GeiserX/cc-aws-keepalive then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:yurukusa-cc-safe-setup",
+      "kind": "subagent",
+      "name": "cc-safe-setup",
+      "description": "| One command (npx cc-safe-setup) to install 6 essential safety hooks in 10 seconds. Zero dependencies |",
+      "url": "https://github.com/yurukusa/cc-safe-setup",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/yurukusa/cc-safe-setup then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:hilyfux-knowledge-graph",
+      "kind": "subagent",
+      "name": "knowledge-graph",
+      "description": "| Built on Anthropic internal engineering practices and Karpathy's AutoResearch methodology. A zero-dependency, git-native memory layer for Claude Code that persists learned context across sessions. Pure bash, ~3ms/event, privacy-first |",
+      "url": "https://github.com/hilyfux/knowledge-graph",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "search",
+        "memory"
+      ],
+      "install_hint": "Review github.com/hilyfux/knowledge-graph then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:supermemoryai-claude-supermemory",
+      "kind": "subagent",
+      "name": "claude-supermemory",
+      "description": "| Persistent memory across sessions and projects using Supermemory. User profile injection at session start, automatic conversation capture. 2,300+ stars |",
+      "url": "https://github.com/supermemoryai/claude-supermemory",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "memory"
+      ],
+      "install_hint": "Review github.com/supermemoryai/claude-supermemory then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:cdeust-cortex",
+      "kind": "subagent",
+      "name": "cortex",
+      "description": "| Persistent memory for Claude Code \u2014 neuroscience-backed retrieval with thermodynamic decay, backed by 41 published papers. PostgreSQL + pgvector + sentence-transformers. 6 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, SessionEnd, Notification, SubagentStart), hierarchical recall, causal chains, knowle",
+      "url": "https://github.com/cdeust/Cortex",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "postgres",
+        "memory",
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/cdeust/Cortex then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:alpyenigun-eliniscan",
+      "kind": "subagent",
+      "name": "eliniscan",
+      "description": "| AI full codebase scanner. Opens a separate Claude session for every file \u2014 reads every line, misses nothing. Finds bugs, security, performance issues and auto-fixes. |",
+      "url": "https://github.com/AlpYenigun/eliniscan",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "security"
+      ],
+      "install_hint": "Review github.com/AlpYenigun/eliniscan then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:houseofmvps-codesight",
+      "kind": "subagent",
+      "name": "codesight",
+      "description": "| CLI token optimizer and AI context generator. Scans codebases to extract routes, schema, components, and dependencies for Claude Code, Cursor, Copilot, Codex, and Windsurf. 9x\u201313x token reduction. Zero runtime dependencies. npx codesight |",
+      "url": "https://github.com/Houseofmvps/codesight",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/Houseofmvps/codesight then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:krodak-clickup-cli",
+      "kind": "subagent",
+      "name": "cup",
+      "description": "| ClickUp CLI for AI agents with task management, sprints, and time tracking |",
+      "url": "https://github.com/krodak/clickup-cli",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/krodak/clickup-cli then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:zeng3ld-dig2crawl",
+      "kind": "subagent",
+      "name": "dig2crawl",
+      "description": "| Universal web crawler with Claude-powered CSS selector discovery. 4-level AI extraction escalation (CSS, browser actions, Claude Vision, captcha). Rust. |",
+      "url": "https://github.com/ZENG3LD/dig2crawl",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "browser"
+      ],
+      "install_hint": "Review github.com/ZENG3LD/dig2crawl then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:claw-army-claude-node",
+      "kind": "subagent",
+      "name": "claw-army/claude-node",
+      "description": "| Python subprocess bridge for Claude Code CLI, giving Python code direct access to Claude Code native capabilities via stream-json |",
+      "url": "https://github.com/claw-army/claude-node",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/claw-army/claude-node then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:discoclaw-discoclaw",
+      "kind": "subagent",
+      "name": "discoclaw",
+      "description": "| Personal AI orchestrator that bridges Discord to Claude Code with durable memory, task tracking, and cron-based automation |",
+      "url": "https://github.com/DiscoClaw/discoclaw",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "memory"
+      ],
+      "install_hint": "Review github.com/DiscoClaw/discoclaw then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ramsbaby-jarvis",
+      "kind": "subagent",
+      "name": "jarvis",
+      "description": "| Turns an idle Claude Max subscription into a 24/7 AI ops system \u2014 Discord bot, 76 scheduled tasks, 12 AI teams, local LanceDB RAG, 98% context compression via Nexus CIG, and 4-layer self-healing infrastructure. Uses claude -p headless mode at $0 extra cost. |",
+      "url": "https://github.com/Ramsbaby/jarvis",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "rag"
+      ],
+      "install_hint": "Review github.com/Ramsbaby/jarvis then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ramsbaby-jarvis-company-board",
+      "kind": "subagent",
+      "name": "jarvis-company-board",
+      "description": "| Real-time AI agent collaboration board built on Next.js 15 and SQLite WAL \u2014 8 named AI board members debate decisions via SSE push, with a DEV task approval workflow and Railway deploy support. |",
+      "url": "https://github.com/Ramsbaby/jarvis-company-board",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "sqlite",
+        "agent"
+      ],
+      "install_hint": "Review github.com/Ramsbaby/jarvis-company-board then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:shmlkv-dna-claude-analysis",
+      "kind": "subagent",
+      "name": "dna-claude-analysis",
+      "description": "| Personal genome analysis toolkit that analyzes raw DNA data across 17 categories and generates a terminal-style HTML dashboard |",
+      "url": "https://github.com/shmlkv/dna-claude-analysis",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/shmlkv/dna-claude-analysis then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:888wing-codetape",
+      "kind": "subagent",
+      "name": "codetape",
+      "description": "| The flight recorder for AI coding \u2014 auto-records semantic traces and syncs README, CHANGELOG, CLAUDE.md. Zero deps. npx codetape init |",
+      "url": "https://github.com/888wing/codetape",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/888wing/codetape then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:zeng3ld-gate4agent",
+      "kind": "subagent",
+      "name": "gate4agent",
+      "description": "| Universal Rust transport for CLI AI agents (Claude Code, Codex, Gemini, OpenCode). Pipe/NDJSON, PTY, and ACP modes. Published on crates.io. |",
+      "url": "https://github.com/ZENG3LD/gate4agent",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/ZENG3LD/gate4agent then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:raphaelchristi-harness-evolver",
+      "kind": "subagent",
+      "name": "harness-evolver",
+      "description": "| LangSmith-native autonomous agent optimization. Multi-agent proposers evolve prompts, routing, tools, and architecture in isolated git worktrees. Install: npx harness-evolver@latest |",
+      "url": "https://github.com/raphaelchristi/harness-evolver",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test",
+        "agent"
+      ],
+      "install_hint": "Review github.com/raphaelchristi/harness-evolver then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:clankercode-claude-inject-idle-time",
+      "kind": "subagent",
+      "name": "idle-timing",
+      "description": "| Injects hidden timing context (local time with UTC offset, idle seconds since last reply, previous-turn duration) into every user prompt so the model knows how long the conversation has been paused. Ships a statusline fragment for a live elapsed-time readout and a visible [after Xm Ys] note when you return from >10s ",
+      "url": "https://github.com/clankercode/claude-inject-idle-time",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test",
+        "rag"
+      ],
+      "install_hint": "Review github.com/clankercode/claude-inject-idle-time then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:onllm-dev-onwatch",
+      "kind": "subagent",
+      "name": "onWatch",
+      "description": "| Open-source Go CLI that tracks AI API quota usage across 7 providers (Synthetic, Z.ai, Anthropic, Codex, GitHub Copilot, MiniMax, Antigravity) with a background daemon (<50 MB RAM), zero telemetry, and a Material Design 3 web dashboard |",
+      "url": "https://github.com/onllm-dev/onwatch",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "github"
+      ],
+      "install_hint": "Review github.com/onllm-dev/onwatch then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:lexxes-projects-obey",
+      "kind": "subagent",
+      "name": "obey",
+      "description": "| Rule enforcement plugin. Save rules with natural language, enforce with 17 lifecycle hooks. Three scopes (global, stack-specific, project-local), active blocking via PreToolUse, completion checklists via Stop hook, audit trail, auto-detects rule-like language. Cross-platform. |",
+      "url": "https://github.com/Lexxes-Projects/obey",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/Lexxes-Projects/obey then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:oxgeneral-orch",
+      "kind": "subagent",
+      "name": "ORCH",
+      "description": "| CLI runtime orchestrating Claude Code, Codex, and Cursor as typed agent teams with state machine (todo\u2192review\u2192done), auto-retry, inter-agent messaging, goals, and TUI dashboard |",
+      "url": "https://github.com/oxgeneral/ORCH",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/oxgeneral/ORCH then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:penguinalleyapps-paco-framework",
+      "kind": "subagent",
+      "name": "paco-framework",
+      "description": "| 1+ | Markdown-first multi-agent OS for Claude Code. Coordinates 3-16 specialized AI agents (Engineering, QA, Growth, Finance) with file-based dispatch, institutional memory, CEO Gate approval, and 24/7 scheduling. No Python required. MIT |",
+      "url": "https://github.com/PenguinAlleyApps/paco-framework",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "memory",
+        "agent"
+      ],
+      "install_hint": "Review github.com/PenguinAlleyApps/paco-framework then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:peonping-peon-ping",
+      "kind": "subagent",
+      "name": "peon-ping",
+      "description": "| Warcraft III Peon voice notifications (+ StarCraft, Portal, Zelda) for Claude Code and other agents. Desktop banners, auto-detects SSH/devcontainers. 3,900+ stars |",
+      "url": "https://github.com/PeonPing/peon-ping",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/PeonPing/peon-ping then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:chsm04-pulse",
+      "kind": "subagent",
+      "name": "pulse",
+      "description": "| Local Channel plugin \u2014 push notifications into Claude Code sessions via HTTP POST. No Discord/Slack needed, just curl. Three levels (info/warn/error), source tracking, dedup. |",
+      "url": "https://github.com/chsm04/pulse",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "slack"
+      ],
+      "install_hint": "Review github.com/chsm04/pulse then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:2389-research-review-squad",
+      "kind": "subagent",
+      "name": "review-squad",
+      "description": "| Multi-perspective code review via dispatched subagent panels: experts, normie users, pedantic nitpickers, and real-user task runners |",
+      "url": "https://github.com/2389-research/review-squad",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/2389-research/review-squad then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:2389-research-simmer",
+      "kind": "subagent",
+      "name": "simmer",
+      "description": "| Iterative artifact refinement using judge subagents that score against user-defined criteria across multiple rounds |",
+      "url": "https://github.com/2389-research/simmer",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/2389-research/simmer then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:2389-research-test-kitchen",
+      "kind": "subagent",
+      "name": "test-kitchen",
+      "description": "| Parallel implementation exploration using competing subagents, with structured comparison and winner selection |",
+      "url": "https://github.com/2389-research/test-kitchen",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test",
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/2389-research/test-kitchen then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:bloopai-vibe-kanban",
+      "kind": "subagent",
+      "name": "vibe-kanban",
+      "description": "| Kanban-based orchestration for 10+ coding agents (Claude Code, Codex, Gemini CLI, Copilot, Amp). Isolated git worktrees per agent, inline diff review. 23,200+ stars |",
+      "url": "https://github.com/BloopAI/vibe-kanban",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/BloopAI/vibe-kanban then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:majiayu000-vibeguard",
+      "kind": "subagent",
+      "name": "VibeGuard",
+      "description": "| Stop AI from hallucinating code. 88 rules + 13 hooks + 14 agents for real-time interception and static scanning across 5 languages |",
+      "url": "https://github.com/majiayu000/vibeguard",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/majiayu000/vibeguard then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:rich627-whatsapp-claude-plugin",
+      "kind": "subagent",
+      "name": "whatsapp-claude-plugin",
+      "description": "| WhatsApp channel plugin for Claude Code -- connects as a linked device via Baileys v7 with bidirectional messaging, full media support, voice transcription, permission relay, and access control |",
+      "url": "https://github.com/Rich627/whatsapp-claude-plugin",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/Rich627/whatsapp-claude-plugin then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:culminationai-background-timer",
+      "kind": "subagent",
+      "name": "background-timer",
+      "description": "| Background timer with task notifications -- set delayed checks without blocking conversation |",
+      "url": "https://github.com/culminationAI/background-timer",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/culminationAI/background-timer then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:deepshal99-notch-so-good",
+      "kind": "subagent",
+      "name": "notch-so-good",
+      "description": "| Pixel-art crab (Chawd) lives in your Mac's notch and watches Claude Code for you. Live session timers, color-coded notifications, 13 idle animations, mouse-reactive eyes, drowsiness system. Universal binary, one-line install: npx notch-so-good. MIT, 130+ users |",
+      "url": "https://github.com/deepshal99/notch-so-good",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/deepshal99/notch-so-good then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:aboudjem-ui-ux-suite",
+      "kind": "subagent",
+      "name": "ui-ux-suite",
+      "description": "| Design audit across 12 dimensions \u2014 color contrast, typography, layout, accessibility. Scans CSS, JSX, Tailwind configs. Quantified scores (1-10) with before/after fix code. WCAG 2.1, APCA, OKLCH. Zero deps |",
+      "url": "https://github.com/Aboudjem/ui-ux-suite",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/Aboudjem/ui-ux-suite then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:agricidaniel-claude-cybersecurity",
+      "kind": "subagent",
+      "name": "claude-cybersecurity",
+      "description": "| AI-powered cybersecurity code review with 8 parallel agents. OWASP 2025, CWE Top 25, MITRE ATT&CK, 11 languages, 5 compliance frameworks, threat intelligence. Zero config. MIT |",
+      "url": "https://github.com/AgriciDaniel/claude-cybersecurity",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "security",
+        "agent"
+      ],
+      "install_hint": "Review github.com/AgriciDaniel/claude-cybersecurity then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:derjochenmeyer-claude-code-craft-statusline",
+      "kind": "subagent",
+      "name": "craft-statusline",
+      "description": "| Bash statusline plugin for Claude Code with state-aware git branch (ahead / behind / stashed / conflict / combined signals), context window with absolute-token traffic light (yellow at 400k tokens, red at 85%), 5h/7d rate limits, and optional cost. Bash 3.2 compatible, jq is the only dependency. Install: /plugin mark",
+      "url": "https://github.com/derjochenmeyer/claude-code-craft-statusline",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/derjochenmeyer/claude-code-craft-statusline then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:bentleypark-claude-code-mobile-spine",
+      "kind": "subagent",
+      "name": "mobile-spine",
+      "description": "| Scaffold for mobile teams whose Android, iOS, and Backend live in separate repos. Coordinates 4 specialized subagents (api / pm / android / ios) with hard repo boundaries via settings.json deny rules. /mobile-spine:init runs a 6-question interview and writes the full workspace; /feat drives a 4-question interview \u2192 4",
+      "url": "https://github.com/bentleypark/claude-code-mobile-spine",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/bentleypark/claude-code-mobile-spine then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:mohamedabdallah-14-unslop",
+      "kind": "subagent",
+      "name": "unslop",
+      "description": "| Removes AI writing tells (tricolons, em-dash pileups, hedging stacks, sycophancy openers, stock vocabulary). Split lint/rewrite modes \u2014 run detection-only passes on your own text without rewriting. Five intensity levels. MIT licensed |",
+      "url": "https://github.com/MohamedAbdallah-14/unslop",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/MohamedAbdallah-14/unslop then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:avansaber-tailtest",
+      "kind": "subagent",
+      "name": "tailtest",
+      "description": "| Automatically generates and runs tests for every file Claude Code creates or modifies. PostToolUse hook detects changes, generates scenarios, runs them, and surfaces failures. 8 languages (Python, TypeScript, JavaScript, Go, Ruby, PHP, Java, Rust). Zero config, zero commands. |",
+      "url": "https://github.com/avansaber/tailtest",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test"
+      ],
+      "install_hint": "Review github.com/avansaber/tailtest then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:nexusbuildsai-claude-time",
+      "kind": "subagent",
+      "name": "claude-time",
+      "description": "| Live local time + timezone injected into every prompt via UserPromptSubmit hook. Stops Claude from saying \"tonight\" at 9 AM. Also stamps every response with [HH:MM AM/PM TZ] so you can see when each message landed (useful when tasks stall). Zero config, zero deps beyond jq. MIT |",
+      "url": "https://github.com/nexusbuildsai/claude-time",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/nexusbuildsai/claude-time then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:apurvbazari-claude-plugins",
+      "kind": "subagent",
+      "name": "notify",
+      "description": "| Cross-platform system notifications for Claude Code hooks \u2014 macOS (terminal-notifier) and Linux (notify-send). Duration filtering to suppress noisy short events, git context extraction (repo + branch), and contextual messages per hook type. MIT |",
+      "url": "https://github.com/ApurvBazari/claude-plugins",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/ApurvBazari/claude-plugins then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ashlrai-ashlr-plugin",
+      "kind": "subagent",
+      "name": "ashlr-plugin",
+      "description": "| Open-source Claude Code plugin replacing the built-in Read/Grep/Edit/Bash tools with token-efficient versions backed by @ashlr/core-efficiency. Independently benchmarked at 57% token reduction on real codebases. 70+ tools across glob, grep, structural diff/edit, and an opt-in genome (LSP-style codebase index). Instal",
+      "url": "https://github.com/ashlrai/ashlr-plugin",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/ashlrai/ashlr-plugin then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:nirecom-agents",
+      "kind": "subagent",
+      "name": "nirecom/agents",
+      "description": "| Self-driving Claude Code + GitHub Copilot framework with hook-enforced workflow state machine (research \u2192 plan \u2192 tests \u2192 code \u2192 security-review \u2192 docs), private-info scanning (AWS/Anthropic keys, PEM certs, RFC 1918 IPs), three-stage planning with adversarial Codex review, OWASP-backed test categories, and cross-mach",
+      "url": "https://github.com/nirecom/agents",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "test",
+        "github",
+        "search",
+        "aws",
+        "security",
+        "agent"
+      ],
+      "install_hint": "Review github.com/nirecom/agents then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:riasistemas-claude-channel-instagram",
+      "kind": "subagent",
+      "name": "claude-channel-instagram",
+      "description": "| Instagram Graph API bridge for Claude Code -- comments, DMs, comment-to-DM bootstrap, audio transcription, pluggable extensions system. Official Meta API (no scraping). Apache-2.0, by RIA Systems (verified Meta Tech Provider). Landing: claude-plugins.riasistemas.com.br/instagram. Install: /plugin marketplace add rias",
+      "url": "https://github.com/riasistemas/claude-channel-instagram",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/riasistemas/claude-channel-instagram then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:riasistemas-claude-channel-whatsapp",
+      "kind": "subagent",
+      "name": "claude-channel-whatsapp",
+      "description": "| Official WhatsApp Business Cloud API bridge for Claude Code -- webhooks, OGG Opus audio, allowlist + permission relay scrubbing secrets. NOT Baileys/scraping -- uses Meta's official API with WABA tokens. Apache-2.0, by RIA Systems (verified Meta Tech Provider). Landing: claude-plugins.riasistemas.com.br/whatsapp. Ins",
+      "url": "https://github.com/riasistemas/claude-channel-whatsapp",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [],
+      "install_hint": "Review github.com/riasistemas/claude-channel-whatsapp then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:axmeai-axme-code",
+      "kind": "subagent",
+      "name": "axme-code",
+      "description": "| Persistent project memory across sessions, architectural decisions with enforce levels, and pre-execution safety hooks that block dangerous commands at the harness level (not via prompts). Local-only storage, multi-repo workspace support, automatic knowledge extraction via background auditor. 100% on ToolEmu safety, ",
+      "url": "https://github.com/AxmeAI/axme-code",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "All Plugins",
+      "tags": [
+        "memory",
+        "rag"
+      ],
+      "install_hint": "Review github.com/AxmeAI/axme-code then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:phoenixrr2113-agntk",
+      "kind": "subagent",
+      "name": "npx agntk",
+      "description": "| Zero-config AI agent CLI with 20+ tools, persistent memory, Ollama auto-detection, and free tier |",
+      "url": "https://github.com/Phoenixrr2113/agntk",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Research & Analysis (11 agents)",
+      "tags": [
+        "search",
+        "memory",
+        "agent"
+      ],
+      "install_hint": "Review github.com/Phoenixrr2113/agntk then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:liberzon-claude-hooks",
+      "kind": "subagent",
+      "name": "smart-approve.py",
+      "description": "| PreToolUse (Bash) | Decompose compound bash commands (&&, \\|\\|, ;, \\|, $()) into sub-commands and check each against allow/deny patterns |",
+      "url": "https://github.com/liberzon/claude-hooks",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Hook Scripts",
+      "tags": [],
+      "install_hint": "Review github.com/liberzon/claude-hooks then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:payshak-claude-code-hooks",
+      "kind": "subagent",
+      "name": "claude-code-hooks",
+      "description": "TypeScript SDK with defineHook(), typed event payloads for all 5 hook events, response builders, and unit-testable .handle() method. Zero dependencies.",
+      "url": "https://github.com/Payshak/claude-code-hooks",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Related SDKs",
+      "tags": [
+        "test"
+      ],
+      "install_hint": "Review github.com/Payshak/claude-code-hooks then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:launsion-boop-echocoding",
+      "kind": "subagent",
+      "name": "EchoCoding",
+      "description": "Audio layer for coding agents with hook-triggered SFX, ambient soundscape, and optional cloud TTS/ASR voice interaction. Works with Claude Code hooks and also supports Cursor/Windsurf, Codex CLI, and Gemini CLI.",
+      "url": "https://github.com/launsion-boop/EchoCoding",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Related SDKs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/launsion-boop/EchoCoding then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:zunoworks-gateguard",
+      "kind": "toolkit",
+      "name": "GateGuard",
+      "description": "| PyPI for details. By ZUNO WORKS K.K.",
+      "url": "https://github.com/zunoworks/gateguard",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "GateGuard \u2014 Fact-Forcing PreToolUse Gate",
+      "tags": [
+        "github"
+      ],
+      "install_hint": "Review github.com/zunoworks/gateguard then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:gguloadoong-idea-factory",
+      "kind": "subagent",
+      "name": "idea-factory",
+      "description": "- Template-install AI company factory for Claude Code. One-line business idea \u2192 autonomous MVP via a 7-agent startup team (PM / Developer / Designer / Architect / Critic / Code-Reviewer / QA). 4-reviewer isolated-worktree gate, Quality Ratchet, MVP-First pipeline. See the installation guide for the bash install.sh flow",
+      "url": "https://github.com/gguloadoong/idea-factory",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Templates",
+      "tags": [
+        "github",
+        "agent"
+      ],
+      "install_hint": "Review github.com/gguloadoong/idea-factory then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:jeromwolf-templateclaw",
+      "kind": "subagent",
+      "name": "TemplateClaw",
+      "description": "- Developer template hub and project scaffolding tool packaged as a Claude Code Plugin. 32 production-ready templates across 6 categories (Landing Pages, Dashboards, UI Components, Dev Methodology, Project Setup, Refactoring). 7 slash commands including /templateclaw, /templateclaw-landing, /templateclaw-dashboard, /te",
+      "url": "https://github.com/jeromwolf/templateclaw",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Templates",
+      "tags": [],
+      "install_hint": "Review github.com/jeromwolf/templateclaw then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:siteboon-claudecodeui",
+      "kind": "toolkit",
+      "name": "CloudCLI",
+      "description": "| 8,400+ | Free open-source web/mobile UI for Claude Code, Cursor CLI, and Codex. Responsive design, integrated shell, file explorer, git explorer |",
+      "url": "https://github.com/siteboon/claudecodeui",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/siteboon/claudecodeui then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:the-vibe-company-companion",
+      "kind": "toolkit",
+      "name": "Companion",
+      "description": "| 2,200+ | Web & mobile UI for Claude Code & Codex. Launch parallel sessions, stream responses, approve tools, session recovery |",
+      "url": "https://github.com/The-Vibe-Company/companion",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/The-Vibe-Company/companion then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ruvnet-ruflo",
+      "kind": "subagent",
+      "name": "Ruflo",
+      "description": "| 21,200+ | Agent orchestration platform -- deploy multi-agent swarms, coordinate autonomous workflows, distributed swarm intelligence, RAG integration |",
+      "url": "https://github.com/ruvnet/ruflo",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "rag",
+        "agent"
+      ],
+      "install_hint": "Review github.com/ruvnet/ruflo then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:catlog22-claude-code-workflow",
+      "kind": "subagent",
+      "name": "Claude-Code-Workflow",
+      "description": "| 1,400+ | JSON-driven multi-agent cadence-team framework with intelligent CLI orchestration (Gemini/Qwen/Codex) |",
+      "url": "https://github.com/catlog22/Claude-Code-Workflow",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/catlog22/Claude-Code-Workflow then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:nwiizo-ccswarm",
+      "kind": "subagent",
+      "name": "ccswarm",
+      "description": "| 127 | Rust-based multi-agent orchestration with specialized agent pools, Git worktree isolation, 93% token reduction |",
+      "url": "https://github.com/nwiizo/ccswarm",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/nwiizo/ccswarm then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:johannesjo-parallel-code",
+      "kind": "toolkit",
+      "name": "parallel-code",
+      "description": "| 370+ | Run Claude Code, Codex, and Gemini side by side -- each in its own git worktree |",
+      "url": "https://github.com/johannesjo/parallel-code",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/johannesjo/parallel-code then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:leonardocardoso-poirot",
+      "kind": "subagent",
+      "name": "Poirot",
+      "description": "| 96 | macOS app for browsing Claude Code sessions, viewing diffs, and re-running commands. Reads local transcripts, runs offline |",
+      "url": "https://github.com/LeonardoCardoso/Poirot",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/LeonardoCardoso/Poirot then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:athevon-tokeneater",
+      "kind": "toolkit",
+      "name": "TokenEater",
+      "description": "| 179 | Native macOS menu bar app for monitoring Claude AI usage limits and watching coding sessions live |",
+      "url": "https://github.com/AThevon/TokenEater",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/AThevon/TokenEater then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:avivk5498-the-claude-protocol",
+      "kind": "subagent",
+      "name": "The Claude Protocol",
+      "description": "| 149 | Enforcement layer wrapping Claude Code with 13 hooks -- blocks unsafe operations, enforces worktree isolation |",
+      "url": "https://github.com/AvivK5498/The-Claude-Protocol",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/AvivK5498/The-Claude-Protocol then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:btangonan-anima",
+      "kind": "toolkit",
+      "name": "Anima",
+      "description": "| new | Native macOS companion for Claude Code. Per-project ASCII familiars, nim token economy, cross-session watcher daemon. Tauri v2 + Rust, 4MB binary |",
+      "url": "https://github.com/btangonan/anima",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/btangonan/anima then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:tomasz-tomczyk-crit",
+      "kind": "subagent",
+      "name": "crit",
+      "description": "| 105 | Local browser UI for inline code review of any file or agent output; integrates with Claude Code via plan-hook to review and approve plans before execution, outputs structured .crit.json for agent consumption. |",
+      "url": "https://github.com/tomasz-tomczyk/crit",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "browser",
+        "agent"
+      ],
+      "install_hint": "Review github.com/tomasz-tomczyk/crit then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:aliceljy-telegram-ai-bridge",
+      "kind": "subagent",
+      "name": "telegram-ai-bridge",
+      "description": "| new | Run N parallel Claude Code sessions from your phone via Telegram. War Room mode, per-bot personas, A2A multi-agent collaboration, tool approval from phone. Supports Claude Code, Codex, and Gemini backends |",
+      "url": "https://github.com/AliceLJY/telegram-ai-bridge",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/AliceLJY/telegram-ai-bridge then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:littlebearapps-untether",
+      "kind": "subagent",
+      "name": "Untether",
+      "description": "| 12 | Telegram bridge for Claude Code (and 5 other AI agents). Send tasks by voice or text, stream progress, approve changes with inline buttons from your phone |",
+      "url": "https://github.com/littlebearapps/untether",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/littlebearapps/untether then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ai-genius-automations-octoally",
+      "kind": "subagent",
+      "name": "OctoAlly",
+      "description": "| 18 | AI coding session orchestration dashboard -- multi-agent hive-mind via RuFlo, Whisper voice dictation, tmux session persistence, built-in git source control, Electron desktop app |",
+      "url": "https://github.com/ai-genius-automations/octoally",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/ai-genius-automations/octoally then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:lsvishaal-tokburn",
+      "kind": "toolkit",
+      "name": "tokburn",
+      "description": "| 3 | Local analytics dashboard for Claude Code -- calculates API-equivalent costs, detects waste patterns (repeated reads, floundering, cost outliers), serves web UI + REST API. Zero network calls, zero accounts, zero telemetry. uvx tokburn serve. |",
+      "url": "https://github.com/lsvishaal/tokburn",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/lsvishaal/tokburn then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:remvisual-claude-workspace-snapshot",
+      "kind": "toolkit",
+      "name": "claude-workspace-snapshot",
+      "description": "| new | Snapshot and restore live Claude Code sessions as named, color-coded Windows Terminal tabs. Detects running sessions via process inspection and .jsonl file activity. Windows only |",
+      "url": "https://github.com/REMvisual/claude-workspace-snapshot",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/REMvisual/claude-workspace-snapshot then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:martinmsaavedra-kanbaii",
+      "kind": "subagent",
+      "name": "KANBAII",
+      "description": "| new | AI-native kanban board for Claude Code \u2014 plan visually, track progress, let AI execute. Sequential engine (Ralph), parallel multi-agent (Teams), cost tracking, real-time dashboard. npx kanbaii start |",
+      "url": "https://github.com/martinmsaavedra/kanbaii",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/martinmsaavedra/kanbaii then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:anaypaul-claude-session-visualizer",
+      "kind": "toolkit",
+      "name": "Claude Session Visualizer",
+      "description": "| new | Live visualization dashboard for Claude Code sessions with execution trees, token cost tracking, thinking trace exploration, and error debugging |",
+      "url": "https://github.com/anaypaul/claude-session-visualizer",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/anaypaul/claude-session-visualizer then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:iofficeai-aionui",
+      "kind": "toolkit",
+      "name": "AionUI",
+      "description": "| 20,500+ | Free local open-source 24/7 Cowork app for Gemini CLI, Claude Code, Codex, and OpenCode |",
+      "url": "https://github.com/iOfficeAI/AionUi",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/iOfficeAI/AionUi then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:noambrand-kivun-terminal",
+      "kind": "toolkit",
+      "name": "ClaudeCode Launchpad CLI",
+      "description": "| 9 | Windows & macOS 2-minute installer for Claude Code \u2014 auto-installs Node.js, Git & Claude Code; two-line live status bar (model, context %, usage limits with reset timers); desktop shortcut with folder picker; right-click \"Open with ClaudeCode Launchpad CLI\" on any Windows folder; optional light-blue theme; Claude",
+      "url": "https://github.com/noambrand/kivun-terminal",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/noambrand/kivun-terminal then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:rustykuntz-clideck",
+      "kind": "subagent",
+      "name": "clideck",
+      "description": "| 31 | WhatsApp-like dashboard for managing AI coding agents (Claude Code, Codex, Gemini CLI, OpenCode) in one browser window. Live status, session resume, autopilot routing between agents, mobile remote |",
+      "url": "https://github.com/rustykuntz/clideck",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "browser",
+        "agent"
+      ],
+      "install_hint": "Review github.com/rustykuntz/clideck then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:jeongwookie-wheremytokens",
+      "kind": "subagent",
+      "name": "WhereMyTokens",
+      "description": "| new | Windows system tray app for monitoring Claude Code token usage in real time. Per-session token counts, costs, context window progress, rate limit bars (5h/1w), activity heatmaps, and model breakdowns. Registers as a Claude Code statusLine plugin for live data without polling. Windows only |",
+      "url": "https://github.com/jeongwookie/WhereMyTokens",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/jeongwookie/WhereMyTokens then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:mixpeek-amux",
+      "kind": "subagent",
+      "name": "amux",
+      "description": "| new | Open-source agent multiplexer for running dozens of parallel Claude Code sessions with web dashboard, self-healing watchdog, kanban board, agent-to-agent REST API, and mobile PWA. Single Python file |",
+      "url": "https://github.com/mixpeek/amux",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/mixpeek/amux then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:jayson-jia-dev-cc-token-status",
+      "kind": "toolkit",
+      "name": "cc-token-status",
+      "description": "| new | macOS menu bar dashboard for Claude Code. Shows live plan limits (5h/7d), costs, tokens, trends, model breakdown, user level system, and multi-machine iCloud sync. 5 languages, dark/light mode. Single Python file, auto-updates |",
+      "url": "https://github.com/jayson-jia-dev/cc-token-status",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/jayson-jia-dev/cc-token-status then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:watchfire-io-watchfire",
+      "kind": "subagent",
+      "name": "Watchfire",
+      "description": "| 33 | Orchestration platform for AI coding agents (starting with Claude Code). Manages project context, breaks work into tasks, runs agents with full codebase awareness. Git worktree isolation, sandboxed execution, multiple agent modes (chat, task, autonomous). Go daemon + CLI/TUI + Electron GUI |",
+      "url": "https://github.com/watchfire-io/watchfire",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/watchfire-io/watchfire then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:aby-agency-aby-claude-watcher",
+      "kind": "toolkit",
+      "name": "aby-claude-watcher",
+      "description": "| new | Real-time macOS dashboard for Claude Code sessions. Five color-coded states (thinking, running, waiting, error, completed), per-session notifications, one-click focus terminal across iTerm2/Terminal/Warp/VSCode/Cursor/Ghostty/kitty/WezTerm/Hyper. Bilingual FR/EN, menu-bar tray, MIT licensed. Apple Silicon + Int",
+      "url": "https://github.com/aby-agency/aby-claude-watcher",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/aby-agency/aby-claude-watcher then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:omrikais-cctally",
+      "kind": "toolkit",
+      "name": "cctally",
+      "description": "| new | Track Claude Code subscription usage as a weekly $-per-1% trend. Local web dashboard, terminal UI, forecasts, threshold alerts. Apache-2.0, zero telemetry. |",
+      "url": "https://github.com/omrikais/cctally",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/omrikais/cctally then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:saiso-claude-code-notifier",
+      "kind": "toolkit",
+      "name": "claude-code-notifier",
+      "description": "| new | Native macOS notifier for Claude Code. Swift + UserNotifications, custom Heroicons-derived icon (SF Symbols\u2013free), click-through to your IDE (VS Code, Cursor, Windsurf, JetBrains, iTerm2, Terminal) via bundle ID swap, per-event sound labels, hardened inputs (allowlists, length caps, control-character stripping)",
+      "url": "https://github.com/saiso/claude-code-notifier",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [],
+      "install_hint": "Review github.com/saiso/claude-code-notifier then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:toutkit-toutkit",
+      "kind": "toolkit",
+      "name": "ToutKit",
+      "description": "| new | Desktop notebook for AI CLIs (Claude Code, Codex, Gemini). Pairs a sidebar of notes with a built-in terminal and an in-app webview that renders whatever the AI writes \u2014 each note is a self-contained folder with its own SQLite, key/value store, attached files, and scripts, so a note can grow from a static page i",
+      "url": "https://github.com/toutkit/toutkit",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Companion Apps & GUIs",
+      "tags": [
+        "sqlite",
+        "search"
+      ],
+      "install_hint": "Review github.com/toutkit/toutkit then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:androidzzt-cc-statistics",
+      "kind": "toolkit",
+      "name": "cc-statistics",
+      "description": "| 270+ | Three-in-one Claude Code stats: CLI + Web + native macOS SwiftUI panel. Token costs, code changes by language, efficiency scoring, weekly reports. Supports Codex and Cursor too |",
+      "url": "https://github.com/androidZzT/cc-statistics",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/androidZzT/cc-statistics then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:marciopuga-cog",
+      "kind": "toolkit",
+      "name": "cog",
+      "description": "| 240+ | Cognitive architecture for Claude Code -- persistent memory, self-reflection, and foresight via plain-text conventions. Zero dependencies, just CLAUDE.md + markdown files |",
+      "url": "https://github.com/marciopuga/cog",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "memory"
+      ],
+      "install_hint": "Review github.com/marciopuga/cog then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:ramsbaby-openclaw-self-healing",
+      "kind": "toolkit",
+      "name": "openclaw-self-healing",
+      "description": "| 32+ | 4-tier autonomous crash recovery for Claude Code and any service \u2014 64% auto-resolved, LLM-agnostic (Claude/GPT-4/Gemini/Ollama), Prometheus metrics |",
+      "url": "https://github.com/Ramsbaby/openclaw-self-healing",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/Ramsbaby/openclaw-self-healing then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:ramsbaby-openclaw-memorybox",
+      "kind": "toolkit",
+      "name": "openclaw-memorybox",
+      "description": "| 8+ | Memory hygiene CLI for Claude Code \u2014 prevents context overflow crashes, 83% MEMORY.md size reduction, zero dependencies |",
+      "url": "https://github.com/Ramsbaby/openclaw-memorybox",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "memory"
+      ],
+      "install_hint": "Review github.com/Ramsbaby/openclaw-memorybox then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ramsbaby-openclaw-self-evolving",
+      "kind": "subagent",
+      "name": "openclaw-self-evolving",
+      "description": "| 2+ | Weekly self-improvement pipeline \u2014 scans Claude Code logs, proposes CLAUDE.md/AGENTS.md rule changes, zero API cost |",
+      "url": "https://github.com/Ramsbaby/openclaw-self-evolving",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/Ramsbaby/openclaw-self-evolving then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:wolfe-jam-faf-cli",
+      "kind": "subagent",
+      "name": "faf-cli",
+      "description": "| -- | The package.json for AI context. IANA-registered .faf format \u2014 init, score, bi-sync with CLAUDE.md, export to AGENTS.md, GEMINI.md, .cursorrules. Built with Bun. |",
+      "url": "https://github.com/Wolfe-Jam/faf-cli",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/Wolfe-Jam/faf-cli then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:erishforg-git-parsec",
+      "kind": "subagent",
+      "name": "git-parsec",
+      "description": "| 6+ | Git worktree lifecycle manager \u2014 gives each AI agent an isolated workspace tied to issue tickets (Jira, GitHub Issues, GitLab). No index.lock conflicts in parallel workflows |",
+      "url": "https://github.com/erishforG/git-parsec",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "github",
+        "agent"
+      ],
+      "install_hint": "Review github.com/erishforG/git-parsec then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:bluzername-claude-code-power-stack",
+      "kind": "toolkit",
+      "name": "claude-code-power-stack",
+      "description": "| new | Ghost memory, conversation search, session naming, and Manus-style planning in a single install with cheat sheet PDF |",
+      "url": "https://github.com/bluzername/claude-code-power-stack",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "search",
+        "memory",
+        "pdf"
+      ],
+      "install_hint": "Review github.com/bluzername/claude-code-power-stack then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:mauribadnights-clooks",
+      "kind": "subagent",
+      "name": "clooks",
+      "description": "| new | Persistent hook daemon that replaces per-invocation spawning -- 112x faster hooks with batching, dependency resolution, metrics |",
+      "url": "https://github.com/mauribadnights/clooks",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/mauribadnights/clooks then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:antkawam-claude-code-aws-gateway",
+      "kind": "toolkit",
+      "name": "Claude Code AWS Gateway",
+      "description": "| new | Self-hosted API gateway that routes Claude Code through Amazon Bedrock with team API keys, budgets, rate limits, OIDC SSO, SCIM provisioning, and an admin portal for analytics |",
+      "url": "https://github.com/antkawam/claude-code-aws-gateway",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "aws"
+      ],
+      "install_hint": "Review github.com/antkawam/claude-code-aws-gateway then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:geiserx-cc-agents-md",
+      "kind": "subagent",
+      "name": "cc-agents-md",
+      "description": "| new | CLI tool and SessionStart hook that loads AGENTS.md files into Claude Code sessions. Walks from CWD to git root, inlines small files, emits read instructions for large ones. Supports mid-session reload, context preservation, custom patterns, and stat-based caching. GPL-3.0 |",
+      "url": "https://github.com/GeiserX/cc-agents-md",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/GeiserX/cc-agents-md then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:weijiafu14-gemini-claude-bridge",
+      "kind": "toolkit",
+      "name": "gemini-claude-bridge",
+      "description": "| new | Gemini-to-Claude protocol converter for using Gemini models as Claude Code backend. Fixes 3 LiteLLM bugs |",
+      "url": "https://github.com/weijiafu14/gemini-claude-bridge",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/weijiafu14/gemini-claude-bridge then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:agentopology-agentopology",
+      "kind": "subagent",
+      "name": "AgenTopology",
+      "description": "| New | Declarative language and CLI for multi-agent orchestration -- define agents, flows, gates, hooks, group chats in one .at file, scaffold to 7 platforms, interactive visualizer. Apache 2.0 |",
+      "url": "https://github.com/agentopology/agentopology",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/agentopology/agentopology then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:daxxsec-cognitropy-lab",
+      "kind": "subagent",
+      "name": "cognitropy-lab",
+      "description": "| -- | Autonomous workspace factory powered by a date-seeded entropy engine (363 domains, 22 categories, 18.8M unique outcomes). Builds one new Agent Workspace Model-compliant workspace daily \u2014 from firmware RE to aquaponics to satellite comms \u2014 with full slash commands, workflows, and secrets scanning. Zero human inte",
+      "url": "https://github.com/DaxxSec/cognitropy-lab",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/DaxxSec/cognitropy-lab then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:luiseiman-claude-kit",
+      "kind": "subagent",
+      "name": "claude-kit",
+      "description": "| 1 | Configuration factory for Claude Code -- 13 composable stacks, 6 agents, audit scoring, practices pipeline. Bootstraps and maintains .claude/ across projects |",
+      "url": "https://github.com/luiseiman/claude-kit",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/luiseiman/claude-kit then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:fr-e-d-gaai-framework",
+      "kind": "toolkit",
+      "name": "GAAI Framework",
+      "description": "| 95+ | Drop-in governance layer (.gaai/ folder) -- backlog authorization, cross-session memory, decision tracking, QA gates, autonomous delivery daemon. Claude Code + Cursor + Codex CLI + Gemini CLI |",
+      "url": "https://github.com/Fr-e-d/GAAI-framework",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "memory"
+      ],
+      "install_hint": "Review github.com/Fr-e-d/GAAI-framework then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:federiconeri-wiggum-cli",
+      "kind": "subagent",
+      "name": "Wiggum CLI",
+      "description": "| -- | Open-source AI agent that scans codebases (80+ tech), generates specs through AI interviews, and runs autonomous Ralph loops via Claude Code or Codex. Agent mode ships GitHub issues end-to-end with priority-aware scheduling and auto-merge |",
+      "url": "https://github.com/federiconeri/wiggum-cli",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "github",
+        "agent"
+      ],
+      "install_hint": "Review github.com/federiconeri/wiggum-cli then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:simonsysun-expert-dispatch",
+      "kind": "toolkit",
+      "name": "expert-dispatch",
+      "description": "| new | Specialist Dispatch Pattern -- let cheap AI assistants delegate complex tasks to Claude Code CLI. Bash adapter with run/resume/review workflow, session continuity, per-project directories, and structured JSON output. Designed to be called by another AI system |",
+      "url": "https://github.com/simonsysun/expert-dispatch",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/simonsysun/expert-dispatch then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:melagiri-code-insights",
+      "kind": "toolkit",
+      "name": "Code Insights",
+      "description": "| 8 | Local-first CLI and dashboard for analyzing AI coding sessions from Claude Code, Cursor, Codex CLI, Copilot CLI, and VS Code Copilot. SQLite-backed with terminal analytics, browser dashboard, and LLM-powered insights |",
+      "url": "https://github.com/melagiri/code-insights",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "browser",
+        "sqlite"
+      ],
+      "install_hint": "Review github.com/melagiri/code-insights then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:jakeefr-prism",
+      "kind": "toolkit",
+      "name": "PRISM",
+      "description": "| 15 | Session intelligence for Claude Code \u2014 reads ~/.claude/projects/ JSONL to surface token waste, CLAUDE.md adherence failures, and attention curve degradation. Generates diff-format CLAUDE.md recommendations. Read-only, zero telemetry |",
+      "url": "https://github.com/jakeefr/prism",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/jakeefr/prism then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:saqibameen-agent-dotfiles",
+      "kind": "subagent",
+      "name": "agent-dotfiles",
+      "description": "| new | Write AI coding rules once, sync to every agent. Supports Command Code, Claude Code, Cursor, Copilot, Codex, OpenCode. |",
+      "url": "https://github.com/saqibameen/agent-dotfiles",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/saqibameen/agent-dotfiles then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:whynowlab-zclean",
+      "kind": "toolkit",
+      "name": "zclean",
+      "description": "| 19+ | Kills orphaned processes left behind by Claude Code and Codex. Stops zombie node/python/esbuild from eating your RAM |",
+      "url": "https://github.com/whynowlab/zclean",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/whynowlab/zclean then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:vectorize-io-hindsight",
+      "kind": "subagent",
+      "name": "Hindsight",
+      "description": "| -- | State-of-the-art long-term memory for AI agents by Vectorize. Biomimetic retain/recall/reflect with 4 parallel retrieval strategies. Self-hosted or cloud, MIT-licensed. Claude Code integration |",
+      "url": "https://github.com/vectorize-io/hindsight",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "memory",
+        "agent"
+      ],
+      "install_hint": "Review github.com/vectorize-io/hindsight then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:ajhcs-healthcare-agents",
+      "kind": "subagent",
+      "name": "healthcare-agents",
+      "description": "| New | 51 specialized healthcare administration agents with MHA-level expertise across 10 divisions -- revenue cycle, compliance, quality, clinical ops, payer relations, health IT, and more |",
+      "url": "https://github.com/ajhcs/healthcare-agents",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/ajhcs/healthcare-agents then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:farion1231-cc-switch",
+      "kind": "toolkit",
+      "name": "cc-switch",
+      "description": "| 35,500+ | Cross-platform desktop All-in-One assistant for Claude Code, Codex, OpenCode, and Gemini CLI |",
+      "url": "https://github.com/farion1231/cc-switch",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/farion1231/cc-switch then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:musistudio-claude-code-router",
+      "kind": "toolkit",
+      "name": "claude-code-router",
+      "description": "| 30,700+ | Use Claude Code as coding infrastructure foundation with custom model routing and interaction |",
+      "url": "https://github.com/musistudio/claude-code-router",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/musistudio/claude-code-router then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:superclaude-org-superclaude_framework",
+      "kind": "subagent",
+      "name": "SuperClaude",
+      "description": "| 22,000+ | Config framework with specialized commands, cognitive personas, and dev methodologies |",
+      "url": "https://github.com/SuperClaude-Org/SuperClaude_Framework",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/SuperClaude-Org/SuperClaude_Framework then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:davila7-claude-code-templates",
+      "kind": "toolkit",
+      "name": "claude-code-templates",
+      "description": "| 23,800+ | CLI tool for configuring and monitoring Claude Code projects and workflows |",
+      "url": "https://github.com/davila7/claude-code-templates",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/davila7/claude-code-templates then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:jarrodwatts-claude-hud",
+      "kind": "subagent",
+      "name": "claude-hud",
+      "description": "| 15,200+ | Plugin showing context usage, active tools, running agents, todo progress in a HUD overlay |",
+      "url": "https://github.com/jarrodwatts/claude-hud",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/jarrodwatts/claude-hud then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:vincent-k2026-codachi",
+      "kind": "toolkit",
+      "name": "codachi",
+      "description": "| New | Tamagotchi-style statusline pet that grows with context usage, shows cache hit rate and burn speed |",
+      "url": "https://github.com/vincent-k2026/codachi",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/vincent-k2026/codachi then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:basicscandal-claude-skins",
+      "kind": "subagent",
+      "name": "claude-skins",
+      "description": "| New | 9 custom visual themes for Claude Code \u2014 terminal colors, ASCII art banners, personality voices, status lines, and tool sounds. One-command install, pure bash engine. |",
+      "url": "https://github.com/basicScandal/claude-skins",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/basicScandal/claude-skins then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:acteq1391gp-claude-code-memory-guide",
+      "kind": "subagent",
+      "name": "claude-code-memory-guide",
+      "description": "| 2 | Zero-to-production memory setup: CLAUDE.md + MEMORY.md + MemPalace semantic search + session hooks + warm-model daemon + nightly Karpathy compile with free-LLM key rotation. Three guides \u2014 linear tutorial, memory format reference, automation reference. Runnable scripts, secrets-in-git precommit guard, end-to-end ",
+      "url": "https://github.com/Acteq1391gp/claude-code-memory-guide",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "search",
+        "memory"
+      ],
+      "install_hint": "Review github.com/Acteq1391gp/claude-code-memory-guide then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:watertian-cc-hud",
+      "kind": "subagent",
+      "name": "cc-hud",
+      "description": "| New | Compact single-line Claude Code statusline -- model, context usage (1/8-char progress bar), active subagents, 5h/7d rate-limit countdowns. Pure Node.js, zero deps, Windows-safe. |",
+      "url": "https://github.com/WaterTian/cc-hud",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/WaterTian/cc-hud then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:lum1104-understand-anything",
+      "kind": "toolkit",
+      "name": "Understand-Anything",
+      "description": "| 7,000+ | Turns any codebase into an interactive knowledge graph for exploration |",
+      "url": "https://github.com/Lum1104/Understand-Anything",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/Lum1104/Understand-Anything then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:cordwainersmith-claudoscope",
+      "kind": "toolkit",
+      "name": "Claudoscope",
+      "description": "| 29 | Native macOS menu bar app for Claude Code session analytics. Token/cost tracking, full-text search, real-time secret detection, config health linting (44 rules). Reads local JSONL files, fully offline, zero telemetry. Swift/SwiftUI, Homebrew install |",
+      "url": "https://github.com/cordwainersmith/claudoscope",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "search"
+      ],
+      "install_hint": "Review github.com/cordwainersmith/claudoscope then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:geiserx-lynxprompt",
+      "kind": "subagent",
+      "name": "LynxPrompt",
+      "description": "| 25+ | Open-source platform for managing AI coding agent configs (CLAUDE.md, AGENTS.md, .cursorrules, copilot-instructions.md). Web marketplace, CLI, VS Code extension, self-hostable via Docker/Helm with federation support |",
+      "url": "https://github.com/GeiserX/LynxPrompt",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "docker",
+        "agent"
+      ],
+      "install_hint": "Review github.com/GeiserX/LynxPrompt then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:kraulerson-solo-orchestrator",
+      "kind": "subagent",
+      "name": "Solo Orchestrator",
+      "description": "| 4 | Phase-gated development methodology for building production-quality applications with Claude Code. One-command setup generates CLAUDE.md, CI/CD pipelines, pre-commit hooks, and security tooling. Auto-discovers new platforms and languages from the filesystem. Includes enterprise governance, intake wizard, and adve",
+      "url": "https://github.com/kraulerson/solo-orchestrator",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "github",
+        "filesystem",
+        "security"
+      ],
+      "install_hint": "Review github.com/kraulerson/solo-orchestrator then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:tuo-lei-vibe-replay",
+      "kind": "toolkit",
+      "name": "vibe-replay",
+      "description": "| new | Turn AI coding sessions into shareable, interactive HTML replays with animated playback, insights, and PR integration. Supports Claude Code and Cursor. Website |",
+      "url": "https://github.com/tuo-lei/vibe-replay",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/tuo-lei/vibe-replay then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:hhammoud-agentsinflow",
+      "kind": "subagent",
+      "name": "AgentsInFlow",
+      "description": "| new | Self-hosted desktop workspace for governed AI development \u2014 run Claude Code, Codex, Cursor, OpenCode in isolated runtimes with persistent memory, ticket-driven orchestration, git worktrees per execution, browser bridge, 28 diagram types, session forking. Free early access, no sign-up. Electron (macOS/Windows) |",
+      "url": "https://github.com/hhammoud/AgentsInFlow",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "browser",
+        "memory",
+        "agent"
+      ],
+      "install_hint": "Review github.com/hhammoud/AgentsInFlow then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:dnafin-claudex",
+      "kind": "toolkit",
+      "name": "claudex-setup",
+      "description": "| new | Audit and optimize any project for Claude Code \u2014 scores 0-100, auto-fixes configuration across 972 verified techniques. Zero deps. npx claudex-setup |",
+      "url": "https://github.com/DnaFin/claudex",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/DnaFin/claudex then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:jazzyalex-agent-sessions",
+      "kind": "subagent",
+      "name": "Agent Sessions",
+      "description": "| 495+ | Native macOS app to search, browse, and resume Claude Code, Codex, Gemini CLI, OpenCode, and other local agent sessions, with Agent Cockpit live iTerm2 orchestration |",
+      "url": "https://github.com/jazzyalex/agent-sessions",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "search",
+        "agent"
+      ],
+      "install_hint": "Review github.com/jazzyalex/agent-sessions then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:luoyuctl-agenttrace",
+      "kind": "subagent",
+      "name": "agenttrace",
+      "description": "| new | TUI observability for Claude Code, Codex CLI, Gemini CLI, Aider, Cursor exports, and more. Tracks cost, tokens, tool failures, latency, anomalies, health, diffs, and CI gates from local session logs |",
+      "url": "https://github.com/luoyuctl/agenttrace",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/luoyuctl/agenttrace then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:theihtisham-agent-shadow-brain",
+      "kind": "subagent",
+      "name": "agent-shadow-brain",
+      "description": "| 8+ | AI-powered background code analysis agent for Claude Code that continuously monitors your codebase and provides intelligent suggestions. npm: @theihtisham/agent-shadow-brain |",
+      "url": "https://github.com/theihtisham/agent-shadow-brain",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent"
+      ],
+      "install_hint": "Review github.com/theihtisham/agent-shadow-brain then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:o0000-code-cc-tempo",
+      "kind": "subagent",
+      "name": "cc-tempo",
+      "description": "| New | Claude Code statusline with wall-clock active work time, SubAgent speedup ratio, /clear-resilient PID timer, code-churn sparkline with trend arrow, and multi-instance detection. Bash + TypeScript, MIT. |",
+      "url": "https://github.com/O0000-code/cc-tempo",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [
+        "agent",
+        "subagent"
+      ],
+      "install_hint": "Review github.com/O0000-code/cc-tempo then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:bjorn-ingmanson-thefroject-plugins",
+      "kind": "subagent",
+      "name": "thefroject-plugins",
+      "description": ". |",
+      "url": "https://github.com/bjorn-ingmanson/thefroject-plugins",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Ecosystem",
+      "tags": [],
+      "install_hint": "Review github.com/bjorn-ingmanson/thefroject-plugins then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "toolkit:mshadmanrahman-claudecode-guide",
+      "kind": "toolkit",
+      "name": "GitHub",
+      "description": ") |",
+      "url": "https://github.com/mshadmanrahman/claudecode-guide",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "Resources",
+      "tags": [
+        "github"
+      ],
+      "install_hint": "Review github.com/mshadmanrahman/claudecode-guide then wire via Cortex discovery install path",
+      "reputation": "community"
+    },
+    {
+      "id": "subagent:0xmariowu-autosearch",
+      "kind": "subagent",
+      "name": "AutoSearch",
+      "description": "| new | Self-evolving deep research plugin for Claude Code -- 32 dedicated search channels (arXiv, GitHub, Reddit, HN, zhihu, bilibili, CSDN + 25 more), LLM-scored evaluation, cited reports in Markdown/HTML/Slides, cross-session learning. Zero API keys required |",
+      "url": "https://github.com/0xmariowu/Autosearch",
+      "source": "rohitg00/awesome-claude-code-toolkit",
+      "category": "License",
+      "tags": [
+        "github",
+        "search"
+      ],
+      "install_hint": "Review github.com/0xmariowu/Autosearch then wire via Cortex discovery install path",
+      "reputation": "community"
+    }
+  ]
+}

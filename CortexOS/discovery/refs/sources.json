@@ -1,0 +1,36 @@
+{
+  "updated": "2026-07-24",
+  "policy": "skills_first_then_mcp; evolve_with_skillopt",
+  "sources": [
+    {
+      "id": "punkpeye/awesome-mcp-servers",
+      "url": "https://github.com/punkpeye/awesome-mcp-servers",
+      "role": "mcp"
+    },
+    {
+      "id": "rohitg00/awesome-claude-code-toolkit",
+      "url": "https://github.com/rohitg00/awesome-claude-code-toolkit",
+      "role": "toolkit_subagents"
+    },
+    {
+      "id": "BehiSecc/awesome-claude-skills",
+      "url": "https://github.com/BehiSecc/awesome-claude-skills",
+      "role": "skills"
+    },
+    {
+      "id": "itgoyo/awesome-agent-skills",
+      "url": "https://github.com/itgoyo/awesome-agent-skills",
+      "role": "skills"
+    },
+    {
+      "id": "microsoft/SkillOpt",
+      "url": "https://github.com/microsoft/SkillOpt",
+      "role": "evolve"
+    },
+    {
+      "id": "vercel-labs/skills/find-skills",
+      "url": "https://github.com/vercel-labs/skills",
+      "role": "find_skills_meta"
+    }
+  ]
+}
