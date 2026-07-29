@@ -41,7 +41,6 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
-from sqlglot.optimizer.scope import build_scope
 
 from CortexOS.paths import data_path
 
@@ -150,8 +149,11 @@ def _parse_ts(raw: str | None, *, field_name: str) -> datetime:
         text = text[:-1] + "+00:00"
     try:
         parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise ManifestMalformed(f"{field_name} is not ISO-8601: {raw!r}") from exc
+    except (ValueError, OverflowError, OSError) as exc:
+        # OverflowError, not ValueError, is what a year of 999999999 raises.
+        # These strings arrive before the signature is checked, so anything
+        # unhandled here is a crash an unauthenticated caller can trigger.
+        raise ManifestMalformed(f"{field_name} is not a usable timestamp: {raw!r}") from exc
     if parsed.tzinfo is None:
         raise ManifestMalformed(f"{field_name} has no timezone offset: {raw!r}")
     return parsed.astimezone(timezone.utc)
@@ -164,12 +166,23 @@ def _now() -> datetime:
 # ── JWKS cache ───────────────────────────────────────────────────────────────
 
 
+_B64URL = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
 def _b64url_decode(raw: str, *, what: str) -> bytes:
-    """Decode unpadded base64url. Rejects anything else — one encoding, strictly."""
+    """Decode unpadded base64url, strictly.
+
+    Strict on purpose. Python's decoder ignores characters it does not
+    recognise and accepts several spellings of the same bytes, so a lax decoder
+    means one signed manifest has many valid-looking signature strings. Nothing
+    keys on that string today, but anything that later did — a replay cache, a
+    dedupe, an audit match — would be bypassable by re-spelling it.
+    """
     text = raw.strip()
-    padding = "=" * (-len(text) % 4)
+    if not text or not _B64URL.match(text) or len(text) % 4 == 1:
+        raise ManifestMalformed(f"{what} is not unpadded base64url")
     try:
-        return base64.urlsafe_b64decode(text + padding)
+        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
     except (ValueError, TypeError) as exc:
         raise ManifestMalformed(f"{what} is not base64url") from exc
 
@@ -201,7 +214,12 @@ def _epoch_or_iso(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            # An absurd exp in a cached JWKS must drop that key, not take the
+            # whole verifier down on the next call.
+            return None
     if isinstance(value, str):
         try:
             return _parse_ts(value, field_name="key validity")
@@ -425,7 +443,14 @@ class ManifestVerifier:
 
         signature = _b64url_decode(manifest.signature, what="signature")
         try:
-            key.public_key.verify(signature, canonical_manifest_bytes(manifest))
+            payload = canonical_manifest_bytes(manifest)
+        except (UnicodeEncodeError, ValueError, TypeError) as exc:
+            # A lone UTF-16 surrogate in any string field cannot be encoded, and
+            # this runs before the signature is checked — so an unauthenticated
+            # caller could otherwise crash the verifier with one field.
+            raise ManifestMalformed("manifest contains text that cannot be canonicalised") from exc
+        try:
+            key.public_key.verify(signature, payload)
         except InvalidSignature as exc:
             raise ManifestSignatureInvalid(f"signature does not verify under key {kid!r}") from exc
 
@@ -630,28 +655,81 @@ def _collect_path_refs(root: exp.Expression) -> list[_PathRef]:
     return refs
 
 
-def _physical_tables(root: exp.Expression) -> list[exp.Table]:
-    """Table nodes that are real relations — not CTE references, not functions.
+def _locally_bound_names(root: exp.Expression) -> set[str]:
+    """Names this statement binds itself: CTEs, derived tables, table functions.
 
-    A CTE reference parses as ``exp.Table`` like anything else. Injecting a row
-    predicate into one is wrong twice over: it re-filters an already-filtered
-    result, and if the CTE name shadows a real table it wraps the wrong
-    relation entirely. The scope resolver is the only thing that tells them
-    apart.
+    Collected syntactically, from the alias nodes, rather than by asking the
+    scope resolver what a name resolves to. That distinction is the whole
+    finding: ``FROM UNNEST([1]) AS orders(x), orders AS o`` makes the resolver
+    report the real ``orders`` as a local source, so a scope-based filter drops
+    it — and with it both the row predicate and the grant check. An attacker
+    who can change what a name *resolves to* must not be able to change whether
+    it is *checked*.
+
+    A ``TableAlias`` hanging off a real table (``FROM orders o``) is not a
+    binding of a new relation — the underlying table is still reached and still
+    checked — so it is skipped.
     """
-    scope = build_scope(root)
-    if scope is None:
-        return [t for t in root.find_all(exp.Table) if isinstance(t.this, exp.Identifier)]
-    tables: list[exp.Table] = []
-    for inner in scope.traverse():
-        for table in inner.tables:
-            if not isinstance(table.this, exp.Identifier):
-                continue  # a table function; the path checks cover it
-            source = inner.sources.get(table.name)
-            if source is not None and not isinstance(source, exp.Table):
-                continue  # resolves to a CTE or a derived table
-            tables.append(table)
-    return tables
+    bound: set[str] = set()
+    for alias in root.find_all(exp.TableAlias):
+        parent = alias.parent
+        if isinstance(parent, exp.Table) and isinstance(parent.this, exp.Identifier):
+            continue
+        if alias.name:
+            bound.add(alias.name.lower())
+    return bound | _cte_names(root)
+
+
+def _cte_names(root: exp.Expression) -> set[str]:
+    """Names a ``WITH`` clause defines — the only local bindings that shadow.
+
+    This is deliberately narrower than :func:`_locally_bound_names`, and the
+    difference is a real escape. A CTE named ``c`` means a later ``FROM c`` is
+    not a base table. A *FROM-clause alias* named ``c`` does not: in
+    ``FROM UNNEST([1]) AS secrets(x), secrets AS s`` the second entry still
+    resolves to the base table ``secrets``. Treating both as "locally bound"
+    therefore let an attacker exempt any table from the grant check just by
+    aliasing something else to its name.
+    """
+    return {cte.alias.lower() for cte in root.find_all(exp.CTE) if cte.alias}
+
+
+def _named_tables(root: exp.Expression) -> list[exp.Table]:
+    """Every table reference written as a name, wherever it appears.
+
+    No scope resolution. Callers separate real tables from locally bound names
+    using :func:`_locally_bound_names`, which the shadowing check has already
+    forced to be disjoint from the granted set.
+    """
+    return [t for t in root.find_all(exp.Table) if isinstance(t.this, exp.Identifier)]
+
+
+def _refuse_unknown_table_functions(root: exp.Expression) -> None:
+    """Refuse any FROM-position function this module does not recognise.
+
+    The file-reading functions are enumerated so their path arguments can be
+    checked, but an enumeration of dangerous functions is a denylist, and
+    DuckDB has more file readers than any list will hold —
+    ``parquet_metadata``, ``parquet_schema``, ``read_json_objects_auto``,
+    ``iceberg_metadata`` and friends all take a path and return its contents.
+    An unrecognised function is therefore refused rather than ignored, which
+    turns the enumeration back into an allowlist.
+    """
+    for table in root.find_all(exp.Table):
+        source = table.this
+        if isinstance(source, exp.Identifier):
+            continue
+        if isinstance(source, exp.Anonymous):
+            name = str(source.this).lower()
+        elif isinstance(source, (exp.ReadParquet, exp.ReadCSV)):
+            continue
+        else:
+            name = type(source).__name__.lower()
+        if name not in _FILE_FUNCTIONS:
+            raise SqlNotAnalyzable(
+                f"{name}() is not a table function this manifest can bound; "
+                "refusing rather than assuming it reads nothing"
+            )
 
 
 def _wrap_with_predicate(table: exp.Table, predicate: str) -> exp.Subquery:
@@ -729,29 +807,32 @@ def _refuse_dynamic_sql(root: exp.Expression) -> None:
             )
 
 
-def _refuse_shadowing(root: exp.Expression, predicated: set[str]) -> None:
-    """Refuse binding a CTE or derived table to a predicated table's name.
+def _refuse_shadowing(bound: set[str], granted: set[str]) -> None:
+    """Refuse binding any local relation to a granted table's name.
 
-    ``WITH orders AS (SELECT * FROM read_parquet(...)) SELECT * FROM orders``
-    reads a path the manifest allows, then serves it under the name of a table
-    the manifest filters. Predicate injection sees a CTE reference and correctly
-    leaves it alone, so the rows come back unfiltered under a governed name. The
-    name is the grant; rebinding it is not allowed.
+    Covers CTEs, derived tables, table functions, ``UNNEST``, ``VALUES`` and
+    lateral joins in one rule, because they are all just an alias node in the
+    tree. Two things go wrong when a governed name is rebound:
+
+    * a path read the manifest allows gets served under the name of a table the
+      manifest filters, and the rows come back unfiltered;
+    * the real table of that name becomes a "local source" to the resolver, so
+      it stops being checked at all.
+
+    Enforcing disjointness here is what lets every later step decide by name
+    alone: a granted name can only ever mean the granted table.
     """
-    for cte in root.find_all(exp.CTE):
-        if cte.alias and cte.alias.lower() in predicated:
-            raise PathNotAllowed(
-                f"CTE {cte.alias!r} rebinds the name of a table this manifest filters"
-            )
-    for subquery in root.find_all(exp.Subquery):
-        alias = subquery.alias
-        if alias and alias.lower() in predicated:
-            raise PathNotAllowed(
-                f"derived table {alias!r} rebinds the name of a table this manifest filters"
-            )
+    collision = sorted(bound & granted)
+    if collision:
+        raise PathNotAllowed(
+            f"{collision[0]!r} is bound locally but is also a table this manifest governs; "
+            "rebinding a governed name is not allowed"
+        )
 
 
-def _refuse_ungranted_tables(root: exp.Expression, granted: set[str]) -> None:
+def _refuse_ungranted_tables(
+    root: exp.Expression, granted: set[str], bound: set[str]
+) -> None:
     """Deny by default: a relation the manifest never names is not readable.
 
     ``allowed_paths`` bounds what may be read out of files. Nothing bounds what
@@ -763,12 +844,12 @@ def _refuse_ungranted_tables(root: exp.Expression, granted: set[str]) -> None:
     Without this, ``SELECT id FROM orders UNION ALL SELECT id FROM secrets``
     passes every path check, because ``secrets`` is not a path.
     """
-    for table in _physical_tables(root):
+    for table in _named_tables(root):
         name = table.name.lower()
-        if name and name not in granted:
-            raise PathNotAllowed(
-                f"table {table.name!r} is not named by this manifest"
-            )
+        if not name or name in bound:
+            continue  # a CTE or derived relation this statement defines itself
+        if name not in granted:
+            raise PathNotAllowed(f"table {table.name!r} is not named by this manifest")
 
 
 def _refuse_cross_catalog(root: exp.Expression) -> None:
@@ -799,6 +880,7 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
     root = _parse_single_statement(sql)
     _refuse_unanalyzable(root)
     _refuse_dynamic_sql(root)
+    _refuse_unknown_table_functions(root)
 
     for attach in root.find_all(exp.Attach, exp.Detach):
         target = attach.this
@@ -824,15 +906,19 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
 
     predicates = {name.lower(): body for name, body in verified.row_predicates.items()}
     granted = set(predicates)
-    _refuse_ungranted_tables(root, granted)
-    _refuse_shadowing(root, granted)
+    # Order matters: disjointness first, so the grant check and the injector
+    # below can both decide by name alone. Note the two different sets — only a
+    # CTE exempts a name from the grant check, while *any* local binding of a
+    # governed name is refused outright.
+    _refuse_shadowing(_locally_bound_names(root), granted)
+    _refuse_ungranted_tables(root, granted, _cte_names(root))
     if not predicates:
         return root.sql(dialect="duckdb")
 
     # Materialise before mutating. Replacing a Table never detaches another
     # Table, so a lazy walk would also be sound here — but the list makes that
     # a local guarantee rather than a fact about sqlglot's traversal order.
-    for table in list(_physical_tables(root)):
+    for table in list(_named_tables(root)):
         predicate = predicates.get(table.name.lower())
         if predicate is None:
             continue

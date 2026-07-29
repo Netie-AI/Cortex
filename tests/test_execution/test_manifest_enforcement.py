@@ -205,3 +205,89 @@ def test_enforcement_requires_a_verified_manifest() -> None:
 
     annotation = inspect.signature(enforce_manifest).parameters["verified"].annotation
     assert "VerifiedManifest" in str(annotation)
+
+
+# ── red-team regressions ─────────────────────────────────────────────────────
+# Every one of these was a working escape found by adversarial review after the
+# 90-case corpus already passed. They are kept as named tests, not folded into
+# the corpus, so the specific mistake stays legible.
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # A FROM-clause alias rebinding a governed name made the real table
+        # invisible to both the predicate injector and the grant check.
+        "SELECT o.* FROM unnest([1]) AS orders(x), orders AS o",
+        "SELECT o.* FROM (VALUES (1)) AS orders(x), orders AS o",
+        "SELECT * FROM orders o, LATERAL (SELECT 1) AS users",
+    ],
+    ids=["unnest_rebind", "values_rebind", "lateral_rebind"],
+)
+def test_local_binding_cannot_rebind_a_governed_name(
+    sql: str, verified: VerifiedManifest
+) -> None:
+    with pytest.raises(PathNotAllowed):
+        enforce_manifest(sql, verified)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT s.* FROM unnest([1]) AS secrets(x), secrets AS s",
+        "SELECT s.* FROM (VALUES (1)) AS secrets(x), secrets AS s",
+    ],
+    ids=["unnest_exempt", "values_exempt"],
+)
+def test_an_alias_cannot_exempt_a_table_from_the_grant_check(
+    sql: str, verified: VerifiedManifest
+) -> None:
+    """A CTE shadows a base table; a FROM-clause alias does not.
+
+    Treating both as "locally bound" let an attacker exempt any table from the
+    grant check by aliasing something else to its name — the second entry still
+    resolves to the base table.
+    """
+    with pytest.raises(PathNotAllowed):
+        enforce_manifest(sql, verified)
+
+
+@pytest.mark.parametrize(
+    "function",
+    [
+        "parquet_metadata",
+        "parquet_schema",
+        "parquet_file_metadata",
+        "read_json_objects_auto",
+        "read_ndjson_objects",
+        "iceberg_metadata",
+        "duckdb_settings",
+    ],
+)
+def test_unrecognised_table_functions_are_refused(
+    function: str, verified: VerifiedManifest
+) -> None:
+    """DuckDB has more file readers than any enumeration will hold.
+
+    Listing the dangerous ones is a denylist: an unlisted reader had its path
+    argument collected by nothing and checked by nothing. Unknown FROM-position
+    functions are now refused, which turns the list back into an allowlist.
+    """
+    with pytest.raises(SqlNotAnalyzable):
+        enforce_manifest(f"SELECT * FROM {function}('/etc/secrets.parquet')", verified)
+
+
+def test_known_readers_still_work_inside_the_manifest(verified: VerifiedManifest) -> None:
+    """The allowlist flip must not break the readers a session is entitled to."""
+    out = enforce_manifest(
+        "SELECT * FROM read_parquet('/data/pool/tenant_a/x.parquet')", verified
+    )
+    assert "READ_PARQUET" in out.upper()
+
+
+def test_cte_still_shadows_legitimately(verified: VerifiedManifest) -> None:
+    """The narrowing must not break ordinary WITH usage."""
+    out = enforce_manifest(
+        "WITH recent AS (SELECT * FROM orders WHERE amount > 1) SELECT * FROM recent", verified
+    )
+    assert "tenant_id" in out

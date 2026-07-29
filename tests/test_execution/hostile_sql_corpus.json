@@ -137,7 +137,8 @@
       "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/orders.parquet') AS orders",
       "technique": "file_aliased_as_table",
       "why_it_might_slip": "Path is legitimately inside allowed_paths, so path validation passes; but predicate injection keyed on the table name 'orders' may skip file-function sources, letting the tenant_id='a' predicate be silently dropped even though the relation is aliased 'orders'.",
-      "expected": "allow_but_predicate_must_apply"
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Reclassified after adversarial review. A table predicate cannot be applied to a file read, so serving an allowed path under a governed table's name is a bypass, not a case for injection. Refused by the same rule that refuses UNNEST(...) AS orders."
     },
     {
       "name": "recursive_cte_rereads_orders",
