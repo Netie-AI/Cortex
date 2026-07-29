@@ -26,7 +26,12 @@ from typing import Any
 import sqlglot
 
 from CortexOS.dms.sql_guardrail import MAX_LIMIT, guard_and_execute
-from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_layer
+from CortexOS.dms.warehouse_db import (
+    DEFAULT_DB,
+    get_connection,
+    load_semantic_layer,
+    read_only_queries_enabled,
+)
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
@@ -105,6 +110,25 @@ def _days(q: str, default: int) -> int:
     return int(m2.group(1)) if m2 else default
 
 
+def _wants_aggregate(q: str) -> bool:
+    """Count/avg/how-many — must beat listing synonyms like bare 'expired'."""
+    return bool(
+        re.search(
+            r"\b(how many|number of|count of|\bcount\b|average|avg|mean|total)\b",
+            q,
+        )
+    )
+
+
+def _calendar_month(q: str) -> str | None:
+    """Return 'last' | 'this' when the question names a calendar month window."""
+    if re.search(r"\b(last|previous|prior)\s+month\b", q):
+        return "last"
+    if re.search(r"\bthis\s+month\b", q):
+        return "this"
+    return None
+
+
 def _pct(q: str, default: int = 90) -> int:
     m = re.search(r"(?:above|over|more than|>)\s*(\d{1,3})\s*(?:percent|%)", q)
     return int(m.group(1)) if m else default
@@ -119,7 +143,21 @@ def _location(question: str) -> str | None:
 
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
 def route_to_metric(question: str) -> MetricPlan | None:
-    q = question.lower()
+    """Pick a governed metric + its slots.
+
+    Two views of the question, deliberately kept apart:
+      ``q``     — normalized into router vocabulary; decides WHICH metric.
+      ``q_raw`` — the untouched question; supplies every SLOT (limits,
+                  thresholds, directions, day windows, percentages, locations).
+
+    Slots must never come from the normalized text: normalization exists to
+    widen recall over wording, and it must not be able to move a number, a
+    threshold or a direction. See packs/dms/semantic/vocabulary.py.
+    """
+    from packs.dms.semantic.vocabulary import normalize_for_routing
+
+    q_raw = question.lower()
+    q = normalize_for_routing(question)
 
     # scalars first — "how many X" must not fall through to a listing
     if re.search(r"\b(how many|number of|count of|count)\b", q) and "cold storage" in q:
@@ -135,14 +173,16 @@ def route_to_metric(question: str) -> MetricPlan | None:
         status = "DELAYED" if "delayed" in q else "IN_TRANSIT"
         return MetricPlan("count_by_destination", {"status": status}, f"{status} shipments grouped by destination")
 
-    # revenue over a window
+    # revenue — calendar month before rolling-day window; before ranked "top sales"
+    if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":
+        return MetricPlan("revenue_last_month", {}, "revenue in the previous calendar month")
     if re.search(r"\b(revenue|sales|sold)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
-        return MetricPlan("revenue_windowed", {"days": _days(q, 30)}, "revenue over a rolling window")
+        return MetricPlan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
 
     # supplier risk threshold
     if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
         return MetricPlan("suppliers_by_risk",
-                          {"threshold": _threshold(q), "op": _threshold_op(q)},
+                          {"threshold": _threshold(q_raw), "op": _threshold_op(q_raw)},
                           "suppliers filtered by risk-score threshold")
 
     # average lead time by country
@@ -152,18 +192,22 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # free capacity ranking
     if re.search(r"\bfree\b|\bspare\b|\bavailable\b", q) and "capacit" in q:
         return MetricPlan("free_capacity",
-                          {"limit": _explicit_limit(q) or 1, "direction": _direction(q)},
+                          {"limit": _explicit_limit(q_raw) or 1, "direction": _direction(q_raw)},
                           "warehouses ranked by free capacity")
 
     # capacity above a percentage
     if "capacit" in q and re.search(r"\b(above|over|more than)\b.*\d", q):
-        return MetricPlan("capacity_above", {"pct": _pct(q)}, "locations above a capacity threshold")
-    if "capacit" in q and re.search(r"\b(utilis|utiliz|how full|usage)\b", q):
+        return MetricPlan("capacity_above", {"pct": _pct(q_raw)}, "locations above a capacity threshold")
+    # utilis\w* / utiliz\w*, not utilis\b — the trailing \b made the word
+    # "utilisation" itself fail to match, so this branch was only ever reachable
+    # by the stem alone. The golden question hits L0 certified, which is why the
+    # dead branch went unnoticed.
+    if "capacit" in q and re.search(r"\b(utilis\w*|utiliz\w*|how full|usage)\b", q):
         return MetricPlan("capacity_utilisation", {}, "capacity utilisation per location")
 
     # arriving window
     if "arriving" in q or ("incoming" in q and re.search(r"\bweek|\bdays?\b", q)):
-        return MetricPlan("arriving_window", {"days": _days(q, 7)}, "in-transit shipments arriving within a window")
+        return MetricPlan("arriving_window", {"days": _days(q_raw, 7)}, "in-transit shipments arriving within a window")
 
     # shipment status listing
     for status in ("delayed", "in transit", "in_transit", "pending", "delivered", "cancelled"):
@@ -183,23 +227,31 @@ def route_to_metric(question: str) -> MetricPlan | None:
 
     # not restocked window
     if re.search(r"\b(not restocked|stale)\b", q) or ("restock" in q and "not" in q):
-        return MetricPlan("stale_restock", {"days": _days(q, 30)}, "items not restocked within a window")
+        return MetricPlan("stale_restock", {"days": _days(q_raw, 30)}, "items not restocked within a window")
 
-    # expired
-    if "expired" in q or "past expiry" in q:
-        return MetricPlan("expired_items", {}, "expired inventory")
+    # expired — aggregate / calendar month BEFORE bare listing
+    if "expired" in q or "past expiry" in q or "out of date" in q:
+        month = _calendar_month(q)
+        if month == "last" or (_wants_aggregate(q) and month == "last"):
+            return MetricPlan("expired_last_month", {}, "count of items that expired last month")
+        if _wants_aggregate(q):
+            return MetricPlan("expired_count", {}, "count of currently expired inventory")
+        return MetricPlan("expired_items", {}, "expired inventory listing")
 
     # active alerts
     if "alert" in q and re.search(r"\b(active|open|unresolved|current)\b", q):
         return MetricPlan("active_alerts", {}, "unresolved alerts")
 
-    # sales ranking
+    # sales ranking (after month/window scalars so "last month sales" never ranks)
     if re.search(r"\b(top|best|highest|most)\b", q) and re.search(r"\b(sell|sold|revenue|sales)\b", q):
         if re.search(r"\b(quantity|volume|kg|units?)\b", q):
-            return MetricPlan("sales_by_volume", {"limit": _extract_limit(q, 5), "direction": _direction(q)},
+            return MetricPlan("sales_by_volume", {"limit": _extract_limit(q_raw, 5), "direction": _direction(q_raw)},
                               "SKUs ranked by quantity sold")
-        return MetricPlan("sales_by_value", {"limit": _extract_limit(q, 5), "direction": _direction(q)},
+        return MetricPlan("sales_by_value", {"limit": _extract_limit(q_raw, 5), "direction": _direction(q_raw)},
                           "SKUs ranked by sales value")
+    # unranked "last month sales" catch-all if earlier branch missed phrasing
+    if re.search(r"\b(sales|revenue)\b", q) and _calendar_month(q) == "last":
+        return MetricPlan("revenue_last_month", {}, "revenue in the previous calendar month")
 
     return None
 
@@ -267,17 +319,148 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
     }
 
 
+# ── session memory (follow-up anaphora) ───────────────────────────────────────
+_SESSION: dict[str, dict[str, Any]] = {}
+
+
+def _session_key(session_id: str | None) -> str:
+    return (session_id or "demo").strip() or "demo"
+
+
+def _remember(session_id: str | None, turn: dict[str, Any]) -> None:
+    _SESSION[_session_key(session_id)] = turn
+
+
+def clear_session(session_id: str | None = None) -> None:
+    if session_id is None:
+        _SESSION.clear()
+    else:
+        _SESSION.pop(_session_key(session_id), None)
+
+
+def _is_anaphora(q: str) -> bool:
+    """Follow-up pronouns referring to the prior result set — not bare 'it' in English."""
+    return bool(
+        re.search(
+            r"\b(them|those|these)\b|"
+            r"\b(average|avg|mean|total|sum|count|how many)\s+of\s+(them|those|these|it)\b|"
+            r"\bwhat is the average of (them|those|these|it)\b|"
+            r"\baverage of (them|those|these)\b",
+            q,
+        )
+    )
+
+
+def _numeric_columns(rows: list[dict[str, Any]]) -> list[str]:
+    if not rows:
+        return []
+    cols: list[str] = []
+    for k, v in rows[0].items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            cols.append(k)
+        elif isinstance(v, str):
+            try:
+                float(v)
+                cols.append(k)
+            except ValueError:
+                pass
+    return cols
+
+
+def _aggregate_prior(
+    prior_sql: str,
+    question: str,
+    rows: list[dict[str, Any]],
+    *,
+    total_count: int | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Follow-up aggregate over the prior result.
+
+    COUNT uses a guarded subquery wrap. AVG is computed from the prior row
+    snapshot (outer alias columns fail the table allowlist guardrail).
+    """
+    q = question.lower()
+    wants_avg = bool(re.search(r"\b(average|avg|mean)\b", q))
+    nums = _numeric_columns(rows)
+    measure = None
+    for prefer in ("sales_value_myr", "total_sold_kg", "revenue_myr", "quantity_kg",
+                   "total_value_myr", "ranking_score", "free_kg", "pct_used"):
+        if prefer in nums:
+            measure = prefer
+            break
+    if measure is None and nums:
+        for c in nums:
+            if not re.search(r"(^id$|_id$|count$)", c, re.I):
+                measure = c
+                break
+
+    if wants_avg and measure and rows:
+        vals: list[float] = []
+        for row in rows:
+            raw = row.get(measure)
+            if raw is None:
+                continue
+            try:
+                vals.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        if vals:
+            avg_val = round(sum(vals) / len(vals), 2)
+            col = f"avg_{measure}"
+            # Literal SELECT — no unknown column vs warehouse allowlist.
+            sql = f"SELECT CAST({avg_val} AS DOUBLE) AS {col}"
+            return sql, [{col: avg_val}]
+
+    tree = sqlglot.parse_one(prior_sql, read="duckdb")
+    tree.set("limit", None)
+    tree.set("order", None)
+    inner = tree.sql(dialect="duckdb")
+    sql = f"SELECT COUNT(*) AS followup_count FROM ({inner}) _prior"
+    if total_count is not None and not wants_avg:
+        # Prefer honest total when prior listing was truncated
+        return sql, [{"followup_count": int(total_count)}]
+    return sql, []  # rows filled by execute
+
+
+
+def _honest_plan(
+    question: str,
+    sql: str | None,
+    *,
+    layer: str,
+    metric_id: str | None = None,
+    skill_score: float | None = None,
+    assumptions: str = "",
+) -> dict[str, Any]:
+    from CortexOS.dms.query_service import plan_query
+
+    base = plan_query(question, sql).to_dict()
+    # Real route wins over keyword heuristics for UI confidence.
+    conf = 0.95 if layer in ("certified", "governed_metric") else 0.85
+    if layer == "query_skill" and skill_score is not None:
+        conf = min(0.99, max(0.72, float(skill_score)))
+    if layer == "session":
+        conf = 0.88
+    intent = metric_id or layer or base.get("intent") or "unknown"
+    base["intent"] = intent
+    base["confidence"] = round(conf, 3)
+    base["layer"] = layer
+    base["metric_id"] = metric_id
+    base["skill_score"] = round(skill_score, 3) if skill_score is not None else None
+    base["assumptions"] = assumptions
+    return base
+
+
 # ── the engine ────────────────────────────────────────────────────────────────
 def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
-    del session_id
     from CortexOS.dms.query_service import (
         _infer_source_table,
         build_chart_spec,
-        plan_query,
         rag_answer,
         route_question,
         synthesize_answer,
     )
+    from packs.dms.semantic import query_skills
 
     audit_id = str(uuid.uuid4())
     route = route_question(question)
@@ -288,6 +471,7 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
             "audit_id": audit_id, "violations_blocked": ["DDL_ATTEMPT"], "route": "blocked",
             "rows": [], "source_table": None, "layer": "blocked", "badge": "blocked",
             "assumptions": "destructive operation refused", "total_count": 0,
+            "query_plan": _honest_plan(question, None, layer="blocked", assumptions="destructive"),
         }
     if route == "rag":
         ans, sources = rag_answer(question)
@@ -296,39 +480,99 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
             "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
             "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
             "total_count": 0,
+            "query_plan": _honest_plan(question, None, layer="rag"),
         }
 
-    # L0 certified → L1 metric → L3 abstain (L2 free-form flag-off)
     layer = badge = ""
     sql: str | None = None
     assumptions = ""
+    metric_id: str | None = None
+    metric_slots: dict[str, Any] = {}
+    skill_score: float | None = None
 
-    cq = match_certified(question)
-    if cq is not None:
-        sql, layer, badge = cq.sql, "certified", "certified"
-        assumptions = f"certified query {cq.id}"
-    else:
-        plan = route_to_metric(question)
-        if plan is not None:
-            from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
+    q_low = question.lower()
+    prior = _SESSION.get(_session_key(session_id))
 
-            try:
-                sql = compile_metric(load_all(), plan.metric_id, plan.slots)
-                layer, badge = "governed_metric", "governed_metric"
-                assumptions = plan.reason
-            except SemanticError as exc:
-                return _abstain(question, audit_id, reason=f"could not resolve inputs: {exc}")
+    # Session anaphora — "average of them" over last successful SQL
+    session_rows: list[dict[str, Any]] | None = None
+    if prior and prior.get("sql") and _is_anaphora(q_low):
+        try:
+            sql, session_rows = _aggregate_prior(
+                prior["sql"],
+                question,
+                prior.get("rows") or [],
+                total_count=prior.get("total_count"),
+            )
+            layer, badge = "session", "session"
+            assumptions = f"follow-up over prior turn ({prior.get('metric_id') or prior.get('layer')})"
+            metric_id = prior.get("metric_id")
+        except Exception:  # noqa: BLE001
+            sql = None
+            session_rows = None
+
+    # L0 certified → L1 metric → L-skill → L3 abstain
+    # Skills run after governed routes so golden/certified paths stay authoritative.
+    if sql is None:
+        cq = match_certified(question)
+        if cq is not None:
+            sql, layer, badge = cq.sql, "certified", "certified"
+            assumptions = f"certified query {cq.id}"
+            metric_id = cq.id
         else:
-            if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
-                # L2 hook — intentionally not wired until a local SQL model exists.
-                return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
-            return _abstain(question, audit_id, reason="no governed metric or certified query matched")
+            plan = route_to_metric(question)
+            if plan is not None:
+                from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
+
+                try:
+                    sql = compile_metric(load_all(), plan.metric_id, plan.slots)
+                    layer, badge = "governed_metric", "governed_metric"
+                    assumptions = plan.reason
+                    metric_id = plan.metric_id
+                    metric_slots = dict(plan.slots)
+                except SemanticError as exc:
+                    return _abstain(question, audit_id, reason=f"could not resolve inputs: {exc}")
+
+    if sql is None:
+        hit = query_skills.find(question)
+        if hit is not None:
+            skill_score = float(hit["score"])
+            if hit.get("metric_id"):
+                from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
+
+                try:
+                    sql = compile_metric(load_all(), hit["metric_id"], hit.get("params") or {})
+                    layer, badge = "query_skill", "query_skill"
+                    assumptions = f"query skill match score={skill_score:.3f} → {hit['metric_id']}"
+                    metric_id = hit["metric_id"]
+                    metric_slots = dict(hit.get("params") or {})
+                except SemanticError:
+                    sql = None
+            elif hit.get("sql_template"):
+                sql = hit["sql_template"]
+                layer, badge = "query_skill", "query_skill"
+                assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
+
+    if sql is None:
+        if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
+            return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
+        return _abstain(question, audit_id, reason="no governed metric or certified query matched")
 
     semantic = load_semantic_layer()
-    con = get_connection(DEFAULT_DB)
+    # Every statement that reaches here has passed the read-only guardrail, so a
+    # read-only handle is always sufficient. It is opt-in (DMS_READ_ONLY_QUERIES)
+    # because it also has to be safe for the writer in this process — see
+    # warehouse_db.read_only_queries_enabled.
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
-        guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-        total_count = _true_count(guard_result.safe_sql, con) if guard_result.passed else None
+        if session_rows is not None and len(session_rows) > 0 and layer == "session":
+            # Precomputed AVG (literal SELECT still guardrail-checked)
+            guard_result, rows, entry = guard_and_execute(sql, semantic, con)
+            if guard_result.passed:
+                rows = session_rows
+            total_count = len(rows) if guard_result.passed else None
+        else:
+            guard_result, rows, entry = guard_and_execute(sql, semantic, con)
+            total_count = _true_count(guard_result.safe_sql, con) if guard_result.passed else None
     finally:
         con.close()
 
@@ -340,6 +584,30 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
     answer_text = synthesize_answer(rows, question)
     if truncated:
         answer_text = f"{total_count} rows match; showing the first {len(rows)}.\n" + answer_text
+
+    # Remember last successful turn for follow-ups
+    _remember(
+        session_id,
+        {
+            "question": question,
+            "sql": guard_result.safe_sql,
+            "metric_id": metric_id,
+            "layer": layer,
+            "rows": rows[:50],
+            "total_count": total_count if total_count is not None else len(rows),
+            "source_table": _infer_source_table(sql),
+        },
+    )
+
+    # Graduate successful non-session answers into the skill store
+    if layer in ("certified", "governed_metric", "query_skill"):
+        query_skills.capture(
+            question,
+            metric_id=metric_id if layer != "certified" else None,
+            params=metric_slots,
+            sql=guard_result.safe_sql,
+            layer=layer,
+        )
 
     return {
         "answer": answer_text,
@@ -356,6 +624,14 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
         "layer": layer,
         "badge": badge,
         "assumptions": assumptions,
-        "query_plan": plan_query(question, sql).to_dict(),
+        "metric_id": metric_id,
+        "query_plan": _honest_plan(
+            question,
+            guard_result.safe_sql,
+            layer=layer,
+            metric_id=metric_id,
+            skill_score=skill_score,
+            assumptions=assumptions,
+        ),
         "audit": {"timestamp": entry.timestamp, "passed": entry.passed, "violations": entry.violations},
     }

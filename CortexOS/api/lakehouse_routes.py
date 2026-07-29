@@ -3,6 +3,7 @@
 Reads go through the existing deterministic sqlglot guardrail (read-only,
 allowlist extended to lake schemas). RBAC via the F7 api_auth dependency.
 """
+from __future__ import annotations
 
 from typing import Any, Optional
 
@@ -111,6 +112,15 @@ def lakehouse_status_mode() -> str:
     from packs.dms.lakehouse.catalog import lakehouse_mode
 
     return lakehouse_mode()
+
+
+@router.post("/sync-warehouse")
+def sync_warehouse(caller: Caller = Depends(require_role("steward"))) -> dict[str, Any]:
+    """Copy lake.silver → dms_demo.duckdb so /dms/query reads medallion silver."""
+    _ = caller
+    from scripts.lakehouse_migrate import sync_warehouse_from_silver
+
+    return sync_warehouse_from_silver()
 
 
 def register_lakehouse_routes(app) -> None:

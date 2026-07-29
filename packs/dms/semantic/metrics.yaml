@@ -33,12 +33,30 @@ metrics:
 
   - id: expired_items
     kind: listing
-    synonyms: ["expired", "past expiry", "out of date"]
+    synonyms: ["expired", "past expiry", "out of date", "show expired", "list expired"]
     result_columns: [sku]
     sql: >
       SELECT sku FROM inventory
       WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
       ORDER BY expiry_date ASC
+
+  - id: expired_count
+    kind: scalar
+    synonyms: ["how many expired", "count expired", "number of expired", "expired count"]
+    result_columns: [expired_count]
+    sql: >
+      SELECT COUNT(*) AS expired_count FROM inventory
+      WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
+
+  - id: expired_last_month
+    kind: scalar
+    synonyms: ["expired last month", "how many expired last month", "expired previous month"]
+    result_columns: [expired_count]
+    sql: >
+      SELECT COUNT(*) AS expired_count FROM inventory
+      WHERE expiry_date IS NOT NULL
+        AND date_trunc('month', CAST(expiry_date AS DATE))
+          = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 
   - id: stale_restock
     kind: listing
@@ -110,6 +128,17 @@ metrics:
       WHERE txn_type = 'OUT' AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL {days} DAY
     params:
       days: {kind: int, default: 30, min: 1, max: 3650}
+
+  - id: revenue_last_month
+    kind: scalar
+    synonyms: ["last month sales", "sales last month", "revenue last month", "last month revenue"]
+    result_columns: [revenue_myr]
+    sql: >
+      SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
+      FROM transactions
+      WHERE txn_type = 'OUT'
+        AND date_trunc('month', CAST("timestamp" AS TIMESTAMP))
+          = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 
   # ── shipments ───────────────────────────────────────────────────────────────
   - id: shipments_by_status

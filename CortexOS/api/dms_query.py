@@ -2,6 +2,7 @@
 
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,15 @@ class DMSQueryResponse(BaseModel):
     alerts_summary: dict[str, int] | None = None
     audit: dict[str, Any] | None = None
     query_plan: dict[str, Any] | None = None
+    # Provenance — engine already computes these; keep them on the wire for Studio/UI.
+    layer: str | None = None
+    badge: str | None = None
+    metric_id: str | None = None
+    total_count: int | None = None
+    truncated: bool | None = None
+    assumptions: str | None = None
+    suggestions: list[str] | None = None
+    query_source: str | None = None
 
 
 class AnalyseEntryRequest(BaseModel):
@@ -84,7 +94,13 @@ def register_dms_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         from CortexOS.dms.query_service import answer_question
 
-        return answer_question(body.question, session_id=body.session_id)
+        out = answer_question(body.question, session_id=body.session_id)
+        # Mark when warehouse tables were synced from lake.silver (medallion path).
+        if out.get("query_source") is None:
+            out["query_source"] = os.environ.get(
+                "DMS_QUERY_SOURCE_LABEL", "warehouse_synced_from_lake_silver"
+            )
+        return out
 
     @app.get("/dms/audit")
     async def dms_audit() -> list[dict[str, Any]]:

@@ -48,11 +48,15 @@ def _sensitive() -> set[str]:
 
 @lru_cache(maxsize=1)
 def _dictionaries() -> dict[str, list[str]]:
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
 
     sensitive = _sensitive()
     out: dict[str, list[str]] = {}
-    con = get_connection(DEFAULT_DB)
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
         for col, table in VALUE_COLUMNS.items():
             if col in sensitive:

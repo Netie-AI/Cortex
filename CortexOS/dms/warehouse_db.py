@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,8 @@ def load_inventory_csv(
 
     db_path = Path(db_path or DEFAULT_DB)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Rebuilding the warehouse needs the write lock; release any cached reader.
+    _evict_read_only(db_path)
 
     con = duckdb.connect(str(db_path))
     try:
@@ -109,9 +112,9 @@ def load_inventory_csv(
 
 
 def table_row_counts(db_path: Path | str | None = None) -> dict[str, int]:
-    import duckdb
-
-    con = duckdb.connect(str(db_path or DEFAULT_DB))
+    # Pure read: must not take the write lock, and must not evict a cached
+    # reader that other callers in this process are still using.
+    con = get_connection(db_path, read_only=read_only_queries_enabled())
     counts: dict[str, int] = {}
     try:
         for table in KNOWN_TABLES:
@@ -136,10 +139,8 @@ def preview_table(
     if table not in KNOWN_TABLES:
         raise ValueError(f"Unknown table: {table}")
 
-    import duckdb
-
     limit = min(max(to_row - from_row, 1), 500)
-    con = duckdb.connect(str(db_path or DEFAULT_DB))
+    con = get_connection(db_path, read_only=read_only_queries_enabled())
     try:
         total = int(con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         col_rows = con.execute(
@@ -159,10 +160,108 @@ def preview_table(
         con.close()
 
 
-def get_connection(db_path: Path | str | None = None):
+def get_connection(db_path: Path | str | None = None, *, read_only: bool = False):
+    """Open the warehouse DuckDB.
+
+    Pass ``read_only=True`` from every query path. DuckDB takes an EXCLUSIVE
+    file lock for read-write connections: one read-write connection anywhere
+    (a live API process, a benchmark run, a notebook) locks every other process
+    out of the file with ``IO Error: ... used by another process``. Read-only
+    connections share the file, so N reader processes can serve concurrently.
+
+    A read-only open cannot create a missing file, so an absent DB falls back to
+    read-write — the caller that first touches a fresh checkout still works.
+    """
     import duckdb
 
-    return duckdb.connect(str(db_path or DEFAULT_DB))
+    path = Path(db_path or DEFAULT_DB)
+    if read_only and path.exists():
+        cursor = _read_only_cursor(path)
+        if cursor is not None:
+            return cursor
+    else:
+        # A read-write open must EVICT any cached read-only instance for this
+        # file first: DuckDB refuses two connections to one file with different
+        # configurations, so a cached reader would otherwise lock the writer out
+        # of its own process for good. Readers re-open on their next call.
+        _evict_read_only(path)
+    return duckdb.connect(str(path))
+
+
+# One read-only DuckDB instance per process; each caller gets a cursor off it.
+# Opening the warehouse file costs ~0.4 s, and the answer path opened a fresh
+# connection for EVERY question — roughly half of query latency was connection
+# churn. A cursor is an independent execution context over the same instance, so
+# concurrent callers stay isolated without paying the open cost again.
+#
+# Only read-only connections are cached. Caching a read-write one would pin
+# DuckDB's exclusive file lock for the life of the process — the very failure
+# this flag exists to avoid.
+_RO_LOCK = threading.Lock()
+_RO_CONNECTIONS: dict[str, Any] = {}
+
+
+def _read_only_cursor(path: Path):
+    # str(path), not path.resolve() — resolve() is a filesystem syscall and this
+    # runs on every question. Callers pass DEFAULT_DB or an explicit path, so the
+    # string is already stable.
+    key = str(path)
+    with _RO_LOCK:
+        parent = _RO_CONNECTIONS.get(key)
+        if parent is None:
+            import duckdb
+
+            try:
+                parent = duckdb.connect(key, read_only=True)
+            except Exception:  # noqa: BLE001
+                # A read-write connection is already open in THIS process;
+                # DuckDB refuses a second one with a different configuration.
+                # Caller falls back to read-write — behaviour as before.
+                return None
+            _RO_CONNECTIONS[key] = parent
+    try:
+        return parent.cursor()
+    except Exception:  # noqa: BLE001 — instance was closed underneath us
+        with _RO_LOCK:
+            _RO_CONNECTIONS.pop(key, None)
+        return None
+
+
+def _evict_read_only(path: Path) -> None:
+    """Drop the cached read-only instance for one file, if any."""
+    key = str(path)
+    with _RO_LOCK:
+        con = _RO_CONNECTIONS.pop(key, None)
+    if con is not None:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def close_cached_connections() -> None:
+    """Release the cached read-only instances (tests, and before a reload)."""
+    with _RO_LOCK:
+        for con in _RO_CONNECTIONS.values():
+            try:
+                con.close()
+            except Exception:  # noqa: BLE001
+                pass
+        _RO_CONNECTIONS.clear()
+
+
+def read_only_queries_enabled() -> bool:
+    """Whether query paths inside the serving process should open read-only.
+
+    Default OFF. Turning it ON lets many API/worker processes read the same
+    warehouse file concurrently (the single biggest scaling limit of the
+    embedded-DuckDB design), but it requires the deployment to keep WRITERS —
+    `/dms/add-entry`, CSV reload — in a process that is not also serving reads,
+    because DuckDB cannot mix read-only and read-write connections in one
+    process. Offline/analysis processes (benchmarks, explain tools) pass
+    ``read_only=True`` directly and do not consult this flag.
+    """
+    return os.environ.get("DMS_READ_ONLY_QUERIES", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def main() -> None:

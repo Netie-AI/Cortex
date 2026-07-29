@@ -235,7 +235,8 @@ def validate_all(*, execute: bool = True) -> dict[str, Any]:
     if execute:
         from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
 
-        con = get_connection(DEFAULT_DB)
+        # explain/validate is an offline tool: never take the exclusive write lock
+        con = get_connection(DEFAULT_DB, read_only=True)
     try:
         for mid, metric in model.metrics.items():
             sample = {p: _sample_value(spec) for p, spec in metric.params.items()}

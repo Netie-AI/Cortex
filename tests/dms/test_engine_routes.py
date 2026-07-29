@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 def engine_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.chdir(tmp_path)
     from CortexOS.api.app import create_app
 
     return TestClient(create_app())

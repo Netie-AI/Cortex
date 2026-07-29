@@ -13,7 +13,12 @@ from typing import Any, Literal
 from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
 from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
-from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_layer
+from CortexOS.dms.warehouse_db import (
+    DEFAULT_DB,
+    get_connection,
+    load_semantic_layer,
+    read_only_queries_enabled,
+)
 from packs.dms.security.reversible import secure_reversible
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,11 +31,119 @@ SQL_KEYWORDS = re.compile(
     r"sales?|sold|revenue|transactions?|rank|ranking|score|compare|comparison|benchmark)\b",
     re.I,
 )
+# A question goes to the document corpus only when it NAMES a document. The
+# opener alone is not a signal: "what does shipping cost us by destination" and
+# "explain the drop in sales" are analytics questions, and routing them to RAG
+# returned a confident zero-row answer from the contract corpus.
+_DOC_NOUN = (
+    r"(?:contracts?|supplier agreements?|agreements?|sops?|policy|policies|"
+    r"clauses?|terms and conditions|payment terms|delivery terms|"
+    r"documents?|documentation|paperwork)"
+)
 RAG_KEYWORDS = re.compile(
-    r"\b(what does|explain|according to|contract|supplier agreement|terms)\b",
+    r"\b(?:"
+    rf"according to\b|"
+    rf"(?:what|which|how)\s+(?:does|do|did|is|are)\b[^?]*\b{_DOC_NOUN}\b|"
+    rf"explain\b[^?]*\b{_DOC_NOUN}\b|"
+    rf"{_DOC_NOUN}\b[^?]*\b(?:say|says|state|states|require|requires|specify|specifies)\b|"
+    rf"(?:in|from|per|under)\s+(?:the\s+|our\s+)?{_DOC_NOUN}\b"
+    r")",
     re.I,
 )
-DESTRUCTIVE = re.compile(r"\b(drop|delete|truncate|alter|insert|update|create)\b", re.I)
+# ── destructive-intent detection ─────────────────────────────────────────────
+# A bare verb blocklist (the old `\b(drop|delete|...|update|create)\b`) is wrong
+# in both directions on natural language: it refused ordinary questions
+# ("update me on the delayed shipments", "cost by drop-off point") and missed
+# every plain-English destructive request ("wipe all supplier records"). Actual
+# ENFORCEMENT lives in sql_guardrail's sqlglot AST check, which rejects any
+# write statement whatever the wording — this layer exists to refuse the *intent*
+# early and record it, so it must classify intent, not spot verbs.
+#
+# Order matters: benign idioms are stripped first, then a mutation verb must be
+# followed (within a short window) by something that names stored data.
+
+_SQL_WRITE_SHAPE = re.compile(
+    r"\b(?:"
+    r"drop\s+(?:table|database|schema|view|index)|"
+    r"truncate\s+(?:table\s+)?\w+|"
+    r"delete\s+from|"
+    r"insert\s+into|"
+    r"update\s+\w+\s+set\b|"
+    r"alter\s+(?:table|database|schema)|"
+    r"create\s+(?:table|database|schema|index|or\s+replace)"
+    r")",
+    re.I,
+)
+
+# Idioms where a mutation verb is ordinary English, not a request to write.
+_BENIGN_IDIOM = re.compile(
+    r"\b(?:"
+    r"updates?\s+(?:me|us|them|him|her)|"
+    r"(?:any|the|an|a|status|latest|daily|weekly|monthly)\s+updates?|"
+    r"keep\s+\w+\s+updated|last\s+updated|not\s+updated|never\s+updated|"
+    r"drop-?\s?offs?|dropped|drops?\s+in\b|price\s+drops?|drop\s+shipping|"
+    r"create\s+(?:a\s+|an\s+|the\s+)?"
+    r"(?:report|chart|graph|dashboard|summary|breakdown|visual|forecast|plot)"
+    r")\b",
+    re.I,
+)
+
+_MUTATION_VERB = re.compile(
+    r"\b(drop|delete|truncate|alter|insert|update|create|wipe|erase|purge|"
+    r"remove|clear|destroy|overwrite|reset)\b",
+    re.I,
+)
+
+# Words that make a mutation verb a request against stored data.
+_DATA_OBJECT = re.compile(
+    r"\b(table|tables|database|databases|schema|column|columns|row|rows|"
+    r"record|records|entry|entries|data|dataset|inventory|supplier|suppliers|"
+    r"shipment|shipments|location|locations|transaction|transactions|"
+    r"alert|alerts|warehouse|warehouses|sku|skus|everything|all)\b",
+    re.I,
+)
+
+# How many words may sit between the verb and the thing it acts on.
+_INTENT_WINDOW = 4
+
+# After a copula the word is a predicate adjective ("locations are clear of
+# alerts") or a passive description of something already done ("records were
+# deleted") — neither is a request to mutate anything.
+_COPULA = frozenset({"is", "are", "was", "were", "be", "been", "being", "am"})
+
+
+def destructive_intent(question: str) -> str | None:
+    """Reason string when the question asks to MUTATE stored data, else None.
+
+    Returns the matched evidence so the refusal can be audited with a cause
+    rather than a bare flag.
+    """
+    q = (question or "").strip()
+    if not q:
+        return None
+
+    shape = _SQL_WRITE_SHAPE.search(q)
+    if shape:
+        return f"sql_write_statement:{shape.group(0).lower()}"
+
+    # Remove benign idioms before looking for verbs, so "update me on ..." and
+    # "drop-off point" never reach the verb scan at all.
+    scrubbed = _BENIGN_IDIOM.sub(" ", q)
+    words = re.findall(r"[A-Za-z_]+", scrubbed)
+    for i, word in enumerate(words):
+        if not _MUTATION_VERB.fullmatch(word):
+            continue
+        if i and words[i - 1].lower() in _COPULA:
+            continue
+        window = words[i + 1 : i + 1 + _INTENT_WINDOW]
+        for target in window:
+            if _DATA_OBJECT.fullmatch(target):
+                return f"mutation_intent:{word.lower()} {target.lower()}"
+    return None
+
+
+# Kept as the literal-SQL detector for callers that want the narrow check.
+DESTRUCTIVE = _SQL_WRITE_SHAPE
 DEFAULT_INVENTORY_SQL = (
     "SELECT sku, quantity_kg, location_id, reorder_level_kg, category "
     "FROM inventory ORDER BY sku LIMIT 100"
@@ -120,7 +233,7 @@ class QueryPlan:
 
 def route_question(question: str) -> Literal["sql", "rag", "blocked", "needs_clarification"]:
     q = question.strip()
-    if DESTRUCTIVE.search(q):
+    if destructive_intent(q):
         return "blocked"
     if RAG_KEYWORDS.search(q):
         return "rag"
@@ -557,8 +670,14 @@ def _format_capacity_answer(rows: list[dict]) -> str:
 def _format_generic_answer(rows: list[dict], question: str) -> str:
     if not rows:
         return "No rows matched your query."
+    # Scalar governed metrics (revenue_myr, expired_count, …) before sales-rank phrasing
+    if len(rows) == 1 and len(rows[0]) == 1:
+        key, val = next(iter(rows[0].items()))
+        return f"Result: {key} = {val}"
     q = question.lower()
-    if "sale" in q or "sold" in q or "revenue" in q:
+    if ("sale" in q or "sold" in q or "revenue" in q) and "sku" in (rows[0] or {}) and (
+        "sales_value_myr" in rows[0] or "total_sold_kg" in rows[0]
+    ):
         lines = [f"Top {len(rows)} sales result(s), ranked by value:"]
         for row in rows[:5]:
             lines.append(
@@ -714,7 +833,7 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
 
 
 def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
-    con = get_connection(db_path or DEFAULT_DB)
+    con = get_connection(db_path or DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
         crit = con.execute(
             "SELECT COUNT(*) FROM alerts WHERE resolved = false AND severity = 'CRITICAL'"
@@ -831,7 +950,7 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     sql = generate_sql(question, semantic)
     query_plan = plan_query(question, sql)
-    con = get_connection(DEFAULT_DB)
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
         guard_result, rows, entry = guard_and_execute(sql, semantic, con)
     finally:

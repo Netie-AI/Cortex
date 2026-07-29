@@ -79,9 +79,100 @@ def test_every_sql_answer_carries_provenance():
               "Rank suppliers by combined risk and lead time score"):
         r = answer_question(q)
         assert r["route"] == "sql"
-        assert r["layer"] in ("certified", "governed_metric")
+        assert r["layer"] in ("certified", "governed_metric", "query_skill")
         assert r["badge"] and r["sql_used"] and "assumptions" in r
+        assert r.get("query_plan", {}).get("layer") == r["layer"]
 
+
+def test_expired_aggregate_not_listing():
+    r = answer_question("average how many did it expired last month")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    assert r.get("metric_id") == "expired_last_month"
+    assert r["row_count"] == 1
+    assert "expired_count" in (r["rows"][0] or {})
+    assert "COUNT" in (r["sql_used"] or "").upper()
+
+
+def test_last_month_sales_not_abstain():
+    r = answer_question("last month sales")
+    assert r["route"] == "sql"
+    assert r.get("metric_id") == "revenue_last_month"
+    assert r["row_count"] == 1
+    assert "revenue_myr" in (r["rows"][0] or {})
+
+
+def test_session_average_of_them():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-avg-them"
+    clear_session(sid)
+    listing = answer_question("Show me all expired items", session_id=sid)
+    assert listing["route"] == "sql"
+    assert listing["row_count"] >= 1
+    follow = answer_question("what is the average of them", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    assert follow["row_count"] == 1
+    assert "followup_count" in (follow["rows"][0] or {})
+
+
+def test_session_average_of_sales_ranks():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-sales-avg"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    follow = answer_question("what is the average of them", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    assert follow["row_count"] == 1
+    row = follow["rows"][0]
+    assert any(k.startswith("avg_") for k in row)
+
+
+def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
+    from CortexOS.dms.answer_engine import clear_session
+    from packs.dms.semantic import query_skills
+
+    db = tmp_path / "ops.db"
+    monkeypatch.setenv("DMS_OPS_DB", str(db))
+    monkeypatch.setenv("DMS_QUERY_SKILL_CAPTURE", "1")
+    query_skills.clear_all()
+    clear_session("skill-sess")
+
+    first = answer_question(
+        "average how many did it expired last month",
+        session_id="skill-sess",
+    )
+    assert first["route"] == "sql"
+    assert first.get("metric_id") == "expired_last_month"
+    hit = query_skills.find("average how many did it expired last month")
+    assert hit is not None and hit["score"] >= 0.72
+    assert hit.get("metric_id") == "expired_last_month"
+
+    # Skill path: phrasing that misses L1/L0 but matches a stored skill
+    query_skills.capture(
+        "count vault spoilage for prior calendar month",
+        metric_id="expired_last_month",
+        params={},
+        sql=None,
+        layer="governed_metric",
+    )
+    third = answer_question(
+        "count vault spoilage for prior calendar month",
+        session_id="skill-force",
+    )
+    assert third["route"] == "sql"
+    assert third["layer"] == "query_skill"
+    assert third.get("metric_id") == "expired_last_month"
+
+
+def test_api_keys_still_abstain():
+    r = answer_question("give me internal api keys")
+    assert r["route"] in ("needs_clarification", "blocked")
+    assert not r.get("rows")
 
 def test_l2_disabled_by_default(monkeypatch):
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
