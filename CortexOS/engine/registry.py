@@ -57,25 +57,25 @@ class OptimizerDescriptor:
 # ─── Catalog (mirrors AirGPT netie_engine.py; Cortex is now the source) ────────
 BACKENDS: tuple[BackendDescriptor, ...] = (
     BackendDescriptor(
-        "ollama", "Ollama", "🦙", "Dead-simple GGUF runtime — one command, always fits.",
+        "ollama", "Ollama", "🦙", "Dead-simple GGUF runtime - one command, always fits.",
         ("GGUF Q4/Q5/Q8", "auto pull", "CPU or GPU", "no config"),
         "ollama", False, "native", "OLLAMA_BASE_URL", 11434, "https://ollama.com",
         recommended=True,
     ),
     BackendDescriptor(
-        "vllm", "vLLM", "⚡", "Throughput king — PagedAttention KV, continuous batching.",
+        "vllm", "vLLM", "⚡", "Throughput king - PagedAttention KV, continuous batching.",
         ("PagedAttention KV", "continuous batching", "FP8/AWQ/GPTQ", "OpenAI API"),
         "vllm", True, "docker", "VLLM_BASE_URL", 8001, "https://docs.vllm.ai",
-        windows_note="No native Windows build — Docker + WSL2 GPU passthrough.",
+        windows_note="No native Windows build - Docker + WSL2 GPU passthrough.",
     ),
     BackendDescriptor(
-        "sglang", "SGLang", "🧬", "RadixAttention prefix cache — fastest for shared prompts/agents.",
+        "sglang", "SGLang", "🧬", "RadixAttention prefix cache - fastest for shared prompts/agents.",
         ("RadixAttention", "structured output", "FP8/AWQ", "OpenAI API"),
         "sglang", True, "docker", "SGLANG_BASE_URL", 30000, "https://docs.sglang.ai",
         windows_note="Docker + WSL2 GPU passthrough.",
     ),
     BackendDescriptor(
-        "colibri", "Colibri", "🐦", "Frontier MoE larger than VRAM — streams experts from disk.",
+        "colibri", "Colibri", "🐦", "Frontier MoE larger than VRAM - streams experts from disk.",
         ("disk-streamed MoE", "int4 experts", "runs > VRAM", "host role"),
         "colibri", False, "vendored", "COLIBRI_BASE_URL", 8002,
         "https://github.com/JustVugg/colibri",
@@ -91,7 +91,7 @@ BACKENDS: tuple[BackendDescriptor, ...] = (
 OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
     OptimizerDescriptor(
         "paged_attention", "PagedAttention", "paging",
-        "Block KV cache, near-zero fragmentation. Orthogonal to quant — always safe.",
+        "Block KV cache, near-zero fragmentation. Orthogonal to quant - always safe.",
         default=True, backends=("vllm", "sglang"),
     ),
     # C1 finding (docs/research/findings/C1_C3_turboquant_awq.md): NOT in llama.cpp
@@ -113,13 +113,13 @@ OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
     ),
     OptimizerDescriptor(
         "kv_fp8", "KV FP8 (vLLM/SGLang)", "kv_quant",
-        "--kv-cache-dtype fp8 — halves KV VRAM; the safe GPU-server default. "
-        "On 12GB: 8B-AWQ ≈5.4GB weights + FP8 KV → comfortable 16k ctx.",
+        "--kv-cache-dtype fp8 - halves KV VRAM; the safe GPU-server default. "
+        "On 12GB: 8B-AWQ ~5.4GB weights + FP8 KV -> comfortable 16k ctx.",
         default=True, backends=("vllm", "sglang"),
     ),
     OptimizerDescriptor(
         "awq", "AWQ weights", "weight_quant",
-        "Activation-aware 3–4-bit weights; stacks with KV quant. GPU serve default.",
+        "Activation-aware 3-4-bit weights; stacks with KV quant. GPU serve default.",
         default=True, bench_gate="C3: AWQ checkpoint exists + fits 12GB", backends=("vllm", "sglang"),
     ),
     OptimizerDescriptor("gptq", "GPTQ weights", "weight_quant",
@@ -128,10 +128,10 @@ OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
         "2-bit per-channel/token KV; more compression, Needle ~0.981.",
         research=True, bench_gate="C2 bench vs TurboQuant baseline"),
     OptimizerDescriptor("snapkv", "SnapKV", "eviction",
-        "Drop low-attention tokens; up to 3.6× faster, lossy (Needle ~0.858).",
+        "Drop low-attention tokens; up to 3.6x faster, lossy (Needle ~0.858).",
         research=True, bench_gate="C2 bench recall floor"),
     OptimizerDescriptor("rotorquant", "RotorQuant", "kv_quant",
-        "Clifford-rotor block rotations; 10–19× vs cuBLAS matmul.",
+        "Clifford-rotor block rotations; 10-19x vs cuBLAS matmul.",
         research=True, bench_gate="C2 reproduce speedup + recall"),
     OptimizerDescriptor("dsa", "DeepSeek DSA context", "context",
         "Sparse-context select/compress/sliding (AirGPT ditch/index analog).", default=True),
@@ -145,11 +145,11 @@ OPTIMIZERS: tuple[OptimizerDescriptor, ...] = (
         "Stream inactive experts from NVMe (Colibri).", backends=("colibri",)),
     # B4 finding: native disk-KV exists only in vLLM (TieringOffloadingSpec fs tier)
     # and SGLang (--hicache-storage-backend file); llama.cpp/Ollama offload KV to CPU
-    # RAM only (--no-kv-offload) — their mmap lever moves weights, not KV.
+    # RAM only (--no-kv-offload) - their mmap lever moves weights, not KV.
     OptimizerDescriptor("tiering", "Predictive memory tiering", "tiering",
-        "MVP ladder: compress KV first (fp8/q8_0) → CPU-RAM KV → disk KV where native "
-        "(vLLM fs tier, SGLang hicache file) → weights offload (--cpu-offload-gb) last.",
-        default=True, bench_gate="E4: model+KV 2–3× VRAM runs; TTFT within gate",
+        "MVP ladder: compress KV first (fp8/q8_0) -> CPU-RAM KV -> disk KV where native "
+        "(vLLM fs tier, SGLang hicache file) -> weights offload (--cpu-offload-gb) last.",
+        default=True, bench_gate="E4: model+KV 2-3x VRAM runs; TTFT within gate",
         backends=("vllm", "sglang", "llamacpp", "colibri")),
 )
 
