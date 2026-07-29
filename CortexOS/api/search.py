@@ -39,35 +39,35 @@ class SearchResponse(BaseModel):
 
 
 def register_search_routes(app: Any) -> None:
-    from fastapi import APIRouter
+    """Always register ``POST /search`` — core profile returns HTTP 501."""
+    from fastapi import APIRouter, HTTPException
 
-    from CortexOS.packaging import FeatureNotInstalled, require_extra
+    from CortexOS.api.feature_stubs import feature_not_installed_detail
+    from CortexOS.packaging import FeatureNotInstalled, extra_available, require_extra
 
-    try:
-        require_extra("rag", feature="search")
-    except FeatureNotInstalled:
-        log.info("Skipping /search routes — netie[rag] not installed")
-        return
-
-    from netie.rag.reranker import BGEReranker
-
-    if not hasattr(app.state, "bge_reranker"):
-        app.state.bge_reranker = BGEReranker()
-
-    cfg = get_config()
-    if getattr(app.state, "dense_retriever", None) is None and getattr(
-        cfg, "qdrant_url", None
-    ):
+    if extra_available("rag"):
         try:
-            from netie.rag.retriever_dense import build_dense_retriever
+            from netie.rag.reranker import BGEReranker
 
-            app.state.dense_retriever = build_dense_retriever(
-                qdrant_url=str(cfg.qdrant_url),
-                collection_name=cfg.qdrant_collection_listings,
-                embedder_model=cfg.embedder_model,
-            )
+            if not hasattr(app.state, "bge_reranker"):
+                app.state.bge_reranker = BGEReranker()
+
+            cfg = get_config()
+            if getattr(app.state, "dense_retriever", None) is None and getattr(
+                cfg, "qdrant_url", None
+            ):
+                try:
+                    from netie.rag.retriever_dense import build_dense_retriever
+
+                    app.state.dense_retriever = build_dense_retriever(
+                        qdrant_url=str(cfg.qdrant_url),
+                        collection_name=cfg.qdrant_collection_listings,
+                        embedder_model=cfg.embedder_model,
+                    )
+                except Exception as exc:
+                    log.debug("Dense retriever skipped on startup (%s)", exc)
         except Exception as exc:
-            log.debug("Dense retriever skipped on startup (%s)", exc)
+            log.info("RAG init deferred — /search will 501 until ready (%s)", exc)
 
     router = APIRouter(tags=["search"])
 
@@ -78,7 +78,15 @@ def register_search_routes(app: Any) -> None:
 
     @router.post("/search", response_model=SearchResponse)
     async def search(req: SearchRequest, request: Request) -> SearchResponse:
+        try:
+            require_extra("rag", feature="search")
+        except FeatureNotInstalled as exc:
+            raise HTTPException(
+                status_code=501, detail=feature_not_installed_detail(exc)
+            ) from exc
+
         from netie.rag.fuser_rrf import fuse_dense_sparse
+        from netie.rag.reranker import BGEReranker
         from netie.rag.retriever_sparse import retrieve_sparse
 
         engine = getattr(request.app.state, "db_engine", None)

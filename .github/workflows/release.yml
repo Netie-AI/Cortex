@@ -79,7 +79,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist_release
           cp dist/*.whl dist_release/
-          cp "contract/openapi-1.0.0.json" dist_release/
+          # Ship every committed contract generation; consumers pin by filename.
+          cp contract/openapi-*.json dist_release/
           (
             cd dist_release
             sha256sum * > SHA256SUMS
@@ -116,6 +117,50 @@ jobs:
             ${{ steps.ver.outputs.image_full }}
             ghcr.io/${{ steps.ver.outputs.repo_lc }}:${{ steps.ver.outputs.version }}-full
 
+      - name: Prove -core and -full report different extras
+        run: |
+          set -euo pipefail
+          CORE_IMG="${{ steps.ver.outputs.image_core }}"
+          FULL_IMG="${{ steps.ver.outputs.image_full }}"
+
+          docker run -d --name cortex-core-probe -p 18010:8010 "$CORE_IMG"
+          docker run -d --name cortex-full-probe -p 18011:8010 "$FULL_IMG"
+          cleanup() {
+            docker rm -f cortex-core-probe cortex-full-probe >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18010/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18011/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          CORE_FEAT="$(curl -fsS http://127.0.0.1:18010/health/features)"
+          FULL_FEAT="$(curl -fsS http://127.0.0.1:18011/health/features)"
+          echo "core:  ${CORE_FEAT}"
+          echo "full:  ${FULL_FEAT}"
+
+          echo "${CORE_FEAT}" | python -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["extras"]["agentic"] is False, d
+          assert d["extras"]["rag"] is False, d
+          '
+          echo "${FULL_FEAT}" | python -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d["extras"]["agentic"] is True, d
+          assert d["extras"]["rag"] is True, d
+          '
+          if [ "${CORE_FEAT}" = "${FULL_FEAT}" ]; then
+            echo "::error::-core and -full /health/features bodies match — images are not differentiated"
+            exit 1
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -124,7 +169,7 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             dist_release/*.whl
-            dist_release/openapi-1.0.0.json
+            dist_release/openapi-*.json
             dist_release/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

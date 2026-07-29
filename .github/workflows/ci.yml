@@ -42,8 +42,10 @@ jobs:
       - name: Version lines
         run: python scripts/check_versions.py
 
-      - name: OpenAPI drift
-        run: python scripts/export_openapi.py --check
+      - name: OpenAPI drift (requires [full])
+        run: |
+          python -c "import dbos,qdrant_client,tantivy,sentence_transformers"
+          python scripts/export_openapi.py --check
 
       - name: Pytest
         run: python -m pytest tests/ -q --tb=short

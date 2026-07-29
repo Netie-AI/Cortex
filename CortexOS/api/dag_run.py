@@ -18,17 +18,22 @@ class RunDAGRequest(BaseModel):
 
 
 def register_dag_run_routes(app: Any) -> None:
-    try:
-        require_extra("agentic", feature="dag_run")
-    except FeatureNotInstalled:
-        return
-
-    from netie.execution.dag_runner import ExecutionContext, run_dag
-    from netie.execution.model_router import ModelRouter
-    from netie.fabrication.dsl_parser import parse_dsl
+    """Always register ``POST /run`` — core profile returns HTTP 501."""
+    from CortexOS.api.feature_stubs import feature_not_installed_detail
 
     @app.post("/run")
     async def run_inline_dag(request: Request, body: RunDAGRequest) -> dict[str, Any]:
+        try:
+            require_extra("agentic", feature="dag_run")
+        except FeatureNotInstalled as exc:
+            raise HTTPException(
+                status_code=501, detail=feature_not_installed_detail(exc)
+            ) from exc
+
+        from netie.execution.dag_runner import ExecutionContext, run_dag
+        from netie.execution.model_router import ModelRouter
+        from netie.fabrication.dsl_parser import parse_dsl
+
         dag_json = json.dumps(body.dag)
         parsed = parse_dsl(dag_json, intent_hash="inline")
         if not isinstance(parsed, Ok):

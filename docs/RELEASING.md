@@ -5,7 +5,7 @@ Three **independent** version lines. Never assume any two are equal.
 | Line | Where | Current | Tracks |
 |------|--------|---------|--------|
 | **Engine** | `CortexOS.__version__`, root `pyproject.toml` | `2.5.0` | G-gates (G2.5 → 2.5.x) |
-| **Contract** | `packages/cortex_contract/version.py` + `packages/cortex_contract/pyproject.toml` | `1.0.0` | DMS↔engine wire (`contract/openapi-1.0.0.json`) |
+| **Contract** | `packages/cortex_contract/version.py` + `packages/cortex_contract/pyproject.toml` | `1.1.0` | DMS↔engine wire (`contract/openapi-<ver>.json`) |
 | **Git tag / Docker** | `v*` tags → `cortex:${VERSION}-core` / `-full` | cut from engine when shipping | Release artifacts |
 
 `scripts/check_versions.py` asserts contract `version.py` matches the packaged contract version and scans for code that couples engine ↔ contract versions.
@@ -30,13 +30,22 @@ Docker:
 
 1. Ensure CI green on `main` (ruff, mypy, pytest, import-linter, `check_versions.py`, OpenAPI drift, base-install).
 2. Bump engine and/or contract versions deliberately (they move on different clocks).
-3. Regenerate the wire if contract models or routes changed:
+3. Regenerate the wire if contract models or routes changed (must use ``[full]``):
 
    ```bash
+   pip install -e ".[full,dev]"
    python scripts/export_openapi.py
    ```
 
-   Commit `contract/openapi-<CONTRACT_VERSION>.json`. Drift breaks CI.
+   The exporter asserts the allowlisted contract operationIds
+   (`ask`, `submit`, `ledger.append`, `ledger.verify`, `tool.registry`) and
+   fails if extras are missing or the route set drifts. Commit
+   `contract/openapi-<CONTRACT_VERSION>.json`. Drift breaks CI.
+
+   Missing install extras return **HTTP 501** with a `FeatureNotInstalled`
+   detail; the route table is identical on `-core` and `-full`.
+   `GET /health/features` reports which extras are live — release.yml fails
+   if the two images report the same body.
 4. Tag and push:
 
    ```bash
