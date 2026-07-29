@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3000"
+    "start": "next start -p 3000",
+    "test:e2e": "playwright test",
+    "test:e2e:reliability": "playwright test e2e/reliability.spec.js"
   },
   "dependencies": {
     "next": "14.2.0",
@@ -15,6 +17,7 @@
     "swr": "^2.2.5"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7"
+    "@babel/core": "^7.29.7",
+    "@playwright/test": "^1.49.0"
   }
 }

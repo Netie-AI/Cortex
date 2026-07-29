@@ -119,9 +119,24 @@ export default function QueryPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="cx-exchange-text" style={{ whiteSpace: "pre-wrap" }}>
-                      {ex.answer}
-                    </div>
+                    <>
+                      {(ex.badge || ex.layer || ex.query_source) && (
+                        <div
+                          className="cx-label"
+                          style={{ marginBottom: 8, opacity: 0.75, fontSize: "0.7rem" }}
+                        >
+                          {[ex.badge || ex.layer, ex.query_source].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                      <div className="cx-exchange-text" style={{ whiteSpace: "pre-wrap" }}>
+                        {ex.answer}
+                      </div>
+                      {ex.suggestions?.length ? (
+                        <div style={{ marginTop: 8, fontSize: "0.8rem", opacity: 0.8 }}>
+                          Try: {ex.suggestions.join(" · ")}
+                        </div>
+                      ) : null}
+                    </>
                   )}
                 </div>
               );
@@ -208,10 +223,28 @@ export default function QueryPage() {
                       <span>INTENT</span>
                       <strong>{plan.intent}</strong>
                     </div>
+                    {(plan.layer || active?.layer) && (
+                      <div className="cx-plan-line">
+                        <span>LAYER</span>
+                        <strong>{plan.layer || active.layer}</strong>
+                      </div>
+                    )}
+                    {(plan.metric_id || active?.metric_id) && (
+                      <div className="cx-plan-line">
+                        <span>METRIC</span>
+                        <strong>{plan.metric_id || active.metric_id}</strong>
+                      </div>
+                    )}
                     <div className="cx-plan-line">
                       <span>CONFIDENCE</span>
                       <strong>{Math.round((plan.confidence || 0) * 100)}%</strong>
                     </div>
+                    {plan.skill_score != null && (
+                      <div className="cx-plan-line">
+                        <span>SKILL MATCH</span>
+                        <strong>{Math.round(plan.skill_score * 100)}%</strong>
+                      </div>
+                    )}
                     {plan.limit && (
                       <div className="cx-plan-line">
                         <span>LIMIT</span>
