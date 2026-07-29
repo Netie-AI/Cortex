@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from inspect import signature
+from pathlib import Path
 
 from CortexOS.api import engine_routes
 from CortexOS.execution import run_plan, tool_runner
@@ -9,8 +10,35 @@ from packages.cortex_contract.version import CONTRACT_VERSION
 from packs.dms.audit import ledger
 
 
-def test_contract_version_pinned() -> None:
-    assert CONTRACT_VERSION == "1.0.0"
+def test_contract_major_is_one() -> None:
+    """DMS pins contract major 1. Bumping to 2 is a coordinated break, not a commit."""
+    assert CONTRACT_VERSION.split(".")[0] == "1"
+
+
+def test_every_published_spec_is_committed() -> None:
+    """Each contract version DMS could be pinned to must still have its spec on disk."""
+    contract_dir = Path(__file__).resolve().parents[2] / "contract"
+    published = sorted(p.name for p in contract_dir.glob("openapi-*.json"))
+    assert f"openapi-{CONTRACT_VERSION}.json" in published, published
+    # 1.0.0 shipped to a consumer; deleting it would strand anyone still pinned.
+    assert "openapi-1.0.0.json" in published, published
+
+
+def test_manifest_1_0_0_producer_still_validates() -> None:
+    """A minor bump may add fields; it may never make an old payload invalid."""
+    from packages.cortex_contract.execution import Manifest
+
+    minted_by_1_0_0 = Manifest(
+        session_id="s1",
+        org_id="acme",
+        allowed_paths=["/data/pool/acme/*.parquet"],
+        row_predicate_sql="tenant_id = 'acme'",
+        expires_at="2030-01-01T00:00:00Z",
+        signature="deadbeef",
+    )
+    assert minted_by_1_0_0.row_predicates == {}
+    assert minted_by_1_0_0.issuer_key_id is None
+    assert minted_by_1_0_0.pool_id is None
 
 
 def test_engine_submit_surface_matches_contract() -> None:

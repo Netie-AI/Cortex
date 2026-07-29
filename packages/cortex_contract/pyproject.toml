@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cortex-contract"
-version = "1.0.0"
+version = "1.1.0"
 description = "Stable contract surface between Cortex engine and DMS"
 requires-python = ">=3.10"
 dependencies = [

@@ -2,7 +2,14 @@
 
 from .answer import AbstainReason, Answer, AskRequest, Badge, Provenance
 from .errors import ContractError, UnauthorizedError, ValidationError
-from .execution import EngineSubmitter, Manifest, PoolSpec, QueryResult, SubmitRequest
+from .execution import (
+    EngineSubmitter,
+    Manifest,
+    PoolSpec,
+    QueryResult,
+    SubmitRequest,
+    canonical_manifest_bytes,
+)
 from .ledger import ChainVerification, LedgerEntry, LedgerWriter
 from .proposal import Diff, GateResult, Proposal, ProposalVersion
 from .tools import ToolCall, ToolClass, ToolResult, ToolRuntime, ToolSpec
@@ -25,6 +32,7 @@ __all__ = [
     "PoolSpec",
     "QueryResult",
     "SubmitRequest",
+    "canonical_manifest_bytes",
     "ChainVerification",
     "LedgerEntry",
     "LedgerWriter",
