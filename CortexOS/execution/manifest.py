@@ -918,6 +918,26 @@ def _refuse_ungranted_tables(
             raise PathNotAllowed(f"table {table.name!r} is not named by this manifest")
 
 
+def _refuse_schema_qualified_columns(root: exp.Expression, granted: set[str]) -> None:
+    """Refuse ``main.orders.uid`` when ``orders`` carries a predicate.
+
+    Wrapping the table produces ``(SELECT * FROM main.orders WHERE ...) AS
+    orders`` — a subquery alias is a single identifier, so the two-part
+    qualifier no longer resolves and DuckDB answers with a binder error about a
+    table that "does not exist". Refusing here turns a confusing failure
+    downstream into a clear one at the gate, and says which reference to change.
+    """
+    for column in root.find_all(exp.Column):
+        table = (column.args.get("table").name if column.args.get("table") else "").lower()
+        schema = column.args.get("db")
+        if schema is not None and table in granted:
+            raise SqlNotAnalyzable(
+                f"{schema.name}.{table}.{column.name} is schema-qualified through a table this "
+                "manifest filters; reference it as "
+                f"{table}.{column.name} so the row predicate can be applied"
+            )
+
+
 def _refuse_cross_catalog(root: exp.Expression) -> None:
     """Refuse three-part names, which reach across attached catalogs.
 
@@ -978,6 +998,7 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
     # governed name is refused outright.
     _refuse_shadowing(_locally_bound_names(root), granted)
     _refuse_ungranted_tables(root, granted, _cte_names(root))
+    _refuse_schema_qualified_columns(root, granted)
     if not predicates:
         return root.sql(dialect="duckdb")
 

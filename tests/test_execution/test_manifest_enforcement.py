@@ -376,3 +376,15 @@ def test_metadata_functions_stay_refused(verified: VerifiedManifest) -> None:
     """Allowing generators must not have opened the engine-introspection door."""
     with pytest.raises(SqlNotAnalyzable):
         enforce_manifest("SELECT * FROM duckdb_settings()", verified)
+
+
+def test_schema_qualified_column_is_refused_clearly(verified: VerifiedManifest) -> None:
+    """Wrapping makes main.orders.uid unresolvable; say so here, not via a binder error."""
+    with pytest.raises(SqlNotAnalyzable) as caught:
+        enforce_manifest("SELECT main.orders.uid FROM main.orders", verified)
+    assert "orders.uid" in str(caught.value)
+
+
+def test_plain_qualified_column_still_works(verified: VerifiedManifest) -> None:
+    out = enforce_manifest("SELECT orders.uid FROM main.orders", verified)
+    assert "AS orders" in out
