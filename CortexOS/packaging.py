@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 from typing import Iterable
 
 
@@ -58,6 +59,10 @@ def _profile() -> str:
 def _modules_missing(modules: tuple[str, ...]) -> list[str]:
     missing: list[str] = []
     for name in modules:
+        # Already in sys.modules means importable, full stop. This also covers
+        # test doubles injected by fixtures, which have no discoverable spec.
+        if name in sys.modules:
+            continue
         try:
             spec = importlib.util.find_spec(name)
         except (ModuleNotFoundError, ValueError):
@@ -69,8 +74,13 @@ def _modules_missing(modules: tuple[str, ...]) -> list[str]:
     return missing
 
 
-def extra_available(extra: str) -> bool:
-    """Return whether the named optional extra appears available at runtime."""
+def extra_available(extra: str, *, modules: Iterable[str] | None = None) -> bool:
+    """Return whether the named optional extra appears available at runtime.
+
+    ``modules`` narrows the probe to the third-party packages one feature
+    actually needs. A reranker that only wants sentence-transformers should not
+    be refused because the document index half of the same extra is absent.
+    """
     profile = _profile()
     if profile in {"core", "base"}:
         if extra in {"agentic", "rag", "full"}:
@@ -78,9 +88,13 @@ def extra_available(extra: str) -> bool:
     if extra == "full":
         return extra_available("agentic") and extra_available("rag")
 
+    if modules is not None:
+        return not _modules_missing(tuple(modules))
+
     modules = _EXTRA_MODULES.get(extra)
     if modules is None:
         return True
+    modules = tuple(modules)
 
     if extra == "agentic":
         # Default: first-party agentic surface is available when not in core
@@ -96,12 +110,21 @@ def extra_available(extra: str) -> bool:
     return not _modules_missing(modules)
 
 
-def require_extra(extra: str, *, feature: str | None = None) -> None:
-    """Raise :class:`FeatureNotInstalled` if ``extra`` is not available."""
-    if extra_available(extra):
+def require_extra(
+    extra: str,
+    *,
+    feature: str | None = None,
+    modules: Iterable[str] | None = None,
+) -> None:
+    """Raise :class:`FeatureNotInstalled` if ``extra`` is not available.
+
+    ``modules`` narrows the probe to what this feature needs; the error still
+    names the extra, since that is what the operator installs.
+    """
+    if extra_available(extra, modules=modules):
         return
-    modules = _EXTRA_MODULES.get(extra, ())
-    missing = _modules_missing(modules)
+    probe = tuple(modules) if modules is not None else _EXTRA_MODULES.get(extra, ())
+    missing = _modules_missing(probe)
     if _profile() in {"core", "base"} and not missing:
         missing = [f"CORTEX_PROFILE={_profile()}"]
     raise FeatureNotInstalled(extra, feature=feature, missing=missing)

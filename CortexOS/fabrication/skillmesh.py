@@ -43,7 +43,9 @@ class DenseReranker:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         from CortexOS.packaging import require_extra
 
-        require_extra("rag", feature="DenseReranker")
+        # Reranking needs the embedding model only — not the document index half
+        # of the rag extra.
+        require_extra("rag", feature="DenseReranker", modules=("sentence_transformers",))
         from sentence_transformers import SentenceTransformer
 
         self.model = SentenceTransformer(model_name)

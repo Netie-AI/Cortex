@@ -2,11 +2,21 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from CortexOS.packaging import extra_available  # noqa: E402
+
+if not extra_available("rag"):
+    # register_search_routes() returns early without netie[rag], so /search is
+    # not mounted and app.state has no reranker. Nothing to assert on a base
+    # install; CI installs [full] and runs these for real.
+    pytest.skip("netie[rag] not installed — /search is not registered", allow_module_level=True)
+
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 import netie.api.search as search_mod
+import netie.rag.fuser_rrf as fuser_mod
+import netie.rag.retriever_sparse as sparse_mod
 from netie.api.app import create_app
 from netie.rag.fuser_rrf import FusedHit
 from netie.rag.reranker import RankedHit
@@ -18,7 +28,9 @@ def _patch_sparse_empty(monkeypatch) -> None:
     async def sparse_stub(*args, **kwargs):  # noqa: ARG001
         return []
 
-    monkeypatch.setattr(search_mod, "retrieve_sparse", sparse_stub)
+    # The search handler imports retrieve_sparse lazily, so patch it at its
+    # source module rather than on the handler's namespace.
+    monkeypatch.setattr(sparse_mod, "retrieve_sparse", sparse_stub)
 
 
 @pytest.fixture()
@@ -53,7 +65,7 @@ def _fuse_stub_chain(fused: list[FusedHit]):
 def test_logged_user_below_five_personalization_bypass(
     monkeypatch, fused_one: list[FusedHit]
 ) -> None:
-    monkeypatch.setattr(search_mod, "fuse_dense_sparse", _fuse_stub_chain(fused_one))
+    monkeypatch.setattr(fuser_mod, "fuse_dense_sparse", _fuse_stub_chain(fused_one))
 
     async def icount_4(*args, **kwargs):  # noqa: ARG001
         return 4
@@ -82,7 +94,7 @@ def test_logged_user_below_five_personalization_bypass(
 
 
 def test_anonymous_always_cold_start(monkeypatch, fused_two: list[FusedHit]) -> None:
-    monkeypatch.setattr(search_mod, "fuse_dense_sparse", _fuse_stub_chain(fused_two))
+    monkeypatch.setattr(fuser_mod, "fuse_dense_sparse", _fuse_stub_chain(fused_two))
 
     app = create_app()
 
@@ -103,7 +115,7 @@ def test_anonymous_always_cold_start(monkeypatch, fused_two: list[FusedHit]) -> 
 
 
 def test_warm_user_personalization_boosts(monkeypatch, fused_one: list[FusedHit]) -> None:
-    monkeypatch.setattr(search_mod, "fuse_dense_sparse", _fuse_stub_chain(fused_one))
+    monkeypatch.setattr(fuser_mod, "fuse_dense_sparse", _fuse_stub_chain(fused_one))
 
     async def icount_11(*args, **kwargs):  # noqa: ARG001
         return 11

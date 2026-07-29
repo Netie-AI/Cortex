@@ -94,8 +94,10 @@ async def _execute_dag(plan: Mapping[str, Any], body: Mapping[str, Any]) -> dict
 
 
 async def _rag_compose(plan: Mapping[str, Any], body: Mapping[str, Any]) -> dict[str, Any]:
+    # Only the DAG runner is gated. The rag_* nodes compose over the corpus in
+    # the request body using first-party lexical code — no qdrant, no tantivy,
+    # no embedding model — so the rag extra is not required to get here.
     require_extra("agentic", feature="rag_compose")
-    require_extra("rag", feature="rag_compose")
     from CortexOS.execution.dag_runner import ExecutionContext, run_dag
     from CortexOS.execution.model_router import ModelRouter
     from CortexOS.rag.templates import get_template
