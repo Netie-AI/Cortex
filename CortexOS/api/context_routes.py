@@ -1,4 +1,4 @@
-"""Context engineering HTTP surface for AirGPT / OpenIDE sidecar clients."""
+"""Context engineering HTTP surface for AirGPT / FreeIDE sidecar clients."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional

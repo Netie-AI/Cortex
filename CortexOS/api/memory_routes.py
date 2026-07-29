@@ -20,16 +20,15 @@ from packs.dms.security.api_auth import Caller, require_role
 from netie.memory.store import (
     BRUTE_FORCE_MAX,
     Hit,
-    InMemoryStore,
     MemoryRecord,
     select_store,
 )
+from netie.memory.factory import get_store
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
-# M0 singleton — swapped for a store factory (select_store) once persistent
-# backends exist. Personal scope only until role labels land (M4).
-_STORE = InMemoryStore()
+# Tests may replace this module-level store with an isolated backend instance.
+_STORE = get_store()
 
 
 class UpsertRecordIn(BaseModel):
