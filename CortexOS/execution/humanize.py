@@ -20,11 +20,10 @@ _MESSAGES: dict[str, tuple[str, str, str]] = {
         "Another program on this computer is already using the port this app wanted.",
         "Close the other program, or approve the app again to get a different port.",
     ),
-    "already_running": (
-        "It's already running",
-        "This app is running right now, so there's nothing to start.",
-        "Open it, or stop it first if you want a fresh start.",
-    ),
+    # NOTE: "already_running" is defined once, further down. An app-flavoured
+    # copy used to sit here and was silently shadowed by the routine one, so it
+    # never reached a user. Distinct wording per surface needs a surface-scoped
+    # key, not a second entry in the same dict.
     "process_exited": (
         "The app closed straight away",
         "It started but shut down before it could serve anything — usually a crash on startup.",
