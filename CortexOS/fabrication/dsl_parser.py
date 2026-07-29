@@ -15,6 +15,10 @@ class NodeType(str, Enum):
     LLM_JUDGED = "llm_judged"
     A2A_CALL = "a2a_call"
     DOCUMENT_REF = "document_ref"
+    RAG_RETRIEVE = "RAG_RETRIEVE"
+    RAG_RERANK = "RAG_RERANK"
+    RAG_ANSWER = "RAG_ANSWER"
+    AGENT_TASK = "agent_task"   # one workflow subagent: preset prompt + tool loop
 
 class InferenceTier(int, Enum):
     TIER0 = 0   # deterministic tool
