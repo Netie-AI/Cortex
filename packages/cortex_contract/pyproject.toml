@@ -1,0 +1,23 @@
+# Standalone version line for the DMS↔engine contract package.
+# Packaged into the netie wheel via the root pyproject.toml; this file is the
+# authoritative packaged version that scripts/check_versions.py asserts against
+# packages/cortex_contract/version.py (CONTRACT_VERSION).
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cortex-contract"
+version = "1.0.0"
+description = "Stable contract surface between Cortex engine and DMS"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2",
+]
+
+[tool.setuptools]
+packages = ["cortex_contract"]
+
+[tool.setuptools.package-dir]
+"cortex_contract" = "."

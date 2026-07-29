@@ -10,10 +10,6 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 
 from netie.config import get_config
-from netie.rag.fuser_rrf import FusedHit, fuse_dense_sparse
-from netie.rag.personalization import personalized_score
-from netie.rag.reranker import BGEReranker, RankedHit
-from netie.rag.retriever_sparse import retrieve_sparse
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +42,16 @@ class SearchResponse(BaseModel):
 def register_search_routes(app: Any) -> None:
     from fastapi import APIRouter
 
+    from CortexOS.packaging import FeatureNotInstalled, require_extra
+
+    try:
+        require_extra("rag", feature="search")
+    except FeatureNotInstalled:
+        log.info("Skipping /search routes — netie[rag] not installed")
+        return
+
+    from netie.rag.reranker import BGEReranker
+
     if not hasattr(app.state, "bge_reranker"):
         app.state.bge_reranker = BGEReranker()
 
@@ -73,6 +79,10 @@ def register_search_routes(app: Any) -> None:
 
     @router.post("/search", response_model=SearchResponse)
     async def search(req: SearchRequest, request: Request) -> SearchResponse:
+        from netie.rag.fuser_rrf import fuse_dense_sparse
+        from netie.rag.personalization import personalized_score
+        from netie.rag.retriever_sparse import retrieve_sparse
+
         engine = getattr(request.app.state, "db_engine", None)
         reranker: BGEReranker = request.app.state.bge_reranker
         dense_retriever = getattr(request.app.state, "dense_retriever", None)
@@ -149,7 +159,7 @@ async def get_interaction_count(engine: Any | None, user_id: str | None) -> int:
 
 
 def apply_personalization(
-    ranked: list[RankedHit],
+    ranked: list[Any],
     *,
     interactions_count: int,
     user_pref_vec: list[float] | None = None,
@@ -157,13 +167,16 @@ def apply_personalization(
     collaborative_resolver: Callable[[str], float] | None = None,
     gamma_one: float = 0.15,
     gamma_two: float = 0.10,
-) -> list[RankedHit]:
+) -> list[Any]:
+    from netie.rag.personalization import personalized_score
+    from netie.rag.reranker import RankedHit
+
     if interactions_count < 5:
         return ranked
     cos_fn = cosine_resolver or (lambda _lid: 0.0)
     col_fn = collaborative_resolver or (lambda _lid: 0.0)
     _ = user_pref_vec  # Future: similarity vs listing embedding derived from prefs
-    out: list[RankedHit] = []
+    out: list[Any] = []
     for r in ranked:
         lid = r.hit.listing_id
         new_score = personalized_score(

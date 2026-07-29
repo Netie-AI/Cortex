@@ -8,6 +8,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from CortexOS.packaging import FeatureNotInstalled, require_extra
+
 log = logging.getLogger(__name__)
 
 
@@ -29,12 +31,14 @@ def stable_point_uuid(listing_id: str) -> str:
 
 
 def _qdrant_models():
+    require_extra("rag", feature="qdrant")
     from qdrant_client.models import Distance, PointStruct, VectorParams
 
     return Distance, PointStruct, VectorParams
 
 
 def _async_client_cls():
+    require_extra("rag", feature="qdrant")
     try:
         from qdrant_client import AsyncQdrantClient as Client  # type: ignore
     except ImportError:
@@ -43,9 +47,7 @@ def _async_client_cls():
                 AsyncQdrantClient as Client,
             )
         except ImportError as exc:
-            raise ImportError(
-                "Dense retrieval requires ``qdrant-client`` (install extras: ``netie[rag]``)."
-            ) from exc
+            raise FeatureNotInstalled("rag", feature="qdrant", missing=("qdrant_client",)) from exc
     return Client
 
 

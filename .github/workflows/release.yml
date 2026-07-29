@@ -1,39 +1,130 @@
 name: Release
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  validate-package:
+  release:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     env:
       PACK: dms
-
+      PYTHONUTF8: "1"
+      REGISTRY: ghcr.io
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      - name: Install build tools
+      - name: Resolve version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          REPO_LC="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "repo_lc=${REPO_LC}" >> "$GITHUB_OUTPUT"
+          echo "image_core=${REGISTRY}/${OWNER_LC}/cortex:${VERSION}-core" >> "$GITHUB_OUTPUT"
+          echo "image_full=${REGISTRY}/${OWNER_LC}/cortex:${VERSION}-full" >> "$GITHUB_OUTPUT"
+
+      - name: Install build + full extras
         run: |
           python -m pip install --upgrade pip wheel build
-          pip install -e ".[dev,api,dms]"
+          pip install -e ".[full,dev]"
 
-      - name: Build sdist/wheel
-        run: python -m build
-
-      - name: Smoke test built wheel
+      - name: Verify versions + OpenAPI
         run: |
-          pip install dist/*.whl
-          python -c "from packs.dms import plug_in; assert plug_in()['pack']=='dms'"
+          python scripts/check_versions.py
+          python scripts/export_openapi.py --check
 
-      - name: Full test suite on release candidate
-        run: python -m pytest tests/ -q --tb=short
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Changelog since previous tag
+        id: changelog
+        run: |
+          set -euo pipefail
+          PREV="$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)"
+          {
+            echo "## Cortex ${{ steps.ver.outputs.version }}"
+            echo
+            if [ -n "${PREV}" ]; then
+              echo "Changes since ${PREV}:"
+              echo
+              git log --pretty=format:'- %s (%h)' "${PREV}..HEAD"
+            else
+              echo "Initial tagged release."
+              echo
+              git log --pretty=format:'- %s (%h)' --max-count=50
+            fi
+            echo
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: SHA256SUMS
+        run: |
+          set -euo pipefail
+          mkdir -p dist_release
+          cp dist/*.whl dist_release/
+          cp "contract/openapi-1.0.0.json" dist_release/
+          (
+            cd dist_release
+            sha256sum * > SHA256SUMS
+          )
+          cat dist_release/SHA256SUMS
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push core image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.core
+          push: true
+          tags: |
+            ${{ steps.ver.outputs.image_core }}
+            ghcr.io/${{ steps.ver.outputs.repo_lc }}:${{ steps.ver.outputs.version }}-core
+
+      - name: Build & push full image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.full
+          push: true
+          tags: |
+            ${{ steps.ver.outputs.image_full }}
+            ghcr.io/${{ steps.ver.outputs.repo_lc }}:${{ steps.ver.outputs.version }}-full
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Cortex ${{ steps.ver.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist_release/*.whl
+            dist_release/openapi-1.0.0.json
+            dist_release/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

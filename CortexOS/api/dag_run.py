@@ -6,9 +6,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
-from netie.execution.dag_runner import ExecutionContext, run_dag
-from netie.execution.model_router import ModelRouter
-from netie.fabrication.dsl_parser import parse_dsl
+from CortexOS.packaging import FeatureNotInstalled, require_extra
 from netie.result import Ok
 
 
@@ -20,6 +18,14 @@ class RunDAGRequest(BaseModel):
 
 
 def register_dag_run_routes(app: Any) -> None:
+    try:
+        require_extra("agentic", feature="dag_run")
+    except FeatureNotInstalled:
+        return
+
+    from netie.execution.dag_runner import ExecutionContext, run_dag
+    from netie.execution.model_router import ModelRouter
+    from netie.fabrication.dsl_parser import parse_dsl
 
     @app.post("/run")
     async def run_inline_dag(request: Request, body: RunDAGRequest) -> dict[str, Any]:

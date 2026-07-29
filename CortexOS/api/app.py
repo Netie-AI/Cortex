@@ -17,7 +17,7 @@ def create_app() -> Any:
     pack = load_pack(cfg.pack, resolve_pack_dir(cfg.pack_dir))
     app = FastAPI(
         title="Cortex Netie",
-        version="0.2.0",
+        version="2.5.0",
         lifespan=database_lifespan_factory(cfg.database_url),
     )
     app.state.pack = pack
@@ -49,12 +49,39 @@ def create_app() -> Any:
     from netie.api.engine_routes import register_engine_routes
     from netie.api.memory_routes import register_memory_routes
     from netie.api.context_routes import register_context_routes
+    from CortexOS.packaging import extra_available
+    import importlib
 
     register_search_routes(app)
     register_dag_run_routes(app)
     register_engine_routes(app)
     register_memory_routes(app)
     register_context_routes(app)
+
+    # Optional route modules (may be absent on slim checkouts / base profile).
+    for _mod, _reg in (
+        ("CortexOS.api.workflow_routes", "register_workflow_routes"),
+        ("CortexOS.api.telemetry_routes", "register_telemetry_routes"),
+        ("CortexOS.api.mcp_routes", "register_mcp_routes"),
+        ("CortexOS.api.discovery_routes", "register_discovery_routes"),
+    ):
+        try:
+            getattr(importlib.import_module(_mod), _reg)(app)
+        except ImportError:
+            continue
+
+    if extra_available("agentic"):
+        for _mod, _reg in (
+            ("CortexOS.api.race_routes", "register_race_routes"),
+            ("CortexOS.api.routine_routes", "register_routine_routes"),
+            ("CortexOS.api.app_routes", "register_app_routes"),
+            ("CortexOS.api.activity_routes", "register_activity_routes"),
+            ("CortexOS.api.goal_routes", "register_goal_routes"),
+        ):
+            try:
+                getattr(importlib.import_module(_mod), _reg)(app)
+            except ImportError:
+                continue
 
     if pack.name == "dms":
         from netie.api.dms_query import register_dms_routes
@@ -82,6 +109,12 @@ def create_app() -> Any:
         register_stream_routes(app)
         register_agent_routes(app)
         register_action_routes(app)
+        try:
+            from CortexOS.api.a2a_routes import register_a2a_routes
+
+            register_a2a_routes(app)
+        except ImportError:
+            pass
 
     @app.get("/health")
     async def health() -> dict[str, str]:

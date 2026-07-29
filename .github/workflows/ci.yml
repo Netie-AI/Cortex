@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dms-integrated-engine, dms-v2]
+  pull_request:
+    branches: [main, dms-integrated-engine, dms-v2]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PACK: dms
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install (full + dev)
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -e ".[full,dev]"
+
+      - name: Ruff
+        run: ruff check CortexOS packages/cortex_contract scripts tests/packaging tests/contract
+
+      - name: Mypy
+        run: mypy
+
+      - name: Import linter
+        run: lint-imports
+
+      - name: Version lines
+        run: python scripts/check_versions.py
+
+      - name: OpenAPI drift
+        run: python scripts/export_openapi.py --check
+
+      - name: Pytest
+        run: python -m pytest tests/ -q --tb=short
+
+  base-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PACK: dms
+      PYTHONUTF8: "1"
+      CORTEX_PROFILE: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install base only (no agentic/rag extras)
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -e ".[dev]"
+
+      - name: Base import surface
+        run: python -m pytest tests/packaging/test_base_install.py -q --tb=short
+
+  protected-paths:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard invariants / contract / importlinter
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_REF}" ] || [ "${BASE_REF}" = "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="$(git rev-parse HEAD~1 2>/dev/null || true)"
+          fi
+          if [ -z "${BASE_REF}" ]; then
+            echo "No base ref — skipping protected-path diff"
+            exit 0
+          fi
+          CHANGED="$(git diff --name-only "${BASE_REF}" "${HEAD_REF}" || true)"
+          echo "Changed files:"
+          echo "${CHANGED}"
+          PROTECTED="$(echo "${CHANGED}" | grep -E '^(tests/invariants/|tests/contract/|\.importlinter)' || true)"
+          if [ -z "${PROTECTED}" ]; then
+            echo "No protected paths touched"
+            exit 0
+          fi
+          echo "Protected paths touched:"
+          echo "${PROTECTED}"
+          # Commit body (not subject) must contain INVARIANT-CHANGE:
+          BODY="$(git log -1 --pretty=%b "${HEAD_REF}")"
+          if echo "${BODY}" | grep -q 'INVARIANT-CHANGE:'; then
+            echo "INVARIANT-CHANGE: present in commit body — OK"
+            exit 0
+          fi
+          echo "::error::Protected paths changed without INVARIANT-CHANGE: in the commit body"
+          exit 1

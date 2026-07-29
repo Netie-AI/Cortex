@@ -1,0 +1,16 @@
+[importlinter]
+root_packages =
+    CortexOS
+    packs
+include_external_packages = False
+
+[importlinter:contract:1]
+name = packaging helpers stay independent of optional planes
+type = independence
+modules =
+    CortexOS.packaging
+independent_from =
+    CortexOS.rag
+    CortexOS.execution.dag_runner
+    CortexOS.execution.osr
+    CortexOS.execution.seeker

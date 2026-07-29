@@ -37,11 +37,15 @@ class BM25Index:
         return results[:top_n]
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from netie.result import Ok, Err, Result
 
 class DenseReranker:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        from CortexOS.packaging import require_extra
+
+        require_extra("rag", feature="DenseReranker")
+        from sentence_transformers import SentenceTransformer
+
         self.model = SentenceTransformer(model_name)
         
     def rerank(self, intent: str, candidates: list[tuple[SkillCard, float]], top_k: int = 8) -> list[SkillCard]:

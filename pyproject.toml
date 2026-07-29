@@ -4,16 +4,19 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "netie"
-version = "0.1.0"
-description = "Netie Cortex OS Edition — AI Coding Agent"
+version = "2.5.0"
+description = "Cortex governed agentic engine — answer plane + optional agentic/RAG extras"
 authors = [
     {name = "Open Source"}
 ]
+requires-python = ">=3.10"
+# Base install: answer engine, execution primitives, ledger, F5/F7, semantic
+# layer, context assembly. Agentic (DAG/OSR/seeker/routines/commitments) and
+# RAG (embeddings/doc index) are optional extras.
 dependencies = [
     "typer>=0.12",
     "rich>=13",
     "rank-bm25>=0.2",
-    "sentence-transformers>=3",
     "numpy>=1.26",
     "litellm>=1",
     "wasmtime>=24",
@@ -22,33 +25,65 @@ dependencies = [
     "toml>=0.10",
     "cryptography>=42",
     "diskcache>=5",
-    "sqlite-utils>=3"
+    "sqlite-utils>=3",
+    # Answer / DMS / semantic / F5–F7
+    "duckdb>=1.1",
+    "sqlglot>=25",
+    "openpyxl>=3.1",
+    "qrcode>=7.4",
+    "pillow>=10",
+    "pytz>=2024.1",
+    # API shell for answer + context assembly
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
-requires-python = ">=3.10"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21"]
+# DAG, OSR, seeker, routines, commitments (+ DBOS resume marker)
+agentic = ["dbos>=2.28.0,<3"]
+# Embeddings + document index
+rag = [
+    "sentence-transformers>=3",
+    "qdrant-client>=1.9",
+    "tantivy>=0.22",
+]
+# Both optional planes
+full = [
+    "dbos>=2.28.0,<3",
+    "sentence-transformers>=3",
+    "qdrant-client>=1.9",
+    "tantivy>=0.22",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "import-linter>=2.0",
+    "types-PyYAML>=6",
+]
 local-inference = ["llama-cpp-python>=0.2"]
 gpu = ["torch>=2", "llama-cpp-python>=0.2"]
-rag = ["qdrant-client>=1.9", "tantivy>=0.22"]
 a2a = ["websockets>=12"]
 personality = ["redis>=5", "sqlalchemy>=2", "APScheduler>=3.10"]
 postgres = ["sqlalchemy[asyncio]>=2", "asyncpg>=0.29", "psycopg[binary]>=3.1"]
+# Backward-compat aliases
 agents = ["dbos>=2.28.0,<3"]
 tokens = ["tiktoken>=0.7"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
-# pytz: DuckDB timezone / DuckLake snapshot paths import it at runtime
 dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=10", "pytz>=2024.1"]
 
 [tool.poetry]
 name = "netie"
-version = "0.1.0"
-description = "Netie Cortex OS Edition — AI Coding Agent"
+version = "2.5.0"
+description = "Cortex governed agentic engine — answer plane + optional agentic/RAG extras"
 authors = ["Open Source"]
 packages = [
     { include = "netie" },
     { include = "CortexOS" },
-    { include = "packs" }
+    { include = "packs" },
+    { include = "cortex_contract", from = "packages" }
 ]
 
 [tool.poetry.dependencies]
@@ -56,7 +91,6 @@ python = "^3.10"
 typer = "^0.12"
 rich = "^13"
 rank-bm25 = "^0.2"
-sentence-transformers = "^3"
 numpy = "^1.26"
 litellm = "^1"
 wasmtime = "^24"
@@ -66,37 +100,71 @@ toml = "^0.10"
 cryptography = "^42"
 diskcache = "^5"
 sqlite-utils = "^3"
+duckdb = "^1.1"
+sqlglot = "^25"
+openpyxl = "^3.1"
+qrcode = "^7.4"
+pillow = "^10"
+pytz = ">=2024.1"
+fastapi = "^0.115"
+uvicorn = {version = "^0.30", extras = ["standard"]}
+# Optional
 pytest = {version = "^8", optional = true}
 pytest-asyncio = {version = "^0.23", optional = true}
 respx = {version = "^0.21", optional = true}
+ruff = {version = "^0.6", optional = true}
+mypy = {version = "^1.11", optional = true}
+import-linter = {version = "^2.0", optional = true}
+types-PyYAML = {version = "^6", optional = true}
 llama-cpp-python = {version = "^0.2", optional = true}
 torch = {version = "^2", optional = true}
 sqlalchemy = {version = "^2.0", optional = true, extras = ["asyncio"]}
 asyncpg = {version = "^0.29", optional = true}
 tiktoken = {version = "^0.7", optional = true}
+sentence-transformers = {version = "^3", optional = true}
 qdrant-client = {version = "^1.9", optional = true}
-fastapi = {version = "^0.115", optional = true}
-uvicorn = {version = "^0.30", extras = ["standard"], optional = true}
 tantivy = {version = "^0.22", optional = true}
-duckdb = {version = "^1.1", optional = true}
-sqlglot = {version = "^25", optional = true}
-openpyxl = {version = "^3.1", optional = true}
-qrcode = {version = "^7.4", optional = true}
-pillow = {version = "^10", optional = true}
-pytz = {version = ">=2024.1", optional = true}
-# Extras live on the dependency; poetry.extras may only list package names (no [binary]).
+websockets = {version = "^12", optional = true}
 psycopg = {version = "^3.1", optional = true, extras = ["binary"]}
 dbos = {version = ">=2.28.0,<3", optional = true}
 
 [tool.poetry.extras]
-dev = ["pytest", "pytest-asyncio", "respx"]
+agentic = ["dbos"]
+rag = ["sentence-transformers", "qdrant-client", "tantivy"]
+full = ["dbos", "sentence-transformers", "qdrant-client", "tantivy"]
+dev = ["pytest", "pytest-asyncio", "respx", "ruff", "mypy", "import-linter", "types-PyYAML"]
 local-inference = ["llama-cpp-python"]
 gpu = ["torch", "llama-cpp-python"]
-rag = ["qdrant-client", "tantivy"]
-a2a = []
+a2a = ["websockets"]
 personality = []
 postgres = ["sqlalchemy", "asyncpg", "psycopg"]
 agents = ["dbos"]
 tokens = ["tiktoken"]
-api = ["fastapi", "uvicorn"]
-dms = ["duckdb", "sqlglot", "openpyxl", "qrcode", "pillow", "pytz"]
+api = []
+dms = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = false
+pretty = true
+# Packaging / release infra only — engine modules remain gradually typed.
+files = [
+    "CortexOS/packaging.py",
+    "packages/cortex_contract",
+    "scripts/check_versions.py",
+    "scripts/export_openapi.py",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
