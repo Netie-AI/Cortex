@@ -5,9 +5,10 @@ from __future__ import annotations
 import csv
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from CortexOS.dms.profiler import profile_dataset
 

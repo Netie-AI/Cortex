@@ -154,7 +154,7 @@ def preview_table(
         )
         rows_raw = rel.fetchall()
         columns = [d[0] for d in rel.description] if rel.description else use_cols
-        rows = [dict(zip(columns, row)) for row in rows_raw]
+        rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
         return rows, total, all_cols
     finally:
         con.close()

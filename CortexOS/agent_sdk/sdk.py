@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from CortexOS.agent_sdk.backends import get_query_backend
 from CortexOS.ontology.registry import (
     ActionType,
     FunctionDef,
@@ -28,7 +29,6 @@ from CortexOS.ontology.registry import (
     load_object_types,
     pack_dir_for,
 )
-from CortexOS.agent_sdk.backends import get_query_backend
 
 _ROLE_RANK = {"viewer": 0, "steward": 1, "admin": 2}
 

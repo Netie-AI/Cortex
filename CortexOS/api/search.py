@@ -6,10 +6,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from netie.config import get_config
 from pydantic import BaseModel, Field
 from starlette.requests import Request
-
-from netie.config import get_config
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +79,6 @@ def register_search_routes(app: Any) -> None:
     @router.post("/search", response_model=SearchResponse)
     async def search(req: SearchRequest, request: Request) -> SearchResponse:
         from netie.rag.fuser_rrf import fuse_dense_sparse
-        from netie.rag.personalization import personalized_score
         from netie.rag.retriever_sparse import retrieve_sparse
 
         engine = getattr(request.app.state, "db_engine", None)

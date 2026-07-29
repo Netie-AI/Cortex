@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from CortexOS.execution.architecture_presets import resolve_runner
 
 
-def plan_for_request(preset: Optional[str], req: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def plan_for_request(preset: str | None, req: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build a RunPlan dict Cortex / AirGPT can hand to dag_runner or compose."""
     plan = resolve_runner(preset)
     body = dict(req or {})

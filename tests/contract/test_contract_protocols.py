@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from inspect import signature
 
-from packages.cortex_contract.version import CONTRACT_VERSION
-from CortexOS.execution import run_plan
-from CortexOS.execution import tool_runner
-from packs.dms.audit import ledger
 from CortexOS.api import engine_routes
+from CortexOS.execution import run_plan, tool_runner
+from packages.cortex_contract.version import CONTRACT_VERSION
+from packs.dms.audit import ledger
 
 
 def test_contract_version_pinned() -> None:

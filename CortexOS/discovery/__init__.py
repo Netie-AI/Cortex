@@ -9,10 +9,10 @@ Exposes the Find Skills tool surface used by MCP, workflow brokers, and HTTP.
 """
 
 from CortexOS.discovery.find import (
+    discover_for_goal,
     find_mcp,
     find_skills,
     find_subagents,
-    discover_for_goal,
 )
 
 __all__ = [

@@ -20,7 +20,8 @@ Netie today: hooks(observe) → registry deny → RBAC deny → confirm_required
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 EVENTS = ("before_action", "after_action", "on_denied")
 Hook = Callable[[dict], None]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping, Protocol
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 

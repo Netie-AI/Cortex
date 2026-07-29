@@ -60,8 +60,8 @@ def test_feature_not_installed_names_extra() -> None:
 
 
 def test_agentic_entrypoint_gated() -> None:
-    from CortexOS.packaging import FeatureNotInstalled
     import CortexOS.execution as execution
+    from CortexOS.packaging import FeatureNotInstalled
 
     # Clear any prior cache from a full-profile import in the same session.
     execution.__dict__.pop("execute_run_plan", None)

@@ -7,7 +7,7 @@ assumptions in words, the same law the routine drafts follow.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -25,16 +25,16 @@ class GoalBody(BaseModel):
 
 
 class GoalPatchBody(BaseModel):
-    statement: Optional[str] = None
-    measurable_criteria: Optional[list[dict[str, Any]]] = None
-    hard_constraints: Optional[list[dict[str, Any]]] = None
-    soft_preferences: Optional[dict[str, Any]] = None
-    audit_required: Optional[bool] = None
-    active: Optional[bool] = None
+    statement: str | None = None
+    measurable_criteria: list[dict[str, Any]] | None = None
+    hard_constraints: list[dict[str, Any]] | None = None
+    soft_preferences: dict[str, Any] | None = None
+    audit_required: bool | None = None
+    active: bool | None = None
 
 
 class SeekBody(BaseModel):
-    goal_id: Optional[str] = None
+    goal_id: str | None = None
     trigger: str = "manual"
     limit: int = seeker.MAX_PROPOSALS
 

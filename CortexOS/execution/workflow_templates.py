@@ -13,8 +13,9 @@ runs that layer concurrently.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from CortexOS.execution import prompt_library
 from CortexOS.fabrication.dsl_parser import AgenticDSLProgram, DSLNode, NodeType

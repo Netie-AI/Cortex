@@ -7,7 +7,7 @@ store and runner; this module is a thin FastAPI registration.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -27,7 +27,7 @@ class RunBody(BaseModel):
     session_id: str = ""
     actor: str = ""
     origin: str = "api"
-    cost_ceiling_myr: Optional[float] = None
+    cost_ceiling_myr: float | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -7,8 +7,8 @@ Cortex ``engine.registry.auto_profile``:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
-
+from collections.abc import Mapping
+from typing import Any
 
 DEFAULT_MAX_PARALLEL = 4
 #: Rough concurrent-agent VRAM budget (GB) when serving a mid local model.

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
 
 # Minimal valid WASM module: (module (func (export "run") (result i32) i32.const 42))
 _MINIMAL_WASM = bytes(

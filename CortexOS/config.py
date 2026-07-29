@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
-from pydantic import BaseModel, Field
+
 import toml
+from pydantic import BaseModel, Field
+
 
 class NettieConfig(BaseModel):
     api_key: str | None = Field(default=None)
@@ -31,7 +33,7 @@ def load_config() -> NettieConfig:
     path = get_config_path()
     data = {}
     if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = toml.load(f)
             
     # Override with env vars

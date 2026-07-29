@@ -4,10 +4,10 @@ import json
 from typing import Any
 
 from fastapi import HTTPException, Request
+from netie.result import Ok
 from pydantic import BaseModel, Field
 
 from CortexOS.packaging import FeatureNotInstalled, require_extra
-from netie.result import Ok
 
 
 class RunDAGRequest(BaseModel):

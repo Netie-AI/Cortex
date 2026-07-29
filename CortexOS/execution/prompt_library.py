@@ -10,9 +10,10 @@ prompt and anything cleverer becomes an injection surface.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from CortexOS.paths import data_path
 

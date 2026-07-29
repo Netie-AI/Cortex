@@ -18,9 +18,11 @@ from typing import Any
 from CortexOS.integrations.openvault_client import (
     freeroute_ratelimit,
     openvault_base_url,
-    ping as _ping,
 )
 from CortexOS.integrations.openvault_client import get_json as _get_json
+from CortexOS.integrations.openvault_client import (
+    ping as _ping,
+)
 
 # Re-export for callers that read the module constant.
 OPENVAULT_URL = os.environ.get("OPENVAULT_URL", openvault_base_url())

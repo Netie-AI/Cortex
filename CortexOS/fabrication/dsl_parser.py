@@ -1,5 +1,9 @@
+import json
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+
+from netie.result import INVALID_DSL, SYNTHESIS_FAILED, Err, Ok, Result
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
 
 class NodeType(str, Enum):
     TOOL_CALL    = "TOOL_CALL"
@@ -75,9 +79,8 @@ class AgenticDSLProgram(BaseModel):
     raw_dsl: str = ""                # original LLM output, preserved (injected by parse_dsl)
     model_config = ConfigDict(populate_by_name=True)
 
-import json
-from pydantic import ValidationError
-from netie.result import Ok, Err, Result, SYNTHESIS_FAILED, INVALID_DSL
+
+
 
 def parse_dsl(raw_json: str, intent_hash: str) -> Result[AgenticDSLProgram]:
     try:

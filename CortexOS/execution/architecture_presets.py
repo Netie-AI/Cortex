@@ -6,7 +6,7 @@ Does not execute a new orchestrator. Maps preset id → existing Cortex paths
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 ArchitecturePreset = Literal[
     "dag",
@@ -21,7 +21,7 @@ ArchitecturePreset = Literal[
 
 DEFAULT_PRESET: ArchitecturePreset = "minimal"
 
-PRESET_CATALOG: List[Dict[str, Any]] = [
+PRESET_CATALOG: list[dict[str, Any]] = [
     {
         "id": "minimal",
         "name": "Minimal",
@@ -83,7 +83,7 @@ PRESET_CATALOG: List[Dict[str, Any]] = [
 _VALID = {p["id"] for p in PRESET_CATALOG}
 
 
-def normalize_preset(value: Optional[str]) -> ArchitecturePreset:
+def normalize_preset(value: str | None) -> ArchitecturePreset:
     v = (value or DEFAULT_PRESET).strip().lower().replace("-", "_")
     if v == "langgraph_style":
         v = "langgraph"
@@ -92,11 +92,11 @@ def normalize_preset(value: Optional[str]) -> ArchitecturePreset:
     return v  # type: ignore[return-value]
 
 
-def catalog() -> List[Dict[str, Any]]:
+def catalog() -> list[dict[str, Any]]:
     return list(PRESET_CATALOG)
 
 
-def resolve_runner(preset: Optional[str]) -> Dict[str, Any]:
+def resolve_runner(preset: str | None) -> dict[str, Any]:
     """Map preset → RunPlan stub for existing runners (no new loop)."""
     pid = normalize_preset(preset)
     meta = next(p for p in PRESET_CATALOG if p["id"] == pid)

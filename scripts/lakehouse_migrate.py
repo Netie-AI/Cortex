@@ -11,12 +11,12 @@ Run: python -m scripts.lakehouse_migrate
 """
 from __future__ import annotations
 
-from pathlib import Path
 import os
+from pathlib import Path
 from typing import Any
 
-from packs.dms.lakehouse.catalog import connect, lakehouse_mode
 from packs.dms.lakehouse import tables as lt
+from packs.dms.lakehouse.catalog import connect, lakehouse_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "data" / "samples"

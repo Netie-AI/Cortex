@@ -1,6 +1,6 @@
 """In-process A2A message endpoint."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -14,9 +14,9 @@ router = APIRouter(prefix="/a2a", tags=["a2a"])
 
 class A2AMessageRequest(BaseModel):
     to: str
-    body: Dict[str, Any]
-    from_did: Optional[str] = None
-    type: Optional[str] = None
+    body: dict[str, Any]
+    from_did: str | None = None
+    type: str | None = None
 
 
 @router.post("/messages")

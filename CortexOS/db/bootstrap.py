@@ -32,7 +32,7 @@ def split_sql_migration_script(script: str) -> list[str]:
     return statements
 
 
-async def apply_node_executions_schema(conn: "AsyncConnection") -> None:
+async def apply_node_executions_schema(conn: AsyncConnection) -> None:
     from sqlalchemy import text
 
     for path in migration_sql_paths():
@@ -41,7 +41,7 @@ async def apply_node_executions_schema(conn: "AsyncConnection") -> None:
             await conn.execute(text(stmt))
 
 
-def create_async_engine_from_url(database_url: str, **kw: Any) -> "AsyncEngine":
+def create_async_engine_from_url(database_url: str, **kw: Any) -> AsyncEngine:
     """Build a SQLAlchemy async engine; normalizes ``postgres://`` to asyncpg dialect."""
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -62,7 +62,7 @@ def _normalize_database_url(database_url: str) -> str:
     )
 
 
-async def init_database_engine(database_url: str | None) -> "AsyncEngine | None":
+async def init_database_engine(database_url: str | None) -> AsyncEngine | None:
     """
     Create engine and apply bundled migrations.
 
@@ -78,6 +78,6 @@ async def init_database_engine(database_url: str | None) -> "AsyncEngine | None"
     return engine
 
 
-async def dispose_engine(engine: "AsyncEngine | None") -> None:
+async def dispose_engine(engine: AsyncEngine | None) -> None:
     if engine is not None:
         await engine.dispose()

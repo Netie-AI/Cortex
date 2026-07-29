@@ -1,7 +1,6 @@
 """F5 task gate API routes."""
 
-import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -12,16 +11,16 @@ router = APIRouter(prefix="/dms/tasks", tags=["tasks"])
 class GateCheckRequest(BaseModel):
     event_id: str
     task_id: str
-    filled_template: Dict[str, Any] = {}
+    filled_template: dict[str, Any] = {}
     actor: str = "user"
 
 
 class ChooseTaskRequest(BaseModel):
-    message_id: Optional[str] = None
-    thread_id: Optional[str] = None
+    message_id: str | None = None
+    thread_id: str | None = None
     task_id: str
-    filled_template: Dict[str, Any] = {}
-    intent: Optional[str] = None
+    filled_template: dict[str, Any] = {}
+    intent: str | None = None
     actor: str = "user"
     accepted: bool = True
 
@@ -31,7 +30,7 @@ class AcknowledgeRequest(BaseModel):
     actor: str = "steward"
 
 
-def _verdict_dict(verdict) -> Dict[str, Any]:
+def _verdict_dict(verdict) -> dict[str, Any]:
     return {
         "status": verdict.status,
         "violations": verdict.violations,

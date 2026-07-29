@@ -34,7 +34,7 @@ MAX_PROPOSALS = 8
 
 
 def _proposal_id(goal_id: str, title: str) -> str:
-    digest = hashlib.sha256(f"{goal_id}|{title}".encode("utf-8")).hexdigest()[:10]
+    digest = hashlib.sha256(f"{goal_id}|{title}".encode()).hexdigest()[:10]
     return f"prop-{digest}"
 
 

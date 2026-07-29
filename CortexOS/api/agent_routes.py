@@ -1,6 +1,6 @@
 """S1 — OpenDMS watcher-agent API (hire agents, run, approve/reject publishes)."""
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -55,7 +55,7 @@ def run_agent(agent_id: str, caller: Caller = Depends(require_role("steward"))) 
 
 
 @router.get("/runs")
-def list_runs(agent_id: Optional[str] = None, status: Optional[str] = None,
+def list_runs(agent_id: str | None = None, status: str | None = None,
               caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     from packs.dms.agents import registry
 

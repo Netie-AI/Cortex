@@ -9,7 +9,6 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
-
 FORBIDDEN = (
     exp.Insert,
     exp.Update,
@@ -185,7 +184,7 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
     rel = con.execute(result.safe_sql)
     rows_raw = rel.fetchall()
     columns = [d[0] for d in rel.description] if rel.description else []
-    rows = [dict(zip(columns, row)) for row in rows_raw]
+    rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
     entry.row_count = len(rows)
     log_audit(entry)
     return result, rows, entry

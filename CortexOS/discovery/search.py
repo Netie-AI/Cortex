@@ -7,7 +7,7 @@ even when dense models are mocked or unavailable in tests.
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 from CortexOS.discovery.models import DiscoveryHit, RefItem
 
@@ -82,7 +82,7 @@ class CatalogIndex:
                 raw_scores.append(float(len(qset & doc)))
 
         hits: list[DiscoveryHit] = []
-        for item, raw in zip(self.items, raw_scores):
+        for item, raw in zip(self.items, raw_scores, strict=False):
             if kinds is not None and item.kind not in kinds:
                 continue
             if raw <= 0 and not _substring_hit(q, item):

@@ -15,7 +15,8 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from CortexOS.execution import scoreboard
 from CortexOS.execution.dag_runner import ExecutionContext, run_dag

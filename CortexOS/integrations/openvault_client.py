@@ -15,7 +15,8 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 DEFAULT_OPENVAULT_URL = "http://127.0.0.1:5000"
 

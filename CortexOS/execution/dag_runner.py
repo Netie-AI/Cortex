@@ -4,19 +4,24 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
-from netie.execution.errors import OutboundNotSendable, UnsupportedDAGNodeKind, WorkflowCostCeilingExceeded
+from netie.execution.errors import (
+    OutboundNotSendable,
+    UnsupportedDAGNodeKind,
+    WorkflowCostCeilingExceeded,
+)
 from netie.execution.executor import invoke_routed_completion
 from netie.execution.model_router import ModelRequest, ModelRouter
 from netie.fabrication.dag_compiler import DAGCompiler
 from netie.fabrication.dsl_parser import AgenticDSLProgram, DSLNode, NodeType
-from netie.routing.adapters.base import AdapterRequest
 from netie.personality.timing import is_sendable_now
+from netie.routing.adapters.base import AdapterRequest
 from netie.routing.cost_ledger import CostLedger
-from netie.routing.token_estimate import estimate_prompt_tokens
 from netie.routing.tiers import Tier
+from netie.routing.token_estimate import estimate_prompt_tokens
 
 _PLACEHOLDER = re.compile(r"\{([\w\-]+)\}")
 
@@ -40,7 +45,7 @@ class ExecutionContext(Mapping[str, Any]):
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
 
-    def update_with_node(self, node_id: str, result: "NodeResult") -> None:
+    def update_with_node(self, node_id: str, result: NodeResult) -> None:
         self._data[node_id] = result.output
 
     def set_default(self, key: str, value: Any) -> None:
@@ -410,8 +415,8 @@ async def execute_rag_answer_node(node: DSLNode, context: ExecutionContext) -> N
 
 
 async def execute_a2a_call_node(node: DSLNode, context: ExecutionContext) -> NodeResult:
-    from datetime import datetime, timezone
     import uuid as _uuid
+    from datetime import datetime, timezone
 
     from CortexOS.a2a.protocol import A2AMessage
     from CortexOS.a2a.transport_ws import InProcessA2ATransport

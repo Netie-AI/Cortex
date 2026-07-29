@@ -1,5 +1,12 @@
+import hashlib
+import json
+from collections import defaultdict, deque
+
+from netie.result import CYCLIC_DAG, Err, Ok, Result
 from pydantic import BaseModel
-from .dsl_parser import DSLNode, AgenticDSLProgram
+
+from .dsl_parser import AgenticDSLProgram, DSLNode
+
 
 class DAGEdge(BaseModel):
     from_node: str
@@ -21,10 +28,8 @@ class CompiledDAG(BaseModel):
     total_nodes: int
     pruned_nodes: int
 
-import json
-import hashlib
-from collections import defaultdict, deque
-from netie.result import Ok, Err, Result, CYCLIC_DAG
+
+
 
 class DAGCompiler:
     def __init__(self, dead_code_eliminator: bool = True):

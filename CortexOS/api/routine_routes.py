@@ -6,7 +6,7 @@ FastAPI registration in the workflow_routes style.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -20,10 +20,10 @@ class RoutineBody(BaseModel):
     goal: str = ""
     name: str = ""
     prompt: str = ""
-    preset: Optional[str] = None
-    depth: Optional[str] = None
-    interval_seconds: Optional[int] = None
-    daily_cost_cap_myr: Optional[float] = None
+    preset: str | None = None
+    depth: str | None = None
+    interval_seconds: int | None = None
+    daily_cost_cap_myr: float | None = None
     vars: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -32,14 +32,14 @@ class DraftBody(BaseModel):
 
 
 class RoutinePatchBody(BaseModel):
-    name: Optional[str] = None
-    prompt: Optional[str] = None
-    preset: Optional[str] = None
-    depth: Optional[str] = None
-    interval_seconds: Optional[int] = None
-    enabled: Optional[bool] = None
-    daily_cost_cap_myr: Optional[float] = None
-    vars: Optional[dict[str, Any]] = None
+    name: str | None = None
+    prompt: str | None = None
+    preset: str | None = None
+    depth: str | None = None
+    interval_seconds: int | None = None
+    enabled: bool | None = None
+    daily_cost_cap_myr: float | None = None
+    vars: dict[str, Any] | None = None
 
 
 class PauseBody(BaseModel):

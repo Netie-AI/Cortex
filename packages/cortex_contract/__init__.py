@@ -1,10 +1,40 @@
 """Stable contract surface between Cortex engine and DMS app."""
 
+from .answer import AbstainReason, Answer, AskRequest, Badge, Provenance
+from .errors import ContractError, UnauthorizedError, ValidationError
+from .execution import EngineSubmitter, Manifest, PoolSpec, QueryResult, SubmitRequest
+from .ledger import ChainVerification, LedgerEntry, LedgerWriter
+from .proposal import Diff, GateResult, Proposal, ProposalVersion
+from .tools import ToolCall, ToolClass, ToolResult, ToolRuntime, ToolSpec
 from .version import CONTRACT_VERSION
 
-from .answer import AskRequest, Answer, Badge, Provenance, AbstainReason
-from .execution import SubmitRequest, QueryResult, Manifest, PoolSpec, EngineSubmitter
-from .proposal import Proposal, ProposalVersion, Diff, GateResult
-from .ledger import LedgerEntry, ChainVerification, LedgerWriter
-from .tools import ToolSpec, ToolCall, ToolResult, ToolClass, ToolRuntime
-from .errors import ContractError, ValidationError, UnauthorizedError
+# The published surface DMS pins against. Adding a name here is a contract
+# minor; removing or renaming one is a contract major. See docs/RELEASING.md.
+__all__ = [
+    "CONTRACT_VERSION",
+    "AbstainReason",
+    "Answer",
+    "AskRequest",
+    "Badge",
+    "Provenance",
+    "ContractError",
+    "UnauthorizedError",
+    "ValidationError",
+    "EngineSubmitter",
+    "Manifest",
+    "PoolSpec",
+    "QueryResult",
+    "SubmitRequest",
+    "ChainVerification",
+    "LedgerEntry",
+    "LedgerWriter",
+    "Diff",
+    "GateResult",
+    "Proposal",
+    "ProposalVersion",
+    "ToolCall",
+    "ToolClass",
+    "ToolResult",
+    "ToolRuntime",
+    "ToolSpec",
+]

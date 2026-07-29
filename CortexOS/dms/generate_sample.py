@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import csv
 import random
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "data" / "samples"
@@ -566,7 +567,6 @@ def generate_rows(n: int = 200) -> list[dict[str, str]]:
     inv = generate_inventory(rng, locations, suppliers, n=n)
     loc_code_by_id = {r["location_id"]: r["location_code"] for r in locations}
     messy: list[dict[str, str]] = []
-    start = date(2024, 1, 1)
     for idx, row in enumerate(inv):
         m = dict(row)
         code = loc_code_by_id.get(row["location_id"], "WH-A")

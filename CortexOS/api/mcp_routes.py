@@ -5,7 +5,7 @@ servers. Includes Find Skills discovery over curated awesome-list catalogs.
 Third-party MCP *clients* remain gated behind P16.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,10 +17,10 @@ router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 class McpCallIn(BaseModel):
     name: str
-    arguments: Dict[str, Any] = {}
+    arguments: dict[str, Any] = {}
 
 
-def _tool_catalog() -> List[Dict[str, Any]]:
+def _tool_catalog() -> list[dict[str, Any]]:
     return [
         {
             "name": "answer_engine.answer",
@@ -95,7 +95,7 @@ def _tool_catalog() -> List[Dict[str, Any]]:
 
 
 @router.get("/tools")
-async def mcp_list_tools(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+async def mcp_list_tools(caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     _ = caller
     return {
         "ok": True,
@@ -109,7 +109,7 @@ async def mcp_list_tools(caller: Caller = Depends(require_role("viewer"))) -> Di
 async def mcp_call_tool(
     body: McpCallIn,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     _ = caller
     name = (body.name or "").strip()
     args = body.arguments or {}
@@ -127,7 +127,7 @@ async def mcp_call_tool(
         return {"ok": True, "name": name, "result": result}
 
     if name == "lakehouse.tables":
-        tables: List[str] = []
+        tables: list[str] = []
         try:
             from CortexOS.dms import lakehouse
 
@@ -140,8 +140,9 @@ async def mcp_call_tool(
         return {"ok": True, "name": name, "result": {"tables": tables}}
 
     if name == "agent.status":
-        from CortexOS.execution import architecture_presets
         from netie.engine import registry
+
+        from CortexOS.execution import architecture_presets
 
         return {
             "ok": True,

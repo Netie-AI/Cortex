@@ -44,13 +44,15 @@ def create_app() -> Any:
 
         app.add_middleware(DMSRateLimitMiddleware)
 
-    from netie.api.search import register_search_routes
+    import importlib
+
+    from netie.api.context_routes import register_context_routes
     from netie.api.dag_run import register_dag_run_routes
     from netie.api.engine_routes import register_engine_routes
     from netie.api.memory_routes import register_memory_routes
-    from netie.api.context_routes import register_context_routes
+    from netie.api.search import register_search_routes
+
     from CortexOS.packaging import extra_available
-    import importlib
 
     register_search_routes(app)
     register_dag_run_routes(app)
@@ -84,18 +86,18 @@ def create_app() -> Any:
                 continue
 
     if pack.name == "dms":
-        from netie.api.dms_query import register_dms_routes
-        from netie.api.chat_routes import register_chat_routes
-        from netie.api.brain_routes import register_brain_routes
-        from netie.api.task_routes import register_task_routes
-        from netie.api.skill_routes import register_skill_routes
-        from netie.api.sidecar_routes import register_sidecar_routes
-        from netie.api.lakehouse_routes import register_lakehouse_routes
-        from netie.api.ingest_routes import register_ingest_routes
-        from netie.api.pipeline_routes import register_pipeline_routes
-        from netie.api.stream_routes import register_stream_routes
-        from netie.api.agent_routes import register_agent_routes
         from netie.api.action_routes import register_action_routes
+        from netie.api.agent_routes import register_agent_routes
+        from netie.api.brain_routes import register_brain_routes
+        from netie.api.chat_routes import register_chat_routes
+        from netie.api.dms_query import register_dms_routes
+        from netie.api.ingest_routes import register_ingest_routes
+        from netie.api.lakehouse_routes import register_lakehouse_routes
+        from netie.api.pipeline_routes import register_pipeline_routes
+        from netie.api.sidecar_routes import register_sidecar_routes
+        from netie.api.skill_routes import register_skill_routes
+        from netie.api.stream_routes import register_stream_routes
+        from netie.api.task_routes import register_task_routes
 
         register_dms_routes(app)
         register_chat_routes(app)

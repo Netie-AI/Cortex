@@ -17,7 +17,6 @@ import re
 import sqlite3
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from CortexOS.memory.store import cosine
@@ -80,7 +79,7 @@ def embed_goal(text: str) -> list[float]:
     vec = [0.0] * EMBED_DIM
     toks = _tokens(text)
     features: list[tuple[str, float]] = [(t, 1.0) for t in toks]
-    features.extend((f"{a} {b}", 0.5) for a, b in zip(toks, toks[1:]))
+    features.extend((f"{a} {b}", 0.5) for a, b in zip(toks, toks[1:], strict=False))
     for feat, weight in features:
         digest = hashlib.sha256(feat.encode("utf-8")).digest()
         bucket = int.from_bytes(digest[:2], "big") % EMBED_DIM
@@ -211,7 +210,7 @@ def upsert_family(family: str, vec: list[float]) -> None:
             return
         old = json.loads(row["centroid"])
         n = int(row["run_count"])
-        merged = [(o * n + v) / (n + 1) for o, v in zip(old, vec)]
+        merged = [(o * n + v) / (n + 1) for o, v in zip(old, vec, strict=False)]
         conn.execute(
             "UPDATE arch_families SET centroid = ?, run_count = ?, updated_at = ? WHERE family = ?",
             (json.dumps(merged), n + 1, time.time(), family),

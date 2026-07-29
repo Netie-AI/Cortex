@@ -11,8 +11,9 @@ when the loop stalls.
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Awaitable, Callable, Mapping, Sequence
+from typing import Any
 
 GenerateFn = Callable[[str, int], Awaitable[str] | str]
 VerifyFn = Callable[[str, Sequence[str], int], Awaitable[Mapping[str, Any]] | Mapping[str, Any]]

@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -89,6 +89,6 @@ def _dms_duckdb_backend(
     try:
         rel = con.execute(sql, values)
         names = [d[0] for d in rel.description]
-        return [dict(zip(names, row)) for row in rel.fetchall()]
+        return [dict(zip(names, row, strict=False)) for row in rel.fetchall()]
     finally:
         con.close()

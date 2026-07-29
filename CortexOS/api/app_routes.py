@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -17,13 +17,13 @@ from CortexOS.execution import app_package, app_store, humanize
 
 
 class ImportBody(BaseModel):
-    name: Optional[str] = None
+    name: str | None = None
     zip_base64: str = Field(..., min_length=4)
 
 
 class ImportFolderBody(BaseModel):
     path: str = Field(..., min_length=1)
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class RejectBody(BaseModel):
@@ -63,7 +63,7 @@ def register_app_routes(app: Any) -> None:
         try:
             data = base64.b64decode(body.zip_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"invalid base64: {exc}")
+            raise HTTPException(status_code=400, detail=f"invalid base64: {exc}") from exc
         out = app_store.import_zip_bytes(data, name=body.name)
         if not out.get("ok"):
             _fail(400, str(out.get("error")))

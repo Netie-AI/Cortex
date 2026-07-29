@@ -19,7 +19,6 @@ import sqlite3
 import threading
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
 from CortexOS.execution import humanize, schedule_spec

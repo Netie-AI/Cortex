@@ -1,4 +1,3 @@
-import os
 try:
     from docx import Document
 except ImportError:

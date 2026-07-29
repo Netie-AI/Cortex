@@ -19,8 +19,9 @@ import json
 import re
 import socket
 import zipfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 MANIFEST_NAME = "netie_app.json"
 MANIFEST_SCHEMA = "netie.app/1"

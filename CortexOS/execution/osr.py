@@ -33,7 +33,8 @@ import json
 import sqlite3
 import threading
 import time
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from CortexOS.execution import untrusted_payload
 from CortexOS.paths import data_path
@@ -166,8 +167,8 @@ def classify(
     min_runs: int = 3,
 ) -> dict[str, Any]:
     """Band an incoming request. Pure read — nothing is learned here."""
-    from CortexOS.packaging import require_extra
     from CortexOS.execution import scoreboard
+    from CortexOS.packaging import require_extra
 
     require_extra("agentic", feature="osr")
     scoreboard.init()

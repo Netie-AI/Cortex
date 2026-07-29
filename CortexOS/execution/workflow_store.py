@@ -17,8 +17,8 @@ import queue
 import sqlite3
 import threading
 import time
-from pathlib import Path
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from CortexOS.paths import data_path
 

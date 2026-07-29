@@ -6,7 +6,7 @@ touch = clear stale tool results once the agent has already acted on them.
 from __future__ import annotations
 
 import re
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from .budget import estimate_tokens, fit_text
 

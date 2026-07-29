@@ -27,8 +27,8 @@ def classify_with_model(text: str) -> ClassifyResult:
     if not _model_ready():
         raise RuntimeError("local inference disabled")
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer
     import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     model_id = DEFAULT_MODEL
     device = "cuda" if torch.cuda.is_available() else "cpu"

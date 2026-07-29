@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.discovery.catalog import catalog_snapshot, clear_catalog_cache, load_sources
-from CortexOS.discovery.models import DiscoveryHit, DiscoveryResult
+from CortexOS.discovery.models import DiscoveryResult
 from CortexOS.discovery.search import CatalogIndex
 from CortexOS.discovery.skillopt_evolve import evolve_hit
 

@@ -14,7 +14,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from CortexOS.execution import scoreboard
 from CortexOS.execution.preset_router import plan_for_request

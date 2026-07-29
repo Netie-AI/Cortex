@@ -11,8 +11,9 @@ cheap char-based estimate for Netie pack/MCP manifests.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 _TOKEN = re.compile(r"[a-z0-9][a-z0-9_+./:-]*", re.I)
 

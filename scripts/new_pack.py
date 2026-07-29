@@ -81,12 +81,12 @@ def _semantic_layer(objects, links) -> dict:
         "glossary": [],
         "joins": [
             {
-                "from_table": l.from_object,
-                "from_column": l.from_property,
-                "to_table": l.to_object,
-                "to_column": l.to_property,
+                "from_table": link.from_object,
+                "from_column": link.from_property,
+                "to_table": link.to_object,
+                "to_column": link.to_property,
             }
-            for l in links
+            for link in links
         ],
         "sensitive_columns": sensitive,
         "tables": {o.id: {"columns": [p.name for p in o.properties]} for o in objects},

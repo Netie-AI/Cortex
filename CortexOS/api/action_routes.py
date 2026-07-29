@@ -1,6 +1,6 @@
 """F8 sandboxed action routes — POST /dms/actions/{tool} (steward+)."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -11,12 +11,12 @@ router = APIRouter(prefix="/dms/actions", tags=["actions"])
 
 
 class ActionRequest(BaseModel):
-    params: Dict[str, Any] = Field(default_factory=dict)
-    run_id: Optional[str] = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    run_id: str | None = None
 
 
 @router.get("")
-def list_actions(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+def list_actions(caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     from netie.execution.tool_runner import allowed_action_tools
 
     _ = caller
@@ -27,7 +27,7 @@ def list_actions(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, 
 def describe_action(
     tool: str,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from netie.execution.tool_runner import allowed_action_tools
 
     _ = caller
@@ -39,7 +39,7 @@ def invoke_action(
     tool: str,
     req: ActionRequest,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from netie.execution.tool_runner import ToolCallError, run_tool_call
 
     try:

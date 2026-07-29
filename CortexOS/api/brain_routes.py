@@ -9,7 +9,7 @@ No from __future__ import annotations (FastAPI rule).
 Pydantic models at module level.
 """
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -23,13 +23,13 @@ router = APIRouter(prefix="/dms/brain", tags=["brain"])
 
 class BrainRunRequest(BaseModel):
     intent: str
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
     actor: str = "user"
 
 
 class ChartRequest(BaseModel):
     query: str
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
 
 
 class ExportRequest(BaseModel):
@@ -40,13 +40,13 @@ class ExportRequest(BaseModel):
 
 class EmailRequest(BaseModel):
     request: str
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
     actor: str = "user"
 
 
 class WhatsAppRequest(BaseModel):
     request: str
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
 
 
 class AnalyzeRequest(BaseModel):
@@ -60,16 +60,16 @@ class ReportRequest(BaseModel):
 
 class TaskSuggestRequest(BaseModel):
     use_llm: bool = False
-    trigger_text: Optional[str] = None
+    trigger_text: str | None = None
 
 
 class TaskChoiceRequest(BaseModel):
     task_id: str
     accepted: bool
     actor: str = "user"
-    filled_template: Optional[Dict[str, Any]] = None
-    message_id: Optional[str] = None
-    thread_id: Optional[str] = None
+    filled_template: dict[str, Any] | None = None
+    message_id: str | None = None
+    thread_id: str | None = None
 
 
 class TaskOutcomeRequest(BaseModel):
@@ -81,12 +81,12 @@ class PonytailRequest(BaseModel):
     text: str
     user_id: str = "anon"
     intent_hint: str = ""
-    force_tier: Optional[str] = None
+    force_tier: str | None = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _get_db_data(table: str, limit: int = 5000) -> List[Dict]:
+def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
     """Pull data from DuckDB for generative tasks."""
     try:
         import duckdb
@@ -97,9 +97,9 @@ def _get_db_data(table: str, limit: int = 5000) -> List[Dict]:
         return []
 
 
-def _get_warehouse_context() -> Dict[str, Any]:
+def _get_warehouse_context() -> dict[str, Any]:
     """Build warehouse context for AI tasks."""
-    ctx: Dict[str, Any] = {}
+    ctx: dict[str, Any] = {}
     for table in ["dms_inventory", "dms_sales", "dms_movements"]:
         try:
             import duckdb
@@ -198,12 +198,13 @@ def brain_report(req: ReportRequest, caller: Caller = Depends(require_role("view
 @router.post("/suggest")
 def task_suggest(req: TaskSuggestRequest, caller: Caller = Depends(require_role("viewer"))):
     """Return ranked task suggestions based on warehouse state."""
-    from packs.dms.tasks.suggest import suggest
     import sqlite3
+
+    from packs.dms.tasks.suggest import suggest
 
     _ = caller
     db_path = os.environ.get("DMS_OPS_DB") or os.environ.get("SQLITE_DB_PATH", "data/dms_ops.db")
-    state: Dict[str, Any] = {"items": [], "locations": [], "recent_movements": [], "compliance_flags": []}
+    state: dict[str, Any] = {"items": [], "locations": [], "recent_movements": [], "compliance_flags": []}
     try:
         with sqlite3.connect(db_path) as conn:
             # Items

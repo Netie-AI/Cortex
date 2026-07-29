@@ -5,7 +5,7 @@ No local keystore. Keys and leave-machine permission live in OpenVault.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from CortexOS.integrations.openvault_client import get_json, openvault_base_url, post_json
 
@@ -15,8 +15,8 @@ def check_gate(
     action: str = "run",
     project_path: str = "",
     destination: str = "",
-    required_providers: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    required_providers: list[str] | None = None,
+) -> dict[str, Any]:
     """POST /api/gate/check — deny-by-default if OpenVault is offline."""
     base = openvault_base_url()
     payload = {
@@ -43,7 +43,7 @@ def check_gate(
         }
 
 
-def resolve_keyvault_snapshot() -> Dict[str, Any]:
+def resolve_keyvault_snapshot() -> dict[str, Any]:
     """Read-only catalog from OpenVault (Cortex never stores secrets)."""
     base = openvault_base_url()
     try:

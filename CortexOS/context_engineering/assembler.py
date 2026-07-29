@@ -1,8 +1,9 @@
 """Assemble curated context for one inference turn."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from .budget import estimate_tokens, fit_text, layer_budgets
 from .compaction import compact_messages, summarize_for_reseed

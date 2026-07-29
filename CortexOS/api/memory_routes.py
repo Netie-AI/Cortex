@@ -11,19 +11,19 @@ findings land. Vectors are supplied by the caller until the embedder is wired
 No from __future__ import annotations (FastAPI rule).
 Pydantic models at module level.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-
-from packs.dms.security.api_auth import Caller, require_role
+from netie.memory.factory import get_store
 from netie.memory.store import (
     BRUTE_FORCE_MAX,
     Hit,
     MemoryRecord,
     select_store,
 )
-from netie.memory.factory import get_store
+from pydantic import BaseModel
+
+from packs.dms.security.api_auth import Caller, require_role
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -34,30 +34,30 @@ _STORE = get_store()
 class UpsertRecordIn(BaseModel):
     id: str
     text: str
-    vector: Optional[List[float]] = None
-    meta: Dict[str, Any] = {}
+    vector: list[float] | None = None
+    meta: dict[str, Any] = {}
     scope: str = "personal"
     collection: str = "default"
-    role: Optional[str] = None
+    role: str | None = None
     tier: str = "warm"
 
 
 class UpsertIn(BaseModel):
-    records: List[UpsertRecordIn]
+    records: list[UpsertRecordIn]
 
 
 class QueryIn(BaseModel):
-    vector: List[float]
+    vector: list[float]
     k: int = 5
-    scope: Optional[str] = None
-    collection: Optional[str] = None
+    scope: str | None = None
+    collection: str | None = None
 
 
 @router.post("/upsert")
 async def memory_upsert(
     body: UpsertIn,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     _ = caller
     recs = [
         MemoryRecord(
@@ -78,9 +78,9 @@ async def memory_upsert(
 async def memory_query(
     body: QueryIn,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     _ = caller
-    hits: List[Hit] = _STORE.query(
+    hits: list[Hit] = _STORE.query(
         body.vector, k=body.k,
         scope=body.scope if body.scope in ("personal", "company") else None,
         collection=body.collection,
@@ -92,7 +92,7 @@ async def memory_query(
 
 
 @router.get("/stats")
-async def memory_stats(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+async def memory_stats(caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     _ = caller
     stats = _STORE.stats()
     return {"ok": True, **stats,

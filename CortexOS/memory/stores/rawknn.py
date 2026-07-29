@@ -32,8 +32,8 @@ import json
 import sqlite3
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from netie.memory.store import Hit, MemoryRecord, Scope
 
@@ -166,9 +166,11 @@ class RawKnnStore:
         # Filtered path — D6: SQL prefilter before touching vector bytes.
         cond, args = [], []
         if scope:
-            cond.append("scope=?"); args.append(scope)
+            cond.append("scope=?")
+            args.append(scope)
         if collection:
-            cond.append("collection=?"); args.append(collection)
+            cond.append("collection=?")
+            args.append(collection)
         cands = self._db.execute(
             "SELECT id,row,text,meta FROM records WHERE " + " AND ".join(cond), args
         ).fetchall()

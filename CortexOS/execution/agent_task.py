@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 import math
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from CortexOS.execution.executor import invoke_routed_completion
 from CortexOS.execution.model_router import ModelRequest, ModelRouter
@@ -112,8 +113,8 @@ def default_broker(name: str, params: dict) -> dict:
 def _tool_instructions(tools: list[str]) -> str:
     if not tools:
         return ""
-    from CortexOS.execution import web_tools
     from CortexOS.discovery.find import SCHEMAS as DISCOVERY_SCHEMAS
+    from CortexOS.execution import web_tools
 
     lines = [f"You may call these tools: {', '.join(tools)}"]
     for schema in list(web_tools.SCHEMAS) + list(DISCOVERY_SCHEMAS):

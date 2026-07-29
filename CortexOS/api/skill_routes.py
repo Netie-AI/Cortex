@@ -1,11 +1,11 @@
 """F6 skill capture API routes (F7 remainder: RBAC on mutating endpoints)."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from packs.dms.security.api_auth import Caller, get_caller, require_role
+from packs.dms.security.api_auth import Caller, require_role
 
 router = APIRouter(prefix="/dms/skills", tags=["skills"])
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/dms/skills", tags=["skills"])
 class CompleteEventRequest(BaseModel):
     event_id: str
     outcome: str
-    trigger_text: Optional[str] = None
+    trigger_text: str | None = None
 
 
 class CaptureConfigRequest(BaseModel):
@@ -24,7 +24,7 @@ class CaptureConfigRequest(BaseModel):
 def list_captured_skills(
     active_only: bool = True,
     caller: Caller = Depends(require_role("viewer")),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     from packs.dms.skills.capture import list_skills
 
     _ = caller
@@ -32,7 +32,7 @@ def list_captured_skills(
 
 
 @router.get("/config")
-def get_capture_config(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+def get_capture_config(caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     from packs.dms.skills.capture import capture_enabled
 
     _ = caller
@@ -43,7 +43,7 @@ def get_capture_config(caller: Caller = Depends(require_role("viewer"))) -> Dict
 def set_capture_config(
     req: CaptureConfigRequest,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from packs.dms.skills.capture import set_capture_enabled
 
     _ = caller
@@ -54,7 +54,7 @@ def set_capture_config(
 def complete_task_event(
     req: CompleteEventRequest,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from packs.dms.skills.capture import complete_event
 
     try:
@@ -72,7 +72,7 @@ def complete_task_event(
 def deactivate(
     skill_id: str,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from packs.dms.skills.capture import deactivate_skill
 
     if not deactivate_skill(skill_id, actor=caller.actor):

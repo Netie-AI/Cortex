@@ -10,7 +10,8 @@ never takes the panel down with it.
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 def _section(fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
