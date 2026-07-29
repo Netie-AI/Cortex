@@ -98,7 +98,7 @@ def test_query_low_stock(loaded_db, monkeypatch):
     monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
     monkeypatch.setattr(
         "netie.dms.query_service.get_connection",
-        lambda _=None: get_connection(loaded_db),
+        lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
     result = query_service.answer_question("Which SKUs are below reorder level?")
     assert result["violations_blocked"] == []
@@ -113,14 +113,16 @@ def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
     monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
     monkeypatch.setattr(
         "netie.dms.query_service.get_connection",
-        lambda _=None: get_connection(loaded_db),
+        lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
     result = query_service.answer_question("top 5 sales")
     assert result["violations_blocked"] == []
     assert result["source_table"] == "transactions"
     assert result["row_count"] == 5
     assert "LIMIT 5" in result["sql_used"].upper()
-    assert result["query_plan"]["intent"] == "sales_rank"
+    # Intent is now the semantic-layer metric id, not the legacy planner label;
+    # the resolved table, limit, and SQL are unchanged.
+    assert result["query_plan"]["intent"] == "sales_by_value"
 
 
 def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
@@ -130,7 +132,7 @@ def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
     monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
     monkeypatch.setattr(
         "netie.dms.query_service.get_connection",
-        lambda _=None: get_connection(loaded_db),
+        lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
     result = query_service.answer_question("return most delayed 1000 rows")
     assert result["violations_blocked"] == []
