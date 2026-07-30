@@ -247,12 +247,23 @@ Update STATUS.md + NEXT_LANES.md when done.
    Cursor lane task:** give those benchmarks a dedicated DB copy (or mark them exclusive) so no
    other process can move the data underneath them. Until then, a single failure in one of these
    three is not evidence that a change broke anything — re-run before investigating.
+   > **Superseded 2026-07-27** (see `STATUS.md`, DMS router audit): the cause was the DuckDB
+   > exclusive file lock on `data/dms_demo.duckdb`, not `packs/data/dms_ops.db`. Fixed by
+   > `get_connection(..., read_only=True)`. The dedicated-DB-copy task is not needed.
 2. **When a module gains a new store, audit every older test that touches it.** Hit twice now:
    G2.2 gave the seeker `action_value` + the F1 ledger (two old fixtures then wrote goal-ledger
    rows into the tracked DMS ops DB); G2.4 gave *every run* an `action_event` trace, so four more
    fixtures needed isolating. **Rule: after wiring a new store into a hot path, grep for every test
    that exercises that path and patch its DB_PATH in the same commit.**
 3. `LEDGER_DB_PATH = None` means **the real pack ledger**. Always monkeypatch it in tests.
+4. **The ops DB is generated, not tracked (2026-07-29).** `packs/data/dms_ops.db` was in git, so
+   every local run re-dirtied the tree — a bare `pytest tests/dms/test_q2_answer_engine.py` bumps
+   `support_count` on 45 learned query skills, because those tests do not monkeypatch `DMS_OPS_DB`
+   before the answer engine runs. Now gitignored and rebuilt by `python -m scripts.seed_ops_db`
+   (schema via each owner's `init_*_schema`, ontology from pack YAML, deterministic demo bins;
+   ledger and skill tables start empty). Verified: the full suite is unchanged with the file
+   absent, so no seed step is needed before pytest in CI. Rule 2 still applies — isolate the DB
+   in new tests; a gitignored file is quieter, not isolated.
 
 ---
 

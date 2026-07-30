@@ -51,6 +51,12 @@ data/dms_demo.duckdb
 data/dms_ops.db
 data/dms_photos/
 data/codebase_ontology.db
+# Same ops DB, second location: query_skills defaults here, and env.local.example
+# points DMS_OPS_DB at it, so a running engine (or a plain pytest run) writes it.
+# Rebuild with: python -m scripts.seed_ops_db
+packs/data/dms_ops.db
+packs/data/dms_ops.db-journal
+packs/data/dms_photos/
 # Engine runtime state — written by a running appliance, never source.
 # Every one of these is regenerated on boot or on first run; committing them
 # makes the tree diverge per-machine and (for telemetry/keys) leaks material.

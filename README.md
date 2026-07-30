@@ -39,6 +39,18 @@ python scripts/handoff.py --claude   # supervisor
 
 **Show script:** [docs/DEMO.md](docs/DEMO.md)
 
+### Generated data (not tracked)
+
+`data/dms_demo.duckdb` and `packs/data/dms_ops.db` are runtime stores, rebuilt from
+committed source — the CSVs in `data/samples/` and the pack's ontology YAML. A running
+engine (and a plain `pytest` run) writes to both, so neither is in git. Nothing needs
+them to exist: the code creates them on first use. To build them explicitly:
+
+```powershell
+python -m CortexOS.dms.warehouse_db   # data/dms_demo.duckdb from data/samples/*.csv
+python -m scripts.seed_ops_db         # packs/data/dms_ops.db: schema, ontology, demo bins
+```
+
 ## Tests
 
 **Broken `myenv` / `.venv_gpu`?** Use the bootstrap venv (Windows, no MSVC/Rust build):
