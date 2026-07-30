@@ -26,10 +26,28 @@ applies to, so it cannot be injected per table. Send `row_predicates`.
 
 ---
 
-## 2. The bytes you sign
+## 2. The bytes you sign — pin the package, do not reimplement this
 
-Call `cortex_contract.execution.canonical_manifest_bytes()` if you can. If you reimplement it,
-the rule is:
+**Pin `cortex-contract==1.1.0` as a pip dependency and call
+`cortex_contract.execution.canonical_manifest_bytes()`.** This is not a convenience; it is the
+rule.
+
+DMS must never import `CortexOS` — that is the engine. `cortex_contract` is a different thing:
+models and Protocols with zero `CortexOS` imports, enforced by its own lint rule, so pinning it
+leaks nothing. It is the one Python import DMS gets from this repo.
+
+Reimplementing canonicalisation from the description below rebuilds the shadow-contract failure
+mode in the highest-consequence place in the system. A one-byte disagreement means every
+manifest DMS signs fails verification, and it presents as a *crypto* bug — you would spend the
+day suspecting the key.
+
+If a future rewrite genuinely cannot import Python (a TypeScript client, say), assert against
+**`contract/testvectors/manifest_canonical.jsonl`** — 25 manifests with the SHA-256 of their
+canonical bytes, covering the pruning rule, key ordering, non-ASCII including astral-plane
+characters, an empty string versus an empty collection, and timestamp boundaries. Copy the file,
+check its hash in CI, and make every vector pass before signing anything real.
+
+The rule, for reference and for reviewing such an implementation:
 
 1. Render the manifest as a JSON object.
 2. Remove the `signature` key.

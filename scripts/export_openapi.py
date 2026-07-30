@@ -12,6 +12,7 @@ smaller silent spec.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -206,6 +207,9 @@ def main(argv: list[str] | None = None) -> int:
     spec = build_spec()
     rendered = json.dumps(spec, indent=2, sort_keys=True) + "\n"
 
+    digest = ROOT / "contract" / f"openapi-{contract_version}.json.sha256"
+    expected = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
     if check:
         if not out.is_file():
             print(f"MISSING {out}", file=sys.stderr)
@@ -217,12 +221,27 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"OK — {out.relative_to(ROOT)} matches regeneration")
+        # The sidecar is what a consumer checks a vendored copy against, so a
+        # missing or stale one is drift too — otherwise DMS could verify a spec
+        # against a hash that was never regenerated with it.
+        if not digest.is_file():
+            print(f"MISSING {digest}", file=sys.stderr)
+            return 1
+        recorded = digest.read_text(encoding="utf-8").split()[0].strip()
+        if recorded != expected:
+            print(
+                f"OpenAPI digest drift: {digest.name} records {recorded[:12]}…, "
+                f"spec hashes to {expected[:12]}…",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"OK — {out.relative_to(ROOT)} matches regeneration, digest agrees")
         return 0
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(rendered, encoding="utf-8")
-    print(f"Wrote {out.relative_to(ROOT)}")
+    digest.write_text(f"{expected}  {out.name}\n", encoding="utf-8")
+    print(f"Wrote {out.relative_to(ROOT)} and {digest.name}")
     return 0
 
 

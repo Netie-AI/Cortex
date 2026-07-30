@@ -47,6 +47,12 @@ jobs:
           python -c "import dbos,qdrant_client,tantivy,sentence_transformers"
           python scripts/export_openapi.py --check
 
+      - name: Contract compatibility
+        # Every published minor must differ from its predecessor only additively,
+        # and each frozen spec must match its .sha256 sidecar — that sidecar is
+        # what a consumer checks a vendored copy against.
+        run: python scripts/check_contract_compat.py
+
       - name: Pytest
         run: python -m pytest tests/ -q --tb=short
 
