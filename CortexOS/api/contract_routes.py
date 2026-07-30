@@ -87,19 +87,39 @@ async def contract_submit(body: SubmitRequest) -> QueryResult:
     )
 
 
+def _ledger() -> Any:
+    """The ledger the active pack registered, or 501 if this install has none.
+
+    Engine-owned seam (``CortexOS.audit``) rather than a direct ``packs.dms``
+    import: CortexOS must not reach across the C2 boundary.
+    """
+    from CortexOS.audit import LedgerNotRegistered, resolve_ledger
+
+    try:
+        return resolve_ledger()
+    except LedgerNotRegistered as exc:
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "error": "FeatureNotInstalled",
+                "feature": "contract.ledger",
+                "message": str(exc),
+            },
+        ) from exc
+
+
 @router.post("/ledger/append", response_model=LedgerEntry, operation_id="ledger.append")
 async def contract_ledger_append(body: LedgerAppendRequest) -> LedgerEntry:
-    from packs.dms.audit import ledger as audit_ledger
-
-    entry = audit_ledger.append(body.actor, body.event_type, body.payload)
+    # No docstring: FastAPI publishes it as the operation `description`, and the
+    # released spec (contract/openapi-1.1.0.json) has none for this operation.
+    entry = _ledger().append(body.actor, body.event_type, body.payload)
     return LedgerEntry.model_validate(_as_mapping(entry))
 
 
 @router.post("/ledger/verify", response_model=ChainVerification, operation_id="ledger.verify")
 async def contract_ledger_verify(body: LedgerVerifyRequest) -> ChainVerification:
-    from packs.dms.audit import ledger as audit_ledger
-
-    result = audit_ledger.verify(start_seq=body.start_seq)
+    # No docstring — see contract_ledger_append.
+    result = _ledger().verify(start_seq=body.start_seq)
     return ChainVerification.model_validate(_as_mapping(result))
 
 

@@ -6,11 +6,28 @@ from typing import Any
 
 __all__ = [
     "plug_in",
+    "register_engine_seams",
     "secure_message",
     "classify_message",
     "append_ledger",
     "verify_ledger",
 ]
+
+
+def register_engine_seams() -> None:
+    """Hand the engine our implementations of the ports it owns (C2 inversion).
+
+    ``CortexOS`` may not import ``packs.*``, so the arrow points this way instead:
+    the engine declares the seam, we fill it. Runs on import, so ``import
+    packs.dms`` — or anything under it — is enough to light the ledger up.
+    """
+    from CortexOS.audit import register_ledger
+    from packs.dms.audit import ledger
+
+    register_ledger(ledger)
+
+
+register_engine_seams()
 
 
 def secure_message(text: str, *, block_scam: bool = True) -> dict[str, Any]:
