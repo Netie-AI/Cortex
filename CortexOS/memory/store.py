@@ -21,6 +21,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
+from CortexOS.memory.scope import normalize_scope, scope_subseteq
+
 Scope = Literal["personal", "company"]
 Tier = Literal["hot", "warm", "cold"]
 
@@ -40,6 +42,14 @@ class MemoryRecord:
     role: str | None = None          # company scope: writer's assigned role/position
     tier: Tier = "warm"
     created_at: float = field(default_factory=time.time)
+    # C6: tags that wrote this entry. Retrieval keeps entry_scope ⊆ session_scope.
+    entry_scope: frozenset[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        tags = normalize_scope(self.entry_scope)
+        if not tags and self.scope:
+            tags = frozenset({self.scope})
+        object.__setattr__(self, "entry_scope", tags)
 
 
 @dataclass(slots=True)
@@ -55,8 +65,15 @@ class VectorStore(Protocol):
     """The one interface. Every store (mmap/sqlite-vec/Qdrant/pgvector) implements it."""
 
     def upsert(self, records: Iterable[MemoryRecord]) -> int: ...
-    def query(self, vector: list[float], *, k: int = 5,
-              scope: Scope | None = None, collection: str | None = None) -> list[Hit]: ...
+    def query(
+        self,
+        vector: list[float],
+        *,
+        k: int = 5,
+        scope: Scope | None = None,
+        collection: str | None = None,
+        session_scope: frozenset[str] | None = None,
+    ) -> list[Hit]: ...
     def evict(self, *, policy: str = "cold", max_keep: int | None = None) -> int: ...
     def stats(self) -> dict: ...
 
@@ -87,14 +104,30 @@ class InMemoryStore:
             n += 1
         return n
 
-    def query(self, vector: list[float], *, k: int = 5,
-              scope: Scope | None = None, collection: str | None = None) -> list[Hit]:
-        cands = [
-            r for r in self._rows.values()
-            if r.vector
-            and (scope is None or r.scope == scope)
-            and (collection is None or r.collection == collection)
-        ]
+    def query(
+        self,
+        vector: list[float],
+        *,
+        k: int = 5,
+        scope: Scope | None = None,
+        collection: str | None = None,
+        session_scope: frozenset[str] | None = None,
+    ) -> list[Hit]:
+        # Candidate selection IS the storage query here — subset filter runs
+        # before scoring so forbidden rows never enter the ranked set.
+        sess = normalize_scope(session_scope) if session_scope is not None else None
+        cands: list[MemoryRecord] = []
+        for r in self._rows.values():
+            if not r.vector:
+                continue
+            if collection is not None and r.collection != collection:
+                continue
+            if sess is not None:
+                if not sess or not r.entry_scope or not scope_subseteq(r.entry_scope, sess):
+                    continue
+            elif scope is not None and r.scope != scope:
+                continue
+            cands.append(r)
         scored = sorted(
             (Hit(r.id, cosine(vector, r.vector or []), r.text, r.meta) for r in cands),
             key=lambda h: -h.score,

@@ -2,12 +2,39 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
 from netie.db.bootstrap import dispose_engine, init_database_engine
 from netie.execution.model_router import ModelRouter
 from netie.routing.cost_ledger import CostLedger
+
+_LOG = logging.getLogger("cortex.lifespan")
+
+
+def _refresh_jwks_at_startup() -> None:
+    """Cold-path JWKS refresh so the first live mint can verify.
+
+    Failure is not fatal: an on-disk cache may still be warm. Hot-path verify
+    never calls the network.
+    """
+    try:
+        from CortexOS.execution.manifest import JwksCache
+
+        cache = JwksCache()
+        ok = cache.refresh(timeout=2.0)
+        if ok:
+            _LOG.info("JWKS refreshed from OpenVault (%d keys)", len(cache.known_kids))
+        else:
+            # Ensure disk cache is loaded even when the network fetch fails.
+            n = len(cache.known_kids)
+            _LOG.warning(
+                "JWKS refresh skipped or empty; using cached keys if any (%d)",
+                n,
+            )
+    except Exception:  # noqa: BLE001 — never block API boot on OpenVault
+        _LOG.exception("JWKS startup refresh failed; continuing with cache if present")
 
 
 def database_lifespan_factory(
@@ -27,6 +54,7 @@ def database_lifespan_factory(
         setattr(app.state, state_attribute, engine)
         app.state.ledger = CostLedger(engine=engine)
         app.state.model_router = ModelRouter()
+        _refresh_jwks_at_startup()
         try:
             yield
         finally:

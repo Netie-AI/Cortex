@@ -71,7 +71,14 @@ def propose(source: str, target: str, *, con=None) -> dict[str, Any]:
     pid = f"proposed_{source.replace('.', '_')}"
     proposal = {
         "id": pid, "source": source, "target": target,
-        "transform_sql": f"SELECT * FROM {{source}}",
+        # Profiler SELECT * does not invent provenance columns; document aggregate
+        # until the source already carries T7 flat/_src columns (then switch to propagate).
+        "lineage": "aggregate",
+        "lineage_reason": (
+            "profiler proposal copies source columns as-is; provenance propagation "
+            "requires bronze T7 columns and an explicit propagate transform"
+        ),
+        "transform_sql": "SELECT * FROM {source}",
         "expectations": exps,
         "status": "pending", "created_at": _now(), "proposed_by": "profiler",
     }

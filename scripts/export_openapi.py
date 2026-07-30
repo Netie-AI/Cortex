@@ -29,6 +29,7 @@ CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
         "ledger.append",
         "ledger.verify",
         "tool.registry",
+        "drillthrough",
     }
 )
 
@@ -62,7 +63,14 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
     Returns the contract version alongside the schemas so callers stamp the
     spec with the contract line, never the engine line.
     """
-    from packages.cortex_contract.answer import Answer, AskRequest, Provenance
+    from packages.cortex_contract.answer import (
+        Answer,
+        AskRequest,
+        ContributingSource,
+        DrillthroughRequest,
+        DrillthroughResponse,
+        Provenance,
+    )
     from packages.cortex_contract.execution import (
         Manifest,
         PoolSpec,
@@ -78,6 +86,9 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
         AskRequest,
         Answer,
         Provenance,
+        ContributingSource,
+        DrillthroughRequest,
+        DrillthroughResponse,
         PoolSpec,
         Manifest,
         SubmitRequest,

@@ -39,7 +39,7 @@ supported:
 
   - version: "1.1"
     spec: openapi-1.1.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       First real contract surface: exactly the five allowlisted operationIds
@@ -49,6 +49,15 @@ supported:
       but present, so a 1.0 producer still validates. Strictness lives in the
       verifier (CortexOS.execution.manifest), not the type: a manifest without an
       issuer is refused at verification, where the refusal can be audited.
+
+  - version: "1.2"
+    spec: openapi-1.2.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive T7 provenance: Answer gains answer_id, assumptions[],
+      contributing_sources[], drillthrough_token; new operationId drillthrough.
+      1.1 clients ignore the new fields. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

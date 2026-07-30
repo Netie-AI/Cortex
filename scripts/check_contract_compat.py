@@ -36,7 +36,14 @@ CONTRACT_DIR = ROOT / "contract"
 # The contract surface is exactly these operationIds — kept in lockstep with
 # CortexOS.api.contract_routes.CONTRACT_ROUTE_IDS and scripts/export_openapi.py.
 CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
-    {"ask", "submit", "ledger.append", "ledger.verify", "tool.registry"}
+    {
+        "ask",
+        "submit",
+        "ledger.append",
+        "ledger.verify",
+        "tool.registry",
+        "drillthrough",
+    }
 )
 
 
@@ -191,11 +198,12 @@ def main() -> int:
     # contract operation as "added" and every engine route as "removed", which
     # buries the schema changes that actually matter.
     surfaces = [
-        (str(e["version"]), str(e["spec"]))
+        (str(e["version"]), str(e["spec"]), str(e.get("status") or ""))
         for e in supported
         if e.get("contract_surface", True)
     ]
-    surface_versions = {v for v, _ in surfaces}
+    surface_versions = {v for v, _, _ in surfaces}
+    status_by_version = {v: status for v, _, status in surfaces}
     for version, spec in specs:
         if version not in surface_versions:
             print(f"{version}: retained artifact, not a contract surface — skipped")
@@ -203,22 +211,33 @@ def main() -> int:
         found = {
             op.split("(")[-1].rstrip(")") for op in _operations(spec)
         }
-        if found != set(CONTRACT_ROUTE_IDS):
-            missing = sorted(set(CONTRACT_ROUTE_IDS) - found)
+        # Current minor must publish exactly the allowlist. Older supported
+        # minors may omit later-additive operationIds (1.1 without drillthrough).
+        if status_by_version.get(version) == "current":
+            if found != set(CONTRACT_ROUTE_IDS):
+                missing = sorted(set(CONTRACT_ROUTE_IDS) - found)
+                extra = sorted(found - set(CONTRACT_ROUTE_IDS))
+                detail = []
+                if missing:
+                    detail.append(f"missing {missing}")
+                if extra:
+                    shown = extra[:5]
+                    suffix = (
+                        f" (+{len(extra) - len(shown)} more)"
+                        if len(extra) > len(shown)
+                        else ""
+                    )
+                    detail.append(f"{len(extra)} unexpected, e.g. {shown}{suffix}")
+                problems.append(
+                    f"{version}: declares contract_surface but does not publish the allowlist — "
+                    + "; ".join(detail)
+                )
+        else:
             extra = sorted(found - set(CONTRACT_ROUTE_IDS))
-            detail = []
-            if missing:
-                detail.append(f"missing {missing}")
             if extra:
-                # Truncated: a mis-exported full engine table is ~169 entries and
-                # printing them all buries the one line that matters.
-                shown = extra[:5]
-                suffix = f" (+{len(extra) - len(shown)} more)" if len(extra) > len(shown) else ""
-                detail.append(f"{len(extra)} unexpected, e.g. {shown}{suffix}")
-            problems.append(
-                f"{version}: declares contract_surface but does not publish the allowlist — "
-                + "; ".join(detail)
-            )
+                problems.append(
+                    f"{version}: older surface has ops outside current allowlist: {extra[:5]}"
+                )
     if problems:
         print("contract compatibility FAILED:", file=sys.stderr)
         for problem in problems:

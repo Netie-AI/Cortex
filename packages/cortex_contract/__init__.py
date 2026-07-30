@@ -1,6 +1,15 @@
 """Stable contract surface between Cortex engine and DMS app."""
 
-from .answer import AbstainReason, Answer, AskRequest, Badge, Provenance
+from .answer import (
+    AbstainReason,
+    Answer,
+    AskRequest,
+    Badge,
+    ContributingSource,
+    DrillthroughRequest,
+    DrillthroughResponse,
+    Provenance,
+)
 from .errors import ContractError, UnauthorizedError, ValidationError
 from .execution import (
     EngineSubmitter,
@@ -23,6 +32,9 @@ __all__ = [
     "Answer",
     "AskRequest",
     "Badge",
+    "ContributingSource",
+    "DrillthroughRequest",
+    "DrillthroughResponse",
     "Provenance",
     "ContractError",
     "UnauthorizedError",

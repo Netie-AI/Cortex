@@ -1,0 +1,6 @@
+{
+  "robustness_floor": 0.6471,
+  "wrong_must_be_zero": true,
+  "paraphrase_total": 85,
+  "note": "C10-min ratchet — raise floor only, never lower"
+}

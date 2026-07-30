@@ -100,11 +100,14 @@ metrics:
     result_columns: [sku, sales_value_myr]
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type = 'OUT'
-      GROUP BY sku ORDER BY sales_value_myr {direction}, sku ASC LIMIT {limit}
+      FROM transactions WHERE txn_type = 'OUT' {exclude_skus}
+      GROUP BY sku ORDER BY sales_value_myr {direction}, sku ASC
+      LIMIT {limit}{offset_clause}
     params:
       limit: {kind: int, default: 5, min: 1, max: 1000}
+      offset_clause: {kind: offset_clause, default: 0, optional: true}
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
+      exclude_skus: {kind: not_in, column: sku, optional: true}
 
   - id: sales_by_volume
     kind: ranked
@@ -112,11 +115,14 @@ metrics:
     result_columns: [sku, total_sold_kg]
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
-      FROM transactions WHERE txn_type = 'OUT'
-      GROUP BY sku ORDER BY total_sold_kg {direction}, sku ASC LIMIT {limit}
+      FROM transactions WHERE txn_type = 'OUT' {exclude_skus}
+      GROUP BY sku ORDER BY total_sold_kg {direction}, sku ASC
+      LIMIT {limit}{offset_clause}
     params:
       limit: {kind: int, default: 5, min: 1, max: 1000}
+      offset_clause: {kind: offset_clause, default: 0, optional: true}
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
+      exclude_skus: {kind: not_in, column: sku, optional: true}
 
   - id: revenue_windowed
     kind: scalar

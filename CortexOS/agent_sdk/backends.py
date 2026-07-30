@@ -65,15 +65,19 @@ def _dms_duckdb_backend(
 ) -> list[dict[str, Any]]:
     """Reference backend: the DMS DuckDB warehouse (object type id == table name).
 
-    Reads DMS_WAREHOUSE_DB at call time (not import) so tests/hosts can redirect.
-    Identifiers come from the compiled ontology registry and are shape-checked;
-    filter values always bind as parameters.
+    Opens via ``CortexOS.execution.warehouse`` only — no direct ``duckdb`` import
+    (C4). Ungoverned agent reads remain a C4.follow concern relative to
+    ``enforce_manifest``; the AST invariant is what this change closes.
     """
-    import duckdb
+    from CortexOS.execution.warehouse import get_connection, warehouse_path
 
     root = Path(__file__).resolve().parents[2]
-    path = Path(db_path) if db_path is not None else Path(
-        os.environ.get("DMS_WAREHOUSE_DB") or root / "data" / "dms_demo.duckdb"
+    path = (
+        Path(db_path)
+        if db_path is not None
+        else warehouse_path(
+            os.environ.get("DMS_WAREHOUSE_DB") or root / "data" / "dms_demo.duckdb"
+        )
     )
     cols_sql = ", ".join(_quote(c) for c in columns)
     where_sql = ""
@@ -85,7 +89,7 @@ def _dms_duckdb_backend(
             values.append(value)
         where_sql = " WHERE " + " AND ".join(parts)
     sql = f"SELECT {cols_sql} FROM {_quote(object_type)}{where_sql} LIMIT {int(limit)}"
-    con = duckdb.connect(str(path), read_only=True)
+    con = get_connection(path, read_only=True)
     try:
         rel = con.execute(sql, values)
         names = [d[0] for d in rel.description]

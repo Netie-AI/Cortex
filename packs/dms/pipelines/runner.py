@@ -29,6 +29,10 @@ DEFS_DIR = ROOT / "packs" / "dms" / "pipelines" / "defs"
 EVENTS_TABLE = f"{LAKE_ALIAS}.bronze._pipeline_events"
 
 _VALID_ACTIONS = ("warn", "drop", "fail")
+_VALID_LINEAGE = ("propagate", "aggregate")
+# Demo-core flat columns (DMS T7) or Appendix A STRUCT.
+_PROVENANCE_FLAT = frozenset({"_src_ref_id", "_src_row", "_ingest_id"})
+_PROVENANCE_STRUCT = frozenset({"_src", "_ingest_id"})
 
 
 class PipelineError(RuntimeError):
@@ -88,11 +92,32 @@ def _validate_def(pdef: dict) -> None:
     schema, _, name = str(pdef["target"]).partition(".")
     if schema not in SCHEMAS or not name:
         raise PipelineError(f"target must be <schema>.<name> with schema in {SCHEMAS}")
+    lineage = pdef.get("lineage")
+    if lineage not in _VALID_LINEAGE:
+        raise PipelineError(
+            f"pipeline def requires lineage: propagate|aggregate (got {lineage!r})"
+        )
+    if lineage == "aggregate" and not str(pdef.get("lineage_reason") or "").strip():
+        raise PipelineError(
+            "lineage: aggregate requires a non-empty lineage_reason "
+            "(architecture §4.4 — document why _src is not propagated)"
+        )
     for exp in pdef.get("expectations") or []:
         if not exp.get("name") or not exp.get("constraint_sql"):
             raise PipelineError(f"expectation needs name + constraint_sql: {exp}")
         if exp.get("action", "warn") not in _VALID_ACTIONS:
             raise PipelineError(f"bad action {exp.get('action')!r} in {exp['name']}")
+
+
+def _target_has_provenance(con, target: str) -> bool:
+    """True if target carries flat T7 cols or STRUCT _src + _ingest_id."""
+    try:
+        cols = {str(r[0]).lower() for r in con.execute(f"DESCRIBE {target}").fetchall()}
+    except Exception:  # noqa: BLE001
+        return False
+    if _PROVENANCE_FLAT <= cols:
+        return True
+    return _PROVENANCE_STRUCT <= cols
 
 
 def _ensure_events(con) -> None:
@@ -202,6 +227,22 @@ def run_pipeline(pdef: dict | str | Path, *, con=None, actor: str = "system") ->
             raise PipelineError(
                 f"reconciliation failed: in={run.rows_in} out={run.rows_out} dropped={run.rows_dropped}")
 
+        # T7 / §4.4: propagate must leave provenance columns on silver
+        if pdef.get("lineage") == "propagate" and not _target_has_provenance(con, target):
+            run.status = "failed"
+            run.error = (
+                "lineage:propagate requires target columns "
+                "_src_ref_id+_src_row+_ingest_id (or _src+_ingest_id); "
+                "got none — fix transform_sql or use lineage:aggregate with a reason"
+            )
+            _record_event(con, run)
+            _audit(
+                "pipeline.failed",
+                {"pipeline": pid, "run_id": run_id, "error": run.error},
+                actor=actor,
+            )
+            return run
+
         _record_event(con, run)
         _audit("pipeline.completed", run.to_dict(), actor=actor)
         return run
@@ -229,7 +270,7 @@ def pipeline_events(*, con=None, limit: int = 100) -> list[dict[str, Any]]:
     try:
         rel = con.execute(f"SELECT * FROM {EVENTS_TABLE} ORDER BY ts DESC LIMIT {int(limit)}")
         cols = [d[0] for d in rel.description]
-        return [dict(zip(cols, row)) for row in rel.fetchall()]
+        return [dict(zip(cols, row, strict=False)) for row in rel.fetchall()]
     except Exception:  # noqa: BLE001 — no events yet
         return []
     finally:

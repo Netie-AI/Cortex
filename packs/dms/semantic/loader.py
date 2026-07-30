@@ -120,6 +120,37 @@ def _render_param(name: str, spec: dict, raw: Any, *, resolve: bool = True) -> s
             raise SemanticError(f"{name}: cannot resolve {raw!r} to a {column} value")
         return f"AND {col_ref} {op} {_q(val)}"
 
+    if kind == "not_in":
+        # optional AND column NOT IN (...); empty when no exclusions
+        if raw in (None, "", [], ()):
+            return ""
+        items = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+        column = spec["column"]
+        quoted: list[str] = []
+        for item in items:
+            text = str(item).strip()
+            if not text:
+                continue
+            if resolve:
+                res = valuedict.resolve(text, column)
+                val = res.value if res.ok else text
+            else:
+                val = text
+            quoted.append(_q(val.upper() if column == "sku" else val))
+        if not quoted:
+            return ""
+        return f"AND {column} NOT IN ({', '.join(quoted)})"
+
+    if kind == "offset_clause":
+        # Omit OFFSET 0 so golden/certified SQL stay byte-stable.
+        try:
+            v = int(raw or 0)
+        except (TypeError, ValueError) as exc:
+            raise SemanticError(f"{name}: expected int, got {raw!r}") from exc
+        if v < 0:
+            raise SemanticError(f"{name}={v} must be >= 0")
+        return f" OFFSET {v}" if v else ""
+
     raise SemanticError(f"{name}: unknown param kind {kind!r}")
 
 
@@ -137,6 +168,10 @@ def _sample_value(spec: dict) -> Any:
     if kind in ("value", "filter"):
         vals = valuedict.values_for(spec["column"])
         return vals[0] if vals else None
+    if kind == "not_in":
+        return []
+    if kind == "offset_clause":
+        return 0
     return None
 
 
@@ -152,10 +187,11 @@ def compile_metric(model: SemanticModel, metric_id: str,
         provided = pname in params
         raw = params.get(pname, spec.get("default"))
         if raw is None and not provided:
+            if spec.get("kind") in ("filter", "not_in", "offset_clause") or spec.get("optional"):
+                empty = [] if spec.get("kind") == "not_in" else (0 if spec.get("kind") == "offset_clause" else "")
+                rendered[pname] = _render_param(pname, spec, empty, resolve=resolve)
+                continue
             if spec.get("required") or spec.get("kind") in ("value",) and not spec.get("optional"):
-                if spec.get("kind") == "filter":  # optional fragment
-                    rendered[pname] = ""
-                    continue
                 raise SemanticError(f"{metric_id}: missing required param {pname!r}")
         rendered[pname] = _render_param(pname, spec, raw, resolve=resolve)
 

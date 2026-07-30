@@ -87,6 +87,7 @@ def test_contract_routes_operation_ids() -> None:
         "ledger.append",
         "ledger.verify",
         "tool.registry",
+        "drillthrough",
     }
 
     # Keep export allowlist in lockstep without importing scripts as a package.

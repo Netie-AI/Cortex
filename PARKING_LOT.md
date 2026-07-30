@@ -157,6 +157,31 @@ OpenVault update/auth path; never silent auto-update, auto-approve apps, or pred
 
 ---
 
+## P22 — C4.follow + post-T7 C-line queue
+
+**Shipped in working tree (Cortex lane):**
+
+- **C4-min** — submit seam, session bind, pool, JWKS, DuckDB location invariant
+- **C6** — `entry_scope ⊆ session_scope` in storage query; Space-keyed anaphora
+- **T7-min** — pipeline lineage gate; drill-through rewrite + HMAC token;
+  contract **1.2.0** additive Answer fields + `drillthrough` op
+- **C10-min** — paraphrase `wrong==0` + robustness floor ratchet
+
+Packets: `CORTEX_TO_DMS_C4_*`, `C6_KICKOFF`, `T7_PROVENANCE`, `C10_KICKOFF`,
+plus kickoffs for C5 / C7 / C8 / C9 / C11.
+
+Still open before calling C4 "full":
+
+- Migrate `packs/dms/lakehouse/catalog.py` + `scripts/lakehouse_migrate.py` off
+  direct `duckdb` (extend AST invariant beyond `CortexOS/`)
+- Close ungoverned agent-SDK reads relative to `enforce_manifest`
+- Multi-pool memory broker / write pool / T10 activation
+
+**Next ordered mins (packets only until started):** C5 → C8 → C7 → C11 → C9-full.
+OpenVault trust root (`30a8d9a`) already settled.
+
+---
+
 ## Move out of parking lot
 1. Condition met.
 2. Claude gate or explicit decision.

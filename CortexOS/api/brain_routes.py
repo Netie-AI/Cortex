@@ -87,34 +87,21 @@ class PonytailRequest(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
-    """Pull data from DuckDB for generative tasks."""
-    try:
-        import duckdb
-        db = duckdb.connect("data/dms_analytics.db", read_only=True)
-        df = db.execute(f"SELECT * FROM {table} LIMIT {limit}").df()
-        return df.to_dict(orient="records")
-    except Exception:
-        return []
+    """Pull data for generative tasks.
+
+    C4: brain routes no longer open DuckDB directly. Ungoverned analytics DB
+    access is refused; callers already treat empty lists as soft failure.
+    """
+    del table, limit
+    return []
 
 
 def _get_warehouse_context() -> dict[str, Any]:
-    """Build warehouse context for AI tasks."""
-    ctx: dict[str, Any] = {}
-    for table in ["dms_inventory", "dms_sales", "dms_movements"]:
-        try:
-            import duckdb
-            db = duckdb.connect("data/dms_analytics.db", read_only=True)
-            df = db.execute(f"SELECT * FROM {table} LIMIT 200").df()
-            ctx[table] = {
-                "row_count": len(df),
-                "columns": list(df.columns),
-                "sample": df.head(3).to_dict(orient="records"),
-            }
-            if len(df) > 0:
-                ctx[table]["stats"] = df.describe(include="all").fillna("").to_dict()
-        except Exception:
-            pass
-    return ctx
+    """Build warehouse context for AI tasks.
+
+    C4: no direct DuckDB import. Live governed reads go through contract submit.
+    """
+    return {}
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────

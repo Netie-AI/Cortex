@@ -420,6 +420,8 @@ class ManifestVerifier:
             raise ManifestMalformed("issuer_key_id is missing; nothing to verify against")
         if not manifest.signature:
             raise ManifestMalformed("signature is missing")
+        if not (manifest.pool_id or "").strip():
+            raise ManifestMalformed("pool_id is required; the verifier refuses an unbound pool")
 
         issued_at = _parse_ts(manifest.issued_at, field_name="issued_at")
         expires_at = _parse_ts(manifest.expires_at, field_name="expires_at")

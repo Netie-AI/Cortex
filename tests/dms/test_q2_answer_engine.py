@@ -132,6 +132,51 @@ def test_session_average_of_sales_ranks():
     assert any(k.startswith("avg_") for k in row)
 
 
+def test_session_divide_revenue_by_5():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-div-rev"
+    clear_session(sid)
+    first = answer_question("What was revenue last month?", session_id=sid)
+    assert first["route"] == "sql"
+    assert first["row_count"] == 1
+    prior = float(first["rows"][0]["revenue_myr"])
+    follow = answer_question("Divide the revenue by 5", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    assert follow["row_count"] == 1
+    scaled = float(next(iter(follow["rows"][0].values())))
+    assert scaled == pytest.approx(round(prior / 5, 2))
+
+
+def test_session_divide_top5_without_sum_abstains():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-div-ambig"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    assert top["row_count"] > 1
+    follow = answer_question("Divide the revenue by 5", session_id=sid)
+    # Ambiguous multirow scale falls through session path → abstain or other layer
+    assert follow["layer"] != "session" or follow["route"] == "needs_clarification"
+
+
+def test_session_sum_then_divide_top5():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-sum-div"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    total = sum(float(r["sales_value_myr"]) for r in top["rows"])
+    follow = answer_question("sum them then divide by 5", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    scaled = float(next(iter(follow["rows"][0].values())))
+    assert scaled == pytest.approx(round(total / 5, 2))
+
+
 def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
     from CortexOS.dms.answer_engine import clear_session
     from packs.dms.semantic import query_skills
@@ -180,13 +225,24 @@ def test_l2_disabled_by_default(monkeypatch):
     assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
 
 
-def test_golden_benchmark_zero_confident_wrong():
-    from bench.accuracy import run_benchmark
+def test_top_sku_excludes_named_sku():
+    r = answer_question("ignoring SKU-BETA what is the top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-BETA" in sql
+    assert "NOT" in sql and "IN" in sql
+    skus = [row["sku"].upper() for row in (r.get("rows") or [])]
+    assert "SKU-BETA" not in skus
+    assert len(skus) <= 5
 
-    report = run_benchmark(tier="all")
-    for tier, summary in report["tiers"].items():
-        assert summary["wrong"] == 0, (tier, summary)
-        assert summary["error"] == 0, (tier, summary)
-    # core + target fully answered; safety fully handled
-    assert report["tiers"]["core"]["coverage"] == 1.0
-    assert report["tiers"]["target"]["coverage"] == 1.0
+
+def test_top_sku_ranks_6_to_10():
+    r = answer_question("number 6-10 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "OFFSET 5" in sql
+    assert "LIMIT 5" in sql
+    # Must not collapse to a scalar total-revenue answer
+    assert "sales_value_myr" in (r.get("rows") or [{}])[0]

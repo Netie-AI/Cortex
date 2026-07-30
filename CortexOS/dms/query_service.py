@@ -877,6 +877,7 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
+        from CortexOS.execution.manifest import ManifestError
 
         result = _engine_answer(question, session_id=session_id)
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
@@ -890,6 +891,9 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
         ):
             return _answer_question_legacy(question, session_id=session_id)
         return result
+    except ManifestError:
+        # Never swallow manifest/security refusals into the legacy path.
+        raise
     except Exception:  # noqa: BLE001 — engine failure must not take the API down
         return _answer_question_legacy(question, session_id=session_id)
 

@@ -25,13 +25,20 @@ from typing import Any
 
 import sqlglot
 
-from CortexOS.dms.sql_guardrail import MAX_LIMIT, guard_and_execute
+from CortexOS.dms.sql_guardrail import (
+    MAX_LIMIT,
+    AuditEntry,
+    guard_and_execute,
+    log_audit,
+    validate_sql,
+)
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
     get_connection,
     load_semantic_layer,
     read_only_queries_enabled,
 )
+from CortexOS.execution.manifest import VerifiedManifest
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
@@ -141,6 +148,81 @@ def _location(question: str) -> str | None:
     return res.value if res.ok else None
 
 
+def _excluded_skus(q: str) -> list[str]:
+    """Named SKUs to drop from a ranking ('ignoring SKU-BETA', 'exclude alpha')."""
+    found = re.findall(
+        r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|without|except)\s+"
+        r"(?:the\s+)?([A-Za-z][\w-]*)",
+        q,
+        flags=re.I,
+    )
+    out: list[str] = []
+    for token in found:
+        t = token.strip().upper()
+        if t in {"THE", "A", "AN", "SKU", "AND", "OR", "FROM", "BY"}:
+            continue
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def _rank_window(q: str) -> tuple[int, int] | None:
+    """Parse '6-10', '6th to 10th', 'numbers 6 to 10', 'ranks 6-10' → (start, end) 1-based."""
+    m = (
+        re.search(
+            r"\b(?:number|numbers|nos?|ranks?|positions?)\s*"
+            r"(\d{1,3})(?:st|nd|rd|th)?\s*(?:to|-|–|—|through)\s*(\d{1,3})(?:st|nd|rd|th)?\b",
+            q,
+            flags=re.I,
+        )
+        or re.search(
+            r"\b(\d{1,3})(?:st|nd|rd|th)?\s*(?:to|-|–|—|through)\s*(\d{1,3})(?:st|nd|rd|th)?\b"
+            r".*\b(?:sku|skus|rank|revenue|sales)\b",
+            q,
+            flags=re.I,
+        )
+        or re.search(
+            r"\b(?:sku|skus|rank|revenue|sales)\b.*\b"
+            r"(\d{1,3})(?:st|nd|rd|th)?\s*(?:to|-|–|—|through)\s*(\d{1,3})(?:st|nd|rd|th)?\b",
+            q,
+            flags=re.I,
+        )
+    )
+    if not m:
+        return None
+    start, end = int(m.group(1)), int(m.group(2))
+    if start > end:
+        start, end = end, start
+    if start < 1 or end > 1000 or (end - start + 1) > 100:
+        return None
+    return start, end
+
+
+def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
+    window = _rank_window(q_raw)
+    excluded = _excluded_skus(q_raw)
+    slots: dict[str, Any] = {"direction": _direction(q_raw), "offset_clause": 0}
+    if window:
+        start, end = window
+        slots["offset_clause"] = start - 1
+        slots["limit"] = end - start + 1
+    else:
+        slots["limit"] = _extract_limit(q_raw, 5)
+    if excluded:
+        slots["exclude_skus"] = excluded
+    return slots
+
+
+def _wants_sales_rank(q: str, q_raw: str) -> bool:
+    if re.search(r"\b(top|best|highest|most)\b", q) and re.search(
+        r"\b(sell|sold|revenue|sales)\b", q
+    ):
+        return True
+    if _rank_window(q_raw) and re.search(r"\b(sku|skus|revenue|sales|sell)\b", q):
+        return True
+    return False
+
+
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
 def route_to_metric(question: str) -> MetricPlan | None:
     """Pick a governed metric + its slots.
@@ -243,12 +325,15 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return MetricPlan("active_alerts", {}, "unresolved alerts")
 
     # sales ranking (after month/window scalars so "last month sales" never ranks)
-    if re.search(r"\b(top|best|highest|most)\b", q) and re.search(r"\b(sell|sold|revenue|sales)\b", q):
+    if _wants_sales_rank(q, q_raw):
+        slots = _sales_rank_slots(q_raw)
         if re.search(r"\b(quantity|volume|kg|units?)\b", q):
-            return MetricPlan("sales_by_volume", {"limit": _extract_limit(q_raw, 5), "direction": _direction(q_raw)},
-                              "SKUs ranked by quantity sold")
-        return MetricPlan("sales_by_value", {"limit": _extract_limit(q_raw, 5), "direction": _direction(q_raw)},
-                          "SKUs ranked by sales value")
+            return MetricPlan(
+                "sales_by_volume",
+                slots,
+                "SKUs ranked by quantity sold",
+            )
+        return MetricPlan("sales_by_value", slots, "SKUs ranked by sales value")
     # unranked "last month sales" catch-all if earlier branch missed phrasing
     if re.search(r"\b(sales|revenue)\b", q) and _calendar_month(q) == "last":
         return MetricPlan("revenue_last_month", {}, "revenue in the previous calendar month")
@@ -257,11 +342,26 @@ def route_to_metric(question: str) -> MetricPlan | None:
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────
-def _true_count(safe_sql: str, con) -> int | None:
+def _true_count(
+    sql: str,
+    con=None,
+    *,
+    verified: VerifiedManifest | None = None,
+) -> int | None:
     """COUNT(*) over the query with LIMIT/ORDER stripped — the honest total
-    behind a possibly-capped listing. Returns None if it can't be computed."""
+    behind a possibly-capped listing. Returns None if it can't be computed.
+
+    When ``verified`` is set (contract live ask), the count runs through the
+    C4 submit executor so predicates apply. Legacy callers still pass ``con``.
+    """
+    if verified is not None:
+        from CortexOS.execution.submit import execute_count
+
+        return execute_count(verified, sql)
+    if con is None:
+        return None
     try:
-        tree = sqlglot.parse_one(safe_sql, read="duckdb")
+        tree = sqlglot.parse_one(sql, read="duckdb")
         tree.set("limit", None)
         tree.set("order", None)
         inner = tree.sql(dialect="duckdb")
@@ -320,35 +420,67 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
 
 
 # ── session memory (follow-up anaphora) ───────────────────────────────────────
+# Keyed by session_id + space_id so Space A never sees Space B's prior SQL (C6).
 _SESSION: dict[str, dict[str, Any]] = {}
 
 
-def _session_key(session_id: str | None) -> str:
-    return (session_id or "demo").strip() or "demo"
+def _session_key(session_id: str | None, space_id: str | None = None) -> str:
+    sid = (session_id or "demo").strip() or "demo"
+    sp = (space_id or "").strip()
+    return f"{sid}::space:{sp}" if sp else sid
 
 
-def _remember(session_id: str | None, turn: dict[str, Any]) -> None:
-    _SESSION[_session_key(session_id)] = turn
+def _remember(
+    session_id: str | None,
+    turn: dict[str, Any],
+    *,
+    space_id: str | None = None,
+) -> None:
+    _SESSION[_session_key(session_id, space_id)] = turn
 
 
-def clear_session(session_id: str | None = None) -> None:
-    if session_id is None:
+def clear_session(session_id: str | None = None, *, space_id: str | None = None) -> None:
+    if session_id is None and space_id is None:
         _SESSION.clear()
     else:
-        _SESSION.pop(_session_key(session_id), None)
+        _SESSION.pop(_session_key(session_id, space_id), None)
 
 
 def _is_anaphora(q: str) -> bool:
-    """Follow-up pronouns referring to the prior result set — not bare 'it' in English."""
+    """Follow-up pronouns / arithmetic over the prior result set."""
     return bool(
         re.search(
             r"\b(them|those|these)\b|"
             r"\b(average|avg|mean|total|sum|count|how many)\s+of\s+(them|those|these|it)\b|"
             r"\bwhat is the average of (them|those|these|it)\b|"
-            r"\baverage of (them|those|these)\b",
+            r"\baverage of (them|those|these)\b|"
+            r"\bdivid(?:e|ed|ing)\b.*?\bby\s+\d|"
+            r"\bmultipl(?:y|ied|ying)\b.*?\bby\s+\d|"
+            r"(?:/|÷|×|\*)\s*\d|"
+            r"\bone\s+fifth\b",
             q,
         )
     )
+
+
+def _scale_factor(q: str) -> tuple[str, float] | None:
+    """Return ('div'|'mul', factor) for session arithmetic follow-ups."""
+    m = re.search(r"\bdivid(?:e|ed|ing)\b.*?\bby\s+(\d+(?:\.\d+)?)", q)
+    if m:
+        return "div", float(m.group(1))
+    m = re.search(r"\bone\s+fifth\b", q)
+    if m:
+        return "div", 5.0
+    m = re.search(r"(?:/|÷)\s*(\d+(?:\.\d+)?)", q)
+    if m:
+        return "div", float(m.group(1))
+    m = re.search(r"\bmultipl(?:y|ied|ying)\b.*?\bby\s+(\d+(?:\.\d+)?)", q)
+    if m:
+        return "mul", float(m.group(1))
+    m = re.search(r"(?:×|\*)\s*(\d+(?:\.\d+)?)", q)
+    if m:
+        return "mul", float(m.group(1))
+    return None
 
 
 def _numeric_columns(rows: list[dict[str, Any]]) -> list[str]:
@@ -367,6 +499,25 @@ def _numeric_columns(rows: list[dict[str, Any]]) -> list[str]:
     return cols
 
 
+def _pick_measure(nums: list[str]) -> str | None:
+    for prefer in (
+        "sales_value_myr",
+        "total_sold_kg",
+        "revenue_myr",
+        "quantity_kg",
+        "total_value_myr",
+        "ranking_score",
+        "free_kg",
+        "pct_used",
+    ):
+        if prefer in nums:
+            return prefer
+    for c in nums:
+        if not re.search(r"(^id$|_id$|count$)", c, re.I):
+            return c
+    return None
+
+
 def _aggregate_prior(
     prior_sql: str,
     question: str,
@@ -374,28 +525,45 @@ def _aggregate_prior(
     *,
     total_count: int | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Follow-up aggregate over the prior result.
+    """Follow-up aggregate / scale over the prior result.
 
-    COUNT uses a guarded subquery wrap. AVG is computed from the prior row
-    snapshot (outer alias columns fail the table allowlist guardrail).
+    COUNT uses a guarded subquery wrap. AVG and divide/multiply are computed
+    from the prior row snapshot (literal SELECT so the allowlist still passes).
     """
     q = question.lower()
     wants_avg = bool(re.search(r"\b(average|avg|mean)\b", q))
+    scale = _scale_factor(q)
     nums = _numeric_columns(rows)
-    measure = None
-    for prefer in ("sales_value_myr", "total_sold_kg", "revenue_myr", "quantity_kg",
-                   "total_value_myr", "ranking_score", "free_kg", "pct_used"):
-        if prefer in nums:
-            measure = prefer
-            break
-    if measure is None and nums:
-        for c in nums:
-            if not re.search(r"(^id$|_id$|count$)", c, re.I):
-                measure = c
-                break
+    measure = _pick_measure(nums)
+
+    if scale is not None:
+        op, factor = scale
+        if factor == 0 and op == "div":
+            raise ValueError("division by zero")
+        if not measure or not rows:
+            raise ValueError("no numeric prior measure to scale")
+        # Scalar prior, or explicit sum/total over multirow — otherwise ambiguous.
+        if len(rows) > 1 and not re.search(r"\b(sum|total|altogether)\b", q):
+            raise ValueError("ambiguous multirow scale; ask to sum them first")
+        vals: list[float] = []
+        for row in rows:
+            raw = row.get(measure)
+            if raw is None:
+                continue
+            try:
+                vals.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        if not vals:
+            raise ValueError("no numeric values to scale")
+        base = sum(vals) if len(vals) > 1 else vals[0]
+        result = round(base / factor, 2) if op == "div" else round(base * factor, 2)
+        col = f"{'div' if op == 'div' else 'mul'}_{measure}"
+        sql = f"SELECT CAST({result} AS DOUBLE) AS {col}"
+        return sql, [{col: result}]
 
     if wants_avg and measure and rows:
-        vals: list[float] = []
+        vals = []
         for row in rows:
             raw = row.get(measure)
             if raw is None:
@@ -420,7 +588,6 @@ def _aggregate_prior(
         # Prefer honest total when prior listing was truncated
         return sql, [{"followup_count": int(total_count)}]
     return sql, []  # rows filled by execute
-
 
 
 def _honest_plan(
@@ -452,7 +619,13 @@ def _honest_plan(
 
 
 # ── the engine ────────────────────────────────────────────────────────────────
-def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+def answer(
+    question: str,
+    *,
+    session_id: str | None = None,
+    space_id: str | None = None,
+    verified: VerifiedManifest | None = None,
+) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
         build_chart_spec,
@@ -491,7 +664,7 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
     skill_score: float | None = None
 
     q_low = question.lower()
-    prior = _SESSION.get(_session_key(session_id))
+    prior = _SESSION.get(_session_key(session_id, space_id))
 
     # Session anaphora — "average of them" over last successful SQL
     session_rows: list[dict[str, Any]] | None = None
@@ -558,23 +731,55 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
         return _abstain(question, audit_id, reason="no governed metric or certified query matched")
 
     semantic = load_semantic_layer()
-    # Every statement that reaches here has passed the read-only guardrail, so a
-    # read-only handle is always sufficient. It is opt-in (DMS_READ_ONLY_QUERIES)
-    # because it also has to be safe for the writer in this process — see
-    # warehouse_db.read_only_queries_enabled.
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
-    try:
-        if session_rows is not None and len(session_rows) > 0 and layer == "session":
-            # Precomputed AVG (literal SELECT still guardrail-checked)
-            guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-            if guard_result.passed:
-                rows = session_rows
-            total_count = len(rows) if guard_result.passed else None
+    # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).
+    # Legacy callers keep the old connection + guard_and_execute path.
+    if verified is not None:
+        from datetime import datetime, timezone
+
+        from CortexOS.execution.submit import execute_sql
+
+        guard_result = validate_sql(sql, semantic)
+        entry = AuditEntry(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            original_sql=sql,
+            safe_sql=guard_result.safe_sql,
+            violations=guard_result.violations,
+            passed=guard_result.passed,
+        )
+        if not guard_result.passed or not guard_result.safe_sql:
+            log_audit(entry)
+            rows = []
+            total_count = None
+        elif session_rows is not None and len(session_rows) > 0 and layer == "session":
+            rows = session_rows
+            total_count = len(rows)
+            entry.row_count = len(rows)
+            log_audit(entry)
         else:
-            guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-            total_count = _true_count(guard_result.safe_sql, con) if guard_result.passed else None
-    finally:
-        con.close()
+            rows, _, _ = execute_sql(verified, guard_result.safe_sql)
+            total_count = _true_count(guard_result.safe_sql, verified=verified)
+            entry.row_count = len(rows)
+            log_audit(entry)
+    else:
+        # Every statement that reaches here has passed the read-only guardrail, so a
+        # read-only handle is always sufficient. It is opt-in (DMS_READ_ONLY_QUERIES)
+        # because it also has to be safe for the writer in this process — see
+        # warehouse_db.read_only_queries_enabled.
+        con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+        try:
+            if session_rows is not None and len(session_rows) > 0 and layer == "session":
+                # Precomputed AVG (literal SELECT still guardrail-checked)
+                guard_result, rows, entry = guard_and_execute(sql, semantic, con)
+                if guard_result.passed:
+                    rows = session_rows
+                total_count = len(rows) if guard_result.passed else None
+            else:
+                guard_result, rows, entry = guard_and_execute(sql, semantic, con)
+                total_count = (
+                    _true_count(guard_result.safe_sql, con) if guard_result.passed else None
+                )
+        finally:
+            con.close()
 
     if not guard_result.passed:
         return _abstain(question, audit_id,
@@ -585,7 +790,7 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
     if truncated:
         answer_text = f"{total_count} rows match; showing the first {len(rows)}.\n" + answer_text
 
-    # Remember last successful turn for follow-ups
+    # Remember last successful turn for follow-ups (scoped to Space)
     _remember(
         session_id,
         {
@@ -596,7 +801,9 @@ def answer(question: str, *, session_id: str | None = None) -> dict[str, Any]:
             "rows": rows[:50],
             "total_count": total_count if total_count is not None else len(rows),
             "source_table": _infer_source_table(sql),
+            "space_id": (space_id or "").strip() or None,
         },
+        space_id=space_id,
     )
 
     # Graduate successful non-session answers into the skill store

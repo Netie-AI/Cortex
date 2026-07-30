@@ -40,6 +40,7 @@ class UpsertRecordIn(BaseModel):
     collection: str = "default"
     role: str | None = None
     tier: str = "warm"
+    entry_scope: list[str] = []
 
 
 class UpsertIn(BaseModel):
@@ -51,6 +52,7 @@ class QueryIn(BaseModel):
     k: int = 5
     scope: str | None = None
     collection: str | None = None
+    session_scope: list[str] | None = None
 
 
 @router.post("/upsert")
@@ -59,15 +61,18 @@ async def memory_upsert(
     caller: Caller = Depends(require_role("steward")),
 ) -> dict[str, Any]:
     _ = caller
-    recs = [
-        MemoryRecord(
-            id=r.id, text=r.text, vector=r.vector, meta=r.meta,
-            scope=r.scope if r.scope in ("personal", "company") else "personal",
-            collection=r.collection, role=r.role,
-            tier=r.tier if r.tier in ("hot", "warm", "cold") else "warm",
+    recs = []
+    for r in body.records:
+        entry = frozenset(t for t in (r.entry_scope or []) if t and str(t).strip())
+        recs.append(
+            MemoryRecord(
+                id=r.id, text=r.text, vector=r.vector, meta=r.meta,
+                scope=r.scope if r.scope in ("personal", "company") else "personal",
+                collection=r.collection, role=r.role,
+                tier=r.tier if r.tier in ("hot", "warm", "cold") else "warm",
+                entry_scope=entry,
+            )
         )
-        for r in body.records
-    ]
     n = _STORE.upsert(recs)
     stats = _STORE.stats()
     return {"ok": True, "upserted": n, "stats": stats,
@@ -80,10 +85,16 @@ async def memory_query(
     caller: Caller = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     _ = caller
+    sess = (
+        frozenset(t for t in body.session_scope if t and str(t).strip())
+        if body.session_scope is not None
+        else None
+    )
     hits: list[Hit] = _STORE.query(
         body.vector, k=body.k,
         scope=body.scope if body.scope in ("personal", "company") else None,
         collection=body.collection,
+        session_scope=sess,
     )
     return {"ok": True, "hits": [
         {"id": h.id, "score": round(h.score, 6), "text": h.text, "meta": h.meta}

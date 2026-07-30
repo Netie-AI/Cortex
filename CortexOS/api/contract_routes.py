@@ -1,8 +1,6 @@
 """Stable DMS↔engine contract HTTP surface.
 
-These five operationIds are the allowlisted contract route set. OpenAPI export
-asserts the published spec contains exactly this set — nothing more, nothing
-less — so the wire does not drift with install profile or optional planes.
+Allowlisted contract operationIds — keep in lockstep with scripts/export_openapi.py.
 """
 
 from __future__ import annotations
@@ -13,7 +11,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from packages.cortex_contract.answer import Answer, AskRequest, Badge, Provenance
+from packages.cortex_contract.answer import (
+    Answer,
+    AskRequest,
+    Badge,
+    DrillthroughRequest,
+    DrillthroughResponse,
+    Provenance,
+)
 from packages.cortex_contract.execution import QueryResult, SubmitRequest
 from packages.cortex_contract.ledger import ChainVerification, LedgerEntry
 from packages.cortex_contract.tools import ToolClass, ToolSpec
@@ -26,6 +31,7 @@ CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
         "ledger.append",
         "ledger.verify",
         "tool.registry",
+        "drillthrough",
     }
 )
 
@@ -56,33 +62,145 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     raise TypeError(f"cannot map {type(value)!r} to dict")
 
 
-@router.post("/ask", response_model=Answer, operation_id="ask")
-async def contract_ask(body: AskRequest) -> Answer:
-    """Answer a governed question (DMS ask plane)."""
-    from CortexOS.dms.answer_engine import answer as answer_engine
+def _http_for_submit_status(status: str) -> int:
+    if status in {"pool_saturated"}:
+        return 429
+    if status in {
+        "session_unbound",
+        "session_expired",
+        "drillthrough_session_mismatch",
+    }:
+        return 409
+    if status in {
+        "pool_mismatch",
+        "pool_required",
+        "manifest_signature_invalid",
+        "manifest_unknown_issuer",
+        "path_not_allowed",
+        "statement_not_allowed",
+        "sql_not_analyzable",
+        "manifest_expired",
+        "manifest_not_yet_valid",
+    }:
+        return 403
+    if status in {
+        "manifest_malformed",
+        "sql_required",
+        "drillthrough_token_invalid",
+        "drillthrough_error",
+    }:
+        return 400
+    return 403
 
-    result = answer_engine(body.question, session_id=body.session_id)
-    if isinstance(result, Answer):
-        return result
-    data = dict(result)
-    # Engine dict may omit contract-required fields on older paths — fill safely.
+
+def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> dict[str, Any]:
+    """Attach T7 answer_id + drillthrough_token when SQL is present."""
+    import uuid
+
+    from CortexOS.execution.drillthrough import manifest_content_hash, mint_token
+
     if "provenance" not in data:
         data["provenance"] = Provenance(layer="engine", badge=Badge.SESSION)
+    answer_id = data.get("answer_id") or data.get("audit_id") or str(uuid.uuid4())
+    data["answer_id"] = answer_id
+    assumptions = data.get("assumptions")
+    if isinstance(assumptions, str) and assumptions.strip():
+        data["assumptions"] = [assumptions.strip()]
+    elif not isinstance(assumptions, list):
+        data["assumptions"] = []
+    data.setdefault("contributing_sources", [])
+    sql = data.get("sql_used")
+    if isinstance(sql, str) and sql.strip() and not data.get("drillthrough_token"):
+        try:
+            data["drillthrough_token"] = mint_token(
+                answer_id=str(answer_id),
+                session_id=session_id,
+                manifest_hash=manifest_content_hash(verified.manifest),
+                sql=sql,
+            )
+        except Exception:  # noqa: BLE001 — token is additive; never break ask
+            data["drillthrough_token"] = None
+    return data
+
+
+@router.post("/ask", response_model=Answer, operation_id="ask")
+async def contract_ask(body: AskRequest) -> Answer:
+    """Answer a governed question (DMS ask plane). Requires a prior submit bind."""
+    from CortexOS.dms.answer_engine import answer as answer_engine
+    from CortexOS.execution.manifest import ManifestError
+    from CortexOS.execution.session_manifests import (
+        SessionExpired,
+        SessionUnbound,
+        get_session_registry,
+    )
+
+    try:
+        verified = get_session_registry().resolve(body.session_id)
+    except SessionUnbound as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except SessionExpired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+
+    try:
+        result = answer_engine(
+            body.question,
+            session_id=body.session_id,
+            space_id=body.space_id,
+            verified=verified,
+        )
+    except ManifestError as exc:
+        code = getattr(exc, "code", "manifest_error")
+        raise HTTPException(
+            status_code=_http_for_submit_status(code),
+            detail={"code": code, "message": str(exc)},
+        ) from exc
+
+    if isinstance(result, Answer):
+        data = result.model_dump()
+    else:
+        data = dict(result)
+    data = _enrich_answer(data, session_id=body.session_id, verified=verified)
     return Answer.model_validate(data)
+
+
+@router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")
+async def contract_drillthrough(body: DrillthroughRequest) -> DrillthroughResponse:
+    """Re-derive contributing rows under the same session manifest (T7)."""
+    from CortexOS.execution.drillthrough import (
+        DrillthroughError,
+        execute_drillthrough,
+    )
+
+    try:
+        result = execute_drillthrough(body.token)
+    except DrillthroughError as exc:
+        raise HTTPException(
+            status_code=_http_for_submit_status(getattr(exc, "code", "drillthrough_error")),
+            detail={"code": getattr(exc, "code", "drillthrough_error"), "message": str(exc)},
+        ) from exc
+    return DrillthroughResponse.model_validate(result)
 
 
 @router.post("/submit", response_model=QueryResult, operation_id="submit")
 async def contract_submit(body: SubmitRequest) -> QueryResult:
-    """Submit a plan under a signed session manifest."""
-    _ = body
-    # Wired by the execution plane (C3 manifest verification + run_plan). Until
-    # that lands, refuse rather than silently accepting unsigned work.
+    """Submit a plan under a signed session manifest (C4)."""
+    from CortexOS.execution.submit import submit_request
+
+    result = submit_request(body)
+    if result.ok:
+        return result
     raise HTTPException(
-        status_code=501,
+        status_code=_http_for_submit_status(result.status),
         detail={
-            "error": "FeatureNotInstalled",
-            "feature": "contract.submit",
-            "message": "Signed submit path not wired in this build",
+            "code": result.status,
+            "message": result.error or result.status,
+            "run_id": result.run_id,
         },
     )
 
@@ -119,7 +237,11 @@ async def contract_ledger_append(body: LedgerAppendRequest) -> LedgerEntry:
 @router.post("/ledger/verify", response_model=ChainVerification, operation_id="ledger.verify")
 async def contract_ledger_verify(body: LedgerVerifyRequest) -> ChainVerification:
     # No docstring — see contract_ledger_append.
-    result = _ledger().verify(start_seq=body.start_seq)
+    ledger = _ledger()
+    if hasattr(ledger, "verify_chain"):
+        result = ledger.verify_chain(start_seq=body.start_seq)
+    else:
+        result = ledger.verify(start_seq=body.start_seq)
     return ChainVerification.model_validate(_as_mapping(result))
 
 
