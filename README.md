@@ -8,14 +8,17 @@ Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
 Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
 
-## Handoff (read first)
+## Read first
 
 | File | When |
 |------|------|
+| [CLAUDE.md](CLAUDE.md) | **Start here.** Invariants, protected paths, how to verify. Any agent or contributor. |
 | [STATUS.md](STATUS.md) | Current gate, debt, next feature |
-| [CURSOR_HANDOFF.md](CURSOR_HANDOFF.md) | Cursor builder startup |
-| [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) | Claude supervisor paste |
 | [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md) | One-call `plug_in(app)` integration |
+
+Older handoff docs (`CURSOR_HANDOFF.md`, `CLAUDE_HANDOFF.md`, `CONTEXT.md`,
+`CORTEX_COMPLETE_PLAN.md`) describe a state the repo has moved past — they still
+reference F7 and a 153-test suite. They are kept for history; do not start from them.
 
 ```powershell
 python scripts/handoff.py --cursor   # builder
