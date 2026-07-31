@@ -21,6 +21,7 @@
 | 2026-07-31 | pointer-beat-realtime | gemini, C25-01, voice, skills | Pointer Beat Realtime: Gemini-first, computer-use scaffold, SkillCards; findings in D:\Pointer\docs\subagents_findings | `../Pointer` cross-ref |
 | 2026-07-31 | demo-clear-exclusion-c5-c8 | drillthrough, exclusion, clarify, C5, C8, wolf | Demo blockers + exclusion confirm + C5/C8 mins; C7 schema-gate next | `2026-07-31_demo-clear-exclusion-c5-c8.md` |
 | 2026-07-31 | routing-gaps-eval-surfaces | routing, malay, delayed_count, E4, ontology, trust, 1a, handoff | Live routing+E4 fixed; Ontology/Trust reviewed; next Phase 1b + I1 importlinter | `2026-07-31_routing-gaps-eval-surfaces.md` |
+| 2026-07-31 | c7-plausibility-failopen-space-leak | C7, plausibility, route_to_metric, confidently_wrong, fail-open, compliance_gate, space ACL, cross-space leak, A-0004, postgres, RLS | Assert the customer artifact: a keyword branch answering a different question, 9 copy-pasted fail-open write gates, and a Space boundary with no production caller | `2026-07-31_c7-plausibility-failopen-space-leak.md` |
 
 ## How to add
 
