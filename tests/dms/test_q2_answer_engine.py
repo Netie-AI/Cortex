@@ -226,15 +226,101 @@ def test_l2_disabled_by_default(monkeypatch):
 
 
 def test_top_sku_excludes_named_sku():
-    r = answer_question("ignoring SKU-BETA what is the top 5 sku by revenue")
+    r = answer_question("ignoring SKU-00173 what is the top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" in sql
+    assert "NOT" in sql and "IN" in sql
+    skus = [row["sku"].upper() for row in (r.get("rows") or [])]
+    assert "SKU-00173" not in skus
+    assert len(skus) <= 5
+    answer = r.get("answer") or ""
+    assert "SKU-00173" not in answer.upper()
+    assert "None" not in answer
+    assert "?" not in answer
+
+
+def test_top_sku_excludes_bare_beta_token():
+    """G4 — value normalization: 'BETA' must resolve to SKU-BETA in rows + answer text."""
+    r = answer_question("excluding BETA, top 5 sku by revenue")
     assert r["route"] == "sql"
     assert r["layer"] == "governed_metric"
     sql = (r["sql_used"] or "").upper()
     assert "SKU-BETA" in sql
-    assert "NOT" in sql and "IN" in sql
-    skus = [row["sku"].upper() for row in (r.get("rows") or [])]
+    skus = [str(row["sku"]).upper() for row in (r.get("rows") or [])]
     assert "SKU-BETA" not in skus
-    assert len(skus) <= 5
+    answer = (r.get("answer") or "").upper()
+    assert "SKU-BETA" not in answer
+
+
+def test_top_sku_excludes_multiple_and_bare_token():
+    r = answer_question(
+        "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
+    )
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" in sql and "SKU-00241" in sql
+    skus = [row["sku"].upper() for row in (r.get("rows") or [])]
+    assert "SKU-00173" not in skus
+    assert "SKU-00241" not in skus
+    answer = (r.get("answer") or "").upper()
+    assert "SKU-00173" not in answer
+    assert "SKU-00241" not in answer
+
+    bare = answer_question("ignoring 00173 what is the top 5 sku by revenue")
+    assert bare["route"] == "sql"
+    bare_sql = (bare["sql_used"] or "").upper()
+    assert "SKU-00173" in bare_sql
+    bare_skus = [row["sku"].upper() for row in (bare.get("rows") or [])]
+    assert "SKU-00173" not in bare_skus
+
+
+def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
+    from CortexOS.dms import answer_engine as ae
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops_skills.db"))
+    query_skills.capture(
+        "what is the top 5 sku by revenue",
+        metric_id="sales_by_value",
+        params={"exclude_skus": ["SKU-00173"], "limit": 5, "direction": "DESC"},
+        sql=None,
+        layer="governed_metric",
+    )
+    monkeypatch.setattr(ae, "match_certified", lambda _q: None)
+    monkeypatch.setattr(ae, "route_to_metric", lambda _q: None)
+
+    r = ae.answer("what is the top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "query_skill"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" not in sql
+    assert "NOT IN" not in sql
+
+
+def test_low_stock_followup_uses_inventory_not_placeholders():
+    from CortexOS.dms.answer_engine import clear_session
+
+    clear_session("lowstock-follow")
+    first = answer_question(
+        "what is the top 5 sku by revenue",
+        session_id="lowstock-follow",
+    )
+    assert first["route"] == "sql"
+    assert first.get("rows")
+    second = answer_question(
+        "which of those are low stock?",
+        session_id="lowstock-follow",
+    )
+    assert second["route"] in ("sql", "needs_clarification")
+    answer = second.get("answer") or ""
+    assert "?" not in answer
+    assert "None" not in answer
+    if second["route"] == "sql" and second.get("rows"):
+        assert "quantity_kg" in second["rows"][0]
+        assert "sku" in second["rows"][0]
 
 
 def test_top_sku_ranks_6_to_10():
@@ -246,3 +332,7 @@ def test_top_sku_ranks_6_to_10():
     assert "LIMIT 5" in sql
     # Must not collapse to a scalar total-revenue answer
     assert "sales_value_myr" in (r.get("rows") or [{}])[0]
+    answer = r.get("answer") or ""
+    assert "None" not in answer
+    for row in r.get("rows") or []:
+        assert str(row["sku"]) in answer

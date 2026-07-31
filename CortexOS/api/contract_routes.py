@@ -257,6 +257,14 @@ async def contract_tool_registry() -> ToolRegistryResponse:
     return ToolRegistryResponse(tools=tools)
 
 
+@router.post("/jwks/refresh")
+def contract_jwks_refresh() -> dict[str, Any]:
+    """Cold-path JWKS refresh after DMS mints a new OpenVault intermediate."""
+    from CortexOS.execution.submit import refresh_jwks
+
+    return refresh_jwks()
+
+
 def register_contract_routes(app: Any) -> None:
     app.include_router(router)
 

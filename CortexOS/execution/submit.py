@@ -56,6 +56,21 @@ def set_verifier_for_tests(verifier: ManifestVerifier | None) -> None:
     _VERIFIER = verifier
 
 
+def refresh_jwks(*, timeout: float = 2.0) -> dict[str, Any]:
+    """Cold-path JWKS refresh — call after DMS mints a new intermediate.
+
+    Hot-path verify() never hits the network; this updates the shared verifier
+    cache so newly minted issuer kids are trusted without restarting the engine.
+    """
+    cache = get_verifier().cache
+    ok = cache.refresh(timeout=timeout)
+    return {
+        "ok": ok,
+        "kids": list(cache.known_kids),
+        "fetched_at": cache._fetched_at,
+    }
+
+
 def verify_and_check_pool(manifest: Manifest, pool_id: str) -> VerifiedManifest:
     if not (manifest.pool_id or "").strip():
         raise PoolRequired("manifest.pool_id is required")
@@ -160,9 +175,23 @@ def execute_sql(
     *,
     pool_id: str | None = None,
     db_path: Any = None,
+    explain_gate: bool | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
-    """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms)."""
+    """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms).
+
+    When ``explain_gate`` is True (default: env ``DMS_EXPLAIN_GATE`` unset or
+    truthy), run DuckDB EXPLAIN after manifest enforce and before fetch.
+    """
+    import os
+
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, explain_dry_run
+
     safe_sql = enforce_manifest(sql, verified)
+    use_explain = (
+        explain_gate
+        if explain_gate is not None
+        else os.environ.get("DMS_EXPLAIN_GATE", "1").lower() not in ("0", "false", "no")
+    )
     pool = get_read_pool()
     pid = pool_id or verified.manifest.pool_id or pool.pool_id
     with pool.acquire(pool_id=pid) as queue_ms:
@@ -170,6 +199,13 @@ def execute_sql(
         path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
         try:
+            if use_explain:
+                ok, detail = explain_dry_run(con, safe_sql)
+                if not ok:
+                    raise SqlGateAbstain(
+                        f"EXPLAIN rejected SQL: {detail}",
+                        violations=[f"EXPLAIN_FAILED:{detail}"],
+                    )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s
             if timeout_s > 0:
@@ -222,6 +258,7 @@ __all__ = [
     "execute_count",
     "execute_sql",
     "get_verifier",
+    "refresh_jwks",
     "set_verifier_for_tests",
     "submit_request",
     "verify_and_check_pool",

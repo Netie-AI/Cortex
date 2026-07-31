@@ -53,6 +53,12 @@ jobs:
       - name: Build wheel
         run: python -m build --wheel
 
+      - name: Build cortex-contract wheel
+        run: |
+          python -m build --wheel packages/cortex_contract
+          mkdir -p dist_release
+          cp packages/cortex_contract/dist/cortex_contract-*.whl dist_release/
+
       - name: Changelog since previous tag
         id: changelog
         run: |
@@ -79,6 +85,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist_release
           cp dist/*.whl dist_release/
+          # Standalone contract wheel for DMS clean installs (P-DMS-25).
+          cp packages/cortex_contract/dist/cortex_contract-*.whl dist_release/ 2>/dev/null || true
           # Ship every committed contract generation; consumers pin by filename.
           cp contract/openapi-*.json dist_release/
           (

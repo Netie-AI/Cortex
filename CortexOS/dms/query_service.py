@@ -628,24 +628,36 @@ def generate_sql(question: str, semantic: dict[str, Any]) -> str:
 
 
 def _format_low_stock_answer(rows: list[dict], wh: str | None) -> str:
+    required = ("sku", "quantity_kg")
+    if not rows or any(k not in rows[0] for k in required):
+        # Do not invent placeholders when the row shape is a count/scalar follow-up.
+        return (
+            "I can't list low-stock SKUs from that prior answer — "
+            "ask a ranking that returns SKUs first, then follow up."
+        )
     loc = f" in {wh}" if wh else ""
     lines = [f"{len(rows)} SKU(s) below reorder level{loc}:"]
     for row in rows[:8]:
-        sku = row.get("sku", "?")
-        qty = row.get("quantity_kg", "?")
-        reorder = row.get("reorder_level_kg", row.get("reorder_level", "?"))
+        sku = row.get("sku")
+        qty = row.get("quantity_kg")
+        reorder = row.get("reorder_level_kg", row.get("reorder_level"))
+        if sku is None or qty is None:
+            continue
         name = row.get("sku_name") or row.get("category") or ""
         bin_id = row.get("storage_bin", "")
         wh_code = row.get("location_code", "")
         detail = f"  · {sku}"
         if name:
             detail += f" ({name})"
-        detail += f" — {qty} kg on hand vs {reorder} kg reorder"
+        reorder_txt = f"{reorder} kg reorder" if reorder is not None else "reorder n/a"
+        detail += f" — {qty} kg on hand vs {reorder_txt}"
         if wh_code:
             detail += f" @ {wh_code}"
         if bin_id:
             detail += f"-{bin_id}"
         lines.append(detail)
+    if len(lines) == 1:
+        return f"No SKUs below reorder level{loc}."
     if len(rows) > 8:
         lines.append(f"  · …and {len(rows) - 8} more (see chart)")
     return "\n".join(lines)
@@ -654,6 +666,13 @@ def _format_low_stock_answer(rows: list[dict], wh: str | None) -> str:
 def _format_capacity_answer(rows: list[dict]) -> str:
     if not rows:
         return "No warehouse capacity data available."
+    if "location_code" not in rows[0] or "pct_used" not in rows[0]:
+        preview = rows[:5]
+        lines = [f"Found {len(rows)} row(s)."]
+        for row in preview:
+            parts = [f"{k}={v}" for k, v in list(row.items())[:5]]
+            lines.append("  · " + ", ".join(parts))
+        return "\n".join(lines)
     over90 = [r for r in rows if float(r.get("pct_used", 0) or 0) > 90]
     lines = [
         f"{len(over90)} of {len(rows)} warehouses are above 90% capacity.",
@@ -674,20 +693,23 @@ def _format_generic_answer(rows: list[dict], question: str) -> str:
     if len(rows) == 1 and len(rows[0]) == 1:
         key, val = next(iter(rows[0].items()))
         return f"Result: {key} = {val}"
-    q = question.lower()
-    if ("sale" in q or "sold" in q or "revenue" in q) and "sku" in (rows[0] or {}) and (
-        "sales_value_myr" in rows[0] or "total_sold_kg" in rows[0]
-    ):
+    first = rows[0] or {}
+    # Dispatch from returned columns — never invent measures from question words.
+    if "sku" in first and "sales_value_myr" in first:
         lines = [f"Top {len(rows)} sales result(s), ranked by value:"]
         for row in rows[:5]:
-            lines.append(
-                f"  · {row.get('sku')}: MYR {row.get('sales_value_myr')} "
-                f"from {row.get('total_sold_kg')} kg sold ({row.get('transaction_count')} txns)"
-            )
+            lines.append(f"  · {row.get('sku')}: MYR {row.get('sales_value_myr')}")
         if len(rows) > 5:
             lines.append(f"  · …and {len(rows) - 5} more rows")
         return "\n".join(lines)
-    if "delayed" in q or "late" in q:
+    if "sku" in first and "total_sold_kg" in first:
+        lines = [f"Top {len(rows)} sales result(s), ranked by volume:"]
+        for row in rows[:5]:
+            lines.append(f"  · {row.get('sku')}: {row.get('total_sold_kg')} kg sold")
+        if len(rows) > 5:
+            lines.append(f"  · …and {len(rows) - 5} more rows")
+        return "\n".join(lines)
+    if "shipment_id" in first and "days_delayed" in first:
         lines = [f"{len(rows)} delayed shipment row(s), sorted by days delayed:"]
         for row in rows[:5]:
             lines.append(
@@ -697,7 +719,7 @@ def _format_generic_answer(rows: list[dict], question: str) -> str:
         if len(rows) > 5:
             lines.append(f"  · …and {len(rows) - 5} more rows")
         return "\n".join(lines)
-    if any(term in q for term in ("rank", "ranking", "score", "compare", "comparison", "benchmark")):
+    if "supplier_name" in first and "ranking_score" in first:
         lines = [f"{len(rows)} ranked supplier result(s), sorted by combined score:"]
         for row in rows[:5]:
             lines.append(
@@ -707,9 +729,6 @@ def _format_generic_answer(rows: list[dict], question: str) -> str:
         if len(rows) > 5:
             lines.append(f"  · …and {len(rows) - 5} more rows")
         return "\n".join(lines)
-    if len(rows) == 1 and len(rows[0]) == 1:
-        key, val = next(iter(rows[0].items()))
-        return f"Result: {key} = {val}"
     preview = rows[:5]
     lines = [f"Found {len(rows)} row(s)."]
     for row in preview:
@@ -729,10 +748,11 @@ def synthesize_answer(rows: list[dict], question: str) -> str:
             return f"No SKUs below reorder level{hint}. All monitored stock is above threshold."
         return "No rows matched your query."
 
-    if "below reorder" in q or "low stock" in q:
+    first = rows[0] or {}
+    if ("below reorder" in q or "low stock" in q) and "sku" in first and "quantity_kg" in first:
         return _format_low_stock_answer(rows, _detect_warehouse_code(question))
 
-    if "capacity" in q:
+    if "capacity" in q and "pct_used" in first:
         return _format_capacity_answer(rows)
 
     return _format_generic_answer(rows, question)

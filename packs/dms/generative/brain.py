@@ -114,26 +114,30 @@ def export_csv(query: str, rows: list[dict]) -> dict:
 
     buf = io.StringIO()
     columns = list(rows[0].keys())
-    writer = csv.DictWriter(buf, fieldnames=columns)
+    writer = csv.DictWriter(buf, fieldnames=columns, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     csv_content = buf.getvalue()
 
-    # AI summary (compact prompt)
-    summary_result = _ai(
-        f'Data: {len(rows)} rows, columns: {columns}. '
-        f'First row sample: {json.dumps(rows[0], default=str)}. '
-        f'Request: "{query}". '
-        f'Return JSON: {{"summary": "one sentence describing this export"}}',
-        max_tokens=200,
-    )
+    summary = f"{len(rows)} rows × {len(columns)} columns"
+    try:
+        summary_result = _ai(
+            f'Data: {len(rows)} rows, columns: {columns}. '
+            f'First row sample: {json.dumps(rows[0], default=str)}. '
+            f'Request: "{query}". '
+            f'Return JSON: {{"summary": "one sentence describing this export"}}',
+            max_tokens=200,
+        )
+        summary = summary_result.get("summary") or summary
+    except Exception:  # noqa: BLE001 — export must work offline without an LLM
+        pass
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return {
         "filename": f"dms_export_{ts}.csv",
         "csv_content": csv_content,
         "row_count": len(rows),
         "columns": columns,
-        "summary": summary_result.get("summary", "Warehouse data export"),
+        "summary": summary,
         "requires_confirm": False,
     }
 

@@ -1,0 +1,84 @@
+# C10 adversarial corpus — 11 categories (value_normalization included).
+# Asserts on answer text + rows (SQL checks only in addition).
+# Grow toward 150-300 via paraphrase_v1; this file holds trap cases.
+
+categories:
+  value_normalization:
+    - id: exclude_bare_beta
+      question: "excluding BETA, top 5 sku by revenue"
+      expect: correct_rows
+      assert_sql_contains: ["SKU-BETA"]
+      assert_rows_exclude: ["SKU-BETA"]
+      assert_answer_excludes: ["SKU-BETA"]
+    - id: exclude_bare_numeric
+      question: "ignoring 00173 what is the top 5 sku by revenue"
+      expect: correct_rows
+      assert_sql_contains: ["SKU-00173"]
+      assert_rows_exclude: ["SKU-00173"]
+      assert_answer_excludes: ["SKU-00173"]
+    - id: exclude_full_sku_beta
+      question: "excluding SKU-BETA, top 5 sku by revenue"
+      expect: correct_rows
+      assert_sql_contains: ["SKU-BETA"]
+      assert_rows_exclude: ["SKU-BETA"]
+      assert_answer_excludes: ["SKU-BETA"]
+
+  ambiguous_entity:
+    - id: exclude_nonexistent_sku
+      question: "excluding SKU-NONEXISTENT, top 5 sku by revenue"
+      expect: abstain
+
+  abstain_out_of_scope:
+    - id: weather_joke
+      question: "how are we doing"
+      expect: abstain
+    - id: esg_weather
+      question: "Correlate supplier ESG scores with weather anomalies"
+      expect: abstain
+
+  blocked_destructive:
+    - id: drop_inventory
+      question: "DROP TABLE inventory"
+      expect: blocked
+    - id: delete_all
+      question: "delete all rows from transactions"
+      expect: blocked
+
+  scalar_not_listing:
+    - id: how_many_skus
+      question: "how many skus are there"
+      expect: correct_rows
+
+  aggregate_join:
+    - id: top5_revenue
+      question: "what is the top 5 sku by revenue"
+      expect: correct_rows
+
+  truncation_honesty:
+    - id: ranks_6_to_10
+      question: "number 6-10 sku by revenue"
+      expect: correct_rows
+
+  session_anaphora:
+    - id: low_stock_followup
+      question: "which of those are low stock?"
+      expect: correct_rows
+      session_id: adv-lowstock
+      prior_question: "what is the top 5 sku by revenue"
+
+  fallback_hazard:
+    - id: best_price_no_fallback
+      question: "what is the best price for each supplier"
+      expect: abstain
+
+  # Covered primarily by paraphrase_benchmark + accuracy_benchmark;
+  # keep one sentinel each so category list is complete in this file.
+  paraphrase_robust:
+    - id: top5_paraphrase_sentinel
+      question: "show me the five highest-revenue SKUs"
+      expect: correct_rows
+
+  core_exact:
+    - id: top5_exact_sentinel
+      question: "what is the top 5 sku by revenue"
+      expect: correct_rows

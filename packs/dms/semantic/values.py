@@ -15,6 +15,7 @@ from functools import lru_cache
 # Column → source table for the DISTINCT scan.
 VALUE_COLUMNS: dict[str, str] = {
     "category": "inventory",
+    "sku": "transactions",
     "status": "shipments",
     "carrier": "shipments",
     "country": "suppliers",
@@ -22,7 +23,7 @@ VALUE_COLUMNS: dict[str, str] = {
     "severity": "alerts",
     "txn_type": "transactions",
 }
-MAX_VALUES = 200
+MAX_VALUES = 1000
 
 
 @dataclass(slots=True)

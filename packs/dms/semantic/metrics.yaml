@@ -107,7 +107,7 @@ metrics:
       limit: {kind: int, default: 5, min: 1, max: 1000}
       offset_clause: {kind: offset_clause, default: 0, optional: true}
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
-      exclude_skus: {kind: not_in, column: sku, optional: true}
+      exclude_skus: {kind: not_in, column: sku, optional: true, resolve: true}
 
   - id: sales_by_volume
     kind: ranked
@@ -122,7 +122,7 @@ metrics:
       limit: {kind: int, default: 5, min: 1, max: 1000}
       offset_clause: {kind: offset_clause, default: 0, optional: true}
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
-      exclude_skus: {kind: not_in, column: sku, optional: true}
+      exclude_skus: {kind: not_in, column: sku, optional: true, resolve: true}
 
   - id: revenue_windowed
     kind: scalar

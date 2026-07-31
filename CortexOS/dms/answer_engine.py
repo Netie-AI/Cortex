@@ -148,21 +148,42 @@ def _location(question: str) -> str | None:
     return res.value if res.ok else None
 
 
+_EXCLUSION_STOP = re.compile(
+    r"\b(?:what|show|list|give|find|get|top|bottom|best|worst|highest|lowest|"
+    r"ranked?|numbers?|ranks?|selling|sold)\b",
+    re.I,
+)
+_EXCLUSION_SKIP = frozenset(
+    {"THE", "A", "AN", "SKU", "AND", "OR", "FROM", "BY", "OF", "ALL", "ANY"}
+)
+
+
 def _excluded_skus(q: str) -> list[str]:
-    """Named SKUs to drop from a ranking ('ignoring SKU-BETA', 'exclude alpha')."""
-    found = re.findall(
-        r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|without|except)\s+"
-        r"(?:the\s+)?([A-Za-z][\w-]*)",
+    """Named SKUs to drop from a ranking.
+
+    Captures the full exclusion clause so ``excluding SKU-A and SKU-B`` keeps
+    both tokens (the old regex only took the first token after the verb).
+    """
+    out: list[str] = []
+    for m in re.finditer(
+        r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|without|except)\s+(?:the\s+)?(.+)",
         q,
         flags=re.I,
-    )
-    out: list[str] = []
-    for token in found:
-        t = token.strip().upper()
-        if t in {"THE", "A", "AN", "SKU", "AND", "OR", "FROM", "BY"}:
-            continue
-        if t not in out:
-            out.append(t)
+    ):
+        clause = m.group(1)
+        stop = _EXCLUSION_STOP.search(clause)
+        if stop:
+            clause = clause[: stop.start()]
+        for token in re.split(r"\s*(?:,|/|\band\b|\bor\b)\s*", clause, flags=re.I):
+            t = token.strip().strip("'\"")
+            tm = re.match(r"^([A-Za-z0-9][\w-]*)$", t)
+            if not tm:
+                continue
+            t = tm.group(1).upper()
+            if t in _EXCLUSION_SKIP or len(t) < 2:
+                continue
+            if t not in out:
+                out.append(t)
     return out
 
 
@@ -215,8 +236,10 @@ def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
 
 def _wants_sales_rank(q: str, q_raw: str) -> bool:
     if re.search(r"\b(top|best|highest|most)\b", q) and re.search(
-        r"\b(sell|sold|revenue|sales)\b", q
+        r"\b(sell|sold|revenue|sales|sku|skus|revnue)\b", q
     ):
+        return True
+    if re.search(r"\btop\s+\d+\b", q):
         return True
     if _rank_window(q_raw) and re.search(r"\b(sku|skus|revenue|sales|sell)\b", q):
         return True
@@ -518,6 +541,33 @@ def _pick_measure(nums: list[str]) -> str | None:
     return None
 
 
+def _prior_skus(rows: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    for row in rows:
+        sku = row.get("sku")
+        if sku is None:
+            continue
+        text = str(sku).strip().upper()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _low_stock_over_prior(rows: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    """Filter inventory to prior-turn SKUs that are below reorder."""
+    skus = _prior_skus(rows)
+    if not skus:
+        raise ValueError("prior result has no SKUs to check for low stock")
+    quoted = ", ".join("'" + s.replace("'", "''") + "'" for s in skus)
+    sql = (
+        "SELECT sku, quantity_kg, reorder_level_kg, location_id, category, storage_bin "
+        "FROM inventory "
+        f"WHERE UPPER(sku) IN ({quoted}) AND quantity_kg < reorder_level_kg "
+        "ORDER BY quantity_kg ASC"
+    )
+    return sql, []  # rows filled by execute
+
+
 def _aggregate_prior(
     prior_sql: str,
     question: str,
@@ -666,16 +716,19 @@ def answer(
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
 
-    # Session anaphora — "average of them" over last successful SQL
+    # Session anaphora — "average of them" / "which of those are low stock"
     session_rows: list[dict[str, Any]] | None = None
     if prior and prior.get("sql") and _is_anaphora(q_low):
         try:
-            sql, session_rows = _aggregate_prior(
-                prior["sql"],
-                question,
-                prior.get("rows") or [],
-                total_count=prior.get("total_count"),
-            )
+            if re.search(r"\b(low stock|below reorder|below\s+reorder)\b", q_low):
+                sql, session_rows = _low_stock_over_prior(prior.get("rows") or [])
+            else:
+                sql, session_rows = _aggregate_prior(
+                    prior["sql"],
+                    question,
+                    prior.get("rows") or [],
+                    total_count=prior.get("total_count"),
+                )
             layer, badge = "session", "session"
             assumptions = f"follow-up over prior turn ({prior.get('metric_id') or prior.get('layer')})"
             metric_id = prior.get("metric_id")
@@ -712,12 +765,29 @@ def answer(
             if hit.get("metric_id"):
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
+                # Never replay turn-specific filters from a prior capture.
+                # Sales ranks re-derive slots from THIS question; other metrics
+                # keep only non-contextual stored params.
+                stored = dict(hit.get("params") or {})
+                contextual = {
+                    "exclude_skus",
+                    "offset_clause",
+                    "limit",
+                    "direction",
+                    "days",
+                    "location_code",
+                    "warehouse",
+                }
+                if hit["metric_id"] in ("sales_by_value", "sales_by_volume"):
+                    params = _sales_rank_slots(question)
+                else:
+                    params = {k: v for k, v in stored.items() if k not in contextual}
                 try:
-                    sql = compile_metric(load_all(), hit["metric_id"], hit.get("params") or {})
+                    sql = compile_metric(load_all(), hit["metric_id"], params)
                     layer, badge = "query_skill", "query_skill"
                     assumptions = f"query skill match score={skill_score:.3f} → {hit['metric_id']}"
                     metric_id = hit["metric_id"]
-                    metric_slots = dict(hit.get("params") or {})
+                    metric_slots = dict(params)
                 except SemanticError:
                     sql = None
             elif hit.get("sql_template"):
@@ -726,8 +796,16 @@ def answer(
                 assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
 
     if sql is None:
+        # C7-min L2 hook: structure only. Without a configured generator, abstain.
         if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
-            return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
+            try:
+                from packs.dms.generative import sql_generator
+            except ImportError:  # noqa: BLE001
+                sql_generator = None  # type: ignore[assignment]
+            if sql_generator is None or not sql_generator.is_configured():
+                return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
+            # Future: schema_retrieval -> generate_candidates -> sql_validate_gate.retry
+            return _abstain(question, audit_id, reason="L2 generation failed validation gate")
         return _abstain(question, audit_id, reason="no governed metric or certified query matched")
 
     semantic = load_semantic_layer()
@@ -737,16 +815,18 @@ def answer(
         from datetime import datetime, timezone
 
         from CortexOS.execution.submit import execute_sql
+        from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
 
-        guard_result = validate_sql(sql, semantic)
+        gate = run_gate(sql, semantic)
+        guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
         entry = AuditEntry(
             timestamp=datetime.now(timezone.utc).isoformat(),
             original_sql=sql,
-            safe_sql=guard_result.safe_sql,
-            violations=guard_result.violations,
-            passed=guard_result.passed,
+            safe_sql=gate.safe_sql,
+            violations=gate.violations,
+            passed=gate.passed,
         )
-        if not guard_result.passed or not guard_result.safe_sql:
+        if not gate.passed or not gate.safe_sql:
             log_audit(entry)
             rows = []
             total_count = None
@@ -756,8 +836,18 @@ def answer(
             entry.row_count = len(rows)
             log_audit(entry)
         else:
-            rows, _, _ = execute_sql(verified, guard_result.safe_sql)
-            total_count = _true_count(guard_result.safe_sql, verified=verified)
+            try:
+                rows, _, _ = execute_sql(verified, gate.safe_sql)
+            except SqlGateAbstain as exc:
+                entry.passed = False
+                entry.violations = list(exc.violations)
+                log_audit(entry)
+                return _abstain(
+                    question,
+                    audit_id,
+                    reason=f"SQL validation gate: {exc}",
+                )
+            total_count = _true_count(gate.safe_sql, verified=verified)
             entry.row_count = len(rows)
             log_audit(entry)
     else:

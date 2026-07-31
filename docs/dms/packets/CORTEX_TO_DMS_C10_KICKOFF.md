@@ -1,23 +1,22 @@
 # Cortex → DMS — C10 kickoff (adversarial eval + CI ratchet)
 
-**Date:** 2026-07-30  
-**Status:** C10-min started on Cortex — paraphrase `wrong==0` + robustness floor in pytest.  
-**Not sellable C10 yet.**
+**Status:** C10 harness expanded — 11-category `bench.adversarial` + value_normalization golden; paraphrases ~100 (target 150–300).  
+**Not sellable C10 yet** until floor raised and corpus grown.
 
-## Shipped (C10-min)
+## Shipped
 
 | Piece | Where |
 |-------|--------|
 | Paraphrase zero-wrong gate | `tests/dms/test_paraphrase_benchmark.py` |
-| Robustness floor | `bench/results/paraphrase_baseline.json` (raise-only) |
-| Hostile SQL corpus | already C3 (`hostile_sql_corpus.json`) — not answer-quality |
+| Robustness floor | `bench/golden/paraphrase_baseline.json` (raise-only) |
+| Adversarial harness | `bench/adversarial.py` + `dms_adversarial_v1.yaml` |
+| Category CI | `tests/dms/test_adversarial_benchmark.py` |
+| Hostile SQL corpus | C3 (`hostile_sql_corpus.json`) — not answer-quality |
 
-## Still open (sellable / full C10)
+## Still open
 
-- Grow paraphrases toward 150–300
-- Golden adversarial abstain tier
+- Grow paraphrases to 150–300; raise robustness floor when earned
 - Plausibility stage (needs **C8** `query_run` history)
-- Unified `bench.adversarial` entrypoint
 
 ## DMS
 

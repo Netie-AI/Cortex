@@ -17,12 +17,13 @@ def _refresh_jwks_at_startup() -> None:
     """Cold-path JWKS refresh so the first live mint can verify.
 
     Failure is not fatal: an on-disk cache may still be warm. Hot-path verify
-    never calls the network.
+    never calls the network. Uses the shared submit verifier cache so the
+    in-memory set matches what session_bind will read.
     """
     try:
-        from CortexOS.execution.manifest import JwksCache
+        from CortexOS.execution.submit import get_verifier
 
-        cache = JwksCache()
+        cache = get_verifier().cache
         ok = cache.refresh(timeout=2.0)
         if ok:
             _LOG.info("JWKS refreshed from OpenVault (%d keys)", len(cache.known_kids))

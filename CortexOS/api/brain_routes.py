@@ -34,8 +34,9 @@ class ChartRequest(BaseModel):
 
 class ExportRequest(BaseModel):
     query: str
-    table: str = "dms_inventory"
+    table: str = "inventory"
     limit: int = 5000
+    format: str = "csv"  # csv | parquet
 
 
 class EmailRequest(BaseModel):
@@ -86,22 +87,102 @@ class PonytailRequest(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
-    """Pull data for generative tasks.
+_TABLE_ALIASES = {
+    "dms_inventory": "inventory",
+    "dms_transactions": "transactions",
+    "dms_suppliers": "suppliers",
+    "dms_locations": "locations",
+    "dms_shipments": "shipments",
+    "dms_alerts": "alerts",
+}
 
-    C4: brain routes no longer open DuckDB directly. Ungoverned analytics DB
-    access is refused; callers already treat empty lists as soft failure.
-    """
-    del table, limit
-    return []
+
+def _resolve_export_table(table: str) -> str:
+    from CortexOS.dms.warehouse_db import KNOWN_TABLES
+
+    name = _TABLE_ALIASES.get((table or "").strip().lower(), (table or "").strip().lower())
+    if name not in KNOWN_TABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown table {table!r}. Allowed: {', '.join(KNOWN_TABLES)}",
+        )
+    return name
+
+
+def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
+    """Pull allowlisted warehouse rows via the C4 connection helper (read-only)."""
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
+
+    name = _resolve_export_table(table)
+    lim = max(1, min(int(limit or 5000), 50_000))
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    try:
+        rel = con.execute(f"SELECT * FROM {name} LIMIT {lim}")
+        cols = [d[0] for d in rel.description]
+        return [dict(zip(cols, row)) for row in rel.fetchall()]
+    finally:
+        con.close()
+
+
+def _export_parquet_snapshot(table: str, limit: int = 5000) -> dict[str, Any]:
+    """Write one isolated Parquet file (Power BI-safe — never the DuckLake folder)."""
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
+
+    name = _resolve_export_table(table)
+    lim = max(1, min(int(limit or 5000), 50_000))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    root = Path(os.environ.get("DMS_EXPORT_DIR") or (Path(DEFAULT_DB).resolve().parent / "exports"))
+    out_dir = root / f"export_{stamp}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{name}.parquet"
+
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    try:
+        # Identifier already allowlisted; limit is int-bounded.
+        con.execute(
+            f"COPY (SELECT * FROM {name} LIMIT {lim}) TO ? (FORMAT PARQUET)",
+            [str(out_path)],
+        )
+        row = con.execute(f"SELECT COUNT(*) FROM {name}").fetchone()
+        total = int(row[0]) if row else 0
+    finally:
+        con.close()
+
+    exported = min(total, lim)
+    return {
+        "filename": out_path.name,
+        "path": str(out_path),
+        "directory": str(out_dir),
+        "row_count": exported,
+        "table": name,
+        "format": "parquet",
+        "summary": (
+            f"Isolated Parquet snapshot of {name} ({exported} rows). "
+            "Point Power BI at this file — not the DuckLake folder."
+        ),
+        "requires_confirm": False,
+    }
 
 
 def _get_warehouse_context() -> dict[str, Any]:
-    """Build warehouse context for AI tasks.
+    """Build warehouse context for AI tasks from allowlisted row counts only."""
+    try:
+        from CortexOS.dms.warehouse_db import table_row_counts
 
-    C4: no direct DuckDB import. Live governed reads go through contract submit.
-    """
-    return {}
+        return {"row_counts": table_row_counts()}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -128,9 +209,15 @@ def brain_chart(req: ChartRequest, caller: Caller = Depends(require_role("viewer
 
 @router.post("/export")
 def brain_export(req: ExportRequest, caller: Caller = Depends(require_role("steward"))):
-    """Export warehouse table as CSV."""
+    """Export an allowlisted warehouse table as CSV or an isolated Parquet snapshot."""
     from packs.dms.generative.brain import export_csv
+
     _ = caller
+    fmt = (req.format or "csv").strip().lower()
+    if fmt == "parquet":
+        return _export_parquet_snapshot(req.table, req.limit)
+    if fmt != "csv":
+        raise HTTPException(status_code=400, detail="format must be 'csv' or 'parquet'")
     rows = _get_db_data(req.table, req.limit)
     return export_csv(req.query, rows)
 

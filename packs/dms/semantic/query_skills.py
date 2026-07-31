@@ -136,7 +136,10 @@ def find(
             pat = normalize_trigger(row["trigger_text"] or "")
             if not pat:
                 continue
-            if pat == text or pat in text or text in pat:
+            # Exact normalized match only for a perfect score. Substring
+            # containment used to replay a longer stored question (with
+            # exclusions / windows) onto a shorter unrelated top-N ask.
+            if pat == text:
                 score = 1.0
             else:
                 try:

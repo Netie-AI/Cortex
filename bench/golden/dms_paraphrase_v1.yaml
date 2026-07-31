@@ -24,11 +24,15 @@ paraphrases:
     - "how many distinct SKUs are in stock"
     - "total number of SKUs we carry"
     - "count our inventory items"
+    - "what's our SKU count"
+    - "how many products are we stocking"
 
   low_stock_wh_a:
     - "what is running low in warehouse A"
     - "SKUs under their reorder point at WH-A"
     - "which products need replenishment in warehouse A"
+    - "WH-A items below reorder"
+    - "warehouse A stockouts risk"
 
   low_stock_all:
     - "what needs reordering"
@@ -54,6 +58,15 @@ paraphrases:
     - "our five biggest earners by sales value"
     - "which SKUs bring in the most money, top 5"
     - "rank the top 5 products by revenue"
+    - "top five SKUs ranked by outbound revenue"
+    - "list the highest-revenue products, limit 5"
+    - "show me the five SKUs that sell the most value"
+
+  sales_top5_exclude_beta:
+    - "excluding BETA, top 5 sku by revenue"
+    - "ignore BETA and show top five by revenue"
+    - "top 5 revenue SKUs without SKU-BETA"
+    - "excluding SKU-BETA, what are the top 5 by sales"
 
   sales_top3_volume:
     - "three highest selling SKUs by weight"
@@ -78,6 +91,8 @@ paraphrases:
     - "what is running late"
     - "show me the late deliveries"
     - "which consignments are behind schedule"
+    - "count of delayed shipments"
+    - "how many shipments are delayed"
 
   in_transit:
     - "what is on the road right now"
@@ -131,6 +146,8 @@ paraphrases:
     - "how full is each warehouse"
     - "site by site space usage"
     - "show me utilisation across locations"
+    - "warehouse capacity usage percent"
+    - "utilization by location"
 
   capacity_above_90:
     - "which sites are nearly full"

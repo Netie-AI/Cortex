@@ -126,6 +126,7 @@ def _render_param(name: str, spec: dict, raw: Any, *, resolve: bool = True) -> s
             return ""
         items = list(raw) if isinstance(raw, (list, tuple)) else [raw]
         column = spec["column"]
+        resolve = bool(spec.get("resolve"))
         quoted: list[str] = []
         for item in items:
             text = str(item).strip()
@@ -133,7 +134,11 @@ def _render_param(name: str, spec: dict, raw: Any, *, resolve: bool = True) -> s
                 continue
             if resolve:
                 res = valuedict.resolve(text, column)
-                val = res.value if res.ok else text
+                if res is None or not res.ok:
+                    raise SemanticError(
+                        f"{name}: cannot resolve {text!r} to a {column} value"
+                    )
+                val = res.value
             else:
                 val = text
             quoted.append(_q(val.upper() if column == "sku" else val))

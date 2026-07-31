@@ -48,7 +48,7 @@ export default function StudioPage() {
       setTable((prev) => prev || first);
     } catch (e) {
       if (!(e instanceof ApiOfflineError)) setError(String(e.message || e));
-      else setError("API offline — start Cortex on :8010 with PACK=dms");
+      else setError("API offline — start Cortex on :8000 with PACK=dms");
     }
   }
 

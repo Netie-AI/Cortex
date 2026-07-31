@@ -47,6 +47,20 @@ items:
     key_columns: [sku, sales_value_myr]
     round: 2
     tags: [sales, rank]
+    category: core_exact
+
+  - id: sales_top5_exclude_beta
+    tier: core
+    question: "excluding BETA, top 5 sku by revenue"
+    match: resultset
+    canonical_sql: >
+      SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
+      GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
+    key_columns: [sku, sales_value_myr]
+    round: 2
+    tags: [sales, rank, value_normalization]
+    category: value_normalization
 
   - id: sales_top3_volume
     tier: core
