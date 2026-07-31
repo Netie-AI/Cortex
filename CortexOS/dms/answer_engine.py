@@ -25,6 +25,7 @@ from typing import Any
 
 import sqlglot
 
+from CortexOS.dms import sql_plausibility
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
@@ -83,10 +84,23 @@ def _explicit_limit(q: str) -> int | None:
     from CortexOS.dms.query_service import NUMBER_WORDS
 
     m = re.search(r"\b(?:top|bottom|first|last|show|give me)\s+(\d{1,4})\b", q) or \
-        re.search(r"\b(\d{1,4})\s+(?:warehouses?|locations?|skus?|suppliers?|rows?|results?|items?)\b", q)
+        re.search(r"\b(\d{1,4})\s+(?:warehouses?|locations?|skus?|suppliers?|rows?|results?|items?)\b", q) or \
+        re.search(r"\bwhich\s+(\d{1,4})\s+skus?\b", q) or \
+        re.search(
+            r"\b(\d{1,4})\s+(?:highest|lowest|best|worst|top|most|least|selling|"
+            r"biggest|largest|smallest)\b",
+            q,
+        )
     if m:
         return int(m.group(1))
-    mw = re.search(r"\b(?:top|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b", q)
+    mw = re.search(
+        r"\b(?:top|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b",
+        q,
+    ) or re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:highest|best|top|lowest|worst|most|least|selling)\b",
+        q,
+    )
     if mw:
         return NUMBER_WORDS[mw.group(1)]
     return None
@@ -127,6 +141,23 @@ def _wants_aggregate(q: str) -> bool:
     )
 
 
+#: A concrete warehouse identifier, e.g. ``SKU-00397`` or ``SKU-BETA``.
+_SPECIFIC_SKU = re.compile(r"\bSKU-[A-Za-z0-9][\w-]*", re.I)
+
+
+def _names_specific_sku(question: str) -> str | None:
+    """The SKU code this question is about, if it names one.
+
+    ``\\bskus?\\b`` matches inside ``SKU-00397`` — the hyphen is a word
+    boundary — so "total revenue for SKU-00397" satisfied the population-level
+    ``sku_count`` branch and answered "509", the count of every SKU in the
+    warehouse, badged as a governed metric. Naming one entity is the strongest
+    possible signal that a population aggregate is the wrong answer.
+    """
+    match = _SPECIFIC_SKU.search(question)
+    return match.group(0).upper() if match else None
+
+
 def _calendar_month(q: str) -> str | None:
     """Return 'last' | 'this' when the question names a calendar month window."""
     if re.search(r"\b(last|previous|prior)\s+month\b", q):
@@ -137,7 +168,7 @@ def _calendar_month(q: str) -> str | None:
 
 
 def _pct(q: str, default: int = 90) -> int:
-    m = re.search(r"(?:above|over|more than|>)\s*(\d{1,3})\s*(?:percent|%)", q)
+    m = re.search(r"(?:above|over|more than|exceed(?:s|ing)?|>)\s*(\d{1,3})\s*(?:percent|%)", q)
     return int(m.group(1)) if m else default
 
 
@@ -149,33 +180,63 @@ def _location(question: str) -> str | None:
 
 
 _EXCLUSION_STOP = re.compile(
-    r"\b(?:what|show|list|give|find|get|top|bottom|best|worst|highest|lowest|"
-    r"ranked?|numbers?|ranks?|selling|sold)\b",
+    r"\b(?:from|in|into|within|among|amongst|what|show|list|give|find|get|"
+    r"top|bottom|best|worst|highest|lowest|"
+    r"ranked?|numbers?|ranks?|selling|sold|revenue|sales|value|quantity|volume|"
+    r"then|please|"
+    # Malay verbs that end the entity clause. Without these, "kecuali BETA,
+    # tunjukkan top 5 …" captured TUNJUKKAN as a SKU, failed to resolve it, and
+    # abstained on a question the English form answers.
+    r"tunjukkan|tunjuk|senaraikan|senarai|bagi|papar|paparkan|beri|berikan)\b",
     re.I,
 )
+# Words that can follow an exclusion verb without naming anything. A token that
+# slips through here becomes a filter matching nothing while the envelope stamps
+# success — the exact failure CLAUDE.md §8 calls out. Prefer dropping a real SKU
+# from this list over admitting a filler word.
 _EXCLUSION_SKIP = frozenset(
-    {"THE", "A", "AN", "SKU", "AND", "OR", "FROM", "BY", "OF", "ALL", "ANY"}
+    {
+        "THE", "A", "AN", "SKU", "SKUS", "AND", "OR", "FROM", "BY", "OF", "ALL",
+        "ANY", "THAT", "THIS", "THOSE", "THESE", "IT", "ITS", "OUT", "IN", "ON",
+        "FOR", "TO", "ME", "US", "WITH", "WHICH", "ARE", "IS", "WAS", "WERE",
+        "ITEM", "ITEMS", "ROW", "ROWS", "ONE", "ONES", "PRODUCT", "PRODUCTS",
+        "RESULT", "RESULTS", "ENTRY", "ENTRIES", "RECORD", "RECORDS",
+        # Malay fillers — "keluarkan BETA dari top 5" must not exclude "DARI".
+        "DARI", "DALAM", "UNTUK", "DAN", "ATAU", "YANG", "ITU", "INI", "KE",
+        "PADA", "SAHAJA", "JUGA",
+    }
 )
 
 
-def _excluded_skus(q: str) -> list[str]:
-    """Named SKUs to drop from a ranking.
+_EXCLUSION_VERB_RE = re.compile(
+    r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|"
+    r"leav(?:e|ing)\s+out|skip(?:ping)?|omit(?:ting)?|"
+    r"without|except|besides|apart\s+from|other\s+than|minus|"
+    r"kecuali|tak\s+nak|buang|selain|keluarkan)\s+(?:the\s+)?(.+)",
+    flags=re.I,
+)
 
-    Captures the full exclusion clause so ``excluding SKU-A and SKU-B`` keeps
-    both tokens (the old regex only took the first token after the verb).
-    """
+
+def _exclusion_clauses(q: str) -> list[str]:
+    """Raw exclusion phrases (before token split), for sku_name fuzzy resolve."""
     out: list[str] = []
-    for m in re.finditer(
-        r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|without|except)\s+(?:the\s+)?(.+)",
-        q,
-        flags=re.I,
-    ):
+    for m in _EXCLUSION_VERB_RE.finditer(q):
         clause = m.group(1)
         stop = _EXCLUSION_STOP.search(clause)
         if stop:
             clause = clause[: stop.start()]
-        for token in re.split(r"\s*(?:,|/|\band\b|\bor\b)\s*", clause, flags=re.I):
-            t = token.strip().strip("'\"")
+        clause = clause.strip().strip("'\".,")
+        if clause and clause.lower() not in out:
+            out.append(clause)
+    return out
+
+
+def _excluded_skus(q: str) -> list[str]:
+    """Named SKUs to drop from a ranking (raw tokens — prefer resolve_exclusions)."""
+    out: list[str] = []
+    for clause in _exclusion_clauses(q):
+        for token in re.split(r"[\s,/]+|\band\b|\bor\b", clause, flags=re.I):
+            t = (token or "").strip().strip("'\".")
             tm = re.match(r"^([A-Za-z0-9][\w-]*)$", t)
             if not tm:
                 continue
@@ -185,6 +246,82 @@ def _excluded_skus(q: str) -> list[str]:
             if t not in out:
                 out.append(t)
     return out
+
+
+def _resolve_exclusions(q_raw: str) -> tuple[list[str], dict[str, Any] | None]:
+    """Resolve exclusion phrases to warehouse SKUs.
+
+    Returns ``(exact_skus, clarify_or_none)``.
+    - All exact/encoding hits → apply immediately.
+    - One fuzzy unique hit → clarify confirm chip (do not silent-filter).
+    - Unresolvable with an exclusion verb → clarify payload with error (abstain).
+    """
+    from packs.dms.semantic import values as valuedict
+
+    clauses = _exclusion_clauses(q_raw)
+    if not clauses:
+        return [], None
+
+    exact: list[str] = []
+    fuzzy: list[tuple[str, str, float]] = []  # (phrase, sku, conf)
+    failed: list[str] = []
+
+    for clause in clauses:
+        # Prefer whole-phrase resolve (sku_name / multi-token), then per-token.
+        res = valuedict.resolve(clause, "sku")
+        if res.exact and res.value:
+            if res.value not in exact:
+                exact.append(res.value)
+            continue
+        if res.ok and res.value and not res.exact:
+            fuzzy.append((clause, res.value, float(res.confidence)))
+            continue
+        # Fall back to token split when the whole clause is ambiguous.
+        tokens = _excluded_skus(f"exclude {clause} from the list")
+        if not tokens:
+            failed.append(clause)
+            continue
+        for tok in tokens:
+            tres = valuedict.resolve(tok, "sku")
+            if tres.exact and tres.value:
+                if tres.value not in exact:
+                    exact.append(tres.value)
+            elif tres.ok and tres.value and not tres.exact:
+                fuzzy.append((tok, tres.value, float(tres.confidence)))
+            else:
+                failed.append(tok)
+
+    if failed and not exact and not fuzzy:
+        return [], {
+            "kind": "exclusion_unresolved",
+            "phrases": failed,
+            "candidates": [],
+        }
+    if failed and exact and not fuzzy:
+        # Partial resolve is not safe — ask rather than silent-drop a leftover token.
+        return [], {
+            "kind": "exclusion_unresolved",
+            "phrases": failed,
+            "candidates": list(exact)[:5],
+        }
+    if fuzzy:
+        # One unique fuzzy SKU across phrases → confirm; else abstain with options.
+        skus = list(dict.fromkeys(s for _, s, _ in fuzzy))
+        if len(skus) == 1 and not failed:
+            phrase, sku, conf = fuzzy[0]
+            return exact, {
+                "kind": "exclusion_confirm",
+                "phrase": phrase,
+                "sku": sku,
+                "confidence": conf,
+                "also_exact": list(exact),
+            }
+        return exact, {
+            "kind": "exclusion_ambiguous",
+            "phrases": [p for p, _, _ in fuzzy] + failed,
+            "candidates": skus[:5],
+        }
+    return exact, None
 
 
 def _rank_window(q: str) -> tuple[int, int] | None:
@@ -221,17 +358,82 @@ def _rank_window(q: str) -> tuple[int, int] | None:
 
 def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
     window = _rank_window(q_raw)
-    excluded = _excluded_skus(q_raw)
+    exact, clarify = _resolve_exclusions(q_raw)
     slots: dict[str, Any] = {"direction": _direction(q_raw), "offset_clause": 0}
     if window:
         start, end = window
         slots["offset_clause"] = start - 1
         slots["limit"] = end - start + 1
     else:
-        slots["limit"] = _extract_limit(q_raw, 5)
-    if excluded:
-        slots["exclude_skus"] = excluded
+        slots["limit"] = _explicit_limit(q_raw) or _extract_limit(q_raw, 5)
+    if exact and clarify is None:
+        slots["exclude_skus"] = exact
+    if clarify is not None:
+        slots["_exclusion_clarify"] = clarify
     return slots
+
+
+def _clarify_exclusion(
+    question: str,
+    audit_id: str,
+    *,
+    clarify: dict[str, Any],
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Customer-visible confirm: did you mean exclude this SKU? (R-0001 / R-0011)."""
+    kind = clarify.get("kind")
+    if kind == "exclusion_confirm":
+        sku = str(clarify["sku"])
+        phrase = str(clarify.get("phrase") or "")
+        yes = f"Yes — exclude {sku} from the top {limit} sales"
+        no = f"No — show top {limit} sales without excluding"
+        text = (
+            f'Do you mean exclude **{sku}**'
+            + (f' (matched “{phrase}”)' if phrase else "")
+            + f" from the top {limit}? "
+            "Click Yes within 5 seconds to confirm, or No to keep the unfiltered ranking."
+        )
+        suggestions = [yes, no]
+        reason = f"exclusion_confirm:{sku}"
+    elif kind == "exclusion_ambiguous":
+        cands = clarify.get("candidates") or []
+        suggestions = [f"Exclude {c} from the top {limit} sales" for c in cands[:3]]
+        suggestions.append(f"Show top {limit} sales without excluding")
+        text = (
+            "I found more than one SKU that could match that exclusion. "
+            "Pick one below, or continue without excluding."
+        )
+        reason = "exclusion_ambiguous"
+    else:
+        phrases = clarify.get("phrases") or []
+        suggestions = [
+            f"Top {limit} selling SKUs by revenue",
+            f"Show top {limit} sales without excluding",
+        ]
+        text = (
+            "I couldn't match "
+            + (", ".join(repr(p) for p in phrases[:3]) or "that exclusion")
+            + " to a SKU in the warehouse. "
+            "Rephrase with the full SKU code, or ask for the ranking without excluding."
+        )
+        reason = "exclusion_unresolved"
+
+    return {
+        "answer": text,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": suggestions,
+        "clarify": clarify,
+    }
 
 
 def _wants_sales_rank(q: str, q_raw: str) -> bool:
@@ -248,6 +450,36 @@ def _wants_sales_rank(q: str, q_raw: str) -> bool:
 
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
 def route_to_metric(question: str) -> MetricPlan | None:
+    """Pick a governed metric, and refuse one that ignores a SKU the user named.
+
+    Every metric in the pack is population-level: there is no "revenue of one
+    SKU". So when a question names a concrete SKU, a plan whose slots do not
+    carry that SKU is answering a *different question* than the one asked —
+    and the badge says governed_metric while it does it.
+
+    That was live. "total revenue for SKU-00397" returned ``sku_count = 509``
+    (every SKU in the warehouse) because ``\\bskus?\\b`` matches inside the
+    identifier. Excluding that one branch just moved the wrong answer along to
+    ``revenue_total = 80,375,993.99`` — the whole warehouse's revenue, reported
+    as one SKU's — because the next branch's guard tests the *normalized* text,
+    where the identifier no longer looks like "sku". Two branches, one defect,
+    and patching them one at a time was never going to converge.
+
+    So the check lives here, once, on the way out: name a SKU, and the plan has
+    to be about it. Exclusion asks pass untouched — "ignore SKU-BETA and show the
+    top 5" resolves the SKU into ``exclude_skus``, so it *is* in the slots.
+    Anything else falls through to L2 generation, or abstains.
+    """
+    plan = _route_to_metric(question)
+    if plan is None:
+        return None
+    named = _names_specific_sku(question)
+    if named and named not in str(plan.slots).upper():
+        return None
+    return plan
+
+
+def _route_to_metric(question: str) -> MetricPlan | None:
     """Pick a governed metric + its slots.
 
     Two views of the question, deliberately kept apart:
@@ -265,10 +497,71 @@ def route_to_metric(question: str) -> MetricPlan | None:
     q = normalize_for_routing(question)
 
     # scalars first — "how many X" must not fall through to a listing
-    if re.search(r"\b(how many|number of|count of|count)\b", q) and "cold storage" in q:
+    # Predictive / out-of-schema asks must abstain before sales-rank keywords fire
+    # ("forecast … top SKU" contains "top"+"sku" and would otherwise invent a ranking).
+    if re.search(r"\b(forecast|predict|projection|what if|hypothetical)\b", q):
+        return None
+
+    # _wants_aggregate, not a narrow keyword list: "Total cold storage locations"
+    # is a count, and returning the listing for it is a shape error the caller
+    # cannot see.
+    if _wants_aggregate(q) and "cold storage" in q:
         return MetricPlan("cold_storage_count", {}, "count of cold-storage locations")
-    if re.search(r"\bhow many\b", q) and re.search(r"\bskus?\b", q) and not re.search(r"\b(category|per|by)\b", q):
+
+    # Row count vs SKU count is the whole point of the grain_fanout category:
+    # "how many rows in inventory" and "how many SKUs" are different questions
+    # with different answers, and this branch must beat the SKU branch below.
+    # Unqualified only. "count inventory rows with no expiry date" is a filtered
+    # count, and answering it with the table total is a confidently wrong number
+    # that looks plausible — the exact shape this branch was added to prevent.
+    if (
+        _wants_aggregate(q)
+        and re.search(r"\b(rows?|records?|lines?|entries|entr(?:y|ies))\b", q)
+        and "inventory" in q
+        and not re.search(
+            r"\b(expiry|expire[ds]?|expiring|null|missing|blank|without|no\s+\w+|"
+            r"hazard\w*|reorder|below|above|under|over|category|categories|"
+            r"supplier\w*|location\w*|warehouse\w*|cold storage|per|each|"
+            r"group(?:ed)?\s+by)\b",
+            q,
+        )
+    ):
+        return MetricPlan("inventory_row_count", {}, "row count of the inventory table")
+
+    # Distinct suppliers sourced from — COUNT(DISTINCT supplier_id) on inventory,
+    # not a count of the supplier table and not a row count after a join.
+    if _wants_aggregate(q) and re.search(r"\bsuppliers?\b", q) and re.search(
+        r"\b(distinct|different|unique|separate)\b|\binventory\b|"
+        r"\bbuy\w*\s+from\b|\bpurchas\w*\s+from\b|\bsourc\w*\s+from\b|\bsupply us\b",
+        q,
+    ) and not re.search(r"\b(country|category|risk|audit|per|each)\b", q):
+        return MetricPlan("supplier_count", {}, "distinct suppliers in inventory")
+
+    # Missing expiry — must beat both the row-count branch above and the
+    # "expired" listing below. A NULL expiry is unknown, not overdue.
+    _no_expiry = re.search(
+        r"\b(?:no|without|missing|blank|null|not have|dont have|don'?t have|"
+        r"lacking|absent)\b[^.?]{0,24}\bexpir\w*", q
+    ) or re.search(r"\bexpir\w*\b[^.?]{0,16}\b(?:missing|blank|null|not recorded)\b", q)
+    if _no_expiry and _wants_aggregate(q):
+        if re.search(r"\b(average|avg|mean)\b", q):
+            return MetricPlan("avg_qty_null_expiry", {}, "average quantity where expiry is unknown")
+        return MetricPlan("null_expiry_count", {}, "count of items with no expiry date")
+
+    # _wants_aggregate, not bare "how many": "count of unique SKUs" and "our
+    # distinct SKU count" are the same question and were abstaining.
+    #
+    # Excluded when the question names one SKU. "total revenue for SKU-00397"
+    # hit every condition here — "total" is an aggregate, and `\bskus?\b` matches
+    # inside the identifier — and answered "sku_count = 509" with a green
+    # governed-metric badge and a drillthrough token. There is no per-SKU revenue
+    # metric, so the honest outcome is to fall through and abstain.
+    if _wants_aggregate(q) and re.search(r"\bskus?\b", q) and not re.search(r"\b(category|per|by)\b", q):
         return MetricPlan("sku_count", {}, "distinct SKU count")
+    # delayed COUNT before status listing — "how many delayed" must not return 1000 rows
+    if _wants_aggregate(q) and "delayed" in q and re.search(r"\bshipments?\b", q) \
+            and not re.search(r"\b(carrier|per|by|each|warehouse|destination)\b", q):
+        return MetricPlan("delayed_count", {}, "count of delayed shipments")
 
     # per-warehouse / per-carrier breakdowns of shipments (before the status listing)
     if "delayed" in q and re.search(r"\bcarrier", q):
@@ -291,11 +584,36 @@ def route_to_metric(question: str) -> MetricPlan | None:
     ):
         return MetricPlan("revenue_total", {}, "total outbound revenue")
 
+    # spend / stock value aggregates (before supplier ranking / listings)
+    if re.search(r"\bspend\b", q) and re.search(r"\bcountry\b", q):
+        return MetricPlan("spend_by_country", {}, "inventory spend grouped by supplier country")
+    if re.search(r"\bstock value\b", q) and re.search(r"\bcategor", q):
+        return MetricPlan("stock_value_by_category", {}, "stock value by category")
+    if re.search(r"\bsku count\b", q) and re.search(r"\bcategor", q):
+        return MetricPlan("sku_count_by_category", {}, "SKU count by category")
+
+    # audit overdue — "who hasn't been audited" / "audit overdue"
+    if "audit" in q and re.search(r"\b(overdue|not been|hasn't|havent|have not)\b", q):
+        return MetricPlan(
+            "audit_overdue",
+            {"days": _days(q_raw, 90)},
+            "suppliers with overdue audit",
+        )
+
     # supplier risk threshold
-    if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
+    if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q) \
+            and not re.search(r"\b(pending|shipment)\b", q):
         return MetricPlan("suppliers_by_risk",
                           {"threshold": _threshold(q_raw), "op": _threshold_op(q_raw)},
                           "suppliers filtered by risk-score threshold")
+
+    # high-risk suppliers with pending shipments
+    if re.search(r"\bhigh[- ]?risk\b", q) and re.search(r"\b(pending|shipment)\b", q):
+        return MetricPlan(
+            "high_risk_pending",
+            {"threshold": _threshold(q_raw, 0.7)},
+            "high-risk suppliers with pending shipments",
+        )
 
     # average lead time by country
     if re.search(r"\baverage\b|\bmean\b|\bavg\b", q) and "lead time" in q:
@@ -307,9 +625,13 @@ def route_to_metric(question: str) -> MetricPlan | None:
                           {"limit": _explicit_limit(q_raw) or 1, "direction": _direction(q_raw)},
                           "warehouses ranked by free capacity")
 
-    # capacity above a percentage
-    if "capacit" in q and re.search(r"\b(above|over|more than)\b.*\d", q):
+    # capacity above a percentage (incl. almost/nearly full via vocabulary)
+    if "capacit" in q and re.search(r"\b(above|over|more than|exceed(?:s|ing)?)\b.*\d", q):
         return MetricPlan("capacity_above", {"pct": _pct(q_raw)}, "locations above a capacity threshold")
+    if re.search(r"\b(almost|nearly)\s+full\b", q) or (
+        "capacit" in q and re.search(r"\b(almost|nearly)\s+full\b", q)
+    ):
+        return MetricPlan("capacity_above", {"pct": _pct(q_raw, 90)}, "locations above a capacity threshold")
     # utilis\w* / utiliz\w*, not utilis\b — the trailing \b made the word
     # "utilisation" itself fail to match, so this branch was only ever reachable
     # by the stem alone. The golden question hits L0 certified, which is why the
@@ -321,7 +643,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
     if "arriving" in q or ("incoming" in q and re.search(r"\bweek|\bdays?\b", q)):
         return MetricPlan("arriving_window", {"days": _days(q_raw, 7)}, "in-transit shipments arriving within a window")
 
-    # shipment status listing
+    # shipment status listing (after delayed_count scalar)
     for status in ("delayed", "in transit", "in_transit", "pending", "delivered", "cancelled"):
         if status in q and re.search(r"\bshipments?\b", q):
             norm = "IN_TRANSIT" if status.startswith("in ") or status == "in_transit" else status.upper()
@@ -357,7 +679,15 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # sales ranking (after month/window scalars so "last month sales" never ranks)
     if _wants_sales_rank(q, q_raw):
         slots = _sales_rank_slots(q_raw)
-        if re.search(r"\b(quantity|volume|kg|units?)\b", q):
+        clarify = slots.pop("_exclusion_clarify", None)
+        if clarify is not None:
+            # Signal to answer() — do not compile/filter yet.
+            return MetricPlan(
+                "_exclusion_clarify",
+                {"clarify": clarify, "limit": int(slots.get("limit") or 5)},
+                "exclusion needs confirm",
+            )
+        if re.search(r"\b(quantity|volume|kg|kilograms?|weight|units?)\b", q):
             return MetricPlan(
                 "sales_by_volume",
                 slots,
@@ -426,6 +756,90 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
             "Show warehouse capacity utilisation",
         ][:limit]
     return seen
+
+
+def _plausibility_runner(verified: VerifiedManifest | None) -> sql_plausibility.Runner:
+    """A bounded probe executor for whichever execution path this turn is on.
+
+    The contract path routes probes through ``execute_sql`` so the manifest
+    applies: a value this session may not read should probe as absent, and the
+    abstain that follows says "no such value" without disclosing that one exists.
+    """
+    if verified is not None:
+
+        def _contract(probe_sql: str) -> list[dict[str, Any]]:
+            from CortexOS.execution.submit import execute_sql
+
+            rows, _, _ = execute_sql(verified, probe_sql)
+            return rows
+
+        return _contract
+
+    def _legacy(probe_sql: str) -> list[dict[str, Any]]:
+        con = get_connection(DEFAULT_DB, read_only=True)
+        try:
+            rel = con.execute(probe_sql)
+            columns = [d[0] for d in rel.description] if rel.description else []
+            return [dict(zip(columns, row, strict=False)) for row in rel.fetchall()]
+        finally:
+            con.close()
+
+    return _legacy
+
+
+def _abstain_impossible_filter(
+    question: str,
+    audit_id: str,
+    *,
+    result: sql_plausibility.PlausibilityResult,
+) -> dict[str, Any]:
+    """Refuse a query whose filter cannot match, and name the near-misses.
+
+    Distinct from a plain abstain because the customer can act on it: the value
+    they asked for does not exist under that spelling, and the answer says which
+    spellings do. Returning "0" here would be the confidently-wrong failure the
+    whole eval floor is built to keep at zero.
+    """
+    first = result.impossible[0]
+    pred = first.predicate
+    suggestions: list[str] = []
+    if first.candidates:
+        suggestions = [
+            re.sub(re.escape(pred.value), c, question, count=1, flags=re.I)
+            if re.search(re.escape(pred.value), question, flags=re.I)
+            else f"{question} (using {c})"
+            for c in first.candidates[:3]
+        ]
+    suggestions.extend(s for s in _suggestions(question) if s not in suggestions)
+
+    if first.candidates:
+        shown = ", ".join(f"**{c}**" for c in first.candidates[:3])
+        text = (
+            f"The warehouse has no `{pred.column}` equal to `{pred.value}`, so that filter "
+            f"would match nothing and any total I gave you would read as a real zero. "
+            f"Closest values stored: {shown}."
+        )
+    else:
+        text = (
+            f"The warehouse has no `{pred.column}` equal to `{pred.value}`, so that filter "
+            f"would match nothing. I'd rather say that than hand you a zero that looks real."
+        )
+
+    return {
+        "answer": text,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": f"impossible_filter: {result.reason()}",
+        "total_count": 0,
+        "suggestions": suggestions[:4],
+    }
 
 
 def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
@@ -754,6 +1168,12 @@ def answer(
         else:
             plan = route_to_metric(question)
             if plan is not None:
+                if plan.metric_id == "_exclusion_clarify":
+                    clarify = dict(plan.slots.get("clarify") or {})
+                    limit = int(plan.slots.get("limit") or 5)
+                    return _clarify_exclusion(
+                        question, audit_id, clarify=clarify, limit=limit
+                    )
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
                 try:
@@ -763,10 +1183,62 @@ def answer(
                     metric_id = plan.metric_id
                     metric_slots = dict(plan.slots)
                 except SemanticError as exc:
+                    # Exclusion resolve failures must not fall through to query-skill.
+                    if _exclusion_clauses(question):
+                        exact, clarify = _resolve_exclusions(question)
+                        if clarify is not None:
+                            return _clarify_exclusion(
+                                question,
+                                audit_id,
+                                clarify=clarify,
+                                limit=int(_sales_rank_slots(question).get("limit") or 5),
+                            )
+                        return _abstain(
+                            question,
+                            audit_id,
+                            reason=f"could not resolve inputs: {exc}",
+                        )
                     return _abstain(question, audit_id, reason=f"could not resolve inputs: {exc}")
 
+    # Predictive / hypothetical asks must not be answered by a similar query skill
+    # (e.g. "forecast … top SKU" matching a captured sales_by_value skill).
+    if sql is None and re.search(
+        r"\b(forecast|predict|projection|what if|hypothetical)\b", q_low
+    ):
+        return _abstain(
+            question,
+            audit_id,
+            reason="predictive / out-of-scope — no verified forecast path",
+        )
+
     if sql is None:
+        # Exclusion verb present but unresolved → abstain (never query-skill replay).
+        if _exclusion_clauses(question) and _wants_sales_rank(_normalize(question), question):
+            exact, clarify = _resolve_exclusions(question)
+            if clarify is not None:
+                return _clarify_exclusion(
+                    question,
+                    audit_id,
+                    clarify=clarify,
+                    limit=int(_sales_rank_slots(question).get("limit") or 5),
+                )
+            if not exact:
+                return _abstain(
+                    question,
+                    audit_id,
+                    reason="exclusion could not be resolved to a warehouse SKU",
+                )
         hit = query_skills.find(question)
+        # A capture is matched by similarity, so a question naming one SKU sits
+        # right next to a stored population-level skill — "total revenue for
+        # SKU-00397" is a near neighbour of "total revenue". Replaying that would
+        # report the whole warehouse's number while the customer reads it as that
+        # SKU's. A capture that actually mentions the SKU is still fair game; L2
+        # generation below can answer the rest properly, or the path abstains.
+        if hit is not None and (_named_sku := _names_specific_sku(question)):
+            captured = f"{hit.get('sql_template') or ''} {hit.get('params') or ''}".upper()
+            if _named_sku not in captured:
+                hit = None
         if hit is not None:
             skill_score = float(hit["score"])
             if hit.get("metric_id"):
@@ -787,6 +1259,14 @@ def answer(
                 }
                 if hit["metric_id"] in ("sales_by_value", "sales_by_volume"):
                     params = _sales_rank_slots(question)
+                    clarify = params.pop("_exclusion_clarify", None)
+                    if clarify is not None:
+                        return _clarify_exclusion(
+                            question,
+                            audit_id,
+                            clarify=clarify,
+                            limit=int(params.get("limit") or 5),
+                        )
                 else:
                     params = {k: v for k, v in stored.items() if k not in contextual}
                 try:
@@ -806,41 +1286,67 @@ def answer(
         # C7-full L2: schema retrieval → FreeRoute generate → validate gate.
         # Never fall back to the L1 keyword cascade or a smaller model.
         if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
-            try:
-                from packs.dms.generative import promotion as l2_promotion
-                from packs.dms.generative import schema_retrieval, sql_generator
-                from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
-            except ImportError:  # noqa: BLE001
-                return _abstain(question, audit_id, reason="no verified answer path (L2 import failed)")
+            # The provider comes from the active pack through the engine-owned port
+            # (CortexOS/dms/sql_generation_port.py). The engine keeps the gate: a
+            # pack proposes SQL, only sql_validate_gate decides whether it may run.
+            from CortexOS.dms.sql_generation_port import (
+                SqlGenerationNotRegistered,
+                resolve_sql_generation,
+            )
+            from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
 
-            if not sql_generator.is_configured():
+            try:
+                l2 = resolve_sql_generation()
+            except SqlGenerationNotRegistered:
+                return _abstain(
+                    question, audit_id, reason="no verified answer path (L2 provider absent)"
+                )
+
+            if not l2.is_configured():
                 return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
 
             semantic_early = load_semantic_layer()
-            reduced = schema_retrieval.retrieve(question)
+            reduced = l2.retrieve_schema(question)
             prior_box: dict[str, list[str]] = {"v": []}
 
-            def _gen(prior: list[str]) -> str | None:
+            def _gen(prior: list[str]) -> list[str]:
+                # Every candidate, not just the best one: the gate tries them all
+                # before spending another generation round.
                 prior_box["v"] = list(prior)
-                cands = sql_generator.generate_candidates(
+                return l2.generate_candidates(
                     question,
                     reduced,
                     prior_violations=prior,
                 )
-                return cands[0] if cands else None
 
+            # EXPLAIN is the only stage that can catch a column the model invented
+            # but that the parser accepts, so generated SQL gets it on *both*
+            # paths. It used to be opened only when ``verified is None``, which
+            # left the live contract path — the customer path — dry-running
+            # nothing until submit.execute_sql, far too late for the retry loop
+            # to feed the error back into the next prompt.
+            #
+            # Read-only unconditionally, matching submit.execute_sql: every
+            # statement here has already passed the read-only guardrail, and a
+            # writer holding the file must not turn into an abstain.
             con_explain = None
+            explain_note = ""
             try:
-                if verified is None:
-                    con_explain = get_connection(
-                        DEFAULT_DB, read_only=read_only_queries_enabled()
-                    )
+                try:
+                    con_explain = get_connection(DEFAULT_DB, read_only=True)
+                except Exception as exc:  # noqa: BLE001
+                    # Not silent: the degradation rides out on the answer's
+                    # assumptions. execute_sql still EXPLAINs post-enforce and
+                    # fails closed, so the query stays gated — what is lost is
+                    # the ability to retry on the error, not the check itself.
+                    explain_note = f"; EXPLAIN deferred to execute ({str(exc)[:80]})"
                 gate = gate_with_retry(
                     _gen,
                     question,
                     semantic_early,
                     con=con_explain,
                     max_retries=2,
+                    require_explain=con_explain is not None,
                 )
             except SqlGateAbstain as exc:
                 return _abstain(
@@ -860,11 +1366,11 @@ def answer(
             assumptions = (
                 f"L2 FreeRoute SQL over reduced schema "
                 f"tables={list((reduced.get('tables') or {}).keys())}"
+                f"; attempts={gate.attempts}"
+                f"; explain={'ran' if gate.explain_ran else 'skipped'}"
+                f"{explain_note}"
             )
-            try:
-                l2_promotion.record_validated(question, sql)
-            except Exception:  # noqa: BLE001 — promotion signal must not block answers
-                pass
+            l2.record_validated(question, sql)  # provider swallows its own failures
         else:
             return _abstain(question, audit_id, reason="no governed metric or certified query matched")
 
@@ -937,6 +1443,27 @@ def answer(
     if not guard_result.passed:
         return _abstain(question, audit_id,
                         reason=f"internal SQL failed guardrail {guard_result.violations}")
+
+    # Plausibility — the stage after EXPLAIN in the C7 pipeline (CLAUDE.md §8).
+    # Parsing and planning both succeed on `WHERE sku = 'BETA'` against a
+    # warehouse that stores SKU-BETA; what comes back is an empty result the
+    # customer reads as a real zero. Probe the filters instead of trusting them.
+    #
+    # Generated SQL is probed every turn because nothing else verifies it. A
+    # query skill is a replay of a capture that passed once, so it is probed only
+    # when the result is empty — the way a stale value presents.
+    if layer in sql_plausibility.PROBED_LAYERS and (layer == "generated" or not rows):
+        plausible = sql_plausibility.check(
+            guard_result.safe_sql or sql,
+            _plausibility_runner(verified),
+            layer=layer,
+        )
+        if not plausible.ok:
+            return _abstain_impossible_filter(question, audit_id, result=plausible)
+        if plausible.skipped_reason:
+            assumptions = f"{assumptions}; plausibility not checked ({plausible.skipped_reason})"
+        elif plausible.probed:
+            assumptions = f"{assumptions}; {plausible.probed} filter value(s) verified present"
 
     truncated = total_count is not None and len(rows) >= MAX_LIMIT and total_count > len(rows)
     answer_text = synthesize_answer(rows, question)

@@ -108,7 +108,7 @@ SKU_NAMES = [
     "Pallet Jack Wheel",
     "Barcode Scanner",
     "Fire Extinguisher 4kg",
-    "PVC Pipe 50mm",
+    "Alha Wolf Pack",
     "Rubber Gasket Set",
     "Cable Tie Assorted",
     "Dust Mask N95 Pack",
@@ -661,6 +661,14 @@ def main() -> None:
     ]
 
     for name, clean_rows, fields, messy_fn in tables:
+        # The clean files are what warehouse_db.TABLE_FILES loads. Writing only the
+        # messy ones left them unregenerable, so anything that re-seeded the
+        # warehouse (a lakehouse migration test, say) silently dropped the seeded
+        # fixtures — SKU-BETA among them — with no way to get them back. `data/`
+        # is documented as regenerated, so it has to actually regenerate.
+        _write_csv(SAMPLES / f"{name}_clean.csv", clean_rows, fields)
+        print(f"  {name}_clean.csv: {len(clean_rows)} rows")
+
         messy_rows = messy_fn(clean_rows)
         _write_csv(SAMPLES / f"{name}_messy.csv", messy_rows, fields)
         print(f"  {name}_messy.csv: {len(messy_rows)} rows")

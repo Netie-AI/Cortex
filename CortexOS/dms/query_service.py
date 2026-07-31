@@ -88,18 +88,64 @@ _BENIGN_IDIOM = re.compile(
     re.I,
 )
 
+# Multi-word destructive phrasings, folded to a single verb before the word scan.
+# "get rid of the inventory table" is the same request as "delete the inventory
+# table"; a word-at-a-time scan cannot see it, and plain English is how a real
+# user asks for a destructive thing.
+_MUTATION_PHRASE: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bget\s+rid\s+of\b", re.I), "delete"),
+    (re.compile(r"\bblank\s+out\b", re.I), "truncate"),
+    (re.compile(r"\bwipe\s+out\b", re.I), "wipe"),
+    (re.compile(r"\bnuke\b", re.I), "delete"),
+)
+
 _MUTATION_VERB = re.compile(
     r"\b(drop|delete|truncate|alter|insert|update|create|wipe|erase|purge|"
-    r"remove|clear|destroy|overwrite|reset)\b",
+    r"remove|clear|destroy|overwrite|reset|empty)\b",
+    re.I,
+)
+
+# Verbs that are ordinary adjectives or state words at least as often as they are
+# requests ("list empty bins", "clear of alerts"). They only count as destructive
+# when they act on a STORAGE noun, never on a bare entity name.
+_WEAK_MUTATION_VERB = frozenset({"empty", "clear", "reset"})
+
+# Nouns that name the store itself. A mutation verb aimed at one of these is a
+# write request under any phrasing.
+_STORAGE_OBJECT = re.compile(
+    r"\b(table|tables|database|databases|schema|column|columns|row|rows|"
+    r"record|records|entry|entries|data|dataset|everything|all)\b",
+    re.I,
+)
+
+# Nouns that name business entities. Destructive when the sentence is a command
+# ("purge suppliers"), but ALSO the normal vocabulary of an analytics filter
+# ("drop SKU-BETA, top 5 sku by revenue") — see _RANKING_CONTEXT below.
+_ENTITY_OBJECT = re.compile(
+    r"\b(inventory|supplier|suppliers|shipment|shipments|location|locations|"
+    r"transaction|transactions|alert|alerts|warehouse|warehouses|sku|skus)\b",
     re.I,
 )
 
 # Words that make a mutation verb a request against stored data.
 _DATA_OBJECT = re.compile(
-    r"\b(table|tables|database|databases|schema|column|columns|row|rows|"
-    r"record|records|entry|entries|data|dataset|inventory|supplier|suppliers|"
-    r"shipment|shipments|location|locations|transaction|transactions|"
-    r"alert|alerts|warehouse|warehouses|sku|skus|everything|all)\b",
+    f"{_STORAGE_OBJECT.pattern}|{_ENTITY_OBJECT.pattern}",
+    re.I,
+)
+
+# A question that asks for a ranking or an aggregate is analysis, and a mutation
+# verb inside it is almost always an exclusion filter — "drop SKU-BETA, top 5 sku
+# by revenue" wants a report, not a DDL statement. In that context only a STORAGE
+# noun still counts as destructive, so "drop the inventory table and show top 5"
+# is caught while the filter phrasing is not.
+#
+# Refusing a legitimate question is not the safe side of this trade. It teaches
+# the user the product is broken, and the actual enforcement is downstream in
+# sql_guardrail's AST check, which no wording gets past.
+_RANKING_CONTEXT = re.compile(
+    r"\b(top|bottom|highest|lowest|rank(?:ed|ing)?|best|worst|"
+    r"revenue|sales|spend|average|avg|count\s+of|how\s+many|"
+    r"group(?:ed)?\s+by|per\s+\w+|breakdown)\b",
     re.I,
 )
 
@@ -129,15 +175,24 @@ def destructive_intent(question: str) -> str | None:
     # Remove benign idioms before looking for verbs, so "update me on ..." and
     # "drop-off point" never reach the verb scan at all.
     scrubbed = _BENIGN_IDIOM.sub(" ", q)
+    for phrase, verb in _MUTATION_PHRASE:
+        scrubbed = phrase.sub(verb, scrubbed)
+
+    # In an analytics question a mutation verb is an exclusion filter, so only a
+    # storage noun still reads as a write request.
+    storage_only = bool(_RANKING_CONTEXT.search(q))
+
     words = re.findall(r"[A-Za-z_]+", scrubbed)
     for i, word in enumerate(words):
         if not _MUTATION_VERB.fullmatch(word):
             continue
         if i and words[i - 1].lower() in _COPULA:
             continue
+        weak = word.lower() in _WEAK_MUTATION_VERB
+        target_re = _STORAGE_OBJECT if (storage_only or weak) else _DATA_OBJECT
         window = words[i + 1 : i + 1 + _INTENT_WINDOW]
         for target in window:
-            if _DATA_OBJECT.fullmatch(target):
+            if target_re.fullmatch(target):
                 return f"mutation_intent:{word.lower()} {target.lower()}"
     return None
 
