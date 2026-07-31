@@ -150,3 +150,12 @@ schema retrieval → generation → sqlglot → EXPLAIN → bounded retry → pl
 Runtime state is gitignored and regenerated — `data/engine/`, `data/bench/`,
 `data/lakehouse/`, `CortexOS/data/` (holds a per-device key; never commit it), and
 `packs/data/dms_ops.db` (rebuild: `python -m scripts.seed_ops_db`).
+
+---
+
+## Knowledge base
+
+Global invariants and workflows live in `D:\Netie-KB`, not in this repo.
+Before non-trivial work: `python D:\Netie-KB\scripts\kb.py search "<keywords>"`.
+After: file a finding (`kb.py new finding`). Do not duplicate global R1–R11 here —
+this file holds only repo-specific laws (import boundaries, contract freezes, pack rules).

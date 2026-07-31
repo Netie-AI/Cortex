@@ -1,0 +1,20 @@
+---
+description: >-
+  Cortex project — always preflight docs/subagents_findings before Task/subagents;
+  store findings with keywords+main_idea for Netie learning.
+alwaysApply: true
+---
+
+# Cortex — subagent findings (project)
+
+Before any Task/explore/review subagent in this repo:
+
+1. Read `docs/subagents_findings/INDEX.md`
+2. Emit `PREFLIGHT: HIT|PARTIAL|MISS`
+3. On return, write `docs/subagents_findings/YYYY-MM-DD_<topic>.md` and update INDEX
+
+Global mirrors: `~/.cursor/` (skills/workflows/findings/subagents) and `~/.claude/` (Claude Code Opus/Fable).
+
+Invoke guides: `C:\Users\OoiJianHong\.cursor\INVOKE_SUBAGENTS.md` · `C:\Users\OoiJianHong\.claude\INVOKE_SUBAGENTS.md`
+
+Handoff: `docs/dms/packets/CLAUDE_CODE_HANDOFF_NEXT.md`

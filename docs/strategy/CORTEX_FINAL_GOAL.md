@@ -1,7 +1,7 @@
 # Cortex — Final Goal: The Best Engine
 
 **Date:** 2026-07-23 · **Status:** north-star (owner-set). Everything Cortex builds serves this.
-**Companion:** `docs/strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md` (how) · `docs/strategy/FABLE5_HANDOFF_PROMPTS.md` (build order).
+**Companion:** `docs/strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md` (how) · `docs/bin/handoffs/FABLE5_HANDOFF_PROMPTS.md` (historical O-series prompts; O1–O7 largely shipped).
 
 ---
 

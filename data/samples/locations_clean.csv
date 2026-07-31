@@ -1,21 +1,21 @@
 location_id,location_code,location_name,city,state,latitude,longitude,capacity_kg,current_load_kg,cctv_camera_id,is_cold_storage,manager_name
 LOC-001,WH-A,Shah Alam Central,Shah Alam,Selangor,3.0648,101.5072,11648,10620,CCTV-WH-A-01,false,Ahmad Rahman
 LOC-002,WH-B,Penang Distribution,Bayan Lepas,Penang,5.3224,100.2790,10848,10320,CCTV-WH-B-01,true,Lim Wei Ming
-LOC-003,WAREHOUSE C,Johor South Hub,Pasir Gudang,Johor,1.4731,103.9081,24559,23383,CCTV-WH-C-01,true,
+LOC-003,WH-C,Johor South Hub,Pasir Gudang,Johor,1.4731,103.9081,24559,23383,CCTV-WH-C-01,true,Tan Mei Ling
 LOC-004,WH-D,Klang Logistics Park,Klang,Selangor,3.0485,101.4579,21746,10007,CCTV-WH-D-01,false,Ahmad Rahman
 LOC-005,WH-E,Ipoh Highlands DC,Ipoh,Perak,4.5911,101.0763,13231,9249,CCTV-WH-E-01,false,Siti Nurhaliza
-LOC-006,WH-F,Melaka Gateway,Melaka,Melaka,2.1735,102.2640,11349,10401,CCTV-WH-F-01,false,
+LOC-006,WH-F,Melaka Gateway,Melaka,Melaka,2.1735,102.2640,11349,10401,CCTV-WH-F-01,false,Tan Mei Ling
 LOC-007,WH-G,Kuantan East Store,Kuantan,Pahang,3.8169,103.3274,16667,12559,CCTV-WH-G-01,false,Raj Kumar
 LOC-008,WH-H,Kota Kinabalu Hub,Kota Kinabalu,Sabah,5.9936,116.0782,10582,6624,CCTV-WH-H-01,true,Siti Nurhaliza
 LOC-009,WH-I,Kuching Sarawak DC,Kuching,Sarawak,1.5353,110.3484,14300,10042,CCTV-WH-I-01,false,Siti Nurhaliza
 LOC-010,WH-J,Seremban Central,Seremban,Negeri Sembilan,2.7405,101.9376,10614,8254,CCTV-WH-J-01,false,Raj Kumar
-LOC-011,WAREHOUSE K,Alor Setar North,Alor Setar,Kedah,6.1190,100.3746,19954,8606,CCTV-WH-K-01,false,Ahmad Rahman
-LOC-012,WAREHOUSE L,Kota Bharu DC,Kota Bharu,Kelantan,6.1152,102.2366,13607,8396,CCTV-WH-L-01,false,Siti Nurhaliza
-LOC-013,WH-M,Miri East Store,Miri,Sarawak,4.4132,114.0024,15196,10520,CCTV-WH-M-01,false,
+LOC-011,WH-K,Alor Setar North,Alor Setar,Kedah,6.1190,100.3746,19954,8606,CCTV-WH-K-01,false,Ahmad Rahman
+LOC-012,WH-L,Kota Bharu DC,Kota Bharu,Kelantan,6.1152,102.2366,13607,8396,CCTV-WH-L-01,false,Siti Nurhaliza
+LOC-013,WH-M,Miri East Store,Miri,Sarawak,4.4132,114.0024,15196,10520,CCTV-WH-M-01,false,Lim Wei Ming
 LOC-014,WH-N,Sandakan Port WH,Sandakan,Sabah,5.8354,118.0997,9051,6811,CCTV-WH-N-01,false,Tan Mei Ling
 LOC-015,WH-O,Taiping Industrial,Taiping,Perak,4.8519,100.7569,18311,8355,CCTV-WH-O-01,false,Raj Kumar
-LOC-016,WH-P,Kemaman Chemical Park,Kemaman,Terengganu,4.2229,103.4503,12681,6117,CCTV-WH-P-01,false,
-LOC-017,WH-Q,Batu Pahat DC,Batu Pahat,Johor,1.8508,102.9213,22038,17606,CCTV-WH-Q-01,false,
-LOC-018,WAREHOUSE R,Kangar Border Store,Kangar,Perlis,6.4512,100.2130,24696,14737,CCTV-WH-R-01,false,Lim Wei Ming
-LOC-019,WH-S,Sibu River Hub,Sibu,Sarawak,2.2839,111.8128,13242,9879,CCTV-WH-S-01,false,
+LOC-016,WH-P,Kemaman Chemical Park,Kemaman,Terengganu,4.2229,103.4503,12681,6117,CCTV-WH-P-01,false,Siti Nurhaliza
+LOC-017,WH-Q,Batu Pahat DC,Batu Pahat,Johor,1.8508,102.9213,22038,17606,CCTV-WH-Q-01,false,Lim Wei Ming
+LOC-018,WH-R,Kangar Border Store,Kangar,Perlis,6.4512,100.2130,24696,14737,CCTV-WH-R-01,false,Lim Wei Ming
+LOC-019,WH-S,Sibu River Hub,Sibu,Sarawak,2.2839,111.8128,13242,9879,CCTV-WH-S-01,false,Raj Kumar
 LOC-020,WH-T,Putrajaya Gov DC,Putrajaya,Putrajaya,2.9452,101.7108,23337,14341,CCTV-WH-T-01,true,Ahmad Rahman

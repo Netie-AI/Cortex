@@ -1,54 +1,72 @@
 # Netie Cortex — Documentation Index
 
-## DMS (current product focus)
+**Start here:** [`ACTIVE.md`](ACTIVE.md) — **engine-first**, all consumers.  
+DMS lane only: [`dms/ACTIVE.md`](dms/ACTIVE.md).  
+Archived PASS/stale packets: [`bin/README.md`](bin/README.md).
+
+## Active (few files)
 
 | Doc | Purpose |
 |-----|---------|
-| [dms/BUILD_PLAN.md](dms/BUILD_PLAN.md) | F1–F7 feature sequence with Cursor prompts |
-| [dms/POSITIONING.md](dms/POSITIONING.md) | Wedge strategy, competitive map, FDE playbook |
-| [dms/VISION_GOVERNANCE.md](dms/VISION_GOVERNANCE.md) | V0–V3 warehouse vision + Claude gate checkpoints |
-| [dms/SUPERVISOR_GATE.md](dms/SUPERVISOR_GATE.md) | What to paste Claude at each milestone |
+| [ACTIVE.md](ACTIVE.md) | **Engine map** — Cortex + siblings; repo policy |
+| [engine/CONSUMERS.md](engine/CONSUMERS.md) | DMS · AirGPT · Pointer · OpenVault · packs |
+| [../PRODUCT_ROLES.md](../PRODUCT_ROLES.md) | Brains vs keys vs shell vs Act |
+| [strategy/CORTEX_FINAL_GOAL.md](strategy/CORTEX_FINAL_GOAL.md) | Engine north star |
+| [strategy/CORTEX_WHITEPAPER.md](strategy/CORTEX_WHITEPAPER.md) | Architecture thesis + ecosystem (P18) |
+| [dms/packets/NEXT_LANES.md](dms/packets/NEXT_LANES.md) | Always-continue lane prompts |
+| [dms/ACTIVE.md](dms/ACTIVE.md) | DMS/Spaces/eval lane only |
+| [dms/SANDBOX_ORIENTATION.md](dms/SANDBOX_ORIENTATION.md) | Host-shim · Docker · Spaces · Act |
 
-## Strategy
+## Strategy (reference)
 
 | Doc | Purpose |
 |-----|---------|
-| [strategy/CORTEX_WHITEPAPER.md](strategy/CORTEX_WHITEPAPER.md) | **Canonical** architecture thesis, apps, roadmap, branch map (P18) |
-| [strategy/CORTEX_FINAL_GOAL.md](strategy/CORTEX_FINAL_GOAL.md) | North star: best engine |
-| [strategy/DMS_SPACES_PRODUCT_2026-07-29.md](strategy/DMS_SPACES_PRODUCT_2026-07-29.md) | DMS Spaces / ChatGPT-for-Excel product lock |
-| [strategy/NETIE_CORTEX_MASTER_PLAN.md](strategy/NETIE_CORTEX_MASTER_PLAN.md) | Horizons, revenue path, scope kill-list |
-| [strategy/RUMA_PHASE3_5.md](strategy/RUMA_PHASE3_5.md) | RUMA vertical (parked until DMS pays) |
+| [strategy/NETIE_CORTEX_MASTER_PLAN.md](strategy/NETIE_CORTEX_MASTER_PLAN.md) | Horizons / kill-list (phase stamp may lag STATUS) |
+| [strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md](strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md) | G2 / P21 proactive loop |
+| [strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md](strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md) | Dual-brain land-one-gate (O1–O7 largely shipped) |
+| [strategy/DMS_C2_CLASSIFICATION_2026-07-29.md](strategy/DMS_C2_CLASSIFICATION_2026-07-29.md) | C2 boundary inventory |
 
-## Archive
+RUMA vertical: archived → [`bin/verticals/RUMA_PHASE3_5.md`](bin/verticals/RUMA_PHASE3_5.md) (parked until DMS pays).
 
-Legacy agent task lists and architecture extracts — reference only, not active build input.
+## DMS reference (not daily)
 
-## Handoff (repo root — read before every session)
+| Doc | Purpose |
+|-----|---------|
+| [dms/SUPERVISOR_GATE.md](dms/SUPERVISOR_GATE.md) | Milestone paste template |
+| [dms/TRUTH_GROUND_MAP.md](dms/TRUTH_GROUND_MAP.md) | Feature→file→test |
+| [dms/DMS_EVAL_AND_STRESS_PLAN.md](dms/DMS_EVAL_AND_STRESS_PLAN.md) | Eval / envelope honesty |
+| [dms/BUILD_PLAN_V2_LAKEHOUSE.md](dms/BUILD_PLAN_V2_LAKEHOUSE.md) | Lakehouse master plan |
+| [dms/BUILD_PLAN.md](dms/BUILD_PLAN.md) | Historical F1–F7 (shipped) |
+| [dms/POSITIONING.md](dms/POSITIONING.md) | Wedge / FDE framing |
+| [dms/VISION_GOVERNANCE.md](dms/VISION_GOVERNANCE.md) | V0–V3 governance |
+
+## Archive & bin
+
+| Path | Purpose |
+|------|---------|
+| [archive/](archive/) | Legacy architecture extracts |
+| [bin/](bin/) | Done/pass/superseded packets + subagent results |
+
+## Handoff (repo root)
 
 | Doc | Purpose |
 |-----|---------|
 | [../STATUS.md](../STATUS.md) | Current gate, debt, next feature |
 | [../CONTEXT.md](../CONTEXT.md) | Paste into new Claude chat |
-| [../ARCHITECTURE.md](../ARCHITECTURE.md) | Honest built vs partial inventory |
+| [../ARCHITECTURE.md](../ARCHITECTURE.md) | Built vs partial inventory |
 | [../PARKING_LOT.md](../PARKING_LOT.md) | Deferred ideas only |
 
 `python scripts/handoff.py` prints a clipboard-ready block.
 
-## Cursor governance (repo root)
+## Cursor governance
 
-- `.cursor/rules/` — always-on and file-scoped agent rules
-- `.cursor/skills/` — DMS ship, gate verify, subagent dispatch
-- `.cursor/AGENTS.md` — subagent roles and sequencing
-- `CHANGELOG_DMS.md` — per-feature ship log (agents append here)
+- `.cursor/rules/` · `.cursor/skills/` · `.cursor/AGENTS.md`
+- `CHANGELOG_DMS.md` — per-feature ship log
 
 ## Run
 
 ```powershell
 pip install -e ".[dev,api,dms]"
 .\demo\run_demo.ps1
-```
-
-# Tests
-python -m pytest tests/test_dms/ -q
 python -m pytest tests/ -q
 ```

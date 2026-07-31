@@ -349,7 +349,7 @@ ON DONE: CHANGELOG_DMS.md.
 ---
 
 ## FEATURE F8 — Tool-call execution
-**Already fully specced in `docs/dms/GATE_F8_PACKET.md` — build exactly that packet next after S0.**
+**Already fully specced historically in `docs/bin/gates/GATE_F8_PACKET.md` — shipped as host `tool_runner` slice (see `docs/dms/SANDBOX_ORIENTATION.md`).**
 Prereq for S1 (agents need governed actions). F7 remainder (Postgres RLS CI + SOPS) rides along per packet.
 
 ---

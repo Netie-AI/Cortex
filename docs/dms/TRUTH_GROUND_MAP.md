@@ -69,7 +69,7 @@
 | F5 | Compliance gate | `packs/dms/tasks/gate.py`, `packs/dms/compliance/` | task complete | gate tests | **Shipped** |
 | F6 | Opt-in skill capture | `packs/dms/skills/capture.py` | `skill_routes.py` | `test_skill_capture.py` | **Shipped** |
 | F7 | PII harness + RBAC + rate limit | `security/prompt_harness.py`, `api_auth.py`, `rate_limit.py` | `/dms/*` Depends | `test_f7_rbac.py`, adversarial | **Partial** (RLS/SOPS open) |
-| F8 | Governed tool-call publish | *packet only* | — | — | **Packet** → [GATE_F8_PACKET.md](GATE_F8_PACKET.md) |
+| F8 | Governed tool-call (host shim) | `tool_runner` + `export_pptx` | `tests/execution/`, `tests/dms/test_tool_call*` | PASS (demo slice) | **Host path shipped**; WASM/Firecracker = P2 — see [SANDBOX_ORIENTATION.md](SANDBOX_ORIENTATION.md); old packet in `docs/bin/gates/GATE_F8_PACKET.md` |
 | L0 | DuckLake lakehouse | `packs/dms/lakehouse/{catalog,tables}.py` | `lakehouse_routes.py` | lakehouse tests | **Shipped** |
 | L1 | File ingest → bronze | `packs/dms/ingest/loader.py` | `ingest_routes.py` | `test_l1_ingest.py` | **Shipped** |
 | L2 | Silver pipelines | `packs/dms/pipelines/{runner,propose}.py` | `pipeline_routes.py` | `test_l2_pipelines.py` | **Shipped** |

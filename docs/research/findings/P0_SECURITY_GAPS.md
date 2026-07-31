@@ -178,7 +178,7 @@ Cursor must not invent these mid-sprint. Each stub is a future Claude Code packe
 | `docs/dms/BUILD_PLAN.md` § F7 | Acceptance: RBAC + RLS + SOPS + PII |
 | `docs/dms/PHASE0_PLAN.md` | RLS SQL shipped / not CI-verified; SOPS debt |
 | `docs/dms/CURSOR_EXEC_PACKET_2026-07-22.md` | A5 research task; B3 F7 remainder |
-| `docs/dms/GATE_F8_PACKET.md` | F8 blocked on F7 remainder |
+| `docs/bin/gates/GATE_F8_PACKET.md` | Historical F8 spec; shipped = host tool_runner (P2 = WASM) |
 | `packs/dms/security/*.py` | Implementations (audited vs additive) |
 | `tests/security/*` | Unit + adversarial (harness-only reversible gap) |
 | `packs/dms/sql/003_rls_policies.sql` | RLS policies |

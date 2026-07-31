@@ -1,6 +1,7 @@
 # Next lane prompts — always continue (Cursor ↔ Claude)
 
-**Updated:** 2026-07-29 after honesty audit (DMS Friday slice elevated)  
+**Updated:** 2026-07-31 — docs reorganized; start from [`docs/ACTIVE.md`](../../ACTIVE.md) (engine-first). DMS lane: [`docs/dms/ACTIVE.md`](../ACTIVE.md).  
+**Sandbox truth:** host-shim tools + Docker apps + Pointer Act peer — not production WASM ([`SANDBOX_ORIENTATION.md`](../SANDBOX_ORIENTATION.md))  
 **Rule:** After every hand-back, both lanes leave the *next* prompt written here and in STATUS.
 
 ---

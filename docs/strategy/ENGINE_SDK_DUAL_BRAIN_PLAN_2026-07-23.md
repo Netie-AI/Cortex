@@ -1,11 +1,12 @@
 # Engine-as-SDK / Company Dual-Brain — Implementation Plan
 
-**Date:** 2026-07-23 · **Author of record:** owner + Claude (Opus 4.8 planning pass) · **To be implemented by:** a later Fable 5 session.
-**Status: PLAN ONLY.** Nothing here is built. Do not present anything below as shipped.
+**Date:** 2026-07-23 · **Author of record:** owner + Claude (Opus 4.8 planning pass)
+**Status (2026-07-31):** O1–O7 largely **shipped** per `STATUS.md`; this file remains the reconciliation / land-one-gate reference. Header formerly said “PLAN ONLY / nothing built” — that is **stale**. Do not big-bang merge `netie-engine` → `main` (P15).
 
-Read first: `ARCHITECTURE.md`, `CONTEXT.md`, `STATUS.md`, `PARKING_LOT.md`,
-`docs/ontology/CORTEX_ONTOLOGY_PLAN.md` (the O0–O8 phases this plan sits on top of),
-`docs/ontology/PALANTIR_AIP_RESEARCH.md` (the 7 portable ideas).
+Read first: `STATUS.md`, `PARKING_LOT.md`, `docs/dms/ACTIVE.md`, `docs/strategy/CORTEX_FINAL_GOAL.md`,
+`docs/ontology/CORTEX_ONTOLOGY_PLAN.md`, `docs/ontology/PALANTIR_AIP_RESEARCH.md`.
+
+World-engine brief (historical): `docs/bin/handoffs/CLAUDE_CODE_WORLD_ENGINE_BRIEF_2026-07-22.md`.
 
 ---
 
@@ -14,7 +15,7 @@ Read first: `ARCHITECTURE.md`, `CONTEXT.md`, `STATUS.md`, `PARKING_LOT.md`,
 > **The whole Cortex runtime is an engine + SDK that a company (or an FDE) points at their data and use-case to generate the governed app they actually want — "company dual brain": a reasoning/runtime brain and an application/ontology brain, sharing one governance spine.**
 
 This is the same throughline as the world-engine brief
-(`docs/dms/packets/CLAUDE_CODE_WORLD_ENGINE_BRIEF_2026-07-22.md`): *ontology-as-memory + LLM-as-reasoner + actions as the only write path*. This doc is the concrete build/reconciliation plan under that north star.
+(`docs/bin/handoffs/CLAUDE_CODE_WORLD_ENGINE_BRIEF_2026-07-22.md`): *ontology-as-memory + LLM-as-reasoner + actions as the only write path*. This doc is the concrete build/reconciliation plan under that north star.
 
 > **Sharpened 2026-07-23 — see `docs/strategy/CORTEX_FINAL_GOAL.md`:** Cortex's final goal is to be **the best engine** — we improve only orchestration + engine capability; verticals (DMS, etc.) are *consumers*. The engine reaches outside builders two ways: a **hosted API** (use only the parts you need) and a **downloadable/self-host "netie engine"** (configure + run on your own base). Made adoptable by first-class **API docs + a whitepaper** (PARKING_LOT P17/P18). In this plan's terms: **Brain B (`netie-engine`) is the product; Brain A (`main`/DMS) is the first reference consumer.**
 
@@ -37,7 +38,7 @@ The two brains already exist as two branches (post branch-consolidation, 2026-07
 
 ## 2. THE gating decision — how to reconcile the two brains
 
-> **✅ DECISION (2026-07-23, owner): Option B — shared engine core, keep dual brains — reached via path C (incremental capability landing). Option A (big-bang merge/rebase) is rejected.** This is settled; the plan below and the Fable 5 prompts (`docs/strategy/FABLE5_HANDOFF_PROMPTS.md`) execute it.
+> **✅ DECISION (2026-07-23, owner): Option B — shared engine core, keep dual brains — reached via path C (incremental capability landing). Option A (big-bang merge/rebase) is rejected.** This is settled; the plan below and the Fable 5 prompts (`docs/bin/handoffs/FABLE5_HANDOFF_PROMPTS.md`) execute it.
 
 | Option | What it is | Cost | When it's right |
 |---|---|---|---|
@@ -128,7 +129,7 @@ Parking-lot-gated (do **not** schedule until condition met): O6 agent builder (e
 
 ## 7. How to start (for the Fable 5 session)
 
-1. Read this doc + `docs/ontology/CORTEX_ONTOLOGY_PLAN.md` + `STATUS.md` + `docs/strategy/FABLE5_HANDOFF_PROMPTS.md`.
+1. Read this doc + `docs/ontology/CORTEX_ONTOLOGY_PLAN.md` + `STATUS.md` + `docs/bin/handoffs/FABLE5_HANDOFF_PROMPTS.md`.
 2. §2 is **decided: Option B via C.** No further owner sign-off needed to start W1.
 3. Start at **W1** (O1/O2 — pure internal plumbing, no gate, transcribes existing `semantic_layer.yaml`). Ship one gate, prove CI green, then the next — never a big-bang. Use the matching prompt from the handoff-prompts doc.
 4. Keep `netie-engine` as the R&D feeder; land its capabilities into `main` one branch + one green CI at a time (§2 option C→B).

@@ -191,7 +191,7 @@ def test_workflow_resume_after_kill():
 | `D:\Cortex\PARKING_LOT.md` (P3) | Temporal/durable DAG deferred; S1 activates **DBOS** path; resume still open |
 | `D:\Cortex\STATUS.md` | S1 remainder: DBOS durable resume open |
 | `D:\Cortex\CHANGELOG_DMS.md` | Notes DBOS resume deferred/skipped |
-| `D:\Cortex\docs\dms\GATE_F8_PACKET.md` | Temporal mentioned only when run volume warrants |
+| `D:\Cortex\docs\bin\gates\GATE_F8_PACKET.md` | Temporal mentioned only when run volume warrants |
 | `D:\Cortex\pyproject.toml` | No `dbos` / `[agents]` extra yet — B1 adds it |
 | `D:\Cortex\docs\research\respond_io_analysis.md` | Unrelated research sample; findings dir was otherwise empty |
 | **Missing but cited:** `docs/research/findings/STREAMING_ORCH_2026.md` | BUILD_PLAN cites DBOS verdict here — **file not present in repo** as of 2026-07-22; this A1 doc re-grounds the verdict from current BUILD_PLAN + upstream DBOS docs |

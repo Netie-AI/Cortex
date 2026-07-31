@@ -1,6 +1,12 @@
 # STATUS.md
-**Last updated:** 2026-07-29 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+**Last updated:** 2026-07-31 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
+
+> **2026-07-31 (docs hygiene + multi-app mend):** Done/pass packets → `docs/bin/`.  
+> **Canonical map = `docs/ACTIVE.md` (engine-first)** — Cortex serves DMS, AirGPT, Pointer (`D:\Netie Clicks`), OpenVault; DMS lane = `docs/dms/ACTIVE.md`. Consumers: `docs/engine/CONSUMERS.md` + `PRODUCT_ROLES.md`.  
+> **Do not open a second engine repo** — keep one Cortex + sibling app repos.  
+> Sandbox: F8 host `tool_runner`; Docker = packaging; Act/Pointer = peer path; WASM = P2.  
+> THROW_AWAY clarified: Pointer/JEPA/Palantir/Closer = out-of-lane or parked, **not erased**. Critique: `docs/bin/subagent-results/2026-07-31_multi-app-engine-critique.md`.
 
 > **2026-07-29 (Pointer demo + DMS Excel-swamp week):**
 > **Pointer (Netie Clicks):** stack health + Act fail-closed on `:8010`; false PNG verify soft for

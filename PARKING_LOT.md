@@ -7,13 +7,14 @@
 Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened.
 
 ## P2 — WASM / Firecracker production hardening
-**Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*
+**Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*  
+**2026-07-31 orientation:** F8 TOOL_CALL runs via **host `tool_runner`** (allowlist + ledger + `outputs/`). Docker is for **app packaging / deploy**, not tool isolation. Do not claim WASM shipped. See `docs/dms/SANDBOX_ORIENTATION.md`.
 
 ## P3 — DAG token optimization + Temporal durable execution
 **Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`. S1 watcher agents activate DBOS path per BUILD_PLAN_V2 — governed detect→draft→approve landed; durable resume still open.)*
 
 ## P4 — respond.io-style endpoint / Closer auto-reply
-WhatsApp/email in, sentiment score, warmed delayed draft (2–5s), human approve before send. **No em dash** in generated replies. **Condition:** DMS paying partner OR explicit RUMA priority. *(Research: `docs/research/respond_io_analysis.md`.)*
+WhatsApp/email in, sentiment score, warmed delayed draft (2–5s), human approve before send. **No em dash** in generated replies. **Condition:** DMS paying partner OR explicit RUMA priority. *(Research: `docs/research/respond_io_analysis.md`. RUMA plan archived: `docs/bin/verticals/RUMA_PHASE3_5.md`. Local `activeflow/` Activepieces clone is gitignored and unwired — safe to delete.)*
 
 ## P5 — Full F2–F7 if pilot asks for chat loop before we planned
 **Condition:** V0+V1 live + client confirms they want task-suggest chat next. *(Note: F2–F5 now shipped in codebase; pilot confirmation still required before sales promise.)*
@@ -177,8 +178,9 @@ Still open before calling C4 "full":
 - Close ungoverned agent-SDK reads relative to `enforce_manifest`
 - Multi-pool memory broker / write pool / T10 activation
 
-**Next ordered mins (packets only until started):** C5 → C8 → C7 → C11 → C9-full.
-OpenVault trust root (`30a8d9a`) already settled.
+**Next ordered mins:** C5 ✓ → C8 ✓ → **C7-product** → **C11** → **C9-full** → C4-full remainders.  
+DMS product spine in parallel: Postgres host → Amend → Spaces.  
+See `docs/dms/DMS_ANCHORED_SEQUENCE.md`. Engine H-depth plan is queued after that floor.
 
 ---
 
