@@ -115,8 +115,9 @@ def _score(item: AdvItem, resp: dict[str, Any]) -> str:
         return "correct"
 
     # correct_rows path — assert SQL + rows + answer text
+    # Abstaining on a known-good case is a measurement failure, not a soft pass.
     if route in {"needs_clarification", "abstain"}:
-        return "abstain"
+        return "wrong"
     if route != "sql":
         return "wrong"
 

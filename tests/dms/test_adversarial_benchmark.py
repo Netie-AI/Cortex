@@ -19,8 +19,12 @@ def adversarial_report():
         return run_benchmark()
     except Exception as exc:  # noqa: BLE001
         msg = str(exc)
+        # A skipped suite cannot fail — lock means C10 never measured (importlinter-class gate).
         if "being used by another process" in msg or "Cannot open file" in msg:
-            pytest.skip(f"warehouse locked by live Cortex process: {msg[:160]}")
+            pytest.fail(
+                "warehouse locked by a live Cortex process — stop the API holding "
+                f"DuckDB before running C10 adversarial. Original error: {msg[:240]}"
+            )
         raise
 
 

@@ -88,6 +88,11 @@ LOW_STOCK_WH_A = [
     ("SKU-90008", "Humidity Sensor Probe", 2.0, 10.0),
 ]
 
+# Named SKUs for value-normalization traps (G4: bare BETA → SKU-BETA).
+NAMED_SKUS = [
+    ("SKU-BETA", "Beta Trial Pack", "FOOD_DRY"),
+]
+
 SKU_NAMES = [
     "Steel Bolt M8",
     "Hydraulic Hose 2in",
@@ -272,6 +277,26 @@ def generate_inventory(
                 "reorder_level_kg": str(reorder),
                 "unit_cost_myr": f"{rng.uniform(5, 250):.2f}",
                 "last_restocked": (today - timedelta(days=rng.randint(5, 60))).isoformat(),
+                "expiry_date": "",
+                "is_hazardous": "false",
+            }
+        )
+
+    # Named SKUs for G4 value-normalization (BETA → SKU-BETA).
+    for j, (sku, name, category) in enumerate(NAMED_SKUS):
+        sup = suppliers[(j + 3) % len(suppliers)]
+        rows.append(
+            {
+                "sku": sku,
+                "sku_name": name,
+                "category": category,
+                "supplier_id": sup["supplier_id"],
+                "location_id": wh_a["location_id"],
+                "storage_bin": f"WH-A-NAMED-{j + 1:02d}",
+                "quantity_kg": str(rng.randint(40, 120)),
+                "reorder_level_kg": "20",
+                "unit_cost_myr": f"{rng.uniform(20, 80):.2f}",
+                "last_restocked": (today - timedelta(days=rng.randint(5, 40))).isoformat(),
                 "expiry_date": "",
                 "is_hazardous": "false",
             }

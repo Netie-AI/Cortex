@@ -126,6 +126,31 @@ def resolve(entity_text: str, column: str) -> Resolution:
     if norm(text) in by_norm:
         return Resolution(by_norm[norm(text)], 0.95, column, [by_norm[norm(text)]])
 
+    # 2b. SKU encoding — bare `BETA` / `00173` → `SKU-BETA` / `SKU-00173`
+    if column == "sku":
+        candidates = []
+        if not lower.startswith("sku"):
+            candidates.append(f"SKU-{text.upper()}")
+            if text.isdigit():
+                candidates.append(f"SKU-{int(text):05d}")
+                candidates.append(f"SKU-{text.zfill(5)}")
+        else:
+            # SKU-BETA already canonical form — still must exist in the dict
+            candidates.append(text.upper())
+            m = re.match(r"^sku[-\s]?(.+)$", text, flags=re.I)
+            if m:
+                rest = m.group(1).strip().upper()
+                candidates.append(f"SKU-{rest}")
+                if rest.isdigit():
+                    candidates.append(f"SKU-{int(rest):05d}")
+        for cand in candidates:
+            if cand in values:
+                return Resolution(cand, 0.95, column, [cand])
+            if cand.lower() in by_lower:
+                return Resolution(by_lower[cand.lower()], 0.95, column, [by_lower[cand.lower()]])
+            if norm(cand) in by_norm:
+                return Resolution(by_norm[norm(cand)], 0.95, column, [by_norm[norm(cand)]])
+
     # 3. location dual-coding
     if column == "location_code":
         hit = _location_candidates(text, values)

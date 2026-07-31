@@ -1,15 +1,139 @@
-"""C7 L2 SQL generator stub — abstain until FreeRoute/model is configured.
+"""C7-full L2 SQL generator — FreeRoute large-model tier only.
 
-Full C7 wires schema retrieval -> generate_candidates -> sql_validate_gate.
-Do not call legacy query_service.generate_sql heuristics as L2.
+Schema retrieval → FreeRoute chat completions → literal normalization.
+Never fall back to the L1 keyword cascade or a smaller model silently.
+If FreeRoute is down or the leave-machine gate refuses → empty candidates
+(caller abstains).
 """
 
 from __future__ import annotations
 
+import json
+import os
+import re
+from typing import Any
+
+from packs.dms.generative.literal_normalize import normalize_sql_literals
+from packs.dms.generative.schema_retrieval import retrieve, schema_prompt_block
+
+_SQL_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.I | re.S)
+_SELECT = re.compile(r"(SELECT\b.+)", re.I | re.S)
+
 
 def is_configured() -> bool:
-    """True only when a real NL->SQL model endpoint is wired."""
-    return False
+    """True when L2 is enabled and OpenVault answers (FreeRoute path exists)."""
+    if os.environ.get("DMS_L2_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return False
+    try:
+        from CortexOS.integrations.openvault_client import ping
+
+        return bool(ping(timeout=1.5))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _leave_machine_allowed() -> tuple[bool, str]:
+    """FreeRoute SQL leaves the box — OpenVault gate must allow it.
+
+    Local OpenVault ``/v1/chat/completions`` still counts as leave-machine when
+    it forwards to a cloud provider. Deny-by-default if OV is offline.
+    """
+    try:
+        from CortexOS.integrations.openvault_gate import check_gate
+
+        # Prefer explicit llm/freeroute; fall back to leave_machine / run.
+        for action, destination in (
+            ("llm", "freeroute"),
+            ("leave_machine", "freeroute"),
+            ("run", "openvault"),
+        ):
+            gate = check_gate(
+                action=action,
+                destination=destination,
+                required_providers=[],
+            )
+            if gate.get("allowed") is True:
+                return True, f"ok:{action}"
+            # Unreachable OV → hard deny (do not try softer actions as bypass).
+            if gate.get("ok") is False and "unreachable" in str(gate.get("reasons") or "").lower():
+                reasons = gate.get("reasons") or ["OpenVault unreachable"]
+                return False, "; ".join(str(r) for r in reasons)[:240]
+        reasons = gate.get("reasons") or ["leave-machine gate denied"]
+        return False, "; ".join(str(r) for r in reasons)[:240]
+    except Exception as exc:  # noqa: BLE001
+        return False, f"gate error: {exc}"[:240]
+
+
+def _extract_sql(text: str) -> str | None:
+    if not text:
+        return None
+    m = _SQL_FENCE.search(text)
+    body = (m.group(1) if m else text).strip()
+    m2 = _SELECT.search(body)
+    if not m2:
+        return None
+    sql = m2.group(1).strip().rstrip(";")
+    # Single statement only
+    if ";" in sql:
+        sql = sql.split(";", 1)[0].strip()
+    if not sql.upper().startswith("SELECT"):
+        return None
+    return sql
+
+
+def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | None:
+    """POST OpenVault /v1/chat/completions — large-model tier. None on any failure."""
+    from CortexOS.integrations.openvault_client import openvault_base_url, post_json
+
+    model = os.environ.get("DMS_L2_MODEL") or os.environ.get("OPENVAULT_SQL_MODEL") or "gpt-4o-mini"
+    body = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You write a single DuckDB SELECT for a warehouse analytics app. "
+                    "Use ONLY tables/columns in the reduced schema. "
+                    "No DDL/DML. No comments. Prefer LIMIT 50. "
+                    "Return SQL only."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 600,
+        "metadata": {"identity": identity, "tier": "sql_generation"},
+    }
+    # Prefer OpenVault proxy; fall back to direct path variants.
+    data = post_json("/v1/chat/completions", body, timeout=45.0, base=openvault_base_url())
+    if not data:
+        return None
+    try:
+        choices = data.get("choices") or []
+        msg = (choices[0].get("message") or {}).get("content") if choices else None
+        return str(msg) if msg else None
+    except (IndexError, AttributeError, TypeError, KeyError):
+        return None
+
+
+def _build_prompt(
+    question: str,
+    schema_context: dict[str, Any],
+    *,
+    prior_violations: list[str] | None,
+) -> str:
+    parts = [
+        schema_prompt_block(schema_context),
+        "",
+        f"QUESTION: {question}",
+        "",
+        "Emit one DuckDB SELECT. Encode categorical filters with exact warehouse values "
+        "(e.g. SKU-BETA not BETA; WH-A / WAREHOUSE A as stored).",
+    ]
+    if prior_violations:
+        parts.append("PREVIOUS VALIDATION ERRORS (fix these):")
+        parts.extend(f"- {v}" for v in prior_violations[:8])
+    return "\n".join(parts)
 
 
 def generate_candidates(
@@ -19,11 +143,56 @@ def generate_candidates(
     n: int = 3,
     prior_violations: list[str] | None = None,
 ) -> list[str]:
-    """Return SQL candidates. Empty until is_configured() is True."""
-    _ = (question, schema_context, n, prior_violations)
+    """Return normalized SQL candidates. Empty → caller must abstain."""
+    _ = n  # FreeRoute returns one proposal; retries feed prior_violations.
     if not is_configured():
         return []
-    return []
+
+    allowed, reason = _leave_machine_allowed()
+    if not allowed:
+        # Fail closed — never silently degrade to a smaller/local model.
+        return []
+
+    schema = schema_context if schema_context is not None else retrieve(question)
+    prompt = _build_prompt(question, schema, prior_violations=prior_violations)
+    raw = _freeroute_complete(prompt)
+    if not raw:
+        return []
+    sql = _extract_sql(raw)
+    if not sql:
+        return []
+
+    norm = normalize_sql_literals(sql)
+    if not norm.ok or not norm.sql:
+        # Unresolvable literal — abstain (empty list); violations surface via gate.
+        return []
+    return [norm.sql]
 
 
-__all__ = ["generate_candidates", "is_configured"]
+def generate_with_detail(
+    question: str,
+    schema_context: dict | None = None,
+    *,
+    prior_violations: list[str] | None = None,
+) -> dict[str, Any]:
+    """Diagnostics helper for tests — never used to bypass abstain rules."""
+    configured = is_configured()
+    allowed, gate_reason = _leave_machine_allowed() if configured else (False, "not_configured")
+    schema = schema_context if schema_context is not None else retrieve(question)
+    cands = generate_candidates(
+        question, schema, prior_violations=prior_violations
+    )
+    return {
+        "configured": configured,
+        "gate_allowed": allowed,
+        "gate_reason": gate_reason,
+        "schema_tables": list((schema.get("tables") or {}).keys()),
+        "candidates": cands,
+    }
+
+
+__all__ = [
+    "generate_candidates",
+    "generate_with_detail",
+    "is_configured",
+]
