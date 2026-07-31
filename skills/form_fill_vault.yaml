@@ -1,0 +1,19 @@
+skill_id: form_fill_vault_v1
+name: Form Fill Vault
+description: >
+  Fill on-screen forms using {{vault.profile.*}} placeholders only. Never emit
+  plaintext PII in the plan. Secrets (password, OTP, passport_number) go to
+  OpenVault custody. Enquire when a field is missing.
+category: computer_use
+example_intents:
+  - "Fill this form with my profile"
+  - "Fill the passenger details for my flight"
+  - "Book air ticket basics"
+required_tools:
+  - computer_control
+annotations:
+  pointer_recipe: form_fill_profile
+  pointer_recipe_air: air_ticket_basics
+max_tier: 2
+version: "1.0.0"
+author: "cortex"

@@ -1,0 +1,14 @@
+skill_id: entity_clarify_v1
+name: Entity Clarify
+description: >
+  When a screen control or form field is ambiguous, ask one clarifying question
+  before emitting clicks. Prefer enquire over guessing irreversible targets.
+category: computer_use
+example_intents:
+  - "Which Save button?"
+  - "Clarify the field before filling"
+required_tools:
+  - computer_control
+max_tier: 1
+version: "1.0.0"
+author: "cortex"

@@ -95,3 +95,4 @@ coverage.xml
 # DBOS local system DB
 data/dbos_agents.sqlite
 *.sqlite
+logs/

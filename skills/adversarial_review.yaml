@@ -1,0 +1,17 @@
+skill_id: adversarial_review_v1
+name: Adversarial Review
+description: >
+  Independent lenses over Act / vault / planner code. Persist findings to disk
+  (claimed/refuted/confirmed). Mutation-verify critical gates. Author is not
+  the sole verifier (R-0003).
+category: meta
+example_intents:
+  - "Run adversarial review on Pointer act path"
+  - "Refute security findings against the real files"
+required_tools:
+  - find_skills
+annotations:
+  ledger: docs/findings/ADVERSARIAL_*.md
+max_tier: 1
+version: "1.0.0"
+author: "cortex"
