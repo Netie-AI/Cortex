@@ -69,6 +69,7 @@ class ActionType:
     required_role: str | None = None
     requires_confirm: bool = False
     params: tuple[str, ...] = ()
+    tool_class: str | None = None  # read | propose | apply — only for kind=tool
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,19 +135,56 @@ def load_action_types(pack_dir: Path | str | None = None) -> list[ActionType]:
     data = _read_yaml(_ontology_dir(pack_dir) / "action_types.yaml")
     out: list[ActionType] = []
     for row in data.get("action_types") or []:
+        kind = str(row.get("kind", "event"))
         out.append(
             ActionType(
                 id=str(row["id"]),
-                kind=str(row.get("kind", "event")),
+                kind=kind,
                 description=str(row.get("description", "")),
                 ledger_event_type=str(row["ledger_event_type"]),
                 object_type=row.get("object_type"),
                 required_role=row.get("required_role"),
                 requires_confirm=bool(row.get("requires_confirm", False)),
                 params=tuple(str(p) for p in row.get("params") or []),
+                tool_class=str(row["tool_class"]) if kind == "tool" and row.get("tool_class") else None,
             )
         )
     return out
+
+
+def load_tool_specs(pack_dir: Path | str | None = None) -> list[ActionType]:
+    """Registered invocable tools with ontology ``tool_class`` tags."""
+    return [a for a in load_action_types(pack_dir) if a.kind == "tool"]
+
+
+def resolve_tool_class(
+    tool_id: str,
+    *,
+    pack_dir: Path | str | None = None,
+    db_path: Path | str | None = None,
+) -> str | None:
+    """Return ``read`` | ``propose`` | ``apply`` for a tool id, or None if unknown."""
+    path = Path(db_path) if db_path is not None else None
+    if path is not None and path.exists():
+        try:
+            conn = sqlite3.connect(path)
+            try:
+                row = conn.execute(
+                    "SELECT tool_class FROM ontology_action_types WHERE id = ? AND kind = 'tool'",
+                    (tool_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row is not None:
+                return str(row[0]) if row[0] else "apply"
+        except sqlite3.Error:
+            pass
+
+    resolved = Path(pack_dir) if pack_dir is not None else pack_dir_for()
+    for action in load_action_types(resolved):
+        if action.id == tool_id and action.kind == "tool":
+            return action.tool_class or "apply"
+    return None
 
 
 def load_functions(pack_dir: Path | str | None = None) -> list[FunctionDef]:
@@ -192,7 +230,8 @@ CREATE TABLE IF NOT EXISTS ontology_action_types (
     object_type TEXT,
     required_role TEXT,
     requires_confirm INTEGER NOT NULL DEFAULT 0,
-    params TEXT NOT NULL DEFAULT '[]'
+    params TEXT NOT NULL DEFAULT '[]',
+    tool_class TEXT
 );
 CREATE TABLE IF NOT EXISTS ontology_functions (
     id TEXT PRIMARY KEY,
@@ -224,6 +263,9 @@ def compile_to_sqlite(
     conn = sqlite3.connect(path)
     try:
         conn.executescript(_SCHEMA)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ontology_action_types)").fetchall()}
+        if "tool_class" not in cols:
+            conn.execute("ALTER TABLE ontology_action_types ADD COLUMN tool_class TEXT")
         with conn:
             conn.execute("DELETE FROM ontology_object_types")
             conn.execute("DELETE FROM ontology_properties")
@@ -262,7 +304,7 @@ def compile_to_sqlite(
             conn.executemany(
                 "INSERT INTO ontology_action_types "
                 "(id, kind, description, ledger_event_type, object_type, required_role, "
-                "requires_confirm, params) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "requires_confirm, params, tool_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         a.id,
@@ -273,6 +315,7 @@ def compile_to_sqlite(
                         a.required_role,
                         int(a.requires_confirm),
                         json.dumps(list(a.params)),
+                        a.tool_class,
                     )
                     for a in actions
                 ],

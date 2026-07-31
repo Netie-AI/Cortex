@@ -37,6 +37,37 @@ class Resolution:
     def ok(self) -> bool:
         return self.value is not None and self.confidence >= 0.6
 
+    @property
+    def exact(self) -> bool:
+        """True when the caller may apply without a confirm chip."""
+        return self.value is not None and self.confidence >= 0.95
+
+
+@lru_cache(maxsize=1)
+def _sku_name_index() -> dict[str, str]:
+    """sku_name (lower) → sku. Used for \"wolf\" / \"beta trial\" style exclusion phrases."""
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
+
+    out: dict[str, str] = {}
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    try:
+        rows = con.execute(
+            "SELECT sku, sku_name FROM inventory "
+            "WHERE sku IS NOT NULL AND sku_name IS NOT NULL "
+            f"LIMIT {MAX_VALUES}"
+        ).fetchall()
+        for sku, name in rows:
+            out[str(name).strip().lower()] = str(sku)
+    except Exception:  # noqa: BLE001
+        return {}
+    finally:
+        con.close()
+    return out
+
 
 def _sensitive() -> set[str]:
     try:
@@ -77,6 +108,7 @@ def _dictionaries() -> dict[str, list[str]]:
 
 def refresh() -> None:
     _dictionaries.cache_clear()
+    _sku_name_index.cache_clear()
 
 
 def values_for(column: str) -> list[str]:
@@ -150,6 +182,26 @@ def resolve(entity_text: str, column: str) -> Resolution:
                 return Resolution(by_lower[cand.lower()], 0.95, column, [by_lower[cand.lower()]])
             if norm(cand) in by_norm:
                 return Resolution(by_norm[norm(cand)], 0.95, column, [by_norm[norm(cand)]])
+
+        # 2c. sku_name phrase / substring ("beta trial", "wolf", "nitrile gloves")
+        name_idx = _sku_name_index()
+        if lower in name_idx:
+            return Resolution(name_idx[lower], 0.9, column, [name_idx[lower]])
+        name_hits = [
+            sku
+            for name, sku in name_idx.items()
+            if lower in name
+            or any(len(tok) >= 4 and tok in name for tok in lower.split())
+        ]
+        # Prefer unique containment of the full phrase in the name.
+        phrase_hits = [sku for name, sku in name_idx.items() if lower in name]
+        if len(set(phrase_hits)) == 1:
+            return Resolution(phrase_hits[0], 0.88, column, [phrase_hits[0]])
+        if len(set(name_hits)) == 1:
+            return Resolution(name_hits[0], 0.82, column, [name_hits[0]])
+        if len(set(phrase_hits)) > 1:
+            uniq = list(dict.fromkeys(phrase_hits))
+            return Resolution(None, 0.0, column, uniq[:5])
 
     # 3. location dual-coding
     if column == "location_code":

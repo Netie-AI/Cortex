@@ -34,6 +34,7 @@ def ledger_db(tmp_path, monkeypatch):
     db = tmp_path / "ops.db"
     monkeypatch.delenv("DMS_LEDGER_DSN", raising=False)
     monkeypatch.setenv("DMS_OPS_DB", str(db))
+    monkeypatch.setenv("PACK", "dms")
     return db
 
 
@@ -94,22 +95,20 @@ def test_viewer_call_action_rbac_denied_and_ledgered(ledger_db):
     assert events[-1].actor == "agent_viewer"
 
 
-def test_steward_needs_confirm_then_executes(ledger_db, tmp_path, monkeypatch):
-    from packs.dms.audit.ledger import list_entries
+def test_steward_needs_confirm_then_agent_apply_denied(ledger_db, tmp_path, monkeypatch):
+    from netie.execution.tool_runner import ToolCallError
 
     monkeypatch.setattr("netie.execution.tool_runner.OUTPUTS", tmp_path / "outputs")
     with pytest.raises(SdkDenied) as exc:  # export_pptx is requires_confirm in the registry
         dms_sdk.call_action("export_pptx", {"title": "T"}, actor=STEWARD, db_path=ledger_db)
     assert exc.value.verdict == "confirm_required"
 
-    result = dms_sdk.call_action(
-        "export_pptx", {"title": "Q3 Stock"}, actor=STEWARD, confirmed=True,
-        run_id="sdkrun1", db_path=ledger_db,
-    )
-    assert result["ok"] is True and result["verdict"] == "pass"
-    executed = list_entries(db_path=ledger_db, event_type="action.tool_call")
-    assert executed[-1].actor == "agent_steward"
-    assert executed[-1].payload["tool"] == "export_pptx"
+    with pytest.raises(ToolCallError) as exc2:  # C5: agents may not invoke apply-class tools
+        dms_sdk.call_action(
+            "export_pptx", {"title": "Q3 Stock"}, actor=STEWARD, confirmed=True,
+            run_id="sdkrun1", db_path=ledger_db,
+        )
+    assert exc2.value.verdict == "agent_apply_denied"
 
 
 def test_event_kind_not_invocable_and_unregistered(ledger_db):
@@ -158,6 +157,7 @@ FAKE_ACTIONS = """
 action_types:
   - id: crm.export
     kind: tool
+    tool_class: apply
     description: "Export accounts."
     required_role: admin
     ledger_event_type: action.tool_call

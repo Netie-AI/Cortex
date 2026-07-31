@@ -1,0 +1,58 @@
+# CI-enforced benchmark floors — ratchet only in your favour.
+# confidently_wrong is NOT a ratchet: zero permanently.
+# Phase 1 target corpus size is 310; seeds_v1 is the hand-written floor.
+
+version: 1
+phase: 1b
+
+confidently_wrong: 0          # hard zero — any violation blocks merge (whole corpus)
+correct_rate_floor: 0.62      # may only increase — measured on the claim set
+abstain_rate_ceiling: 0.38    # may only decrease — measured on the claim set
+
+# Phase 1b paraphrases are machine-authored and abstain more by design. They are
+# tracked, not held to the seed floor: pressuring this number down would push the
+# engine to answer where abstaining is the correct behaviour. `confidently_wrong`
+# still applies to them in full.
+expanded_abstain_rate_ceiling: 0.70
+
+corpus:
+  target_total: 310
+  seeds_file: bench/corpus/seeds_v1.yaml
+  paraphrases_file: bench/corpus/paraphrases_v1.yaml
+  seeds_min_per_category: 3
+  seeds_max_per_category: 5
+  paraphrases_min_per_seed: 5
+  # target_total is a CLAIM target: it counts gold_verified items only.
+  # expanded_n (everything scored) is reported separately and is not a substitute.
+  claim_counts_gold_verified_only: true
+
+# Gated categories — wrong must stay 0 (C10 adversarial ratchet still applies).
+gated_categories:
+  - value_normalization
+  - must_abstain
+  - semantic_ambiguity
+  - fallback_hazard
+  - coercion
+  - blocked_destructive
+
+# Per-category seed floors for Phase 1a (hand-written seeds only).
+category_seed_floors:
+  grain_fanout: 4
+  null_semantics: 4
+  silent_dedup: 3
+  temporal: 4
+  rare_sql: 4
+  unit_currency: 3
+  semantic_ambiguity: 4
+  malay_codeswitch: 4
+  must_abstain: 5
+  coercion: 3
+  value_normalization: 4
+  fallback_hazard: 3
+
+# Live routing gaps closed 2026-07-31 (1a→1b prep)
+# Malay vocab, delayed_count scalar, capacity/audit/spend routes, E4 multi-row values,
+# forecast abstain before query-skill replay.
+gap_fixes_note: >
+  See packs/dms/semantic/vocabulary.py Malay rules; metrics.yaml delayed_count;
+  answer_engine route_to_metric branches; DMS envelope _ensure_values harvest.

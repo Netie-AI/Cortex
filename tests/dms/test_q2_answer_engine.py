@@ -38,11 +38,35 @@ def test_metric_layer_compiles_target_paraphrase():
 
 
 def test_truncation_disclosed():
+    """The contract is disclosure, not a specific row count.
+
+    This asserted `1031` literally, which is a count of rows in `data/` — a
+    gitignored directory the repo documents as regenerated. Any rebuild of the
+    demo warehouse failed the test for a reason that had nothing to do with
+    truncation honesty. The count now comes from the warehouse, so what is
+    actually pinned is the property: the answer states the TRUE total, and the
+    total is larger than the page it returned.
+    """
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
+
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    try:
+        expected = int(
+            con.execute("SELECT COUNT(*) FROM shipments WHERE status = 'DELAYED'").fetchone()[0]
+        )
+    finally:
+        con.close()
+
     r = answer_question("Which shipments are delayed?")
     assert r["route"] == "sql"
-    assert r["total_count"] == 1031          # the honest total
+    assert r["total_count"] == expected          # the honest total
     assert r["truncated"] is True
-    assert "1031" in r["answer"]
+    assert r["total_count"] > len(r["rows"])     # a page, and it says so
+    assert str(expected) in r["answer"]
 
 
 def test_scalar_question_returns_count_not_listing():

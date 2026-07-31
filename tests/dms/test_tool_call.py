@@ -13,6 +13,7 @@ def ledger_db(tmp_path, monkeypatch):
     db = tmp_path / "ledger.db"
     monkeypatch.delenv("DMS_LEDGER_DSN", raising=False)
     monkeypatch.setenv("DMS_OPS_DB", str(db))
+    monkeypatch.setenv("PACK", "dms")
     return db
 
 

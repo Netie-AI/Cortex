@@ -15,9 +15,69 @@ metrics:
   # ── inventory ───────────────────────────────────────────────────────────────
   - id: sku_count
     kind: scalar
-    synonyms: ["how many skus", "number of skus", "sku count", "distinct skus", "count skus"]
+    synonyms:
+      - "how many skus"
+      - "number of skus"
+      - "sku count"
+      - "distinct skus"
+      - "count skus"
+      - "berapa banyak sku"
+      - "berapa sku"
     result_columns: [sku_count]
     sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+
+  # Rows, not SKUs. One SKU can sit in several bins, so COUNT(*) and
+  # COUNT(DISTINCT sku) are different answers to questions that sound alike —
+  # the grain_fanout failure the corpus exists to catch.
+  - id: inventory_row_count
+    kind: scalar
+    synonyms:
+      - "how many inventory rows"
+      - "inventory row count"
+      - "number of inventory records"
+      - "how many rows in inventory"
+      - "total number of inventory rows"
+      - "how many lines in the inventory table"
+    result_columns: [row_count]
+    sql: "SELECT COUNT(*) AS row_count FROM inventory"
+
+  # Distinct suppliers we actually hold stock from — sourced off inventory, not
+  # a row count of the supplier table.
+  - id: supplier_count
+    kind: scalar
+    synonyms:
+      - "how many suppliers"
+      - "distinct suppliers"
+      - "how many different suppliers"
+      - "number of suppliers we buy from"
+      - "unique supplier count"
+      - "how many suppliers in inventory"
+    result_columns: [supplier_count]
+    sql: "SELECT COUNT(DISTINCT supplier_id) AS supplier_count FROM inventory"
+
+  # NULL is not zero and not "expired". A missing expiry date means unknown, and
+  # these two metrics exist so the answer path never has to guess which it meant.
+  - id: null_expiry_count
+    kind: scalar
+    synonyms:
+      - "how many items have no expiry date"
+      - "inventory with no expiry"
+      - "missing expiry date count"
+      - "items without an expiry date"
+      - "null expiry count"
+    result_columns: [null_expiry_count]
+    sql: "SELECT COUNT(*) AS null_expiry_count FROM inventory WHERE expiry_date IS NULL"
+
+  - id: avg_qty_null_expiry
+    kind: scalar
+    synonyms:
+      - "average quantity for items with no expiry date"
+      - "average quantity without expiry"
+      - "mean quantity missing expiry"
+    result_columns: [avg_qty_kg]
+    sql: >
+      SELECT ROUND(AVG(quantity_kg), 2) AS avg_qty_kg
+      FROM inventory WHERE expiry_date IS NULL
 
   - id: low_stock
     kind: listing
@@ -161,6 +221,17 @@ metrics:
           = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 
   # ── shipments ───────────────────────────────────────────────────────────────
+  - id: delayed_count
+    kind: scalar
+    synonyms:
+      - "how many delayed"
+      - "delayed count"
+      - "number of delayed shipments"
+      - "berapa shipment delayed"
+      - "berapa shipment yang delayed"
+    result_columns: [delayed_count]
+    sql: "SELECT COUNT(*) AS delayed_count FROM shipments WHERE status = 'DELAYED'"
+
   - id: shipments_by_status
     kind: listing
     synonyms: ["shipments that are", "list shipments", "shipment status", "delayed shipments", "in transit"]
@@ -247,7 +318,12 @@ metrics:
 
   - id: spend_by_country
     kind: grouped
-    synonyms: ["spend by country", "purchasing by country", "total spend per country"]
+    synonyms:
+      - "spend by country"
+      - "purchasing by country"
+      - "total spend per country"
+      - "inventory spend by country"
+      - "spend grouped by supplier country"
     result_columns: [country, total_spend_myr]
     sql: >
       SELECT s.country, ROUND(SUM(i.quantity_kg * i.unit_cost_myr), 2) AS total_spend_myr
@@ -256,7 +332,13 @@ metrics:
 
   - id: audit_overdue
     kind: listing
-    synonyms: ["audit overdue", "overdue audit", "suppliers needing audit"]
+    synonyms:
+      - "audit overdue"
+      - "overdue audit"
+      - "suppliers needing audit"
+      - "hasn't been audited"
+      - "not been audited"
+      - "who hasn't been audited"
     result_columns: [supplier_id]
     sql: >
       SELECT supplier_id FROM suppliers
@@ -288,7 +370,13 @@ metrics:
 
   - id: capacity_above
     kind: listing
-    synonyms: ["above capacity", "over percent capacity", "near full", "above 90"]
+    synonyms:
+      - "above capacity"
+      - "over percent capacity"
+      - "near full"
+      - "nearly full"
+      - "almost full"
+      - "above 90"
     result_columns: [location_code]
     sql: >
       SELECT location_code FROM locations
@@ -309,13 +397,22 @@ metrics:
 
   - id: cold_storage_list
     kind: listing
-    synonyms: ["cold storage locations", "which are cold storage", "refrigerated warehouses"]
+    synonyms:
+      - "cold storage locations"
+      - "which are cold storage"
+      - "refrigerated warehouses"
+      - "senarai lokasi cold storage"
+      - "list cold storage"
     result_columns: [location_code]
     sql: "SELECT location_code FROM locations WHERE is_cold_storage = true ORDER BY location_code"
 
   - id: cold_storage_count
     kind: scalar
-    synonyms: ["how many cold storage", "count cold storage", "number of cold storage"]
+    synonyms:
+      - "how many cold storage"
+      - "count cold storage"
+      - "number of cold storage"
+      - "berapa lokasi cold storage"
     result_columns: [cold_count]
     sql: "SELECT COUNT(*) AS cold_count FROM locations WHERE is_cold_storage = true"
 

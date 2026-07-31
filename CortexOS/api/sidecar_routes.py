@@ -183,5 +183,71 @@ def sidecar_call_action(
     return {"ok": True, **result}
 
 
+class ComputerUseRequest(BaseModel):
+    """Pointer NETIE_CU_PLANNER=1 body — see docs/CONTRACTS.md / Beat Realtime pack."""
+
+    device_id: str = ""
+    instruction: str = ""
+    hot_context: str = ""
+    skills: list[Any] = Field(default_factory=list)
+    policy: dict[str, Any] = Field(default_factory=dict)
+    prior: dict[str, Any] = Field(default_factory=dict)
+    screen: dict[str, Any] | None = None
+
+
+@router.post("/dms/agents/computer-use")
+def dms_agents_computer_use(
+    req: ComputerUseRequest,
+    caller: Caller = Depends(require_role("viewer")),
+) -> dict[str, Any]:
+    """C25-01 — governed computer-use planner ingress for Pointer.
+
+    Fail-closed on empty/blocked instruction. Returns a conservative plan
+    (observe + needs_approval) until gen-cFSM / full CU planner fills actions.
+    Pointer still runs local reviewPlan; this endpoint must never emit executor
+    trust flags (_approved, safety, …).
+    """
+    import uuid
+
+    from packs.dms import secure_message
+
+    text = (req.instruction or "").strip()
+    if not text:
+        return {"ok": False, "error": "empty instruction", "actions": [], "needs_approval": True}
+
+    gated = secure_message(text, block_scam=True)
+    if gated.get("blocked"):
+        return {
+            "ok": False,
+            "error": "blocked by /dms/secure",
+            "reasons": gated.get("reasons") or gated.get("findings") or [],
+            "actions": [],
+            "needs_approval": True,
+        }
+
+    safe = gated.get("text") or gated.get("safe_text") or text
+    plan_id = f"cu-{uuid.uuid4().hex[:12]}"
+    # Conservative scaffold: never invent clicks from this stub. Pointer may
+    # fall back to OpenVault LLM when it wants richer plans; when CU is primary
+    # we at least prove the governed path is reachable (R-0011).
+    actions = [
+        {
+            "type": "observe",
+            "target": "screen",
+            "value": safe[:240],
+        }
+    ]
+    return {
+        "ok": True,
+        "plan_id": plan_id,
+        "rationale": "computer-use scaffold (C25-01) — expand via gen-cFSM / F8 tools",
+        "actions": actions,
+        "skills_used": [str(s) for s in (req.skills or [])[:8]],
+        "needs_approval": True,
+        "actor": getattr(caller, "role", "viewer"),
+        "device_id": req.device_id[:80] if req.device_id else "",
+    }
+
+
 def register_sidecar_routes(app) -> None:
     app.include_router(router)

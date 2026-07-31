@@ -23,6 +23,7 @@ def ledger_db(tmp_path, monkeypatch):
     db = tmp_path / "ops.db"
     monkeypatch.delenv("DMS_LEDGER_DSN", raising=False)
     monkeypatch.setenv("DMS_OPS_DB", str(db))
+    monkeypatch.setenv("PACK", "dms")
     return db
 
 
@@ -32,10 +33,12 @@ def test_before_and_after_fire_on_success(ledger_db, tmp_path, monkeypatch):
     register_agent_hook("before_action", lambda ctx: seen.append(("before", ctx["action_id"], ctx["actor"])))
     register_agent_hook("after_action", lambda ctx: seen.append(("after", ctx["result"]["verdict"])))
 
-    call_action("export_pptx", {"title": "Hooked"}, actor=STEWARD, confirmed=True,
+    # Human steward actor (not agent_*) may invoke apply-class tools through the SDK.
+    human = AgentActor(actor="steward", role="steward")
+    call_action("export_pptx", {"title": "Hooked"}, actor=human, confirmed=True,
                 run_id="hk1", db_path=ledger_db, pack="dms")
 
-    assert ("before", "export_pptx", "agent_steward") in seen
+    assert ("before", "export_pptx", "steward") in seen
     assert ("after", "pass") in seen
 
 
@@ -55,7 +58,8 @@ def test_hook_exception_never_breaks_the_write_path(ledger_db, tmp_path, monkeyp
 
     register_agent_hook("before_action", boom)
     register_agent_hook("after_action", boom)
-    res = call_action("export_pptx", {"title": "Resilient"}, actor=STEWARD, confirmed=True,
+    human = AgentActor(actor="steward", role="steward")
+    res = call_action("export_pptx", {"title": "Resilient"}, actor=human, confirmed=True,
                       run_id="hk2", db_path=ledger_db, pack="dms")
     assert res["ok"] is True  # the raising observers did not break governance
 
@@ -76,6 +80,7 @@ def test_clear_keeps_builtins(ledger_db, tmp_path, monkeypatch):
     hit = []
     register_agent_hook("after_action", lambda ctx: hit.append(1))
     clear_agent_hooks()  # drops the user hook, keeps the built-in scanner
-    call_action("export_pptx", {"title": "Clean"}, actor=STEWARD, confirmed=True,
+    human = AgentActor(actor="steward", role="steward")
+    call_action("export_pptx", {"title": "Clean"}, actor=human, confirmed=True,
                 run_id="hk3", db_path=ledger_db, pack="dms")
     assert hit == []  # user hook gone

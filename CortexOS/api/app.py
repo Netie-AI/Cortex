@@ -98,6 +98,7 @@ def create_app() -> Any:
         register_feature_stubs(app, extra="agentic", feature=_key, routes=stubs)
 
     if pack.name == "dms":
+        from fastapi import Depends
         from netie.api.action_routes import register_action_routes
         from netie.api.agent_routes import register_agent_routes
         from netie.api.brain_routes import register_brain_routes
@@ -123,6 +124,16 @@ def create_app() -> Any:
         register_stream_routes(app)
         register_agent_routes(app)
         register_action_routes(app)
+
+        # Ontology + eval read APIs hold no `packs` import; the role gate is passed
+        # in from here so the C2 boundary stays clean and RBAC still applies.
+        from CortexOS.api.eval_routes import register_eval_routes
+        from CortexOS.api.ontology_routes import register_ontology_routes
+        from packs.dms.security.api_auth import require_role
+
+        _viewer = [Depends(require_role("viewer"))]
+        register_ontology_routes(app, dependencies=_viewer)
+        register_eval_routes(app, dependencies=_viewer)
         try:
             from CortexOS.api.a2a_routes import register_a2a_routes
 

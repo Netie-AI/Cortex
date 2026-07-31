@@ -239,6 +239,21 @@ async def contract_ask(body: AskRequest) -> Answer:
     else:
         data = dict(result)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
+
+    from CortexOS.execution.telemetry import new_run_id, record_run
+
+    row_count = data.get("row_count")
+    record_run(
+        run_id=str(data.get("audit_id") or new_run_id()),
+        kind="ask",
+        status=str(data.get("badge") or data.get("layer") or data.get("route") or "ok"),
+        session_id=body.session_id,
+        pool_id=verified.manifest.pool_id,
+        row_count=int(row_count) if isinstance(row_count, int) else None,
+        issuer_kid=verified.issuer_kid,
+        error=_assumptions_str(data) if _is_abstain_signal(data) else None,
+    )
+
     return Answer.model_validate(data)
 
 
@@ -321,11 +336,15 @@ async def contract_ledger_verify(body: LedgerVerifyRequest) -> ChainVerification
 @router.get("/tools", response_model=ToolRegistryResponse, operation_id="tool.registry")
 async def contract_tool_registry() -> ToolRegistryResponse:
     """List tools DMS may invoke through the contract runtime."""
-    from CortexOS.execution.tool_runner import allowed_action_tools
+    from CortexOS.ontology.registry import load_tool_specs, pack_dir_for
 
     tools = [
-        ToolSpec(id=tool_id, class_name=ToolClass.APPLY, description=tool_id)
-        for tool_id in sorted(allowed_action_tools())
+        ToolSpec(
+            id=action.id,
+            class_name=ToolClass(action.tool_class or "apply"),
+            description=action.description or action.id,
+        )
+        for action in load_tool_specs(pack_dir_for())
     ]
     return ToolRegistryResponse(tools=tools)
 

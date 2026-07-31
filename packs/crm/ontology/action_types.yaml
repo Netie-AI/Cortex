@@ -11,6 +11,7 @@ action_types:
     ledger_event_type: opportunity.stage_changed
   - id: crm.export
     kind: tool
+    tool_class: apply
     description: "Export a CRM view (demo tool — no runner handler yet, denies fail-closed)."
     required_role: steward
     ledger_event_type: action.tool_call

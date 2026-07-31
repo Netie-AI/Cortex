@@ -70,10 +70,29 @@ def test_param_ranges_and_enums_enforced():
 def test_value_resolution():
     assert vd.resolve("Chemicals", "category").value == "CHEMICALS"
     assert vd.resolve("warehouse A", "location_code").value == "WH-A"
-    assert vd.resolve("warehouse C", "location_code").value == "WAREHOUSE C"  # messy dual-coding
     assert vd.resolve("in transit", "status").value == "IN_TRANSIT"
     assert vd.resolve("dhl", "carrier").value == "DHL MY"
     assert not vd.resolve("totally bogus value", "category").ok
+
+
+def test_dual_coded_location_resolves_to_a_stored_encoding():
+    """"warehouse C" must land on whatever the column actually holds.
+
+    This asserted the literal ``WAREHOUSE C``, which only existed because the
+    warehouse had been loaded from a *contaminated* clean CSV carrying messy
+    duplicate rows. The serving layer is the cleaned layer — a single encoding
+    there is correct, and dual-coding is an ingest-time hazard that still lives
+    in ``data/samples/*_messy.csv``.
+
+    So the requirement, not the fixture: a dual-coded phrasing must resolve to a
+    code the column really contains, and it must be site C. Abstaining, or
+    resolving to a value the warehouse has never seen, both still fail.
+    """
+    stored = vd.values_for("location_code")
+    res = vd.resolve("warehouse C", "location_code")
+    assert res.ok, "dual-coded phrasing must not abstain"
+    assert res.value in stored, f"{res.value!r} is not a stored location_code"
+    assert res.value.upper().replace("WAREHOUSE", "WH").replace(" ", "").endswith("C")
 
 
 def test_optional_filter_and_defaults():

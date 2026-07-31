@@ -91,8 +91,14 @@ paraphrases:
     - "what is running late"
     - "show me the late deliveries"
     - "which consignments are behind schedule"
+    # count/how-many paraphrases intentionally omitted — they belong to
+    # delayed_count scalar metric, not this listing_total parent (1031-row list).
+
+  # Separate scalar parent for "how many delayed" (governed delayed_count metric)
+  delayed_shipments_how_many:
     - "count of delayed shipments"
     - "how many shipments are delayed"
+    - "berapa shipment yang delayed"
 
   in_transit:
     - "what is on the road right now"

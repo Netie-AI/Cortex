@@ -41,6 +41,28 @@ def test_rewrite_drops_group_by():
     assert "group by" not in out.sql.lower()
 
 
+def test_rewrite_strips_nested_round_coalesce_sum():
+    sql = (
+        "SELECT sku, ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS sales_value_myr "
+        "FROM transactions WHERE txn_type = 'OUT' GROUP BY sku "
+        "ORDER BY sales_value_myr DESC LIMIT 5"
+    )
+    out = rewrite_for_drillthrough(sql, include_provenance=False)
+    low = out.sql.lower()
+    assert "sum(" not in low
+    assert "group by" not in low
+    assert "quantity_kg" in low and "unit_cost_myr" in low
+    assert "_src_ref_id" not in low
+    assert out.approximate is True
+
+
+def test_rewrite_omits_provenance_when_disabled():
+    sql = "SELECT SUM(amount) AS total FROM sales WHERE region = 'N'"
+    out = rewrite_for_drillthrough(sql, include_provenance=False)
+    assert "_src_ref_id" not in out.sql.lower()
+    assert "amount" in out.sql.lower()
+
+
 def test_token_roundtrip_and_expiry(monkeypatch):
     monkeypatch.setenv("CORTEX_DRILLTHROUGH_HMAC", "test-secret")
     tok = mint_token(

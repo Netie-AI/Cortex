@@ -81,8 +81,17 @@ items:
     key_columns: [shipment_id]
     known_gap: >
       1031 delayed rows vs the delayed-path LIMIT 100 - silent truncation makes the
-      answer text imply 100 is the total. Q2 must aggregate or disclose truncation.
+      answer text imply 100 is the total. Listing path must disclose truncation;
+      "how many delayed" routes to delayed_shipments_how_many (scalar).
     tags: [shipments, truncation]
+
+  - id: delayed_shipments_how_many
+    tier: core
+    question: "How many shipments are delayed?"
+    match: scalar
+    canonical_sql: "SELECT COUNT(*) AS delayed_count FROM shipments WHERE status = 'DELAYED'"
+    key_columns: [delayed_count]
+    tags: [shipments, count]
 
   - id: in_transit
     tier: target

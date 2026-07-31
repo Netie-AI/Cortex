@@ -22,9 +22,12 @@ def register_engine_seams() -> None:
     packs.dms`` — or anything under it — is enough to light the ledger up.
     """
     from CortexOS.audit import register_ledger
+    from CortexOS.dms.sql_generation_port import register_sql_generation
     from packs.dms.audit import ledger
+    from packs.dms.generative.engine_port import provider as sql_generation
 
     register_ledger(ledger)
+    register_sql_generation(sql_generation)
 
 
 register_engine_seams()

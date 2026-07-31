@@ -16,6 +16,7 @@ action_types:
   # ---- invocable tools (F8 governed write path) --------------------------
   - id: export_pptx
     kind: tool
+    tool_class: apply
     description: "Export a title/body payload to a PowerPoint file under outputs/<actor>/<run_id>/."
     object_type: null
     required_role: steward

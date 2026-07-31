@@ -56,6 +56,10 @@ _RULES: tuple[tuple[str, str], ...] = (
     # ── suppliers ──────────────────────────────────────────────────────────
     (r"\bvendors?\b", "suppliers"),
     (r"\bprocurement\s+spend\b", "total spend"),
+    # "risky suppliers" reached the shipment-status listing instead of the
+    # high-risk branch, so a supplier question answered with shipments.
+    (r"\brisky\s+suppliers?\b", "high risk suppliers"),
+    (r"\bhigh\s+risk\s+vendors?\b", "high risk suppliers"),
 
     # ── inventory ──────────────────────────────────────────────────────────
     (r"\b(?:running low|needs? replenishment|need(?:s|ing)? reordering|"
@@ -64,8 +68,9 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\bwhat(?:'s| is) low in\b", "below reorder level in"),
     (r"\bsku(?:s)? (?:that are )?scarce\b", "below reorder level"),
     (r"\breorder\s+point\b", "reorder level"),
-    (r"\b(?:past (?:its |their )?expiry(?: date)?|past shelf life|out of date|"
-     r"gone past (?:its |their )?expiry)\b", "expired"),
+    (r"\b(?:pass(?:ed)?\s+(?:its |their |the )?expiry(?: date)?|past shelf life|"
+     r"out of date|gone past (?:its |their )?expiry)\b", "expired"),
+    (r"\binventory\s+value\b", "stock value"),
     (r"\b(?:topped up|top(?:ped)? up)\b", "restocked"),
     (r"\bgone stale\b", "not restocked"),
     (r"\bchemical products?\b", "chemicals"),
@@ -79,6 +84,10 @@ _RULES: tuple[tuple[str, str], ...] = (
     # lookbehind keeps this idempotent — "capacity utilisation" is left alone.
     (r"(?<!capacity )\butili[sz]ation\b", "capacity utilisation"),
     (r"\bnearly full\b", "capacity above 90 percent"),
+    # "90 percent full" → the router branch keys on the "capacit" stem. The
+    # number is left where it is; _pct still reads it from the raw question.
+    (r"\bpercent\s+full\b", "percent capacity"),
+    (r"%\s*full\b", "percent capacity"),
     # Singular on purpose: the router matches \b(warehouse|destination|location)\b,
     # so "locations" would slip past the per-site breakdown rule and fall through
     # to a flat status listing.
@@ -94,6 +103,39 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\b(?:past|last)\s+thirty\s+days\b", "last 30 days"),
     (r"\bworth\b", "stock value"),
     (r"\bturn(?:ed)?\s+over\b", "turnover"),
+    (r"\binventory\s+spend\b", "spend"),
+    (r"\bspend\s+grouped\s+by\s+(?:supplier\s+)?country\b", "spend by country"),
+    (r"\bstock\s+value\s+by\s+category\b", "stock value by category"),
+
+    # ── capacity paraphrases the router stem-misses ─────────────────────
+    # "almost/nearly full" must inject "capacity" — the branch keys on "capacit".
+    (r"\balmost\s+full\b", "capacity above 90 percent"),
+    (r"\bwarehouses?\s+(?:that\s+are\s+)?(?:almost|nearly)\s+full\b",
+     "locations capacity above 90 percent"),
+
+    # ── audit overdue (no router synonym path today) ───────────────────
+    (r"\b(?:hasn'?t|have not|haven'?t|not)\s+been\s+audited\b", "audit overdue"),
+    (r"\bwho\s+hasn'?t\s+been\s+audited\b", "suppliers audit overdue"),
+    (r"\baudit(?:s)?\s+(?:over|older than|past)\s+\d+\s*days?\b", "audit overdue"),
+    (r"\baudits?\s+(?:that are\s+)?past\s+due\b", "audit overdue"),
+    (r"\bdue\s+for\s+an?\s+audit\b", "audit overdue"),
+    (r"\baudits?\s+(?:has|have)\s+lapsed\b", "audit overdue"),
+
+    # ── Malay / code-switch → router English (routing only) ────────────
+    (r"\bberapa\s+banyak\b", "how many"),
+    (r"\bberapa\b", "how many"),
+    (r"\btunjukkan\b", "show"),
+    (r"\bmengikut\b", "by"),
+    (r"\bkecuali\b", "excluding"),
+    (r"\btak\s+nak\b", "excluding"),
+    (r"\bsenarai(?:kan)?\b", "list"),
+    (r"\blokasi\b", "location"),
+    (r"\bpenghantaran\b", "shipments"),  # "shipment/delivery"
+    (r"\btunjuk\b", "show"),
+    (r"\bikut\b", "by"),
+    (r"\bjumlah\b", "total"),
+    (r"\byang\b", ""),  # relative-pronoun filler
+    (r"\bkita\s+ada(?:\s+sekarang)?\b", ""),  # "we have (now)" — drop filler
 )
 
 _COMPILED: tuple[tuple[re.Pattern[str], str], ...] = tuple(

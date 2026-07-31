@@ -33,11 +33,28 @@ ROUTES = [
     ("where do we have the most room left", "free_capacity"),
     ("how full is each warehouse", "capacity_utilisation"),
     ("which sites are nearly full", "capacity_above"),
+    ("Which warehouses are almost full — above 90%?", "capacity_above"),
     ("what is currently flagged", "active_alerts"),
     ("suppliers with risk over 0.7", "suppliers_by_risk"),
     ("show me utilisation across locations", "capacity_utilisation"),
     ("what has not been topped up in a month", "stale_restock"),
+    # Malay / code-switch
+    ("berapa banyak SKU kita ada?", "sku_count"),
+    ("boss, berapa banyak SKU kita ada sekarang?", "sku_count"),
+    ("berapa shipment yang delayed?", "delayed_count"),
+    ("How many shipments are delayed?", "delayed_count"),
+    ("senarai lokasi cold storage", "cold_storage_list"),
+    # Metrics that previously had no router branch
+    ("Who hasn't been audited in over 90 days?", "audit_overdue"),
+    ("total inventory spend grouped by supplier country", "spend_by_country"),
+    ("Stock value by category", "stock_value_by_category"),
+    ("Any high risk suppliers with shipments still pending?", "high_risk_pending"),
 ]
+
+
+def test_forecast_does_not_route_to_sales() -> None:
+    assert route_to_metric("Can you forecast Q3 demand for our top SKU?") is None
+    assert route_to_metric("predict next quarter revenue") is None
 
 
 @pytest.mark.parametrize("question,metric_id", ROUTES)

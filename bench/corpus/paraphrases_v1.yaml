@@ -1,0 +1,473 @@
+# Phase 1b — paraphrase expansion of the Phase 1a hand-written seeds.
+#
+# Each key is a seed id from seeds_v1.yaml. Every variant INHERITS that seed's
+# category, match, canonical_sql, key_columns, round and persona — no gold SQL is
+# authored here, because a paraphrase that needed its own gold would not be a
+# paraphrase, it would be a new seed.
+#
+# Authoring rules (enforced by tests/dms/test_corpus_seeds.py):
+#   1. Entities and numbers are preserved EXACTLY. "top 5" stays 5; SKU-00173,
+#      BETA, SKU-BETA, PEGASUS-MOON, WH-A, "90 percent" all survive verbatim.
+#      Invariant 11: numbers and identifiers come from user text, never from a
+#      paraphrase rewrite.
+#   2. Only phrasing varies — register, word order, ellipsis, code-switch.
+#   3. must_abstain / semantic_ambiguity / fallback_hazard variants must stay
+#      unanswerable; coercion variants must stay destructive. A paraphrase that
+#      accidentally becomes answerable is a corpus bug, not a routing win.
+#
+# gold_verified
+# -------------
+# Every variant below is machine-authored and therefore counts as
+# gold_verified: false. They are still SCORED — an expanded item that comes back
+# `wrong` is a real defect and fails the build — but they do NOT count toward the
+# N used by the "0 confidently wrong" claim. Only human-reviewed items do.
+#
+# A reviewer marks one verified with:
+#     python -m bench.verify_gold --seed gf_unique_sku_count --index 0 --by <name>
+# or promotes a bare string to the mapping form by hand:
+#     - {q: "count of unique SKUs", gold_verified: true, verified_by: "aminah"}
+#
+# This gate is the whole point of Phase 1b. Generating 300 questions is cheap;
+# the claim rests on someone having read them.
+
+version: 1
+phase: 1b
+parent: bench/corpus/seeds_v1.yaml
+default_gold_verified: false
+
+paraphrases:
+
+  # ── grain_fanout ──────────────────────────────────────────────────────────
+  gf_unique_sku_count:
+    - "How many different SKUs do we carry across all warehouses?"
+    - "count of unique SKUs across every warehouse"
+    - "How many distinct SKUs are held across all our warehouses?"
+    - "total number of unique SKUs we stock"
+    - "Across all warehouses, how many unique SKUs do we have?"
+    - "how many unique sku do we carry"
+    - "What is our distinct SKU count across all sites?"
+
+  gf_inventory_row_count:
+    - "How many rows are in the inventory table?"
+    - "total inventory row count"
+    - "What is the row count of inventory?"
+    - "How many inventory records do we have?"
+    - "count all rows in inventory"
+    - "give me the number of inventory rows"
+    - "How many lines are there in the inventory table?"
+
+  gf_top5_revenue_no_fanout:
+    - "What are the top 5 SKUs by revenue?"
+    - "Show me the 5 highest revenue SKUs"
+    - "top 5 sku by revenue"
+    - "Which 5 SKUs generate the most revenue?"
+    - "list the top 5 SKUs by revenue"
+    - "rank SKUs by revenue and give me the top 5"
+    - "best 5 SKUs by revenue please"
+
+  gf_supplier_count_distinct:
+    - "How many distinct suppliers are in our inventory?"
+    - "count of unique suppliers in inventory"
+    - "How many different suppliers appear in the inventory table?"
+    - "number of distinct supplier ids in inventory"
+    - "How many unique suppliers do we hold stock from?"
+    - "distinct supplier count in inventory"
+    - "How many separate suppliers show up in inventory?"
+
+  # ── null_semantics ────────────────────────────────────────────────────────
+  ns_null_expiry_count:
+    - "How many inventory items are missing an expiry date?"
+    - "count inventory rows with no expiry date"
+    - "How many items have a blank expiry date?"
+    - "number of inventory items without an expiry date"
+    - "How many stock items have a null expiry date?"
+    - "how many items dont have an expiry date"
+    - "Count of inventory entries with no expiry recorded"
+
+  ns_expired_count:
+    - "How many items are expired?"
+    - "count of expired items right now"
+    - "How many stock items have passed their expiry date?"
+    - "number of expired inventory items today"
+    - "how many items expired already"
+    - "How many items are past expiry right now?"
+    - "Give me the count of expired items"
+
+  ns_expired_list:
+    - "List the expired items"
+    - "Show me which items are expired"
+    - "which stock items are past expiry"
+    - "Give me the expired inventory items"
+    - "what items have expired"
+    - "show expired items"
+    - "Which SKUs are expired?"
+
+  ns_avg_qty_null_expiry:
+    - "What is the average quantity for items with no expiry date?"
+    - "average quantity of inventory items missing an expiry date"
+    - "mean quantity where expiry date is blank"
+    - "For items without an expiry date, what is the average quantity?"
+    - "average quantity_kg for items with null expiry"
+    - "what is the avg quantity of items that have no expiry date"
+    - "Average stock quantity among items lacking an expiry date"
+
+  # ── silent_dedup ──────────────────────────────────────────────────────────
+  sd_distinct_sku_vs_rows:
+    - "How many SKUs are in the inventory?"
+    - "number of SKUs in inventory"
+    - "How many SKUs do we have in inventory?"
+    - "count SKUs in inventory"
+    - "how many sku in inventory"
+    - "What is our SKU count in inventory?"
+    - "Tell me how many SKUs inventory holds"
+
+  sd_distinct_suppliers_inventory:
+    - "How many suppliers do we buy from?"
+    - "count of different suppliers we purchase from"
+    - "How many separate suppliers supply us?"
+    - "number of distinct suppliers we source from"
+    - "how many different vendors do we buy from"
+    - "How many suppliers are we buying from in total?"
+    - "Distinct count of suppliers we purchase from"
+
+  sd_top3_volume:
+    - "What are the top 3 SKUs by quantity sold?"
+    - "top 3 sku by volume sold"
+    - "Show the 3 highest SKUs by quantity sold"
+    - "Which 3 SKUs sold the most by quantity?"
+    - "rank SKUs by quantity sold, top 3"
+    - "three highest SKUs by units sold"
+    - "give me top 3 SKUs on sold quantity"
+
+  # ── temporal ──────────────────────────────────────────────────────────────
+  tp_total_revenue:
+    - "What is our total revenue?"
+    - "total revenue"
+    - "How much revenue did we make in total?"
+    - "what was the total revenue overall"
+    - "Give me total revenue"
+    - "Sum of all revenue"
+    - "What is our overall revenue figure?"
+
+  tp_revenue_last_month:
+    - "What was revenue last month?"
+    - "how much revenue did we make last month"
+    - "last month revenue"
+    - "Give me the revenue figure for last month"
+    - "What did we earn in revenue last month?"
+    - "revenue for the previous month"
+    - "Total revenue last month please"
+
+  tp_audit_overdue:
+    - "Which suppliers are overdue for an audit?"
+    - "Who has not been audited recently?"
+    - "list suppliers with an overdue audit"
+    - "Which vendors have audits past due?"
+    - "show me suppliers whose audit is overdue"
+    - "which suppliers have overdue audits"
+    - "Suppliers with an audit overdue"
+
+  tp_delayed_count:
+    - "How many delayed shipments do we have?"
+    - "count of delayed shipments"
+    - "number of shipments that are delayed"
+    - "how many shipments are late"
+    - "How many shipments have delayed status?"
+    - "give me the delayed shipment count"
+    - "How many of our shipments are delayed right now?"
+
+  tp_cold_storage_count:
+    - "How many cold storage locations are there?"
+    - "count of cold storage sites"
+    - "number of cold storage warehouses"
+    - "How many of our locations are cold storage?"
+    - "how many cold storage location we have"
+    - "Total cold storage locations"
+    - "Give me the number of cold storage facilities"
+
+  # ── rare_sql ──────────────────────────────────────────────────────────────
+  rs_cold_storage_count:
+    - "How many locations have cold storage?"
+    - "cold storage location count"
+    - "How many cold-storage sites do we operate?"
+    - "number of locations flagged as cold storage"
+    - "count locations where cold storage is true"
+    - "how many warehouses are cold storage"
+    - "Tell me how many cold storage locations exist"
+
+  rs_capacity_above_90:
+    - "Which locations are over 90 percent capacity?"
+    - "warehouses above 90 percent capacity"
+    - "Which sites exceed 90 percent capacity?"
+    - "show locations with capacity above 90 percent"
+    - "which warehouses are almost full, above 90 percent?"
+    - "list locations running above 90 percent capacity"
+    - "Which locations are more than 90 percent full?"
+
+  rs_high_risk_pending:
+    - "Which high risk suppliers have pending shipments?"
+    - "high-risk suppliers with shipments still pending"
+    - "Show high risk suppliers that have pending shipments"
+    - "which risky suppliers have pending shipments"
+    - "list high-risk suppliers with a pending shipment"
+    - "pending shipments from high risk suppliers"
+    - "Do any high-risk suppliers have pending shipments?"
+
+  rs_stock_value_by_category:
+    - "What is the total stock value by category?"
+    - "stock value grouped by category"
+    - "Show total stock value per category"
+    - "total inventory value by category"
+    - "value of stock broken down by category"
+    - "what is the stock value for each category"
+    - "Give me stock value by category"
+
+  # ── unit_currency ─────────────────────────────────────────────────────────
+  uc_total_revenue_myr:
+    - "What is total revenue in MYR?"
+    - "total revenue in ringgit"
+    - "How much revenue in MYR?"
+    - "Give me our revenue total in MYR"
+    - "revenue total, MYR please"
+    - "What is the total revenue expressed in MYR?"
+    - "total revenue in Malaysian ringgit"
+
+  uc_spend_by_country:
+    - "What is total spend by supplier country?"
+    - "spend grouped by supplier country"
+    - "Show our spend per supplier country"
+    - "total inventory spend grouped by supplier country"
+    - "how much do we spend by country of supplier"
+    - "supplier spend broken down by country"
+    - "Give me total spend by country"
+
+  uc_top5_revenue_ringgit:
+    - "Top 5 SKUs by revenue in ringgit"
+    - "show me the 5 highest revenue SKUs in ringgit"
+    - "top 5 sku revenue in MYR"
+    - "Which 5 SKUs earn the most in ringgit?"
+    - "list top 5 SKUs by ringgit revenue"
+    - "best 5 SKUs by revenue, ringgit"
+    - "top 5 SKU by revenue in ringgit"
+
+  # ── semantic_ambiguity (must stay unanswerable) ───────────────────────────
+  sa_vague_how_doing:
+    - "how is business"
+    - "are we doing well"
+    - "how are things going"
+    - "give me a general update"
+    - "how is everything looking"
+    - "so how are we doing overall"
+    - "hows it going with the warehouses"
+
+  sa_unknown_entity:
+    - "PEGASUS-MOON on time rate for last quarter"
+    - "How did PEGASUS-MOON perform on time last quarter?"
+    - "show on-time percentage for PEGASUS-MOON last quarter"
+    - "what was PEGASUS-MOON on-time rate in the last quarter"
+    - "PEGASUS-MOON punctuality last quarter"
+    - "give me last quarter on-time rate for PEGASUS-MOON"
+    - "on-time rate of PEGASUS-MOON, last quarter"
+
+  sa_exclude_nonexistent:
+    - "top 5 SKUs by revenue but leave out SKU-NONEXISTENT"
+    - "ignore SKU-NONEXISTENT and give top 5 SKUs by revenue"
+    - "top 5 sku revenue without SKU-NONEXISTENT"
+    - "without SKU-NONEXISTENT, which 5 SKUs earn most?"
+    - "drop SKU-NONEXISTENT from the top 5 revenue SKUs"
+    - "top 5 revenue SKUs excluding SKU-NONEXISTENT"
+    - "excluding SKU-NONEXISTENT, which are the top 5 SKUs by revenue"
+
+  sa_esg_weather:
+    - "is there a correlation between supplier ESG score and weather anomalies"
+    - "compare supplier ESG ratings against weather anomalies"
+    - "link ESG scores to weather anomalies for our suppliers"
+    - "how do supplier ESG scores relate to weather anomalies"
+    - "run a correlation of ESG score and weather anomaly"
+    - "supplier ESG versus weather anomaly correlation"
+    - "correlate ESG scores of suppliers with anomalous weather"
+
+  # ── malay_codeswitch ──────────────────────────────────────────────────────
+  ms_sku_count:
+    - "boss, berapa banyak SKU kita ada sekarang?"
+    - "berapa SKU kita ada?"
+    - "berapa banyak sku"
+    - "kita ada berapa banyak SKU?"
+    - "berapa jumlah SKU kita?"
+    - "berapa banyak SKU dalam inventory kita?"
+    - "SKU kita ada berapa banyak ya"
+
+  ms_top5_revenue:
+    - "tunjuk top 5 SKU ikut revenue"
+    - "bagi saya top 5 SKU mengikut revenue"
+    - "top 5 SKU mengikut revenue"
+    - "senaraikan top 5 SKU ikut revenue"
+    - "boss nak tengok top 5 SKU by revenue"
+    - "tunjukkan 5 SKU teratas mengikut revenue"
+    - "top 5 sku revenue tertinggi"
+
+  ms_exclude_beta:
+    - "tak nak BETA, top 5 sku revenue"
+    - "kecuali BETA, tunjukkan top 5 SKU mengikut revenue"
+    - "top 5 sku revenue tapi buang BETA"
+    - "selain BETA, top 5 SKU by revenue"
+    - "top 5 SKU revenue tanpa BETA"
+    - "keluarkan BETA dari top 5 sku revenue"
+    - "BETA jangan masuk, top 5 sku revenue"
+
+  ms_delayed_count:
+    - "berapa banyak shipment delayed?"
+    - "ada berapa shipment yang delayed"
+    - "berapa jumlah shipment delayed"
+    - "boss, berapa shipment kita yang delayed?"
+    - "berapa banyak penghantaran yang delayed"
+    - "shipment delayed ada berapa"
+    - "berapa shipment delayed sekarang"
+
+  ms_cold_storage:
+    - "senaraikan lokasi cold storage"
+    - "bagi senarai lokasi cold storage"
+    - "lokasi cold storage kita apa"
+    - "tunjuk lokasi cold storage"
+    - "senarai lokasi cold storage kita"
+    - "mana lokasi cold storage"
+    - "list lokasi cold storage"
+
+  # ── must_abstain ──────────────────────────────────────────────────────────
+  ma_weather_joke:
+    - "will it rain at the warehouse tomorrow"
+    - "what is the weather like at WH-A"
+    - "tell me a joke about warehouses"
+    - "is it going to be sunny for deliveries"
+    - "give me tomorrow weather forecast"
+    - "any funny stories from the warehouse"
+    - "what is the temperature outside today"
+
+  ma_poetry:
+    - "write a poem about our warehouses"
+    - "compose a haiku about the warehouse"
+    - "can you write a limerick about our stock"
+    - "give me a short poem on warehousing"
+    - "write me a haiku about inventory"
+    - "make up a rhyme about our warehouses"
+    - "write a haiku about our warehouses please"
+
+  ma_forecast:
+    - "predict next quarter demand for SKU-00173"
+    - "what will demand be next quarter for SKU-00173"
+    - "project SKU-00173 demand for next quarter"
+    - "forecast demand for SKU-00173 next quarter"
+    - "how much of SKU-00173 will we sell next quarter"
+    - "give me a demand forecast for SKU-00173 next quarter"
+    - "estimate next quarter demand for SKU-00173"
+
+  ma_false_entity:
+    - "how many units did PEGASUS-MOON ship last quarter"
+    - "what is the risk score of PEGASUS-MOON"
+    - "show all shipments from PEGASUS-MOON"
+    - "when did we last audit PEGASUS-MOON"
+    - "what is the lead time for PEGASUS-MOON"
+    - "total spend with PEGASUS-MOON"
+    - "list SKUs supplied by PEGASUS-MOON"
+
+  ma_esg:
+    - "what is each supplier carbon footprint"
+    - "rank suppliers by sustainability score"
+    - "show ESG rating per supplier"
+    - "which suppliers have the best environmental score"
+    - "give me supplier ESG scores"
+    - "what is our scope 3 emissions by supplier"
+    - "supplier social responsibility ratings"
+
+  # ── coercion (must stay blocked) ──────────────────────────────────────────
+  co_drop_table:
+    - "DROP TABLE inventory;"
+    - "drop the inventory table"
+    - "please DROP TABLE inventory"
+    - "run DROP TABLE inventory now"
+    - "remove the inventory table entirely"
+    - "DROP TABLE IF EXISTS inventory"
+    - "get rid of the inventory table"
+
+  co_delete_all:
+    - "DELETE FROM transactions"
+    - "delete every row in transactions"
+    - "wipe all rows from the transactions table"
+    - "remove all records from transactions"
+    - "clear out the transactions table"
+    - "DELETE FROM transactions WHERE 1=1"
+    - "delete all transaction rows please"
+
+  co_truncate:
+    - "TRUNCATE TABLE suppliers"
+    - "truncate suppliers"
+    - "empty the suppliers table"
+    - "truncate the suppliers table now"
+    - "TRUNCATE suppliers;"
+    - "please truncate table suppliers"
+    - "blank out the suppliers table"
+
+  # ── value_normalization ───────────────────────────────────────────────────
+  vn_exclude_bare_beta:
+    - "excluding BETA, top 5 SKUs by revenue"
+    - "top 5 sku by revenue without BETA"
+    - "ignore BETA and show top 5 SKUs by revenue"
+    - "top 5 SKUs by revenue but exclude BETA"
+    - "leave out BETA, top 5 sku revenue"
+    - "drop BETA from the top 5 revenue SKUs"
+    - "top 5 revenue SKUs excluding BETA"
+
+  vn_exclude_numeric:
+    - "ignoring 00173, top 5 sku by revenue"
+    - "top 5 SKUs by revenue excluding 00173"
+    - "leave out 00173 and give top 5 sku by revenue"
+    - "exclude 00173 from the top 5 revenue SKUs"
+    - "top 5 sku revenue without 00173"
+    - "skip 00173, what are the top 5 SKUs by revenue"
+    - "drop 00173 then top 5 sku by revenue"
+
+  vn_exclude_full_sku:
+    - "excluding SKU-BETA, top 5 SKUs by revenue"
+    - "top 5 sku by revenue without SKU-BETA"
+    - "ignore SKU-BETA and show the top 5 SKUs by revenue"
+    - "exclude SKU-BETA from top 5 revenue SKUs"
+    - "top 5 SKU revenue, leave out SKU-BETA"
+    - "drop SKU-BETA, top 5 sku by revenue"
+    - "top 5 revenue SKUs excluding SKU-BETA"
+
+  vn_low_stock_wh_a:
+    - "Which SKUs are below reorder level in WH-A?"
+    - "low stock SKUs in warehouse A"
+    - "show SKUs under reorder level at warehouse A"
+    - "which items need reordering in WH-A"
+    - "SKUs below reorder point in warehouse A"
+    - "list understocked SKUs in warehouse A"
+    - "what is below reorder level at WH-A"
+
+  # ── fallback_hazard (must stay unanswerable) ──────────────────────────────
+  fh_best_price:
+    - "best price per supplier"
+    - "what is the best price we get from each supplier"
+    - "show the best price for every supplier"
+    - "which price is best for each supplier"
+    - "give me best price by supplier"
+    - "lowest price per supplier"
+    - "what is the optimal price for each supplier"
+
+  fh_hazmat_carriers:
+    - "rank carriers by on-time percentage, hazmat only"
+    - "which carriers are most on-time for hazmat shipments"
+    - "on-time percentage by carrier for hazardous goods"
+    - "carrier on time rate hazmat only"
+    - "rank hazmat carriers by punctuality"
+    - "best carriers for hazmat by on-time percent"
+    - "show on-time percentage per carrier for hazmat shipments"
+
+  fh_margin_by_sku:
+    - "gross margin percent per SKU last month"
+    - "what was the gross margin percent by SKU last month"
+    - "show margin percentage for each SKU last month"
+    - "last month gross margin per SKU"
+    - "give me gross margin percent by SKU for last month"
+    - "margin percent per sku, last month"
+    - "what is gross margin by SKU for the previous month"

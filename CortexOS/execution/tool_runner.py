@@ -12,6 +12,12 @@ from typing import Any
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_\-.]{1,128}$")
 _RULESET = "packs/dms/compliance/tool_call_rules_v1.yaml"
+_AGENT_ACTOR_PREFIX = "agent_"
+
+
+def is_agent_actor(actor: str) -> bool:
+    """True when the actor id is an SDK/agent runtime (``agent_*``), not a human API caller."""
+    return (actor or "").startswith(_AGENT_ACTOR_PREFIX)
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUTS = ROOT / "outputs"
@@ -159,6 +165,16 @@ def run_tool_call(
 
     if tool_name not in allowed_action_tools(db_path):
         _deny("allowlist", f"tool {tool_name!r} not a registered action type")
+
+    from CortexOS.ontology.registry import resolve_tool_class
+    from packs.dms.ontology.registry import PACK_DIR
+
+    tool_class = resolve_tool_class(tool_name, db_path=db_path, pack_dir=PACK_DIR)
+    if is_agent_actor(actor) and tool_class == "apply":
+        _deny(
+            "agent_apply_denied",
+            f"agent actors may not invoke apply-class tools ({tool_name!r})",
+        )
 
     try:
         out_dir = resolve_output_dir(actor, rid)

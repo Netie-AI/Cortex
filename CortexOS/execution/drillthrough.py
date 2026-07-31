@@ -110,6 +110,33 @@ def verify_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def _unwrap_aggregate(node: exp.Expression) -> tuple[exp.Expression | None, bool]:
+    """If ``node`` is (or wraps) an aggregate, return (inner_arg, found).
+
+    Handles nested wrappers used by governed metrics — e.g.
+    ``ROUND(COALESCE(SUM(x), 0), 2)`` — which ``isinstance(AggFunc)`` alone misses.
+    """
+    if isinstance(node, exp.AggFunc):
+        args = list(node.expressions) or ([node.this] if node.this is not None else [])
+        if not args:
+            return None, True
+        return args[0].copy(), True
+    # Walk unary/binary wrappers that keep a single primary child expression.
+    for attr in ("this",):
+        child = getattr(node, attr, None)
+        if isinstance(child, exp.Expression):
+            inner, found = _unwrap_aggregate(child)
+            if found:
+                return inner, True
+    # COALESCE / ROUND style: first arg may hold the aggregate.
+    children = list(getattr(node, "expressions", None) or [])
+    if children:
+        inner, found = _unwrap_aggregate(children[0])
+        if found:
+            return inner, True
+    return None, False
+
+
 def _strip_aggregates(select: exp.Select) -> tuple[list[exp.Expression], str | None, bool]:
     """Replace aggregate projections with their args; return measure for ORDER BY."""
     approximate = False
@@ -118,12 +145,11 @@ def _strip_aggregates(select: exp.Select) -> tuple[list[exp.Expression], str | N
     for proj in select.expressions:
         alias = proj.alias_or_name if isinstance(proj, exp.Alias) else None
         node = proj.this if isinstance(proj, exp.Alias) else proj
-        if isinstance(node, exp.AggFunc):
-            args = list(node.expressions) or ([node.this] if node.this is not None else [])
-            if not args:
+        inner, found = _unwrap_aggregate(node)
+        if found:
+            if inner is None:
                 approximate = True
                 continue
-            inner = args[0].copy()
             if measure is None:
                 measure = inner.sql(dialect="duckdb")
             if alias:
@@ -165,8 +191,19 @@ def _provenance_projections(aliases: list[tuple[str | None, str]]) -> list[exp.E
     return projs
 
 
-def rewrite_for_drillthrough(sql: str, *, dialect: str = "duckdb") -> DrillRewrite:
-    """Architecture §4.5 rewrite rules."""
+def rewrite_for_drillthrough(
+    sql: str,
+    *,
+    dialect: str = "duckdb",
+    include_provenance: bool = True,
+) -> DrillRewrite:
+    """Architecture §4.5 rewrite rules.
+
+    Provenance columns (`_src_ref_id`, …) exist on lakehouse silver tables.
+    The demo warehouse (`transactions`, …) does not carry them — callers must
+    pass ``include_provenance=False`` or fall back after a binder rejection.
+    Projecting missing columns is not caution; it is a hard failure (R-0005).
+    """
     tree = sqlglot.parse_one(sql, read=dialect)
     if not isinstance(tree, exp.Select):
         raise DrillthroughError("drill-through requires a SELECT statement")
@@ -194,9 +231,13 @@ def rewrite_for_drillthrough(sql: str, *, dialect: str = "duckdb") -> DrillRewri
     if not new_exprs:
         raise DrillthroughError("no projectable columns after stripping aggregates")
 
-    aliases = _table_aliases(tree)
-    prov = _provenance_projections(aliases)
-    tree.set("expressions", new_exprs + prov)
+    if include_provenance:
+        aliases = _table_aliases(tree)
+        new_exprs = new_exprs + _provenance_projections(aliases)
+    else:
+        # Rows still contribute; lineage columns unavailable on this store.
+        approximate = True
+    tree.set("expressions", new_exprs)
 
     if measure:
         tree.set("order", exp.Order(expressions=[exp.Ordered(this=sqlglot.parse_one(measure, read=dialect), desc=True)]))
@@ -224,6 +265,13 @@ def rewrite_for_drillthrough(sql: str, *, dialect: str = "duckdb") -> DrillRewri
         approximate=approximate,
         measure_expr=measure,
     )
+
+
+def _missing_provenance_binder(detail: str) -> bool:
+    low = detail.lower()
+    if "does not have a column named" not in low and "column" not in low:
+        return False
+    return any(col.lower() in low for col in _PROVENANCE_COLS)
 
 
 def execute_drillthrough(
@@ -259,8 +307,21 @@ def execute_drillthrough(
     if sql_digest(sql) != str(payload["sql_digest"]):
         raise DrillthroughTokenInvalid("sql digest mismatch")
 
-    rewritten = rewrite_for_drillthrough(sql)
-    rows, _, _ = execute_sql(verified, rewritten.sql)
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+
+    rewritten = rewrite_for_drillthrough(sql, include_provenance=True)
+    try:
+        rows, _, _ = execute_sql(verified, rewritten.sql)
+    except SqlGateAbstain as exc:
+        detail = str(exc)
+        if not _missing_provenance_binder(detail):
+            raise DrillthroughError(f"drill SQL rejected: {detail}") from exc
+        # Warehouse / non-lineage tables: contribute rows without _src_* cols.
+        rewritten = rewrite_for_drillthrough(sql, include_provenance=False)
+        try:
+            rows, _, _ = execute_sql(verified, rewritten.sql)
+        except SqlGateAbstain as exc2:
+            raise DrillthroughError(f"drill SQL rejected: {exc2}") from exc2
     try:
         count_rows, _, _ = execute_sql(verified, rewritten.count_sql)
         total = (

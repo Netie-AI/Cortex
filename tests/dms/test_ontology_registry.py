@@ -100,6 +100,7 @@ def test_export_pptx_requires_confirm():
     actions = {a.id: a for a in registry.load_action_types(PACK_DIR)}
     tool = actions["export_pptx"]
     assert tool.kind == "tool"
+    assert tool.tool_class == "apply"
     assert tool.requires_confirm is True
     assert tool.required_role == "steward"
     assert tool.ledger_event_type == "action.tool_call"
