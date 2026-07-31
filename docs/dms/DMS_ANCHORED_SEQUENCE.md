@@ -92,18 +92,37 @@ flowchart TB
 
 Ordered. One exit gate per row. Claude Code pastes one prompt at a time.
 
-| # | ID | Work | Exit gate | DMS value |
-|---|-----|------|-----------|-----------|
-| 1 | **Ops** | Commit path lists when asked; land DMS worktree (demo_ask + drillthrough gate) into `D:\DMS`; restart :8090 from main | Live ask + drillthrough + forecast abstain on :8090 | Demo trustworthy |
-| 2 | **C7-prod** | Schema retrieval → sqlglot → EXPLAIN → retry → abstain (Prompt I / W7) | Paraphrase ↑, wrong=0, envelope asserts | Fewer silent wrong answers |
-| 3 | **C10/claim** | `python -m bench.verify_gold --review --by <name>` waves | claim_n climbs; Trust stays `supported:false` until 310 | Honest "0 wrong" story |
-| 4 | **W1 Postgres** | Host-reachable DB for DMS (topology without killing bench stack) | `database_configured: true` | Unlocks everything mutation |
-| 5 | **W2 Amend** | Proposal → confirm → apply → receipt via `call_action` | Envelope + ledger green | Differentiator vs lakes |
-| 6 | **W5 Spaces** | Persist + ACL enforce (retire in-memory) | Space boundary holds | Product lock |
-| 7 | **C11** | Alias graph (after C5/C8 done ✓) | Packet exit | Anaphora / entity clarity |
-| 8 | **C9-full** | Per P22 after C11 | Packet exit | Memory pools later |
-| 9 | **C4-full remainders** | Lakehouse duckdb AST outside CortexOS; agent-SDK reads vs manifest | lint + corpus | Boundary honesty |
-| 10 | **OV smoke** | Keep pinned home; merge only when branch clean | healthz + JWKS + live ask | Manifest mint |
+| # | ID | Work | Exit gate | Status (2026-08-01) |
+|---|-----|------|-----------|---------------------|
+| 1 | **Ops** | Commit path lists; restart :8090 from main | Live ask + drillthrough + forecast abstain on :8090 | **Done.** Both repos committed in explicit slices. Live ask had been 503 all along — OpenVault `POST /keys/services` 500 from a **stale process** (A-0004), not code or data; restarted on its pinned home |
+| 2 | **C7-prod** | Schema retrieval → sqlglot → EXPLAIN → retry → **plausibility** → abstain | wrong=0, envelope asserts | **Done.** Plausibility stage added (`CortexOS/dms/sql_plausibility.py`); gate no longer claims EXPLAIN ran when it did not; all candidates gated before a retry is spent. Found and fixed a **live P0**: `total revenue for SKU-00397` answered `sku_count = 509` |
+| 3 | **C10/claim** | `bench.verify_gold --review --by <name>` waves | claim_n → 310 | **Blocked on a human, by design.** `--review` requires a TTY and a named reviewer; a batch importer would make the gate decoration. Still **47/310**, 329 unverified |
+| 4 | **W1 Postgres** | Host-reachable DB for DMS | `database_configured: true` | **Done.** Control plane was already built (Alembic, RLS, roles, seed); the work was topology + 3 defects. `docker-compose.hostdb.yml` keeps Caddy-only-public intact |
+| 5 | **W2 Amend** | Proposal → confirm → apply → receipt | Envelope + ledger green | **Done except the apply.** Receipt is now part of the write (failed append rolls the confirm back, token stays retryable). Confirm mutates no warehouse data and now **says so** — a real apply needs a contract minor + regenerated client |
+| 6 | **W5 Spaces** | Persist + ACL enforce | Space boundary holds | **Persist done** (`PostgresSpaceStore.create`, honest `persisted`). **ACL enforcement open — see P0 below** |
+| 7 | **C11** | Alias graph | Packet exit | **Done, without a third alias file.** The graph already exists in `metrics.yaml synonyms:` + `vocabulary.py _RULES`, both read on the serving path; C11-min was the missing *validation* |
+| 8 | **C9-full** | Per P22 after C11 | Packet exit | Not started |
+| 9 | **C4-full remainders** | Lakehouse duckdb outside CortexOS | lint + corpus | **Gap pinned, not closed.** The duckdb rule was documented in CLAUDE.md and enforced by *nothing*; ratcheted in `tests/dms/test_c4_duckdb_boundary.py`. Moving `lakehouse/catalog.py` is an architecture call |
+| 10 | **OV smoke** | Keep pinned home; merge only when clean | healthz + JWKS + live ask | healthz/keys/live-ask green after restart. Merge still parked (dirty branch, other lane) |
+
+### P0 still open — the Space boundary
+
+`Executor.live_ask` mints from `demo_acl()` regardless of `space_id`, so every
+Space reads the whole warehouse. Confirmed live: "Margin sandbox" holds only
+`inventory` + `locations`, and a `transactions` question inside it returned the
+full ranking, badge `L0_CERTIFIED`. `intersect_space_grants` /
+`resolve_session_acl` are correct and tested but have **no production caller**.
+
+Pinned as `xfail(strict=True)` in `D:\DMS\tests\test_space_acl_boundary.py`, so
+the suite fails the moment it starts passing.
+
+**Not wired, on evidence:** `DEMO_TABLES` needs 6 tables, `data_sources` covers
+3 (`suppliers`, `shipments`, `alerts` have no row), and `acl_grants` has **0
+rows** — so `list_user_source_grants` returns nothing and enforcement would
+refuse **100% of asks** (R-0005). Turning it on needs a decision about which
+sources are company-scoped vs Space-scoped, plus seed rows to match. That is a
+product call, and shipping it half-on either breaks every demo ask or leaves the
+boundary decorative.
 
 **P22 ordered mins (updated truth):**
 
