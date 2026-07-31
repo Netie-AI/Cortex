@@ -102,6 +102,19 @@ def test_last_month_sales_not_abstain():
     assert "revenue_myr" in (r["rows"][0] or {})
 
 
+def test_total_revenue_g6_answers():
+    """G6 — bare total revenue must hit governed metric, not abstain."""
+    r = answer_question("What was total revenue?")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    assert r.get("metric_id") == "revenue_total"
+    assert r.get("sql_used")
+    assert r.get("rows")
+    answer = (r.get("answer") or "").lower()
+    assert any(ch.isdigit() for ch in answer)
+    assert "can't answer" not in answer
+
+
 def test_session_average_of_them():
     from CortexOS.dms.answer_engine import clear_session
 

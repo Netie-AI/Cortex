@@ -278,11 +278,18 @@ def route_to_metric(question: str) -> MetricPlan | None:
         status = "DELAYED" if "delayed" in q else "IN_TRANSIT"
         return MetricPlan("count_by_destination", {"status": status}, f"{status} shipments grouped by destination")
 
-    # revenue — calendar month before rolling-day window; before ranked "top sales"
+    # revenue — calendar month before rolling-day window; bare total before ranked "top sales"
     if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":
         return MetricPlan("revenue_last_month", {}, "revenue in the previous calendar month")
     if re.search(r"\b(revenue|sales|sold)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
         return MetricPlan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
+    # G6 — bare total revenue (no month/window); must not fall through to abstain
+    if re.search(r"\btotal\b", q) and re.search(r"\b(revenue|sales)\b", q):
+        return MetricPlan("revenue_total", {}, "total outbound revenue")
+    if re.search(r"\b(revenue|sales)\b", q) and not re.search(
+        r"\b(top|best|highest|most|sku|skus|rank|per|by|each)\b", q
+    ):
+        return MetricPlan("revenue_total", {}, "total outbound revenue")
 
     # supplier risk threshold
     if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):

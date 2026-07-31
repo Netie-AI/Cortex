@@ -138,6 +138,12 @@ feature as working (see the SKU-BETA / `NOT IN ('BETA')` false verification).
 (`BETA` → `SKU-BETA`, location dual-coding, case/whitespace). Prefer abstain over a
 filter that matches nothing while the envelope stamps success.
 
+**Customer envelope (Phase 0)** — every gate must also assert on the artifact the
+customer receives. Cortex-side assertions are necessary and insufficient. When the
+consumer is DMS, assert badge / abstained / values / sources / drillthrough_token /
+audit_id on the DMS envelope from `POST /v1/chat/ask` (see DMS
+`assert_envelope_valid`). A green badge on abstention prose is a P0.
+
 **C7 (pre-D1)** — replace the keyword cascade in `answer_engine.route_to_metric` with
 schema retrieval → generation → sqlglot → EXPLAIN → bounded retry → plausibility.
 

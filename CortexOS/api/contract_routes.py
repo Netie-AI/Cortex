@@ -93,14 +93,83 @@ def _http_for_submit_status(status: str) -> int:
     return 403
 
 
+_FLAT_BADGE: dict[str, Badge] = {
+    "certified": Badge.CERTIFIED,
+    "governed_metric": Badge.GOVERNED_METRIC,
+    "query_skill": Badge.QUERY_SKILL,
+    "session": Badge.SESSION,
+    "generated": Badge.QUERY_SKILL,  # L2_VALIDATED on DMS side
+    "l2_validated": Badge.QUERY_SKILL,
+    "abstain": Badge.ABSTAIN,
+    "blocked": Badge.BLOCKED,
+}
+
+
+def _assumptions_str(data: dict[str, Any]) -> str | None:
+    raw = data.get("assumptions")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    if isinstance(raw, list) and raw:
+        first = raw[0]
+        return str(first).strip() if first else None
+    return None
+
+
+def _is_abstain_signal(data: dict[str, Any]) -> bool:
+    route = str(data.get("route") or "").lower()
+    badge = str(data.get("badge") or "").lower()
+    layer = str(data.get("layer") or "").lower()
+    return route in {"needs_clarification", "abstain", "blocked"} or badge in {
+        "abstain",
+        "blocked",
+    } or layer in {"abstain", "blocked"}
+
+
+def _provenance_from_flat(data: dict[str, Any]) -> Provenance:
+    """Build provenance from answer_engine flat fields — never invent SESSION on abstain."""
+    route = str(data.get("route") or "").lower()
+    badge_raw = str(data.get("badge") or "").lower()
+    layer = str(data.get("layer") or "engine")
+    assumptions = _assumptions_str(data)
+    if route == "blocked" or badge_raw == "blocked" or layer == "blocked":
+        return Provenance(
+            layer="blocked",
+            badge=Badge.BLOCKED,
+            assumptions=assumptions,
+            metric_id=data.get("metric_id") if isinstance(data.get("metric_id"), str) else None,
+        )
+    if _is_abstain_signal(data):
+        return Provenance(
+            layer="abstain" if layer in {"", "engine"} else layer,
+            badge=Badge.ABSTAIN,
+            assumptions=assumptions,
+            metric_id=data.get("metric_id") if isinstance(data.get("metric_id"), str) else None,
+        )
+    badge = _FLAT_BADGE.get(badge_raw, Badge.SESSION)
+    return Provenance(
+        layer=layer or "engine",
+        badge=badge,
+        assumptions=assumptions,
+        metric_id=data.get("metric_id") if isinstance(data.get("metric_id"), str) else None,
+    )
+
+
 def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> dict[str, Any]:
-    """Attach T7 answer_id + drillthrough_token when SQL is present."""
+    """Attach T7 answer_id + drillthrough_token when SQL is present.
+
+    Abstain/blocked flat answers must carry Provenance.badge=ABSTAIN|BLOCKED —
+    never default to SESSION (that stamped L2_VALIDATED on DMS envelopes).
+    """
     import uuid
 
     from CortexOS.execution.drillthrough import manifest_content_hash, mint_token
 
-    if "provenance" not in data:
-        data["provenance"] = Provenance(layer="engine", badge=Badge.SESSION)
+    if "provenance" not in data or data.get("provenance") is None:
+        data["provenance"] = _provenance_from_flat(data)
+    elif _is_abstain_signal(data):
+        # Override a wrong SESSION default if callers pre-set provenance.
+        data["provenance"] = _provenance_from_flat(data)
+
     answer_id = data.get("answer_id") or data.get("audit_id") or str(uuid.uuid4())
     data["answer_id"] = answer_id
     assumptions = data.get("assumptions")
@@ -110,7 +179,11 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = []
     data.setdefault("contributing_sources", [])
     sql = data.get("sql_used")
-    if isinstance(sql, str) and sql.strip() and not data.get("drillthrough_token"):
+    # Never mint drillthrough for abstain/blocked answers.
+    if _is_abstain_signal(data):
+        data["drillthrough_token"] = None
+        data["sql_used"] = None
+    elif isinstance(sql, str) and sql.strip() and not data.get("drillthrough_token"):
         try:
             data["drillthrough_token"] = mint_token(
                 answer_id=str(answer_id),

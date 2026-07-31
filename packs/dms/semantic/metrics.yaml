@@ -124,6 +124,20 @@ metrics:
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
       exclude_skus: {kind: not_in, column: sku, optional: true, resolve: true}
 
+  - id: revenue_total
+    kind: scalar
+    synonyms:
+      - "total revenue"
+      - "what was total revenue"
+      - "overall revenue"
+      - "all-time revenue"
+      - "total sales"
+    result_columns: [revenue_myr]
+    sql: >
+      SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
+      FROM transactions
+      WHERE txn_type = 'OUT'
+
   - id: revenue_windowed
     kind: scalar
     synonyms: ["revenue last", "sales in the last", "revenue in days", "recent revenue"]

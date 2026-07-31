@@ -62,6 +62,9 @@ categories:
     - id: top5_revenue
       question: "what is the top 5 sku by revenue"
       expect: correct_rows
+    - id: total_revenue_g6
+      question: "What was total revenue?"
+      expect: correct_rows
 
   truncation_honesty:
     - id: ranks_6_to_10
