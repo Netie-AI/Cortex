@@ -923,7 +923,93 @@ def _is_anaphora(q: str) -> bool:
             r"\bone\s+fifth\b",
             q,
         )
+    ) or _is_window_followup(q)
+
+
+#: Domain nouns that make a question stand on its own. A follow-up borrows its
+#: subject from the previous turn ("show me number 2-6"); a question that names
+#: its own subject ("top 2 to 6 SKUs by revenue") is a fresh ask and must go to
+#: the normal router, not get re-windowed over whatever happened to be on screen.
+_NAMES_OWN_SUBJECT = re.compile(
+    r"\b(skus?|revenue|sales|shipments?|suppliers?|inventory|alerts?|warehouses?|"
+    r"spend|costs?|items?|products?|categor(?:y|ies)|carriers?|locations?)\b",
+    re.I,
+)
+
+
+def _skip_first(q: str) -> int | None:
+    """"ignoring the first one", "excluding the top 2", "after the first 3" -> N."""
+    m = re.search(
+        r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|without|skip(?:ping)?|omit(?:ting)?|"
+        r"apart from|other than|besides|after|drop(?:ping)?)\s+"
+        r"(?:the\s+)?(?:first|top|highest|best)\s+(one|1|two|2|three|3|\d{1,2})\b",
+        q,
+        re.I,
     )
+    if not m:
+        # "ignoring the first" / "without the top" with no count means one.
+        if re.search(
+            r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|without|skip(?:ping)?|omit(?:ting)?|"
+            r"apart from|other than|besides|drop(?:ping)?)\s+(?:the\s+)?"
+            r"(?:first|top|highest|best)\b(?!\s+\d)",
+            q,
+            re.I,
+        ):
+            return 1
+        return None
+    word = m.group(1).lower()
+    return {"one": 1, "two": 2, "three": 3}.get(word, int(word) if word.isdigit() else 1)
+
+
+def _is_window_followup(q: str) -> bool:
+    """A re-slice of the previous ranking, phrased without naming a subject."""
+    if _NAMES_OWN_SUBJECT.search(q):
+        return False
+    return _rank_window(q) is not None or _skip_first(q) is not None
+
+
+def _window_over_prior(
+    prior_sql: str, question: str, rows: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]]]:
+    """Re-run the previous ranking at a different offset / length.
+
+    "show me number 2-6" and "ignoring the first one" are the two most natural
+    things to say after a top-5, and both abstained — the ranked metrics have
+    carried an ``offset_clause`` parameter the whole time, but the router only
+    ever reached it when the question named its own subject, which a follow-up
+    by definition does not.
+
+    Rewrites LIMIT/OFFSET on the prior statement rather than recompiling the
+    metric, because the prior turn is often a *certified* query with no
+    ``metric_id`` to recompile — which is exactly the case in the reported
+    session, where turn one was ``cq_sales_top5_value``.
+    """
+    window = _rank_window(question)
+    skip = _skip_first(question)
+    if window is None and skip is None:
+        raise ValueError("not a window follow-up")
+
+    tree = sqlglot.parse_one(prior_sql, read="duckdb")
+    if window is not None:
+        start, end = window
+        offset, limit = start - 1, end - start + 1
+    else:
+        prior_limit = None
+        limit_node = tree.args.get("limit")
+        if limit_node is not None:
+            try:
+                prior_limit = int(limit_node.expression.this)
+            except (AttributeError, TypeError, ValueError):
+                prior_limit = None
+        # Keep the window the same size as the one on screen, just moved along.
+        offset, limit = int(skip or 1), prior_limit or max(len(rows), 5)
+
+    if offset < 0 or limit < 1 or limit > MAX_LIMIT:
+        raise ValueError("window out of range")
+
+    tree.set("limit", sqlglot.exp.Limit(expression=sqlglot.exp.Literal.number(limit)))
+    tree.set("offset", sqlglot.exp.Offset(expression=sqlglot.exp.Literal.number(offset)))
+    return tree.sql(dialect="duckdb"), []  # rows filled by execute
 
 
 def _scale_factor(q: str) -> tuple[str, float] | None:
@@ -1121,7 +1207,37 @@ def _aggregate_prior(
         # quietly downgraded to a row count.
         raise FollowupUnsupported("the previous answer has no numeric column to average")
 
+    # "How many of them?" counts what is on screen. Stripping LIMIT unconditionally
+    # counted the whole underlying result instead, so after a top-5 the answer was
+    # 491 — every SKU with an outbound transaction. That is a real number and a
+    # different question, and this is where the 491 in the reported session came
+    # from.
+    #
+    # A LIMIT below the system cap is one the customer asked for ("top 5"), so it
+    # is part of what "them" means and stays in the count. A LIMIT *at* the cap is
+    # truncation the engine imposed, and there the honest answer is still the full
+    # total — otherwise "how many" would report the page size.
     tree = sqlglot.parse_one(prior_sql, read="duckdb")
+    requested_limit: int | None = None
+    limit_node = tree.args.get("limit")
+    if limit_node is not None:
+        try:
+            value = int(limit_node.expression.this)
+            if value < MAX_LIMIT:
+                requested_limit = value
+        except (AttributeError, TypeError, ValueError):
+            requested_limit = None
+
+    if requested_limit is not None:
+        # Keep the LIMIT so the count genuinely produces the number reported —
+        # no hardcoded row standing in for SQL that would say something else.
+        # ORDER BY still goes: it names a select alias, which the guardrail's
+        # column allowlist cannot see inside a subquery, and which of the five
+        # rows they are does not change how many there are.
+        tree.set("order", None)
+        inner = tree.sql(dialect="duckdb")
+        return f"SELECT COUNT(*) AS followup_count FROM ({inner}) _prior", []
+
     tree.set("limit", None)
     tree.set("order", None)
     inner = tree.sql(dialect="duckdb")
@@ -1214,6 +1330,10 @@ def answer(
         try:
             if re.search(r"\b(low stock|below reorder|below\s+reorder)\b", q_low):
                 sql, session_rows = _low_stock_over_prior(prior.get("rows") or [])
+            elif _is_window_followup(q_low):
+                sql, session_rows = _window_over_prior(
+                    prior["sql"], question, prior.get("rows") or []
+                )
             else:
                 sql, session_rows = _aggregate_prior(
                     prior["sql"],
