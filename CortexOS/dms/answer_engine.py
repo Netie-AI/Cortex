@@ -31,7 +31,6 @@ from CortexOS.dms.sql_guardrail import (
     AuditEntry,
     guard_and_execute,
     log_audit,
-    validate_sql,
 )
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
@@ -129,6 +128,51 @@ def _days(q: str, default: int) -> int:
         return int(m.group(1))
     m2 = re.search(r"\b(\d+)\s*days?\b", q)
     return int(m2.group(1)) if m2 else default
+
+
+#: Asking the warehouse what *will* happen. Five words was not the class.
+#:
+#: The old guard was ``\b(forecast|predict|projection|what if|hypothetical)\b``,
+#: which is a list of ways to say it rather than the thing itself. Measured on
+#: the corpus, 4 of 7 forecast paraphrases walked straight past it — "what will
+#: demand be next quarter", "project SKU-00173 demand for next quarter", "how
+#: much of SKU-00173 will we sell next quarter", "estimate next quarter demand"
+#: — and L2 then answered each with historically-valid SQL over the past.
+#: Confidently wrong about the future, badged as a real answer.
+_PREDICTION_VERB = re.compile(
+    r"\b(forecast(?:s|ed|ing)?|predict(?:s|ed|ion|ions|ing)?|projection(?:s)?|"
+    r"extrapolat\w*|simulat\w*)\b",
+    re.I,
+)
+_HYPOTHETICAL = re.compile(r"\b(what if|hypothetical|scenario|suppose|assuming)\b", re.I)
+#: "next quarter", "coming month", "next 30 days" — a window that has not happened.
+_FUTURE_WINDOW = re.compile(
+    r"\b(next|coming|upcoming|following)\s+"
+    r"(?:\d+\s+)?(quarter|month|week|year|fy|financial year|day)s?\b",
+    re.I,
+)
+#: Dates the warehouse actually stores. ``shipments.expected_arrival`` is a real
+#: future date, so "which deliveries are due in the next seven days" is a
+#: question about recorded schedule, not a prediction — refusing it would be a
+#: control rejecting legitimate work (R-0005), and the vocabulary layer already
+#: routes that phrasing to a governed metric.
+#: ``expir\w*`` belongs here for the same reason as arrivals: ``inventory``
+#: stores ``expiry_date``, so "which SKUs expire next month" is a lookup against
+#: a recorded date, not a prediction. It was missing, and the corpus could not
+#: see the mistake because every expiry seed in it is past tense ("expired last
+#: month") — the guard measured zero false refusals while refusing a real one.
+_SCHEDULED_FUTURE = re.compile(
+    r"\b(arriv\w*|deliver\w*|due|eta|incoming|inbound|expected|shipment|shipping|"
+    r"scheduled|restock\w*|reorder\w*|expir\w*|renew\w*|lapse\w*)\b",
+    re.I,
+)
+
+
+def _is_predictive(q: str) -> bool:
+    """True when the question asks about the future rather than the record."""
+    if _PREDICTION_VERB.search(q) or _HYPOTHETICAL.search(q):
+        return True
+    return bool(_FUTURE_WINDOW.search(q) and not _SCHEDULED_FUTURE.search(q))
 
 
 def _wants_aggregate(q: str) -> bool:
@@ -499,7 +543,7 @@ def _route_to_metric(question: str) -> MetricPlan | None:
     # scalars first — "how many X" must not fall through to a listing
     # Predictive / out-of-schema asks must abstain before sales-rank keywords fire
     # ("forecast … top SKU" contains "top"+"sku" and would otherwise invent a ranking).
-    if re.search(r"\b(forecast|predict|projection|what if|hypothetical)\b", q):
+    if _is_predictive(q):
         return None
 
     # _wants_aggregate, not a narrow keyword list: "Total cold storage locations"
@@ -1430,9 +1474,7 @@ def answer(
 
     # Predictive / hypothetical asks must not be answered by a similar query skill
     # (e.g. "forecast … top SKU" matching a captured sales_by_value skill).
-    if sql is None and re.search(
-        r"\b(forecast|predict|projection|what if|hypothetical)\b", q_low
-    ):
+    if sql is None and _is_predictive(q_low):
         return _abstain(
             question,
             audit_id,
@@ -1611,8 +1653,8 @@ def answer(
     if verified is not None:
         from datetime import datetime, timezone
 
-        from CortexOS.execution.submit import execute_sql
         from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
+        from CortexOS.execution.submit import execute_sql
 
         gate = run_gate(sql, semantic)
         guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations

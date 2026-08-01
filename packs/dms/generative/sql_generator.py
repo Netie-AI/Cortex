@@ -8,7 +8,6 @@ If FreeRoute is down or the leave-machine gate refuses → empty candidates
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from typing import Any
@@ -88,7 +87,7 @@ def _extract_sql(text: str) -> str | None:
     return sql
 
 
-def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | None:
+def _freeroute_complete(prompt: str) -> str | None:
     """POST OpenVault /v1/chat/completions — large-model tier. None on any failure."""
     from CortexOS.integrations.openvault_client import openvault_base_url, post_json
 
@@ -117,8 +116,15 @@ def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | N
         ],
         "temperature": 0.0,
         "max_tokens": 600,
-        "metadata": {"identity": identity, "tier": "sql_generation"},
     }
+    # `metadata` is not part of the OpenAI chat-completions body that FreeRoute
+    # forwards. Groq rejects the whole request with HTTP 400 non-retryable, so
+    # post_json returned None and L2 abstained — silently, and only when the
+    # router happened to pick Groq. L2 therefore appeared to work or not
+    # depending on provider selection, which made every wrong-rate measurement
+    # of it meaningless. The identity travels as a header instead, where a
+    # provider that does not know it will ignore rather than refuse it — and
+    # post_json takes no headers today, so the identity simply is not sent.
     # Prefer OpenVault proxy; fall back to direct path variants.
     data = post_json("/v1/chat/completions", body, timeout=45.0, base=openvault_base_url())
     if not data:
