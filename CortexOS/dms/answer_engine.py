@@ -893,13 +893,40 @@ def _session_key(session_id: str | None, space_id: str | None = None) -> str:
     return f"{sid}::space:{sp}" if sp else sid
 
 
+def _is_derived_scalar(turn: dict[str, Any]) -> bool:
+    """A single number computed from the turn before it (a sum, an average, a count)."""
+    if turn.get("layer") != "session":
+        return False
+    rows = turn.get("rows") or []
+    if len(rows) != 1:
+        return False
+    return all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) for v in rows[0].values()
+    )
+
+
 def _remember(
     session_id: str | None,
     turn: dict[str, Any],
     *,
     space_id: str | None = None,
 ) -> None:
-    _SESSION[_session_key(session_id, space_id)] = turn
+    """Record this turn as what "them" refers to next — unless it is a scalar.
+
+    "Top 5" then "sum of them" then "how many of them?" answered **1**: the sum
+    had replaced the ranking as the anchor, so "them" was one number and
+    counting it gave one. Literally consistent and not what anybody means.
+
+    A derived scalar therefore does not become the new anchor; the listing it
+    came from stays. That keeps a chain of follow-ups pointing at the thing on
+    screen rather than at the last thing computed from it. A follow-up that
+    produces a *listing* — re-slicing a ranking — does become the anchor, because
+    then the screen really has changed.
+    """
+    key = _session_key(session_id, space_id)
+    if _is_derived_scalar(turn) and key in _SESSION:
+        return
+    _SESSION[key] = turn
 
 
 def clear_session(session_id: str | None = None, *, space_id: str | None = None) -> None:

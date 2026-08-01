@@ -119,6 +119,39 @@ def test_a_question_naming_its_own_subject_is_not_re_windowed(session: str) -> N
     assert fresh["layer"] == "governed_metric"
 
 
+def test_them_keeps_pointing_at_the_listing_across_a_chain(session: str) -> None:
+    """"top 5" -> "sum of them" -> "how many of them?" answered 1.
+
+    The sum had replaced the ranking as what "them" referred to, so the count
+    counted the one row the sum produced. Consistent, and not what anybody means.
+    A derived scalar no longer becomes the anchor.
+    """
+    top = answer_question(TOP5, session_id=session)
+    assert len(top["rows"]) == 5
+
+    answer_question("Sum of them", session_id=session)
+    count = answer_question("how many of them?", session_id=session)
+    assert (count["rows"] or [{}])[0].get("followup_count") == 5, "them drifted onto the sum"
+
+    avg = answer_question("what is the average of them", session_id=session)
+    assert "avg_sales_value_myr" in (avg["rows"] or [{}])[0]
+
+
+def test_a_reslice_does_become_the_new_anchor(session: str) -> None:
+    """Re-windowing changes the screen, so later follow-ups must follow it."""
+    answer_question(TOP5, session_id=session)
+    window = answer_question("show me number 2-6", session_id=session)
+    expected = round(
+        sum(float(r["sales_value_myr"]) for r in window["rows"] if r.get("sales_value_myr")), 2
+    )
+
+    total = answer_question("Sum of them", session_id=session)
+
+    assert (total["rows"] or [{}])[0].get("sum_sales_value_myr") == pytest.approx(
+        expected, rel=1e-6
+    ), "sum followed the original top-5 instead of the re-sliced window"
+
+
 def test_window_follow_up_without_a_prior_turn_does_not_invent_one(session: str) -> None:
     """No previous ranking means there is nothing to re-slice — abstain, never guess."""
     result = answer_question("show me number 2-6", session_id=session)
