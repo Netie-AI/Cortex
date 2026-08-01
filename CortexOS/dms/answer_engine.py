@@ -556,7 +556,26 @@ def _route_to_metric(question: str) -> MetricPlan | None:
     # inside the identifier — and answered "sku_count = 509" with a green
     # governed-metric badge and a drillthrough token. There is no per-SKU revenue
     # metric, so the honest outcome is to fall through and abstain.
-    if _wants_aggregate(q) and re.search(r"\bskus?\b", q) and not re.search(r"\b(category|per|by)\b", q):
+    # "sum" and "top N" are not counting words. "i mean the sum of top 5 selling
+    # skus" satisfied every condition here — `_wants_aggregate` fires on "sum",
+    # `\bskus?\b` matches — and answered "sku_count = 509", the count of every
+    # SKU in the warehouse, badged L1_GOVERNED_METRIC. Adding up five revenue
+    # figures and counting all the products are not the same question, and the
+    # customer has no way to see which one they were given.
+    #
+    # There is no governed metric that sums a ranking, so the honest outcome is
+    # to fall through and abstain rather than answer the adjacent question.
+    _counts_not_sums = not re.search(
+        r"\b(sum|summed|combined|altogether|top|highest|largest|biggest|best|"
+        r"lowest|smallest|bottom|rank(?:ed|ing)?)\b",
+        q,
+    )
+    if (
+        _wants_aggregate(q)
+        and _counts_not_sums
+        and re.search(r"\bskus?\b", q)
+        and not re.search(r"\b(category|per|by)\b", q)
+    ):
         return MetricPlan("sku_count", {}, "distinct SKU count")
     # delayed COUNT before status listing — "how many delayed" must not return 1000 rows
     if _wants_aggregate(q) and "delayed" in q and re.search(r"\bshipments?\b", q) \
@@ -989,6 +1008,18 @@ def _low_stock_over_prior(rows: list[dict[str, Any]]) -> tuple[str, list[dict[st
     return sql, []  # rows filled by execute
 
 
+class FollowupUnsupported(Exception):
+    """The follow-up named an aggregation this turn cannot compute.
+
+    Distinct from "this is not a follow-up at all". The caller falls through to
+    the other layers on a generic failure, which is right when the question was
+    never a follow-up — but wrong here: the customer asked for the sum of the
+    thing on screen, and letting the keyword router take a second guess at it is
+    how "sum of top 5 selling skus" became "sku_count = 509". Carries a reason
+    the abstain can show.
+    """
+
+
 def _aggregate_prior(
     prior_sql: str,
     question: str,
@@ -998,11 +1029,25 @@ def _aggregate_prior(
 ) -> tuple[str, list[dict[str, Any]]]:
     """Follow-up aggregate / scale over the prior result.
 
-    COUNT uses a guarded subquery wrap. AVG and divide/multiply are computed
-    from the prior row snapshot (literal SELECT so the allowlist still passes).
+    COUNT uses a guarded subquery wrap. SUM, AVG and divide/multiply are
+    computed from the prior row snapshot (literal SELECT so the allowlist still
+    passes).
+
+    SUM was missing and there was no refusal behind it, so "sum of them" fell
+    all the way through to the COUNT wrap and answered ``followup_count = 491``
+    for a question about revenue. The scale branch below has been telling people
+    to "ask to sum them first" against a sum that was never implemented.
+
+    The rule now: an aggregation the customer named explicitly is either
+    computed or refused. Falling back to a *different* aggregation and putting a
+    confident number next to it is the worst outcome available (R-0011).
     """
     q = question.lower()
     wants_avg = bool(re.search(r"\b(average|avg|mean)\b", q))
+    wants_sum = bool(
+        re.search(r"\b(sum|summed|combined|altogether|added up|add(?:ed)? together)\b", q)
+        or re.search(r"\btotal(?:led|led up)?\b(?!\s+(?:count|number))", q)
+    )
     scale = _scale_factor(q)
     nums = _numeric_columns(rows)
     measure = _pick_measure(nums)
@@ -1033,6 +1078,27 @@ def _aggregate_prior(
         sql = f"SELECT CAST({result} AS DOUBLE) AS {col}"
         return sql, [{col: result}]
 
+    if wants_sum:
+        # Explicitly asked for a sum: compute it, or refuse. Never silently
+        # answer with a count of the same rows.
+        vals = []
+        for row in rows:
+            raw = row.get(measure) if measure else None
+            if raw is None:
+                continue
+            try:
+                vals.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        if not vals:
+            raise FollowupUnsupported(
+                "the previous answer has no numeric column to add up"
+            )
+        total = round(sum(vals), 2)
+        col = f"sum_{measure}"
+        sql = f"SELECT CAST({total} AS DOUBLE) AS {col}"
+        return sql, [{col: total}]
+
     if wants_avg and measure and rows:
         vals = []
         for row in rows:
@@ -1049,6 +1115,11 @@ def _aggregate_prior(
             # Literal SELECT — no unknown column vs warehouse allowlist.
             sql = f"SELECT CAST({avg_val} AS DOUBLE) AS {col}"
             return sql, [{col: avg_val}]
+
+    if wants_avg:
+        # Same rule as SUM: an average that cannot be computed is refused, not
+        # quietly downgraded to a row count.
+        raise FollowupUnsupported("the previous answer has no numeric column to average")
 
     tree = sqlglot.parse_one(prior_sql, read="duckdb")
     tree.set("limit", None)
@@ -1153,6 +1224,11 @@ def answer(
             layer, badge = "session", "session"
             assumptions = f"follow-up over prior turn ({prior.get('metric_id') or prior.get('layer')})"
             metric_id = prior.get("metric_id")
+        except FollowupUnsupported as exc:
+            # The customer named an aggregation over the answer in front of them.
+            # Falling through would hand the question to the keyword router,
+            # which matches on surface tokens and would answer a different one.
+            return _abstain(question, audit_id, reason=f"follow-up not supported: {exc}")
         except Exception:  # noqa: BLE001
             sql = None
             session_rows = None

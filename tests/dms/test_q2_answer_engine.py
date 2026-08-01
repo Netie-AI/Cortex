@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from CortexOS.dms.answer_engine import ABSTAIN
 from CortexOS.dms.query_service import answer_question
 
 
@@ -139,7 +140,20 @@ def test_total_revenue_g6_answers():
     assert "can't answer" not in answer
 
 
-def test_session_average_of_them():
+def test_session_average_over_a_listing_with_nothing_numeric_abstains():
+    """An average of a column-less list of SKUs is not a count.
+
+    This test previously asserted ``"followup_count" in rows[0]`` for the
+    question "what is the average of them" — the expired-items listing returns
+    only ``sku``, so there was nothing to average and the follow-up fell through
+    to the COUNT wrap and answered 400. Asserting that made the defect the
+    requirement: an average question certified as working while returning a
+    count, which is the false-verification shape CLAUDE.md section 8 names.
+
+    Refusing is the correct answer here, and it is cheap to satisfy honestly —
+    ``test_session_average_of_sales_ranks`` covers the case where the prior turn
+    does carry a measure.
+    """
     from CortexOS.dms.answer_engine import clear_session
 
     sid = "test-session-avg-them"
@@ -147,11 +161,43 @@ def test_session_average_of_them():
     listing = answer_question("Show me all expired items", session_id=sid)
     assert listing["route"] == "sql"
     assert listing["row_count"] >= 1
+
     follow = answer_question("what is the average of them", session_id=sid)
+    assert follow["route"] == ABSTAIN
+    assert follow["rows"] == []
+    # The customer is told which part could not be done, not just "no".
+    assert "average" in follow["assumptions"].lower()
+    assert "followup_count" not in str(follow["rows"])
+
+
+def test_session_sum_of_them_adds_the_measure_up():
+    """"sum of them" answered ``followup_count`` — a count, for a sum question.
+
+    Reported from a live session: after a top-5 revenue ranking, "hmm sum of
+    them?" returned ``followup_count = 491``. SUM was never implemented and had
+    no refusal behind it, so it fell through to the COUNT wrap and put a
+    confident number next to the wrong aggregation.
+    """
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-sum-them"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    measure_total = sum(
+        float(r["sales_value_myr"]) for r in top["rows"] if r.get("sales_value_myr") is not None
+    )
+
+    follow = answer_question("hmm sum of them?", session_id=sid)
     assert follow["route"] == "sql"
     assert follow["layer"] == "session"
     assert follow["row_count"] == 1
-    assert "followup_count" in (follow["rows"][0] or {})
+    row = follow["rows"][0]
+    assert "followup_count" not in row, "a sum must not be answered with a count"
+    assert "sum_sales_value_myr" in row
+    assert row["sum_sales_value_myr"] == pytest.approx(round(measure_total, 2), rel=1e-6)
+    # The rendered answer is what the customer reads (CLAUDE.md section 8).
+    assert "491" not in follow["answer"]
 
 
 def test_session_average_of_sales_ranks():
