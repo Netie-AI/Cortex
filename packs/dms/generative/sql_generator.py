@@ -41,10 +41,17 @@ def _leave_machine_allowed() -> tuple[bool, str]:
     try:
         from CortexOS.integrations.openvault_gate import check_gate
 
-        # Prefer explicit llm/freeroute; fall back to leave_machine / run.
+        # OpenVault's gate accepts exactly retrieve | run | deploy | leave |
+        # connect. This asked for "llm" and "leave_machine", which are not among
+        # them, so every call 422'd, came back empty, and was read as "OpenVault
+        # unreachable" — the deny-by-default branch. L2 was therefore hard-denied
+        # on a machine whose gate was open with six providers ready, and the
+        # denial looked like a policy decision rather than a typo.
+        #
+        # "leave" is the honest action: schema and question go off the box to
+        # FreeRoute. "run" is the fallback for an older gate that predates it.
         for action, destination in (
-            ("llm", "freeroute"),
-            ("leave_machine", "freeroute"),
+            ("leave", "freeroute"),
             ("run", "openvault"),
         ):
             gate = check_gate(
@@ -85,7 +92,15 @@ def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | N
     """POST OpenVault /v1/chat/completions — large-model tier. None on any failure."""
     from CortexOS.integrations.openvault_client import openvault_base_url, post_json
 
-    model = os.environ.get("DMS_L2_MODEL") or os.environ.get("OPENVAULT_SQL_MODEL") or "gpt-4o-mini"
+    # Default must be a model FreeRoute's configured providers actually serve.
+    # "gpt-4o-mini" is an OpenAI name; routed to Groq it answers HTTP 404
+    # non-retryable, so every generation failed and the answer path abstained —
+    # indistinguishable from "no model wired" and equally silent.
+    model = (
+        os.environ.get("DMS_L2_MODEL")
+        or os.environ.get("OPENVAULT_SQL_MODEL")
+        or "llama-3.3-70b-versatile"
+    )
     body = {
         "model": model,
         "messages": [
@@ -116,6 +131,48 @@ def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | N
         return None
 
 
+#: Enumerate a categorical column in the prompt only when it is small enough to
+#: read as a closed set. Past this it is a lookup, not an enum, and listing it
+#: would crowd out the schema.
+MAX_ENUM_VALUES = 25
+
+
+def _value_ground_truth(schema_context: dict[str, Any]) -> list[str]:
+    """The values each categorical column actually holds, verbatim.
+
+    Told only "use exact warehouse values", the model has to guess the encoding,
+    and it guesses plausibly: ``txn_type = 'SALE'`` for a revenue question
+    against a warehouse that stores ``OUT``. The literal gate catches it and the
+    answer abstains — correct, and a wasted round-trip for a question that was
+    answerable.
+
+    Casing and spelling are the same class of problem: ``nasi lemak``,
+    ``Nasi Lemak`` and ``NASI LEMAK`` are one value to a person and three to a
+    ``=``. Handing over the stored spelling removes the guess instead of
+    correcting it afterwards, and what is listed here is read from the warehouse,
+    so it cannot drift from what is really in the column.
+    """
+    try:
+        from packs.dms.semantic import values as valuedict
+    except Exception:  # noqa: BLE001
+        return []
+
+    lines: list[str] = []
+    wanted = set((schema_context.get("tables") or {}).keys())
+    for column, table in getattr(valuedict, "VALUE_COLUMNS", {}).items():
+        if table not in wanted:
+            continue
+        try:
+            allowed = valuedict.values_for(column)
+        except Exception:  # noqa: BLE001 — a prompt hint must never break the ask
+            continue
+        if not allowed or len(allowed) > MAX_ENUM_VALUES:
+            continue
+        rendered = ", ".join(repr(str(v)) for v in allowed)
+        lines.append(f"- {table}.{column} is one of: {rendered}")
+    return lines
+
+
 def _build_prompt(
     question: str,
     schema_context: dict[str, Any],
@@ -124,11 +181,23 @@ def _build_prompt(
 ) -> str:
     parts = [
         schema_prompt_block(schema_context),
+    ]
+    ground_truth = _value_ground_truth(schema_context)
+    if ground_truth:
+        parts += [
+            "",
+            "EXACT COLUMN VALUES (copy these spellings and casing verbatim; "
+            "never invent a category):",
+            *ground_truth,
+        ]
+    parts += [
         "",
         f"QUESTION: {question}",
         "",
         "Emit one DuckDB SELECT. Encode categorical filters with exact warehouse values "
-        "(e.g. SKU-BETA not BETA; WH-A / WAREHOUSE A as stored).",
+        "(e.g. SKU-BETA not BETA; WH-A / WAREHOUSE A as stored). "
+        "If the question asks to skip or exclude the leading rows, use OFFSET. "
+        "If no listed column can answer it, emit nothing rather than guessing a column.",
     ]
     if prior_violations:
         parts.append("PREVIOUS VALIDATION ERRORS (fix these):")

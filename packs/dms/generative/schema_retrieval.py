@@ -6,6 +6,8 @@ Never put the full catalog in a prompt. Cache embeddings; invalidate when
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,9 @@ from packs.dms.skills.capture import cosine_similarity, text_embedding
 ROOT = Path(__file__).resolve().parents[3]
 SEMANTIC_PATH = ROOT / "packs" / "dms" / "semantic_layer.yaml"
 DEFAULT_TOP_K = 4
+
+#: Tables named after FROM / JOIN in a metric's SQL.
+TABLE_HINT_RE = re.compile(r"\b(?:from|join)\s+([a-z_][a-z0-9_]*)", re.I)
 
 
 @dataclass(slots=True)
@@ -50,8 +55,49 @@ def _glossary_bits(raw: dict[str, Any], table: str) -> list[str]:
     return bits
 
 
+def _metric_vocabulary() -> dict[str, list[str]]:
+    """Business vocabulary per table, taken from the metrics that read it.
+
+    Retrieval text used to be purely structural — ``table transactions columns
+    txn_id sku location_id txn_type quantity_kg unit_cost_myr …``. The word
+    "revenue" appears nowhere in that, so no embedding could connect a revenue
+    question to the table revenue lives in: ``transactions`` was never retrieved
+    for *any* sales question, and the model dutifully wrote revenue against
+    ``inventory`` instead. Wrong table, valid SQL, passes EXPLAIN.
+
+    The vocabulary already exists. ``metrics.yaml`` says ``sales_by_value``
+    reads ``transactions`` and is also called "top selling", "revenue by sku",
+    "highest revenue" — the same synonyms the alias-graph invariant keeps unique.
+    Deriving the description from the metric definitions means there is no third
+    place to keep in sync, and a new metric improves retrieval for free.
+    """
+    try:
+        from packs.dms.semantic.loader import load_all
+    except Exception:  # noqa: BLE001 — retrieval must not die on a pack import
+        return {}
+
+    vocab: dict[str, list[str]] = {}
+    try:
+        metrics = load_all()
+    except Exception:  # noqa: BLE001
+        return {}
+
+    declared = getattr(metrics, "metrics", None) or {}
+    # ``SemanticModel.metrics`` is keyed by id — iterate the definitions, not the ids.
+    for metric in (declared.values() if isinstance(declared, dict) else declared):
+        sql = str(getattr(metric, "sql", "") or "").lower()
+        words = [str(getattr(metric, "id", ""))] + [
+            str(s) for s in (getattr(metric, "synonyms", None) or [])
+        ]
+        for table in TABLE_HINT_RE.findall(sql):
+            vocab.setdefault(table, []).extend(w for w in words if w)
+    # Deduplicate, keep order — repeated phrases skew the embedding.
+    return {t: list(dict.fromkeys(ws)) for t, ws in vocab.items()}
+
+
 def _build_entries(raw: dict[str, Any]) -> list[CatalogEntry]:
     tables = raw.get("tables") or {}
+    vocab = _metric_vocabulary()
     out: list[CatalogEntry] = []
     for name, spec in tables.items():
         if not isinstance(spec, dict):
@@ -63,6 +109,8 @@ def _build_entries(raw: dict[str, Any]) -> list[CatalogEntry]:
                 f"table {name}",
                 "columns " + " ".join(cols),
                 " ".join(gloss),
+                # What people call this table when they ask for it.
+                " ".join(vocab.get(name) or []),
             ]
         )
         out.append(
