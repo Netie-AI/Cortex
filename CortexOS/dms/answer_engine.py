@@ -1139,6 +1139,7 @@ def _aggregate_prior(
     rows: list[dict[str, Any]],
     *,
     total_count: int | None = None,
+    total_exact: bool = True,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Follow-up aggregate / scale over the prior result.
 
@@ -1269,8 +1270,11 @@ def _aggregate_prior(
     tree.set("order", None)
     inner = tree.sql(dialect="duckdb")
     sql = f"SELECT COUNT(*) AS followup_count FROM ({inner}) _prior"
-    if total_count is not None and not wants_avg:
-        # Prefer honest total when prior listing was truncated
+    if total_count is not None and total_exact and not wants_avg:
+        # Prefer honest total when prior listing was truncated. Only when that
+        # total is real: an inexact one is a lower bound, and replaying it here
+        # would turn "at least 1000" into a confident "1000". Falling through
+        # runs the COUNT for real instead.
         return sql, [{"followup_count": int(total_count)}]
     return sql, []  # rows filled by execute
 
@@ -1367,6 +1371,7 @@ def answer(
                     question,
                     prior.get("rows") or [],
                     total_count=prior.get("total_count"),
+                    total_exact=bool(prior.get("total_count_exact", True)),
                 )
             layer, badge = "session", "session"
             assumptions = f"follow-up over prior turn ({prior.get('metric_id') or prior.get('layer')})"
@@ -1688,10 +1693,27 @@ def answer(
         elif plausible.probed:
             assumptions = f"{assumptions}; {plausible.probed} filter value(s) verified present"
 
-    truncated = total_count is not None and len(rows) >= MAX_LIMIT and total_count > len(rows)
+    # A capped listing whose COUNT probe failed used to report total_count =
+    # len(rows) = exactly 1000, with truncated=False because total_count was
+    # None — so nothing disclosed the cap and the customer read a fabricated
+    # exact total. The real number could be 50,000, and a follow-up "how many of
+    # them?" replayed the same invented 1000.
+    #
+    # len(rows) is only the true total when the cap was NOT reached. At the cap
+    # with no count, all that is known is "at least this many", and the answer
+    # says so rather than picking a number.
+    count_exact = total_count is not None or len(rows) < MAX_LIMIT
+    capped = len(rows) >= MAX_LIMIT
+    truncated = capped and (total_count is None or total_count > len(rows))
+
     answer_text = synthesize_answer(rows, question)
-    if truncated:
+    if truncated and count_exact:
         answer_text = f"{total_count} rows match; showing the first {len(rows)}.\n" + answer_text
+    elif truncated:
+        answer_text = (
+            f"More than {len(rows)} rows match; showing the first {len(rows)}. "
+            "The exact total could not be computed for this query.\n"
+        ) + answer_text
 
     # Remember last successful turn for follow-ups (scoped to Space)
     _remember(
@@ -1703,6 +1725,9 @@ def answer(
             "layer": layer,
             "rows": rows[:50],
             "total_count": total_count if total_count is not None else len(rows),
+            # Whether that total is the real one. A follow-up count must not
+            # replay a lower bound as though it were exact.
+            "total_count_exact": count_exact,
             "source_table": _infer_source_table(sql),
             "space_id": (space_id or "").strip() or None,
         },
@@ -1729,6 +1754,9 @@ def answer(
         "row_count": len(rows),
         "rows": rows,
         "total_count": total_count if total_count is not None else len(rows),
+        # False means total_count is a lower bound, not the answer. The UI must
+        # render it as "1000+" rather than "1000".
+        "total_count_exact": count_exact,
         "truncated": truncated,
         "source_table": _infer_source_table(sql),
         "layer": layer,
