@@ -16,7 +16,7 @@ before contract `ask`. No contract major: shapes stay on **1.1.0**.
 Still **1.1.0**. Regenerate `packages/cortex_client` from
 `contract/openapi-1.1.0.json` only — never from `openapi-1.0.0.json`.
 
-Do **not** reimplement `canonical_manifest_bytes`. Pin `cortex-contract==1.1.0`
+Do **not** reimplement `canonical_manifest_bytes`. Pin `cortex-contract>=1.2.0,<2`
 and call the function. See [CORTEX_TO_DMS_C3_MANIFEST_CONTRACT.md](CORTEX_TO_DMS_C3_MANIFEST_CONTRACT.md).
 
 `AskRequest` is unchanged (no `manifest` field). The manifest reaches Cortex via
@@ -122,7 +122,7 @@ Those badges must **not** claim certified / governed green. Only live Cortex
 ## 8. Flip checklist
 
 1. Cortex + OpenVault up; JWKS reachable or cache warm.
-2. DMS pins `cortex-contract==1.1.0`; client from `openapi-1.1.0.json`.
+2. DMS pins `cortex-contract>=1.2.0,<2`; client from `openapi-1.2.0.json`.
 3. Mint → `submit` bind → `ask` against `http://127.0.0.1:8010`.
 4. Confirm unbound ask returns `session_unbound`; tampered signature refused.
 5. Set `DMS_ASK_MODE=live`.
