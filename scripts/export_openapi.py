@@ -250,8 +250,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(rendered, encoding="utf-8")
-    digest.write_text(f"{expected}  {out.name}\n", encoding="utf-8")
+    # newline="\n" is load-bearing: `expected` above hashes the in-memory string,
+    # which carries LF. Without this, write_text translates to CRLF on Windows, so
+    # the file never hashes to its own sidecar and every downstream verification -
+    # here, check_contract_compat.py, and the DMS contract-pin job that vendors this
+    # exact file - fails on Linux CI while passing on the machine that wrote it.
+    out.write_text(rendered, encoding="utf-8", newline="\n")
+    digest.write_text(f"{expected}  {out.name}\n", encoding="utf-8", newline="\n")
     print(f"Wrote {out.relative_to(ROOT)} and {digest.name}")
     return 0
 

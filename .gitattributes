@@ -1,0 +1,15 @@
+# Contract artifacts are hash-verified. Git must not touch their bytes.
+#
+# Without this, core.autocrlf=true on Windows stores LF in the blob while the
+# working tree holds CRLF. export_openapi.py then writes a .sha256 sidecar for
+# the CRLF bytes, Linux CI checks the file out as LF, and every hash comparison
+# fails - a gate that cannot pass on any platform but the one that generated it.
+# DMS vendors contract/openapi-1.2.0.json and verifies the same sidecar, so the
+# defect crosses the repo boundary.
+#
+# -text disables all end-of-line conversion, so the bytes are identical in the
+# blob, on Windows, and on the CI runner. Frozen specs (1.0.0, 1.1.0) keep the
+# exact bytes consumers already vendored.
+contract/*.json -text
+contract/*.sha256 -text
+contract/testvectors/* -text
