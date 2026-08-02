@@ -230,8 +230,7 @@ def register_dms_routes(app: Any) -> None:
 
         return add_inventory_entry(body.proposed, approved_by=body.approved_by)
 
-    from CortexOS.api.chat_routes import register_chat_routes
-    from CortexOS.api.warehouse_routes import register_warehouse_routes
-
-    register_chat_routes(app)
-    register_warehouse_routes(app)
+    # chat_routes and warehouse_routes are mounted by the app factory in app.py, not
+    # chained from here. Chaining registered chat_routes twice, which put three
+    # duplicate operation IDs into the generated OpenAPI spec - and the spec is the
+    # artifact DMS consumes, so a duplicate there is a customer-facing defect.

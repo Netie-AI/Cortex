@@ -111,9 +111,11 @@ def create_app() -> Any:
         from netie.api.skill_routes import register_skill_routes
         from netie.api.stream_routes import register_stream_routes
         from netie.api.task_routes import register_task_routes
+        from netie.api.warehouse_routes import register_warehouse_routes
 
         register_dms_routes(app)
         register_chat_routes(app)
+        register_warehouse_routes(app)
         register_brain_routes(app)
         register_task_routes(app)
         register_skill_routes(app)
