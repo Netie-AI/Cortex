@@ -1036,7 +1036,8 @@ def clear_session(session_id: str | None = None, *, space_id: str | None = None)
 #: does not name its own subject (the same guard _is_window_followup already
 #: uses for "them"-adjacent re-slicing).
 _POSSESSIVE_FOLLOWUP = re.compile(
-    r"\b(their|its)\s+(average|avg|mean|median|total|sum|count)\b", re.I
+    r"\b(their|its)\s+(average|avg|mean|median|total|sum|count|min|minimum|max|maximum)\b",
+    re.I,
 )
 
 
@@ -1063,10 +1064,11 @@ def _is_anaphora(q: str) -> bool:
     return bool(
         re.search(
             r"\b(them|those|these)\b|"
-            r"\b(average|avg|mean|median|total|sum|count|how many)\s+of\s+(them|those|these|it)\b|"
-            r"\bwhat is the (average|median) of (them|those|these|it)\b|"
+            r"\b(average|avg|mean|median|total|sum|count|how many|min|minimum|max|maximum)\s+of\s+(them|those|these|it)\b|"
+            r"\bwhat is the (average|median|min(?:imum)?|max(?:imum)?) of (them|those|these|it)\b|"
             r"\baverage of (them|those|these)\b|"
             r"\bmedian of (them|those|these)\b|"
+            r"\b(?:min|minimum|max|maximum) of (them|those|these)\b|"
             r"\bdivid(?:e|ed|ing)\b.*?\bby\s+\d|"
             r"\bmultipl(?:y|ied|ying)\b.*?\bby\s+\d|"
             r"(?:/|÷|×|\*)\s*\d|"
@@ -1298,6 +1300,8 @@ def _aggregate_prior(
     q = question.lower()
     wants_avg = bool(re.search(r"\b(average|avg|mean)\b", q))
     wants_median = bool(re.search(r"\bmedian\b", q))
+    wants_min = bool(re.search(r"\b(min(?:imum)?)\b", q))
+    wants_max = bool(re.search(r"\b(max(?:imum)?)\b", q))
     wants_sum = bool(
         re.search(r"\b(sum|summed|combined|altogether|added up|add(?:ed)? together)\b", q)
         or re.search(r"\btotal(?:led|led up)?\b(?!\s+(?:count|number))", q)
@@ -1401,6 +1405,44 @@ def _aggregate_prior(
     if wants_median:
         # Same rule as SUM/AVG: refused, not silently downgraded to a count.
         raise FollowupUnsupported("the previous answer has no numeric column to take a median of")
+
+    if wants_min and measure and rows:
+        vals = []
+        for row in rows:
+            raw = row.get(measure)
+            if raw is None:
+                continue
+            try:
+                vals.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        if vals:
+            min_val = round(min(vals), 2)
+            col = f"min_{measure}"
+            sql = f"SELECT CAST({min_val} AS DOUBLE) AS {col}"
+            return sql, [{col: min_val}]
+
+    if wants_min:
+        raise FollowupUnsupported("the previous answer has no numeric column to take a minimum of")
+
+    if wants_max and measure and rows:
+        vals = []
+        for row in rows:
+            raw = row.get(measure)
+            if raw is None:
+                continue
+            try:
+                vals.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        if vals:
+            max_val = round(max(vals), 2)
+            col = f"max_{measure}"
+            sql = f"SELECT CAST({max_val} AS DOUBLE) AS {col}"
+            return sql, [{col: max_val}]
+
+    if wants_max:
+        raise FollowupUnsupported("the previous answer has no numeric column to take a maximum of")
 
     # "How many of them?" counts what is on screen. Stripping LIMIT unconditionally
     # counted the whole underlying result instead, so after a top-5 the answer was

@@ -38,6 +38,27 @@ def session(request) -> str:
     return sid
 
 
+def _expected_from_top(top_rows: list[dict], expect_key: str):
+    vals = [
+        float(r["sales_value_myr"])
+        for r in top_rows
+        if r.get("sales_value_myr") is not None
+    ]
+    if expect_key.startswith("sum_"):
+        return round(sum(vals), 2)
+    if expect_key.startswith("avg_"):
+        return round(sum(vals) / len(vals), 2)
+    if expect_key.startswith("median_"):
+        return round(statistics.median(vals), 2)
+    if expect_key.startswith("min_"):
+        return round(min(vals), 2)
+    if expect_key.startswith("max_"):
+        return round(max(vals), 2)
+    if expect_key == "followup_count":
+        return len(top_rows)
+    raise AssertionError(f"unknown expect_key {expect_key!r}")
+
+
 @pytest.mark.parametrize(
     ("setup", "follow_up", "expect_key"),
     [
@@ -47,6 +68,16 @@ def session(request) -> str:
         (TOP5, "how many of them?", "followup_count"),
         (TOP5, "give me their mean", "avg_sales_value_myr"),
         (TOP5, "their total", "sum_sales_value_myr"),
+        # those / these pronouns
+        (TOP5, "sum of those", "sum_sales_value_myr"),
+        (TOP5, "average of these", "avg_sales_value_myr"),
+        (TOP5, "median of those", "median_sales_value_myr"),
+        (TOP5, "count of these", "followup_count"),
+        # min / max (acceptance list)
+        (TOP5, "what is the min of them", "min_sales_value_myr"),
+        (TOP5, "maximum of those", "max_sales_value_myr"),
+        (TOP5, "their minimum", "min_sales_value_myr"),
+        (TOP5, "give me their max", "max_sales_value_myr"),
     ],
 )
 def test_followup_corpus_computes_or_abstains_honestly(
@@ -62,19 +93,12 @@ def test_followup_corpus_computes_or_abstains_honestly(
     assert follow["route"] != ABSTAIN, f"{follow_up!r} abstained unexpectedly"
     row = (follow.get("rows") or [{}])[0]
     assert expect_key in row, f"{follow_up!r} missing {expect_key!r}"
-    if expect_key.startswith(("sum_", "avg_", "median_")):
-        vals = [
-            float(r["sales_value_myr"])
-            for r in top["rows"]
-            if r.get("sales_value_myr") is not None
-        ]
-        if expect_key.startswith("sum_"):
-            expected = round(sum(vals), 2)
-        elif expect_key.startswith("avg_"):
-            expected = round(sum(vals) / len(vals), 2)
-        else:
-            expected = round(statistics.median(vals), 2)
-        assert row[expect_key] == pytest.approx(expected, rel=1e-6)
+    # Named agg must never silently become a different aggregation (wrong=0).
+    if expect_key != "followup_count":
+        assert "followup_count" not in row, f"{follow_up!r} answered with a count"
+    expected = _expected_from_top(top["rows"], expect_key)
+    assert row[expect_key] == pytest.approx(expected, rel=1e-6)
+    if expect_key != "followup_count":
         assert str(int(expected)) in follow["answer"] or str(expected) in follow["answer"]
 
 
@@ -84,6 +108,8 @@ def test_followup_corpus_computes_or_abstains_honestly(
         "what is the average of them",
         "sum of them",
         "give me their mean",
+        "min of those",
+        "maximum of these",
     ],
 )
 def test_followup_without_prior_abstains(session: str, follow_up: str) -> None:
@@ -91,3 +117,13 @@ def test_followup_without_prior_abstains(session: str, follow_up: str) -> None:
     _assert_sql_envelope(result)
     assert result["route"] == ABSTAIN
     assert result["badge"] == "abstain"
+
+
+def test_sum_phrasing_never_returns_a_count(session: str) -> None:
+    """Adversarial: sum-shaped follow-up must not invent a count (wrong=0)."""
+    answer_question(TOP5, session_id=session)
+    follow = answer_question("hmm sum of them?", session_id=session)
+    _assert_sql_envelope(follow)
+    row = (follow.get("rows") or [{}])[0]
+    assert "followup_count" not in row
+    assert "sum_sales_value_myr" in row
