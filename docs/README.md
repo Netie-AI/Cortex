@@ -52,11 +52,12 @@ RUMA vertical: archived → [`bin/verticals/RUMA_PHASE3_5.md`](bin/verticals/RUM
 | Doc | Purpose |
 |-----|---------|
 | [../STATUS.md](../STATUS.md) | Current gate, debt, next feature |
-| [../CONTEXT.md](../CONTEXT.md) | Paste into new Claude chat |
+| [ACTIVE.md](ACTIVE.md) | The canonical map - read this first |
 | [../ARCHITECTURE.md](../ARCHITECTURE.md) | Built vs partial inventory |
 | [../PARKING_LOT.md](../PARKING_LOT.md) | Deferred ideas only |
 
-`python scripts/handoff.py` prints a clipboard-ready block.
+There is no handoff generator. A new session reads `CLAUDE.md`, then `docs/ACTIVE.md`,
+then `STATUS.md`.
 
 ## Cursor governance
 

@@ -11,8 +11,8 @@
 | # | File | Role |
 |---|---|---|
 | 1 | [STATUS.md](../../STATUS.md) | Current gate + next moves |
-| 2 | [CURSOR_HANDOFF.md](../../CURSOR_HANDOFF.md) | Builder startup |
-| 3 | [CONTEXT.md](../../CONTEXT.md) | Locked decisions |
+| 2 | [CLAUDE.md](../../CLAUDE.md) | Invariants and protected paths |
+| 3 | [docs/ACTIVE.md](../ACTIVE.md) | The canonical map |
 | 4 | [ARCHITECTURE.md](../../ARCHITECTURE.md) | Built vs partial honesty |
 | 5 | [PARKING_LOT.md](../../PARKING_LOT.md) | Do not build from here |
 | 6 | This map | Edit targets + cross-app links |
@@ -162,5 +162,4 @@ python -m pytest tests/ -q
 python -m bench.accuracy
 python -m bench.stress --scenario stream --threads 8 --iterations 15
 .\demo\run_demo.ps1 -Fast
-python scripts/handoff.py --write
 ```

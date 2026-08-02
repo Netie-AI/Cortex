@@ -32,7 +32,9 @@ Folder watch, schema infer, agentic cleaning (AI proposes, deterministic applies
 YOLO / Grounding DINO / Label Studio self-hosted. **Condition:** 50+ real warehouse interactions from pilot.
 
 ## P8 — Automated handoff ~~(beyond manual STATUS paste)~~
-**SHIPPED 2026-06-26** — `CLAUDE_HANDOFF.md`, `CURSOR_HANDOFF.md`, `python scripts/handoff.py --write`. Keep this entry as historical; do not re-build.
+**SHIPPED 2026-06-26, RETIRED 2026-08-02.** Was `CLAUDE_HANDOFF.md` + `CURSOR_HANDOFF.md` + `scripts/handoff.py --write`. All three are gone: the files to `docs/bin/handoffs/`, the script deleted.
+
+Why it was the wrong shape, so nobody rebuilds it: per-agent files were created because several agents work this repo, but **different agents do not need different truth - they need the same truth plus a role.** The generator also only re-stamped a timestamp, so a stale "153 passed" claim survived every single regeneration while the real count reached 1310. One state file (`STATUS.md`) replaces all of it. Do not re-build.
 
 ## P9 — Cortex as respond.io replacement (full)
 **Condition:** DMS revenue + RUMA Closer validates sentiment draft loop.

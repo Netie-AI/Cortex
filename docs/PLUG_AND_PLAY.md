@@ -59,7 +59,6 @@ python scripts/finetune_dms_tone.py --smoke   # LoRA on warehouse tone corpus
 ## Cross-laptop resume
 
 ```powershell
-git pull origin dms-v2
-python scripts/handoff.py --cursor
+git pull origin main
 pytest -q
 ```

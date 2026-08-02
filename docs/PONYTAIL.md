@@ -32,7 +32,7 @@ Or `~/.config/ponytail/config.json`:
 
 ## Cortex workflow
 
-1. **Before coding:** read `CURSOR_HANDOFF.md` (keep handoff under 1500 tokens)
+1. **Before coding:** read `STATUS.md` (the one state file, capped at 60 lines)
 2. **During build:** prefer extending existing functions over new modules
 3. **Before merge:** ponytail-review mindset — remove unused imports, collapse one-liner helpers
 4. **Never ponytail:** security harness, ledger tests, adversarial corpus

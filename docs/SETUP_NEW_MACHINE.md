@@ -110,7 +110,6 @@ netstat -ano | findstr ":3000"
 ## Resume development on the new machine
 
 ```powershell
-git pull origin dms-v2
-python scripts/handoff.py --cursor
+git pull origin main
 pytest -q
 ```

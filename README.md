@@ -63,14 +63,14 @@ Open-source agentic AI runtime: install locally, bring your own API key (OpenAI,
 | [STATUS.md](STATUS.md) | Current gate, debt, next feature |
 | [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md) | One-call `plug_in(app)` integration |
 
-Older handoff docs (`CURSOR_HANDOFF.md`, `CLAUDE_HANDOFF.md`, `CONTEXT.md`,
-`CORTEX_COMPLETE_PLAN.md`) describe a state the repo has moved past — they still
-reference F7 and a 153-test suite. They are kept for history; do not start from them.
+The old per-agent handoff files (`CURSOR_HANDOFF.md`, `CLAUDE_HANDOFF.md`, `CONTEXT.md`)
+are archived under [`docs/bin/handoffs/`](docs/bin/handoffs/), and `scripts/handoff.py`
+is retired. They described a state the repo had moved past - F7 and a 153-test suite -
+and the generator could only re-stamp a timestamp, which is why the stale count survived
+every regeneration.
 
-```powershell
-python scripts/handoff.py --cursor   # builder
-python scripts/handoff.py --claude   # supervisor
-```
+Different agents do not need different truth. They need the same truth plus a role, so
+there is now one state file: [STATUS.md](STATUS.md).
 
 ## Quick start (demo now)
 

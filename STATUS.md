@@ -1,6 +1,6 @@
 # STATUS.md
 **Last updated:** 2026-07-31 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
-**Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
+**Rule:** Update after every gate. This is the one state file - there is no per-agent handoff. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
 > **2026-07-31 (docs hygiene + multi-app mend):** Done/pass packets → `docs/bin/`.  
 > **Canonical map = `docs/ACTIVE.md` (engine-first)** — Cortex serves DMS, AirGPT, Pointer (`D:\Netie Clicks`), OpenVault; DMS lane = `docs/dms/ACTIVE.md`. Consumers: `docs/engine/CONSUMERS.md` + `PRODUCT_ROLES.md`.  
