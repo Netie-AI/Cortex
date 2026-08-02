@@ -1,6 +1,21 @@
 # STATUS.md
-**Last updated:** 2026-07-31 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
+**Last updated:** 2026-08-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
 **Rule:** Update after every gate. This is the one state file - there is no per-agent handoff. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
+
+> **2026-08-03 (dms follow-up conversation: "their"/"its" pronoun + median):** Reported live,
+> demo-eve — after re-fetching a top-5, `"give me their mean"` abstained. `_is_anaphora`
+> recognised `them/those/these` but not the possessive `their/its`, so the follow-up never
+> looked at the prior turn. First attempt added them to the bare pronoun class and broke two
+> corpus questions that were never follow-ups (`"SKUs under their reorder point at WH-A"`,
+> `"what stock has gone past its expiry date"` — both name their own subject and got hijacked
+> onto an unrelated prior ranking; `bench/paraphrase.py` wrong=2). Fixed by scoping the match
+> to *"possessive directly before an aggregation word"* and refusing it when the question
+> names its own subject (`_NAMES_OWN_SUBJECT`, the same guard the window follow-up already
+> used). Separately, **median was not implemented as an aggregation at all**, in any phrasing
+> — added `statistics.median` alongside SUM/AVG in `_aggregate_prior`, same compute-or-refuse
+> rule. Both directions verified fallible before landing (R-0007). `tests/dms/`: 850 passed, 6
+> skipped. Commits `4d0161a`, `2c77a10` on `chore/unblock-ci-and-estate-audit` (uncommitted,
+> unrelated `docs/engine/CONSUMERS.md` change from another lane left untouched, R-0006).
 
 > **2026-07-31 (docs hygiene + multi-app mend):** Done/pass packets → `docs/bin/`.  
 > **Canonical map = `docs/ACTIVE.md` (engine-first)** — Cortex serves DMS, AirGPT, Pointer (`D:\Netie Clicks`), OpenVault; DMS lane = `docs/dms/ACTIVE.md`. Consumers: `docs/engine/CONSUMERS.md` + `PRODUCT_ROLES.md`.  
