@@ -29,6 +29,16 @@ from CortexOS.dms.query_service import answer_question
 TOP5 = "Top 5 selling SKUs by revenue"
 
 
+def _assert_customer_envelope(result: dict, *, expect_route: str | None = None) -> None:
+    """Phase 0 — assert on what the customer receives, not only SQL."""
+    assert "badge" in result and "answer" in result and "rows" in result
+    if expect_route == ABSTAIN:
+        assert result["badge"] == "abstain"
+        assert result["rows"] == []
+    elif result["route"] != ABSTAIN:
+        assert result["badge"] in ("certified", "governed_metric", "session", "query_skill")
+
+
 @pytest.fixture
 def session(request) -> str:
     sid = f"conv-{request.node.name}"
@@ -52,6 +62,8 @@ def test_sum_of_them_returns_the_sum_not_a_count(session: str, phrasing: str) ->
 
     follow = answer_question(phrasing, session_id=session)
 
+    _assert_customer_envelope(follow)
+    assert follow["badge"] == "session"
     row = (follow.get("rows") or [{}])[0]
     assert "followup_count" not in row, f"{phrasing!r} answered a sum with a count"
     assert row.get("sum_sales_value_myr") == pytest.approx(expected, rel=1e-6)
@@ -216,6 +228,7 @@ def test_give_me_their_mean_reported_live(session: str) -> None:
 
     follow = answer_question("give me their mean", session_id=session)
 
+    _assert_customer_envelope(follow)
     assert follow["route"] != ABSTAIN, "the exact live-reported abstain"
     assert follow["layer"] == "session"
     row = (follow.get("rows") or [{}])[0]
@@ -279,3 +292,62 @@ def test_a_first_attempt_at_this_fix_broke_these_two_corpus_questions(
     assert result.get("layer") != "session", (
         f"{phrasing!r} was answered as a follow-up over an unrelated prior turn"
     )
+
+
+# ----------------------------------------------------------- arithmetic follow-up
+
+
+@pytest.mark.parametrize("phrasing", ["+ 2000", "add 2000", "adding 2000"])
+def test_add_literal_on_scalar_prior(session: str, phrasing: str) -> None:
+    """After a single-number answer, '+ 2000' must ground on that measure."""
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = f"{session}-scalar-add"
+    clear_session(sid)
+    first = answer_question("What was revenue last month?", session_id=sid)
+    prior = float(first["rows"][0]["revenue_myr"])
+
+    follow = answer_question(phrasing, session_id=sid)
+
+    assert follow["route"] != ABSTAIN, f"{phrasing!r} did not reach session arithmetic"
+    assert follow["layer"] == "session"
+    scaled = float(next(iter((follow["rows"] or [{}])[0].values())))
+    assert scaled == pytest.approx(round(prior + 2000, 2), rel=1e-6)
+
+
+def test_subtract_literal_on_scalar_prior(session: str) -> None:
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = f"{session}-scalar-sub"
+    clear_session(sid)
+    first = answer_question("What was revenue last month?", session_id=sid)
+    prior = float(first["rows"][0]["revenue_myr"])
+
+    follow = answer_question("minus 50", session_id=sid)
+
+    assert follow["route"] != ABSTAIN
+    assert follow["layer"] == "session"
+    scaled = float(next(iter((follow["rows"] or [{}])[0].values())))
+    assert scaled == pytest.approx(round(prior - 50, 2), rel=1e-6)
+
+
+def test_add_on_top5_without_sum_abstains(session: str) -> None:
+    """Multi-row prior without an explicit sum is ambiguous — same guard as divide."""
+    answer_question(TOP5, session_id=session)
+    follow = answer_question("+ 2000", session_id=session)
+    assert follow["layer"] != "session" or follow["route"] == ABSTAIN
+
+
+def test_sum_then_add_on_top5(session: str) -> None:
+    """Explicit sum in the same utterance removes multi-row ambiguity."""
+    top = answer_question(TOP5, session_id=session)
+    total = round(
+        sum(float(r["sales_value_myr"]) for r in top["rows"] if r.get("sales_value_myr")), 2
+    )
+
+    follow = answer_question("sum them then add 2000", session_id=session)
+
+    assert follow["route"] != ABSTAIN
+    assert follow["layer"] == "session"
+    scaled = float(next(iter((follow["rows"] or [{}])[0].values())))
+    assert scaled == pytest.approx(round(total + 2000, 2), rel=1e-6)

@@ -2,6 +2,19 @@
 **Last updated:** 2026-08-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
 **Rule:** Update after every gate. This is the one state file - there is no per-agent handoff. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
+> **2026-08-03 (EPIC-011 demo minimum — follow-ups grounded + grant-bound):** Demo-eve
+> minimum for multi-turn follow-ups shipped on `chore/unblock-ci-and-estate-audit`.
+> Possessive pronouns (`their`/`its` before agg), median, SUM/AVG/COUNT over prior rows,
+> additive/subtractive arithmetic (`+ 2000` / `minus 50`), session anchor stability
+> (scalar sum does not replace listing for "them"). **FOLLOWUP-03:** session memory stores
+> `granted_tables` from manifest; follow-ups call `_check_followup_grant` and recognised
+> anaphora **never fall through** to fresh routing on failure (abstain instead). Tests:
+> `test_followup_conversation.py`, `test_followup_corpus.py`, `test_followup_grant_bound.py`,
+> `test_scale_factor_additive.py` — envelope asserts badge/rows/values, not SQL alone.
+> Verify: `DMS_READ_ONLY_QUERIES=1 python -m pytest tests/dms/test_followup_*.py -q`.
+> Residual: low-stock follow-up still needs `inventory` granted; full EPIC-011 (FOLLOWUP-01
+> arithmetic chain edge cases, broader adversarial corpus) remains open on #19.
+
 > **2026-08-03 (dms follow-up conversation: "their"/"its" pronoun + median):** Reported live,
 > demo-eve — after re-fetching a top-5, `"give me their mean"` abstained. `_is_anaphora`
 > recognised `them/those/these` but not the possessive `their/its`, so the follow-up never

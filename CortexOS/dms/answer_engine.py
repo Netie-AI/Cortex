@@ -39,7 +39,7 @@ from CortexOS.dms.warehouse_db import (
     load_semantic_layer,
     read_only_queries_enabled,
 )
-from CortexOS.execution.manifest import VerifiedManifest
+from CortexOS.execution.manifest import ManifestError, PathNotAllowed, VerifiedManifest
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
@@ -950,11 +950,53 @@ def _is_derived_scalar(turn: dict[str, Any]) -> bool:
     )
 
 
+def _granted_tables(
+    prior: dict[str, Any] | None,
+    verified: VerifiedManifest | None,
+) -> frozenset[str] | None:
+    """Tables the prior turn was allowed to read — follow-ups must stay inside this."""
+    if prior:
+        stored = prior.get("granted_tables")
+        if stored:
+            return frozenset(str(t).lower() for t in stored)
+    if verified is not None:
+        return frozenset(k.lower() for k in verified.manifest.row_predicates)
+    return None
+
+
+def _tables_referenced(sql: str) -> set[str]:
+    tree = sqlglot.parse_one(sql, read="duckdb")
+    names: set[str] = set()
+    for table in tree.find_all(sqlglot.exp.Table):
+        name = (table.name or "").lower()
+        if name:
+            names.add(name)
+    return names
+
+
+def _check_followup_grant(
+    sql: str,
+    prior: dict[str, Any],
+    verified: VerifiedManifest | None,
+) -> None:
+    """Refuse follow-ups that would touch tables outside the bound manifest (FOLLOWUP-03)."""
+    granted = _granted_tables(prior, verified)
+    if not granted:
+        return
+    extra = _tables_referenced(sql) - granted
+    if extra:
+        raise PathNotAllowed(
+            f"follow-up would read {sorted(extra)!r} outside the prior grant "
+            f"{sorted(granted)!r}"
+        )
+
+
 def _remember(
     session_id: str | None,
     turn: dict[str, Any],
     *,
     space_id: str | None = None,
+    verified: VerifiedManifest | None = None,
 ) -> None:
     """Record this turn as what "them" refers to next — unless it is a scalar.
 
@@ -971,6 +1013,11 @@ def _remember(
     key = _session_key(session_id, space_id)
     if _is_derived_scalar(turn) and key in _SESSION:
         return
+    if verified is not None and "granted_tables" not in turn:
+        turn = {
+            **turn,
+            "granted_tables": sorted(k.lower() for k in verified.manifest.row_predicates),
+        }
     _SESSION[key] = turn
 
 
@@ -1023,6 +1070,10 @@ def _is_anaphora(q: str) -> bool:
             r"\bdivid(?:e|ed|ing)\b.*?\bby\s+\d|"
             r"\bmultipl(?:y|ied|ying)\b.*?\bby\s+\d|"
             r"(?:/|÷|×|\*)\s*\d|"
+            r"\badd(?:ing)?\s+\d|"
+            r"\b(?:minus|subtract(?:ing)?)\s+\d|"
+            r"\+\s*\d|"
+            r"(?<!\w)-\s*\d|"
             r"\bone\s+fifth\b",
             q,
         )
@@ -1116,7 +1167,7 @@ def _window_over_prior(
 
 
 def _scale_factor(q: str) -> tuple[str, float] | None:
-    """Return ('div'|'mul', factor) for session arithmetic follow-ups."""
+    """Return ('div'|'mul'|'add'|'sub', factor) for session arithmetic follow-ups."""
     m = re.search(r"\bdivid(?:e|ed|ing)\b.*?\bby\s+(\d+(?:\.\d+)?)", q)
     if m:
         return "div", float(m.group(1))
@@ -1132,6 +1183,18 @@ def _scale_factor(q: str) -> tuple[str, float] | None:
     m = re.search(r"(?:×|\*)\s*(\d+(?:\.\d+)?)", q)
     if m:
         return "mul", float(m.group(1))
+    m = re.search(r"\badd(?:ing)?\s+(\d+(?:\.\d+)?)\b", q)
+    if m:
+        return "add", float(m.group(1))
+    m = re.search(r"\b(?:minus|subtract(?:ing)?)\s+(\d+(?:\.\d+)?)", q)
+    if m:
+        return "sub", float(m.group(1))
+    m = re.search(r"\+\s*(\d+(?:\.\d+)?)", q)
+    if m:
+        return "add", float(m.group(1))
+    m = re.search(r"(?<!\w)-\s*(\d+(?:\.\d+)?)", q)
+    if m:
+        return "sub", float(m.group(1))
     return None
 
 
@@ -1264,8 +1327,15 @@ def _aggregate_prior(
         if not vals:
             raise ValueError("no numeric values to scale")
         base = sum(vals) if len(vals) > 1 else vals[0]
-        result = round(base / factor, 2) if op == "div" else round(base * factor, 2)
-        col = f"{'div' if op == 'div' else 'mul'}_{measure}"
+        if op == "div":
+            result = round(base / factor, 2)
+        elif op == "mul":
+            result = round(base * factor, 2)
+        elif op == "add":
+            result = round(base + factor, 2)
+        else:
+            result = round(base - factor, 2)
+        col = f"{op}_{measure}"
         sql = f"SELECT CAST({result} AS DOUBLE) AS {col}"
         return sql, [{col: result}]
 
@@ -1470,6 +1540,7 @@ def answer(
                     total_count=prior.get("total_count"),
                     total_exact=bool(prior.get("total_count_exact", True)),
                 )
+            _check_followup_grant(sql, prior, verified)
             layer, badge = "session", "session"
             assumptions = f"follow-up over prior turn ({prior.get('metric_id') or prior.get('layer')})"
             metric_id = prior.get("metric_id")
@@ -1478,9 +1549,13 @@ def answer(
             # Falling through would hand the question to the keyword router,
             # which matches on surface tokens and would answer a different one.
             return _abstain(question, audit_id, reason=f"follow-up not supported: {exc}")
-        except Exception:  # noqa: BLE001
-            sql = None
-            session_rows = None
+        except ManifestError as exc:
+            return _abstain(question, audit_id, reason=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            # Never re-route a recognised follow-up — that widens past the prior grant.
+            return _abstain(
+                question, audit_id, reason=f"follow-up could not be computed: {exc}"
+            )
 
     # L0 certified → L1 metric → L-skill → L3 abstain
     # Skills run after governed routes so golden/certified paths stay authoritative.
@@ -1827,6 +1902,7 @@ def answer(
             "space_id": (space_id or "").strip() or None,
         },
         space_id=space_id,
+        verified=verified,
     )
 
     # Graduate successful non-session answers into the skill store
