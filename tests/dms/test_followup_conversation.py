@@ -19,7 +19,10 @@ customer which question was answered.
 
 from __future__ import annotations
 
+import statistics
+
 import pytest
+
 from CortexOS.dms.answer_engine import ABSTAIN, clear_session
 from CortexOS.dms.query_service import answer_question
 
@@ -67,6 +70,39 @@ def test_average_of_them_still_averages(session: str) -> None:
     answer_question(TOP5, session_id=session)
     follow = answer_question("what is the average of them", session_id=session)
     assert "avg_sales_value_myr" in (follow["rows"] or [{}])[0]
+
+
+def test_median_of_them_computes_a_real_median(session: str) -> None:
+    """Median was not implemented at all — every phrasing abstained.
+
+    Reported alongside "their mean": once the pronoun gate let a follow-up
+    through, ``_aggregate_prior`` had no median branch to hand it to.
+    """
+    top = answer_question(TOP5, session_id=session)
+    expected = round(
+        statistics.median(float(r["sales_value_myr"]) for r in top["rows"]), 2
+    )
+
+    follow = answer_question("what is the median of them", session_id=session)
+
+    assert follow["route"] != ABSTAIN
+    assert (follow["rows"] or [{}])[0].get("median_sales_value_myr") == pytest.approx(
+        expected, rel=1e-6
+    )
+
+
+def test_their_median_reported_live(session: str) -> None:
+    """The possessive form, same shape as the "their mean" bug."""
+    top = answer_question(TOP5, session_id=session)
+    vals = sorted(float(r["sales_value_myr"]) for r in top["rows"])
+    expected = vals[2]  # odd-length ranking — the middle value, not interpolated
+
+    follow = answer_question("give me their median", session_id=session)
+
+    assert follow["route"] != ABSTAIN
+    assert (follow["rows"] or [{}])[0].get("median_sales_value_myr") == pytest.approx(
+        expected, rel=1e-6
+    )
 
 
 def test_sum_of_a_ranking_is_not_a_distinct_sku_count(session: str) -> None:
