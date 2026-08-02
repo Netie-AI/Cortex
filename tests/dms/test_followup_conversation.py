@@ -157,3 +157,89 @@ def test_window_follow_up_without_a_prior_turn_does_not_invent_one(session: str)
     result = answer_question("show me number 2-6", session_id=session)
     assert result["route"] == ABSTAIN
     assert result["rows"] == []
+
+
+# ------------------------------------------------------------- possessive pronouns
+
+
+def test_give_me_their_mean_reported_live(session: str) -> None:
+    """The exact reported conversation, demo-eve: 2026-08-02.
+
+    "average these five sales results and give me a mean" resolved fine — "these"
+    is covered. Later, after the ranking was re-fetched, "give me their mean"
+    abstained: "their" was not in the pronoun set, so the question never looked
+    at the prior turn and fell through to the keyword router with nothing to
+    match. ``_aggregate_prior`` already reads "mean" from the text on its own —
+    the only thing missing was the gate that decides whether to look back at all.
+    """
+    top = answer_question(TOP5, session_id=session)
+    expected = round(
+        sum(float(r["sales_value_myr"]) for r in top["rows"] if r.get("sales_value_myr")) / 5,
+        2,
+    )
+
+    follow = answer_question("give me their mean", session_id=session)
+
+    assert follow["route"] != ABSTAIN, "the exact live-reported abstain"
+    assert follow["layer"] == "session"
+    row = (follow.get("rows") or [{}])[0]
+    assert row.get("avg_sales_value_myr") == pytest.approx(expected, rel=1e-6)
+
+
+@pytest.mark.parametrize(
+    "phrasing",
+    ["their mean", "their average", "what is their total"],
+)
+def test_their_is_recognised_as_a_follow_up_pronoun(session: str, phrasing: str) -> None:
+    answer_question(TOP5, session_id=session)
+    follow = answer_question(phrasing, session_id=session)
+    assert follow["route"] != ABSTAIN, f"{phrasing!r} did not reach the prior turn"
+
+
+def test_its_is_recognised_as_a_follow_up_pronoun(session: str) -> None:
+    """Singular possessive, same class as "their" — one SKU instead of a ranking."""
+    answer_question(TOP5, session_id=session)
+    reslice = answer_question("show me number 2-6", session_id=session)
+    assert reslice["route"] != ABSTAIN
+
+    follow = answer_question("what is its total", session_id=session)
+    assert follow["route"] != ABSTAIN
+
+
+def test_their_own_subject_still_reaches_the_governed_router(session: str) -> None:
+    """"Their" must not swallow a fresh question that names its own subject.
+
+    Same guard _is_window_followup already relies on for "them": a follow-up
+    borrows its subject from the prior turn, a question that names one is fresh.
+    """
+    answer_question(TOP5, session_id=session)
+    fresh = answer_question("what is their total spend by supplier country", session_id=session)
+    # Whatever it resolves to, it must not be a bare follow-up count/avg over the
+    # SKU ranking — that would answer the wrong question with a confident number.
+    if fresh["route"] != ABSTAIN:
+        assert fresh["layer"] != "session" or "avg_sales_value_myr" not in (
+            fresh.get("rows") or [{}]
+        )[0]
+
+
+@pytest.mark.parametrize(
+    "phrasing",
+    [
+        "SKUs under their reorder point at WH-A",
+        "what stock has gone past its expiry date",
+    ],
+)
+def test_a_first_attempt_at_this_fix_broke_these_two_corpus_questions(
+    session: str, phrasing: str
+) -> None:
+    """Pinned from ``bench/paraphrase.py`` going confidently wrong (wrong=2).
+
+    Both name their own subject in the same clause and are not follow-ups. An
+    unrelated prior turn (a SKU ranking) must not hijack them into a follow-up
+    count/average over rows that have nothing to do with either question.
+    """
+    answer_question(TOP5, session_id=session)
+    result = answer_question(phrasing, session_id=session)
+    assert result.get("layer") != "session", (
+        f"{phrasing!r} was answered as a follow-up over an unrelated prior turn"
+    )

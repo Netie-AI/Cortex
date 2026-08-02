@@ -980,8 +980,38 @@ def clear_session(session_id: str | None = None, *, space_id: str | None = None)
         _SESSION.pop(_session_key(session_id, space_id), None)
 
 
+#: "their"/"its" directly ahead of an aggregation word ("their mean", "its
+#: total") is a follow-up. Unlike "them/those/these", which are rarely a fresh
+#: question's own grammar, "their"/"its" is an ordinary possessive determiner —
+#: "SKUs under their reorder point", "stock past its expiry date" — so it is
+#: recognised only in this narrow construction, and only when the question
+#: does not name its own subject (the same guard _is_window_followup already
+#: uses for "them"-adjacent re-slicing).
+_POSSESSIVE_FOLLOWUP = re.compile(
+    r"\b(their|its)\s+(average|avg|mean|total|sum|count)\b", re.I
+)
+
+
 def _is_anaphora(q: str) -> bool:
-    """Follow-up pronouns / arithmetic over the prior result set."""
+    """Follow-up pronouns / arithmetic over the prior result set.
+
+    "give me their mean" abstained: "them/those/these" were recognised but not
+    the possessive "their/its". ``_aggregate_prior`` already reads "mean" from
+    the question text on its own — the gate here is only what decides whether
+    to look at the prior turn at all, so the missing pronoun read as a fresh,
+    unrouted question instead of a follow-up.
+
+    A first attempt added "their"/"its" to the bare pronoun class and broke two
+    corpus questions that were never follow-ups: "SKUs under their reorder
+    point at WH-A" and "what stock has gone past its expiry date" both name
+    their own subject in the same clause, and got answered over an unrelated
+    prior turn's ranking instead. Scoping the match to "possessive directly
+    before an aggregation word", and refusing it when the question names its
+    own subject, fixes the reported case without that regression (R-0007
+    caught both directions before this landed).
+    """
+    if _POSSESSIVE_FOLLOWUP.search(q) and not _NAMES_OWN_SUBJECT.search(q):
+        return True
     return bool(
         re.search(
             r"\b(them|those|these)\b|"
