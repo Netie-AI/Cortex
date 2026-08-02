@@ -1527,6 +1527,7 @@ def answer(
     from CortexOS.dms.query_service import (
         _infer_source_table,
         build_chart_spec,
+        format_answer_with_insights,
         rag_answer,
         route_question,
         synthesize_answer,
@@ -1926,6 +1927,8 @@ def answer(
             f"More than {len(rows)} rows match; showing the first {len(rows)}. "
             "The exact total could not be computed for this query.\n"
         ) + answer_text
+    # INS-01: secondary pass — bullets cite only values already in ``rows``.
+    answer_text = format_answer_with_insights(answer_text, rows)
 
     # Remember last successful turn for follow-ups (scoped to Space)
     _remember(

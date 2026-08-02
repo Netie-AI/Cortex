@@ -2,6 +2,20 @@
 **Last updated:** 2026-08-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
 **Rule:** Update after every gate. This is the one state file - there is no per-agent handoff. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
+> **2026-08-03 (overnight ticket-runner):** `#21` CLOSED (independent verify; commit
+> `0e5318b`). `#22` CLOSED (reconfirm). EPIC-011 engine tickets COMPLETE — dms#16 still
+> needs live `verify_demo_live` multi-turn. `#30`/`#31` INS-01/02 independent verify green
+> (insights e2e + chart shapes; 68-suite with follow-up+wrong=0); closing on this run.
+>
+> **2026-08-03 (EPIC-013 INS-01/02 implement):** grounded insights + schema `chart_spec`
+> in `query_service.py`, wired on ask return (`answer_engine`). Bullets cite row values
+> only (ride `answer` text). Chart types: bignum/bar/line/null from columns.
+> Tests: `tests/dms/test_insights_chart_spec.py`. Residual: INS-03 (dms#17) UI map.
+>
+> **2026-08-03 (EPIC-011 ticket-runner — FOLLOWUP-02/03):** `#22` CLOSED (grant-bound).
+> `#21` CLOSED after independent overnight verify — corpus expanded (those/these +
+> min/max); `_aggregate_prior` min/max. Suites: follow-up 54; paraphrase+adversarial wrong=0.
+>
 > **2026-08-03 (EPIC-011 demo minimum — follow-ups grounded + grant-bound):** Demo-eve
 > minimum for multi-turn follow-ups shipped on `chore/unblock-ci-and-estate-audit`.
 > Possessive pronouns (`their`/`its` before agg), median, SUM/AVG/COUNT over prior rows,
@@ -12,8 +26,7 @@
 > `test_followup_conversation.py`, `test_followup_corpus.py`, `test_followup_grant_bound.py`,
 > `test_scale_factor_additive.py` — envelope asserts badge/rows/values, not SQL alone.
 > Verify: `DMS_READ_ONLY_QUERIES=1 python -m pytest tests/dms/test_followup_*.py -q`.
-> Residual: low-stock follow-up still needs `inventory` granted; full EPIC-011 (FOLLOWUP-01
-> arithmetic chain edge cases, broader adversarial corpus) remains open on #19.
+> Residual: low-stock follow-up still needs `inventory` granted; `#21` independent close.
 
 > **2026-08-03 (dms follow-up conversation: "their"/"its" pronoun + median):** Reported live,
 > demo-eve — after re-fetching a top-5, `"give me their mean"` abstained. `_is_anaphora`

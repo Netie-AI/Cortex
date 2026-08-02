@@ -827,69 +827,191 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
+_NAME_CANDIDATES = (
+    "location_code",
+    "sku",
+    "sku_name",
+    "category",
+    "carrier",
+    "supplier_name",
+    "country",
+    "name",
+    "label",
+)
+_VALUE_CANDIDATES = (
+    "sales_value_myr",
+    "ranking_score",
+    "days_delayed",
+    "pct_used",
+    "utilisation_pct",
+    "quantity_kg",
+    "total_value_myr",
+    "total_cost_myr",
+    "delayed_count",
+    "total_spend_myr",
+    "sku_count",
+    "total_kg",
+    "lead_time_days",
+    "risk_score",
+    "transaction_count",
+)
+
+
+def _column_mostly_numeric(rows: list[dict], key: str) -> bool:
+    hits = 0
+    seen = 0
+    for r in rows:
+        v = r.get(key)
+        if v is None:
+            continue
+        seen += 1
+        if _to_float(v) is not None:
+            hits += 1
+    return seen > 0 and hits >= max(1, (seen + 1) // 2)
+
+
+def _schema_chart_keys(rows: list[dict]) -> tuple[str | None, str | None, str | None]:
+    """Classify (name_key, value_key, time_key) from result columns — no invented points."""
+    if not rows:
+        return None, None, None
+    keys = list(rows[0].keys())
+    time_key = next((k for k in keys if _is_time_dimension(k)), None)
+
+    name_key = next((c for c in _NAME_CANDIDATES if c in keys), None)
+    if not name_key:
+        for k in keys:
+            if k == time_key:
+                continue
+            if not _column_mostly_numeric(rows, k) and rows[0].get(k) is not None:
+                name_key = k
+                break
+
+    value_key = next((c for c in _VALUE_CANDIDATES if c in keys), None)
+    if not value_key:
+        for key in reversed(keys):
+            if key in (name_key, time_key):
+                continue
+            if _column_mostly_numeric(rows, key):
+                value_key = key
+                break
+    if not value_key:
+        for key in reversed(keys):
+            if key in (name_key, time_key):
+                continue
+            if _to_float(rows[0].get(key)) is not None:
+                value_key = key
+                break
+    return name_key, value_key, time_key
+
+
+def build_grounded_insights(rows: list[dict]) -> list[str]:
+    """2-3 bullets citing only values present in ``rows``. Empty when too thin."""
+    if not rows:
+        return []
+    # Scalar already is the whole answer — no secondary pass.
+    if len(rows) == 1 and len(rows[0]) <= 1:
+        return []
+
+    bullets: list[str] = [f"{len(rows)} row(s) in this result."]
+    name_key, value_key, _time_key = _schema_chart_keys(rows)
+
+    if value_key:
+        ranked: list[tuple[float, Any, Any]] = []
+        for r in rows:
+            raw = r.get(value_key)
+            num = _to_float(raw)
+            if num is None:
+                continue
+            label = r.get(name_key) if name_key else None
+            ranked.append((num, raw, label))
+        if ranked:
+            hi = max(ranked, key=lambda t: t[0])
+            lo = min(ranked, key=lambda t: t[0])
+            if hi[2] is not None:
+                bullets.append(f"Highest {value_key}: {hi[1]} ({hi[2]}).")
+            else:
+                bullets.append(f"Highest {value_key}: {hi[1]}.")
+            if len(ranked) > 1 and lo[1] != hi[1]:
+                if lo[2] is not None:
+                    bullets.append(f"Lowest {value_key}: {lo[1]} ({lo[2]}).")
+                else:
+                    bullets.append(f"Lowest {value_key}: {lo[1]}.")
+    elif name_key and len(rows) >= 2:
+        names = [str(r.get(name_key)) for r in rows[:3] if r.get(name_key) is not None]
+        if names:
+            bullets.append(f"Includes {name_key}: {', '.join(names)}.")
+
+    # Too thin after classification (e.g. one wide text row) — omit.
+    if len(bullets) == 1 and len(rows) == 1:
+        return []
+    return bullets[:3]
+
+
+def format_answer_with_insights(answer_text: str, rows: list[dict]) -> str:
+    """Append grounded insight bullets to customer-visible answer text."""
+    insights = build_grounded_insights(rows)
+    if not insights:
+        return answer_text
+    block = "\n".join(f"- {b}" for b in insights)
+    return f"{answer_text}\n\nInsights:\n{block}"
+
+
 def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
     if not rows:
         return None
 
     q = question.lower()
 
-    if len(rows) == 1 and len(rows[0]) == 1:
-        key, val = next(iter(rows[0].items()))
-        return {
-            "type": "bignum",
-            "value": val,
-            "label": key.replace("_", " ").upper(),
-            "title": question[:80],
-            "data": [],
-        }
+    # Scalar: single cell, or single row with one numeric measure.
+    if len(rows) == 1:
+        name_key, value_key, _ = _schema_chart_keys(rows)
+        numeric_cols = [k for k in rows[0] if _to_float(rows[0].get(k)) is not None]
+        if len(rows[0]) == 1 or (value_key and len(numeric_cols) == 1):
+            key = value_key or next(iter(rows[0]))
+            val = rows[0].get(key)
+            return {
+                "type": "bignum",
+                "value": val,
+                "label": key.replace("_", " ").upper(),
+                "title": question[:80],
+                "data": [],
+            }
 
+    # Demo corpora keyword fast-paths (keep; schema path covers the rest).
     if ("below reorder" in q or "low stock" in q) and len(rows) <= 20:
-        wh = _detect_warehouse_code(question) or "ALL"
-        data = [
-            {"name": r.get("sku", "?"), "value": float(r.get("quantity_kg") or 0)}
-            for r in rows[:10]
-        ]
-        return {
-            "type": "bar",
-            "data": data,
-            "x_label": "sku",
-            "y_label": "quantity_kg",
-            "title": f"Low Stock Items — {wh}",
-        }
+        if "sku" in rows[0] and _to_float(rows[0].get("quantity_kg")) is not None:
+            wh = _detect_warehouse_code(question) or "ALL"
+            data = [
+                {"name": r.get("sku", "?"), "value": float(r.get("quantity_kg") or 0)}
+                for r in rows[:10]
+            ]
+            return {
+                "type": "bar",
+                "data": data,
+                "x_label": "sku",
+                "y_label": "quantity_kg",
+                "title": f"Low Stock Items — {wh}",
+            }
 
-    keys = list(rows[0].keys())
-    name_key = None
-    value_key = None
-
-    for candidate in ("location_code", "sku", "sku_name", "category", "carrier", "supplier_name", "country"):
-        if candidate in keys:
-            name_key = candidate
-            break
-    if not name_key:
-        name_key = keys[0]
-
-    for candidate in ("sales_value_myr", "ranking_score", "days_delayed", "pct_used", "utilisation_pct", "quantity_kg", "total_value_myr", "total_cost_myr", "delayed_count", "total_spend_myr", "sku_count", "total_kg", "lead_time_days", "risk_score", "transaction_count"):
-        if candidate in keys:
-            value_key = candidate
-            break
-    if not value_key:
-        # Fall back to the last column whose value is actually numeric; text-only
-        # result sets (e.g. alert listings) get no chart instead of a crash.
-        for key in reversed(keys):
-            if _to_float(rows[0].get(key)) is not None:
-                value_key = key
-                break
+    name_key, value_key, time_key = _schema_chart_keys(rows)
     if not value_key:
         return None
 
-    chart_type = "line" if _is_time_dimension(name_key) else "bar"
+    x_key = time_key or name_key
+    if not x_key:
+        # Measure-only multi-row: index as category so we still chart honestly.
+        x_key = next((k for k in rows[0] if k != value_key), None)
+    if not x_key:
+        return None
+
+    chart_type = "line" if time_key or _is_time_dimension(x_key) else "bar"
     slice_rows = rows[:20] if "capacity" in q else rows[:10]
     data = []
     for r in slice_rows:
         val = _to_float(r.get(value_key))
         if val is None:
             continue
-        data.append({"name": str(r.get(name_key, "")), "value": val})
+        data.append({"name": str(r.get(x_key, "")), "value": val})
     if not data:
         return None
 
@@ -900,7 +1022,7 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
     return {
         "type": chart_type,
         "data": data,
-        "x_label": name_key,
+        "x_label": x_key,
         "y_label": value_key,
         "title": title,
         "more_count": max(0, len(rows) - len(slice_rows)),
@@ -1052,7 +1174,7 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
             "query_plan": query_plan.to_dict(),
         }
 
-    answer = synthesize_answer(rows, question)
+    answer = format_answer_with_insights(synthesize_answer(rows, question), rows)
     chart = build_chart_spec(rows, question)
 
     if ("below reorder" in question.lower() or "low stock" in question.lower()) and rows:
