@@ -22,12 +22,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from cortex_contract.execution import Manifest, canonical_manifest_bytes
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from CortexOS.dms.answer_engine import ABSTAIN, answer, clear_session
 from CortexOS.execution.manifest import JwksCache, ManifestVerifier, VerifiedManifest
-from packages.cortex_contract.execution import Manifest, canonical_manifest_bytes
 
 
 def _verified(session_id: str, granted: dict[str, str]) -> VerifiedManifest:

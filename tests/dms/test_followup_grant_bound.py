@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from cortex_contract.execution import Manifest
 
 from CortexOS.dms.answer_engine import ABSTAIN, answer, clear_session
 from CortexOS.execution.manifest import VerifiedManifest
-from packages.cortex_contract.execution import Manifest
 
 TOP5 = "Top 5 selling SKUs by revenue"
 

@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from cortex_contract.answer import AskRequest
+from cortex_contract.execution import Manifest, PoolSpec, SubmitRequest, canonical_manifest_bytes
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -21,8 +23,6 @@ from CortexOS.execution.telemetry import (
     get_run,
     init,
 )
-from packages.cortex_contract.answer import AskRequest
-from packages.cortex_contract.execution import Manifest, PoolSpec, SubmitRequest, canonical_manifest_bytes
 
 
 def _b64u(raw: bytes) -> str:

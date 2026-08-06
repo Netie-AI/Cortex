@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from packages.cortex_contract.answer import Badge, Provenance
+from cortex_contract.answer import Badge, Provenance
 
 from CortexOS.api.contract_routes import _enrich_answer, _provenance_from_flat
 

@@ -305,13 +305,14 @@ def execute_drillthrough(
     expected_manifest_hash: str | None = None,
 ) -> dict[str, Any]:
     """Verify token, resolve session manifest, rewrite + enforce_manifest execute."""
+    from cortex_contract.execution import canonical_manifest_bytes
+
     from CortexOS.execution.session_manifests import (
         SessionExpired,
         SessionUnbound,
         get_session_registry,
     )
     from CortexOS.execution.submit import execute_sql
-    from packages.cortex_contract.execution import canonical_manifest_bytes
 
     payload = verify_token(token)
     session_id = str(payload["session_id"])
@@ -366,6 +367,6 @@ def execute_drillthrough(
 
 
 def manifest_content_hash(manifest: Any) -> str:
-    from packages.cortex_contract.execution import canonical_manifest_bytes
+    from cortex_contract.execution import canonical_manifest_bytes
 
     return hashlib.sha256(canonical_manifest_bytes(manifest)).hexdigest()

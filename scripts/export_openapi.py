@@ -63,7 +63,7 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
     Returns the contract version alongside the schemas so callers stamp the
     spec with the contract line, never the engine line.
     """
-    from packages.cortex_contract.answer import (
+    from cortex_contract.answer import (
         Answer,
         AskRequest,
         ContributingSource,
@@ -71,18 +71,22 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
         DrillthroughResponse,
         Provenance,
     )
-    from packages.cortex_contract.execution import (
+    from cortex_contract.execution import (
         Manifest,
         PoolSpec,
         QueryResult,
         SubmitRequest,
     )
-    from packages.cortex_contract.ledger import ChainVerification, LedgerEntry
-    from packages.cortex_contract.proposal import Diff, GateResult, Proposal, ProposalVersion
-    from packages.cortex_contract.tools import ToolCall, ToolResult, ToolSpec
-    from packages.cortex_contract.version import CONTRACT_VERSION
+    from cortex_contract.ledger import ChainVerification, LedgerEntry
+    from cortex_contract.proposal import Diff, GateResult, Proposal, ProposalVersion
+    from cortex_contract.tools import ToolCall, ToolResult, ToolSpec
+    from cortex_contract.version import CONTRACT_VERSION
+    from pydantic import BaseModel
 
-    models = [
+    # Annotated as the base class, not inferred: pydantic models are instances of
+    # ModelMetaclass, so an unannotated list infers that metaclass and mypy
+    # cannot see model_json_schema on it.
+    models: list[type[BaseModel]] = [
         AskRequest,
         Answer,
         Provenance,

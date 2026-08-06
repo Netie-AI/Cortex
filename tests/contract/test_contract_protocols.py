@@ -4,9 +4,10 @@ from __future__ import annotations
 from inspect import signature
 from pathlib import Path
 
+from cortex_contract.version import CONTRACT_VERSION
+
 from CortexOS.api import engine_routes
 from CortexOS.execution import run_plan, tool_runner
-from packages.cortex_contract.version import CONTRACT_VERSION
 from packs.dms.audit import ledger
 
 
@@ -26,7 +27,7 @@ def test_every_published_spec_is_committed() -> None:
 
 def test_manifest_1_0_0_producer_still_validates() -> None:
     """A minor bump may add fields; it may never make an old payload invalid."""
-    from packages.cortex_contract.execution import Manifest
+    from cortex_contract.execution import Manifest
 
     minted_by_1_0_0 = Manifest(
         session_id="s1",

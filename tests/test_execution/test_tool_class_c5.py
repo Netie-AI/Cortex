@@ -24,7 +24,7 @@ def ledger_db(tmp_path, monkeypatch):
 
 
 def test_tool_class_enum_values():
-    from packages.cortex_contract.tools import ToolClass
+    from cortex_contract.tools import ToolClass
 
     assert {c.value for c in ToolClass} == {"read", "propose", "apply"}
 

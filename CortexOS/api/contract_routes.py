@@ -8,10 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-
-from packages.cortex_contract.answer import (
+from cortex_contract.answer import (
     Answer,
     AskRequest,
     Badge,
@@ -19,9 +16,11 @@ from packages.cortex_contract.answer import (
     DrillthroughResponse,
     Provenance,
 )
-from packages.cortex_contract.execution import QueryResult, SubmitRequest
-from packages.cortex_contract.ledger import ChainVerification, LedgerEntry
-from packages.cortex_contract.tools import ToolClass, ToolSpec
+from cortex_contract.execution import QueryResult, SubmitRequest
+from cortex_contract.ledger import ChainVerification, LedgerEntry
+from cortex_contract.tools import ToolClass, ToolSpec
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 # Canonical contract route IDs — keep in lockstep with scripts/export_openapi.py.
 CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(

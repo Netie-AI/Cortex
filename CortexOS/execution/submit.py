@@ -10,6 +10,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from cortex_contract.execution import Manifest, QueryResult, SubmitRequest
+
 from CortexOS.execution.manifest import (
     ManifestError,
     ManifestMalformed,
@@ -25,7 +27,6 @@ from CortexOS.execution.warehouse import (
     read_only_queries_enabled,
     warehouse_path,
 )
-from packages.cortex_contract.execution import Manifest, QueryResult, SubmitRequest
 
 
 class PoolMismatch(ManifestError):

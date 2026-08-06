@@ -7,6 +7,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from cortex_contract.execution import (
+    Manifest,
+    PoolSpec,
+    SubmitRequest,
+    canonical_manifest_bytes,
+)
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import HTTPException
@@ -32,12 +38,6 @@ from CortexOS.execution.submit import (
     verify_and_check_pool,
 )
 from CortexOS.execution.telemetry import clear_runs_for_tests, recent_runs
-from packages.cortex_contract.execution import (
-    Manifest,
-    PoolSpec,
-    SubmitRequest,
-    canonical_manifest_bytes,
-)
 
 
 def _b64u(raw: bytes) -> str:
@@ -137,8 +137,9 @@ def test_session_bind_then_resolve(verifier: ManifestVerifier, issuer: Ed25519Pr
 
 
 def test_ask_unbound_http(verifier: ManifestVerifier) -> None:
+    from cortex_contract.answer import AskRequest
+
     from CortexOS.api.contract_routes import contract_ask
-    from packages.cortex_contract.answer import AskRequest
 
     async def _run() -> None:
         with pytest.raises(HTTPException) as caught:
