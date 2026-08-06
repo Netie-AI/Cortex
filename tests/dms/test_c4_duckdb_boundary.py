@@ -6,7 +6,12 @@ enforce a manifest. It is written down and nothing checks it — ``.importlinter
 declares two contracts and neither is about duckdb — so the rule has been true
 by habit rather than by construction.
 
-It is currently false in three places. All three predate this test.
+It is currently false in two places, both inside one file, and both predate
+this test. ``scripts/lakehouse_migrate.py`` was the third and is now fixed: it
+goes through ``execution.warehouse.get_connection``, which matters beyond
+tidiness — opening the warehouse read-write behind that helper's back skipped
+the cached-reader eviction and produced DuckDB's "Can't open a connection to
+same database file with a different configuration" mid-suite.
 
 This is deliberately **not** an allowlist. An allowlist absorbs new entries
 silently, which is how ``_C2_ALLOWLIST`` became pre-C2 debt that had to be
@@ -45,10 +50,6 @@ KNOWN_VIOLATIONS: dict[str, str] = {
         "opens an in-memory DuckDB and ATTACHes the DuckLake catalog; needs an "
         "architecture decision about whether the lakehouse plane is a second "
         "sanctioned opener before it can move under CortexOS/execution"
-    ),
-    "scripts/lakehouse_migrate.py": (
-        "migration entrypoint; runs outside the serving path but still opens the "
-        "database directly, so it is not covered by the manifest either"
     ),
 }
 

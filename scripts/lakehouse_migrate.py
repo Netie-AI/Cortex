@@ -146,9 +146,12 @@ def sync_warehouse_from_silver() -> dict[str, Any]:
     Answer engine / semantic SQL use unqualified table names (inventory, …).
     After medallion migrate (or Studio promote), this makes Q2 read silver data.
     """
-    import duckdb
-
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, KNOWN_TABLES
+    # Through the sanctioned open site, not `import duckdb` (CLAUDE.md: duckdb
+    # appears only under CortexOS/execution/). This is a real writer, so it must
+    # also *evict* any cached read-only connection this process is holding —
+    # opening read-write behind the cache's back is what produced "Can't open a
+    # connection to same database file with a different configuration".
+    from CortexOS.dms.warehouse_db import KNOWN_TABLES, get_connection, warehouse_path
 
     out: dict[str, Any] = {"ok": False, "tables": {}, "source": "lake.silver"}
     home = Path(os.environ.get("DMS_LAKEHOUSE_HOME") or ROOT / "data" / "lakehouse")
@@ -173,8 +176,9 @@ def sync_warehouse_from_silver() -> dict[str, Any]:
         out["error"] = "no silver tables"
         return out
 
-    DEFAULT_DB.parent.mkdir(parents=True, exist_ok=True)
-    wh = duckdb.connect(str(DEFAULT_DB))
+    warehouse = warehouse_path()
+    warehouse.parent.mkdir(parents=True, exist_ok=True)
+    wh = get_connection(warehouse, read_only=False)
     try:
         if mode == "ducklake":
             wh.execute("INSTALL ducklake")
@@ -208,7 +212,7 @@ def sync_warehouse_from_silver() -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001
                 out["tables"][t] = f"error:{exc}"
         out["ok"] = any(isinstance(v, int) for v in out["tables"].values())
-        out["path"] = str(DEFAULT_DB)
+        out["path"] = str(warehouse)
     finally:
         wh.close()
     return out

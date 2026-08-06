@@ -110,7 +110,9 @@ def _build_issues(proposed: dict[str, Any], originals: dict[str, str | None]) ->
 
 def _hidden_issues(proposed: dict[str, Any]) -> list[str]:
     hidden: list[str] = []
-    con = get_connection(DEFAULT_DB)
+    # Duplicate/consistency probes are SELECTs. Opening read-write here made
+    # merely *analysing* a proposed entry lock the warehouse for everyone else.
+    con = get_connection(DEFAULT_DB, read_only=True)
     try:
         sku = proposed["sku"]
         loc = proposed["location"]

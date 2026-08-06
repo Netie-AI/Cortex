@@ -114,12 +114,11 @@ def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
     from CortexOS.dms.warehouse_db import (
         DEFAULT_DB,
         get_connection,
-        read_only_queries_enabled,
     )
 
     name = _resolve_export_table(table)
     lim = max(1, min(int(limit or 5000), 50_000))
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    con = get_connection(DEFAULT_DB, read_only=True)  # export reads; it never writes back
     try:
         rel = con.execute(f"SELECT * FROM {name} LIMIT {lim}")
         cols = [d[0] for d in rel.description]
@@ -139,7 +138,6 @@ def _export_parquet_snapshot(table: str, limit: int = 5000) -> dict[str, Any]:
     from CortexOS.dms.warehouse_db import (
         DEFAULT_DB,
         get_connection,
-        read_only_queries_enabled,
     )
 
     name = _resolve_export_table(table)
@@ -150,7 +148,9 @@ def _export_parquet_snapshot(table: str, limit: int = 5000) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{name}.parquet"
 
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    # COPY ... TO writes a Parquet file on disk, not the database, so this stays
+    # a reader as far as DuckDB's lock is concerned.
+    con = get_connection(DEFAULT_DB, read_only=True)
     try:
         # Identifier already allowlisted; limit is int-bounded.
         con.execute(

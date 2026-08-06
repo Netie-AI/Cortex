@@ -95,11 +95,9 @@ def test_query_low_stock(loaded_db, monkeypatch):
     from netie.dms import query_service
     from netie.dms.warehouse_db import get_connection
 
-    monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
-    monkeypatch.setattr(
-        "netie.dms.query_service.get_connection",
-        lambda _=None, **kw: get_connection(loaded_db, **kw),
-    )
+    # SEC-01 moved execution behind the manifest executor, so redirecting the
+    # warehouse is one seam now: warehouse_path() resolves this each call.
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(loaded_db))
     result = query_service.answer_question("Which SKUs are below reorder level?")
     assert result["violations_blocked"] == []
     assert result["sql_used"]
@@ -110,11 +108,9 @@ def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
     from netie.dms import query_service
     from netie.dms.warehouse_db import get_connection
 
-    monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
-    monkeypatch.setattr(
-        "netie.dms.query_service.get_connection",
-        lambda _=None, **kw: get_connection(loaded_db, **kw),
-    )
+    # SEC-01 moved execution behind the manifest executor, so redirecting the
+    # warehouse is one seam now: warehouse_path() resolves this each call.
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(loaded_db))
     result = query_service.answer_question("top 5 sales")
     assert result["violations_blocked"] == []
     assert result["source_table"] == "transactions"
@@ -129,11 +125,9 @@ def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
     from netie.dms import query_service
     from netie.dms.warehouse_db import get_connection
 
-    monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
-    monkeypatch.setattr(
-        "netie.dms.query_service.get_connection",
-        lambda _=None, **kw: get_connection(loaded_db, **kw),
-    )
+    # SEC-01 moved execution behind the manifest executor, so redirecting the
+    # warehouse is one seam now: warehouse_path() resolves this each call.
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(loaded_db))
     result = query_service.answer_question("return most delayed 1000 rows")
     assert result["violations_blocked"] == []
     assert result["source_table"] == "shipments"
@@ -154,7 +148,7 @@ def test_query_random_question_asks_for_dms_clarification():
 def test_query_blocks_drop(loaded_db, monkeypatch):
     from netie.dms import query_service
 
-    monkeypatch.setattr(query_service, "DEFAULT_DB", loaded_db)
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(loaded_db))
     result = query_service.answer_question("Drop the inventory table")
     assert "not permitted" in result["answer"].lower()
     assert result["violations_blocked"]

@@ -20,7 +20,18 @@ _RO_CONNECTIONS: dict[str, Any] = {}
 
 
 def warehouse_path(db_path: Path | str | None = None) -> Path:
-    return Path(db_path or DEFAULT_DB)
+    """Resolve which warehouse to open, consulting the environment each call.
+
+    ``DEFAULT_DB`` is bound at import, so a process that reads it directly can
+    never be pointed somewhere else afterwards — the env var only worked if it
+    was set before this module was first imported, which is a footgun for
+    deployments and made the executor untestable against a temp warehouse.
+    Resolving here means one seam redirects every reader.
+    """
+    if db_path is not None:
+        return Path(db_path)
+    env = os.environ.get("DMS_WAREHOUSE_DB", "").strip()
+    return Path(env) if env else DEFAULT_DB
 
 
 def read_only_queries_enabled() -> bool:

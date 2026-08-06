@@ -59,11 +59,10 @@ def _sku_name_index() -> dict[str, str]:
     from CortexOS.dms.warehouse_db import (
         DEFAULT_DB,
         get_connection,
-        read_only_queries_enabled,
     )
 
     out: dict[str, str] = {}
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    con = get_connection(DEFAULT_DB, read_only=True)  # dictionary build is a read
     try:
         rows = con.execute(
             "SELECT sku, sku_name FROM inventory "
@@ -93,12 +92,11 @@ def _dictionaries() -> dict[str, list[str]]:
     from CortexOS.dms.warehouse_db import (
         DEFAULT_DB,
         get_connection,
-        read_only_queries_enabled,
     )
 
     sensitive = _sensitive()
     out: dict[str, list[str]] = {}
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    con = get_connection(DEFAULT_DB, read_only=True)  # dictionary build is a read
     try:
         for col, table in VALUE_COLUMNS.items():
             if col in sensitive:

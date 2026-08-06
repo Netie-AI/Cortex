@@ -21,7 +21,6 @@ from CortexOS.execution.pool import PoolSaturated, get_read_pool
 from CortexOS.execution.session_manifests import get_session_registry
 from CortexOS.execution.telemetry import new_run_id, record_run
 from CortexOS.execution.warehouse import (
-    DEFAULT_DB,
     get_connection,
     read_only_queries_enabled,
     warehouse_path,
@@ -196,7 +195,7 @@ def execute_sql(
     pid = pool_id or verified.manifest.pool_id or pool.pool_id
     with pool.acquire(pool_id=pid) as queue_ms:
         started = time.perf_counter()
-        path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
+        path = warehouse_path(db_path)
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
         try:
             if use_explain:

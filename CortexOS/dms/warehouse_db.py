@@ -17,6 +17,7 @@ from CortexOS.execution.warehouse import (
     connect_write,
     get_connection,
     read_only_queries_enabled,
+    warehouse_path,
 )
 
 # Re-export connection helpers so existing callers keep importing from here.
@@ -33,6 +34,7 @@ __all__ = [
     "preview_table",
     "read_only_queries_enabled",
     "table_row_counts",
+    "warehouse_path",
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -131,7 +133,12 @@ def load_inventory_csv(
 def table_row_counts(db_path: Path | str | None = None) -> dict[str, int]:
     # Pure read: must not take the write lock, and must not evict a cached
     # reader that other callers in this process are still using.
-    con = get_connection(db_path, read_only=read_only_queries_enabled())
+    #
+    # Unconditional, not `read_only_queries_enabled()`. That flag asks "may the
+    # *query* path give up write access?", which is a question a COUNT(*) never
+    # had to answer — and defaulting it to False meant this read took DuckDB's
+    # EXCLUSIVE lock and shut every other process out of the warehouse.
+    con = get_connection(db_path, read_only=True)
     counts: dict[str, int] = {}
     try:
         for table in KNOWN_TABLES:
@@ -157,7 +164,7 @@ def preview_table(
         raise ValueError(f"Unknown table: {table}")
 
     limit = min(max(to_row - from_row, 1), 500)
-    con = get_connection(db_path, read_only=read_only_queries_enabled())
+    con = get_connection(db_path, read_only=True)  # SELECT only — never the write lock
     try:
         total = int(con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         col_rows = con.execute(
