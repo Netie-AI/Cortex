@@ -57,6 +57,7 @@ ACL in data plane; Excel source-only; Phase0 Postgres before amend.
 
 ## P14 — Engine-as-SDK / company dual-brain
 The whole runtime packaged as an engine + SDK an FDE points at a customer's data/use-case to generate a governed app. "Dual brain" = reasoning/runtime brain (`netie-engine`) + application/ontology brain (`main`), sharing one governance spine. This is the *how* under P1 (ontology parity) and P12 (company central brain). **Plan:** `docs/strategy/ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md`. **Condition:** reconciliation option chosen (plan §2) + Ontology O1/O3/O4 shipped. *(The "SDK" is O4 `agents/sdk.py`; the "make the app you want" is O7 `scripts/new_pack.py`.)*
+**Cross-ref DMS F30 (2026-08-05):** Palantir SuperRepo beta (monorepo Ontology+functions+React, Foundry CLI, Marketplace signed bundle) is the competitor shape of this parking item + P17 — **not** a DMS What's New/tour (EPIC-023). Internal SuperRepo-class goal for MSSQL/MySQL shops rides **EPIC-022** precision gate; Foundry CLI / Marketplace / SuperRepo **clone stays H6 / DMS P-DMS-31**. Do not clone this sprint.
 
 ## P15 — netie-engine ↔ main capability landing
 `main` and `netie-engine` diverged by 327 files / +34.5k / −5.2k (branched at `dms-v2`). **Do not big-bang merge/rebase** (aborts on add/add conflicts across `registry.py`/`store.py`/engine routes). Land engine capabilities (L0 DuckLake, rawknn/hybrid-RAG memory, Q1/Q2, S0 streams, agent orchestration) into `main` **one gate + one green CI at a time**; pick a canonical home per duplicated core file. **Condition:** plan §2 decision made. *(netie-engine stays the R&D feeder; see plan §2 option C→B.)*
@@ -157,6 +158,11 @@ G2.2 action-value JEPA → G2.3 OSR/reactive ingress → G2.4 telemetry → G2.5
 G2.6 update/OAuth (with P17/P17a).
 **Condition:** G2.0/G2.1 after this handoff; silence litmus required for G2.1; G2.6 after
 OpenVault update/auth path; never silent auto-update, auto-approve apps, or predicate-free money actions.
+**Cross-ack DMS F31 (2026-08-05):** founder ask for adaptive Gen/C/JEPA/FSM/DAG vs linear
+verify chooser on the **DMS ask path** maps here as research — **not** a DMS Wave 7 epic.
+DMS keeps linear FreeRoute verify default; ask-path meta-chooser parked `P-DMS-32` until
+EPIC-018 green + measured bottleneck (or founder policy switch). Honesty: JEPA *family*
+gate ≠ trained JEPA. Do not invent DMS tickets from this ack.
 
 ---
 
