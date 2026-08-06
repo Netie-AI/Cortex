@@ -14,6 +14,34 @@ append-only).
 
 ---
 
+> **2026-08-06 (computer-use capability — measured, before building anything):** Asked
+> whether the decision layer can drive real desktop work (open app, log in, fill form,
+> vault the credentials, mask secrets on screen). **It cannot, and Pointer already can** —
+> so the gap is on the engine side, not Pointer's.
+>
+> **Pointer** (`D:\Pointer`, *not* `D:\Netie Clicks` — `docs/engine/CONSUMERS.md` has the
+> paths inverted and lists the real one as a placeholder to avoid creating) runs headless
+> Node suites with no Electron. All green: vault-fill 13, custody 7 ("the secret itself
+> never leaves the device"), skills-exec 10 ("a Cortex executable skill (C25-02) is used
+> verbatim"), form-fill-privacy (privacy veil armed by `executeApproved`), replan 10,
+> plan-guard 12. `queue.js` already calls `http://127.0.0.1:8010`. One real failure:
+> `test/acceptance/verify.test.js` — `word_docx_write` / `word_from_clipboard` /
+> `clipboard_verify` can execute but can never be verified. Its own comment records the
+> same drift previously with `keypress`; the cause is a hand-kept list in the test that
+> `safety.js` already knows authoritatively. **Not fixed here — another lane had
+> uncommitted work in that repo.**
+>
+> **Cortex side, measured:** 25 registered ontology action types, all DMS domain events —
+> zero `click` / `type` / `screenshot` / `open_app`. `generate_ir` on "open the billing app,
+> log in, and fill the invoice form" emits four *identical* `document_ref` nodes plus an
+> EMIT: the goal text is never parsed, so gen-cFSM produces a fixed chain whose only
+> variable is its length. `computer_control` answered that goal `{"ok": True, "status":
+> "ready"}` having done nothing, and `score_probe` rated that no-op **0.5** against **0.0**
+> for a preset that genuinely tried — so doing nothing won races, and with `known` now
+> reachable it would have been stored as the family's winner. Both halves fixed (`b61c47b`).
+> Real computer-use actions in the engine remain **unrouted** — that is a feature, not a
+> defect fix, and CLAUDE.md sends it to `prd-agent`.
+
 > **2026-08-06 (manifest grounding — Cortex#14 P0-DEMO-02 + Cortex#6 SEC-01):** One root
 > cause, two ends. **#14:** `route_to_metric` matched "total"/"revenue"/"amount" and
 > answered from the synthetic demo warehouse, badged `governed_metric`, for questions about
