@@ -24,14 +24,14 @@ Shipped this session, **all awaiting independent verify by a different run** (R-
 
 ## Next
 
-1. Independent verify + close `#14`, `#6`, `#5`, `#10` (R-0003 — a different run verifies).
-2. Estate-audit bugs still open: `#7` EVAL-01, `#8` ANS-01, `#9` C2-01.
+1. Independent verify + close `#14`, `#6`, `#5`, `#10`, `#8`, `#9` (R-0003).
+2. `#7` EVAL-01 **partial** — regression gate proven fallible; see Known broken.
 3. `EPIC-015` doc-RAG: `RAG-01` (dms#24) is the remaining ticket.
 
 ## Known broken / not green
 
-- **`packs/dms/lakehouse/catalog.py` still imports duckdb** (2 sites) outside sanctioned
-  `CortexOS/execution` — ratcheted; needs a call on whether the lakehouse is a 2nd opener.
+- **`packs/dms/lakehouse/catalog.py` imports duckdb** (2 sites) outside sanctioned
+  `CortexOS/execution` — ratcheted; is the lakehouse a second legitimate opener?
 - **`cortex-contract` is pip-installed editable at 1.1.0** against a 1.3.0 tree; imports
   resolve, `pip show` lies.
 - **26 ruff findings under `packs/dms/**`**, outside the gate scope. **`langgraph` /
