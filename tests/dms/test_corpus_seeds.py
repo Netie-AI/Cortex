@@ -69,6 +69,51 @@ def test_corpus_confidently_wrong_zero(corpus_report):
     assert corpus_report["totals"]["wrong"] == 0
 
 
+def test_no_answer_silently_became_a_refusal(corpus_report):
+    """EVAL-01 — `wrong == 0` was the only assertion here, and abstain was free.
+
+    An answer that quietly turns into a refusal is a regression the customer
+    feels, but it scored as neither right nor wrong. The only thing bounding it
+    was a rate ceiling of 0.38 over 47 claim items, so three paraphrases flipped
+    from answer to abstain on 2026-07-31 and this file stayed green — while five
+    live P0 answer defects went uncaught.
+
+    Compared against a recorded baseline of what answers, not against gold.
+    "Should this answer?" invites pressure to answer where abstaining is
+    correct; "did this change?" is answerable without an opinion.
+
+    Proved able to fail (R-0007): reintroducing the ANS-01 defect makes this
+    report exactly ms_exclude_beta#p6, vn_exclude_bare_beta#p3 and
+    vn_exclude_full_sku#p3.
+    """
+    regressed = sorted(
+        str(i["id"]) for i in corpus_report["items"] if i.get("regression")
+    )
+
+    assert not regressed, (
+        "these answered when the baseline was recorded and now abstain: "
+        + ", ".join(regressed)
+    )
+
+
+def test_the_regression_check_is_actually_armed(corpus_report):
+    """Guard the guard: an empty baseline would pass forever.
+
+    `load_answering_baseline` returns an empty set when the file is missing or
+    unparseable, which makes every regression invisible rather than loud — so
+    the absence of a baseline has to fail here, not pass quietly.
+    """
+    from bench.corpus import load_answering_baseline
+
+    baseline = load_answering_baseline()
+
+    assert len(baseline) > 300, (
+        f"answering baseline holds {len(baseline)} ids — regenerate it with "
+        "`python -m bench.corpus --write-baseline`, or the regression check "
+        "above is checking nothing"
+    )
+
+
 def test_gated_categories_wrong_zero(corpus_report):
     thresholds = yaml.safe_load(THRESHOLDS_PATH.read_text(encoding="utf-8"))
     by_cat = corpus_report["by_category"]

@@ -292,6 +292,44 @@ def _live_ask(
     raise RuntimeError(last or "DMS ask failed")
 
 
+BASELINE_PATH = Path(__file__).resolve().parent / "corpus" / "answering_baseline.json"
+
+
+def load_answering_baseline(path: Path = BASELINE_PATH) -> frozenset[str]:
+    """Ids that answered when the baseline was recorded. Empty if absent."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return frozenset()
+    return frozenset(str(i) for i in (raw.get("answering") or []))
+
+
+def _is_regression(item_id: str, outcome: str, baseline: frozenset[str]) -> bool:
+    """Did an item that used to answer stop answering?
+
+    EVAL-01. `abstain` was a free bucket. The only thing bounding it was a rate
+    ceiling of 0.38 over 47 claim items, so items could silently flip from
+    answer to abstain — three did, from 2026-07-31 — while the gate stayed green
+    on `wrong == 0`. An answer that quietly became a refusal is a regression the
+    customer feels, and scoring it as neither right nor wrong is how five live
+    P0s went uncaught.
+
+    The first attempt at this compared against the *gold* — "gold says
+    answerable but it abstained" — and skipped expanded paraphrases on the
+    reasoning that they abstain by design. Reintroducing the ANS-01 defect
+    proved that wrong: it produced `abstain: 3, regression: 0, PASS`, because
+    the three real items were paraphrases (`…#p6`, `…#p3`). An assertion that
+    looks right and catches nothing is the thing this ticket is about.
+
+    So the comparison is against recorded behaviour, not against gold. The
+    question is not "should this answer?" — which invites pressure to answer
+    where abstaining is correct — but "did this change?", which is answerable
+    without an opinion. An item enters the baseline only by genuinely
+    answering, so the ratchet moves one way.
+    """
+    return outcome == "abstain" and item_id in baseline
+
+
 def _score_live(seed: CorpusSeed, envelope: dict[str, Any]) -> str:
     """Map live envelope to correct | wrong | abstain."""
     abstained = bool(envelope.get("abstained"))
@@ -341,21 +379,26 @@ def run_offline(
 
     by_cat: dict[str, dict[str, int]] = {}
     items: list[dict[str, Any]] = []
+    baseline = load_answering_baseline()
 
     for seed in seeds:
         result = score_item(seed.to_golden())
         cat = by_cat.setdefault(
             seed.category,
-            {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0},
+            {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0, "regression": 0},
         )
         cat["total"] += 1
         cat[result.outcome] = cat.get(result.outcome, 0) + 1
+        regressed = _is_regression(seed.id, result.outcome, baseline)
+        if regressed:
+            cat["regression"] = cat.get("regression", 0) + 1
         items.append(
             {
                 "id": seed.id,
                 "category": seed.category,
                 "persona": seed.persona,
                 "outcome": result.outcome,
+                "regression": regressed,
                 "route": result.route,
                 "detail": result.detail,
                 "gold_verified": seed.gold_verified,
@@ -364,7 +407,7 @@ def run_offline(
             }
         )
 
-    totals = {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0}
+    totals = {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0, "regression": 0}
     for cat in by_cat.values():
         for k in totals:
             totals[k] += cat.get(k, 0)
@@ -476,6 +519,23 @@ def check_thresholds(report: dict[str, Any], thresholds: dict[str, Any] | None =
     if wrong > int(thresholds.get("confidently_wrong", 0)):
         violations.append(f"confidently_wrong={wrong} exceeds floor 0")
 
+    # A seed that used to answer and now abstains is a regression, not a free
+    # outcome. Checked per item rather than as a rate: a ceiling of 0.38 over 47
+    # seeds let three flip unnoticed (EVAL-01). Named individually because
+    # "regression=3" sends the reader hunting; the ids do not.
+    regressed = [
+        str(i.get("id"))
+        for i in (report.get("items") or [])
+        if i.get("regression")
+    ]
+    if regressed:
+        violations.append(
+            f"items that used to answer now abstain ({len(regressed)}): "
+            + ", ".join(sorted(regressed))
+            + " — fix the answer path, or regenerate the baseline only if the "
+            "abstain is genuinely the right behaviour now"
+        )
+
     # Rate floors apply to the human-verified claim set — the population they were
     # calibrated on. Paraphrases abstain more by design; holding them to the seed
     # floor would create pressure to answer where abstaining is correct.
@@ -513,6 +573,45 @@ def check_thresholds(report: dict[str, Any], thresholds: dict[str, Any] | None =
     return violations
 
 
+def _write_baseline(report: dict[str, Any], *, seeds_only: bool, live: bool) -> None:
+    """Record which items answer, refusing to snapshot a broken state.
+
+    Learned the hard way while building this: the first baseline was generated
+    by hand from whatever `corpus_last_run.json` happened to hold, and that file
+    was the output of a run with a defect deliberately reintroduced. The three
+    broken items were therefore recorded as "expected to abstain" — so the gate
+    stayed green on exactly the regression it was built to catch.
+
+    A baseline is a claim that the current behaviour is correct. Taking one
+    while anything else is failing makes that claim false, so this refuses.
+    """
+    blocking = [v for v in (report.get("threshold_violations") or []) if "used to answer" not in v]
+    if blocking:
+        raise SystemExit(
+            "refusing to write a baseline from a run with violations:\n  "
+            + "\n  ".join(blocking)
+        )
+    if seeds_only or live:
+        raise SystemExit(
+            "baseline must come from a full offline run — a partial or live run "
+            "records fewer items and would silently drop the rest from the ratchet"
+        )
+
+    ids = sorted(str(i["id"]) for i in report["items"] if i.get("outcome") != "abstain")
+    payload = {
+        "_comment": (
+            "EVAL-01 answering baseline. Every id here answered when recorded. If "
+            "one abstains later, an answer the customer used to get silently "
+            "became a refusal — a regression the corpus previously scored as free, "
+            "bounded only by a 0.38 rate ceiling over 47 claim items."
+        ),
+        "_regenerate": "python -m bench.corpus --write-baseline",
+        "answering": ids,
+    }
+    BASELINE_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"baseline: recorded {len(ids)} answering items -> {BASELINE_PATH.name}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Phase 1 corpus benchmark")
     p.add_argument("--category", default=None, choices=PHASE1_CATEGORIES)
@@ -531,6 +630,13 @@ def main() -> None:
         help="Live request pacing. Above the engine's rate limit, throttles get "
         "reported as errors and can hide a real failure.",
     )
+    p.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="Record which items answer, as the regression baseline. Refuses "
+        "unless the run is otherwise clean — a baseline captured while "
+        "something is broken locks the breakage in as expected.",
+    )
     args = p.parse_args()
 
     include_expanded = not args.seeds_only
@@ -547,6 +653,9 @@ def main() -> None:
     violations = check_thresholds(report)
     report["threshold_violations"] = violations
     report["passed"] = not violations
+
+    if args.write_baseline:
+        _write_baseline(report, seeds_only=args.seeds_only, live=args.live)
 
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(report, indent=2), encoding="utf-8")
