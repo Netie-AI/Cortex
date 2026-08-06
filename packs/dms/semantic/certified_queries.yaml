@@ -27,6 +27,10 @@ certified:
 
   - id: cq_sales_top5_value
     question: "Top 5 selling SKUs by revenue"
+    synonyms:
+      - "top 5 product families by MYR sales"
+      - "top 5 skus by sales value"
+      - "best 5 selling SKUs by revenue"
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
       FROM transactions WHERE txn_type = 'OUT'

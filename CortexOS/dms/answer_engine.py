@@ -61,12 +61,29 @@ def _certified_index() -> dict[str, Any]:
     from packs.dms.semantic.loader import load_all
 
     model = load_all()
-    return {_normalize(cq.question): cq for cq in model.certified}
+    # Exact normalized match on primary question + curated synonyms (VQ-01).
+    # Never fuzzy — a scoped question must not collide with an unscoped asset.
+    index: dict[str, Any] = {}
+    for cq in model.certified:
+        keys = [_normalize(cq.question), *(_normalize(s) for s in (cq.synonyms or []))]
+        for key in keys:
+            if not key:
+                continue
+            prior = index.get(key)
+            if prior is not None and prior.id != cq.id:
+                raise RuntimeError(
+                    f"certified synonym collision on {key!r}: {prior.id} vs {cq.id}"
+                )
+            index[key] = cq
+    return index
 
 
 def match_certified(question: str):
-    """L0 — EXACT normalized match only (high precision; never fuzzy, so a
-    scoped question can't collide with an unscoped certified query)."""
+    """L0 — EXACT normalized match on primary question or curated synonyms.
+
+    High precision; never fuzzy. Synonyms live on the certified asset (pack
+    YAML), not in product intent regex (F28 / VQ-01).
+    """
     return _certified_index().get(_normalize(question))
 
 
@@ -797,6 +814,7 @@ def _true_count(
 # ── suggestions for abstain ──────────────────────────────────────────────────
 def _suggestions(question: str, limit: int = 3) -> list[str]:
     """Nearest answerable questions (token overlap over certified + metric synonyms)."""
+    from packs.dms.semantic.catalog_answer import _metric_label
     from packs.dms.semantic.loader import load_all
 
     model = load_all()
@@ -806,6 +824,11 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
         overlap = len(qtokens & set(_normalize(cq.question).split()))
         if overlap:
             scored.append((overlap, cq.question))
+    for metric in model.metrics.values():
+        for syn in metric.synonyms[:2]:
+            overlap = len(qtokens & set(_normalize(syn).split()))
+            if overlap:
+                scored.append((overlap * 0.9, syn))
     scored.sort(key=lambda t: -t[0])
     seen: list[str] = []
     for _, qtext in scored:
@@ -813,13 +836,45 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
             seen.append(qtext)
         if len(seen) >= limit:
             break
-    if not seen:  # cold: offer a stable default trio
-        seen = [
-            "Top 5 selling SKUs by revenue",
-            "Which SKUs are below reorder level in warehouse A?",
-            "Show warehouse capacity utilisation",
-        ][:limit]
-    return seen
+    if not seen:  # cold: certified titles + metric labels from the pack
+        for cq in model.certified:
+            seen.append(cq.question)
+            if len(seen) >= limit:
+                break
+        if len(seen) < limit:
+            for metric in model.metrics.values():
+                label = _metric_label(metric)
+                if label not in seen:
+                    seen.append(label)
+                if len(seen) >= limit:
+                    break
+    return seen[:limit]
+
+
+def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
+    """META-01 — browse what the semantic layer can answer (no SQL)."""
+    from packs.dms.semantic.catalog_answer import build_catalog_answer
+    from packs.dms.semantic.loader import load_all
+
+    payload = build_catalog_answer()
+    model = load_all()
+    suggestions = [cq.question for cq in model.certified[:5]]
+    return {
+        "answer": payload["answer"],
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "sql",
+        "rows": [],
+        "source_table": None,
+        "layer": payload["layer"],
+        "badge": payload["badge"],
+        "assumptions": "semantic layer catalog (no SQL)",
+        "total_count": 0,
+        "suggestions": suggestions,
+        "query_plan": _honest_plan(question, None, layer=payload["layer"], assumptions="catalog browse"),
+    }
 
 
 def _plausibility_runner(verified: VerifiedManifest | None) -> sql_plausibility.Runner:
@@ -925,6 +980,85 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
         "total_count": 0,
         "suggestions": suggestions,
     }
+
+
+def _try_document_rag(
+    question: str,
+    audit_id: str,
+    *,
+    space_id: str | None,
+) -> dict[str, Any] | None:
+    """Space-scoped doc-RAG after SQL layers abstain (RAG-03).
+
+  Only runs when ``space_id`` is set and the retrieval port returns hits for
+  that Space — never as an early keyword shortcut ahead of L0/L1/L2.
+    """
+    if not space_id:
+        return None
+    from CortexOS.dms.document_retrieval_port import (
+        DocumentRetrievalNotRegistered,
+        resolve_document_retrieval,
+    )
+    from CortexOS.rag import lexical
+
+    try:
+        retriever = resolve_document_retrieval()
+    except DocumentRetrievalNotRegistered:
+        return None
+    if not retriever.is_configured():
+        return None
+    hits = retriever.retrieve(question, space_id=space_id, top_k=8)
+    if not hits:
+        return None
+    for hit in hits:
+        if str(hit.get("space_id") or "") != str(space_id):
+            return None
+    corpus_hits = [
+        {
+            "id": h.get("id"),
+            "text": h.get("content") or h.get("text") or "",
+            "space_id": h.get("space_id"),
+            "source_id": h.get("source_id"),
+            "score": h.get("score"),
+        }
+        for h in hits
+    ]
+    rag = lexical.answer_from_hits(question, corpus_hits)
+    sources = [
+        f"{h.get('source_id')}:{h.get('chunk_index', h.get('id'))}"
+        for h in hits
+        if h.get("source_id")
+    ]
+    return {
+        "answer": rag["answer"],
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "rag",
+        "sources": sources,
+        "rows": [],
+        "source_table": None,
+        "layer": "rag",
+        "badge": "document",
+        "assumptions": f"document retrieval (space={space_id})",
+        "total_count": 0,
+        "query_plan": _honest_plan(question, None, layer="rag"),
+    }
+
+
+def _abstain_or_document_rag(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+    space_id: str | None = None,
+) -> dict[str, Any]:
+    """Final abstain path — try space-scoped doc-RAG before giving up."""
+    doc = _try_document_rag(question, audit_id, space_id=space_id)
+    if doc is not None:
+        return doc
+    return _abstain(question, audit_id, reason=reason)
 
 
 # ── session memory (follow-up anaphora) ───────────────────────────────────────
@@ -1528,7 +1662,6 @@ def answer(
         _infer_source_table,
         build_chart_spec,
         format_answer_with_insights,
-        rag_answer,
         route_question,
         synthesize_answer,
     )
@@ -1545,15 +1678,6 @@ def answer(
             "assumptions": "destructive operation refused", "total_count": 0,
             "query_plan": _honest_plan(question, None, layer="blocked", assumptions="destructive"),
         }
-    if route == "rag":
-        ans, sources = rag_answer(question)
-        return {
-            "answer": ans, "sql_used": None, "chart_spec": None, "audit_id": audit_id,
-            "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
-            "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
-            "total_count": 0,
-            "query_plan": _honest_plan(question, None, layer="rag"),
-        }
 
     layer = badge = ""
     sql: str | None = None
@@ -1567,7 +1691,15 @@ def answer(
 
     # Session anaphora — "average of them" / "which of those are low stock"
     session_rows: list[dict[str, Any]] | None = None
-    if prior and prior.get("sql") and _is_anaphora(q_low):
+    if _is_anaphora(q_low):
+        if not (prior and prior.get("sql")):
+            # Without a prior turn, fall-through to L0/L1 invents a different ask
+            # from surface tokens ("average" → sales average). Abstain instead.
+            return _abstain(
+                question,
+                audit_id,
+                reason="follow-up needs a prior answer in this session",
+            )
         try:
             if re.search(r"\b(low stock|below reorder|below\s+reorder)\b", q_low):
                 sql, session_rows = _low_stock_over_prior(prior.get("rows") or [])
@@ -1651,6 +1783,13 @@ def answer(
             audit_id,
             reason="predictive / out-of-scope — no verified forecast path",
         )
+
+    # META-01 — metadata / browse intent before query-skill replay or L2 generation.
+    if sql is None:
+        from packs.dms.semantic.catalog_answer import is_catalog_intent
+
+        if is_catalog_intent(question):
+            return _catalog_response(question, audit_id)
 
     if sql is None:
         # Exclusion verb present but unresolved → abstain (never query-skill replay).
@@ -1739,12 +1878,20 @@ def answer(
             try:
                 l2 = resolve_sql_generation()
             except SqlGenerationNotRegistered:
-                return _abstain(
-                    question, audit_id, reason="no verified answer path (L2 provider absent)"
+                return _abstain_or_document_rag(
+                    question,
+                    audit_id,
+                    reason="no verified answer path (L2 provider absent)",
+                    space_id=space_id,
                 )
 
             if not l2.is_configured():
-                return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
+                return _abstain_or_document_rag(
+                    question,
+                    audit_id,
+                    reason="no verified answer path (L2 not wired)",
+                    space_id=space_id,
+                )
 
             semantic_early = load_semantic_layer()
             reduced = l2.retrieve_schema(question)
@@ -1790,17 +1937,23 @@ def answer(
                     require_explain=con_explain is not None,
                 )
             except SqlGateAbstain as exc:
-                return _abstain(
+                return _abstain_or_document_rag(
                     question,
                     audit_id,
                     reason=f"L2 generation failed validation gate: {exc}",
+                    space_id=space_id,
                 )
             finally:
                 if con_explain is not None:
                     con_explain.close()
 
             if not gate.passed or not gate.safe_sql:
-                return _abstain(question, audit_id, reason="L2 generation failed validation gate")
+                return _abstain_or_document_rag(
+                    question,
+                    audit_id,
+                    reason="L2 generation failed validation gate",
+                    space_id=space_id,
+                )
 
             sql = gate.safe_sql
             layer, badge = "generated", "L2_VALIDATED"
@@ -1813,10 +1966,20 @@ def answer(
             )
             l2.record_validated(question, sql)  # provider swallows its own failures
         else:
-            return _abstain(question, audit_id, reason="no governed metric or certified query matched")
+            return _abstain_or_document_rag(
+                question,
+                audit_id,
+                reason="no governed metric or certified query matched",
+                space_id=space_id,
+            )
 
     if sql is None:
-        return _abstain(question, audit_id, reason="no governed metric or certified query matched")
+        return _abstain_or_document_rag(
+            question,
+            audit_id,
+            reason="no governed metric or certified query matched",
+            space_id=space_id,
+        )
 
     semantic = load_semantic_layer()
     # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).

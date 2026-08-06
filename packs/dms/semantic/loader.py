@@ -45,6 +45,9 @@ class CertifiedQuery:
     verified_by: str = ""
     verified_at: str = ""
     tags: list[str] = field(default_factory=list)
+    #: Curated alternate phrasings (Genie Knowledge Store pattern). Exact
+    #: normalized match only — never fuzzy, never product intent regex.
+    synonyms: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -238,9 +241,13 @@ def _load_certified() -> list[CertifiedQuery]:
             raise SemanticError(f"duplicate certified id {raw['id']!r}")
         seen.add(raw["id"])
         out.append(CertifiedQuery(
-            id=raw["id"], question=raw["question"], sql=raw["sql"].strip(),
-            verified_by=raw.get("verified_by", ""), verified_at=raw.get("verified_at", ""),
+            id=raw["id"],
+            question=raw["question"],
+            sql=raw["sql"].strip(),
+            verified_by=raw.get("verified_by", ""),
+            verified_at=raw.get("verified_at", ""),
             tags=list(raw.get("tags") or []),
+            synonyms=[str(s).strip() for s in (raw.get("synonyms") or []) if str(s).strip()],
         ))
     return out
 
