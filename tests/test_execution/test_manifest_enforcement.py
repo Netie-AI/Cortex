@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import sqlglot
+from cortex_contract.execution import Manifest
 from sqlglot import exp
 
 from CortexOS.execution.manifest import (
@@ -26,7 +27,6 @@ from CortexOS.execution.manifest import (
     VerifiedManifest,
     enforce_manifest,
 )
-from packages.cortex_contract.execution import Manifest
 
 CORPUS = json.loads((Path(__file__).parent / "hostile_sql_corpus.json").read_text(encoding="utf-8"))
 CASES = CORPUS["cases"]

@@ -19,8 +19,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from packages.cortex_contract.execution import Manifest, canonical_manifest_bytes
+from cortex_contract.execution import Manifest, canonical_manifest_bytes
 
 VECTORS_PATH = Path(__file__).resolve().parents[2] / "contract" / "testvectors" / "manifest_canonical.jsonl"
 
