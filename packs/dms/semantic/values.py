@@ -20,8 +20,18 @@ VALUE_COLUMNS: dict[str, str] = {
     "carrier": "shipments",
     "country": "suppliers",
     "location_code": "locations",
+    "city": "locations",
     "severity": "alerts",
     "txn_type": "transactions",
+}
+
+# Common MY / logistics acronyms → canonical city when present in the dict.
+_CITY_ACRONYMS: dict[str, str] = {
+    "kl": "Kuala Lumpur",
+    "kul": "Kuala Lumpur",
+    "jb": "Johor Bahru",
+    "pg": "Penang",
+    "penang": "Penang",
 }
 MAX_VALUES = 1000
 
@@ -208,6 +218,19 @@ def resolve(entity_text: str, column: str) -> Resolution:
         hit = _location_candidates(text, values)
         if hit:
             return Resolution(hit, 0.95, column, [hit])
+
+    # 3b. city acronyms (KL → Kuala Lumpur) when the expanded form exists
+    if column == "city":
+        expanded = _CITY_ACRONYMS.get(lower)
+        if expanded:
+            if expanded in values:
+                return Resolution(expanded, 0.95, column, [expanded])
+            if expanded.lower() in by_lower:
+                return Resolution(
+                    by_lower[expanded.lower()], 0.95, column, [by_lower[expanded.lower()]]
+                )
+            # Acronym known but city absent from this warehouse — fail closed.
+            return Resolution(None, 0.0, column, values[:5])
 
     # 4. token/substring containment (both directions)
     contained = [v for v in values if lower in v.lower() or v.lower() in lower]

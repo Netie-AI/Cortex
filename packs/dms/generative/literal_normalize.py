@@ -45,10 +45,37 @@ def _guess_column(sql: str, lit_start: int) -> str | None:
     return hits[-1].group(1).lower()
 
 
+_DATEISH = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _unique_column_resolve(raw: str) -> tuple[str, valuedict.Resolution] | None:
+    """When the column hint is missing, accept only a unique high-confidence hit."""
+    if not raw or _DATEISH.match(raw) or len(raw) > 64:
+        return None
+    hits: list[tuple[str, valuedict.Resolution]] = []
+    for col in sorted(_RESOLVE_COLUMNS):
+        res = valuedict.resolve(raw, col)
+        if res.exact or (res.ok and res.confidence >= 0.95 and res.value):
+            hits.append((col, res))
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
 def normalize_sql_literals(sql: str) -> NormalizeResult:
     """Rewrite entity literals using valuedict.resolve. Fail closed on ambiguity."""
     if not sql or not sql.strip():
         return NormalizeResult(ok=False, sql=None, violations=["EMPTY_SQL"])
+
+    # Rebuild hint set if VALUE_COLUMNS grew since import (city, etc.).
+    global _COL_HINT, _RESOLVE_COLUMNS
+    _RESOLVE_COLUMNS = frozenset(valuedict.VALUE_COLUMNS.keys())
+    _COL_HINT = re.compile(
+        r"\b("
+        + "|".join(re.escape(c) for c in sorted(_RESOLVE_COLUMNS, key=len, reverse=True))
+        + r")\b",
+        re.I,
+    )
 
     out_parts: list[str] = []
     last = 0
@@ -60,11 +87,15 @@ def normalize_sql_literals(sql: str) -> NormalizeResult:
         col = _guess_column(sql, m.start())
         out_parts.append(sql[last : m.start()])
         if col is None or col not in _RESOLVE_COLUMNS:
-            # Keep non-entity literals (dates, free text) unchanged.
-            out_parts.append(m.group(0))
-            last = m.end()
-            continue
-        res = valuedict.resolve(raw, col)
+            uniq = _unique_column_resolve(raw)
+            if uniq is None:
+                # Keep non-entity literals (dates, free text) unchanged.
+                out_parts.append(m.group(0))
+                last = m.end()
+                continue
+            col, res = uniq
+        else:
+            res = valuedict.resolve(raw, col)
         if not res.ok or not res.value:
             violations.append(
                 f"UNRESOLVED_LITERAL:{col}={raw!r} candidates={res.candidates[:5]}"

@@ -92,13 +92,12 @@ def _freeroute_complete(prompt: str) -> str | None:
     from CortexOS.integrations.openvault_client import openvault_base_url, post_json
 
     # Default must be a model FreeRoute's configured providers actually serve.
-    # "gpt-4o-mini" is an OpenAI name; routed to Groq it answers HTTP 404
-    # non-retryable, so every generation failed and the answer path abstained —
-    # indistinguishable from "no model wired" and equally silent.
+    # Named Groq ids (e.g. llama-3.3-70b-versatile) often 404 non-retryable on the
+    # live vault chain; ``auto`` lets FreeRoute pick a working upstream (bakeoff).
     model = (
         os.environ.get("DMS_L2_MODEL")
         or os.environ.get("OPENVAULT_SQL_MODEL")
-        or "llama-3.3-70b-versatile"
+        or "auto"
     )
     body = {
         "model": model,

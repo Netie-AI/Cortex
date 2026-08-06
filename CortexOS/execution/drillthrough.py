@@ -110,6 +110,29 @@ def verify_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def _drill_inner(expr: exp.Expression) -> exp.Expression:
+    """Reduce COUNT(DISTINCT col) / COUNT(*) args to projectable expressions."""
+    if isinstance(expr, exp.Distinct):
+        inner = expr.expressions[0] if expr.expressions else expr.this
+        return inner.copy() if inner is not None else expr
+    return expr
+
+
+def _order_measure(inner: exp.Expression, *, dialect: str) -> str | None:
+    """ORDER BY target for drill SQL — skip DISTINCT/Star fragments sqlglot cannot parse."""
+    inner = _drill_inner(inner)
+    if isinstance(inner, exp.Star):
+        return None
+    sql = inner.sql(dialect=dialect)
+    if not sql or sql.upper().startswith("DISTINCT "):
+        return None
+    try:
+        sqlglot.parse_one(sql, read=dialect)
+    except Exception:  # noqa: BLE001
+        return None
+    return sql
+
+
 def _unwrap_aggregate(node: exp.Expression) -> tuple[exp.Expression | None, bool]:
     """If ``node`` is (or wraps) an aggregate, return (inner_arg, found).
 
@@ -150,8 +173,9 @@ def _strip_aggregates(select: exp.Select) -> tuple[list[exp.Expression], str | N
             if inner is None:
                 approximate = True
                 continue
+            inner = _drill_inner(inner)
             if measure is None:
-                measure = inner.sql(dialect="duckdb")
+                measure = _order_measure(inner, dialect="duckdb")
             if alias:
                 new_exprs.append(exp.alias_(inner, alias, table=False))
             else:

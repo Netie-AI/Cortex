@@ -37,6 +37,31 @@ def test_literal_normalize_beta_to_sku_beta():
     assert "'BETA'" not in out.sql or "SKU-BETA" in out.sql
 
 
+def test_resolve_city_kl_acronym(monkeypatch):
+    monkeypatch.setattr(
+        valuedict,
+        "values_for",
+        lambda col: ["Kuala Lumpur", "Johor Bahru", "Shah Alam"] if col == "city" else [],
+    )
+    res = valuedict.resolve("KL", "city")
+    assert res.ok is True
+    assert res.value == "Kuala Lumpur"
+
+
+def test_literal_normalize_kl_with_city_hint(monkeypatch):
+    monkeypatch.setattr(
+        valuedict,
+        "values_for",
+        lambda col: ["Kuala Lumpur", "Johor Bahru"] if col == "city" else [],
+    )
+    valuedict.refresh()
+    sql = "SELECT city, SUM(x) FROM t WHERE city = 'KL'"
+    out = literal_normalize.normalize_sql_literals(sql)
+    assert out.ok is True
+    assert out.sql is not None
+    assert "Kuala Lumpur" in out.sql
+
+
 def test_literal_normalize_unresolved_abstains():
     sql = "SELECT * FROM shipments WHERE carrier = 'PEGASUS-MOON-XYZ' LIMIT 5"
     out = literal_normalize.normalize_sql_literals(sql)

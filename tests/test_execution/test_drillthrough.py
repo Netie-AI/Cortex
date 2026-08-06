@@ -63,6 +63,17 @@ def test_rewrite_omits_provenance_when_disabled():
     assert "amount" in out.sql.lower()
 
 
+def test_rewrite_count_distinct_sku():
+    sql = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory LIMIT 1000"
+    out = rewrite_for_drillthrough(sql, include_provenance=False)
+    low = out.sql.lower()
+    assert "count(" not in low
+    assert "sku" in low
+    assert "inventory" in low
+    assert "limit 5000" in low
+    assert out.measure_expr == "sku"
+
+
 def test_token_roundtrip_and_expiry(monkeypatch):
     monkeypatch.setenv("CORTEX_DRILLTHROUGH_HMAC", "test-secret")
     tok = mint_token(
