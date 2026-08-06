@@ -34,15 +34,43 @@ def detect_platform() -> dict[str, Any]:
     }
 
 
+def _backend_available(backend_id: str) -> bool | None:
+    """Is the selected runtime actually reachable? ``None`` means "not checked".
+
+    Three-valued on purpose. "We did not look" and "it is there" are different
+    answers, and collapsing them is how a plan ends up claiming a backend that
+    was never installed. Import is local because ``bakeoff`` imports this
+    module.
+    """
+    try:
+        from CortexOS.engine import bakeoff
+
+        return bool(bakeoff.probe_backend(backend_id).get("ok"))
+    except Exception:  # noqa: BLE001 — a probe must never break planning
+        return None
+
+
 def just_works(
     hardware: dict[str, Any] | None = None,
     *,
     research: bool = False,
     prefer: str | None = None,
+    probe: bool = True,
 ) -> dict[str, Any]:
     """One-shot plan a human never has to edit.
 
     Returns apply-ready config + human reasons (idiot-proof copy).
+
+    The plan reports whether the chosen backend is **reachable**, and says so in
+    the human copy. Selecting a backend from hardware alone and returning
+    ``ok: True`` read as "Ollama is serving" when Ollama was never installed —
+    a degradation visible only at the first real generation, which is exactly
+    the silent fallback R-0011 forbids.
+
+    Cortex is not one of these backends. Orchestration, routing, governance and
+    the manifest are ours and keep working when the substrate underneath is
+    absent; what an unreachable backend costs is *generation*, and the plan is
+    careful to say only that.
     """
     hw = dict(hardware or {})
     plat = detect_platform()
@@ -101,12 +129,34 @@ def just_works(
     if not profile["has_gpu"]:
         human.append("No GPU - Ollama/CPU path. You don't need to install CUDA.")
 
+    available = _backend_available(backend) if probe else None
+    backend_name = registry.BACKEND_BY_ID[backend].name
+    if available is False:
+        human.append(
+            f"{backend_name} is NOT reachable right now - nothing is serving on its port. "
+            "Cortex still routes, governs and audits; only generation is unavailable "
+            f"until you start {backend_name} or pick another backend."
+        )
+    elif available is None and probe:
+        human.append(
+            f"Could not tell whether {backend_name} is reachable - treat generation as "
+            "unverified rather than working."
+        )
+    elif available is None:
+        human.append(
+            f"{backend_name} was not probed, so its availability is unknown - "
+            "this plan does not claim it is running."
+        )
+
     return {
         "ok": True,
         "mode": "just_works",
         "thesis": thesis()["role"],
         "config": {
             "backend": backend,
+            # True / False / None = reachable / absent / not checked. Never
+            # defaulted to True: an unprobed backend is not a working one.
+            "backend_available": available,
             "optimizers": opts,
             "research": bool(research),
             "agents_runtime": "cortex",
