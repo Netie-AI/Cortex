@@ -52,12 +52,24 @@ supported:
 
   - version: "1.2"
     spec: openapi-1.2.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive T7 provenance: Answer gains answer_id, assumptions[],
       contributing_sources[], drillthrough_token; new operationId drillthrough.
       1.1 clients ignore the new fields. canonical_manifest_bytes unchanged.
+
+  - version: "1.3"
+    spec: openapi-1.3.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive INS-02 presentation: Answer gains chart_spec, an optional
+      deterministic chart descriptor built from the result schema (never from
+      model prose). The ask route already returned it in the engine payload;
+      without the field pydantic dropped it before the consumer saw it, so a
+      1.2 client observes no change and a 1.3 client maps it to envelope.chart.
+      No operationId added or removed; canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

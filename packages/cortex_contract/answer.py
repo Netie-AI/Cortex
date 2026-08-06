@@ -60,6 +60,8 @@ class Answer(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     contributing_sources: list[ContributingSource] = Field(default_factory=list)
     drillthrough_token: str | None = None
+    #: INS-02 presentation — optional; DMS maps to envelope.chart.
+    chart_spec: dict[str, Any] | None = None
 
 
 class DrillthroughRequest(BaseModel):
