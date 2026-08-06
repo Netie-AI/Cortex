@@ -154,7 +154,22 @@ def _memory_compose(plan: Mapping[str, Any], body: Mapping[str, Any]) -> dict[st
 def _ontology_actions(plan: Mapping[str, Any], body: Mapping[str, Any], caller: Any) -> dict[str, Any]:
     action_id = body.get("action_id")
     if not action_id:
-        return {"ok": True, "runner": str(plan["runner"]), "status": "ready"}
+        # Being handed a goal and no action to run is a planning failure, not a
+        # success. This used to answer `ok: True, status: "ready"`, which the
+        # racing router scored 0.5 — better than a preset that genuinely tried
+        # and failed (0.0). A no-op therefore won races over computer-use goals
+        # and would be stored as the family's winner now that `known` is
+        # reachable. Nothing ran, so nothing is claimed.
+        return {
+            "ok": False,
+            "runner": str(plan["runner"]),
+            "status": "no_action_selected",
+            "error": (
+                "computer_control was given no action_id to run. This preset "
+                "dispatches one registered ontology action; it does not decompose "
+                "a goal into steps, so something upstream has to choose the action."
+            ),
+        }
 
     from CortexOS.agent_sdk import SdkDenied, call_action
 

@@ -99,6 +99,18 @@ def score_probe(
 
     if judge_score is not None:
         return {"score": judge_score, "predicates_pass": None, "judge_score": judge_score}
+
+    # With no predicates and no judge, output is the only evidence of work. But
+    # "no output" covers two different things: an action that ran and had
+    # nothing to say (a click that landed), and a preset that executed nothing
+    # at all. The second used to collect the same 0.5 as the first, which put a
+    # no-op above a preset that tried and failed — so it won races and, now that
+    # `known` is reachable, would be stored as the family's winner.
+    ran = bool(result.get("output")) or bool(result.get("result")) or bool(
+        str(result.get("status") or "").lower() in {"completed", "ok", "done"}
+    )
+    if not ran:
+        return {"score": 0.0, "predicates_pass": None, "judge_score": None}
     return {
         "score": 1.0 if result.get("output") else 0.5,
         "predicates_pass": None,
