@@ -285,6 +285,32 @@ _EXCLUSION_VERB_RE = re.compile(
 )
 
 
+def _strip_trailing_filler(clause: str) -> str:
+    """Drop filler words the clause ends on, so the resolver sees only entities.
+
+    ANS-01. Two lists decided this and disagreed. ``_EXCLUSION_STOP`` says where
+    the entity clause ends and omitted ``and`` / ``dan``; ``_EXCLUSION_SKIP``,
+    used by the token path, contains them. So ``_excluded_skus`` read
+    "SKU-BETA and" correctly while this path handed the fuzzy resolver the
+    literal string — which cannot match exactly, so the engine asked the user to
+    confirm an exclusion they had already stated precisely. A refusal of
+    legitimate work (R-0005), on the documented promise that an exact encoding
+    applies immediately.
+
+    Fixed here rather than by adding the two words to the stop list, because
+    that leaves the class alive: any future divergence between the lists
+    reopens it. One list now decides (R-0004).
+
+    Only *trailing* tokens go. In "ignore BETA and GAMMA" the ``and`` joins two
+    entities and dropping it would silently lose GAMMA — turning a visible
+    refusal into a wrong answer, which is the worse trade.
+    """
+    tokens = clause.split()
+    while tokens and tokens[-1].strip("'\".,").upper() in _EXCLUSION_SKIP:
+        tokens.pop()
+    return " ".join(tokens)
+
+
 def _exclusion_clauses(q: str) -> list[str]:
     """Raw exclusion phrases (before token split), for sku_name fuzzy resolve."""
     out: list[str] = []
@@ -293,7 +319,7 @@ def _exclusion_clauses(q: str) -> list[str]:
         stop = _EXCLUSION_STOP.search(clause)
         if stop:
             clause = clause[: stop.start()]
-        clause = clause.strip().strip("'\".,")
+        clause = _strip_trailing_filler(clause.strip().strip("'\".,"))
         if clause and clause.lower() not in out:
             out.append(clause)
     return out

@@ -80,14 +80,28 @@ def test_population_questions_still_route(question: str, expected_metric: str) -
     assert plan.metric_id == expected_metric
 
 
-def test_exclusion_still_reaches_its_confirm_chip() -> None:
+def test_exclusion_is_passed_through_by_the_sku_guard() -> None:
     """An exclusion names a SKU *and* is legitimately about it.
 
     The SKU is resolved into the plan's slots, so the guard passes it through —
     this is the case that would break if the check were "names a SKU, refuse".
+
+    This asserted ``"SKU-BETA" in result["answer"]`` and passed for the wrong
+    reason: the answer was the confirm chip *"Do you mean exclude SKU-BETA"*, so
+    the string appeared because the engine was refusing to answer (ANS-01).
+    With the exclusion applied the query runs and SKU-BETA is correctly **absent**
+    from the ranking — the old assertion now fails on the fixed behaviour, which
+    is what a test pinning a defect does.
+
+    So it asserts the docstring's actual claim instead: the guard passes the
+    exclusion through and the question is answered.
     """
     result = answer("ignore SKU-BETA and show the top 5 SKUs by revenue")
-    assert "SKU-BETA" in result["answer"]
+
+    assert result["badge"] == "governed_metric", result.get("answer")
+    assert result["rows"], "the guard refused an exclusion it is supposed to allow"
+    rendered = " ".join(str(v) for row in result["rows"] for v in row.values()).upper()
+    assert "SKU-BETA" not in rendered, "the exclusion routed but was never applied"
 
 
 # ------------------------------------------------------------ gate honesty
