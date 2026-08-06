@@ -22,7 +22,7 @@ THESIS = {
     "wins_on": [
         "auto backend + middleware selection from hardware",
         "governed actions / ledger / RBAC identical for human and agent",
-        "DAG + race router + JEPA family gate (architecture efficiency)",
+        "DAG + race router + deterministic family gate (architecture efficiency)",
         "context engineering + deferred tools (token efficiency)",
         "cross-OS install: native where possible, Docker where required",
         "idiot-proof defaults: one call, no dropdowns required",

@@ -1,7 +1,7 @@
 """HTTP surface for the racing router + architecture scoreboard.
 
 AirGPT proxies these under the same paths on :8765. POST /api/engine/auto is
-the one entry point agents need: JEPA family gate decides direct-vs-race,
+the one entry point agents need: the family gate decides direct-vs-race,
 the scoreboard learns from every run.
 """
 

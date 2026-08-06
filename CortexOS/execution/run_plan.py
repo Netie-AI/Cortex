@@ -177,6 +177,27 @@ def _ontology_actions(plan: Mapping[str, Any], body: Mapping[str, Any], caller: 
     return {"ok": bool(result.get("ok", True)), "runner": str(plan["runner"]), "status": "completed", "result": result}
 
 
+#: Runners this module can actually execute — the single source of truth for
+#: whether an architecture is real. `architecture_presets` derives availability
+#: from this set rather than keeping its own list, so implementing an adapter
+#: flips the preset on with no second edit, and forgetting to implement one
+#: cannot be papered over by editing a literal somewhere else.
+IMPLEMENTED_RUNNERS: frozenset[str] = frozenset(
+    {
+        "dag_single",
+        "dag_linear",
+        "dag_runner",
+        "rag_compose",
+        "memory_compose",
+        "ontology_actions",
+    }
+)
+
+#: Declared in the catalog, adapter not written. Kept named (rather than
+#: deleted) so the gap is documented, but never selectable.
+STUB_RUNNERS: frozenset[str] = frozenset({"marketplace_langgraph", "marketplace_langchain"})
+
+
 async def execute_run_plan(
     plan: Mapping[str, Any],
     body: Mapping[str, Any],
@@ -194,6 +215,6 @@ async def execute_run_plan(
         return _memory_compose(plan, body)
     if runner == "ontology_actions":
         return _ontology_actions(plan, body, caller)
-    if runner in {"marketplace_langgraph", "marketplace_langchain"}:
+    if runner in STUB_RUNNERS:
         return {"ok": False, "runner": runner, "status_code": 501, "error": "adapter_unavailable"}
     return {"ok": False, "runner": runner, "status_code": 400, "error": "unknown_runner"}

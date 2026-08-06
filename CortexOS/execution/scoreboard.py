@@ -1,4 +1,16 @@
-"""Architecture scoreboard + JEPA family gate — the racing router's memory.
+"""Architecture scoreboard + family gate — the racing router's memory.
+
+**Honesty first**, matching ``action_value``: the "family gate" is a
+deterministic feature hash, not a learned representation and not JEPA. There is
+no training here, nothing predicts a future observation, and similarity is
+purely lexical — two goals that mean the same thing in different words land in
+unrelated buckets. It is a cheap, stable clustering key that needs no model
+download, and it is genuinely useful as that. Calling it JEPA oversold it, in
+the same way the README oversold Wasm sandboxing (DOC-01): a name promising a
+capability the code does not have.
+
+Real representation learning in this layer is an open architecture decision,
+not something this module quietly already does.
 
 Every probe and scaled run lands here (data/engine/scoreboard.db, SQLite WAL,
 same pattern as workflow_store). Task families are unbounded: goals embed with
@@ -218,7 +230,7 @@ def upsert_family(family: str, vec: list[float]) -> None:
 
 
 def match_family(vec: list[float]) -> tuple[str | None, float]:
-    """Nearest family centroid by cosine — the cheap JEPA confidence lookup."""
+    """Nearest family centroid by cosine over the feature hash (not a learned model)."""
     best_family: str | None = None
     best_sim = 0.0
     with _conn() as conn:

@@ -308,11 +308,20 @@ def _extract_cost(result: dict[str, Any]) -> float:
     return float(result.get("cost_myr") or 0.0)
 
 
-def apply_governor(rid: str) -> str | None:
-    """The governor agent's deterministic floor: streaks and cost caps pause."""
+def apply_governor(rid: str, *, permanent_error: str = "") -> str | None:
+    """The governor agent's deterministic floor: streaks and cost caps pause.
+
+    A *permanent* failure pauses on the first run rather than waiting out the
+    streak. The streak exists to tell a flaky routine from a broken one, and
+    that question does not arise when the run can never succeed — retrying it
+    on a schedule is a loop, not resilience.
+    """
     routine = get_routine(rid)
     if routine is None or routine["status"] == "paused":
         return None
+    if permanent_error:
+        pause(rid, f"governor:permanent:{permanent_error}"[:200])
+        return "paused:permanent"
     if routine["error_streak"] >= GOVERNOR_ERROR_STREAK:
         pause(rid, f"governor:error_streak:{routine['error_streak']}")
         return "paused:error_streak"
@@ -378,6 +387,23 @@ async def _dispatch(
             "nodes": result.get("nodes"),
             "error": result.get("error") or "",
             "chosen": out.get("winner"),
+        }
+    # A preset whose adapter was never written can never succeed, so retrying it
+    # on a schedule is not resilience — it is a loop. One routine pinned to
+    # `langgraph` failed 327 consecutive times here before this check existed;
+    # the governor's streak pause is for a routine that degraded, not for one
+    # that was impossible from the first run.
+    from CortexOS.execution.architecture_presets import PresetUnavailable, resolve_runner
+
+    try:
+        resolve_runner(routine["preset"], require_available=True)
+    except PresetUnavailable as exc:
+        return {
+            "ok": False,
+            "runner": str(routine["preset"]),
+            "status": "preset_unavailable",
+            "error": str(exc),
+            "permanent": True,
         }
     plan = plan_for_request(routine["preset"], body)
     return await execute_run_plan(plan, body)
@@ -483,7 +509,11 @@ async def run_once(
             (rid, rid, int(KEEP_RUNS_PER_ROUTINE)),
         )
     _record_action_event(routine, result, ok=ok, cost=cost, started=started, finished=finished)
-    governor_action = apply_governor(rid)
+    # Only a failed run that reports itself *permanent* short-circuits the
+    # streak. Anything else — including an ordinary failure — goes through the
+    # normal governor path, so a flaky routine still gets its retries.
+    permanent = "" if ok or not result.get("permanent") else str(result.get("status") or "permanent")
+    governor_action = apply_governor(rid, permanent_error=permanent)
     error = str(result.get("error") or "")
     return {
         "ok": ok,

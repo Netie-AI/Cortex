@@ -28,7 +28,21 @@ Judge = Callable[[Mapping[str, Any]], float]
 
 
 def rank_candidates(task_family: str, *, k: int = 3) -> list[str]:
-    """History first (score desc, cost asc, runs desc), cold-start fill after."""
+    """History first (score desc, cost asc, runs desc), cold-start fill after.
+
+    Presets whose adapter is not implemented are dropped. Every probe costs a
+    real token budget and records a run, so racing a permanent 501 both wastes
+    the budget and writes a loss that drags the family's score down — teaching
+    the scoreboard something about the adapter rather than about the task.
+    """
+    from CortexOS.execution.architecture_presets import resolve_runner, runner_available
+
+    def _executable(preset: str) -> bool:
+        try:
+            return runner_available(str(resolve_runner(preset)["runner"]))
+        except Exception:  # noqa: BLE001 — an unknown preset is not raceable either
+            return False
+
     stats = scoreboard.family_stats(task_family)
     ranked = [
         preset
@@ -41,7 +55,7 @@ def rank_candidates(task_family: str, *, k: int = 3) -> list[str]:
     for preset in COLD_START_ORDER:
         if preset not in ranked:
             ranked.append(preset)
-    return ranked[:k]
+    return [p for p in ranked if _executable(p)][:k]
 
 
 def eval_predicates(output: Any, predicates: Sequence[Mapping[str, Any]]) -> bool:
@@ -239,7 +253,7 @@ async def auto_route(
     probe_token_cap: int = PROBE_TOKEN_CAP,
     scale: bool = True,
 ) -> dict[str, Any]:
-    """The full gate: JEPA family confidence → direct route or top-3 race."""
+    """The full gate: family confidence (feature hash, not JEPA) → direct route or race."""
     scoreboard.init()
     gate = scoreboard.should_race(goal, sim_threshold=sim_threshold, min_runs=min_runs)
     task_family = gate["family"] or scoreboard.family_id(goal)
