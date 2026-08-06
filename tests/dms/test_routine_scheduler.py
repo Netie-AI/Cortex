@@ -75,10 +75,21 @@ async def test_pause_skips_and_resume_restores():
 
 
 @pytest.mark.asyncio
-async def test_governor_pauses_on_error_streak():
-    routine = rs.create_routine(
-        "Broken", "hello", preset="langgraph", interval_seconds=0
-    )  # honest adapter_unavailable → deterministic failure
+async def test_governor_pauses_on_error_streak(monkeypatch):
+    """The streak is for a routine that *can* work and keeps not working.
+
+    This used `preset="langgraph"` as a convenient deterministic failure, but
+    that preset has no adapter at all — so it now parks on the first run as a
+    permanent fault and never reaches the streak. Conflating the two is the
+    thing that let one routine fail 327 times, so the streak is exercised here
+    with a transient failure on a real preset, which is what it is actually for.
+    """
+    routine = rs.create_routine("Broken", "hello", preset="minimal", interval_seconds=0)
+
+    async def _transient(*a, **k):
+        return {"ok": False, "error": "upstream timed out"}
+
+    monkeypatch.setattr(rs, "_dispatch", _transient)
 
     for _ in range(rs.GOVERNOR_ERROR_STREAK):
         await rs.tick()
@@ -88,6 +99,21 @@ async def test_governor_pauses_on_error_streak():
     assert paused["paused_reason"].startswith("governor:error_streak")
 
     assert await rs.tick() == []  # governor keeps it parked
+
+
+@pytest.mark.asyncio
+async def test_governor_parks_an_impossible_preset_without_burning_the_streak():
+    """The other half of that split, kept beside it so the contrast is visible."""
+    routine = rs.create_routine(
+        "Impossible", "hello", preset="langgraph", interval_seconds=0
+    )
+
+    await rs.tick()
+
+    paused = rs.get_routine(routine["id"])
+    assert paused["status"] == "paused"
+    assert paused["paused_reason"].startswith("governor:permanent")
+    assert paused["error_streak"] < rs.GOVERNOR_ERROR_STREAK
 
 
 def test_governor_pauses_on_cost_cap():
