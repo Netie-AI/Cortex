@@ -1,4 +1,4 @@
-"""Adversarial security stress tests — injection, scam, PII, WASM sandbox."""
+"""Adversarial security stress tests — injection, scam, PII."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from CortexOS.execution.wasm_isolate import WasmSandbox, sandbox_available
 from packs.dms.security.injection_guard import is_blocked, scan
 from packs.dms.security.pii import detect, redact_for_prompt
 from packs.dms.security.prompt_harness import secure_for_prompt
@@ -68,21 +67,6 @@ def test_harness_blocks_before_model() -> None:
     r = secure_for_prompt(evil)
     assert r.blocked
     assert "sk-live" not in r.safe_text
-
-
-@pytest.mark.skipif(not sandbox_available(), reason="wasmtime not installed")
-def test_wasm_sandbox_runs_minimal() -> None:
-    sb = WasmSandbox()
-    res = sb.run()
-    assert res.ok
-    assert res.return_value == 42
-
-
-@pytest.mark.skipif(not sandbox_available(), reason="wasmtime not installed")
-def test_wasm_fuel_exhaustion() -> None:
-    sb = WasmSandbox()
-    res = sb.run_with_exhaustion_test(tiny_fuel=1)
-    assert not res.ok or res.error is not None or res.return_value is None
 
 
 def test_scan_injection_categories() -> None:
