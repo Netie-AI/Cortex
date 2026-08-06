@@ -85,7 +85,23 @@ requirement.
 `tests/contract/test_import_boundaries.py`.** That list is pre-C2 debt being
 evacuated, and its docstring says new crossings must fail immediately. Note it
 matches by **basename**, so `registry.py` silently covers every `registry.py` in the
-tree — `.importlinter` is the stricter check, and the one to trust.
+tree.
+
+**Neither checker is authoritative alone — run both.** This file used to say
+`.importlinter` was "the stricter check, and the one to trust", and that was
+wrong in a way that hid 13 real crossings (C2-01). `lint-imports` builds a graph
+from packages, so a directory without `__init__.py` is not merely unchecked, it
+is *invisible* — and the contract reports the same green either way.
+`packs/dms/semantic/` was in that state, so every import the answer engine made
+into it was unseen. The AST test in `tests/contract/` has no such blind spot
+because it reads files, not packages; what it has instead is the basename
+over-matching above. They fail differently, which is why both run.
+
+Two habits follow. Clear **both** `.grimp_cache` and `.import_linter_cache`
+before trusting a verdict — the same tree gave "2 kept, 0 broken" warm and
+"1 kept, 1 broken" cold. And when adding a directory of modules under `packs/`,
+give it an `__init__.py`; `tests/contract/test_pack_packages_are_visible.py`
+enforces that, because the alternative is a boundary that cannot see.
 
 ---
 

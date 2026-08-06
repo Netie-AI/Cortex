@@ -37,7 +37,12 @@ jobs:
         run: mypy
 
       - name: Import linter
-        run: lint-imports
+        # Cold caches, always. The same tree answered "2 kept, 0 broken" warm and
+        # "1 kept, 1 broken" cold (C2-01) — a boundary whose verdict depends on
+        # cache warmth is not a boundary. Cheap here; the graph is ~300 files.
+        run: |
+          rm -rf .grimp_cache .import_linter_cache
+          lint-imports
 
       - name: Version lines
         run: python scripts/check_versions.py

@@ -23,14 +23,17 @@ def register_engine_seams() -> None:
     """
     from CortexOS.audit import register_ledger
     from CortexOS.dms.document_retrieval_port import register_document_retrieval
+    from CortexOS.dms.semantic_port import register_semantic_layer
     from CortexOS.dms.sql_generation_port import register_sql_generation
     from packs.dms.audit import ledger
     from packs.dms.generative.engine_port import provider as sql_generation
     from packs.dms.retrieval.engine_port import provider as document_retrieval
+    from packs.dms.semantic.engine_port import provider as semantic_layer
 
     register_ledger(ledger)
     register_sql_generation(sql_generation)
     register_document_retrieval(document_retrieval)
+    register_semantic_layer(semantic_layer)
 
 
 register_engine_seams()

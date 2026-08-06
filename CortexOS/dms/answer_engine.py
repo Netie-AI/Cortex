@@ -27,6 +27,10 @@ from typing import Any
 import sqlglot
 
 from CortexOS.dms import sql_plausibility
+from CortexOS.dms.semantic_port import (
+    SemanticCompileError,
+    resolve_semantic_layer,
+)
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
@@ -62,9 +66,7 @@ def _normalize(text: str) -> str:
 
 
 def _certified_index() -> dict[str, Any]:
-    from packs.dms.semantic.loader import load_all
-
-    model = load_all()
+    model = resolve_semantic_layer().load_model()
     # Exact normalized match on primary question + curated synonyms (VQ-01).
     # Never fuzzy — a scoped question must not collide with an unscoped asset.
     index: dict[str, Any] = {}
@@ -239,9 +241,9 @@ def _pct(q: str, default: int = 90) -> int:
 
 
 def _location(question: str) -> str | None:
-    from packs.dms.semantic import values as vd
+    vd = resolve_semantic_layer()
 
-    res = vd.resolve(question, "location_code")
+    res = vd.resolve_value(question, "location_code")
     return res.value if res.ok else None
 
 
@@ -322,7 +324,7 @@ def _resolve_exclusions(q_raw: str) -> tuple[list[str], dict[str, Any] | None]:
     - One fuzzy unique hit → clarify confirm chip (do not silent-filter).
     - Unresolvable with an exclusion verb → clarify payload with error (abstain).
     """
-    from packs.dms.semantic import values as valuedict
+    valuedict = resolve_semantic_layer()
 
     clauses = _exclusion_clauses(q_raw)
     if not clauses:
@@ -334,7 +336,7 @@ def _resolve_exclusions(q_raw: str) -> tuple[list[str], dict[str, Any] | None]:
 
     for clause in clauses:
         # Prefer whole-phrase resolve (sku_name / multi-token), then per-token.
-        res = valuedict.resolve(clause, "sku")
+        res = valuedict.resolve_value(clause, "sku")
         if res.exact and res.value:
             if res.value not in exact:
                 exact.append(res.value)
@@ -348,7 +350,7 @@ def _resolve_exclusions(q_raw: str) -> tuple[list[str], dict[str, Any] | None]:
             failed.append(clause)
             continue
         for tok in tokens:
-            tres = valuedict.resolve(tok, "sku")
+            tres = valuedict.resolve_value(tok, "sku")
             if tres.exact and tres.value:
                 if tres.value not in exact:
                     exact.append(tres.value)
@@ -557,10 +559,9 @@ def _route_to_metric(question: str) -> MetricPlan | None:
     widen recall over wording, and it must not be able to move a number, a
     threshold or a direction. See packs/dms/semantic/vocabulary.py.
     """
-    from packs.dms.semantic.vocabulary import normalize_for_routing
 
     q_raw = question.lower()
-    q = normalize_for_routing(question)
+    q = resolve_semantic_layer().normalize_for_routing(question)
 
     # scalars first — "how many X" must not fall through to a listing
     # Predictive / out-of-schema asks must abstain before sales-rank keywords fire
@@ -803,10 +804,8 @@ def _true_count(sql: str, *, verified: VerifiedManifest) -> int | None:
 # ── suggestions for abstain ──────────────────────────────────────────────────
 def _suggestions(question: str, limit: int = 3) -> list[str]:
     """Nearest answerable questions (token overlap over certified + metric synonyms)."""
-    from packs.dms.semantic.catalog_answer import _metric_label
-    from packs.dms.semantic.loader import load_all
-
-    model = load_all()
+    sem = resolve_semantic_layer()
+    model = sem.load_model()
     qtokens = set(_normalize(question).split())
     scored: list[tuple[float, str]] = []
     for cq in model.certified:
@@ -832,7 +831,7 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
                 break
         if len(seen) < limit:
             for metric in model.metrics.values():
-                label = _metric_label(metric)
+                label = sem.metric_label(metric)
                 if label not in seen:
                     seen.append(label)
                 if len(seen) >= limit:
@@ -842,11 +841,10 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
 
 def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
     """META-01 — browse what the semantic layer can answer (no SQL)."""
-    from packs.dms.semantic.catalog_answer import build_catalog_answer
-    from packs.dms.semantic.loader import load_all
+    sem = resolve_semantic_layer()
 
-    payload = build_catalog_answer()
-    model = load_all()
+    payload = sem.build_catalog_answer()
+    model = sem.load_model()
     suggestions = [cq.question for cq in model.certified[:5]]
     return {
         "answer": payload["answer"],
@@ -1780,7 +1778,7 @@ def answer(
         route_question,
         synthesize_answer,
     )
-    from packs.dms.semantic import query_skills
+    skills = resolve_semantic_layer()
 
     audit_id = str(uuid.uuid4())
     route = route_question(question)
@@ -1877,15 +1875,16 @@ def answer(
                     return _clarify_exclusion(
                         question, audit_id, clarify=clarify, limit=limit
                     )
-                from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
                 try:
-                    sql = compile_metric(load_all(), plan.metric_id, plan.slots)
+                    sql = resolve_semantic_layer().compile_metric(
+                        plan.metric_id, plan.slots
+                    )
                     layer, badge = "governed_metric", "governed_metric"
                     assumptions = plan.reason
                     metric_id = plan.metric_id
                     metric_slots = dict(plan.slots)
-                except SemanticError as exc:
+                except SemanticCompileError as exc:
                     # Exclusion resolve failures must not fall through to query-skill.
                     if _exclusion_clauses(question):
                         exact, clarify = _resolve_exclusions(question)
@@ -1914,9 +1913,8 @@ def answer(
 
     # META-01 — metadata / browse intent before query-skill replay or L2 generation.
     if sql is None:
-        from packs.dms.semantic.catalog_answer import is_catalog_intent
 
-        if is_catalog_intent(question):
+        if resolve_semantic_layer().is_catalog_intent(question):
             return _catalog_response(question, audit_id)
 
     if sql is None:
@@ -1936,7 +1934,7 @@ def answer(
                     audit_id,
                     reason="exclusion could not be resolved to a warehouse SKU",
                 )
-        hit = query_skills.find(question)
+        hit = skills.find_skill(question)
         # A capture is matched by similarity, so a question naming one SKU sits
         # right next to a stored population-level skill — "total revenue for
         # SKU-00397" is a near neighbour of "total revenue". Replaying that would
@@ -1950,7 +1948,6 @@ def answer(
         if hit is not None:
             skill_score = float(hit["score"])
             if hit.get("metric_id"):
-                from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
                 # Never replay turn-specific filters from a prior capture.
                 # Sales ranks re-derive slots from THIS question; other metrics
@@ -1978,12 +1975,14 @@ def answer(
                 else:
                     params = {k: v for k, v in stored.items() if k not in contextual}
                 try:
-                    sql = compile_metric(load_all(), hit["metric_id"], params)
+                    sql = resolve_semantic_layer().compile_metric(
+                        hit["metric_id"], params
+                    )
                     layer, badge = "query_skill", "query_skill"
                     assumptions = f"query skill match score={skill_score:.3f} → {hit['metric_id']}"
                     metric_id = hit["metric_id"]
                     metric_slots = dict(params)
-                except SemanticError:
+                except SemanticCompileError:
                     sql = None
             elif hit.get("sql_template"):
                 sql = hit["sql_template"]
@@ -2249,7 +2248,7 @@ def answer(
 
     # Graduate successful non-session answers into the skill store
     if layer in ("certified", "governed_metric", "query_skill"):
-        query_skills.capture(
+        skills.capture_skill(
             question,
             metric_id=metric_id if layer != "certified" else None,
             params=metric_slots,
