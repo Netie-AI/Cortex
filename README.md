@@ -53,7 +53,9 @@ Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
 **Whitepaper (architecture · apps · roadmap · branches):** [`docs/strategy/CORTEX_WHITEPAPER.md`](docs/strategy/CORTEX_WHITEPAPER.md)
 
-Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
+Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, and runs it on your compute.
+
+**What actually guards it today:** SQL is parsed and validated with sqlglot before it runs; every read is enforced against a signed session manifest, so a query cannot reach a table the session never bound; the audit trail is a hash chain; and tool calls go through an allowlisted host runner. Process-level isolation is **not** shipped — untrusted code is packaged and run in containers, not sandboxed in-process. See [`PARKING_LOT.md`](PARKING_LOT.md) P2.
 
 ## Read first
 
