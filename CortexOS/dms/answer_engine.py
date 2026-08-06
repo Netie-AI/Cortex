@@ -39,7 +39,12 @@ from CortexOS.dms.warehouse_db import (
     load_semantic_layer,
     read_only_queries_enabled,
 )
-from CortexOS.execution.manifest import ManifestError, PathNotAllowed, VerifiedManifest
+from CortexOS.execution.manifest import (
+    ManifestError,
+    PathNotAllowed,
+    VerifiedManifest,
+    tables_read,
+)
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
@@ -979,6 +984,78 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
         "assumptions": reason,
         "total_count": 0,
         "suggestions": suggestions,
+    }
+
+
+def _ungrounded_tables(
+    sql: str, *, verified: VerifiedManifest | None
+) -> frozenset[str]:
+    """Tables this SQL reads that the session never bound (P0-DEMO-02).
+
+    The grant is the manifest's ``row_predicates`` keys — the same set
+    ``enforce_manifest`` decides by — so the two can never disagree about what
+    was allowed.
+
+    With no manifest there is nothing to intersect against, and this returns
+    empty rather than inventing a grant. That path is the ``/dms/query`` bypass
+    tracked as SEC-01; closing it here would be guessing at a boundary instead
+    of enforcing one.
+
+    Unparseable SQL yields no table set. It cannot be *cleared* either, so it is
+    reported as ungrounded under a sentinel — fail closed, since every caller
+    treats a non-empty result as a refusal.
+    """
+    if verified is None:
+        return frozenset()
+    try:
+        read = tables_read(sql)
+    except ManifestError:
+        return frozenset({"<unanalysable-sql>"})
+    granted = {str(name).lower() for name in verified.manifest.row_predicates}
+    return frozenset(sorted(read - granted))
+
+
+def _abstain_ungrounded(
+    question: str,
+    audit_id: str,
+    *,
+    ungrounded: frozenset[str],
+    verified: VerifiedManifest | None,
+) -> dict[str, Any]:
+    """Refuse a plan that reads outside the session's bound sources, and say so.
+
+    Names the sources that *are* answerable. An abstain that only says no is a
+    dead end the buyer reads as "it doesn't work"; the granted table names are
+    already in their hands, because they are what the session bound.
+    """
+    granted = sorted(str(name).lower() for name in (verified.manifest.row_predicates if verified else {}))
+    refused = ", ".join(sorted(ungrounded))
+    can_answer = (
+        "This session is bound to: " + ", ".join(granted) + "."
+        if granted
+        else "This session has no data sources bound."
+    )
+    reason = f"question resolves to ungranted source(s): {refused}"
+    return {
+        "answer": (
+            "I can't answer that from the sources bound to this session — the closest "
+            f"governed answer would read {refused}, which this session did not bind. "
+            + can_answer
+            + " Ask about those, or bind the source you meant and ask again."
+        ),
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": granted[:4],
+        "query_plan": _honest_plan(question, None, layer="abstain", assumptions=reason),
     }
 
 
@@ -1980,6 +2057,22 @@ def answer(
             reason="no governed metric or certified query matched",
             space_id=space_id,
         )
+
+    # P0-DEMO-02 — the plan has to name the tables it reads, and they have to be
+    # sources this session actually bound. Until here the router has only ever
+    # asked "which metric do these words look like?", so "the total amount in
+    # the Q3 sales export" compiles happily against `transactions` — Netie's own
+    # demo warehouse — and ships a confident number about data the customer has
+    # never seen, badged governed_metric.
+    #
+    # enforce_manifest already refuses this, but it refuses by raising from
+    # inside execution, which the ask route turns into an HTTP error. A refusal
+    # the customer reads as a crash teaches them the product is broken; a
+    # refusal that names what it *can* answer teaches them how to ask. The gate
+    # below is the legible one; the enforcer stays the boundary that holds.
+    ungrounded = _ungrounded_tables(sql, verified=verified)
+    if ungrounded:
+        return _abstain_ungrounded(question, audit_id, ungrounded=ungrounded, verified=verified)
 
     semantic = load_semantic_layer()
     # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).

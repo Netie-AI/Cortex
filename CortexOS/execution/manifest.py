@@ -955,6 +955,33 @@ def _refuse_cross_catalog(root: exp.Expression) -> None:
             )
 
 
+def tables_read(sql: str) -> frozenset[str]:
+    """The base tables a statement reads, lowercased, excluding its own CTEs.
+
+    Read-only, and deliberately *not* an authorisation decision — it answers
+    "which tables would this touch?" so a caller can refuse early, in its own
+    vocabulary, instead of letting :func:`enforce_manifest` raise from inside
+    execution. The answer path uses it to abstain with an explanation; the
+    enforcer below stays the boundary that actually holds.
+
+    Name resolution matches the enforcer exactly (:func:`_named_tables` minus
+    :func:`_cte_names`), because a helper that disagreed with the gate about
+    what counts as a table would let a caller believe it had checked something
+    it had not.
+
+    Raises :class:`SqlNotAnalyzable` when the SQL does not parse — unanalysable
+    SQL has no knowable table set, and returning an empty one would read as
+    "touches nothing".
+    """
+    root = _parse_single_statement(sql)
+    bound = _cte_names(root)
+    return frozenset(
+        name
+        for table in _named_tables(root)
+        if (name := table.name.lower()) and name not in bound
+    )
+
+
 def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
     """Return SQL that cannot leave the manifest, or raise a :class:`ManifestError`.
 
