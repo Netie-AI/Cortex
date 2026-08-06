@@ -41,7 +41,7 @@ Shipped this session, **all awaiting independent verify by a different run** (R-
 ## Verify
 
 ```bash
-python -m pytest tests/ -q                  # ~1430 passed, 8 skipped — passes with the engine up
+python -m pytest tests/ -q                  # 1428 passed, 8 skipped — passes with the engine up
 python -m ruff check CortexOS packages/cortex_contract scripts tests/packaging tests/contract
 python -m mypy                              # 11 files; must exclude build/ or it checks nothing
 lint-imports                                # NOT python -m importlinter.cli — exits 0 running nothing
