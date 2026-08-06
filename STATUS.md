@@ -1,6 +1,35 @@
 # STATUS.md
-**Last updated:** 2026-08-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
+**Last updated:** 2026-08-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active map:** `docs/dms/ACTIVE.md` · lanes `NEXT_LANES.md`
 **Rule:** Update after every gate. This is the one state file - there is no per-agent handoff. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
+
+> **2026-08-06 (manifest grounding — Cortex#14 P0-DEMO-02 + Cortex#6 SEC-01):** One root
+> cause, two ends. **#14:** `route_to_metric` matched "total"/"revenue"/"amount" and
+> answered from the synthetic demo warehouse, badged `governed_metric`, for questions about
+> an uploaded file. `enforce_manifest` *was* already refusing it — by raising from inside
+> execution, which the ask route turned into an HTTP error, so the control worked and the
+> product still failed. Added `manifest.tables_read()` (the enforcer's own name resolution)
+> plus a legible gate in front: plan states its tables, intersect the grant, abstain naming
+> what it *can* answer. Enforcer untouched, no refusal weakened. **#6:** `/dms/query` ran SQL
+> with no manifest at all. `verified=None` now means "no session grant" and mints a narrow
+> self-issued one (`LOCAL_ISSUER_KID`, empty signature, `query_plan.grant_kind` on the
+> envelope — R-0011), so every read reaches `enforce_manifest`. Four executors removed, not
+> one: the `else:` branch, `_true_count`'s legacy con, the plausibility prober, and
+> query_service's legacy ranked path + `get_alerts_summary`. Proof the bypass is gone rather
+> than unreachable: ruff now reports `guard_and_execute`/`get_connection`/
+> `read_only_queries_enabled` as **unused imports**. Both gates verified fallible before
+> trusting green (R-0007: 6/6, then 4/8); R-0005 controls included. **1244 passed**
+> (dms + test_execution + contract + packaging + invariants).
+> ⚠ **Not green:** 5 lakehouse tests (`test_l0_lakehouse`, `test_l2_pipelines`) fail — they
+> need a read-write warehouse and a live engine (uvicorn :8010) holds DuckDB's exclusive
+> lock. Verified environmental by stashing the changes and reproducing identically. Recorded
+> as failing, not waived (R-0002). KB: `F-0007`.
+>
+> **Contract 1.3.0 published** — `Answer.chart_spec` was added to the model but never
+> version-bumped, so the spec was in drift and CI would have failed. Bumped `version.py` +
+> `pyproject.toml`, generated `contract/openapi-1.3.0.json`, added the `compat.yaml` entry.
+> `1.2 -> 1.3: 2 additive, 0 breaking`; 1.2.0 stays frozen on disk. Also landed three closed
+> tickets whose code was never committed (#32 RAG-03, #33 RAG-02, #35 META-01) plus VQ-01
+> certified synonyms, city value resolution, `COUNT(DISTINCT)` drillthrough, FreeRoute `auto`.
 
 > **2026-08-03 (overnight ticket-runner):** `#21` CLOSED (independent verify; commit
 > `0e5318b`). `#22` CLOSED (reconfirm). EPIC-011 engine tickets COMPLETE — dms#16 still
