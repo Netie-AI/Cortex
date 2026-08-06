@@ -10,11 +10,11 @@ Shipped this session, **all awaiting independent verify by a different run** (R-
 
 - **Answer path is manifest-grounded end to end** — the router states which tables it reads
   and abstains when the session never bound them (`#14`); `/dms/query` has no ungoverned
-  executor left, every read goes through `enforce_manifest` (`#6`).
+  executor left (`#6`).
 - **Contract 1.3.0** — additive `Answer.chart_spec`; 1.2.0 stays frozen on disk.
 - **A read no longer takes the warehouse write lock** — the ceiling recorded 2026-07-27.
-- **One contract module identity** (`#5`); mypy runs again after exiting 2 for who knows
-  how long, checking nothing.
+- **One contract module identity** (`#5`); mypy runs again after exiting 2, checking 0 files.
+
 - **No Wasm sandboxing claim on the front page** (`#10`); scaffold deleted, claim ratcheted.
 - **An absent backend is reported absent** — `just_works` no longer says `ok: True` for an
   Ollama that is not installed. Orchestration is ours and says so.
@@ -25,20 +25,17 @@ Shipped this session, **all awaiting independent verify by a different run** (R-
 2. Estate-audit bugs still open: `#7` EVAL-01, `#8` ANS-01, `#9` C2-01.
 3. `EPIC-015` doc-RAG: `RAG-01` (dms#24) is the remaining ticket and lives in the DMS repo.
 
-## Later
-
-`EPIC-001` eval gate · `EPIC-002` contract identity + published wheel · `EPIC-006` C7 keyword
-cascade (blocked on one real user, `#12`) · `EPIC-010` claim_n 47→310 (founder-attended, `#13`).
+**Later:** `EPIC-001` eval gate · `EPIC-002` contract identity + wheel · `EPIC-006` C7
+cascade (blocked on one real user, `#12`) · `EPIC-010` claim_n 47→310 (`#13`).
 
 ## Known broken / not green
 
-- **`packs/dms/lakehouse/catalog.py` still imports duckdb** (2 sites), outside the sanctioned
+- **`packs/dms/lakehouse/catalog.py` still imports duckdb** (2 sites) outside the sanctioned
   `CortexOS/execution`. Ratcheted by `tests/dms/test_c4_duckdb_boundary.py`; needs an
   architecture call on whether the lakehouse plane is a second legitimate opener.
-- **26 ruff findings under `packs/dms/**`** — outside the documented gate scope, unaddressed.
-- **`cortex-contract` is pip-installed editable at 1.1.0** while the tree is at 1.3.0. The
-  editable finder points at the tree so imports are correct, but the installed metadata is
-  stale. Reinstall before trusting a version read from `pip show`.
+- **26 ruff findings under `packs/dms/**`** — outside the documented gate scope.
+- **`cortex-contract` is pip-installed editable at 1.1.0** against a 1.3.0 tree. Imports
+  resolve correctly; `pip show` reports a stale version.
 
 ## Verify
 
