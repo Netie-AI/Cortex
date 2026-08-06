@@ -17,6 +17,12 @@ def lake_home(tmp_path, monkeypatch):
     home = tmp_path / "lakehouse"
     monkeypatch.setenv("DMS_LAKEHOUSE_HOME", str(home))
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    # Own warehouse, not the shared serving one. `sync_warehouse_from_silver`
+    # is a writer, and DuckDB gives a writer the file exclusively — so pointed
+    # at data/dms_demo.duckdb these tests fail whenever an engine is running,
+    # which reads as flakiness and is really contention. This is the durable
+    # fix STATUS.md recorded as unclaimed on 2026-07-27.
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(tmp_path / "demo.duckdb"))
     # Fresh capability probe per test.
     from packs.dms.lakehouse import catalog
 

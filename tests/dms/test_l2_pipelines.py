@@ -10,6 +10,10 @@ def lake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("DMS_LAKEHOUSE_HOME", str(tmp_path / "lakehouse"))
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv("DMS_PROPOSED_DIR", str(tmp_path / "proposed"))
+    # Own warehouse — the promote path writes, and a writer needs the DuckDB
+    # file exclusively, so sharing data/dms_demo.duckdb makes these tests fail
+    # whenever an engine holds it.
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(tmp_path / "demo.duckdb"))
     from packs.dms.lakehouse import catalog
 
     catalog.reset_mode_cache()

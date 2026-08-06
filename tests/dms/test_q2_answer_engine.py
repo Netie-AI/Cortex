@@ -48,13 +48,13 @@ def test_truncation_disclosed():
     actually pinned is the property: the answer states the TRUE total, and the
     total is larger than the page it returned.
     """
-    from CortexOS.dms.warehouse_db import (
-        DEFAULT_DB,
-        get_connection,
-        read_only_queries_enabled,
-    )
+    from CortexOS.dms.warehouse_db import get_connection, warehouse_path
 
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    # read_only=True, not read_only_queries_enabled(): this is a COUNT(*), and
+    # that flag defaults to False, so the test took DuckDB's write lock and
+    # failed whenever an engine held the warehouse — contention read as
+    # flakiness. Same fix as the production read sites.
+    con = get_connection(warehouse_path(), read_only=True)
     try:
         expected = int(
             con.execute("SELECT COUNT(*) FROM shipments WHERE status = 'DELAYED'").fetchone()[0]
