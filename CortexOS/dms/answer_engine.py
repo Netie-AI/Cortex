@@ -30,19 +30,18 @@ from CortexOS.dms import sql_plausibility
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
-    guard_and_execute,
     log_audit,
 )
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
     get_connection,
     load_semantic_layer,
-    read_only_queries_enabled,
 )
 from CortexOS.execution.manifest import (
     ManifestError,
     PathNotAllowed,
     VerifiedManifest,
+    local_manifest,
     tables_read,
 )
 
@@ -788,32 +787,17 @@ def _route_to_metric(question: str) -> MetricPlan | None:
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────
-def _true_count(
-    sql: str,
-    con=None,
-    *,
-    verified: VerifiedManifest | None = None,
-) -> int | None:
+def _true_count(sql: str, *, verified: VerifiedManifest) -> int | None:
     """COUNT(*) over the query with LIMIT/ORDER stripped — the honest total
     behind a possibly-capped listing. Returns None if it can't be computed.
 
-    When ``verified`` is set (contract live ask), the count runs through the
-    C4 submit executor so predicates apply. Legacy callers still pass ``con``.
+    Always runs through the C4 submit executor so the manifest applies. The
+    count is a second read of the same data, so a count that ignored predicates
+    would disclose the size of a set the session may not see (SEC-01).
     """
-    if verified is not None:
-        from CortexOS.execution.submit import execute_count
+    from CortexOS.execution.submit import execute_count
 
-        return execute_count(verified, sql)
-    if con is None:
-        return None
-    try:
-        tree = sqlglot.parse_one(sql, read="duckdb")
-        tree.set("limit", None)
-        tree.set("order", None)
-        inner = tree.sql(dialect="duckdb")
-        return int(con.execute(f"SELECT COUNT(*) AS n FROM ({inner}) _t").fetchone()[0])
-    except Exception:  # noqa: BLE001
-        return None
+    return execute_count(verified, sql)
 
 
 # ── suggestions for abstain ──────────────────────────────────────────────────
@@ -882,33 +866,24 @@ def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
     }
 
 
-def _plausibility_runner(verified: VerifiedManifest | None) -> sql_plausibility.Runner:
-    """A bounded probe executor for whichever execution path this turn is on.
+def _plausibility_runner(verified: VerifiedManifest) -> sql_plausibility.Runner:
+    """A bounded probe executor, always under the manifest.
 
-    The contract path routes probes through ``execute_sql`` so the manifest
-    applies: a value this session may not read should probe as absent, and the
-    abstain that follows says "no such value" without disclosing that one exists.
+    Probes route through ``execute_sql`` so the manifest applies: a value this
+    session may not read probes as absent, and the abstain that follows says
+    "no such value" without disclosing that one exists. The bare-connection
+    runner that used to serve unbound callers is gone — a probe is a read, and
+    an unenforced read is the same disclosure whether or not it feeds an answer
+    (SEC-01).
     """
-    if verified is not None:
 
-        def _contract(probe_sql: str) -> list[dict[str, Any]]:
-            from CortexOS.execution.submit import execute_sql
+    def _run(probe_sql: str) -> list[dict[str, Any]]:
+        from CortexOS.execution.submit import execute_sql
 
-            rows, _, _ = execute_sql(verified, probe_sql)
-            return rows
+        rows, _, _ = execute_sql(verified, probe_sql)
+        return rows
 
-        return _contract
-
-    def _legacy(probe_sql: str) -> list[dict[str, Any]]:
-        con = get_connection(DEFAULT_DB, read_only=True)
-        try:
-            rel = con.execute(probe_sql)
-            columns = [d[0] for d in rel.description] if rel.description else []
-            return [dict(zip(columns, row, strict=False)) for row in rel.fetchall()]
-        finally:
-            con.close()
-
-    return _legacy
+    return _run
 
 
 def _abstain_impossible_filter(
@@ -984,6 +959,64 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
         "assumptions": reason,
         "total_count": 0,
         "suggestions": suggestions,
+    }
+
+
+def _local_grant_tables() -> frozenset[str]:
+    """Tables the local warehouse grant may cover — the semantic layer's own.
+
+    Read from the pack rather than hardcoded, so a pack that stops declaring a
+    table stops being able to answer over it. Kept as a seam so a test can
+    narrow the grant and prove the enforcement below actually refuses.
+    """
+    semantic = load_semantic_layer()
+    return frozenset((semantic.get("tables") or {}).keys())
+
+
+def _local_verified(session_id: str | None) -> VerifiedManifest:
+    """Self-issued grant for a caller that never bound a session manifest (SEC-01)."""
+    return local_manifest(
+        session_id=(session_id or "local").strip() or "local",
+        tables=_local_grant_tables(),
+        allowed_paths=[str(DEFAULT_DB)],
+    )
+
+
+def _abstain_refused(
+    question: str, audit_id: str, *, exc: ManifestError
+) -> dict[str, Any]:
+    """A manifest refusal the caller receives as an envelope, not a stack trace.
+
+    Same refusal *types* as /v1/contract/submit — the class name is reported so
+    PathNotAllowed, StatementNotAllowed and SqlNotAnalyzable stay
+    distinguishable — and the query is still refused: no rows, no SQL.
+
+    The route is deliberately not the ordinary abstain code. ``answer_question``
+    bridges ``needs_clarification`` into the legacy ranked-SQL path for delayed/
+    late questions, and that path executes on its own connection — so reusing
+    the abstain code here would let a manifest refusal fall straight through
+    into the execution it was meant to prevent.
+    """
+    kind = type(exc).__name__
+    reason = f"{kind}: {exc}"
+    return {
+        "answer": (
+            "That question can't be answered inside this session's data grant "
+            f"({kind}). Nothing was read."
+        ),
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [kind],
+        "route": "refused",
+        "rows": [],
+        "source_table": None,
+        "layer": "refused",
+        "badge": "refused",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": [],
+        "query_plan": _honest_plan(question, None, layer="refused", assumptions=reason),
     }
 
 
@@ -1707,6 +1740,7 @@ def _honest_plan(
     metric_id: str | None = None,
     skill_score: float | None = None,
     assumptions: str = "",
+    grant_kind: str = "session",
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import plan_query
 
@@ -1724,6 +1758,10 @@ def _honest_plan(
     base["metric_id"] = metric_id
     base["skill_score"] = round(skill_score, 3) if skill_score is not None else None
     base["assumptions"] = assumptions
+    # Which grant this answer was read under. A self-issued local grant is a
+    # weaker claim than a signed session manifest, and a degradation that is
+    # only visible in a log line is a silent one (R-0011).
+    base["grant_kind"] = grant_kind
     return base
 
 
@@ -1746,6 +1784,19 @@ def answer(
 
     audit_id = str(uuid.uuid4())
     route = route_question(question)
+
+    # SEC-01 — there is no ungoverned execution path out of this function.
+    # `verified is None` used to mean "skip the manifest", so POST /dms/query —
+    # the demo and product path — ran SQL on a bare connection while the 34
+    # fail-closed refusals and the hostile corpus guarded only /v1/contract/*.
+    # It now means "no session bound a grant", and the local warehouse mints a
+    # narrow self-issued one instead, so every statement below reaches
+    # enforce_manifest either way. The grant is exactly the tables the semantic
+    # layer declares — it cannot reach a relation the pack never named.
+    grant_kind = "session"
+    if verified is None:
+        verified = _local_verified(session_id)
+        grant_kind = "local-self-issued"
 
     if route == "blocked":
         return {
@@ -2075,67 +2126,57 @@ def answer(
         return _abstain_ungrounded(question, audit_id, ungrounded=ungrounded, verified=verified)
 
     semantic = load_semantic_layer()
-    # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).
-    # Legacy callers keep the old connection + guard_and_execute path.
-    if verified is not None:
-        from datetime import datetime, timezone
+    # One execution path, always through the C4 submit executor, which calls
+    # enforce_manifest. The bare-connection branch that used to live here (taken
+    # whenever no manifest was bound) is deleted rather than left unreachable —
+    # an ungoverned executor kept "just in case" is the bypass, whether or not
+    # anything currently reaches it.
+    from datetime import datetime, timezone
 
-        from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
-        from CortexOS.execution.submit import execute_sql
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
+    from CortexOS.execution.submit import execute_sql
 
-        gate = run_gate(sql, semantic)
-        guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
-        entry = AuditEntry(
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            original_sql=sql,
-            safe_sql=gate.safe_sql,
-            violations=gate.violations,
-            passed=gate.passed,
-        )
-        if not gate.passed or not gate.safe_sql:
-            log_audit(entry)
-            rows = []
-            total_count = None
-        elif session_rows is not None and len(session_rows) > 0 and layer == "session":
-            rows = session_rows
-            total_count = len(rows)
-            entry.row_count = len(rows)
-            log_audit(entry)
-        else:
-            try:
-                rows, _, _ = execute_sql(verified, gate.safe_sql)
-            except SqlGateAbstain as exc:
-                entry.passed = False
-                entry.violations = list(exc.violations)
-                log_audit(entry)
-                return _abstain(
-                    question,
-                    audit_id,
-                    reason=f"SQL validation gate: {exc}",
-                )
-            total_count = _true_count(gate.safe_sql, verified=verified)
-            entry.row_count = len(rows)
-            log_audit(entry)
+    gate = run_gate(sql, semantic)
+    guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
+    entry = AuditEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        original_sql=sql,
+        safe_sql=gate.safe_sql,
+        violations=gate.violations,
+        passed=gate.passed,
+    )
+    if not gate.passed or not gate.safe_sql:
+        log_audit(entry)
+        rows = []
+        total_count = None
+    elif session_rows is not None and len(session_rows) > 0 and layer == "session":
+        rows = session_rows
+        total_count = len(rows)
+        entry.row_count = len(rows)
+        log_audit(entry)
     else:
-        # Every statement that reaches here has passed the read-only guardrail, so a
-        # read-only handle is always sufficient. It is opt-in (DMS_READ_ONLY_QUERIES)
-        # because it also has to be safe for the writer in this process — see
-        # warehouse_db.read_only_queries_enabled.
-        con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
         try:
-            if session_rows is not None and len(session_rows) > 0 and layer == "session":
-                # Precomputed AVG (literal SELECT still guardrail-checked)
-                guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-                if guard_result.passed:
-                    rows = session_rows
-                total_count = len(rows) if guard_result.passed else None
-            else:
-                guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-                total_count = (
-                    _true_count(guard_result.safe_sql, con) if guard_result.passed else None
-                )
-        finally:
-            con.close()
+            rows, _, _ = execute_sql(verified, gate.safe_sql)
+        except SqlGateAbstain as exc:
+            entry.passed = False
+            entry.violations = list(exc.violations)
+            log_audit(entry)
+            return _abstain(
+                question,
+                audit_id,
+                reason=f"SQL validation gate: {exc}",
+            )
+        except ManifestError as exc:
+            # The enforcer refused. Report it as the refusal it is, with the
+            # type preserved, instead of letting it leave as an exception the
+            # product path turns into a 500.
+            entry.passed = False
+            entry.violations = [type(exc).__name__]
+            log_audit(entry)
+            return _abstain_refused(question, audit_id, exc=exc)
+        total_count = _true_count(gate.safe_sql, verified=verified)
+        entry.row_count = len(rows)
+        log_audit(entry)
 
     if not guard_result.passed:
         return _abstain(question, audit_id,
@@ -2242,6 +2283,7 @@ def answer(
             metric_id=metric_id,
             skill_score=skill_score,
             assumptions=assumptions,
+            grant_kind=grant_kind,
         ),
         "audit": {"timestamp": entry.timestamp, "passed": entry.passed, "violations": entry.violations},
     }

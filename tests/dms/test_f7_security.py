@@ -31,7 +31,11 @@ def test_pii_redacted_before_prompt(monkeypatch):
         captured.append(req.content)
         return original(self, req)
 
-    def fake_guard(sql, semantic, con):
+    # SEC-01 moved execution behind the manifest: the legacy path no longer
+    # opens its own connection, so the stub replaces the governed executor
+    # instead. The assertion below is unchanged — this test is about what
+    # reaches the model, not about how rows are fetched.
+    def fake_guard(sql, semantic, session_id=None):
         entry = AuditEntry(
             timestamp="2026-01-01T00:00:00+00:00",
             original_sql=sql,
@@ -42,7 +46,7 @@ def test_pii_redacted_before_prompt(monkeypatch):
         return GuardrailResult(passed=True, safe_sql=sql), [], entry
 
     monkeypatch.setattr(JudgmentModel, "decide", spy_decide)
-    monkeypatch.setattr("CortexOS.dms.query_service.guard_and_execute", fake_guard)
+    monkeypatch.setattr("CortexOS.dms.query_service._guarded_execute", fake_guard)
 
     raw_nric = "S1234567A"
     raw_phone = "91234567"

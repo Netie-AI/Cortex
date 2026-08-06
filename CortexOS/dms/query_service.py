@@ -10,12 +10,9 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
+from CortexOS.dms.sql_guardrail import audit_log, validate_sql
 from CortexOS.dms.warehouse_db import (
-    DEFAULT_DB,
-    get_connection,
     load_semantic_layer,
-    read_only_queries_enabled,
 )
 from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
@@ -1029,20 +1026,76 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
     }
 
 
+def _local_verified_for(session_id: str | None = None):
+    """The self-issued grant this module's legacy reads run under (SEC-01)."""
+    from CortexOS.dms.answer_engine import _local_verified
+
+    return _local_verified(session_id)
+
+
+def _guarded_execute(sql: str, semantic: dict[str, Any], session_id: str | None = None):
+    """Validate then execute under the manifest, returning the legacy triple.
+
+    Mirrors ``guard_and_execute``'s (result, rows, entry) shape so the callers
+    below are unchanged, but the read goes through the C4 submit executor and
+    therefore through ``enforce_manifest``.
+    """
+    from datetime import datetime, timezone
+
+    from CortexOS.dms.sql_guardrail import AuditEntry, log_audit
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
+    from CortexOS.execution.manifest import ManifestError
+    from CortexOS.execution.submit import execute_sql
+
+    gate = run_gate(sql, semantic)
+    entry = AuditEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        original_sql=sql,
+        safe_sql=gate.safe_sql,
+        violations=gate.violations,
+        passed=gate.passed,
+    )
+    rows: list[dict[str, Any]] = []
+    if gate.passed and gate.safe_sql:
+        try:
+            rows, _, _ = execute_sql(_local_verified_for(session_id), gate.safe_sql)
+            entry.row_count = len(rows)
+        except (SqlGateAbstain, ManifestError) as exc:
+            gate.passed = False
+            gate.violations = [*gate.violations, type(exc).__name__]
+            entry.passed = False
+            entry.violations = list(gate.violations)
+            rows = []
+    log_audit(entry)
+    return gate, rows, entry
+
+
 def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
-    con = get_connection(db_path or DEFAULT_DB, read_only=read_only_queries_enabled())
+    """Unresolved CRITICAL/HIGH counts, read under the manifest like every other read.
+
+    A fixed internal query is still a read of customer data, and "it is not
+    user-controlled" is the argument that leaves a bypass in place (SEC-01).
+    """
+    del db_path  # the grant names the warehouse; a caller cannot redirect the read
+    semantic = load_semantic_layer()
     try:
-        crit = con.execute(
-            "SELECT COUNT(*) FROM alerts WHERE resolved = false AND severity = 'CRITICAL'"
-        ).fetchone()[0]
-        high = con.execute(
-            "SELECT COUNT(*) FROM alerts WHERE resolved = false AND severity = 'HIGH'"
-        ).fetchone()[0]
-        return {"critical": int(crit), "high": int(high)}
-    except Exception:
+        crit_gate, crit_rows, _ = _guarded_execute(
+            "SELECT COUNT(*) AS n FROM alerts WHERE resolved = false "
+            "AND severity = 'CRITICAL'",
+            semantic,
+        )
+        high_gate, high_rows, _ = _guarded_execute(
+            "SELECT COUNT(*) AS n FROM alerts WHERE resolved = false AND severity = 'HIGH'",
+            semantic,
+        )
+        if not (crit_gate.passed and high_gate.passed):
+            return {"critical": 0, "high": 0}
+        return {
+            "critical": int((crit_rows or [{}])[0].get("n") or 0),
+            "high": int((high_rows or [{}])[0].get("n") or 0),
+        }
+    except Exception:  # noqa: BLE001 — a summary must never break the answer
         return {"critical": 0, "high": 0}
-    finally:
-        con.close()
 
 
 def rag_answer(question: str) -> tuple[str, list[str]]:
@@ -1151,11 +1204,11 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     sql = generate_sql(question, semantic)
     query_plan = plan_query(question, sql)
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
-    try:
-        guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-    finally:
-        con.close()
+    # SEC-01 — this path is reachable from POST /dms/query through the ranked
+    # bridge above, so it executes under the same manifest as everything else.
+    # It used to open a bare connection, which made the enforcer optional on the
+    # one path customers actually use.
+    guard_result, rows, entry = _guarded_execute(sql, semantic)
 
     alerts_summary = get_alerts_summary()
     show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))

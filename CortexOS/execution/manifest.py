@@ -32,7 +32,7 @@ import posixpath
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -390,6 +390,67 @@ class VerifiedManifest:
     @property
     def row_predicates(self) -> dict[str, str]:
         return dict(self.manifest.row_predicates)
+
+
+#: Issuer marker for grants this process minted for itself. Never a customer key.
+LOCAL_ISSUER_KID = "local-self-issued"
+
+
+def local_manifest(
+    *,
+    session_id: str,
+    tables: set[str] | frozenset[str] | list[str],
+    allowed_paths: list[str],
+    org_id: str = "local",
+    pool_id: str = "local",
+    ttl_s: int = 300,
+) -> VerifiedManifest:
+    """Mint a self-issued grant for the single-tenant local warehouse.
+
+    This is the one documented exception to "a :class:`VerifiedManifest` is
+    proof that verification happened", and it exists to *remove* an unenforced
+    path rather than to create an authority. ``POST /dms/query`` historically
+    ran SQL on a bare connection with no manifest at all — 34 fail-closed
+    refusals and a hostile corpus applied only to ``/v1/contract/*``. Handing
+    that path a narrow self-issued grant means every statement now goes through
+    :func:`enforce_manifest`: statement class, path scope, ungranted tables and
+    cross-catalog reads are all checked where previously nothing was.
+
+    It cannot widen anything. ``tables`` is the whole grant and is supplied by
+    the caller from the semantic layer, so this can never authorise a relation
+    the pack does not declare; an empty grant is refused rather than quietly
+    minted, because a grant of nothing reads like a no-op and is really a
+    total refusal.
+
+    It is not a substitute for a customer-issued manifest. ``issuer_kid`` is
+    :data:`LOCAL_ISSUER_KID` precisely so audit rows, telemetry and any future
+    multi-tenant check can tell a self-issued grant from a signed one, and a
+    real bound session must always take precedence over this.
+    """
+    names = sorted({str(t).strip().lower() for t in tables if str(t).strip()})
+    if not names:
+        raise ValueError(
+            "local_manifest requires at least one table; an empty grant refuses "
+            "every query and would look like a configuration no-op"
+        )
+    now = datetime.now(timezone.utc)
+    manifest = Manifest(
+        session_id=session_id,
+        org_id=org_id,
+        pool_id=pool_id,
+        issuer_key_id=LOCAL_ISSUER_KID,
+        allowed_paths=list(allowed_paths),
+        # TRUE, not a filter: this grant scopes *which* relations are readable,
+        # and has no tenant to narrow rows by. Row scoping is the signed
+        # manifest's job, and this type is not that.
+        row_predicates=dict.fromkeys(names, "TRUE"),
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(seconds=ttl_s)).isoformat(),
+        signature="",
+    )
+    return VerifiedManifest(
+        manifest=manifest, issuer_kid=LOCAL_ISSUER_KID, verified_at=now
+    )
 
 
 DEFAULT_CLOCK_SKEW_S = 120
