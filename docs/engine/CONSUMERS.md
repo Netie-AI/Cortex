@@ -16,7 +16,7 @@ Cortex is one engine. Apps plug in; they do not fork the brain.
 | **OpenVault** | `D:\OpenVault` | Keys / gate / FreeRoute; Cortex asks, OV allows | Companion product (`:5000`) |
 | **AirGPT** | `D:\AirGPT` | Thin HTTP client → `:8010`; Seek/Routines/Apps proxies | Host shell (`:8765`) |
 | **Pointer** | `D:\Netie Clicks` | Act fail-closed → `:8010` `computer_control` | External Act client |
-| **Netie Space** | `D:\Netie Space` | Optional handoff / preview UI | Not DMS Spaces ACL product |
+| **Netie Space** | `D:\Space` | Optional handoff / preview UI | Not DMS Spaces ACL product |
 | **RUMA** | `D:\RUMA` + `packs/ruma` | Planned; **not wired** | Parked vertical |
 | **OpenIDE** | (out of tree) | Asks Cortex for coding tools | Expert slice |
 
