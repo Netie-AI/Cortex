@@ -18,6 +18,8 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-08-20 | verify-reopened-six-of-seven | R-0003, adversarial-verify, false-green, self-issued-grant, vacuous-gate, stop-list, REVERT-A, negation-blindness, partial-agent-work | Adversarial independent verify reopened 6 of 7 shipped tickets; four recurring shapes incl. a gate intersecting against a set it also mints | `2026-08-20_verify-reopened-six-of-seven.md` |
+| 2026-08-20 | netie-control-option-3 | netie-control, paperclip, cortex-hero, client-only, third-orchestrator | Option 3: plane-4 client, Cortex hero, GET-only /api/netie | `2026-08-20_netie-control-option-3.md` |
 | 2026-08-06 | paperclip-netie-control-fit | paperclip, netie-control, heartbeat, adapters, budgets, github-issues, ticket-runner, fork | Paperclip PARTIAL: strong Ticket Runner substrate; wrong planning layer until GitHub sync + PRD/Epic law replace AI-company model | `2026-08-06_paperclip-netie-control-fit.md` |
 | 2026-08-06 | netie-agent-stack-audit | prd-agent, epic-agent, ticket-runner, model-routing, NEEDS-YOU, unlocks, F17, F18, Composer, Grok | AGENT_SYSTEM solid; Claude agents only; Cursor routing conflicts; no Unlock board — seed AirGPT F17–F20 + peer NEEDS-YOU | `2026-08-06_netie-agent-stack-audit.md` |
 | 2026-08-06 | openvault-saas-monetize-intake | OpenVault, SaaS, monetization, FreeRoute, OmniRoute, RTK, skills, wave-2 | Park SaaS/billing/RTK/skills as wave-2; keep multi-tenant OOS; continue #17→#18 until HT | `2026-08-06_openvault-saas-monetize-intake.md` |
