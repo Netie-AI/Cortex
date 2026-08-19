@@ -71,6 +71,16 @@ supported:
       1.2 client observes no change and a 1.3 client maps it to envelope.chart.
       No operationId added or removed; canonical_manifest_bytes unchanged.
 
+      Also carries SEC-01 grant visibility: DMSQueryResponse gains grant_kind
+      and granted_sources, both optional. A session running on a self-issued
+      grant rather than a bound manifest is a degradation, and R-0011 says a
+      degradation has to be visible in the output rather than in a log line.
+      Not a contract-surface change - DMSQueryResponse is an engine schema and
+      /dms/query is not one of the six contract operationIds - and folded into
+      1.3 rather than opening 1.4 because 1.3 has not merged to main, so no
+      consumer can be pinned to it yet. Once it merges, the same two fields
+      would cost a minor.
+
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.
   - field: Manifest.row_predicate_sql
