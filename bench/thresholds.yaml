@@ -49,6 +49,10 @@ category_seed_floors:
   coercion: 3
   value_normalization: 4
   fallback_hazard: 3
+  # EVAL-01. Five, because the ticket names five multi-turn shapes and
+  # each one is a defect that reached a customer: sum-of-them, follow-up
+  # count, re-slice a ranking, "them" after a derived scalar, paged total.
+  conversation: 5
 
 # Live routing gaps closed 2026-07-31 (1a→1b prep)
 # Malay vocab, delayed_count scalar, capacity/audit/spend routes, E4 multi-row values,

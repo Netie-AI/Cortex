@@ -7,8 +7,38 @@
 Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened.
 
 ## P2 — WASM / Firecracker production hardening
-**Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*  
+**Condition:** First enterprise client conversation. *(Scaffold deleted 2026-08-19, see below.)*  
 **2026-07-31 orientation:** F8 TOOL_CALL runs via **host `tool_runner`** (allowlist + ledger + `outputs/`). Docker is for **app packaging / deploy**, not tool isolation. Do not claim WASM shipped. See `docs/dms/SANDBOX_ORIENTATION.md`.
+
+**2026-08-19 (DOC-01 verification) - the scaffolds are gone, the deferral is not.**
+Two rounds of cleanup removed the empty promises this item was hiding behind.
+
+*The Wasm half:* `CortexOS/execution/wasm_isolate.py`, `wasm_modules/base_agent.wasm`
+(git's empty blob) and `test_wasm_honesty.py` are deleted. Nothing imported the isolate
+outside its own test, so no security coverage was lost.
+
+*The platform-security half:* the whole of `CortexOS/security/` - `platform.py`,
+`windows_adapter.py`, `linux_adapter.py`, `macos_adapter.py`, `manifest_enforcer.py` -
+was 24 tracked files at zero bytes, imported by nothing, and read by a newcomer as
+shipped surface. Deleted along with the rest of the estate's zero-byte modules:
+`CortexOS/cas/`, `CortexOS/skills/`, `CortexOS/crypto/transport.py`, `CortexOS/cli.py`,
+`CortexOS/execution/tier{0_tools,1_inference,2_api,_router}.py`,
+`CortexOS/fabrication/{causal_scanner,dead_code,intent_router}.py`,
+`tests/fixtures/sample_*`, and two empty `.cursor/` placeholders. The design intent
+they stood for is recorded in `docs/archive/implementation_plan.md` and
+`docs/archive/task.md`, which is where a deferred design belongs. Note that
+`docs/ontology/CORTEX_ONTOLOGY_PLAN.md` still cites `tier_router.py` as if it exists;
+it never did.
+
+*Why deletion and not a stub:* an empty tracked module is a promise the repo does not
+keep, and it is invisible to review because a diff of nothing looks like nothing. This
+parking-lot entry is the record; the file was not. Rebuilding any of these starts from
+the archived plan, not from a resurrected empty file.
+
+*The gate:* `tests/security/test_readme_claims.py::test_no_empty_placeholder_artifacts_are_tracked`
+now reads `git ls-files -s` for the empty blob across every tracked path, so this cannot
+recur silently. Only `__init__.py` and `.gitkeep` are allowed to be empty, because being
+empty is their entire job.
 
 ## P3 — DAG token optimization + Temporal durable execution
 **Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`. S1 watcher agents activate DBOS path per BUILD_PLAN_V2 — governed detect→draft→approve landed; durable resume still open.)*

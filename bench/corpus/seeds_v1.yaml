@@ -479,3 +479,106 @@ categories:
       engineer_intent: "no margin column — abstain not invent"
       match: abstain
       tags: [fallback]
+
+  # EVAL-01 - the shapes a single-question corpus structurally cannot hold.
+  # Every entry here is the turn AFTER an answer, and every one is a defect that
+  # shipped: this corpus reported 376/376 wrong=0 throughout the session that
+  # produced them (ebd049b..78309fc). `turns` are asked first, in one session;
+  # `question` is the turn that gets scored. `answer_must_not_contain` holds the
+  # defect's signature in the RENDERED text, because the customer reads prose -
+  # several of these had a self-consistent row payload while the number on
+  # screen answered a different question.
+  conversation:
+    - id: cv_sum_of_them
+      question: "Sum of them"
+      turns:
+        - "Top 5 selling SKUs by revenue"
+      persona: ops_manager
+      engineer_intent: >
+        ebd049b - _aggregate_prior had no SUM branch and no refusal behind the
+        gap, so "sum of them" fell through to the COUNT wrap and put
+        followup_count=491 on screen under a governed badge. Gold is the SUM of
+        the five values the prior turn showed.
+      match: scalar
+      canonical_sql: >
+        SELECT ROUND(SUM(sales_value_myr), 2) AS sum_sales_value_myr FROM (
+          SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+          FROM transactions WHERE txn_type = 'OUT'
+          GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5)
+      key_columns: [sum_sales_value_myr]
+      round: 2
+      answer_must_not_contain: ["followup_count", "sku_count"]
+      tags: [conversation, followup, aggregation]
+
+    - id: cv_count_of_them
+      question: "how many of them?"
+      turns:
+        - "Top 5 selling SKUs by revenue"
+      persona: ops_manager
+      engineer_intent: >
+        2475f50 - the COUNT wrap stripped LIMIT unconditionally, so counting a
+        top-5 counted every SKU with an outbound transaction and answered 491.
+        Five rows on screen is five.
+      match: scalar
+      canonical_sql: >
+        SELECT COUNT(*) AS followup_count FROM (
+          SELECT sku FROM transactions WHERE txn_type = 'OUT'
+          GROUP BY sku
+          ORDER BY SUM(quantity_kg * unit_cost_myr) DESC, sku ASC LIMIT 5)
+      key_columns: [followup_count]
+      answer_must_not_contain: ["sku_count"]
+      tags: [conversation, followup, count]
+
+    - id: cv_reslice_ranking
+      question: "show me number 2-6"
+      turns:
+        - "Top 5 selling SKUs by revenue"
+      persona: ops_manager
+      engineer_intent: >
+        2475f50 - a subjectless re-slice abstained. The ranked metrics carried
+        an offset parameter the whole time; the router only reached it when the
+        question named its own subject, which a follow-up by definition does not.
+      match: resultset
+      canonical_sql: >
+        SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+        FROM transactions WHERE txn_type = 'OUT'
+        GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5 OFFSET 1
+      key_columns: [sku, sales_value_myr]
+      round: 2
+      tags: [conversation, followup, window]
+
+    - id: cv_them_after_a_derived_scalar
+      question: "how many of them?"
+      turns:
+        - "Top 5 selling SKUs by revenue"
+        - "Sum of them"
+      persona: ops_manager
+      engineer_intent: >
+        dc86689 - every turn replaced the session anchor, so the sum became what
+        "them" pointed at and the next count counted the single row the sum had
+        produced: 1. Literally consistent, and not what anybody means.
+      match: scalar
+      canonical_sql: >
+        SELECT COUNT(*) AS followup_count FROM (
+          SELECT sku FROM transactions WHERE txn_type = 'OUT'
+          GROUP BY sku
+          ORDER BY SUM(quantity_kg * unit_cost_myr) DESC, sku ASC LIMIT 5)
+      key_columns: [followup_count]
+      answer_must_not_contain: ["followup_count = 1"]
+      tags: [conversation, followup, anchor]
+
+    - id: cv_paged_total_followup
+      question: "how many of them?"
+      turns:
+        - "Which shipments are in transit?"
+      persona: ops_manager
+      engineer_intent: >
+        78309fc - the listing hit the 1000-row guardrail cap with a failed COUNT
+        probe and reported the page size as the total, then the follow-up
+        replayed that invented 1000 as a confident answer. Gold is the true
+        IN_TRANSIT count, which is larger than the cap.
+      match: scalar
+      canonical_sql: "SELECT COUNT(*) AS followup_count FROM shipments WHERE status = 'IN_TRANSIT'"
+      key_columns: [followup_count]
+      answer_must_not_contain: ["followup_count = 1000"]
+      tags: [conversation, followup, truncation]

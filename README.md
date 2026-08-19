@@ -55,7 +55,9 @@ Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
 Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, and runs it on your compute.
 
-**What actually guards it today:** SQL is parsed and validated with sqlglot before it runs; every read is enforced against a signed session manifest, so a query cannot reach a table the session never bound; the audit trail is a hash chain; and tool calls go through an allowlisted host runner. Process-level isolation is **not** shipped — untrusted code is packaged and run in containers, not sandboxed in-process. See [`PARKING_LOT.md`](PARKING_LOT.md) P2.
+**What actually guards it today:** SQL is parsed and validated with sqlglot before it runs (`CortexOS/dms/sql_validate_gate.py`); every read is enforced against a signed session manifest, so a query cannot reach a table the session never bound (`CortexOS/execution/manifest.py`, Ed25519); the audit trail is a hash chain (`packs/dms/audit/ledger.py`); and tool calls go through a host runner whose allowlist is derived from the governed action-type registry (`CortexOS/execution/tool_runner.py`).
+
+**What does *not* guard it:** there is no container, no VM, and no in-process sandbox anywhere between an installed app and your machine. A packaged app is started by `CortexOS/execution/app_runner.py` as an ordinary child process, under the same OS account as the engine, with the engine's own environment; the engine will **not** start a container stack for you at all. Treat anything you install as code you have chosen to trust. See [`PARKING_LOT.md`](PARKING_LOT.md) P2.
 
 ## Read first
 

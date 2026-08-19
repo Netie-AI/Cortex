@@ -48,9 +48,20 @@ from CortexOS.execution.manifest import (
     local_manifest,
     tables_read,
 )
+from CortexOS.execution.session_manifests import (
+    SessionExpired,
+    SessionUnbound,
+    get_session_registry,
+)
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
+
+# Which authority a turn ran under. A signed session manifest is a stronger
+# claim than a grant this process minted for itself, and the difference has to
+# be legible on the envelope, not inferrable from a log line (R-0011).
+SESSION_GRANT = "session"
+LOCAL_GRANT = "local-self-issued"
 
 
 @dataclass(slots=True)
@@ -311,6 +322,140 @@ def _strip_trailing_filler(clause: str) -> str:
     return " ".join(tokens)
 
 
+#: Conjunctions that may join two entities inside one exclusion clause.
+_EXCLUSION_JOINER_RE = re.compile(r"[,/]+|\b(?:and|or|dan|atau)\b", re.I)
+#: Shaped like a SKU identifier even if the warehouse does not encode it. A
+#: token the customer clearly meant as an entity must reach the resolver so it
+#: can be reported as unmatched, rather than truncating the span and silently
+#: discarding the real SKUs that follow it.
+_SKU_SHAPED_RE = re.compile(r"^SKU[-_]?[A-Za-z0-9]+$", re.I)
+
+
+def _resolves_as_entity(text: str) -> bool:
+    """True when *text* names a SKU the warehouse actually encodes.
+
+    Fail-safe: if the semantic layer is not registered the resolver raises, and
+    an unresolvable token is simply not an entity. The caller then falls back to
+    the stop-list path, so an unregistered pack behaves exactly as before.
+    """
+    token = text.strip().strip("'\".,")
+    if not token:
+        return False
+    try:
+        res = resolve_semantic_layer().resolve_value(token, "sku")
+    except Exception:
+        return False
+    return bool(res.exact and res.value)
+
+
+def _resolves_at_all(text: str) -> bool:
+    """True when the resolver gets *any* hit on *text*, exact or fuzzy.
+
+    A fuzzy hit is meaningful on its own: "remove beta trial" must reach
+    ``_resolve_exclusions`` intact so it produces a confirm chip. Narrowing it
+    to the exact "beta" inside it would silently filter something the customer
+    only approximately named, which is the failure the clarify path exists to
+    prevent.
+    """
+    token = text.strip().strip("'\".,")
+    if not token:
+        return False
+    try:
+        res = resolve_semantic_layer().resolve_value(token, "sku")
+    except Exception:
+        return False
+    return bool(res.ok and res.value)
+
+
+def _looks_named(part: str) -> bool:
+    """True when *part* is something the customer clearly meant as an entity.
+
+    Three signals, none of them a filler list (R-0004): it resolves; it is
+    shaped like a SKU code; or it is written in caps, which is how people write
+    an identifier they believe in. "GAMMA" qualifies and "also" does not, and
+    that distinction is what lets the span keep a named-but-unknown entity -
+    so the resolver can report it unmatched - while still dropping an adverb.
+    """
+    bare = part.strip().strip("'\".,")
+    if not bare:
+        return False
+    # A *fuzzy* hit counts: "beta trial" is something the customer named, and
+    # the clarify path is what decides whether to apply or confirm it. The six
+    # adverbs that broke ANS-01 - also, just, kindly, maybe, simply, perhaps -
+    # get no hit at all, which is what separates them from an entity.
+    if _resolves_at_all(bare) or _SKU_SHAPED_RE.match(bare):
+        return True
+    return bare.isupper() and bare.upper() not in _EXCLUSION_SKIP
+
+
+def _entity_span(clause: str) -> str | None:
+    """Longest leading span of *clause* that is entities joined by conjunctions.
+
+    ANS-01, second pass. The first fix ended the clause *negatively* - it popped
+    trailing tokens that appeared in ``_EXCLUSION_SKIP``. That still let two
+    lists disagree, just later: any word neither list knows ("also", "just",
+    "kindly", "maybe", "simply") stayed in the clause, the fuzzy resolver could
+    not match it exactly, and the engine asked the customer to confirm an
+    exclusion they had already stated precisely. Six live phrasings abstained,
+    two of them carrying no punctuation at all.
+
+    This ends the clause *positively* instead: keep the longest leading span
+    that actually resolves to entities, and drop whatever follows. An unknown
+    adverb cannot break it, because the span is established by what resolves
+    rather than by what a list happens to name (R-0004 - the defect class is
+    "a list can be incomplete", so no list decides).
+
+    "BETA and GAMMA" survives whole - both sides resolve, and dropping the
+    conjunction would silently lose GAMMA, turning a visible refusal into a
+    wrong answer. Returns ``None`` when nothing in the clause resolves, leaving
+    the existing clarify/abstain path to report it.
+    """
+    whole = clause.strip().strip("'\".,")
+    if not whole:
+        return None
+    # Every part of the clause already looks named, so the clause means what it
+    # says. Narrowing it would turn "remove beta trial" into "beta" and
+    # silently filter a SKU the customer only approximately named, which is the
+    # failure the clarify path exists to prevent. Leave it, and let the
+    # stop-list strip take the trailing conjunction as it always did.
+    #
+    # Testing the *whole* clause for a resolver hit would not do: the fuzzy
+    # resolver hits "SKU-BETA and also" too, and returning non-exact on it is
+    # precisely the ANS-01 defect. Only a part-wise test separates a phrase the
+    # customer named from a phrase an adverb wandered into.
+    if _entity_parts(whole) is not None:
+        return None
+
+    tokens = whole.split()
+    for end in range(len(tokens) - 1, 0, -1):
+        cand = " ".join(tokens[:end])
+        named = _entity_parts(cand)
+        if named is not None:
+            return named
+    return None
+
+
+def _entity_parts(cand: str) -> str | None:
+    """*cand* rebuilt from its entities, or ``None`` if any part is not one.
+
+    Returns the cleaned join rather than the raw candidate, so a trailing
+    conjunction does not survive into the clause - "SKU-BETA and" cannot
+    resolve and would abstain exactly as the unfixed engine did.
+
+    Every part must look named, so an unmatched-but-clearly-named SKU stays in
+    the span and reaches the resolver, which reports it. Truncating there
+    instead would drop the real SKUs after it - "exclude SKU-BETA and
+    SKU-GAMMA and SKU-00397" would apply only SKU-BETA and still answer green,
+    and a wrong answer under a success badge is worse than an abstain
+    (CLAUDE.md section 8).
+    """
+    parts = [p.strip().strip("'\".,") for p in _EXCLUSION_JOINER_RE.split(cand)]
+    parts = [p for p in parts if p]
+    if not parts or not all(_looks_named(p) for p in parts):
+        return None
+    return " and ".join(parts)
+
+
 def _exclusion_clauses(q: str) -> list[str]:
     """Raw exclusion phrases (before token split), for sku_name fuzzy resolve."""
     out: list[str] = []
@@ -319,7 +464,11 @@ def _exclusion_clauses(q: str) -> list[str]:
         stop = _EXCLUSION_STOP.search(clause)
         if stop:
             clause = clause[: stop.start()]
-        clause = _strip_trailing_filler(clause.strip().strip("'\".,"))
+        clause = clause.strip().strip("'\".,")
+        # Entity-anchored first (R-0004); the stop-list strip is only the
+        # fallback for when the semantic layer cannot resolve anything.
+        anchored = _entity_span(clause)
+        clause = anchored if anchored is not None else _strip_trailing_filler(clause)
         if clause and clause.lower() not in out:
             out.append(clause)
     return out
@@ -965,11 +1114,38 @@ def _abstain_impossible_filter(
     }
 
 
-def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
+def _bound_sources_sentence(verified: VerifiedManifest | None) -> str:
+    """One sentence naming what this session can be answered over.
+
+    Shared by every abstain so the two cannot describe the same grant
+    differently. P0-DEMO-02's clause is that the system says which sources it
+    *can* answer over; an abstain that only says no is a dead end the buyer
+    reads as "it does not work".
+    """
+    granted = sorted(
+        {str(name).lower() for name in (verified.manifest.row_predicates if verified else {})}
+    )
+    if not granted:
+        return "This session has no data sources bound."
+    return "This session is bound to: " + ", ".join(granted) + "."
+
+
+def _abstain(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+    verified: VerifiedManifest | None = None,
+) -> dict[str, Any]:
+    # The suggestions come from the semantic layer, which describes the whole
+    # pack - so on a session bound to an uploaded workbook they used to offer
+    # demo-warehouse questions this very session would refuse. Naming the bound
+    # sources first keeps the offer honest (P0-DEMO-02).
     suggestions = _suggestions(question)
-    hint = " Try: " + " · ".join(f'"{s}"' for s in suggestions)
+    hint = " Try: " + " / ".join(f'"{s}"' for s in suggestions)
     return {
-        "answer": (f"I can't answer that from the DMS semantic layer with confidence ({reason})."
+        "answer": (f"I can't answer that from the DMS semantic layer with confidence ({reason}). "
+                   + _bound_sources_sentence(verified)
                    + hint),
         "sql_used": None,
         "chart_spec": None,
@@ -1004,6 +1180,66 @@ def _local_verified(session_id: str | None) -> VerifiedManifest:
         tables=_local_grant_tables(),
         allowed_paths=[str(DEFAULT_DB)],
     )
+
+
+def resolve_grant(
+    session_id: str | None, verified: VerifiedManifest | None
+) -> tuple[VerifiedManifest, str, str]:
+    """The one place that decides which grant governs a turn.
+
+    SEC-01 and P0-DEMO-02 were one defect because two pieces of code answered
+    "what may this session read?" and were free to disagree. ``/v1/contract/ask``
+    resolved :func:`get_session_registry`; ``/dms/query`` and ``/mcp/call`` did
+    not, so a session that bound a narrow grant still ran under the wide
+    self-issued mint on the product path - and P0-DEMO-02's grounding gate
+    intersected against a grant that already contained every table the pack
+    declares. The gate was vacuous exactly where the customer stands.
+
+    Teaching those two call sites to look up the registry would have made
+    today's lists agree and left the next entry point free to disagree
+    tomorrow. So resolution happens here, once, for every caller: an explicit
+    manifest wins, then the session registry, and only a caller with no binding
+    at all falls back to the local mint.
+
+    Returns the grant, its kind, and why it degraded (empty when it did not).
+    The reason is returned rather than logged because an expired binding
+    widening back to the full local grant is the most dangerous of the three
+    outcomes, and the caller has to be able to see which one they got.
+    """
+    if verified is not None:
+        return verified, SESSION_GRANT, ""
+    try:
+        return get_session_registry().resolve(session_id), SESSION_GRANT, ""
+    except SessionExpired:
+        return _local_verified(session_id), LOCAL_GRANT, "session manifest expired"
+    except SessionUnbound:
+        return _local_verified(session_id), LOCAL_GRANT, "no session manifest bound"
+
+
+def stamp_grant(
+    result: dict[str, Any], *, verified: VerifiedManifest, kind: str, degraded: str
+) -> dict[str, Any]:
+    """Disclose the governing grant on the envelope, on every return path.
+
+    :func:`answer` has more than twenty returns. Asking each to remember the
+    disclosure is the same shape as the defect above - a set of places that can
+    disagree - so there is exactly one writer, at the exit, and no path can
+    ship an envelope that hides the degradation (R-0011).
+    """
+    sources = sorted({str(name).lower() for name in verified.manifest.row_predicates})
+    result["grant_kind"] = kind
+    result["granted_sources"] = sources
+    if degraded:
+        note = f"grant={kind} ({degraded})"
+        prior = str(result.get("assumptions") or "")
+        result["assumptions"] = f"{prior}; {note}" if prior else note
+    plan = result.get("query_plan")
+    if isinstance(plan, dict):
+        plan["grant_kind"] = kind
+        plan["granted_sources"] = sources
+        if degraded:
+            plan["assumptions"] = result["assumptions"]
+    return result
 
 
 def _abstain_refused(
@@ -1044,7 +1280,7 @@ def _abstain_refused(
     }
 
 
-def _ungrounded_tables(
+def ungrounded_tables(
     sql: str, *, verified: VerifiedManifest | None
 ) -> frozenset[str]:
     """Tables this SQL reads that the session never bound (P0-DEMO-02).
@@ -1085,17 +1321,13 @@ def _abstain_ungrounded(
     dead end the buyer reads as "it doesn't work"; the granted table names are
     already in their hands, because they are what the session bound.
     """
-    granted = sorted(str(name).lower() for name in (verified.manifest.row_predicates if verified else {}))
+    granted = sorted({str(name).lower() for name in (verified.manifest.row_predicates if verified else {})})
     refused = ", ".join(sorted(ungrounded))
-    can_answer = (
-        "This session is bound to: " + ", ".join(granted) + "."
-        if granted
-        else "This session has no data sources bound."
-    )
+    can_answer = _bound_sources_sentence(verified)
     reason = f"question resolves to ungranted source(s): {refused}"
     return {
         "answer": (
-            "I can't answer that from the sources bound to this session — the closest "
+            "I can't answer that from the sources bound to this session - the closest "
             f"governed answer would read {refused}, which this session did not bind. "
             + can_answer
             + " Ask about those, or bind the source you meant and ask again."
@@ -1187,12 +1419,13 @@ def _abstain_or_document_rag(
     *,
     reason: str,
     space_id: str | None = None,
+    verified: VerifiedManifest | None = None,
 ) -> dict[str, Any]:
-    """Final abstain path — try space-scoped doc-RAG before giving up."""
+    """Final abstain path - try space-scoped doc-RAG before giving up."""
     doc = _try_document_rag(question, audit_id, space_id=space_id)
     if doc is not None:
         return doc
-    return _abstain(question, audit_id, reason=reason)
+    return _abstain(question, audit_id, reason=reason, verified=verified)
 
 
 # ── session memory (follow-up anaphora) ───────────────────────────────────────
@@ -1764,7 +1997,6 @@ def _honest_plan(
     metric_id: str | None = None,
     skill_score: float | None = None,
     assumptions: str = "",
-    grant_kind: str = "session",
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import plan_query
 
@@ -1782,10 +2014,9 @@ def _honest_plan(
     base["metric_id"] = metric_id
     base["skill_score"] = round(skill_score, 3) if skill_score is not None else None
     base["assumptions"] = assumptions
-    # Which grant this answer was read under. A self-issued local grant is a
-    # weaker claim than a signed session manifest, and a degradation that is
-    # only visible in a log line is a silent one (R-0011).
-    base["grant_kind"] = grant_kind
+    # ``grant_kind`` is stamped by stamp_grant on the way out, not here. Two
+    # writers for one disclosure field is the same shape as the defect it
+    # discloses.
     return base
 
 
@@ -1796,6 +2027,24 @@ def answer(
     session_id: str | None = None,
     space_id: str | None = None,
     verified: VerifiedManifest | None = None,
+) -> dict[str, Any]:
+    """Answer under exactly one grant, and say on the envelope which one.
+
+    Kept deliberately thin. Grant resolution happens before any routing so no
+    branch below can run without one, and the disclosure is stamped after every
+    branch so no branch can omit it.
+    """
+    grant, kind, degraded = resolve_grant(session_id, verified)
+    result = _answer(question, session_id=session_id, space_id=space_id, verified=grant)
+    return stamp_grant(result, verified=grant, kind=kind, degraded=degraded)
+
+
+def _answer(
+    question: str,
+    *,
+    session_id: str | None,
+    space_id: str | None,
+    verified: VerifiedManifest,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
@@ -1809,18 +2058,12 @@ def answer(
     audit_id = str(uuid.uuid4())
     route = route_question(question)
 
-    # SEC-01 — there is no ungoverned execution path out of this function.
-    # `verified is None` used to mean "skip the manifest", so POST /dms/query —
-    # the demo and product path — ran SQL on a bare connection while the 34
-    # fail-closed refusals and the hostile corpus guarded only /v1/contract/*.
-    # It now means "no session bound a grant", and the local warehouse mints a
-    # narrow self-issued one instead, so every statement below reaches
-    # enforce_manifest either way. The grant is exactly the tables the semantic
-    # layer declares — it cannot reach a relation the pack never named.
-    grant_kind = "session"
-    if verified is None:
-        verified = _local_verified(session_id)
-        grant_kind = "local-self-issued"
+    # SEC-01 - there is no ungoverned execution path out of this function.
+    # `verified` is resolved by the caller above and is never None here, so
+    # every statement below reaches enforce_manifest. The parameter used to be
+    # optional, and POST /dms/query - the demo and product path - passed
+    # nothing, so the 34 fail-closed refusals and the hostile corpus guarded
+    # only /v1/contract/*.
 
     if route == "blocked":
         return {
@@ -1851,6 +2094,7 @@ def answer(
                 question,
                 audit_id,
                 reason="follow-up needs a prior answer in this session",
+                verified=verified,
             )
         try:
             if re.search(r"\b(low stock|below reorder|below\s+reorder)\b", q_low):
@@ -1875,13 +2119,16 @@ def answer(
             # The customer named an aggregation over the answer in front of them.
             # Falling through would hand the question to the keyword router,
             # which matches on surface tokens and would answer a different one.
-            return _abstain(question, audit_id, reason=f"follow-up not supported: {exc}")
+            return _abstain(
+                question, audit_id, reason=f"follow-up not supported: {exc}", verified=verified
+            )
         except ManifestError as exc:
-            return _abstain(question, audit_id, reason=str(exc))
+            return _abstain(question, audit_id, reason=str(exc), verified=verified)
         except Exception as exc:  # noqa: BLE001
             # Never re-route a recognised follow-up — that widens past the prior grant.
             return _abstain(
-                question, audit_id, reason=f"follow-up could not be computed: {exc}"
+                question, audit_id, reason=f"follow-up could not be computed: {exc}",
+                verified=verified,
             )
 
     # L0 certified → L1 metric → L-skill → L3 abstain
@@ -1925,8 +2172,14 @@ def answer(
                             question,
                             audit_id,
                             reason=f"could not resolve inputs: {exc}",
+                            verified=verified,
                         )
-                    return _abstain(question, audit_id, reason=f"could not resolve inputs: {exc}")
+                    return _abstain(
+                        question,
+                        audit_id,
+                        reason=f"could not resolve inputs: {exc}",
+                        verified=verified,
+                    )
 
     # Predictive / hypothetical asks must not be answered by a similar query skill
     # (e.g. "forecast … top SKU" matching a captured sales_by_value skill).
@@ -1935,6 +2188,7 @@ def answer(
             question,
             audit_id,
             reason="predictive / out-of-scope — no verified forecast path",
+            verified=verified,
         )
 
     # META-01 — metadata / browse intent before query-skill replay or L2 generation.
@@ -1959,6 +2213,7 @@ def answer(
                     question,
                     audit_id,
                     reason="exclusion could not be resolved to a warehouse SKU",
+                    verified=verified,
                 )
         hit = skills.find_skill(question)
         # A capture is matched by similarity, so a question naming one SKU sits
@@ -2036,6 +2291,7 @@ def answer(
                     audit_id,
                     reason="no verified answer path (L2 provider absent)",
                     space_id=space_id,
+                    verified=verified,
                 )
 
             if not l2.is_configured():
@@ -2044,6 +2300,7 @@ def answer(
                     audit_id,
                     reason="no verified answer path (L2 not wired)",
                     space_id=space_id,
+                    verified=verified,
                 )
 
             semantic_early = load_semantic_layer()
@@ -2095,6 +2352,7 @@ def answer(
                     audit_id,
                     reason=f"L2 generation failed validation gate: {exc}",
                     space_id=space_id,
+                    verified=verified,
                 )
             finally:
                 if con_explain is not None:
@@ -2106,6 +2364,7 @@ def answer(
                     audit_id,
                     reason="L2 generation failed validation gate",
                     space_id=space_id,
+                    verified=verified,
                 )
 
             sql = gate.safe_sql
@@ -2124,6 +2383,7 @@ def answer(
                 audit_id,
                 reason="no governed metric or certified query matched",
                 space_id=space_id,
+                verified=verified,
             )
 
     if sql is None:
@@ -2132,6 +2392,7 @@ def answer(
             audit_id,
             reason="no governed metric or certified query matched",
             space_id=space_id,
+            verified=verified,
         )
 
     # P0-DEMO-02 — the plan has to name the tables it reads, and they have to be
@@ -2146,7 +2407,7 @@ def answer(
     # the customer reads as a crash teaches them the product is broken; a
     # refusal that names what it *can* answer teaches them how to ask. The gate
     # below is the legible one; the enforcer stays the boundary that holds.
-    ungrounded = _ungrounded_tables(sql, verified=verified)
+    ungrounded = ungrounded_tables(sql, verified=verified)
     if ungrounded:
         return _abstain_ungrounded(question, audit_id, ungrounded=ungrounded, verified=verified)
 
@@ -2190,6 +2451,7 @@ def answer(
                 question,
                 audit_id,
                 reason=f"SQL validation gate: {exc}",
+                verified=verified,
             )
         except ManifestError as exc:
             # The enforcer refused. Report it as the refusal it is, with the
@@ -2204,8 +2466,12 @@ def answer(
         log_audit(entry)
 
     if not guard_result.passed:
-        return _abstain(question, audit_id,
-                        reason=f"internal SQL failed guardrail {guard_result.violations}")
+        return _abstain(
+            question,
+            audit_id,
+            reason=f"internal SQL failed guardrail {guard_result.violations}",
+            verified=verified,
+        )
 
     # Plausibility — the stage after EXPLAIN in the C7 pipeline (CLAUDE.md §8).
     # Parsing and planning both succeed on `WHERE sku = 'BETA'` against a
@@ -2308,7 +2574,6 @@ def answer(
             metric_id=metric_id,
             skill_score=skill_score,
             assumptions=assumptions,
-            grant_kind=grant_kind,
         ),
         "audit": {"timestamp": entry.timestamp, "passed": entry.passed, "violations": entry.violations},
     }

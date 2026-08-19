@@ -123,6 +123,10 @@ async def mcp_call_tool(
             raise HTTPException(status_code=400, detail={"ok": False, "error": "question required"})
         from CortexOS.dms.answer_engine import answer as answer_fn
 
+        # No manifest is passed on purpose: answer() resolves the session's
+        # bound grant itself, so this route cannot be given a different one
+        # than /dms/query or /v1/contract/ask (SEC-01). Do not "fix" this by
+        # minting a grant here - a second resolver is how the two disagreed.
         result = answer_fn(question, session_id=args.get("session_id"))
         return {"ok": True, "name": name, "result": result}
 

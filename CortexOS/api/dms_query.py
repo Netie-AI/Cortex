@@ -34,7 +34,7 @@ class DMSQueryResponse(BaseModel):
     alerts_summary: dict[str, int] | None = None
     audit: dict[str, Any] | None = None
     query_plan: dict[str, Any] | None = None
-    # Provenance — engine already computes these; keep them on the wire for Studio/UI.
+    # Provenance - engine already computes these; keep them on the wire for Studio/UI.
     layer: str | None = None
     badge: str | None = None
     metric_id: str | None = None
@@ -43,6 +43,17 @@ class DMSQueryResponse(BaseModel):
     assumptions: str | None = None
     suggestions: list[str] | None = None
     query_source: str | None = None
+    # SEC-01 / R-0011 - which authority this answer was read under, and what it
+    # covered. "session" is a manifest the caller bound; "local-self-issued" is
+    # a grant this process minted for itself because nothing was bound. That is
+    # a degradation, and a degradation only visible in a log line is a silent
+    # one - so it rides the envelope the customer receives.
+    #
+    # Additive, and NOT part of the frozen contract: /dms/query is not one of
+    # the allowlisted contract operationIds (scripts/export_openapi.py), so this
+    # is an engine-local response model, not a cortex_contract version decision.
+    grant_kind: str | None = None
+    granted_sources: list[str] | None = None
 
 
 class AnalyseEntryRequest(BaseModel):

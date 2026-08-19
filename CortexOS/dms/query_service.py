@@ -1026,11 +1026,17 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
     }
 
 
-def _local_verified_for(session_id: str | None = None):
-    """The self-issued grant this module's legacy reads run under (SEC-01)."""
-    from CortexOS.dms.answer_engine import _local_verified
+def _grant_for(session_id: str | None = None):
+    """The grant this module's legacy reads run under (SEC-01).
 
-    return _local_verified(session_id)
+    Was ``_local_verified_for``, which always minted the wide self-issued grant
+    and so ignored whatever manifest the session had actually bound - a second
+    answer to "what may this session read?", free to disagree with the engine's.
+    It now calls the engine's single resolver, so it cannot.
+    """
+    from CortexOS.dms.answer_engine import resolve_grant
+
+    return resolve_grant(session_id, None)[0]
 
 
 def _guarded_execute(sql: str, semantic: dict[str, Any], session_id: str | None = None):
@@ -1058,7 +1064,7 @@ def _guarded_execute(sql: str, semantic: dict[str, Any], session_id: str | None 
     rows: list[dict[str, Any]] = []
     if gate.passed and gate.safe_sql:
         try:
-            rows, _, _ = execute_sql(_local_verified_for(session_id), gate.safe_sql)
+            rows, _, _ = execute_sql(_grant_for(session_id), gate.safe_sql)
             entry.row_count = len(rows)
         except (SqlGateAbstain, ManifestError) as exc:
             gate.passed = False
@@ -1117,39 +1123,56 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
 
 
 def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
-    """Q2 — route through the layered answer engine (certified → governed metric →
+    """Q2 - route through the layered answer engine (certified -> governed metric ->
     abstain). Falls back to the legacy heuristic path only if the engine is
     unavailable, so behavior degrades safely rather than breaking.
 
     Bridge: when the engine abstains but a ranked legacy SQL template still matches
     (delayed shipments / sales / supplier ranking), serve the legacy path so
     pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+
+    The bridge is a *second* executor, so it has to clear the *same* grant.
+    Measured before this changed: a session bound to ``q3_sales_export`` only,
+    asking "which shipments are late in my uploaded file", got rows out of the
+    demo warehouse's ``shipments`` table - the engine's grounding gate refused,
+    route came back ``needs_clarification``, and the bridge read that as "no
+    metric matched" and ran anyway. Same P0 as SEC-01, one door along.
+
+    The check below calls the engine's own grounding function rather than
+    re-deriving one, so the bridge and the engine cannot disagree about what
+    this session may read.
     """
+    from CortexOS.dms.answer_engine import (
+        resolve_grant,
+        stamp_grant,
+        ungrounded_tables,
+    )
+
+    grant, kind, degraded = resolve_grant(session_id, None)
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
         from CortexOS.execution.manifest import ManifestError
 
         result = _engine_answer(question, session_id=session_id)
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
-        # until a dedicated governed metric exists. Word-boundary match only — bare
+        # until a dedicated governed metric exists. Word-boundary match only - bare
         # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
         q = question.lower()
-        if (
-            result.get("route") == "needs_clarification"
-            and re.search(r"\b(delayed|late)\b", q)
-            and _try_generate_ranked_sql(question)
-        ):
-            return _answer_question_legacy(question, session_id=session_id)
+        if result.get("route") == "needs_clarification" and re.search(r"\b(delayed|late)\b", q):
+            ranked = _try_generate_ranked_sql(question)
+            if ranked and not ungrounded_tables(ranked[0], verified=grant):
+                legacy = _answer_question_legacy(question, session_id=session_id)
+                return stamp_grant(legacy, verified=grant, kind=kind, degraded=degraded)
         return result
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.
         raise
-    except Exception:  # noqa: BLE001 — engine failure must not take the API down
-        return _answer_question_legacy(question, session_id=session_id)
+    except Exception:  # noqa: BLE001 - engine failure must not take the API down
+        legacy = _answer_question_legacy(question, session_id=session_id)
+        return stamp_grant(legacy, verified=grant, kind=kind, degraded=degraded)
 
 
 def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
-    del session_id
     audit_id = str(uuid.uuid4())
     route = route_question(question)
     semantic = load_semantic_layer()
@@ -1208,7 +1231,7 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
     # bridge above, so it executes under the same manifest as everything else.
     # It used to open a bare connection, which made the enforcer optional on the
     # one path customers actually use.
-    guard_result, rows, entry = _guarded_execute(sql, semantic)
+    guard_result, rows, entry = _guarded_execute(sql, semantic, session_id)
 
     alerts_summary = get_alerts_summary()
     show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))

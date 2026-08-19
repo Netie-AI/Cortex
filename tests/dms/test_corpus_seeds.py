@@ -32,13 +32,21 @@ PHASE1_CATEGORIES = (
     "coercion",
     "value_normalization",
     "fallback_hazard",
+    "conversation",
 )
 
 
-def test_twelve_categories_declared():
+def test_thirteen_categories_declared():
+    """Was twelve. EVAL-01 added `conversation`, and the count is pinned again.
+
+    Deliberate change, not a drifted number. The twelve were all single
+    questions, which is why 376/376 wrong=0 held throughout the live session
+    that produced five P0s: the corpus could not express the shape that broke.
+    """
     from bench.corpus import PHASE1_CATEGORIES
 
-    assert len(PHASE1_CATEGORIES) == 12
+    assert len(PHASE1_CATEGORIES) == 13
+    assert "conversation" in PHASE1_CATEGORIES
 
 
 def test_seed_floors_met():
@@ -203,3 +211,100 @@ def test_wrong_is_zero_across_the_whole_expansion(corpus_report):
     """Unverified items are still scored — a confident wrong is a defect anywhere."""
     assert corpus_report["corpus"]["expanded_totals"]["wrong"] == 0
     assert corpus_report["corpus"]["claim_totals"]["wrong"] == 0
+
+
+# --- conversation (EVAL-01) --------------------------------------------------
+#
+# The acceptance clause for EVAL-01 is a proof obligation, not a feature: the
+# corpus must go red when one of the five defect shapes in ebd049b..78309fc is
+# reintroduced. It could not, for a reason no amount of tuning would have fixed
+# - all five defects were the turn AFTER an answer, and every one of the 376
+# items was a single question. The category below is the shape, not the count.
+
+#: The five shapes the ticket names, and the commit that fixed each.
+_CONVERSATION_SHAPES = {
+    "cv_sum_of_them": "ebd049b",
+    "cv_count_of_them": "2475f50",
+    "cv_reslice_ranking": "2475f50",
+    "cv_them_after_a_derived_scalar": "dc86689",
+    "cv_paged_total_followup": "78309fc",
+}
+
+
+@pytest.fixture(scope="module")
+def conversation_seeds():
+    from bench.corpus import load_seeds
+
+    return {s.id: s for s in load_seeds() if s.category == "conversation"}
+
+
+def test_all_five_reported_shapes_are_in_the_corpus(conversation_seeds):
+    missing = sorted(set(_CONVERSATION_SHAPES) - set(conversation_seeds))
+    assert not missing, f"conversation shapes with no seed: {missing}"
+
+
+def test_a_conversation_seed_is_actually_multi_turn(conversation_seeds):
+    """The whole point. A `conversation` seed with no prior turn is a question."""
+    for seed_id, seed in conversation_seeds.items():
+        assert seed.turns, f"{seed_id} has no setup turns, so it is not a conversation"
+        assert seed.is_conversation
+
+
+def test_conversation_gold_is_computable_independently(conversation_seeds):
+    """Gold comes from SQL over the warehouse, never from what the engine said.
+
+    A conversation is the easiest place to accidentally write the engine's own
+    output down as the requirement, because the answer depends on a prior turn.
+    Canonical SQL that reproduces the prior turn as a subquery keeps the gold
+    independent - which is the property that lets this category fail.
+    """
+    for seed_id, seed in conversation_seeds.items():
+        assert seed.canonical_sql, f"{seed_id} has no independently computed gold"
+        assert seed.key_columns, f"{seed_id} has no key columns, so nothing is compared"
+
+
+def test_conversation_items_score_and_the_five_seeds_are_correct(corpus_report):
+    """The customer-visible gate: rows AND rendered text, on the final turn."""
+    items = {i["id"]: i for i in corpus_report["items"] if i["category"] == "conversation"}
+    assert items, "the conversation category scored nothing"
+    for seed_id in _CONVERSATION_SHAPES:
+        assert items[seed_id]["outcome"] == "correct", (
+            f"{seed_id}: {items[seed_id]['outcome']} - {items[seed_id].get('detail')}"
+        )
+        assert items[seed_id]["turns"], f"{seed_id} was scored without its setup turns"
+
+
+@pytest.mark.parametrize(
+    "phrasing",
+    ["add them up", "add up those numbers", "what do those five come to", "combine those numbers"],
+)
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "LIVE GAP, found by the conversation category on the day it was written. "
+        "ebd049b keyed the SUM branch on the literal tokens 'sum'/'total', so "
+        "every other way of asking to add five numbers still falls through to "
+        "the COUNT wrap and answers followup_count = 5 - a count, for a sum, "
+        "badged. Same class as the 491. The fix is in "
+        "CortexOS/dms/answer_engine.py, which the EVAL-01 lane does not own. "
+        "strict=True on purpose: when it is fixed this goes RED, and whoever "
+        "fixed it moves these four back into cv_sum_of_them in "
+        "bench/corpus/paraphrases_v1.yaml. Pinned, not skipped (R-0002)."
+    ),
+)
+def test_every_way_of_asking_for_a_sum_returns_a_sum(phrasing):
+    from CortexOS.dms.answer_engine import clear_session
+    from CortexOS.dms.query_service import answer_question
+
+    sid = f"eval01-gap-{phrasing.replace(' ', '-')}"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    expected = round(
+        sum(float(r["sales_value_myr"]) for r in top["rows"] if r.get("sales_value_myr")), 2
+    )
+
+    follow = answer_question(phrasing, session_id=sid)
+
+    row = (follow.get("rows") or [{}])[0]
+    assert "followup_count" not in row, f"{phrasing!r} answered a sum with a count"
+    assert row.get("sum_sales_value_myr") == pytest.approx(expected, rel=1e-6)

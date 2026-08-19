@@ -471,3 +471,52 @@ paraphrases:
     - "give me gross margin percent by SKU for last month"
     - "margin percent per sku, last month"
     - "what is gross margin by SKU for the previous month"
+
+  # --- conversation (EVAL-01) -----------------------------------------------
+  # A paraphrase rewrites the FINAL turn only. The setup turns are gold and are
+  # inherited, exactly like canonical_sql: a variant that changed what was on
+  # screen first would be a different conversation, not a rephrasing of this one.
+  cv_sum_of_them:
+    - "hmm sum of them?"
+    - "sum them up"
+    - "what is their total"
+    - "give me the total of those"
+    - "sum of those five"
+  # Four more paraphrases of this seed are NOT in the list, and the reason is a
+  # live defect this category found on the day it was written: "add them up",
+  # "add up those numbers", "what do those five come to" and "combine those
+  # numbers" all answer `followup_count = 5` - a count, for a sum, badged. The
+  # ebd049b fix keyed on the literal tokens "sum"/"total", so every other way of
+  # asking to add still falls through to the COUNT wrap. They are pinned as a
+  # strict xfail in tests/dms/test_corpus_seeds.py rather than parked here,
+  # because a hard-zero gate that ships red gets ignored, and because the fix is
+  # in CortexOS/dms/answer_engine.py, which this lane does not own. Move them
+  # into this list the moment that is fixed - the xfail goes red to remind you.
+
+  cv_count_of_them:
+    - "how many are they?"
+    - "count them"
+    - "how many of those"
+    - "so how many is that"
+    - "how many rows are those"
+
+  cv_reslice_ranking:
+    - "show me number 2 to 6"
+    - "give me numbers 2-6"
+    - "what about number 2-6"
+    - "show 2-6 instead"
+    - "number 2-6 please"
+
+  cv_them_after_a_derived_scalar:
+    - "how many of those"
+    - "count them"
+    - "so how many is that"
+    - "how many are they?"
+    - "how many rows are those"
+
+  cv_paged_total_followup:
+    - "how many of those"
+    - "count them"
+    - "how many are they?"
+    - "what is the total number of them"
+    - "give me the count of them"

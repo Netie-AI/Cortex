@@ -252,7 +252,3 @@ def test_workflow_resume_after_kill(lake_home, monkeypatch, use_dbos_destroy):
 
     dbos_runtime.destroy()
 
-
-@pytest.mark.skip(reason="S1 slice: @agent chat dispatch not landed yet")
-def test_agent_chat_dispatch():
-    assert False, "placeholder for F2 @agent dispatch"

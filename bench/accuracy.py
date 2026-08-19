@@ -160,14 +160,20 @@ def _ensure_db_loaded() -> None:
         load_inventory_csv()
 
 
-def score_item(item: GoldenItem) -> ItemResult:
-    from CortexOS.dms.query_service import answer_question
+def score_answer(item: GoldenItem, result: dict[str, Any]) -> ItemResult:
+    """Score one already-produced answer against gold.
 
-    try:
-        result = answer_question(item.question)
-    except Exception as exc:  # noqa: BLE001 — a crash is a benchmark outcome
-        return ItemResult(item.id, item.tier, "error", detail=f"answer_question raised: {exc!r}")
+    Split out of ``score_item`` so there is exactly ONE comparison rule and every
+    caller reaches it the same way. The live corpus runner used to have no gold
+    comparison of its own, so it re-ran the local engine and scored *that* while
+    stamping the report ``mode: live`` (EVAL-01, R-0011). The cure is not to give
+    the live path a second copy of this logic - two copies can disagree - it is
+    to make this one function take the answer as an argument, so an offline
+    answer dict and a live DMS envelope are judged by the same code.
 
+    ``result`` needs only the customer-visible keys: ``route``, ``rows``,
+    ``sql_used`` and, for ``listing_total``, ``total_count``.
+    """
     route = result.get("route", "")
     rows = result.get("rows") or []
     sql_used = result.get("sql_used")
@@ -237,6 +243,18 @@ def score_item(item: GoldenItem) -> ItemResult:
         detail=(f"result-set mismatch: {len(got)} answer rows vs {len(truth)} canonical rows "
                 f"on {item.key_columns}"),
     )
+
+
+def score_item(item: GoldenItem) -> ItemResult:
+    """Ask the local engine, then score. The offline entry point."""
+    from CortexOS.dms.query_service import answer_question
+
+    try:
+        result = answer_question(item.question)
+    except Exception as exc:  # noqa: BLE001 - a crash is a benchmark outcome
+        return ItemResult(item.id, item.tier, "error", detail=f"answer_question raised: {exc!r}")
+
+    return score_answer(item, result)
 
 
 def run_benchmark(tier: str = "all", golden_path: Path | str | None = None) -> dict[str, Any]:

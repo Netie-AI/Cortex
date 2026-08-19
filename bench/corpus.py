@@ -9,10 +9,12 @@ Reuses bench.accuracy scoring; asserts confidently_wrong == 0 on gated categorie
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import os
 import sys
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +22,10 @@ import yaml
 
 from bench.accuracy import (
     GoldenItem,
+    ItemResult,
     _ensure_db_loaded,
-    load_golden,
-    score_item,
+    _run_canonical,
+    score_answer,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +47,21 @@ PHASE1_CATEGORIES = (
     "coercion",
     "value_normalization",
     "fallback_hazard",
+    # EVAL-01. Added late, and the reason is the whole point of the ticket: all
+    # five live P0s in ebd049b..78309fc were the turn AFTER an answer, and this
+    # corpus asked 376 single questions. It reported 376/376 wrong=0 through the
+    # entire session that produced them. A corpus that cannot express a
+    # conversation cannot catch a conversational defect, however many rows it has.
+    "conversation",
 )
+
+#: Outcome buckets every report carries, offline and live alike. Kept in ONE
+#: place because the two runners used to build their counter dicts separately:
+#: live omitted "regression", so `check_thresholds` looked at a key that could
+#: never be set and the regression gate was structurally dead on a live run.
+#: Making the two dicts agree today would have left them free to disagree again
+#: tomorrow (R-0004), so they are no longer written twice.
+OUTCOME_KEYS = ("total", "correct", "wrong", "abstain", "error", "regression")
 
 
 @dataclass(slots=True)
@@ -65,10 +82,24 @@ class CorpusSeed:
     gold_verified: bool = True
     #: Seed id this item paraphrases; empty for the hand-written seeds themselves.
     parent_id: str = ""
+    #: Turns asked BEFORE `question`, in one session, to set up the context the
+    #: final question depends on. Empty for a single-question seed. This is what
+    #: makes "sum of them" scoreable at all: the pronoun has nothing to point at
+    #: unless a prior turn put a listing on the screen.
+    turns: list[str] = field(default_factory=list)
+    #: Substrings that must NOT appear in the rendered answer text. Every one is
+    #: a defect signature taken from a real wrong answer ("followup_count = 491").
+    #: Rows alone do not close these: the customer reads prose, and CLAUDE.md
+    #: section 8 / R-0001 says the gate asserts the artifact they receive.
+    answer_must_not_contain: list[str] = field(default_factory=list)
 
     @property
     def is_expanded(self) -> bool:
         return bool(self.parent_id)
+
+    @property
+    def is_conversation(self) -> bool:
+        return bool(self.turns)
 
     def to_golden(self) -> GoldenItem:
         return GoldenItem(
@@ -105,6 +136,10 @@ def load_seeds(path: Path = SEEDS_PATH) -> list[CorpusSeed]:
                     engineer_intent=str(e.get("engineer_intent") or ""),
                     tags=list(e.get("tags") or []),
                     gold_verified=bool(e.get("gold_verified", True)),
+                    turns=[str(t) for t in (e.get("turns") or [])],
+                    answer_must_not_contain=[
+                        str(t) for t in (e.get("answer_must_not_contain") or [])
+                    ],
                 )
             )
     return seeds
@@ -156,6 +191,11 @@ def load_paraphrases(
                     tags=list(parent.tags),
                     gold_verified=verified,
                     parent_id=parent_id,
+                    # A paraphrase rewrites the FINAL question only. The setup
+                    # turns and the forbidden-signature list are gold, and gold
+                    # is inherited, never authored by the expansion.
+                    turns=list(parent.turns),
+                    answer_must_not_contain=list(parent.answer_must_not_contain),
                 )
             )
     return out
@@ -171,6 +211,57 @@ def load_corpus(
     if not include_expanded:
         return seeds
     return seeds + load_paraphrases(seeds, paraphrases_path)
+
+
+def new_counters() -> dict[str, int]:
+    """The one counter shape. Both runners use it, so neither can drop a key."""
+    return dict.fromkeys(OUTCOME_KEYS, 0)
+
+
+def record_item(
+    seed: CorpusSeed,
+    *,
+    outcome: str,
+    regressed: bool,
+    by_cat: dict[str, dict[str, int]],
+    items: list[dict[str, Any]],
+    **extra: Any,
+) -> None:
+    """The one item-record shape, and the one place a category is tallied.
+
+    Offline and live each used to do this inline. They drifted: live never wrote
+    a "regression" field, so `check_thresholds`' `if i.get("regression")` could
+    not fire on a live report no matter what the answer path did. Two writers of
+    one record is the defect class; one writer is the fix.
+    """
+    cat = by_cat.setdefault(seed.category, new_counters())
+    cat["total"] += 1
+    cat[outcome] = cat.get(outcome, 0) + 1
+    if regressed:
+        cat["regression"] += 1
+    items.append(
+        {
+            "id": seed.id,
+            "category": seed.category,
+            "persona": seed.persona,
+            "engineer_intent": seed.engineer_intent,
+            "outcome": outcome,
+            "regression": regressed,
+            "gold_verified": seed.gold_verified,
+            "parent_id": seed.parent_id,
+            "turns": list(seed.turns),
+            "question": seed.question,
+            **extra,
+        }
+    )
+
+
+def sum_counters(by_cat: dict[str, dict[str, int]]) -> dict[str, int]:
+    totals = new_counters()
+    for cat in by_cat.values():
+        for k in totals:
+            totals[k] += cat.get(k, 0)
+    return totals
 
 
 def _count_totals(items: list[dict[str, Any]], predicate) -> dict[str, int]:
@@ -330,40 +421,191 @@ def _is_regression(item_id: str, outcome: str, baseline: frozenset[str]) -> bool
     return outcome == "abstain" and item_id in baseline
 
 
-def _score_live(seed: CorpusSeed, envelope: dict[str, Any]) -> str:
-    """Map live envelope to correct | wrong | abstain."""
+# --- the artifact the customer receives --------------------------------------
+
+
+def _rendered_forms(value: Any, digits: int) -> set[str]:
+    """Every string a gold value could plausibly be rendered as in prose.
+
+    Deliberately generous. A false "the text does not name the answer" would be
+    a control refusing legitimate work (R-0005), and the point of the check is
+    to catch a number that is *absent*, not one that is formatted unusually.
+    """
+    if isinstance(value, Decimal):
+        value = float(value)
+    if isinstance(value, bool):
+        return {str(value), str(value).lower()}
+    if isinstance(value, (_dt.date, _dt.datetime)):
+        return {value.isoformat(), str(value)}
+    if isinstance(value, int):
+        return {str(value), f"{value:,}"}
+    if isinstance(value, float):
+        r = round(value, digits)
+        forms = {f"{r}", f"{r:,}"}
+        if r == int(r):
+            forms |= {str(int(r)), f"{int(r):,}"}
+        return forms
+    return {str(value)}
+
+
+def _text_gate(
+    seed: CorpusSeed,
+    result: ItemResult,
+    answer_text: str,
+    truth_rows: list[dict[str, Any]] | None,
+) -> ItemResult:
+    """Judge the rendered answer, not only the rows (R-0001, CLAUDE.md section 8).
+
+    Two checks, in the order that matters.
+
+    A defect signature in the prose is `wrong` whatever the rows say. Every one
+    of the five live P0s put a real number from a different question in front of
+    the customer - `followup_count = 491` for a sum, `sku_count = 509` for a
+    ranking, `followup_count = 1` after a scalar - and in some of those the
+    engine's own row payload was self-consistent. Scoring the payload alone is
+    how the corpus stayed at 376/376 through the session that produced them.
+
+    Then: an answer that scored correct but does not NAME its gold value in the
+    text is not an answer the customer received. Applied to conversation seeds
+    only - their results are a handful of rows, so "the text names them" is a
+    fair demand; a 1000-row listing renders a page and would fail it unfairly.
+    """
+    text = answer_text or ""
+    hit = next((tok for tok in seed.answer_must_not_contain if tok and tok in text), None)
+    if hit is not None:
+        return ItemResult(
+            result.id,
+            result.tier,
+            "wrong",
+            detail=f"answer text carries the defect signature {hit!r}: {text[:200]}",
+            route=result.route,
+            sql_used=result.sql_used,
+        )
+
+    if result.outcome != "correct" or not seed.is_conversation or not truth_rows:
+        return result
+
+    for row in truth_rows:
+        col = next((c for c in (seed.key_columns or list(row)) if c in row), None)
+        if col is None:
+            continue
+        if not any(form in text for form in _rendered_forms(row[col], seed.round)):
+            return ItemResult(
+                result.id,
+                result.tier,
+                "wrong",
+                detail=(
+                    f"rows are right but the answer text never names {col}="
+                    f"{row[col]!r}, so the customer did not receive it: {text[:200]}"
+                ),
+                route=result.route,
+                sql_used=result.sql_used,
+            )
+    return result
+
+
+def _gold_rows(seed: CorpusSeed) -> list[dict[str, Any]] | None:
+    if not seed.canonical_sql:
+        return None
+    try:
+        return _run_canonical(seed.canonical_sql)
+    except Exception:  # noqa: BLE001 - a broken gold query is reported by score_answer
+        return None
+
+
+def _run_seed(seed: CorpusSeed) -> dict[str, Any]:
+    """Ask the local engine. A conversation seed replays its turns in one session."""
+    from CortexOS.dms.query_service import answer_question
+
+    if not seed.is_conversation:
+        return answer_question(seed.question)
+
+    from CortexOS.dms.answer_engine import clear_session
+
+    session_id = f"corpus-{seed.id}"
+    clear_session(session_id)
+    for turn in seed.turns:
+        answer_question(turn, session_id=session_id)
+    return answer_question(seed.question, session_id=session_id)
+
+
+def score_seed_offline(seed: CorpusSeed) -> ItemResult:
+    golden = seed.to_golden()
+    try:
+        result = _run_seed(seed)
+    except Exception as exc:  # noqa: BLE001 - a crash is a benchmark outcome
+        return ItemResult(golden.id, golden.tier, "error", detail=f"answer path raised: {exc!r}")
+    scored = score_answer(golden, result)
+    return _text_gate(seed, scored, str(result.get("answer") or ""), _gold_rows(seed))
+
+
+# --- live scoring -----------------------------------------------------------
+
+
+class LiveUnscorable(RuntimeError):
+    """The live envelope carried nothing to compare against gold.
+
+    Raised, not swallowed. `--live` used to answer this case by re-running the
+    LOCAL engine and scoring that, while the report said `"mode": "live"` - the
+    report claimed a measurement it had not taken (R-0011). If a live run cannot
+    be scored the honest output is a visible error, not a borrowed number.
+    """
+
+
+def _score_live(seed: CorpusSeed, envelope: dict[str, Any]) -> ItemResult:
+    """Score the DMS envelope itself. Never re-runs the local answer path.
+
+    Answerable items go through `bench.accuracy.score_answer` - the same
+    function the offline runner uses - fed with the envelope's own rows. One
+    comparison rule, two sources of answers.
+    """
+    golden = seed.to_golden()
     abstained = bool(envelope.get("abstained"))
     badge = str(envelope.get("badge") or "")
     route = str(envelope.get("route") or "")
+    text = str(envelope.get("text") or envelope.get("answer") or "")
+
+    def _verdict(outcome: str, detail: str = "") -> ItemResult:
+        res = ItemResult(golden.id, golden.tier, outcome, detail=detail, route=route,
+                         sql_used=envelope.get("sql_used"))
+        return _text_gate(seed, res, text, None)
 
     if seed.match == "abstain":
         if abstained or badge == "ABSTAIN":
-            return "correct"
+            return _verdict("correct")
         if envelope.get("values") or envelope.get("rows"):
-            return "wrong"
-        return "abstain"
+            return _verdict("wrong", "answered a question gold says must abstain")
+        return _verdict("abstain")
 
     if seed.match == "blocked":
-        if abstained and "not allowed" in str(envelope.get("text") or "").lower():
-            return "correct"
         if abstained or route in {"blocked", "needs_clarification"}:
-            return "correct"
+            return _verdict("correct")
         if envelope.get("sql_used") and "DROP" not in str(envelope.get("sql_used") or "").upper():
-            return "wrong"
-        return "correct"
+            return _verdict("wrong", "a destructive request was served")
+        return _verdict("correct")
 
     if abstained or badge == "ABSTAIN":
-        return "wrong"
-    if not envelope.get("sql_used"):
-        return "wrong"
+        return _verdict("abstain", "abstained on an answerable question")
 
-    golden = seed.to_golden()
-    offline = score_item(golden)
-    if offline.outcome == "correct":
-        return "correct"
-    if offline.outcome == "wrong":
-        return "wrong"
-    return offline.outcome
+    rows = envelope.get("rows")
+    if not rows:
+        rows = [r for r in (envelope.get("values") or []) if isinstance(r, dict)]
+    if not rows:
+        raise LiveUnscorable(
+            f"{seed.id}: envelope has neither rows nor dict values, so there is "
+            f"nothing to compare against gold (badge={badge!r} route={route!r})"
+        )
+
+    scored = score_answer(
+        golden,
+        {
+            "route": route or "live",
+            "rows": rows,
+            "sql_used": envelope.get("sql_used"),
+            "total_count": envelope.get("total_count"),
+        },
+    )
+    return _text_gate(seed, scored, text, _gold_rows(seed))
 
 
 def run_offline(
@@ -382,39 +624,20 @@ def run_offline(
     baseline = load_answering_baseline()
 
     for seed in seeds:
-        result = score_item(seed.to_golden())
-        cat = by_cat.setdefault(
-            seed.category,
-            {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0, "regression": 0},
+        result = score_seed_offline(seed)
+        record_item(
+            seed,
+            outcome=result.outcome,
+            regressed=_is_regression(seed.id, result.outcome, baseline),
+            by_cat=by_cat,
+            items=items,
+            route=result.route,
+            detail=result.detail,
         )
-        cat["total"] += 1
-        cat[result.outcome] = cat.get(result.outcome, 0) + 1
-        regressed = _is_regression(seed.id, result.outcome, baseline)
-        if regressed:
-            cat["regression"] = cat.get("regression", 0) + 1
-        items.append(
-            {
-                "id": seed.id,
-                "category": seed.category,
-                "persona": seed.persona,
-                "outcome": result.outcome,
-                "regression": regressed,
-                "route": result.route,
-                "detail": result.detail,
-                "gold_verified": seed.gold_verified,
-                "parent_id": seed.parent_id,
-                "question": seed.question,
-            }
-        )
-
-    totals = {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0, "regression": 0}
-    for cat in by_cat.values():
-        for k in totals:
-            totals[k] += cat.get(k, 0)
 
     return {
         "mode": "offline",
-        "totals": totals,
+        "totals": sum_counters(by_cat),
         "corpus": _corpus_sizes(items),
         "by_category": by_cat,
         "items": items,
@@ -432,6 +655,11 @@ def run_live(
 ) -> dict[str, Any]:
     import time
 
+    # Gold is computed here, from SQL against the warehouse, even in live mode -
+    # the answers come off the wire, the truth never does. Without this the live
+    # runner had no gold of its own, which is how it ended up borrowing the
+    # offline scorer's.
+    _ensure_db_loaded()
     assert_envelope_valid = _import_dms_envelope()
     seeds = load_corpus(seeds_path=seeds_path, include_expanded=include_expanded)
     if category:
@@ -441,15 +669,33 @@ def run_live(
     items: list[dict[str, Any]] = []
     gap = 1.0 / rps if rps > 0 else 0.0
     throttles = [0]
+    # The same ratchet the offline runner uses. It was absent here entirely, so
+    # `check_thresholds` could not see a live answer that had become a refusal.
+    baseline = load_answering_baseline()
 
     for i, seed in enumerate(seeds):
         if i and gap:
             time.sleep(gap)
         try:
-            env = _live_ask(seed.question, dms_url=dms_url, throttle_counter=throttles)
+            session_id = f"corpus-live-{seed.id}" if seed.is_conversation else None
+            for turn in seed.turns:
+                if gap:
+                    time.sleep(gap)
+                _live_ask(
+                    turn,
+                    dms_url=dms_url,
+                    session_id=session_id,
+                    throttle_counter=throttles,
+                )
+            env = _live_ask(
+                seed.question,
+                dms_url=dms_url,
+                session_id=session_id,
+                throttle_counter=throttles,
+            )
             assert_envelope_valid(env)
-            outcome = _score_live(seed, env)
-            err = ""
+            scored = _score_live(seed, env)
+            outcome, err = scored.outcome, scored.detail
         except LiveAskError as exc:
             env = {}
             if seed.match == "blocked" and _is_gate_refusal(exc.status, exc.body):
@@ -463,32 +709,17 @@ def run_live(
             env = {}
             err = str(exc)[:300]
 
-        cat = by_cat.setdefault(
-            seed.category,
-            {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0},
+        record_item(
+            seed,
+            outcome=outcome,
+            regressed=_is_regression(seed.id, outcome, baseline),
+            by_cat=by_cat,
+            items=items,
+            badge=env.get("badge"),
+            abstained=env.get("abstained"),
+            error=err,
+            detail=err,
         )
-        cat["total"] += 1
-        cat[outcome] = cat.get(outcome, 0) + 1
-        items.append(
-            {
-                "id": seed.id,
-                "category": seed.category,
-                "persona": seed.persona,
-                "engineer_intent": seed.engineer_intent,
-                "outcome": outcome,
-                "badge": env.get("badge"),
-                "abstained": env.get("abstained"),
-                "error": err,
-                "gold_verified": seed.gold_verified,
-                "parent_id": seed.parent_id,
-                "question": seed.question,
-            }
-        )
-
-    totals = {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0}
-    for cat in by_cat.values():
-        for k in totals:
-            totals[k] += cat.get(k, 0)
 
     return {
         "mode": "live",
@@ -497,7 +728,7 @@ def run_live(
         # Non-zero means the run was fighting the rate limiter, not just the
         # answer path. Reported so a noisy run is never mistaken for a clean one.
         "throttle_retries": throttles[0],
-        "totals": totals,
+        "totals": sum_counters(by_cat),
         "corpus": _corpus_sizes(items),
         "by_category": by_cat,
         "items": items,

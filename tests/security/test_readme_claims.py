@@ -17,6 +17,7 @@ front page has to be traceable to code that actually runs.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,12 +25,37 @@ README = ROOT / "README.md"
 
 #: Words that promise an isolation boundary. Claiming one that nothing enforces
 #: is worse than claiming nothing: it tells a buyer they are protected.
-_ISOLATION_CLAIMS = ("wasm sandbox", "wasm sandboxing", "sandboxed", "firecracker", "gvisor")
+#: "container" earns its place the hard way. The first fix for DOC-01 deleted
+#: the Wasm claim and wrote "untrusted code is packaged and run in containers"
+#: in its place - one unbacked isolation promise swapped for another, on the
+#: same front page. `app_runner.py` refuses the docker stack outright, so the
+#: replacement was false in the same direction as the claim it replaced.
+_ISOLATION_CLAIMS = (
+    "wasm sandbox",
+    "wasm sandboxing",
+    "sandboxed",
+    "firecracker",
+    "gvisor",
+    "run in containers",
+    "run in a container",
+    "container isolation",
+)
 
 _SEARCH_ROOTS = ("CortexOS", "packs", "scripts")
 
 
 _NEGATIONS = (" not ", " no ", " never ", "n't ")
+
+#: Splits a sentence into independently-judged clauses. A negation binds to the
+#: clause it sits in, not to everything after the next dash.
+#:
+#: Commas count. "untrusted code is packaged and run in containers, not
+#: sandboxed in-process" carries the assertion and a negation *of a different
+#: control* in one comma-joined breath, and honouring the negation across the
+#: comma is what let the claim through. Splitting here is deliberately eager:
+#: the cost of an over-split is prose that has to state its claim plainly, and
+#: the cost of an under-split is a security promise nothing keeps.
+_CLAUSE_SPLIT = re.compile(r"\s+[-–—]+\s+|[;,]")
 
 
 def _readme_prose() -> str:
@@ -51,9 +77,20 @@ def _affirmative_sentences(prose: str) -> list[str]:
     isolation is *not* shipped, and a bare keyword match cannot tell a promise
     from a disclaimer — it would force the README to avoid the plainest word
     for the thing it is being honest about.
+
+    But dropping the whole sentence was itself the hole. "Process-level
+    isolation is **not** shipped - untrusted code is packaged and run in
+    containers" denies one control and asserts another in one breath, and the
+    single sentence on the front page making an unbacked claim was the one
+    sentence this gate could not see. A clause is only exempt if the negation
+    reaches it, so the sentence is split at each dash and semicolon first and
+    every clause judged on its own.
     """
     sentences = [s.strip() for s in prose.replace("\n", " ").split(".") if s.strip()]
-    return [s for s in sentences if not any(neg in f" {s} " for neg in _NEGATIONS)]
+    clauses: list[str] = []
+    for sentence in sentences:
+        clauses.extend(c.strip() for c in _CLAUSE_SPLIT.split(sentence) if c.strip())
+    return [c for c in clauses if not any(neg in f" {c} " for neg in _NEGATIONS)]
 
 
 def _imports_a_sandbox() -> list[str]:
