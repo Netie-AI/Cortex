@@ -287,6 +287,30 @@ paraphrases:
     - "supplier ESG versus weather anomaly correlation"
     - "correlate ESG scores of suppliers with anomalous weather"
 
+  sa_sum_of_a_ranking:
+    - "what is the sum of the top 5 selling skus"
+    - "sum up the top 5 selling skus"
+    - "total of the top 5 selling skus"
+    - "give me the sum of the top five selling skus"
+    - "combined value of the top 5 selling skus"
+    - "the summed revenue of the top 5 skus"
+
+  sa_total_over_a_ranking:
+    - "total revenue for the top 3 suppliers"
+    - "what is the total revenue of our top 3 suppliers"
+    - "combined revenue of the top 3 suppliers"
+    - "total spend across the top 3 suppliers"
+    - "sum of revenue for the top three suppliers"
+    - "the total for our best 3 suppliers"
+
+  sa_average_of_a_ranking:
+    - "mean revenue of the top 5 skus"
+    - "what is the average of the top 5 skus"
+    - "avg revenue across the top 5 skus"
+    - "average value of the highest selling skus"
+    - "the mean of the top five skus by revenue"
+    - "average revenue of the best 5 skus"
+
   # ── malay_codeswitch ──────────────────────────────────────────────────────
   ms_sku_count:
     - "boss, berapa banyak SKU kita ada sekarang?"

@@ -220,6 +220,57 @@ def _wants_aggregate(q: str) -> bool:
     )
 
 
+#: Words that aggregate *values*. Deliberately narrower than `_wants_aggregate`,
+#: which also carries the counting words: counting a ranking of five is five, a
+#: question nobody is misled by, while *summing* one has no governed metric
+#: behind it at all. Refusing more than that would be R-0005 in the other
+#: direction.
+_VALUE_AGGREGATE = re.compile(
+    r"\b(sum|summed|summing|total|totals|totalled|average|averaged|avg|mean|"
+    r"median|combined|altogether|added up)\b",
+    re.I,
+)
+
+#: A ranking construct - "top 5", "the highest", "bottom three".
+_RANKING = re.compile(
+    r"\b(top|bottom|highest|lowest|largest|smallest|biggest|best|worst)\b",
+    re.I,
+)
+
+
+def _aggregate_over_ranking(question: str) -> str | None:
+    """Reason this question aggregates over a ranking, or None if it does not.
+
+    Every metric in the pack either ranks or aggregates. None of them does both,
+    so "the sum of the top 5 selling SKUs" has no plan - and the router answered
+    it anyway, with whichever half it matched. Three live shapes, one class:
+
+        sum of top 5 selling skus          -> the 5-row ranking (asked for one number)
+        average of the top 5 skus          -> the 5-row ranking
+        total revenue of the top 3 suppliers -> revenue_total, the whole warehouse
+
+    The third is the dangerous one: a plausible scalar that is not the answer to
+    the question, under a governed badge, which is the ebd049b class exactly.
+
+    **Order decides it, not membership.** Both words appear in a legitimate
+    ranked metric too - "top 5 categories by total revenue" ranks *on* an
+    aggregate and is perfectly answerable. What distinguishes them is which one
+    governs: an aggregate *before* the ranking applies to it, an aggregate
+    *after* is the key the ranking sorts by. Testing membership alone would
+    refuse the legitimate half (R-0005).
+    """
+    agg = _VALUE_AGGREGATE.search(question)
+    if agg is None:
+        return None
+    rank = _RANKING.search(question)
+    if rank is None or agg.start() > rank.start():
+        return None
+    return (
+        f"no governed metric computes a {agg.group(0).lower()} over a ranking - "
+        f"ask for the ranking on its own first, then 'sum of them'"
+    )
+
+
 #: A concrete warehouse identifier, e.g. ``SKU-00397`` or ``SKU-BETA``.
 _SPECIFIC_SKU = re.compile(r"\bSKU-[A-Za-z0-9][\w-]*", re.I)
 
@@ -718,6 +769,14 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return None
     named = _names_specific_sku(question)
     if named and named not in str(plan.slots).upper():
+        return None
+    # Same shape as the SKU check above, same reason: the plan has to be about
+    # the question that was asked. An aggregate over a ranking has no metric, so
+    # whatever matched is answering an adjacent question (ANS-02). Enforced here
+    # rather than at the one answer site so that every caller is safe by
+    # construction - the abstain *message* is rendered there, but the refusal
+    # cannot be forgotten by a caller that does not know to ask.
+    if _aggregate_over_ranking(question) is not None:
         return None
     return plan
 
@@ -2140,6 +2199,13 @@ def _answer(
             assumptions = f"certified query {cq.id}"
             metric_id = cq.id
         else:
+            # Say *why*, before falling through to a generic abstain. The
+            # refusal itself lives in route_to_metric so no caller can miss it;
+            # this is the half the customer reads, and it names the two-step
+            # path that does work rather than just declining (ANS-02, R-0005).
+            over_ranking = _aggregate_over_ranking(question)
+            if over_ranking is not None:
+                return _abstain(question, audit_id, reason=over_ranking, verified=verified)
             plan = route_to_metric(question)
             if plan is not None:
                 if plan.metric_id == "_exclusion_clarify":

@@ -293,6 +293,46 @@ categories:
       match: abstain
       tags: [ambiguity]
 
+    - id: sa_sum_of_a_ranking
+      question: "i mean the sum of top 5 selling skus"
+      persona: ops_manager
+      engineer_intent: >
+        ebd049b half B. That commit fixed two paths and the corpus covered only
+        one - every conversation seed replays turns, so the form that names its
+        own subject was covered by none of them. Reintroducing the follow-up
+        half turns the corpus red; reintroducing this half left it green.
+        Filed here rather than under conversation because it is deliberately
+        single-turn, and a conversation seed with no prior turn is just a
+        question. Every metric in the pack either ranks or aggregates and none
+        does both, so the honest outcome is to abstain rather than answer with
+        the ranking itself (ANS-02).
+      match: abstain
+      tags: [ambiguity, aggregation]
+
+    - id: sa_total_over_a_ranking
+      question: "total revenue of the top 3 suppliers"
+      persona: ops_manager
+      engineer_intent: >
+        The dangerous shape. The sibling seeds return a five-row table when one
+        number was asked for, which is visibly not an answer. This one returned
+        revenue_total - every supplier in the warehouse, MYR 80,375,993.99 - as
+        though it were three, badged governed_metric. A plausible scalar for the
+        wrong question is indistinguishable from a right one.
+      match: abstain
+      answer_must_not_contain: ["80375993", "80,375,993"]
+      tags: [ambiguity, aggregation]
+
+    - id: sa_average_of_a_ranking
+      question: "average of the top 5 skus by revenue"
+      persona: data_engineer
+      engineer_intent: >
+        Carries an aggregate word AND a ranking key, so it pins the distinction
+        the fix rests on: an aggregate BEFORE the ranking applies to it and must
+        abstain, while "top 5 skus by total revenue" ranks ON an aggregate and
+        must still answer. A membership test would refuse both.
+      match: abstain
+      tags: [ambiguity, aggregation]
+
   malay_codeswitch:
     - id: ms_sku_count
       question: "berapa banyak SKU kita ada?"
