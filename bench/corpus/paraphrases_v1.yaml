@@ -311,6 +311,14 @@ paraphrases:
     - "the mean of the top five skus by revenue"
     - "average revenue of the best 5 skus"
 
+  sa_leading_n_over_a_ranking:
+    - "total revenue of the foremost 3 suppliers"
+    - "total revenue of the poorest 3 suppliers"
+    - "cumulative revenue of the top 3 suppliers"
+    - "overall revenue of the top 3 suppliers"
+    - "aggregate revenue of the leading 3 suppliers"
+    - "the combined revenue of our leading 3 suppliers"
+
   # ── malay_codeswitch ──────────────────────────────────────────────────────
   ms_sku_count:
     - "boss, berapa banyak SKU kita ada sekarang?"

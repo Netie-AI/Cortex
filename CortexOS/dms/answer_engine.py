@@ -220,20 +220,51 @@ def _wants_aggregate(q: str) -> bool:
     )
 
 
+#: "i mean ...", "you meant ..." - a repair phrase, not an average. It contains
+#: `mean`, and it is the commonest opener in this whole feature: the ANS-02
+#: ticket's own canonical question is "i mean the sum of top 5 selling skus".
+#: Reading it as an aggregate refused "i mean top 5 skus", a question that had
+#: always worked, and it also renamed the reason - the abstain for the ticket's
+#: headline question said "no governed metric computes a MEAN over a ranking"
+#: because `mean` matched before `sum` did. Stripped first, so neither the test
+#: nor the message ever sees it.
+_DISCOURSE_LEADIN = re.compile(r"^\W*(?:i|we|you)\s+mean(?:t)?\b[\s,:-]*", re.I)
+
 #: Words that aggregate *values*. Deliberately narrower than `_wants_aggregate`,
 #: which also carries the counting words: counting a ranking of five is five, a
 #: question nobody is misled by, while *summing* one has no governed metric
 #: behind it at all. Refusing more than that would be R-0005 in the other
 #: direction.
 _VALUE_AGGREGATE = re.compile(
-    r"\b(sum|summed|summing|total|totals|totalled|average|averaged|avg|mean|"
-    r"median|combined|altogether|added up)\b",
+    r"\b(sum|summed|summing|total|totals|totalled|totalling|average|averaged|avg|"
+    r"mean|median|combined|altogether|aggregate|cumulative|overall|added up)\b",
     re.I,
 )
 
-#: A ranking construct - "top 5", "the highest", "bottom three".
+_CARDINAL = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+
+#: A ranking construct, and it has to say HOW MANY.
+#:
+#: Requiring the count is what separates a ranking from an ordinary noun phrase
+#: that happens to start with the same word. Without it this matched "bottom
+#: line revenue", "top-level category", "top shelf inventory", "top-up quantity"
+#: and "best before date" - none of them rankings, all of them refused. The
+#: hyphenated ones are the trap: `\btop\b` matches inside "top-level" because
+#: the hyphen is a word boundary.
+#:
+#: The cost is real and is the right way round: "the total of the highest
+#: selling products" names no count, so it escapes and answers as it did before.
+#: Missing a case leaves the status quo; refusing a working question is a new
+#: defect (R-0005).
+#: The second branch recovers the countless forms without letting the noun
+#: phrases back in. "the highest SELLING skus" and "the best PERFORMING
+#: categories" are rankings that never say how many; "bottom LINE", "top SHELF",
+#: "top-LEVEL" and "best BEFORE" are not, and the difference is that a ranking
+#: continues into a participle while a compound noun continues into a noun.
+#: "top-up" survives it too, because the hyphen means there is no space to match.
 _RANKING = re.compile(
-    r"\b(top|bottom|highest|lowest|largest|smallest|biggest|best|worst)\b",
+    r"\b(top|bottom|highest|lowest|largest|smallest|biggest|best|worst|leading|"
+    rf"foremost|poorest)\b(?:\W{{0,3}}{_CARDINAL}\b|\s+\w+ing\b)",
     re.I,
 )
 
@@ -252,13 +283,27 @@ def _aggregate_over_ranking(question: str) -> str | None:
     The third is the dangerous one: a plausible scalar that is not the answer to
     the question, under a governed badge, which is the ebd049b class exactly.
 
-    **Order decides it, not membership.** Both words appear in a legitimate
-    ranked metric too - "top 5 categories by total revenue" ranks *on* an
-    aggregate and is perfectly answerable. What distinguishes them is which one
-    governs: an aggregate *before* the ranking applies to it, an aggregate
-    *after* is the key the ranking sorts by. Testing membership alone would
-    refuse the legitimate half (R-0005).
+    **Order decides it, not membership.** Both words appear in a ranked metric
+    too - "top 5 SKUs by total revenue" ranks *on* an aggregate. What
+    distinguishes them is which one governs: an aggregate *before* the ranking
+    applies to it, an aggregate *after* is the key the ranking sorts by. Testing
+    membership alone would refuse both (R-0005).
+
+    **This is a mitigation, not closure of the class.** The discriminator is two
+    word lists and a position test, which is the shape of the ANS-01 defect, and
+    an unlisted aggregate or an aggregate written as a suffix ("the top 3
+    suppliers combined") walks straight past it. Closing the class properly
+    needs the router to state the shape its plan returns and to refuse when the
+    question asks for a different one - Cortex#14 step 1. Until then this stops
+    the phrasings on the lists and no more, which is why the escapes are seeded
+    rather than left to be rediscovered.
+
+    Do not read the earlier claim that "top N categories by total revenue" is
+    answerable as verification of anything: it returns the whole warehouse's
+    revenue as one row (Cortex#38). It is out of scope here, and it is the
+    reason this function refuses to treat "answers at all" as "answers right".
     """
+    question = _DISCOURSE_LEADIN.sub("", question)
     agg = _VALUE_AGGREGATE.search(question)
     if agg is None:
         return None

@@ -333,6 +333,20 @@ categories:
       match: abstain
       tags: [ambiguity, aggregation]
 
+    - id: sa_leading_n_over_a_ranking
+      question: "total revenue of the leading 3 suppliers"
+      persona: ops_manager
+      engineer_intent: >
+        The escape family. The first ANS-02 guard listed "top" and not
+        "leading", so swapping one synonym returned MYR 80,375,993.99 - every
+        supplier in the warehouse - under a governed badge, byte-identical to
+        the defect the ticket was filed about. The guard is still two word
+        lists, so this seed exists to make a narrowing of either list fail here
+        rather than in front of a customer. Pins the figure by value.
+      match: abstain
+      answer_must_not_contain: ["80375993", "80,375,993"]
+      tags: [ambiguity, aggregation]
+
   malay_codeswitch:
     - id: ms_sku_count
       question: "berapa banyak SKU kita ada?"
