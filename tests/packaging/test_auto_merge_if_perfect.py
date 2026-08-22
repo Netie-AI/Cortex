@@ -1,7 +1,7 @@
 """Auto-merge only when every required check is green."""
 from __future__ import annotations
 
-from scripts.auto_merge_if_perfect import verdict
+from scripts.auto_merge_if_perfect import as_rollup_checks, verdict
 
 
 def test_draft_is_skip():
@@ -120,6 +120,31 @@ def test_cancelled_previous_run_ignored():
                 "mergeable": "MERGEABLE",
                 "mergeStateStatus": "CLEAN",
                 "statusCheckRollup": checks,
+            }
+        )
+        == "merge"
+    )
+
+
+def test_gh_pr_checks_json_maps_to_success():
+    mapped = as_rollup_checks(
+        [
+            {"name": "lint-type-test", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "base-install", "bucket": "pass"},
+            {"name": "protected-paths", "state": "pass"},
+            {"name": "rls-proof", "bucket": "pass"},
+            {"name": "secrets-scan", "state": "SUCCESS", "bucket": "pass"},
+            {"name": "auto-merge", "bucket": "pending"},
+        ]
+    )
+    assert (
+        verdict(
+            {
+                "isDraft": False,
+                "baseRefName": "main",
+                "mergeable": "MERGEABLE",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": mapped,
             }
         )
         == "merge"

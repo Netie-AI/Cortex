@@ -23,13 +23,40 @@ IGNORE_CONCLUSIONS = frozenset({"CANCELLED", "SKIPPED", "NEUTRAL"})
 ALLOWED_BASES = frozenset({"main", "dms-integrated-engine", "dms-v2"})
 
 
+_ALIASES = {
+    "PASS": "SUCCESS",
+    "FAIL": "FAILURE",
+    "PENDING": "IN_PROGRESS",
+    "SKIPPING": "SKIPPED",
+}
+
+
 def _norm_name(check: dict[str, Any]) -> str:
     return str(check.get("name") or "").strip()
 
 
 def _conclusion(check: dict[str, Any]) -> str:
-    raw = check.get("conclusion") or check.get("state") or check.get("status") or ""
-    return str(raw).upper().replace(" ", "_")
+    raw = check.get("conclusion") or check.get("state") or check.get("bucket") or ""
+    key = str(raw).upper().replace(" ", "_")
+    return _ALIASES.get(key, key)
+
+
+def as_rollup_checks(raw: Any) -> list[dict[str, Any]]:
+    """Normalize `gh pr checks --json` or statusCheckRollup into verdict checks."""
+    items = raw if isinstance(raw, list) else []
+    out: list[dict[str, Any]] = []
+    for check in items:
+        if not isinstance(check, dict):
+            continue
+        conc = _conclusion(check)
+        bucket = str(check.get("bucket") or "").lower()
+        status = str(check.get("status") or "").upper()
+        if bucket == "pending" or conc in {"", "NONE", "IN_PROGRESS", "PENDING", "QUEUED"}:
+            status = status or "IN_PROGRESS"
+        elif not status:
+            status = "COMPLETED"
+        out.append({"name": _norm_name(check), "conclusion": conc, "status": status})
+    return out
 
 
 def verdict(pr: dict[str, Any]) -> str:
@@ -80,21 +107,26 @@ def verdict(pr: dict[str, Any]) -> str:
     return "merge"
 
 
+def _gh(args: list[str]) -> Any:
+    raw = subprocess.check_output(["gh", *args], text=True)
+    return json.loads(raw)
+
+
 def _gh_pr_view(number: str) -> dict[str, Any]:
-    raw = subprocess.check_output(
+    # Do not request statusCheckRollup — GITHUB_TOKEN cannot read nested workflowRun.
+    data = _gh(
         [
-            "gh",
             "pr",
             "view",
             number,
             "--json",
-            "isDraft,mergeable,mergeStateStatus,statusCheckRollup,baseRefName,url,title",
-        ],
-        text=True,
+            "isDraft,mergeable,mergeStateStatus,baseRefName,url,title",
+        ]
     )
-    data = json.loads(raw)
     if not isinstance(data, dict):
-        raise SystemExit("gh pr view did not return an object")
+        raise OSError("gh pr view did not return an object")
+    checks = _gh(["pr", "checks", number, "--json", "name,state,bucket"])
+    data["statusCheckRollup"] = as_rollup_checks(checks)
     return data
 
 
@@ -116,33 +148,40 @@ def main(argv: list[str] | None = None) -> int:
         print("PR_NUMBER or --pr is required", file=sys.stderr)
         return 2
     deadline = time.time() + 10 * 60
-    while True:
-        pr = _gh_pr_view(number)
-        decision = verdict(pr)
-        print(f"{decision} {pr.get('url')} mergeable={pr.get('mergeable')} state={pr.get('mergeStateStatus')}")
-        if decision == "skip":
-            return 0
-        if decision in {"merge", "queue"}:
-            if not apply:
+    try:
+        while True:
+            pr = _gh_pr_view(number)
+            decision = verdict(pr)
+            print(
+                f"{decision} {pr.get('url')} mergeable={pr.get('mergeable')} "
+                f"state={pr.get('mergeStateStatus')}"
+            )
+            if decision == "skip":
                 return 0
-            try:
-                _merge(number, decision)
-            except subprocess.CalledProcessError:
-                if decision == "merge":
-                    print("direct merge failed; enabling GitHub auto-merge")
-                    try:
-                        _merge(number, "queue")
-                    except subprocess.CalledProcessError:
-                        print("could not merge (token or protection); leaving PR open")
-                        return 0
-                else:
-                    print("could not enable auto-merge; leaving PR open")
+            if decision in {"merge", "queue"}:
+                if not apply:
                     return 0
-            return 0
-        if time.time() >= deadline:
-            print("waited for sibling checks; still not perfect — leaving PR open")
-            return 0
-        time.sleep(15)
+                try:
+                    _merge(number, decision)
+                except subprocess.CalledProcessError:
+                    if decision == "merge":
+                        print("direct merge failed; enabling GitHub auto-merge")
+                        try:
+                            _merge(number, "queue")
+                        except subprocess.CalledProcessError:
+                            print("could not merge (token or protection); leaving PR open")
+                            return 0
+                    else:
+                        print("could not enable auto-merge; leaving PR open")
+                        return 0
+                return 0
+            if time.time() >= deadline:
+                print("waited for sibling checks; still not perfect — leaving PR open")
+                return 0
+            time.sleep(15)
+    except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as exc:
+        print(f"auto-merge probe failed ({exc}); leaving PR open")
+        return 0
 
 
 if __name__ == "__main__":
