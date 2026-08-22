@@ -22,6 +22,11 @@ so L2 abstain reasons name the refused SQL, not only "exhausted retries".
 writer resolve different files, or if a second CortexOS module hardcodes
 `dms_demo.duckdb`.
 
+**CI (lint-type-test).** Regenerated `contract/openapi-1.2.0.json` so the live
+`ExportRequest` (`format`, default table `inventory`) matches `--check`.
+Corrected 1.0/1.1 `.sha256` sidecars to the LF bytes git stores (sidecars were
+hashed from CRLF working copies). Frozen JSON specs unchanged.
+
 
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
