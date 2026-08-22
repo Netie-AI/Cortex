@@ -43,6 +43,8 @@ class DMSQueryResponse(BaseModel):
     assumptions: str | None = None
     suggestions: list[str] | None = None
     query_source: str | None = None
+    grant_kind: str | None = None
+    granted_sources: list[str] | None = None
 
 
 class AnalyseEntryRequest(BaseModel):
@@ -94,7 +96,11 @@ def register_dms_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         from CortexOS.dms.query_service import answer_question
 
-        out = answer_question(body.question, session_id=body.session_id)
+        out = answer_question(
+            body.question,
+            session_id=body.session_id,
+            require_grounding=True,
+        )
         # Mark when warehouse tables were synced from lake.silver (medallion path).
         if out.get("query_source") is None:
             out["query_source"] = os.environ.get(

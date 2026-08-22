@@ -123,7 +123,7 @@ def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
     try:
         rel = con.execute(f"SELECT * FROM {name} LIMIT {lim}")
         cols = [d[0] for d in rel.description]
-        return [dict(zip(cols, row)) for row in rel.fetchall()]
+        return [dict(zip(cols, row, strict=True)) for row in rel.fetchall()]
     finally:
         con.close()
 

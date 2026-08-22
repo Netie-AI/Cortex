@@ -37,6 +37,8 @@ ROUTES = [
     ("suppliers with risk over 0.7", "suppliers_by_risk"),
     ("show me utilisation across locations", "capacity_utilisation"),
     ("what has not been topped up in a month", "stale_restock"),
+    ("three highest selling SKUs by weight", "sales_by_volume"),
+    ("which 3 SKUs moved the most kilograms", "sales_by_volume"),
 ]
 
 
@@ -45,6 +47,17 @@ def test_business_phrasing_reaches_its_metric(question: str, metric_id: str) -> 
     plan = route_to_metric(question)
     assert plan is not None, f"{question!r} abstained"
     assert plan.metric_id == metric_id, f"{question!r} -> {plan.metric_id}"
+
+
+def test_volume_paraphrases_keep_the_asked_limit() -> None:
+    for question in (
+        "three highest selling SKUs by weight",
+        "which 3 SKUs moved the most kilograms",
+    ):
+        plan = route_to_metric(question)
+        assert plan is not None
+        assert plan.metric_id == "sales_by_volume"
+        assert plan.slots.get("limit") == 3, question
 
 
 # ── invariants: normalization must not move meaning ──────────────────────────

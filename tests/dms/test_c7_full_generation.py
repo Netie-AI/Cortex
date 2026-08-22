@@ -10,6 +10,15 @@ from packs.dms.generative import literal_normalize, promotion, schema_retrieval,
 from packs.dms.semantic import values as valuedict
 
 
+@pytest.fixture(scope="module", autouse=True)
+def ensure_db():
+    from bench.accuracy import _ensure_db_loaded
+
+    _ensure_db_loaded()
+    valuedict.refresh()
+    yield
+
+
 def test_schema_retrieval_is_reduced():
     schema = schema_retrieval.retrieve("delayed shipments by carrier", top_k=3)
     tables = schema.get("tables") or {}
@@ -96,3 +105,29 @@ def test_l2_mock_generation_returns_rows_and_answer(monkeypatch):
     if r.get("layer") == "generated":
         assert r.get("badge") == "L2_VALIDATED"
         assert len((r.get("answer") or "")) > 0
+
+
+def test_answer_engine_does_not_import_pack_generative() -> None:
+    """C2: the engine holds a port. The pack registers. No packs.dms.generative import."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    src = root / "CortexOS" / "dms" / "answer_engine.py"
+    text = src.read_text(encoding="utf-8")
+    assert "packs.dms.generative" not in text
+    assert "schema_retrieval" not in text
+    assert "sql_generator" not in text
+    assert "l2_promotion" not in text
+    assert "generative.promotion" not in text
+
+    port = root / "CortexOS" / "dms" / "l2_generation.py"
+    tree = ast.parse(port.read_text(encoding="utf-8"), filename=str(port))
+    mods: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            mods.append(node.module)
+    leaked = [m for m in mods if m == "packs" or m.startswith("packs.")]
+    assert not leaked, f"l2_generation.py must not statically import packs: {leaked}"

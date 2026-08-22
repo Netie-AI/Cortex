@@ -1914,6 +1914,31 @@
             ],
             "title": "Chart Spec"
           },
+          "grant_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Kind"
+          },
+          "granted_sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted Sources"
+          },
           "layer": {
             "anyOf": [
               {
@@ -2419,6 +2444,11 @@
       },
       "ExportRequest": {
         "properties": {
+          "format": {
+            "default": "csv",
+            "title": "Format",
+            "type": "string"
+          },
           "limit": {
             "default": 5000,
             "title": "Limit",
@@ -2429,7 +2459,7 @@
             "type": "string"
           },
           "table": {
-            "default": "dms_inventory",
+            "default": "inventory",
             "title": "Table",
             "type": "string"
           }

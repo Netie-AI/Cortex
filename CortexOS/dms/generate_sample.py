@@ -437,6 +437,24 @@ def generate_transactions(
                 "reference_doc": f"DOC-{rng.randint(1000, 9999)}" if rng.random() > 0.2 else "",
             }
         )
+    # Value dict reads sku from transactions. Named inventory SKUs must appear
+    # here or BETA cannot resolve to SKU-BETA. IN-only so OUT rankings stay put.
+    named_ids = {sku for sku, _name, _cat in NAMED_SKUS}
+    named_inv = [inv for inv in inventory if inv.get("sku") in named_ids]
+    for j, inv in enumerate(named_inv):
+        rows.append(
+            {
+                "txn_id": f"TXN-{210000 + j}",
+                "sku": inv["sku"],
+                "location_id": inv["location_id"],
+                "txn_type": "IN",
+                "quantity_kg": "1.0",
+                "unit_cost_myr": inv["unit_cost_myr"],
+                "operator_id": "OP-001",
+                "timestamp": now.isoformat(timespec="seconds"),
+                "reference_doc": "DOC-NAMED",
+            }
+        )
     return rows
 
 

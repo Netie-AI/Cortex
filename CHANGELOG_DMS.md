@@ -2,6 +2,31 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Unbound session must abstain — 2026-08-22
+
+A session with no binding was answering from the demo warehouse on
+`POST /dms/query` (badge `governed_metric`, `grant_kind local-self-issued`,
+all six demo tables granted). The table-intersect never fired because the
+self-issued grant already contained every table.
+
+- `route_to_metric` now returns the tables its plan will read (from the metric
+  definition, not by re-parsing compiled SQL).
+- Served doors (`/dms/query`, `/mcp/call`) fail closed when nothing is bound
+  or the grant is self-issued. They do not mint a Space grant.
+- Bound demo-table questions still answer (R-0005). A bound abstain names the
+  sources the session *can* answer over.
+- Rewrote `test_unbound_session_still_answers_and_says_the_grant_is_self_issued`
+  to expect abstain. Cortex#36 "total" routing and Cortex#39 (customers -> SKUs)
+  are untouched.
+- C2: L2 generation no longer imports `packs.dms.generative` from
+  `answer_engine`. The engine holds `L2GenerationPort`; `attempt_l2` lives on
+  that seam. Pack registers the adapter. No C2 ignore added.
+- Sample warehouse now includes `SKU-BETA` in inventory and one IN
+  transaction so G4 `BETA` -> `SKU-BETA` can resolve. OUT rankings unchanged.
+  PowerShell autostart tests skip when `powershell` is not on PATH.
+- Vocabulary maps `kilograms` / `by weight` to the volume rank the router
+  already knows, so those paraphrases stop compiling as sales-by-value.
+
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
 **New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:

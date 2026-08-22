@@ -17,7 +17,6 @@ UI can show provenance and disclose truncation honestly.
 """
 from __future__ import annotations
 
-import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -30,7 +29,6 @@ from CortexOS.dms.sql_guardrail import (
     AuditEntry,
     guard_and_execute,
     log_audit,
-    validate_sql,
 )
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
@@ -38,10 +36,20 @@ from CortexOS.dms.warehouse_db import (
     load_semantic_layer,
     read_only_queries_enabled,
 )
-from CortexOS.execution.manifest import VerifiedManifest
+from CortexOS.execution.manifest import ManifestError, VerifiedManifest
+from CortexOS.execution.session_manifests import (
+    SessionExpired,
+    SessionUnbound,
+    get_session_registry,
+)
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
+
+# A signed session binding is permission. A grant this process minted for
+# itself is not — honesty on grant_kind is not a fix.
+SESSION_GRANT = "session"
+LOCAL_ISSUER_KID = "local-self-issued"
 
 
 @dataclass(slots=True)
@@ -49,6 +57,27 @@ class MetricPlan:
     metric_id: str
     slots: dict[str, Any]
     reason: str
+    tables: tuple[str, ...] = ()
+
+
+def _tables_stated_by_metric(metric_id: str) -> tuple[str, ...]:
+    """Tables the metric definition says it will read — not compiled SQL."""
+    from packs.dms.semantic.loader import load_all
+
+    return load_all().metric(metric_id).tables
+
+
+def _metric_plan(metric_id: str, slots: dict[str, Any], reason: str) -> MetricPlan:
+    return MetricPlan(
+        metric_id,
+        slots,
+        reason,
+        tables=_tables_stated_by_metric(metric_id),
+    )
+
+
+class UngroundedSession(Exception):
+    """A served turn arrived with nothing granting it anything."""
 
 
 # ── normalization + certified index ──────────────────────────────────────────
@@ -87,6 +116,13 @@ def _explicit_limit(q: str) -> int | None:
     if m:
         return int(m.group(1))
     mw = re.search(r"\b(?:top|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b", q)
+    if mw:
+        return NUMBER_WORDS[mw.group(1)]
+    mw = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:highest|best|selling|skus?|warehouses?|locations?|suppliers?|items?)\b",
+        q,
+    )
     if mw:
         return NUMBER_WORDS[mw.group(1)]
     return None
@@ -228,7 +264,7 @@ def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
         slots["offset_clause"] = start - 1
         slots["limit"] = end - start + 1
     else:
-        slots["limit"] = _extract_limit(q_raw, 5)
+        slots["limit"] = _explicit_limit(q_raw) or _extract_limit(q_raw, 5)
     if excluded:
         slots["exclude_skus"] = excluded
     return slots
@@ -266,107 +302,107 @@ def route_to_metric(question: str) -> MetricPlan | None:
 
     # scalars first — "how many X" must not fall through to a listing
     if re.search(r"\b(how many|number of|count of|count)\b", q) and "cold storage" in q:
-        return MetricPlan("cold_storage_count", {}, "count of cold-storage locations")
+        return _metric_plan("cold_storage_count", {}, "count of cold-storage locations")
     if re.search(r"\bhow many\b", q) and re.search(r"\bskus?\b", q) and not re.search(r"\b(category|per|by)\b", q):
-        return MetricPlan("sku_count", {}, "distinct SKU count")
+        return _metric_plan("sku_count", {}, "distinct SKU count")
 
     # per-warehouse / per-carrier breakdowns of shipments (before the status listing)
     if "delayed" in q and re.search(r"\bcarrier", q):
-        return MetricPlan("count_by_carrier", {"status": "DELAYED"}, "delayed shipments grouped by carrier")
+        return _metric_plan("count_by_carrier", {"status": "DELAYED"}, "delayed shipments grouped by carrier")
     if re.search(r"\b(per|by|each)\b", q) and re.search(r"\b(warehouse|destination|location)\b", q) \
             and ("delayed" in q or "incoming" in q or "shipment" in q):
         status = "DELAYED" if "delayed" in q else "IN_TRANSIT"
-        return MetricPlan("count_by_destination", {"status": status}, f"{status} shipments grouped by destination")
+        return _metric_plan("count_by_destination", {"status": status}, f"{status} shipments grouped by destination")
 
     # revenue — calendar month before rolling-day window; bare total before ranked "top sales"
     if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":
-        return MetricPlan("revenue_last_month", {}, "revenue in the previous calendar month")
+        return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
     if re.search(r"\b(revenue|sales|sold)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
-        return MetricPlan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
+        return _metric_plan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
     # G6 — bare total revenue (no month/window); must not fall through to abstain
     if re.search(r"\btotal\b", q) and re.search(r"\b(revenue|sales)\b", q):
-        return MetricPlan("revenue_total", {}, "total outbound revenue")
+        return _metric_plan("revenue_total", {}, "total outbound revenue")
     if re.search(r"\b(revenue|sales)\b", q) and not re.search(
         r"\b(top|best|highest|most|sku|skus|rank|per|by|each)\b", q
     ):
-        return MetricPlan("revenue_total", {}, "total outbound revenue")
+        return _metric_plan("revenue_total", {}, "total outbound revenue")
 
     # supplier risk threshold
     if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
-        return MetricPlan("suppliers_by_risk",
+        return _metric_plan("suppliers_by_risk",
                           {"threshold": _threshold(q_raw), "op": _threshold_op(q_raw)},
                           "suppliers filtered by risk-score threshold")
 
     # average lead time by country
     if re.search(r"\baverage\b|\bmean\b|\bavg\b", q) and "lead time" in q:
-        return MetricPlan("avg_lead_time_by_country", {}, "average lead time grouped by country")
+        return _metric_plan("avg_lead_time_by_country", {}, "average lead time grouped by country")
 
     # free capacity ranking
     if re.search(r"\bfree\b|\bspare\b|\bavailable\b", q) and "capacit" in q:
-        return MetricPlan("free_capacity",
+        return _metric_plan("free_capacity",
                           {"limit": _explicit_limit(q_raw) or 1, "direction": _direction(q_raw)},
                           "warehouses ranked by free capacity")
 
     # capacity above a percentage
     if "capacit" in q and re.search(r"\b(above|over|more than)\b.*\d", q):
-        return MetricPlan("capacity_above", {"pct": _pct(q_raw)}, "locations above a capacity threshold")
+        return _metric_plan("capacity_above", {"pct": _pct(q_raw)}, "locations above a capacity threshold")
     # utilis\w* / utiliz\w*, not utilis\b — the trailing \b made the word
     # "utilisation" itself fail to match, so this branch was only ever reachable
     # by the stem alone. The golden question hits L0 certified, which is why the
     # dead branch went unnoticed.
     if "capacit" in q and re.search(r"\b(utilis\w*|utiliz\w*|how full|usage)\b", q):
-        return MetricPlan("capacity_utilisation", {}, "capacity utilisation per location")
+        return _metric_plan("capacity_utilisation", {}, "capacity utilisation per location")
 
     # arriving window
     if "arriving" in q or ("incoming" in q and re.search(r"\bweek|\bdays?\b", q)):
-        return MetricPlan("arriving_window", {"days": _days(q_raw, 7)}, "in-transit shipments arriving within a window")
+        return _metric_plan("arriving_window", {"days": _days(q_raw, 7)}, "in-transit shipments arriving within a window")
 
     # shipment status listing
     for status in ("delayed", "in transit", "in_transit", "pending", "delivered", "cancelled"):
         if status in q and re.search(r"\bshipments?\b", q):
             norm = "IN_TRANSIT" if status.startswith("in ") or status == "in_transit" else status.upper()
-            return MetricPlan("shipments_by_status", {"status": norm}, f"shipments with status {norm}")
+            return _metric_plan("shipments_by_status", {"status": norm}, f"shipments with status {norm}")
 
     # cold storage listing
     if "cold storage" in q:
-        return MetricPlan("cold_storage_list", {}, "cold-storage locations")
+        return _metric_plan("cold_storage_list", {}, "cold-storage locations")
 
     # low stock (optionally warehouse-scoped)
     if re.search(r"\b(below reorder|low stock|understocked|reorder level)\b", q):
         loc = _location(question)
-        return MetricPlan("low_stock", {"wh": loc} if loc else {},
+        return _metric_plan("low_stock", {"wh": loc} if loc else {},
                           f"items below reorder level{' at ' + loc if loc else ''}")
 
     # not restocked window
     if re.search(r"\b(not restocked|stale)\b", q) or ("restock" in q and "not" in q):
-        return MetricPlan("stale_restock", {"days": _days(q_raw, 30)}, "items not restocked within a window")
+        return _metric_plan("stale_restock", {"days": _days(q_raw, 30)}, "items not restocked within a window")
 
     # expired — aggregate / calendar month BEFORE bare listing
     if "expired" in q or "past expiry" in q or "out of date" in q:
         month = _calendar_month(q)
         if month == "last" or (_wants_aggregate(q) and month == "last"):
-            return MetricPlan("expired_last_month", {}, "count of items that expired last month")
+            return _metric_plan("expired_last_month", {}, "count of items that expired last month")
         if _wants_aggregate(q):
-            return MetricPlan("expired_count", {}, "count of currently expired inventory")
-        return MetricPlan("expired_items", {}, "expired inventory listing")
+            return _metric_plan("expired_count", {}, "count of currently expired inventory")
+        return _metric_plan("expired_items", {}, "expired inventory listing")
 
     # active alerts
     if "alert" in q and re.search(r"\b(active|open|unresolved|current)\b", q):
-        return MetricPlan("active_alerts", {}, "unresolved alerts")
+        return _metric_plan("active_alerts", {}, "unresolved alerts")
 
     # sales ranking (after month/window scalars so "last month sales" never ranks)
     if _wants_sales_rank(q, q_raw):
         slots = _sales_rank_slots(q_raw)
         if re.search(r"\b(quantity|volume|kg|units?)\b", q):
-            return MetricPlan(
+            return _metric_plan(
                 "sales_by_volume",
                 slots,
                 "SKUs ranked by quantity sold",
             )
-        return MetricPlan("sales_by_value", slots, "SKUs ranked by sales value")
+        return _metric_plan("sales_by_value", slots, "SKUs ranked by sales value")
     # unranked "last month sales" catch-all if earlier branch missed phrasing
     if re.search(r"\b(sales|revenue)\b", q) and _calendar_month(q) == "last":
-        return MetricPlan("revenue_last_month", {}, "revenue in the previous calendar month")
+        return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
 
     return None
 
@@ -428,12 +464,26 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
     return seen
 
 
-def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
+def _abstain(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+    granted_sources: list[str] | None = None,
+) -> dict[str, Any]:
     suggestions = _suggestions(question)
     hint = " Try: " + " · ".join(f'"{s}"' for s in suggestions)
+    text = f"I can't answer that from the DMS semantic layer with confidence ({reason})."
+    # Bound sessions name the sources they CAN answer over. Suggesting demo
+    # warehouse questions to a session that did not bind those tables is a
+    # dead end dressed up as help.
+    if granted_sources:
+        named = ", ".join(granted_sources)
+        text = f"{text} This session can answer over: {named}."
+    else:
+        text = text + hint
     return {
-        "answer": (f"I can't answer that from the DMS semantic layer with confidence ({reason})."
-                   + hint),
+        "answer": text,
         "sql_used": None,
         "chart_spec": None,
         "audit_id": audit_id,
@@ -445,7 +495,109 @@ def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
         "badge": "abstain",
         "assumptions": reason,
         "total_count": 0,
-        "suggestions": suggestions,
+        "suggestions": [] if granted_sources else suggestions,
+    }
+
+
+def resolve_product_grant(
+    session_id: str | None,
+    verified: VerifiedManifest | None,
+) -> tuple[VerifiedManifest, str, list[str]]:
+    """Grant for a served door. Never mints. Self-issued is not a binding.
+
+    The old hole: no binding still minted a wide local grant over every demo
+    table, so a table-intersect against that grant never fired. Unbound must
+    fail closed *before* that grant is used as permission to answer.
+    """
+    candidate = verified
+    if candidate is None:
+        try:
+            candidate = get_session_registry().resolve(session_id)
+        except SessionExpired as exc:
+            raise UngroundedSession("the session grant expired") from exc
+        except SessionUnbound as exc:
+            raise UngroundedSession("no session grant is bound") from exc
+    if (candidate.issuer_kid or "").strip() == LOCAL_ISSUER_KID:
+        raise UngroundedSession("self-issued grant is not a session binding")
+    sources = sorted({str(name).lower() for name in candidate.row_predicates})
+    if not sources:
+        raise UngroundedSession("session grant names no sources")
+    return candidate, SESSION_GRANT, sources
+
+
+def _stamp_grant(
+    result: dict[str, Any],
+    *,
+    kind: str,
+    sources: list[str],
+) -> dict[str, Any]:
+    result["grant_kind"] = kind
+    result["granted_sources"] = list(sources)
+    plan = result.get("query_plan")
+    if isinstance(plan, dict):
+        plan["grant_kind"] = kind
+        plan["granted_sources"] = list(sources)
+    return result
+
+
+def _abstain_unbound(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
+    """Refuse a served turn that nothing grants. Do not offer demo questions."""
+    return _stamp_grant(
+        {
+            "answer": (
+                "I can't answer that yet - nothing is grounding this session "
+                f"({reason}). Bind a session grant naming the sources you want me "
+                "to read, then ask again. Until then I have nothing to read and "
+                "would be guessing."
+            ),
+            "sql_used": None,
+            "chart_spec": None,
+            "audit_id": audit_id,
+            "violations_blocked": [],
+            "route": ABSTAIN,
+            "rows": [],
+            "source_table": None,
+            "layer": "abstain",
+            "badge": "abstain",
+            "assumptions": f"ungrounded session: {reason}",
+            "total_count": 0,
+            "suggestions": [],
+        },
+        kind="none",
+        sources=[],
+    )
+
+
+def _abstain_ungrounded_plan(
+    question: str,
+    audit_id: str,
+    *,
+    ungrounded: frozenset[str],
+    granted_sources: list[str],
+) -> dict[str, Any]:
+    """Refuse a plan that reads tables the session did not bind, and name those it did."""
+    refused = ", ".join(sorted(ungrounded))
+    can = ", ".join(granted_sources) if granted_sources else "(none)"
+    reason = f"question resolves to ungranted source(s): {refused}"
+    return {
+        "answer": (
+            "I can't answer that from the sources bound to this session - the closest "
+            f"governed answer would read {refused}, which this session did not bind. "
+            f"This session can answer over: {can}. Ask about those, or bind the "
+            "source you meant and ask again."
+        ),
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": [],
     }
 
 
@@ -682,6 +834,7 @@ def answer(
     session_id: str | None = None,
     space_id: str | None = None,
     verified: VerifiedManifest | None = None,
+    require_grounding: bool = False,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
@@ -693,25 +846,52 @@ def answer(
     from packs.dms.semantic import query_skills
 
     audit_id = str(uuid.uuid4())
+    grant_kind = "none"
+    granted_sources: list[str] = []
+    if require_grounding:
+        try:
+            verified, grant_kind, granted_sources = resolve_product_grant(
+                session_id, verified
+            )
+        except UngroundedSession as exc:
+            return _abstain_unbound(question, audit_id, reason=str(exc))
+
+    def _done(result: dict[str, Any]) -> dict[str, Any]:
+        if not require_grounding:
+            return result
+        if "grant_kind" not in result:
+            return _stamp_grant(result, kind=grant_kind, sources=granted_sources)
+        return result
+
+    def _abs(reason: str) -> dict[str, Any]:
+        return _done(
+            _abstain(
+                question,
+                audit_id,
+                reason=reason,
+                granted_sources=granted_sources or None,
+            )
+        )
+
     route = route_question(question)
 
     if route == "blocked":
-        return {
+        return _done({
             "answer": "That operation is not permitted.", "sql_used": None, "chart_spec": None,
             "audit_id": audit_id, "violations_blocked": ["DDL_ATTEMPT"], "route": "blocked",
             "rows": [], "source_table": None, "layer": "blocked", "badge": "blocked",
             "assumptions": "destructive operation refused", "total_count": 0,
             "query_plan": _honest_plan(question, None, layer="blocked", assumptions="destructive"),
-        }
+        })
     if route == "rag":
         ans, sources = rag_answer(question)
-        return {
+        return _done({
             "answer": ans, "sql_used": None, "chart_spec": None, "audit_id": audit_id,
             "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
             "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
             "total_count": 0,
             "query_plan": _honest_plan(question, None, layer="rag"),
-        }
+        })
 
     layer = badge = ""
     sql: str | None = None
@@ -719,6 +899,7 @@ def answer(
     metric_id: str | None = None
     metric_slots: dict[str, Any] = {}
     skill_score: float | None = None
+    planned_tables: tuple[str, ...] = ()
 
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
@@ -751,6 +932,7 @@ def answer(
             sql, layer, badge = cq.sql, "certified", "certified"
             assumptions = f"certified query {cq.id}"
             metric_id = cq.id
+            planned_tables = tuple(cq.tables)
         else:
             plan = route_to_metric(question)
             if plan is not None:
@@ -762,8 +944,9 @@ def answer(
                     assumptions = plan.reason
                     metric_id = plan.metric_id
                     metric_slots = dict(plan.slots)
+                    planned_tables = plan.tables
                 except SemanticError as exc:
-                    return _abstain(question, audit_id, reason=f"could not resolve inputs: {exc}")
+                    return _abs(f"could not resolve inputs: {exc}")
 
     if sql is None:
         hit = query_skills.find(question)
@@ -795,6 +978,7 @@ def answer(
                     assumptions = f"query skill match score={skill_score:.3f} → {hit['metric_id']}"
                     metric_id = hit["metric_id"]
                     metric_slots = dict(params)
+                    planned_tables = _tables_stated_by_metric(hit["metric_id"])
                 except SemanticError:
                     sql = None
             elif hit.get("sql_template"):
@@ -803,73 +987,39 @@ def answer(
                 assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
 
     if sql is None:
-        # C7-full L2: schema retrieval → FreeRoute generate → validate gate.
-        # Never fall back to the L1 keyword cascade or a smaller model.
-        if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
-            try:
-                from packs.dms.generative import promotion as l2_promotion
-                from packs.dms.generative import schema_retrieval, sql_generator
-                from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
-            except ImportError:  # noqa: BLE001
-                return _abstain(question, audit_id, reason="no verified answer path (L2 import failed)")
+        # L2 lives on the engine port module, not here. This file must not
+        # import pack generation code (C2).
+        from CortexOS.dms.l2_generation import attempt_l2
 
-            if not sql_generator.is_configured():
-                return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
-
-            semantic_early = load_semantic_layer()
-            reduced = schema_retrieval.retrieve(question)
-            prior_box: dict[str, list[str]] = {"v": []}
-
-            def _gen(prior: list[str]) -> str | None:
-                prior_box["v"] = list(prior)
-                cands = sql_generator.generate_candidates(
-                    question,
-                    reduced,
-                    prior_violations=prior,
-                )
-                return cands[0] if cands else None
-
-            con_explain = None
-            try:
-                if verified is None:
-                    con_explain = get_connection(
-                        DEFAULT_DB, read_only=read_only_queries_enabled()
-                    )
-                gate = gate_with_retry(
-                    _gen,
-                    question,
-                    semantic_early,
-                    con=con_explain,
-                    max_retries=2,
-                )
-            except SqlGateAbstain as exc:
-                return _abstain(
-                    question,
-                    audit_id,
-                    reason=f"L2 generation failed validation gate: {exc}",
-                )
-            finally:
-                if con_explain is not None:
-                    con_explain.close()
-
-            if not gate.passed or not gate.safe_sql:
-                return _abstain(question, audit_id, reason="L2 generation failed validation gate")
-
-            sql = gate.safe_sql
-            layer, badge = "generated", "L2_VALIDATED"
-            assumptions = (
-                f"L2 FreeRoute SQL over reduced schema "
-                f"tables={list((reduced.get('tables') or {}).keys())}"
-            )
-            try:
-                l2_promotion.record_validated(question, sql)
-            except Exception:  # noqa: BLE001 — promotion signal must not block answers
-                pass
-        else:
-            return _abstain(question, audit_id, reason="no governed metric or certified query matched")
+        l2_out = attempt_l2(question, verified=verified)
+        if l2_out is None:
+            return _abs("no governed metric or certified query matched")
+        if not l2_out.sql:
+            return _abs(l2_out.reason)
+        sql = l2_out.sql
+        layer, badge = l2_out.layer, l2_out.badge
+        assumptions = l2_out.assumptions
 
     if sql is None:
-        return _abstain(question, audit_id, reason="no governed metric or certified query matched")
+        return _abs("no governed metric or certified query matched")
+
+    # Grounding uses the plan's stated tables. Do not recover them only by
+    # re-parsing compiled SQL if the plan can state them — a self-issued
+    # wide grant would make that intersect vacuous.
+    if require_grounding:
+        read = frozenset(t.lower() for t in planned_tables)
+        granted = frozenset(granted_sources)
+        extra = read - granted
+        if not read or extra:
+            ungrounded = extra or frozenset({"<unanalysable-plan>"})
+            return _done(
+                _abstain_ungrounded_plan(
+                    question,
+                    audit_id,
+                    ungrounded=ungrounded,
+                    granted_sources=granted_sources,
+                )
+            )
 
     semantic = load_semantic_layer()
     # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).
@@ -877,8 +1027,8 @@ def answer(
     if verified is not None:
         from datetime import datetime, timezone
 
-        from CortexOS.execution.submit import execute_sql
         from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
+        from CortexOS.execution.submit import execute_sql
 
         gate = run_gate(sql, semantic)
         guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
@@ -905,11 +1055,12 @@ def answer(
                 entry.passed = False
                 entry.violations = list(exc.violations)
                 log_audit(entry)
-                return _abstain(
-                    question,
-                    audit_id,
-                    reason=f"SQL validation gate: {exc}",
-                )
+                return _abs(f"SQL validation gate: {exc}")
+            except ManifestError as exc:
+                entry.passed = False
+                entry.violations = [type(exc).__name__]
+                log_audit(entry)
+                return _abs(f"{type(exc).__name__}: {exc}")
             total_count = _true_count(gate.safe_sql, verified=verified)
             entry.row_count = len(rows)
             log_audit(entry)
@@ -935,8 +1086,7 @@ def answer(
             con.close()
 
     if not guard_result.passed:
-        return _abstain(question, audit_id,
-                        reason=f"internal SQL failed guardrail {guard_result.violations}")
+        return _abs(f"internal SQL failed guardrail {guard_result.violations}")
 
     truncated = total_count is not None and len(rows) >= MAX_LIMIT and total_count > len(rows)
     answer_text = synthesize_answer(rows, question)
@@ -969,7 +1119,7 @@ def answer(
             layer=layer,
         )
 
-    return {
+    return _done({
         "answer": answer_text,
         "sql_used": guard_result.safe_sql,
         "chart_spec": build_chart_spec(rows, question),
@@ -994,4 +1144,4 @@ def answer(
             assumptions=assumptions,
         ),
         "audit": {"timestamp": entry.timestamp, "passed": entry.passed, "violations": entry.violations},
-    }
+    })
