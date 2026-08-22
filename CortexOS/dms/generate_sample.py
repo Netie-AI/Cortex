@@ -437,6 +437,28 @@ def generate_transactions(
                 "reference_doc": f"DOC-{rng.randint(1000, 9999)}" if rng.random() > 0.2 else "",
             }
         )
+    # G4: named SKUs must appear in transactions so the value dict can resolve
+    # bare BETA -> SKU-BETA. Random sampling can miss them.
+    have = {r["sku"] for r in rows}
+    for j, (sku, _name, _cat) in enumerate(NAMED_SKUS):
+        if sku in have:
+            continue
+        inv = next((row for row in inventory if row["sku"] == sku), None)
+        if inv is None:
+            continue
+        rows.append(
+            {
+                "txn_id": f"TXN-{209900 + j}",
+                "sku": sku,
+                "location_id": inv["location_id"],
+                "txn_type": "OUT",
+                "quantity_kg": "10",
+                "unit_cost_myr": inv["unit_cost_myr"],
+                "operator_id": "OP-001",
+                "timestamp": (now - timedelta(hours=24)).isoformat(timespec="seconds"),
+                "reference_doc": f"DOC-NAMED-{j + 1}",
+            }
+        )
     return rows
 
 
