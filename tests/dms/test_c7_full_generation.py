@@ -100,8 +100,25 @@ def test_l2_mock_generation_returns_rows_and_answer(monkeypatch):
 
 def test_answer_engine_does_not_import_pack_generative() -> None:
     """C2: the engine holds a port. The pack registers. No packs.dms.generative import."""
+    import ast
     from pathlib import Path
 
-    src = Path(__file__).resolve().parents[2] / "CortexOS" / "dms" / "answer_engine.py"
+    root = Path(__file__).resolve().parents[2]
+    src = root / "CortexOS" / "dms" / "answer_engine.py"
     text = src.read_text(encoding="utf-8")
     assert "packs.dms.generative" not in text
+    assert "schema_retrieval" not in text
+    assert "sql_generator" not in text
+    assert "l2_promotion" not in text
+    assert "generative.promotion" not in text
+
+    port = root / "CortexOS" / "dms" / "l2_generation.py"
+    tree = ast.parse(port.read_text(encoding="utf-8"), filename=str(port))
+    mods: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            mods.append(node.module)
+    leaked = [m for m in mods if m == "packs" or m.startswith("packs.")]
+    assert not leaked, f"l2_generation.py must not statically import packs: {leaked}"

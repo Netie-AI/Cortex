@@ -9,6 +9,8 @@ declares this port, the active pack registers an implementation, and
 from __future__ import annotations
 
 import importlib
+import os
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 
@@ -73,9 +75,91 @@ def _load_active_pack() -> None:
         return
 
 
+@dataclass(slots=True)
+class L2Attempt:
+    """Outcome of the L2 path. ``sql`` set means the gate passed."""
+
+    sql: str | None = None
+    reason: str = ""
+    layer: str = "generated"
+    badge: str = "L2_VALIDATED"
+    assumptions: str = ""
+
+
+def attempt_l2(question: str, *, verified: Any = None) -> L2Attempt | None:
+    """Run L2 through the registered port. ``None`` when the L2 flag is off.
+
+    Lives here so ``answer_engine`` never names pack generation modules.
+    """
+    if os.environ.get("DMS_L2_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return None
+
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        load_semantic_layer,
+        read_only_queries_enabled,
+    )
+
+    try:
+        l2 = resolve_l2_generation()
+    except L2NotRegistered:
+        return L2Attempt(reason="no verified answer path (L2 import failed)")
+
+    if not l2.is_configured():
+        return L2Attempt(reason="no verified answer path (L2 not wired)")
+
+    semantic_early = load_semantic_layer()
+    reduced = l2.retrieve_schema(question)
+
+    def _gen(prior: list[str]) -> str | None:
+        cands = l2.generate_candidates(
+            question,
+            reduced,
+            prior_violations=prior,
+        )
+        return cands[0] if cands else None
+
+    con_explain = None
+    try:
+        if verified is None:
+            con_explain = get_connection(
+                DEFAULT_DB, read_only=read_only_queries_enabled()
+            )
+        gate = gate_with_retry(
+            _gen,
+            question,
+            semantic_early,
+            con=con_explain,
+            max_retries=2,
+        )
+    except SqlGateAbstain as exc:
+        return L2Attempt(reason=f"L2 generation failed validation gate: {exc}")
+    finally:
+        if con_explain is not None:
+            con_explain.close()
+
+    if not gate.passed or not gate.safe_sql:
+        return L2Attempt(reason="L2 generation failed validation gate")
+
+    sql = gate.safe_sql
+    try:
+        l2.record_validated(question, sql)
+    except Exception:  # noqa: BLE001 — promotion signal must not block answers
+        pass
+    tables = list((reduced.get("tables") or {}).keys())
+    return L2Attempt(
+        sql=sql,
+        assumptions=f"L2 FreeRoute SQL over reduced schema tables={tables}",
+    )
+
+
 __all__ = [
+    "L2Attempt",
     "L2GenerationPort",
     "L2NotRegistered",
+    "attempt_l2",
     "clear_l2_generation",
     "register_l2_generation",
     "resolve_l2_generation",

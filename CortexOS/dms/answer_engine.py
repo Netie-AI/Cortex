@@ -17,7 +17,6 @@ UI can show provenance and disclose truncation honestly.
 """
 from __future__ import annotations
 
-import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -981,67 +980,18 @@ def answer(
                 assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
 
     if sql is None:
-        # C7-full L2: schema retrieval → FreeRoute generate → validate gate.
-        # Never fall back to the L1 keyword cascade or a smaller model.
-        if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
-            from CortexOS.dms.l2_generation import L2NotRegistered, resolve_l2_generation
-            from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
+        # L2 lives on the engine port module, not here. This file must not
+        # import pack generation code (C2).
+        from CortexOS.dms.l2_generation import attempt_l2
 
-            try:
-                l2 = resolve_l2_generation()
-            except L2NotRegistered:
-                return _abs("no verified answer path (L2 import failed)")
-
-            if not l2.is_configured():
-                return _abs("no verified answer path (L2 not wired)")
-
-            semantic_early = load_semantic_layer()
-            reduced = l2.retrieve_schema(question)
-            prior_box: dict[str, list[str]] = {"v": []}
-
-            def _gen(prior: list[str]) -> str | None:
-                prior_box["v"] = list(prior)
-                cands = l2.generate_candidates(
-                    question,
-                    reduced,
-                    prior_violations=prior,
-                )
-                return cands[0] if cands else None
-
-            con_explain = None
-            try:
-                if verified is None:
-                    con_explain = get_connection(
-                        DEFAULT_DB, read_only=read_only_queries_enabled()
-                    )
-                gate = gate_with_retry(
-                    _gen,
-                    question,
-                    semantic_early,
-                    con=con_explain,
-                    max_retries=2,
-                )
-            except SqlGateAbstain as exc:
-                return _abs(f"L2 generation failed validation gate: {exc}")
-            finally:
-                if con_explain is not None:
-                    con_explain.close()
-
-            if not gate.passed or not gate.safe_sql:
-                return _abs("L2 generation failed validation gate")
-
-            sql = gate.safe_sql
-            layer, badge = "generated", "L2_VALIDATED"
-            assumptions = (
-                f"L2 FreeRoute SQL over reduced schema "
-                f"tables={list((reduced.get('tables') or {}).keys())}"
-            )
-            try:
-                l2.record_validated(question, sql)
-            except Exception:  # noqa: BLE001 — promotion signal must not block answers
-                pass
-        else:
+        l2_out = attempt_l2(question, verified=verified)
+        if l2_out is None:
             return _abs("no governed metric or certified query matched")
+        if not l2_out.sql:
+            return _abs(l2_out.reason)
+        sql = l2_out.sql
+        layer, badge = l2_out.layer, l2_out.badge
+        assumptions = l2_out.assumptions
 
     if sql is None:
         return _abs("no governed metric or certified query matched")

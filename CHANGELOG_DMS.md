@@ -18,6 +18,9 @@ self-issued grant already contained every table.
 - Rewrote `test_unbound_session_still_answers_and_says_the_grant_is_self_issued`
   to expect abstain. Cortex#36 "total" routing and Cortex#39 (customers -> SKUs)
   are untouched.
+- C2: L2 generation no longer imports `packs.dms.generative` from
+  `answer_engine`. The engine holds `L2GenerationPort`; `attempt_l2` lives on
+  that seam. Pack registers the adapter. No C2 ignore added.
 
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
