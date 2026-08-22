@@ -984,23 +984,24 @@ def answer(
         # C7-full L2: schema retrieval → FreeRoute generate → validate gate.
         # Never fall back to the L1 keyword cascade or a smaller model.
         if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
+            from CortexOS.dms.l2_generation import L2NotRegistered, resolve_l2_generation
+            from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
+
             try:
-                from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
-                from packs.dms.generative import promotion as l2_promotion
-                from packs.dms.generative import schema_retrieval, sql_generator
-            except ImportError:  # noqa: BLE001
+                l2 = resolve_l2_generation()
+            except L2NotRegistered:
                 return _abs("no verified answer path (L2 import failed)")
 
-            if not sql_generator.is_configured():
+            if not l2.is_configured():
                 return _abs("no verified answer path (L2 not wired)")
 
             semantic_early = load_semantic_layer()
-            reduced = schema_retrieval.retrieve(question)
+            reduced = l2.retrieve_schema(question)
             prior_box: dict[str, list[str]] = {"v": []}
 
             def _gen(prior: list[str]) -> str | None:
                 prior_box["v"] = list(prior)
-                cands = sql_generator.generate_candidates(
+                cands = l2.generate_candidates(
                     question,
                     reduced,
                     prior_violations=prior,
@@ -1036,7 +1037,7 @@ def answer(
                 f"tables={list((reduced.get('tables') or {}).keys())}"
             )
             try:
-                l2_promotion.record_validated(question, sql)
+                l2.record_validated(question, sql)
             except Exception:  # noqa: BLE001 — promotion signal must not block answers
                 pass
         else:

@@ -96,3 +96,12 @@ def test_l2_mock_generation_returns_rows_and_answer(monkeypatch):
     if r.get("layer") == "generated":
         assert r.get("badge") == "L2_VALIDATED"
         assert len((r.get("answer") or "")) > 0
+
+
+def test_answer_engine_does_not_import_pack_generative() -> None:
+    """C2: the engine holds a port. The pack registers. No packs.dms.generative import."""
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "CortexOS" / "dms" / "answer_engine.py"
+    text = src.read_text(encoding="utf-8")
+    assert "packs.dms.generative" not in text
