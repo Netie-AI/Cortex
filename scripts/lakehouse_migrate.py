@@ -146,9 +146,8 @@ def sync_warehouse_from_silver() -> dict[str, Any]:
     Answer engine / semantic SQL use unqualified table names (inventory, …).
     After medallion migrate (or Studio promote), this makes Q2 read silver data.
     """
-    import duckdb
-
     from CortexOS.dms.warehouse_db import DEFAULT_DB, KNOWN_TABLES
+    from CortexOS.execution.warehouse import connect_write
 
     out: dict[str, Any] = {"ok": False, "tables": {}, "source": "lake.silver"}
     home = Path(os.environ.get("DMS_LAKEHOUSE_HOME") or ROOT / "data" / "lakehouse")
@@ -174,7 +173,9 @@ def sync_warehouse_from_silver() -> dict[str, Any]:
         return out
 
     DEFAULT_DB.parent.mkdir(parents=True, exist_ok=True)
-    wh = duckdb.connect(str(DEFAULT_DB))
+    # connect_write evicts the execute_sql read-only cache so this process
+    # can reopen the same file with write config.
+    wh = connect_write(DEFAULT_DB)
     try:
         if mode == "ducklake":
             wh.execute("INSTALL ducklake")

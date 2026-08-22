@@ -14,6 +14,9 @@ from tests.dms.session_manifest import install_auto_bind, uninstall_auto_bind
 
 @pytest.fixture(scope="module", autouse=True)
 def _auto_bind_warehouse_manifest_module() -> None:
+    from bench.accuracy import _ensure_db_loaded
+
+    _ensure_db_loaded()
     install_auto_bind()
     yield
     uninstall_auto_bind()

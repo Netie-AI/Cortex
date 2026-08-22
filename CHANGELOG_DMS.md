@@ -14,6 +14,12 @@ Cortex#42 remain out of scope). In-manifest warehouse questions still answer.
 Newly abstaining corpus items: none expected; report any in the PR if the
 answer corpus regresses.
 
+CI follow-up: committed samples now include the G4 `SKU-BETA` seed;
+`_ensure_db_loaded` reloads if that row is missing; lakehouse warehouse sync
+uses `connect_write` so it does not clash with the `execute_sql` read-only
+cache. Volume paraphrases that say "by weight" / "kilograms" / "three"
+route to `sales_by_volume` with the stated limit.
+
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
 **New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:

@@ -152,12 +152,37 @@ def _run_canonical(sql: str) -> list[dict]:
         con.close()
 
 
+def _sku_beta_present() -> bool:
+    """G4 seed must be in the serving warehouse, not only in generate_sample.py."""
+    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
+
+    if not DEFAULT_DB.exists():
+        return False
+    try:
+        con = get_connection(DEFAULT_DB, read_only=True)
+        try:
+            row = con.execute(
+                "SELECT 1 FROM transactions WHERE sku = 'SKU-BETA' LIMIT 1"
+            ).fetchone()
+            return row is not None
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 — missing table/file means reload
+        return False
+
+
 def _ensure_db_loaded() -> None:
     from CortexOS.dms.warehouse_db import DEFAULT_DB, load_inventory_csv, table_row_counts
 
     counts = table_row_counts(DEFAULT_DB) if DEFAULT_DB.exists() else {}
-    if not counts or sum(counts.values()) == 0:
+    if not counts or sum(counts.values()) == 0 or not _sku_beta_present():
         load_inventory_csv()
+        try:
+            from packs.dms.semantic import values as valuedict
+
+            valuedict.refresh()
+        except Exception:  # noqa: BLE001 — benches still run without the pack
+            pass
 
 
 def score_item(item: GoldenItem) -> ItemResult:

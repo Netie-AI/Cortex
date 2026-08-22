@@ -287,7 +287,8 @@ def _score(question: str, terms: tuple[str, ...], *, base: float = 0.0) -> float
 def _sales_sql(question: str) -> tuple[str, int, str]:
     limit = _extract_limit(question, default=5)
     direction = _rank_direction(question)
-    if "quantity" in question.lower() or "volume" in question.lower() or "kg" in question.lower():
+    qlow = question.lower()
+    if any(term in qlow for term in ("quantity", "volume", "kg", "kilogram", "weight")):
         metric = "total_sold_kg"
     else:
         metric = "sales_value_myr"

@@ -75,11 +75,19 @@ def _explicit_limit(q: str) -> int | None:
     'which warehouse' correctly resolves to 1."""
     from CortexOS.dms.query_service import NUMBER_WORDS
 
+    q = q.lower()
     m = re.search(r"\b(?:top|bottom|first|last|show|give me)\s+(\d{1,4})\b", q) or \
         re.search(r"\b(\d{1,4})\s+(?:warehouses?|locations?|skus?|suppliers?|rows?|results?|items?)\b", q)
     if m:
         return int(m.group(1))
-    mw = re.search(r"\b(?:top|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b", q)
+    mw = re.search(
+        r"\b(?:top|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b",
+        q,
+    ) or re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:highest|best|top|selling|skus?|products?|items?)\b",
+        q,
+    )
     if mw:
         return NUMBER_WORDS[mw.group(1)]
     return None
@@ -221,7 +229,7 @@ def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
         slots["offset_clause"] = start - 1
         slots["limit"] = end - start + 1
     else:
-        slots["limit"] = _extract_limit(q_raw, 5)
+        slots["limit"] = _explicit_limit(q_raw) or _extract_limit(q_raw, 5)
     if excluded:
         slots["exclude_skus"] = excluded
     return slots
@@ -350,7 +358,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # sales ranking (after month/window scalars so "last month sales" never ranks)
     if _wants_sales_rank(q, q_raw):
         slots = _sales_rank_slots(q_raw)
-        if re.search(r"\b(quantity|volume|kg|units?)\b", q):
+        if re.search(r"\b(quantity|volume|kg|kilograms?|weight|units?)\b", q):
             return MetricPlan(
                 "sales_by_volume",
                 slots,
