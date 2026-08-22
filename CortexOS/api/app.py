@@ -123,6 +123,9 @@ def create_app() -> Any:
         register_stream_routes(app)
         register_agent_routes(app)
         register_action_routes(app)
+        from CortexOS.api.constructor_routes import register_constructor_routes
+
+        register_constructor_routes(app)
         try:
             from CortexOS.api.a2a_routes import register_a2a_routes
 
