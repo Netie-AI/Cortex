@@ -105,21 +105,34 @@ jobs:
             echo "No base ref — skipping protected-path diff"
             exit 0
           fi
-          CHANGED="$(git diff --name-only "${BASE_REF}" "${HEAD_REF}" || true)"
-          echo "Changed files:"
-          echo "${CHANGED}"
-          PROTECTED="$(echo "${CHANGED}" | grep -E '^(tests/invariants/|tests/contract/|\.importlinter)' || true)"
-          if [ -z "${PROTECTED}" ]; then
-            echo "No protected paths touched"
-            exit 0
+          # Asked per commit, not once over the squashed range.
+          #
+          # This used to diff BASE..HEAD and then read only `git log -1 HEAD`,
+          # which was wrong in both directions. It failed any multi-commit PR
+          # where the declaring commit was not the tip - a docs commit landing
+          # afterwards was enough. And it passed a PR whose tip happened to say
+          # INVARIANT-CHANGE while an earlier commit quietly gutted a contract
+          # test, which is the direction that matters: the marker was attached
+          # to the wrong thing. CLAUDE.md section 2 says "a commit body must
+          # contain INVARIANT-CHANGE:", and the commit it means is the one doing
+          # the changing.
+          FAILED=0
+          for SHA in $(git rev-list "${BASE_REF}".."${HEAD_REF}"); do
+            TOUCHED="$(git diff-tree --no-commit-id --name-only -r "${SHA}" \
+              | grep -E '^(tests/invariants/|tests/contract/|\.importlinter)' || true)"
+            if [ -z "${TOUCHED}" ]; then
+              continue
+            fi
+            if git log -1 --pretty=%b "${SHA}" | grep -q 'INVARIANT-CHANGE:'; then
+              echo "OK      ${SHA} declares INVARIANT-CHANGE:"
+            else
+              echo "::error::commit ${SHA} changed protected paths without INVARIANT-CHANGE: in its body"
+              git log -1 --format='        %h %s' "${SHA}"
+              echo "${TOUCHED}" | sed 's/^/          /'
+              FAILED=1
+            fi
+          done
+          if [ "${FAILED}" -eq 0 ]; then
+            echo "Every commit touching a protected path declares why."
           fi
-          echo "Protected paths touched:"
-          echo "${PROTECTED}"
-          # Commit body (not subject) must contain INVARIANT-CHANGE:
-          BODY="$(git log -1 --pretty=%b "${HEAD_REF}")"
-          if echo "${BODY}" | grep -q 'INVARIANT-CHANGE:'; then
-            echo "INVARIANT-CHANGE: present in commit body — OK"
-            exit 0
-          fi
-          echo "::error::Protected paths changed without INVARIANT-CHANGE: in the commit body"
-          exit 1
+          exit "${FAILED}"

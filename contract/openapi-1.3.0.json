@@ -1910,6 +1910,17 @@
             "default": "demo",
             "title": "Session Id",
             "type": "string"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
           }
         },
         "required": [
