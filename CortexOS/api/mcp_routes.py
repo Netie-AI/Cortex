@@ -91,6 +91,34 @@ def _tool_catalog() -> list[dict[str, Any]]:
             },
             "read_only": True,
         },
+        {
+            "name": "computer_control.status",
+            "description": (
+                "Probe UACC / computer-control-mcp / Windows-MCP. Read-only. "
+                "Does not move mouse or keyboard. Default disarmed."
+            ),
+            "inputSchema": {"type": "object", "properties": {}},
+            "read_only": True,
+        },
+        {
+            "name": "computer_control.invoke",
+            "description": (
+                "Gated computer-control action (status|screenshot|click|type|move). "
+                "Fail-closed unless CORTEX_COMPUTER_CONTROL=1 and a driver imports. "
+                "This host still will not move input in-process; use a uacc-mcp sidecar."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "text": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            "read_only": False,
+        },
     ]
 
 
@@ -166,6 +194,19 @@ async def mcp_call_tool(
             raise HTTPException(status_code=400, detail={"ok": False, "error": "goal required"})
         result = DISCOVERY_TOOLS[name](**args)
         return {"ok": True, "name": name, "result": result}
+
+    if name == "computer_control.status":
+        from CortexOS.connectors import computer_control as cc
+
+        return {"ok": True, "name": name, "result": cc.probe()}
+
+    if name == "computer_control.invoke":
+        from CortexOS.connectors import computer_control as cc
+
+        action = str(args.get("action") or "").strip()
+        payload = {k: args[k] for k in ("x", "y", "text") if k in args}
+        out = cc.invoke(action, **payload)
+        return {"ok": bool(out.get("ok")), "name": name, "result": out}
 
     raise HTTPException(status_code=404, detail={"ok": False, "error": "unknown_tool"})
 

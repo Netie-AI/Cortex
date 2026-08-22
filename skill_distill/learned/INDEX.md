@@ -2,7 +2,7 @@
 
 Normalized facts from `captures/`. Updated by `scripts/distill_ingest.py`.
 
-_Last ingest: 2026-08-22T14:04:47Z_
+_Last ingest: 2026-08-22T14:34:04Z_
 
 | Date | Capture | Facts | Promotions |
 |------|---------|-------|------------|
@@ -19,6 +19,7 @@ _Last ingest: 2026-08-22T14:04:47Z_
 | 2026-07-29 | `skill_distill/captures/2026-07-29_dms-spaces_chatgpt-for-excel.md` | 0 | — |
 | 2026-07-29 | `skill_distill/captures/2026-07-29_pointer-demo_dms-lake-map.md` | 0 | — |
 | 2026-07-30 | `skill_distill/captures/2026-07-30_cursor_excel-powerbi-demo-loop.md` | 0 | — |
+| 2026-08-22 | `skill_distill/captures/2026-08-22_computer-control-mcp.md` | 6 | parking, rule |
 | 2026-08-22 | `skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md` | 6 | parking, rule |
 
 ## Auto-extracted facts
@@ -90,6 +91,15 @@ _Last ingest: 2026-08-22T14:04:47Z_
 - (high/docs → skill) Built-in Explore uses faster model
 - (high/observed → rule) MCP lazy: GetMcpTools before CallMcpTool
 - (high/observed → rule) Precision = rules+skills+agentic Grep/Read + mode + child brief
+
+### skill_distill/captures/2026-08-22_computer-control-mcp.md
+
+- (high/observed → rule) Computer control MCP servers are catalogued; Cortex probes, does not auto-install
+- (high/observed → rule) Default OFF; CORTEX_COMPUTER_CONTROL=1 arms; EXECUTE=1 still needs a sidecar
+- (high/observed → parking) Windows-MCP cannot run on Linux cloud agents
+- (high/inferred → parking) In-process UACC/PyAutoGUI execute is not wired; uacc-mcp sidecar is the path
+- (high/observed → rule) Constructor Agent UI is GET /api/connectors over the existing dispatch port
+- (high/docs → parking) Scraping sibling repos / Outlier is out of scope
 
 ### skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
 

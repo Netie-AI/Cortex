@@ -19,11 +19,17 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
     ("netie", "orchestration_kb", "CORTEX_WS_NETIE", r"D:\Netie", "Netie KB / orchestration"),
     ("dms", "vertical", "CORTEX_WS_DMS", r"D:\DMS", "DMS consumer vertical"),
     ("chatbot", "normal_chat", "CORTEX_WS_CHATBOT", r"D:\chatbot", "Normal chat product"),
+    ("pointer", "computer_control", "CORTEX_WS_POINTER", r"D:\Pointer", "Pointer / Act computer-control client"),
+    ("omi", "router", "CORTEX_WS_OMI", r"D:\OMI", "OMI router"),
+    ("openvault", "custody", "CORTEX_WS_OPENVAULT", r"D:\OpenVault", "OpenVault key custody"),
 )
 
 _DMS_HINTS = ("dms", "warehouse", "sku", "shipment", "supplier", "inventory")
 _NETIE_HINTS = ("netie", "distill", "kb", "skill_distill")
 _CHAT_HINTS = ("chatbot", "customer chat", "normal chat")
+_POINTER_HINTS = ("pointer", "computer control", "pyautogui", "uacc", "windows-mcp")
+_OMI_HINTS = ("omi", "omii")
+_VAULT_HINTS = ("openvault", "key vault")
 
 
 def _root_for(env_name: str, windows_default: str, workspace_id: str) -> Path:
@@ -68,6 +74,12 @@ def resolve_workspace(text: str, *, kind: str) -> str:
     q = (text or "").lower()
     if any(h in q for h in _CHAT_HINTS):
         return "chatbot"
+    if any(h in q for h in _POINTER_HINTS):
+        return "pointer"
+    if any(h in q for h in _OMI_HINTS):
+        return "omi"
+    if any(h in q for h in _VAULT_HINTS):
+        return "openvault"
     if any(h in q for h in _DMS_HINTS):
         return "dms"
     if any(h in q for h in _NETIE_HINTS):

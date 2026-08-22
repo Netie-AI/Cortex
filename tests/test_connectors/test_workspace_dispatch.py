@@ -74,6 +74,24 @@ def test_unknown_workspace_raises():
         workspaces.get("salesforce")
 
 
+def test_catalog_includes_pointer_omi_openvault():
+    ids = {row["id"] for row in workspaces.catalog()}
+    assert {"pointer", "omi", "openvault"} <= ids
+
+
+def test_pointer_and_omi_language_route():
+    pointer = dispatch("arm uacc computer control on pointer", kind="task")
+    assert pointer["workspace"] == "pointer"
+    omi = dispatch("route this through the omi router", kind="task")
+    assert omi["workspace"] == "omi"
+
+
+def test_workspace_override_pins_agent_surface():
+    out = dispatch("ship a warehouse slice", kind="task", workspace="pointer")
+    assert out["workspace"] == "pointer"
+    assert out["new_cursor_chat"] is True
+
+
 def test_connectors_package_does_not_import_langgraph_or_packs():
     for py in (ROOT / "CortexOS" / "connectors").glob("*.py"):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))

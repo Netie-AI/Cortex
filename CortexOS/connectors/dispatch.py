@@ -12,12 +12,19 @@ from typing import Any
 from CortexOS.connectors import cursor_session, workspaces
 
 
-def dispatch(text: str, *, kind: str | None = None) -> dict[str, Any]:
+def dispatch(
+    text: str,
+    *,
+    kind: str | None = None,
+    workspace: str | None = None,
+) -> dict[str, Any]:
     body = (text or "").strip()
     if not body:
         raise ValueError("dispatch requires a non-empty message")
     resolved_kind = workspaces.infer_kind(body, kind)
-    workspace_id = workspaces.resolve_workspace(body, kind=resolved_kind)
+    workspace_id = (workspace or "").strip().lower() or workspaces.resolve_workspace(
+        body, kind=resolved_kind
+    )
     ws = workspaces.get(workspace_id)
     result: dict[str, Any] = {
         "kind": resolved_kind,

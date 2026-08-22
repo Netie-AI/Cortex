@@ -9,7 +9,9 @@ alwaysApply: false
 distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
 
 - Cortex (DAG / routines / seeker / A2A) is the state engine. Do not add LangGraph, CrewAI, or n8n as a second orchestrator.
-- `kind=task` opens a **new** Cursor chat on the matching workspace (cortex / netie / dms / chatbot).
+- `kind=task` opens a **new** Cursor chat on the matching workspace (cortex / netie / dms / chatbot / pointer / omi / openvault).
 - `kind=chat` stays on the chatbot workspace and must not open a Cursor chat.
 - Workspace roots come from `CORTEX_WS_*`. `D:\Cortex`, `D:\Netie`, `D:\DMS`, `D:\chatbot` are Windows defaults, not required paths.
 - Engine holds `CursorSessionPort`. Do not pretend this process can click the Cursor sidebar.
+- Computer control (UACC, computer-control-mcp, Windows-MCP) is a **probe**. Default OFF. Arm with `CORTEX_COMPUTER_CONTROL=1`. Moving input also needs `CORTEX_COMPUTER_CONTROL_EXECUTE=1` on a Windows sidecar. Never install UACC/PyAutoGUI just to make a cloud-agent test green. Never a keylogger.
+- Constructor Agent UI is `GET /api/connectors`. Agents post into dispatch; Pointer reports the probe. Money Gainer / Outlier scraping is parked.

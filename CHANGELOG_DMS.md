@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Constructor desk + computer-control probe — 2026-08-22
+
+Operator desk at `GET /api/connectors` (Constructor-style sidebar). Agents
+post into the existing dispatch port. Pointer reports the computer-control
+probe. UACC / computer-control-mcp / Windows-MCP are catalogued. Default
+OFF. Invoke fails closed. This Linux host cannot attach Windows-MCP and does
+not `pip install uacc`. MCP tools: `computer_control.status` (read-only),
+`computer_control.invoke` (gated). Workspaces add pointer / omi / openvault.
+distill: skill_distill/captures/2026-08-22_computer-control-mcp.md
+
 ## Workspace + Cursor connectors — 2026-08-22
 
 Cortex is the orchestration layer. Cursor is a worker surface. Normal chat

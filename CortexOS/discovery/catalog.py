@@ -55,6 +55,13 @@ def load_ref_items(*, kinds: Iterable[str] | None = None) -> list[RefItem]:
             if kind_set is not None and item.kind not in kind_set:
                 continue
             items.append(item)
+        if kind == "mcp":
+            for raw in _load_json_items(REFS_DIR / "cortex_mcp.json"):
+                try:
+                    item = RefItem(**raw)
+                except Exception:
+                    continue
+                items.append(item)
     return items
 
 
