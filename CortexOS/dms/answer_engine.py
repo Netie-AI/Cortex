@@ -280,7 +280,10 @@ _SUBJECT_SKIP = frozenset({
     "active", "open", "unresolved", "current", "delayed", "expired",
     "incoming", "arriving", "stale", "low", "free", "spare", "available",
     "cold", "storage", "how", "many", "number", "count", "which", "what",
-    "show", "list", "find", "get", "do", "we", "have",
+    "show", "list", "find", "get", "do", "did", "does", "we", "have", "has",
+    "had", "it", "its", "they", "them", "you", "i", "us", "me",
+    "previous", "prior", "next", "month", "week", "day", "days", "year",
+    "quarter", "average", "avg", "mean",
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
 })
 _SUBJECT_MEASURES = frozenset({
@@ -294,10 +297,12 @@ _TABLE_SUBJECT_ALIASES: dict[str, tuple[str, ...]] = {
     "inventory": (
         "sku", "skus", "item", "items", "product", "products",
         "inventory", "stock", "category", "categories",
+        "chemical", "chemicals",
     ),
     "suppliers": ("supplier", "suppliers", "vendor", "vendors"),
     "locations": (
         "warehouse", "warehouses", "location", "locations", "site", "sites",
+        "cctv", "camera",
     ),
     "shipments": (
         "shipment", "shipments", "consignment", "consignments",
@@ -342,16 +347,26 @@ def _answerable_entities() -> tuple[str, ...]:
     )
 
 
-def _first_content_noun(text: str) -> str | None:
-    for tok in re.findall(r"[a-z][a-z0-9_-]*", (text or "").lower()):
+def _subject_from_span(span: str, known: dict[str, str]) -> str | None:
+    """Prefer a known entity in the span; otherwise the first leftover noun.
+
+    ``which high-risk suppliers`` must resolve to suppliers, not the adjective.
+    ``top 3 customers by amount`` has no known entity, so customers stands.
+    """
+    first_unknown: str | None = None
+    for tok in re.findall(r"[a-z][a-z0-9_-]*", (span or "").lower()):
         if tok in _SUBJECT_SKIP or tok in _SUBJECT_MEASURES:
             continue
-        return tok
-    return None
+        if tok in known:
+            return tok
+        if first_unknown is None:
+            first_unknown = tok
+    return first_unknown
 
 
-def _named_subject(q: str) -> str | None:
+def _named_subject(q: str, known: dict[str, str] | None = None) -> str | None:
     """Subject noun of a ranking/count/listing, or None when the ask is a measure."""
+    known = known if known is not None else _known_subject_map()
     m = re.search(
         r"\b(?:top|bottom|first|last)\s+(?:\d+|one|two|three|four|five|"
         r"six|seven|eight|nine|ten)\s+(.+)",
@@ -361,24 +376,24 @@ def _named_subject(q: str) -> str | None:
         q,
     )
     if m:
-        noun = _first_content_noun(m.group(1))
+        noun = _subject_from_span(m.group(1), known)
         if noun:
             return noun
     m = re.search(r"\b(?:how many|number of|count of)\s+(.+)", q)
     if m:
-        noun = _first_content_noun(m.group(1))
+        noun = _subject_from_span(m.group(1), known)
         if noun:
             return noun
     m = re.search(r"\b(?:which|what)\s+(.+)", q)
     if m:
         rest = m.group(1)
         if not re.match(r"^(?:is|are|was|were|do|does|did|can|will|would|has|have)\b", rest):
-            noun = _first_content_noun(rest)
+            noun = _subject_from_span(rest, known)
             if noun:
                 return noun
     m = re.search(r"\b(?:show|list|find|get)(?:\s+me)?(?:\s+all)?(?:\s+the)?\s+(.+)", q)
     if m:
-        noun = _first_content_noun(m.group(1))
+        noun = _subject_from_span(m.group(1), known)
         if noun:
             return noun
     m = re.search(

@@ -193,3 +193,19 @@ def test_known_sku_rank_still_answers() -> None:
     text = body.get("answer") or ""
     assert "SKU-" in text
     assert "can't answer" not in text.lower()
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "List chemicals in inventory",
+        "Which high-risk suppliers have pending shipments?",
+        "Show the CCTV camera for warehouse A",
+    ],
+)
+def test_known_entity_questions_still_answer(question: str) -> None:
+    assert undefined_subject(question) is None
+    body = answer_question(question)
+    assert body["route"] == "sql"
+    assert body["rows"]
+    assert body["badge"] != "abstain"
