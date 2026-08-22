@@ -19,12 +19,20 @@ def register_engine_seams() -> None:
 
     ``CortexOS`` may not import ``packs.*``, so the arrow points this way instead:
     the engine declares the seam, we fill it. Runs on import, so ``import
-    packs.dms`` — or anything under it — is enough to light the ledger up.
+    packs.dms`` — or anything under it — is enough to light the ledger and L2
+    generator up.
     """
     from CortexOS.audit import register_ledger
+    from CortexOS.dms.l2_registry import register_l2
     from packs.dms.audit import ledger
+    from packs.dms.generative import promotion, schema_retrieval, sql_generator
 
     register_ledger(ledger)
+    register_l2(
+        sql_generator=sql_generator,
+        schema_retrieval=schema_retrieval,
+        promotion=promotion,
+    )
 
 
 register_engine_seams()
