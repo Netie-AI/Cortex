@@ -10,7 +10,13 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from CortexOS.dms.sql_guardrail import AuditEntry, audit_log, log_audit, validate_sql
+from CortexOS.dms.sql_guardrail import (
+    AuditEntry,
+    audit_log,
+    guard_and_execute,  # noqa: F401 — re-export; F7 PII test patches this symbol
+    log_audit,
+    validate_sql,
+)
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
     get_connection,

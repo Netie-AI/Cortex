@@ -12,7 +12,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from CortexOS.execution.session_manifests import reset_session_registry_for_tests
-from tests.dms.session_manifest import bind_warehouse_session
+from tests.dms.session_manifest import (
+    bind_warehouse_session,
+    install_auto_bind,
+    uninstall_auto_bind,
+)
 
 IN_MANIFEST_QUESTION = "How many SKUs do we have in inventory?"
 OUT_OF_MANIFEST_QUESTION = "Which suppliers have a risk score above 0.7?"
@@ -45,10 +49,12 @@ def _post_query(client: TestClient, question: str, session_id: str) -> dict:
     return body
 
 
-@pytest.mark.no_auto_manifest
 def test_unbound_session_refuses_on_envelope(dms_client: TestClient) -> None:
-    reset_session_registry_for_tests()
-    env = _post_query(dms_client, IN_MANIFEST_QUESTION, "nobody")
+    uninstall_auto_bind()
+    try:
+        env = _post_query(dms_client, IN_MANIFEST_QUESTION, "nobody")
+    finally:
+        install_auto_bind()
     assert env["badge"] == "blocked"
     assert env["route"] == "blocked"
     assert "SessionUnbound" in env["violations_blocked"]

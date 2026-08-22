@@ -46,3 +46,48 @@ def bind_warehouse_session(
     verified = warehouse_verified(session_id, tables=tables)
     get_session_registry().bind(verified)
     return verified
+
+
+def install_auto_bind() -> None:
+    """Patch resolve so tests that never bind still hit enforce_manifest.
+
+    Not a production grant. Tests that need a truly unbound session should
+    call :func:`uninstall_auto_bind` first.
+    """
+    from CortexOS.execution.session_manifests import SessionUnbound
+
+    registry = get_session_registry()
+    if getattr(registry, "_cortex6_auto_bind", False):
+        return
+    original = registry.resolve
+
+    def resolve(session_id, *, now=None):
+        try:
+            return original(session_id, now=now)
+        except SessionUnbound:
+            sid = (session_id or "demo").strip() or "demo"
+            bind_warehouse_session(sid)
+            return original(sid, now=now)
+
+    registry.resolve = resolve  # type: ignore[method-assign]
+    registry._cortex6_auto_bind = True  # type: ignore[attr-defined]
+    registry._cortex6_resolve_original = original  # type: ignore[attr-defined]
+    bind_warehouse_session("demo")
+
+
+def uninstall_auto_bind() -> None:
+    from CortexOS.execution.session_manifests import (
+        SessionManifestRegistry,
+        reset_session_registry_for_tests,
+    )
+
+    registry = get_session_registry()
+    original = getattr(registry, "_cortex6_resolve_original", None)
+    if original is not None:
+        registry.resolve = original  # type: ignore[method-assign]
+    else:
+        registry.resolve = SessionManifestRegistry.resolve.__get__(
+            registry, SessionManifestRegistry
+        )
+    registry._cortex6_auto_bind = False  # type: ignore[attr-defined]
+    reset_session_registry_for_tests()
