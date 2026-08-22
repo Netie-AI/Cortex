@@ -261,6 +261,21 @@ def _extract_limit(question: str, *, default: int = 100) -> int:
     if word_match:
         return NUMBER_WORDS[word_match.group(1)]
 
+    word_superlative = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:highest|best|selling|top)\b",
+        q,
+    )
+    if word_superlative:
+        return NUMBER_WORDS[word_superlative.group(1)]
+
+    noun_count = re.search(
+        r"\b(\d{1,5})\s+(?:skus?|products?|items?|warehouses?|locations?)\b",
+        q,
+    )
+    if noun_count:
+        return min(max(int(noun_count.group(1)), 1), 1000)
+
     if re.search(r"\b(top|bottom|best|worst|highest|lowest|most|least)\b", q):
         return 5
     return min(max(default, 1), 1000)
@@ -281,7 +296,7 @@ def _score(question: str, terms: tuple[str, ...], *, base: float = 0.0) -> float
 def _sales_sql(question: str) -> tuple[str, int, str]:
     limit = _extract_limit(question, default=5)
     direction = _rank_direction(question)
-    if "quantity" in question.lower() or "volume" in question.lower() or "kg" in question.lower():
+    if any(tok in question.lower() for tok in ("quantity", "volume", "kg", "kilogram", "weight")):
         metric = "total_sold_kg"
     else:
         metric = "sales_value_myr"

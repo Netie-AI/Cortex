@@ -37,6 +37,8 @@ ROUTES = [
     ("suppliers with risk over 0.7", "suppliers_by_risk"),
     ("show me utilisation across locations", "capacity_utilisation"),
     ("what has not been topped up in a month", "stale_restock"),
+    ("three highest selling SKUs by weight", "sales_by_volume"),
+    ("which 3 SKUs moved the most kilograms", "sales_by_volume"),
 ]
 
 
@@ -88,6 +90,14 @@ def test_slots_are_read_from_the_original_question() -> None:
     most = route_to_metric("which site has the most spare space")
     assert most is not None and most.metric_id == "free_capacity"
     assert most.slots["direction"] == "DESC"
+
+    by_weight = route_to_metric("three highest selling SKUs by weight")
+    assert by_weight is not None and by_weight.metric_id == "sales_by_volume"
+    assert by_weight.slots["limit"] == 3
+
+    by_kg = route_to_metric("which 3 SKUs moved the most kilograms")
+    assert by_kg is not None and by_kg.metric_id == "sales_by_volume"
+    assert by_kg.slots["limit"] == 3
 
 
 def test_normalization_is_idempotent() -> None:

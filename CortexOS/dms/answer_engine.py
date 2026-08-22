@@ -356,7 +356,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # sales ranking (after month/window scalars so "last month sales" never ranks)
     if _wants_sales_rank(q, q_raw):
         slots = _sales_rank_slots(q_raw)
-        if re.search(r"\b(quantity|volume|kg|units?)\b", q):
+        if re.search(r"\b(quantity|volume|kg|kilograms?|weight|units?)\b", q):
             return MetricPlan(
                 "sales_by_volume",
                 slots,

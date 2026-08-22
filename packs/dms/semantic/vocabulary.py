@@ -94,6 +94,9 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\b(?:past|last)\s+thirty\s+days\b", "last 30 days"),
     (r"\bworth\b", "stock value"),
     (r"\bturn(?:ed)?\s+over\b", "turnover"),
+    # sales rank: weight / kilograms are volume, not revenue
+    (r"\bkilograms?\b", "kg"),
+    (r"\bby weight\b", "by quantity"),
 )
 
 _COMPILED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
