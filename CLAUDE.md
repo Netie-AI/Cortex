@@ -103,6 +103,7 @@ so nobody later reads the corpus as proof that it can.
   fast-forwarded onto main mid-session here and an `--amend` landed on their commit.
   Never rewrite a commit you did not author.
 - Stage precise paths. `git add -A` in this repo picks up other lanes' work in progress.
+- **Merge when perfect** (not draft, required CI green, mergeable, no conflicts). CI job `auto-merge` squash-merges. Cloud-agent `gh` is read-only.
 - `.cursor/` is tracked but outside this checkout's sparse cone; it needs
   `git add --sparse`.
 - **The project that drives DMS**: talk to Cortex over HTTP through the generated

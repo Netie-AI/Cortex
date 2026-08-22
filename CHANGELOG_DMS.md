@@ -2,6 +2,13 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Auto-merge perfect PRs — 2026-08-22
+
+CI job `auto-merge` squash-merges a non-draft PR when lint-type-test,
+base-install, protected-paths, rls-proof, and secrets-scan are all SUCCESS
+and the PR is mergeable. Drafts, dirty/behind, and failed checks stay open.
+Rule: `.cursor/rules/merge-perfect.mdc`.
+
 ## Constructor desk + computer-control probe — 2026-08-22
 
 Operator desk at `GET /api/connectors` (Constructor-style sidebar). Agents

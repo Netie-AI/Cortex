@@ -1,5 +1,8 @@
 # STATUS.md
-**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Constructor desk + computer-control probe
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** auto-merge perfect PRs
+
+> **2026-08-22 (auto-merge):** CI job `auto-merge` squash-merges non-draft PRs when
+> every required check is green. Rule `.cursor/rules/merge-perfect.mdc`.
 
 > **2026-08-22 (constructor + computer control):** `GET /api/connectors` is
 > a Constructor-style agent desk. Computer control (UACC, computer-control-mcp,

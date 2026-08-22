@@ -18,7 +18,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "C",
         "color": "#388bfd",
         "role": "Orchestrate builds across repos",
-        "blurb": "Orchestrate builds across repos",
     },
     {
         "id": "verify",
@@ -27,7 +26,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "V",
         "color": "#f778ba",
         "role": "Gates, pytest, honesty checks",
-        "blurb": "Gates, pytest, honesty checks",
     },
     {
         "id": "devops",
@@ -36,7 +34,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "D",
         "color": "#39d353",
         "role": "CI, tickets, landings",
-        "blurb": "CI, tickets, landings",
     },
     {
         "id": "ux",
@@ -45,7 +42,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "U",
         "color": "#f85149",
         "role": "Chat and UI copy",
-        "blurb": "Chat and UI copy",
     },
     {
         "id": "pointer",
@@ -54,7 +50,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "P",
         "color": "#8b949e",
         "role": "Computer control / Act",
-        "blurb": "Computer control / Act",
     },
     {
         "id": "ticket",
@@ -63,7 +58,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "T",
         "color": "#d29922",
         "role": "Seat work on a ticket",
-        "blurb": "Seat work on a ticket",
     },
     {
         "id": "pr",
@@ -72,7 +66,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "R",
         "color": "#58a6ff",
         "role": "Open and update pull requests",
-        "blurb": "Open and update pull requests",
     },
     {
         "id": "prd",
@@ -81,7 +74,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "S",
         "color": "#8b949e",
         "role": "Spec and acceptance",
-        "blurb": "Spec and acceptance",
     },
     {
         "id": "seo",
@@ -90,7 +82,6 @@ _ROSTER: tuple[dict[str, str], ...] = (
         "icon": "E",
         "color": "#1f6feb",
         "role": "Discovery and exposure",
-        "blurb": "Discovery and exposure",
     },
 )
 
@@ -110,7 +101,7 @@ def roster() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in _ROSTER:
         msgs = _INBOX.get(row["id"]) or []
-        snippet = msgs[-1]["text"] if msgs else row["blurb"]
+        snippet = msgs[-1]["text"] if msgs else row["role"]
         item = dict(row)
         item["snippet"] = snippet[:80]
         item["unread"] = False

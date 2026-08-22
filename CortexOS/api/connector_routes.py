@@ -111,8 +111,8 @@ def _ui_html() -> str:
 <style>{_UI_CSS}</style></head>
 <body><div class="app">
 <aside class="side">
-  <input class="search" placeholder="Search" aria-label="Search agents">
-  <div class="agents">{agent_list}</div>
+  <input class="search" id="search" placeholder="Search" aria-label="Search agents">
+  <div class="agents" id="agentlist">{agent_list}</div>
   <div class="foot">Plugins · Cortex operator desk · Not LangGraph</div>
 </aside>
 <main class="main">
@@ -125,12 +125,8 @@ def _ui_html() -> str:
   <div class="pane" id="pane">
     <p class="sn">NEW</p>
     <div class="msg"><div class="who">system</div>
-      Pick an agent in the sidebar. Pointer Agent reports the computer-control
-      probe (UACC / computer-control-mcp / Windows-MCP). This Linux host cannot
-      attach Windows-MCP. Mouse/keyboard stay off unless
-      <code>CORTEX_COMPUTER_CONTROL_EXECUTE=1</code> on a Windows sidecar running
-      <code>uacc-mcp</code>. New <b>task</b> opens a new Cursor chat. Normal
-      <b>chat</b> stays on chatbot.</div>
+      New <b>task</b> opens a Cursor chat. <b>chat</b> stays on chatbot. Not LangGraph.
+      Computer control is off until a Windows sidecar is armed.</div>
   </div>
   <div class="composer">
     <form id="f">
@@ -173,6 +169,12 @@ function escapeHtml(s) {{
 document.querySelectorAll('.agent').forEach(el => el.addEventListener('click', e => {{
   e.preventDefault(); pick(el.dataset.id);
 }}));
+document.getElementById('search').addEventListener('input', e => {{
+  const q = e.target.value.toLowerCase();
+  document.querySelectorAll('.agent').forEach(el => {{
+    el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+  }});
+}});
 document.getElementById('f').addEventListener('submit', async e => {{
   e.preventDefault();
   const text = ph.value.trim();
