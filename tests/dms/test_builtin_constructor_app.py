@@ -8,7 +8,7 @@ from CortexOS.execution import app_store
 def test_builtin_constructor_is_hosted_and_not_deletable(tmp_path, monkeypatch):
     monkeypatch.setattr(app_store, "DB_PATH", tmp_path / "apps.db")
     monkeypatch.setattr(app_store, "APPS_ROOT", tmp_path / "apps")
-    monkeypatch.setenv("CONSTRUCTOR_SKIN_DIR", r"D:\Constructor")
+    monkeypatch.delenv("CONSTRUCTOR_SKIN_DIR", raising=False)
     app_store.init()
 
     seeded = app_store.ensure_builtin_constructor()

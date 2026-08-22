@@ -7,7 +7,6 @@ HTML GET needs a valid API key cookie or X-API-Key. Login form is the only open 
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from CortexOS.paths import constructor_skin_dir
 from packs.dms.security.api_auth import (
     Caller,
     extract_api_key,
@@ -54,8 +54,7 @@ def _require_loopback(request: Request, action: str) -> None:
 
 
 def _skin_dir() -> Path:
-    raw = (os.environ.get("CONSTRUCTOR_SKIN_DIR") or r"D:\Constructor").strip()
-    return Path(raw)
+    return constructor_skin_dir()
 
 
 def _caller_from_request(
@@ -276,9 +275,10 @@ async def constructor_run(
     body: ConstructorRunBody,
     caller: Caller = Depends(require_constructor_viewer),
 ) -> dict[str, Any]:
-    from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
     from netie.execution.dag_runner import ExecutionContext, run_dag
     from netie.execution.model_router import ModelRouter
+
+    from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
 
     try:
         program = compile_constructor_graph({"nodes": body.nodes, "edges": body.edges})

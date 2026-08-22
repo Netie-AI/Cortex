@@ -13,7 +13,6 @@ OpenVault + FreeBuild lane, never this module.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import sqlite3
 import threading
@@ -23,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.execution import app_package
-from CortexOS.paths import data_path
+from CortexOS.paths import constructor_skin_dir, data_path
 
 DB_PATH = data_path("engine", "apps.db")
 APPS_ROOT = data_path("apps")
@@ -108,11 +107,7 @@ def get_app(app_id: str) -> dict[str, Any] | None:
 def ensure_builtin_constructor(*, skin_dir: str | Path | None = None) -> dict[str, Any]:
     """Register Constructor as a hosted Cortex app (no extra process, no extra port)."""
     init()
-    skin = Path(
-        skin_dir
-        or os.environ.get("CONSTRUCTOR_SKIN_DIR")
-        or r"D:\Constructor"
-    )
+    skin = Path(skin_dir) if skin_dir is not None else constructor_skin_dir()
     now = time.time()
     manifest = {
         "schema": app_package.MANIFEST_SCHEMA,

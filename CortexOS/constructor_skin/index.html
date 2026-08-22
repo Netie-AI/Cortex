@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Constructor — Netie</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <div class="eyebrow">NETIE / CONSTRUCTOR</div>
+        <h1>Constructor</h1>
+        <p class="lede">
+          Chat builds a DAG. Ghost dry-runs it. Cortex is the only engine.
+          Path: connector -&gt; ontology -&gt; insight -&gt; foundry -&gt; app.
+        </p>
+        <p class="hint" id="power">Checking origin.</p>
+      </div>
+      <div class="actions">
+        <input id="cortex-key" type="password" autocomplete="off" placeholder="OpenVault key (ov_...)" />
+        <button type="button" id="ghost-toggle" class="ghost">Ghost off</button>
+        <button type="button" id="propose">Propose 3</button>
+        <button type="button" id="maximize">Maximize</button>
+        <button type="button" id="run-graph">Run</button>
+        <button type="button" id="export-json">Export JSON</button>
+        <button type="button" id="reset-graph" class="ghost">Reset sample</button>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="rail">
+        <div class="eyebrow">NODES</div>
+        <button type="button" data-add="ingest">Ingest</button>
+        <button type="button" data-add="connector">Connector</button>
+        <button type="button" data-add="ontology">Ontology</button>
+        <button type="button" data-add="insight">Insight</button>
+        <button type="button" data-add="foundry">Foundry</button>
+        <button type="button" data-add="app">App</button>
+        <button type="button" data-add="agent">Agent</button>
+        <button type="button" data-add="hypothesize">Hypothesize</button>
+        <button type="button" data-add="improve">Improve</button>
+        <button type="button" data-add="audit">Audit</button>
+        <button type="button" data-add="tool_call">Tool call</button>
+        <p class="hint">
+          Drag. Port-to-port to wire. Chat can do the same.
+        </p>
+      </aside>
+
+      <main class="stage" id="stage">
+        <svg id="wires" aria-hidden="true"></svg>
+        <div id="nodes"></div>
+      </main>
+
+      <aside class="inspect" id="inspect">
+        <div class="eyebrow">AUDIT</div>
+        <p class="hint" id="inspect-empty">Select a node, or ghost-run the graph.</p>
+        <pre id="inspect-json" hidden></pre>
+        <div class="eyebrow">APPROACHES</div>
+        <div id="approaches" class="approaches"></div>
+      </aside>
+    </div>
+
+    <section class="chat" aria-label="ChatGPT-style Constructor control">
+      <div class="eyebrow">CHATGPT CONTROL</div>
+      <div id="chat-log" class="chat-log"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea
+          id="chat-input"
+          rows="2"
+          placeholder="foundry path. ghost run. propose 3. maximize. run."
+        ></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </section>
+
+    <script src="app.js"></script>
+    <script src="engine.js"></script>
+  </body>
+</html>

@@ -31,7 +31,7 @@ def api_keys_env(monkeypatch):
     )
     monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("CONSTRUCTOR_SKIN_DIR", r"D:\Constructor")
+    monkeypatch.delenv("CONSTRUCTOR_SKIN_DIR", raising=False)
     return {"viewer": "sk-viewer-test"}
 
 
@@ -71,7 +71,19 @@ def test_login_open_constructor_redirects_without_key(dms_client):
     assert "/cortex/login" in bare.headers["location"]
 
 
-def test_constructor_html_requires_key(dms_client, api_keys_env):
+def test_vendored_skin_is_served_without_laptop_path(dms_client, api_keys_env):
+    from CortexOS.paths import constructor_skin_dir
+
+    skin = constructor_skin_dir()
+    assert (skin / "index.html").is_file()
+    assert (skin / "engine.js").is_file()
+    res = dms_client.get(
+        "/cortex/constructor/engine.js",
+        headers={"X-API-Key": api_keys_env["viewer"]},
+        follow_redirects=False,
+    )
+    assert res.status_code == 200
+    assert b"cortexOrigin" in res.content
     denied = dms_client.get("/cortex/constructor/", follow_redirects=False)
     assert denied.status_code == 303
     ok = dms_client.get(
