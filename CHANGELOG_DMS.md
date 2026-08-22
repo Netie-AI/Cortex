@@ -30,7 +30,8 @@ include `SKU-BETA` so G4 value-normalization gates can resolve `BETA` (the
 generator already emitted it; the committed samples did not). Autostart tests
 skip when powershell is absent — assertions unchanged when it is present.
 Volume paraphrases ("by weight", "kilograms") now reach `sales_by_volume`
-with the spoken limit (three / 3 SKUs).
+with the spoken limit (three / 3 SKUs). Autostart tests skip on non-Windows
+(Linux CI has `pwsh` but no `%APPDATA%` Startup folder); tests kept.
 
 
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27

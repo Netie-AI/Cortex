@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,10 @@ ROOT = Path(__file__).resolve().parents[2]
 START_PS1 = ROOT / "scripts" / "start_cortex_engine.ps1"
 INSTALL_PS1 = ROOT / "scripts" / "install_engine_autostart.ps1"
 _SHELL = shutil.which("pwsh") or shutil.which("powershell")
+_WINDOWS = sys.platform == "win32"
 
 
+@pytest.mark.skipif(not _WINDOWS, reason="Windows Startup-folder scripts")
 @pytest.mark.skipif(_SHELL is None, reason="powershell not installed")
 @pytest.mark.skipif(not START_PS1.is_file(), reason="start script missing")
 def test_start_cortex_engine_dry_run():
@@ -43,6 +46,7 @@ def test_start_cortex_engine_dry_run():
     assert "8010" in hint.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(not _WINDOWS, reason="Windows Startup-folder scripts")
 @pytest.mark.skipif(_SHELL is None, reason="powershell not installed")
 @pytest.mark.skipif(not INSTALL_PS1.is_file(), reason="install script missing")
 def test_install_engine_autostart_dry_run():
