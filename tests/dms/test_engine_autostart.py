@@ -1,6 +1,7 @@
 """A1 — engine autostart dry-run + AirGPT ensure_engine helpers."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -9,11 +10,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 START_PS1 = ROOT / "scripts" / "start_cortex_engine.ps1"
 INSTALL_PS1 = ROOT / "scripts" / "install_engine_autostart.ps1"
+_POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
 @pytest.mark.skipif(not START_PS1.is_file(), reason="start script missing")
+@pytest.mark.skipif(_POWERSHELL is None, reason="powershell not on PATH")
 def test_start_cortex_engine_dry_run():
-    shell = "powershell"
+    shell = _POWERSHELL
     r = subprocess.run(
         [
             shell,
@@ -41,8 +44,9 @@ def test_start_cortex_engine_dry_run():
 
 
 @pytest.mark.skipif(not INSTALL_PS1.is_file(), reason="install script missing")
+@pytest.mark.skipif(_POWERSHELL is None, reason="powershell not on PATH")
 def test_install_engine_autostart_dry_run():
-    shell = "powershell"
+    shell = _POWERSHELL
     r = subprocess.run(
         [
             shell,
