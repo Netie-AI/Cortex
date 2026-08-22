@@ -118,6 +118,13 @@ def _explicit_limit(q: str) -> int | None:
     mw = re.search(r"\b(?:top|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b", q)
     if mw:
         return NUMBER_WORDS[mw.group(1)]
+    mw = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:highest|best|selling|skus?|warehouses?|locations?|suppliers?|items?)\b",
+        q,
+    )
+    if mw:
+        return NUMBER_WORDS[mw.group(1)]
     return None
 
 
@@ -257,7 +264,7 @@ def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
         slots["offset_clause"] = start - 1
         slots["limit"] = end - start + 1
     else:
-        slots["limit"] = _extract_limit(q_raw, 5)
+        slots["limit"] = _explicit_limit(q_raw) or _extract_limit(q_raw, 5)
     if excluded:
         slots["exclude_skus"] = excluded
     return slots

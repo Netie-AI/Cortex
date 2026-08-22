@@ -10,6 +10,15 @@ from packs.dms.generative import literal_normalize, promotion, schema_retrieval,
 from packs.dms.semantic import values as valuedict
 
 
+@pytest.fixture(scope="module", autouse=True)
+def ensure_db():
+    from bench.accuracy import _ensure_db_loaded
+
+    _ensure_db_loaded()
+    valuedict.refresh()
+    yield
+
+
 def test_schema_retrieval_is_reduced():
     schema = schema_retrieval.retrieve("delayed shipments by carrier", top_k=3)
     tables = schema.get("tables") or {}

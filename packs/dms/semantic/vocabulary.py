@@ -89,6 +89,11 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\bcamera feed\b", "cctv"),
 
     # ── measures ───────────────────────────────────────────────────────────
+    # Volume rank looks for \b(quantity|volume|kg|units?)\b. "kilograms" and
+    # "by weight" are the same ask; without this they compile as sales_by_value
+    # (confidently wrong).
+    (r"\bkilograms?\b", "kg"),
+    (r"\bby weight\b", "by kg"),
     (r"\b(?:typical|mean)\b", "average"),
     (r"\btrailing month\b", "last 30 days"),
     (r"\b(?:past|last)\s+thirty\s+days\b", "last 30 days"),

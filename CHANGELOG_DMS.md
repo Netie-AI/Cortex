@@ -21,6 +21,11 @@ self-issued grant already contained every table.
 - C2: L2 generation no longer imports `packs.dms.generative` from
   `answer_engine`. The engine holds `L2GenerationPort`; `attempt_l2` lives on
   that seam. Pack registers the adapter. No C2 ignore added.
+- Sample warehouse now includes `SKU-BETA` in inventory and one IN
+  transaction so G4 `BETA` -> `SKU-BETA` can resolve. OUT rankings unchanged.
+  PowerShell autostart tests skip when `powershell` is not on PATH.
+- Vocabulary maps `kilograms` / `by weight` to the volume rank the router
+  already knows, so those paraphrases stop compiling as sales-by-value.
 
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
