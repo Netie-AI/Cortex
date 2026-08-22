@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
+from CortexOS.dms.sql_guardrail import AuditEntry, audit_log, log_audit, validate_sql
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
     get_connection,
@@ -886,20 +886,34 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     return answer, sources
 
 
-def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+def answer_question(
+    question: str,
+    *,
+    session_id: str | None = None,
+    verified: Any = None,
+) -> dict[str, Any]:
     """Q2 — route through the layered answer engine (certified → governed metric →
-    abstain). Falls back to the legacy heuristic path only if the engine is
-    unavailable, so behavior degrades safely rather than breaking.
+    abstain). Warehouse execute always requires a VerifiedManifest (Cortex#6).
 
     Bridge: when the engine abstains but a ranked legacy SQL template still matches
-    (delayed shipments / sales / supplier ranking), serve the legacy path so
-    pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+    (delayed shipments / sales / supplier ranking), serve that SQL through
+    ``execute_sql`` so pre-Q2 demo queries keep working without an ungoverned path.
     """
-    try:
-        from CortexOS.dms.answer_engine import answer as _engine_answer
-        from CortexOS.execution.manifest import ManifestError
+    from CortexOS.dms.answer_engine import answer as _engine_answer
+    from CortexOS.dms.answer_engine import manifest_refusal
+    from CortexOS.execution.manifest import ManifestError, VerifiedManifest
+    from CortexOS.execution.session_manifests import SessionExpired, SessionUnbound
 
-        result = _engine_answer(question, session_id=session_id)
+    if not isinstance(verified, VerifiedManifest):
+        from CortexOS.dms.answer_engine import _require_verified
+
+        resolved = _require_verified(session_id, None)
+        if not isinstance(resolved, VerifiedManifest):
+            return resolved
+        verified = resolved
+
+    try:
+        result = _engine_answer(question, session_id=session_id, verified=verified)
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
         # until a dedicated governed metric exists. Word-boundary match only — bare
         # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
@@ -909,17 +923,45 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
             and re.search(r"\b(delayed|late)\b", q)
             and _try_generate_ranked_sql(question)
         ):
-            return _answer_question_legacy(question, session_id=session_id)
+            return _answer_question_legacy(
+                question, session_id=session_id, verified=verified
+            )
         return result
-    except ManifestError:
-        # Never swallow manifest/security refusals into the legacy path.
-        raise
+    except ManifestError as exc:
+        return manifest_refusal(exc)
+    except (SessionUnbound, SessionExpired) as exc:
+        return manifest_refusal(exc)
     except Exception:  # noqa: BLE001 — engine failure must not take the API down
-        return _answer_question_legacy(question, session_id=session_id)
+        return {
+            "answer": "I can't answer that from the DMS semantic layer right now.",
+            "sql_used": None,
+            "chart_spec": None,
+            "audit_id": str(uuid.uuid4()),
+            "violations_blocked": [],
+            "route": "needs_clarification",
+            "rows": [],
+            "source_table": None,
+            "layer": "abstain",
+            "badge": "abstain",
+        }
 
 
-def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
-    del session_id
+def _answer_question_legacy(
+    question: str,
+    *,
+    session_id: str | None = None,
+    verified: Any = None,
+) -> dict[str, Any]:
+    from CortexOS.dms.answer_engine import _require_verified, manifest_refusal
+    from CortexOS.execution.manifest import ManifestError, VerifiedManifest
+    from CortexOS.execution.submit import execute_sql
+
+    if not isinstance(verified, VerifiedManifest):
+        resolved = _require_verified(session_id, None)
+        if not isinstance(resolved, VerifiedManifest):
+            return resolved
+        verified = resolved
+
     audit_id = str(uuid.uuid4())
     route = route_question(question)
     semantic = load_semantic_layer()
@@ -974,11 +1016,22 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     sql = generate_sql(question, semantic)
     query_plan = plan_query(question, sql)
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
-    try:
-        guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-    finally:
-        con.close()
+    guard_result = validate_sql(sql, semantic)
+    entry = AuditEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        original_sql=sql,
+        safe_sql=guard_result.safe_sql,
+        violations=guard_result.violations,
+        passed=guard_result.passed,
+    )
+    rows: list[dict] = []
+    if guard_result.passed and guard_result.safe_sql:
+        try:
+            rows, _, _ = execute_sql(verified, guard_result.safe_sql)
+            entry.row_count = len(rows)
+        except ManifestError as exc:
+            return manifest_refusal(exc, audit_id=audit_id)
+    log_audit(entry)
 
     alerts_summary = get_alerts_summary()
     show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))

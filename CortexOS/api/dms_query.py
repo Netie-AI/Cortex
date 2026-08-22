@@ -92,9 +92,22 @@ def register_dms_routes(app: Any) -> None:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
+        from CortexOS.dms.answer_engine import manifest_refusal
         from CortexOS.dms.query_service import answer_question
+        from CortexOS.execution.session_manifests import (
+            SessionExpired,
+            SessionUnbound,
+            get_session_registry,
+        )
 
-        out = answer_question(body.question, session_id=body.session_id)
+        try:
+            verified = get_session_registry().resolve(body.session_id)
+        except (SessionUnbound, SessionExpired) as exc:
+            return manifest_refusal(exc)
+
+        out = answer_question(
+            body.question, session_id=body.session_id, verified=verified
+        )
         # Mark when warehouse tables were synced from lake.silver (medallion path).
         if out.get("query_source") is None:
             out["query_source"] = os.environ.get(

@@ -1,5 +1,9 @@
 # STATUS.md
-**Last updated:** 2026-07-29 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Cortex#6 / SEC-01 `/dms/query` manifest enforce · Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+
+> **2026-08-22 (Cortex#6 / SEC-01):** `POST /dms/query` requires a bound `VerifiedManifest`.
+> Ungoverned no-manifest execute is gone. Envelope carries `PathNotAllowed` /
+> `StatementNotAllowed` / `SqlNotAnalyzable`. No engine-minted grant (Cortex#42 out of scope).
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
 > **2026-07-29 (Pointer demo + DMS Excel-swamp week):**

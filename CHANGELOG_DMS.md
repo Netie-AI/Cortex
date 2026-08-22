@@ -2,6 +2,18 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Cortex#6 / SEC-01 — /dms/query requires a verified session manifest — 2026-08-22
+
+`POST /dms/query` now resolves the session's `VerifiedManifest` and executes only
+through `execute_sql` → `enforce_manifest`. The ungoverned no-manifest
+`guard_and_execute` branch in `answer()` is deleted, not left unreachable.
+Refusals (`PathNotAllowed`, `StatementNotAllowed`, `SqlNotAnalyzable`,
+`SessionUnbound`) land on the customer envelope (`violations_blocked` +
+`badge=blocked`). The engine does not mint a self-issued grant (P0-DEMO-02 /
+Cortex#42 remain out of scope). In-manifest warehouse questions still answer.
+Newly abstaining corpus items: none expected; report any in the PR if the
+answer corpus regresses.
+
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
 **New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:

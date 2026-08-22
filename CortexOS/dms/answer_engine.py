@@ -28,9 +28,7 @@ import sqlglot
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
-    guard_and_execute,
     log_audit,
-    validate_sql,
 )
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
@@ -38,7 +36,7 @@ from CortexOS.dms.warehouse_db import (
     load_semantic_layer,
     read_only_queries_enabled,
 )
-from CortexOS.execution.manifest import VerifiedManifest
+from CortexOS.execution.manifest import ManifestError, VerifiedManifest
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
 ABSTAIN = "needs_clarification"
@@ -428,6 +426,51 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
     return seen
 
 
+def manifest_refusal(
+    exc: BaseException,
+    *,
+    audit_id: str | None = None,
+) -> dict[str, Any]:
+    """Customer envelope for a typed manifest refusal (Cortex#6 / SEC-01)."""
+    name = type(exc).__name__
+    code = getattr(exc, "code", "manifest_error")
+    return {
+        "answer": f"This query is not permitted under the session manifest ({name}).",
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id or str(uuid.uuid4()),
+        "violations_blocked": [name],
+        "route": "blocked",
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "blocked",
+        "badge": "blocked",
+        "assumptions": f"{code}: {exc}",
+        "total_count": 0,
+        "suggestions": [],
+    }
+
+
+def _require_verified(
+    session_id: str | None,
+    verified: VerifiedManifest | None,
+) -> VerifiedManifest | dict[str, Any]:
+    """Return a VerifiedManifest or a refusal envelope. Never mint a grant."""
+    if verified is not None:
+        return verified
+    from CortexOS.execution.session_manifests import (
+        SessionExpired,
+        SessionUnbound,
+        get_session_registry,
+    )
+
+    try:
+        return get_session_registry().resolve(session_id or "demo")
+    except (SessionUnbound, SessionExpired) as exc:
+        return manifest_refusal(exc)
+
+
 def _abstain(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
     suggestions = _suggestions(question)
     hint = " Try: " + " · ".join(f'"{s}"' for s in suggestions)
@@ -692,6 +735,11 @@ def answer(
     )
     from packs.dms.semantic import query_skills
 
+    bound = _require_verified(session_id, verified)
+    if not isinstance(bound, VerifiedManifest):
+        return bound
+    verified = bound
+
     audit_id = str(uuid.uuid4())
     route = route_question(question)
 
@@ -872,67 +920,50 @@ def answer(
         return _abstain(question, audit_id, reason="no governed metric or certified query matched")
 
     semantic = load_semantic_layer()
-    # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).
-    # Legacy callers keep the old connection + guard_and_execute path.
-    if verified is not None:
-        from datetime import datetime, timezone
+    # Every warehouse execute goes through C4 submit (enforce_manifest).
+    from datetime import datetime, timezone
 
-        from CortexOS.execution.submit import execute_sql
-        from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
+    from CortexOS.execution.submit import execute_sql
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
 
-        gate = run_gate(sql, semantic)
-        guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
-        entry = AuditEntry(
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            original_sql=sql,
-            safe_sql=gate.safe_sql,
-            violations=gate.violations,
-            passed=gate.passed,
-        )
-        if not gate.passed or not gate.safe_sql:
-            log_audit(entry)
-            rows = []
-            total_count = None
-        elif session_rows is not None and len(session_rows) > 0 and layer == "session":
-            rows = session_rows
-            total_count = len(rows)
-            entry.row_count = len(rows)
-            log_audit(entry)
-        else:
-            try:
-                rows, _, _ = execute_sql(verified, gate.safe_sql)
-            except SqlGateAbstain as exc:
-                entry.passed = False
-                entry.violations = list(exc.violations)
-                log_audit(entry)
-                return _abstain(
-                    question,
-                    audit_id,
-                    reason=f"SQL validation gate: {exc}",
-                )
-            total_count = _true_count(gate.safe_sql, verified=verified)
-            entry.row_count = len(rows)
-            log_audit(entry)
+    gate = run_gate(sql, semantic)
+    guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
+    entry = AuditEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        original_sql=sql,
+        safe_sql=gate.safe_sql,
+        violations=gate.violations,
+        passed=gate.passed,
+    )
+    if not gate.passed or not gate.safe_sql:
+        log_audit(entry)
+        rows = []
+        total_count = None
+    elif session_rows is not None and len(session_rows) > 0 and layer == "session":
+        rows = session_rows
+        total_count = len(rows)
+        entry.row_count = len(rows)
+        log_audit(entry)
     else:
-        # Every statement that reaches here has passed the read-only guardrail, so a
-        # read-only handle is always sufficient. It is opt-in (DMS_READ_ONLY_QUERIES)
-        # because it also has to be safe for the writer in this process — see
-        # warehouse_db.read_only_queries_enabled.
-        con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
         try:
-            if session_rows is not None and len(session_rows) > 0 and layer == "session":
-                # Precomputed AVG (literal SELECT still guardrail-checked)
-                guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-                if guard_result.passed:
-                    rows = session_rows
-                total_count = len(rows) if guard_result.passed else None
-            else:
-                guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-                total_count = (
-                    _true_count(guard_result.safe_sql, con) if guard_result.passed else None
-                )
-        finally:
-            con.close()
+            rows, _, _ = execute_sql(verified, gate.safe_sql)
+        except ManifestError as exc:
+            entry.passed = False
+            entry.violations = [type(exc).__name__]
+            log_audit(entry)
+            return manifest_refusal(exc, audit_id=audit_id)
+        except SqlGateAbstain as exc:
+            entry.passed = False
+            entry.violations = list(exc.violations)
+            log_audit(entry)
+            return _abstain(
+                question,
+                audit_id,
+                reason=f"SQL validation gate: {exc}",
+            )
+        total_count = _true_count(gate.safe_sql, verified=verified)
+        entry.row_count = len(rows)
+        log_audit(entry)
 
     if not guard_result.passed:
         return _abstain(question, audit_id,
