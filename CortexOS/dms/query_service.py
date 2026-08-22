@@ -1149,12 +1149,12 @@ def answer_question(
     this session may read.
     """
     from CortexOS.dms.answer_engine import (
+        UngroundedSession,
+        _abstain_no_grant,
         resolve_grant,
         stamp_grant,
         ungrounded_tables,
     )
-
-    from CortexOS.dms.answer_engine import UngroundedSession, _abstain_no_grant
 
     try:
         grant, kind, degraded = resolve_grant(

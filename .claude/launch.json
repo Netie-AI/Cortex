@@ -2,10 +2,22 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dms-v3",
-      "runtimeExecutable": "C:\\Users\\user\\RUMA\\Cortex\\myenv\\Scripts\\python.exe",
-      "runtimeArgs": ["C:\\Users\\user\\Playground\\Apps\\DMS\\app.py"],
-      "port": 8010
+      "name": "cortex",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "CortexOS.api.app:create_app",
+        "--factory",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8010"
+      ],
+      "port": 8010,
+      "env": {
+        "PACK": "dms"
+      }
     }
   ]
 }

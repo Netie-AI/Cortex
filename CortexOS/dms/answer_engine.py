@@ -1298,12 +1298,21 @@ def _abstain_no_grant(question: str, audit_id: str, *, reason: str) -> dict[str,
     ``grant_kind`` is reported as ``none`` rather than omitted. A field that
     disappears reads as 'not applicable'; the point is that the value is known
     and it is nothing (R-0011).
+
+    The message names binding a grant and does **not** name selecting a Space,
+    which is the instruction it obviously wants to give. Selecting one does not
+    ground anything today: ``space_id`` reaches the engine and scopes document
+    retrieval and session history, but nothing mints a grant from it, so a turn
+    carrying only a Space still lands here. Telling a customer to do something
+    that does not work is the same defect as answering them wrongly, one step
+    earlier. Cortex#42 closes it; this line changes when that does.
     """
     return {
         "answer": (
             "I can't answer that yet - nothing is grounding this session "
-            f"({reason}). Select a Space, or bind a session grant, and ask again. "
-            "Until then I have no sources to read and would be guessing."
+            f"({reason}). Bind a session grant naming the sources you want me to "
+            "read, then ask again. Until then I have nothing to read and would "
+            "be guessing."
         ),
         "sql_used": None,
         "chart_spec": None,
