@@ -30,7 +30,6 @@ from CortexOS.dms.sql_guardrail import (
     AuditEntry,
     guard_and_execute,
     log_audit,
-    validate_sql,
 )
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
@@ -986,9 +985,9 @@ def answer(
         # Never fall back to the L1 keyword cascade or a smaller model.
         if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
             try:
+                from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
                 from packs.dms.generative import promotion as l2_promotion
                 from packs.dms.generative import schema_retrieval, sql_generator
-                from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
             except ImportError:  # noqa: BLE001
                 return _abs("no verified answer path (L2 import failed)")
 
@@ -1070,8 +1069,8 @@ def answer(
     if verified is not None:
         from datetime import datetime, timezone
 
-        from CortexOS.execution.submit import execute_sql
         from CortexOS.dms.sql_validate_gate import SqlGateAbstain, run_gate
+        from CortexOS.execution.submit import execute_sql
 
         gate = run_gate(sql, semantic)
         guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
