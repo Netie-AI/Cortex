@@ -25,7 +25,10 @@ writer resolve different files, or if a second CortexOS module hardcodes
 **CI (lint-type-test).** Regenerated `contract/openapi-1.2.0.json` so the live
 `ExportRequest` (`format`, default table `inventory`) matches `--check`.
 Corrected 1.0/1.1 `.sha256` sidecars to the LF bytes git stores (sidecars were
-hashed from CRLF working copies). Frozen JSON specs unchanged.
+hashed from CRLF working copies). Frozen JSON specs unchanged. Clean CSVs now
+include `SKU-BETA` so G4 value-normalization gates can resolve `BETA` (the
+generator already emitted it; the committed samples did not). Autostart tests
+skip when powershell is absent — assertions unchanged when it is present.
 
 
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
