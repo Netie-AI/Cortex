@@ -48,6 +48,7 @@ _C2_ALLOWLIST = {
     "sidecar_routes.py",
     "a2a_routes.py",
     "mcp_routes.py",
+    "constructor_routes.py",
     "discovery_routes.py",
     "app.py",
     "telemetry_routes.py",

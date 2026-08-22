@@ -33,6 +33,7 @@ ignore_imports =
     CortexOS.api.sidecar_routes -> packs.**
     CortexOS.api.a2a_routes -> packs.**
     CortexOS.api.mcp_routes -> packs.**
+    CortexOS.api.constructor_routes -> packs.**
     CortexOS.api.discovery_routes -> packs.**
     CortexOS.api.app -> packs.**
     CortexOS.api.telemetry_routes -> packs.**
