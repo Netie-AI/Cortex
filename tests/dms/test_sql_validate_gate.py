@@ -56,6 +56,31 @@ def test_retry_exhausted_abstains(semantic):
         gate_with_retry(bad, "x", semantic, con=None, max_retries=2)
     assert attempts["n"] == 3  # initial + 2 retries
     assert ei.value.violations
+    # FF-03 (dms#59): the abstain reason the customer sees is built as
+    # f"...: {exc}", so the *why* must survive str(). A message that names only
+    # "exhausted retries" and strands the violations on .violations is the defect.
+    rendered = str(ei.value)
+    assert "exhausted retries" in rendered
+    for v in ei.value.violations:
+        assert v in rendered, f"violation {v!r} dropped from str(SqlGateAbstain)"
+
+
+def test_str_carries_violations():
+    """str() folds the violations into the message so no call site drops them."""
+    exc = SqlGateAbstain(
+        "SQL validation gate exhausted retries",
+        violations=["unknown column revenue_usd", "unbound table sales"],
+    )
+    rendered = str(exc)
+    assert "SQL validation gate exhausted retries" in rendered
+    assert "unknown column revenue_usd" in rendered
+    assert "unbound table sales" in rendered
+
+
+def test_str_without_violations_is_bare_message():
+    """No violations — the message is unchanged, no dangling separator."""
+    exc = SqlGateAbstain("SQL validation gate exhausted retries")
+    assert str(exc) == "SQL validation gate exhausted retries"
 
 
 def test_l2_without_model_abstains(monkeypatch):

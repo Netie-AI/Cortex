@@ -24,11 +24,27 @@ class ValidateGateResult:
 
 
 class SqlGateAbstain(Exception):
-    """Raised when validation/EXPLAIN retries are exhausted — caller must abstain."""
+    """Raised when validation/EXPLAIN retries are exhausted — caller must abstain.
+
+    The violations ride in ``str(exc)``, not only on the attribute. Every abstain
+    reason downstream is built as ``f"...: {exc}"`` (see answer_engine), so a
+    ``__str__`` that dropped them stranded the *why* on ``.violations`` — the
+    customer's envelope said "SQL validation gate exhausted retries" and never
+    named the unknown column or unbound table that actually caused it. The
+    sibling raise in ``execution/submit.py`` already folds its detail into the
+    message; this fixes the class so every raise site does, not one of them
+    (R-0004).
+    """
 
     def __init__(self, message: str, *, violations: list[str] | None = None) -> None:
-        super().__init__(message)
+        self.base_message = message
         self.violations = list(violations or [])
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        if not self.violations:
+            return self.base_message
+        return f"{self.base_message}: {'; '.join(self.violations)}"
 
 
 def explain_dry_run(con: Any, sql: str) -> tuple[bool, str]:
