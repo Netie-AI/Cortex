@@ -270,7 +270,154 @@ def _sales_rank_slots(q_raw: str) -> dict[str, Any]:
     return slots
 
 
+# Words that sit next to a ranking/count but are not the subject entity.
+_SUBJECT_SKIP = frozenset({
+    "the", "a", "an", "our", "my", "their", "this", "that", "these", "those",
+    "selling", "sold", "ranked", "performing", "highest", "lowest",
+    "best", "worst", "top", "bottom", "most", "least", "first", "last",
+    "by", "of", "in", "for", "with", "from", "at", "on", "to", "and",
+    "all", "any", "some", "each", "per", "total", "overall",
+    "active", "open", "unresolved", "current", "delayed", "expired",
+    "incoming", "arriving", "stale", "low", "free", "spare", "available",
+    "cold", "storage", "how", "many", "number", "count", "which", "what",
+    "show", "list", "find", "get", "do", "we", "have",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+})
+_SUBJECT_MEASURES = frozenset({
+    "amount", "revenue", "sales", "value", "volume", "quantity", "kg",
+    "units", "unit", "cost", "price", "risk", "capacity", "utilisation",
+    "utilization", "spend", "score", "time", "days", "percent", "weight",
+    "kilograms",
+})
+# Alias token -> display name. Only counted as known when that table exists.
+_TABLE_SUBJECT_ALIASES: dict[str, tuple[str, ...]] = {
+    "inventory": (
+        "sku", "skus", "item", "items", "product", "products",
+        "inventory", "stock", "category", "categories",
+    ),
+    "suppliers": ("supplier", "suppliers", "vendor", "vendors"),
+    "locations": (
+        "warehouse", "warehouses", "location", "locations", "site", "sites",
+    ),
+    "shipments": (
+        "shipment", "shipments", "consignment", "consignments",
+        "carrier", "carriers",
+    ),
+    "transactions": ("transaction", "transactions"),
+    "alerts": ("alert", "alerts", "warning", "warnings"),
+}
+_TABLE_DISPLAY: dict[str, str] = {
+    "inventory": "SKUs",
+    "suppliers": "suppliers",
+    "locations": "warehouses",
+    "shipments": "shipments",
+    "transactions": "transactions",
+    "alerts": "alerts",
+}
+
+
+def _known_subject_map() -> dict[str, str]:
+    """token -> display name for entities the loaded semantic layer defines."""
+    tables = {
+        str(name).lower()
+        for name in (load_semantic_layer().get("tables") or {})
+    }
+    out: dict[str, str] = {}
+    for table, aliases in _TABLE_SUBJECT_ALIASES.items():
+        if table not in tables:
+            continue
+        display = _TABLE_DISPLAY[table]
+        for alias in aliases:
+            out[alias] = display
+    return out
+
+
+def _answerable_entities() -> tuple[str, ...]:
+    tables = {
+        str(name).lower()
+        for name in (load_semantic_layer().get("tables") or {})
+    }
+    return tuple(
+        _TABLE_DISPLAY[t] for t in _TABLE_DISPLAY if t in tables
+    )
+
+
+def _first_content_noun(text: str) -> str | None:
+    for tok in re.findall(r"[a-z][a-z0-9_-]*", (text or "").lower()):
+        if tok in _SUBJECT_SKIP or tok in _SUBJECT_MEASURES:
+            continue
+        return tok
+    return None
+
+
+def _named_subject(q: str) -> str | None:
+    """Subject noun of a ranking/count/listing, or None when the ask is a measure."""
+    m = re.search(
+        r"\b(?:top|bottom|first|last)\s+(?:\d+|one|two|three|four|five|"
+        r"six|seven|eight|nine|ten)\s+(.+)",
+        q,
+    ) or re.search(
+        r"\b(?:top|bottom|best|worst|highest|lowest|most|least)\s+(.+)",
+        q,
+    )
+    if m:
+        noun = _first_content_noun(m.group(1))
+        if noun:
+            return noun
+    m = re.search(r"\b(?:how many|number of|count of)\s+(.+)", q)
+    if m:
+        noun = _first_content_noun(m.group(1))
+        if noun:
+            return noun
+    m = re.search(r"\b(?:which|what)\s+(.+)", q)
+    if m:
+        rest = m.group(1)
+        if not re.match(r"^(?:is|are|was|were|do|does|did|can|will|would|has|have)\b", rest):
+            noun = _first_content_noun(rest)
+            if noun:
+                return noun
+    m = re.search(r"\b(?:show|list|find|get)(?:\s+me)?(?:\s+all)?(?:\s+the)?\s+(.+)", q)
+    if m:
+        noun = _first_content_noun(m.group(1))
+        if noun:
+            return noun
+    m = re.search(
+        r"\b([a-z][a-z0-9_-]*)\s+by\s+(?:amount|revenue|sales|value|volume)\b",
+        q,
+    )
+    if m:
+        token = m.group(1)
+        if token not in _SUBJECT_SKIP and token not in _SUBJECT_MEASURES:
+            return token
+    return None
+
+
+def undefined_subject(question: str) -> str | None:
+    """Named subject the semantic layer does not define, else None.
+
+    ``top 3 customers by amount`` names customers. ``total revenue`` names none.
+    """
+    from packs.dms.semantic.vocabulary import normalize_for_routing
+
+    subject = _named_subject(normalize_for_routing(question))
+    if subject is None:
+        return None
+    if subject in _known_subject_map():
+        return None
+    return subject
+
+
+def _subject_allows_sales_rank(q: str) -> bool:
+    """Sales rank is SKUs. A named non-SKU subject must not become a SKU list."""
+    subject = _named_subject(q)
+    if subject is None:
+        return True
+    return _known_subject_map().get(subject) == "SKUs"
+
+
 def _wants_sales_rank(q: str, q_raw: str) -> bool:
+    if not _subject_allows_sales_rank(q):
+        return False
     if re.search(r"\b(top|best|highest|most)\b", q) and re.search(
         r"\b(sell|sold|revenue|sales|sku|skus|revnue)\b", q
     ):
@@ -927,6 +1074,13 @@ def answer(
     # L0 certified → L1 metric → L-skill → L3 abstain
     # Skills run after governed routes so golden/certified paths stay authoritative.
     if sql is None:
+        unknown = undefined_subject(question)
+        if unknown:
+            named = ", ".join(_answerable_entities())
+            return _abs(
+                f"the question names '{unknown}', which the semantic layer does "
+                f"not define; it can answer about {named}"
+            )
         cq = match_certified(question)
         if cq is not None:
             sql, layer, badge = cq.sql, "certified", "certified"

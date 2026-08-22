@@ -1,5 +1,11 @@
 # STATUS.md
-**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Unbound session abstain (founder spec 2026-08-22)
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** ANS-04 unknown-subject abstain (Cortex#39)
+
+> **2026-08-22 (ANS-04 / Cortex#39):** A question that names a subject the
+> semantic layer does not define (customers) no longer answers as SKUs under
+> `governed_metric`. The engine abstains and names the entities it can answer
+> about. Asserted on rendered text and rows. Unbound still abstains (#45).
+> Bound demo-table questions still answer (R-0005). Did not mint a Space grant.
 
 > **2026-08-22 (unbound session abstain):** `POST /dms/query` with no binding
 > (or a self-issued wide grant, e.g. `session_id=demo-unbound`) now abstains.

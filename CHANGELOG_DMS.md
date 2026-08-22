@@ -2,6 +2,20 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## ANS-04 unknown subject abstain — 2026-08-22
+
+`answer("top 3 customers by amount")` was badged `governed_metric` and rendered
+as Top 3 sales over SKU rows. There is no customers table. `_wants_sales_rank`
+matched bare `top N` and ignored the unconsumed subject noun. A correct grant
+did not make the substitution honest (different from #14/#45 unbound).
+
+- Named subject nouns are checked against the semantic layer's tables/aliases
+  before L0/L1/skills. An undefined subject abstains and names the entities
+  the layer can answer about.
+- Sales rank will not compile when the named subject is not a SKU.
+- Bound demo-table questions still answer (R-0005). Unbound still abstains.
+- Asserted on rendered text and rows, not SQL.
+
 ## Unbound session must abstain — 2026-08-22
 
 A session with no binding was answering from the demo warehouse on
