@@ -37,7 +37,22 @@ ROUTES = [
     ("suppliers with risk over 0.7", "suppliers_by_risk"),
     ("show me utilisation across locations", "capacity_utilisation"),
     ("what has not been topped up in a month", "stale_restock"),
+    ("three highest selling SKUs by weight", "sales_by_volume"),
+    ("which 3 SKUs moved the most kilograms", "sales_by_volume"),
 ]
+
+
+@pytest.mark.parametrize(
+    "question,limit",
+    [
+        ("three highest selling SKUs by weight", 3),
+        ("which 3 SKUs moved the most kilograms", 3),
+    ],
+)
+def test_volume_paraphrases_keep_asked_limit(question: str, limit: int) -> None:
+    plan = route_to_metric(question)
+    assert plan is not None and plan.metric_id == "sales_by_volume"
+    assert plan.slots.get("limit") == limit
 
 
 @pytest.mark.parametrize("question,metric_id", ROUTES)

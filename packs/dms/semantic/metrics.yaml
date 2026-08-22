@@ -111,7 +111,7 @@ metrics:
 
   - id: sales_by_volume
     kind: ranked
-    synonyms: ["top by quantity", "most sold by kg", "volume sold", "quantity sold"]
+    synonyms: ["top by quantity", "most sold by kg", "volume sold", "quantity sold", "by weight", "most kilograms"]
     result_columns: [sku, total_sold_kg]
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg

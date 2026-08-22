@@ -261,6 +261,20 @@ def _extract_limit(question: str, *, default: int = 100) -> int:
     if word_match:
         return NUMBER_WORDS[word_match.group(1)]
 
+    counted = re.search(
+        r"\b(\d{1,5})\s+(?:skus?|products?|items?)\b",
+        q,
+    )
+    if counted:
+        return min(max(int(counted.group(1)), 1), 1000)
+    counted_word = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:highest|lowest|best|worst|top|most)\b",
+        q,
+    )
+    if counted_word:
+        return NUMBER_WORDS[counted_word.group(1)]
+
     if re.search(r"\b(top|bottom|best|worst|highest|lowest|most|least)\b", q):
         return 5
     return min(max(default, 1), 1000)
@@ -281,7 +295,8 @@ def _score(question: str, terms: tuple[str, ...], *, base: float = 0.0) -> float
 def _sales_sql(question: str) -> tuple[str, int, str]:
     limit = _extract_limit(question, default=5)
     direction = _rank_direction(question)
-    if "quantity" in question.lower() or "volume" in question.lower() or "kg" in question.lower():
+    qlow = question.lower()
+    if any(tok in qlow for tok in ("quantity", "volume", "kg", "kilogram", "weight")):
         metric = "total_sold_kg"
     else:
         metric = "sales_value_myr"
