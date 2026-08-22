@@ -2,6 +2,21 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## FF-03 — L2 gate abstention names the actual SQL violations — 2026-08-22
+
+`SqlGateAbstain` already stored `violations` (unknown column, unbound table,
+disallowed construct, EXPLAIN failure) and `gate_with_retry` passed them in.
+`Exception.__str__` only returns `args[0]`, so `answer_engine` interpolated
+`{exc}` as "SQL validation gate exhausted retries" and threw the cause away.
+
+`SqlGateAbstain.__str__` now appends the violation list. Any future
+`str(exc)` / `f"{exc}"` site keeps the refusals (R-0004). The sibling
+EXPLAIN raise in `execution/submit.py` still puts DuckDB detail in the
+message. Test: `test_sql_gate_abstain_str_includes_violations` fails if
+violations disappear from `str(SqlGateAbstain)`.
+
+GitHub: Netie-AI/dms#59 (Cortex-side).
+
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
 **New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:

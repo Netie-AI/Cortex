@@ -45,6 +45,43 @@ def test_explain_passes_valid_select(semantic):
         con.close()
 
 
+def test_sql_gate_abstain_str_includes_violations():
+    """R-0004: str(SqlGateAbstain) must carry the gate's refusal list.
+
+    answer_engine interpolates ``{exc}`` into the L2 abstention reason. If
+    violations stay only on the attribute, callers see 'exhausted retries'
+    and lose unknown-column / unbound-table / disallowed-construct detail.
+    """
+    violations = [
+        "UNKNOWN_COLUMN:not_a_col",
+        "UNKNOWN_TABLE:ghost",
+        "DDL_ATTEMPT",
+    ]
+    exc = SqlGateAbstain(
+        "SQL validation gate exhausted retries",
+        violations=violations,
+    )
+    text = str(exc)
+    assert "exhausted retries" in text
+    for item in violations:
+        assert item in text, f"str(SqlGateAbstain) dropped {item!r}: {text!r}"
+    # f-string / answer_engine path uses the same conversion
+    assert "UNKNOWN_COLUMN:not_a_col" in f"L2 generation failed validation gate: {exc}"
+
+
+def test_explain_abstain_str_keeps_detail():
+    """Sibling EXPLAIN raise already puts detail in the message; keep it."""
+    detail = "Referenced column \"nope\" not found in FROM clause"
+    exc = SqlGateAbstain(
+        f"EXPLAIN rejected SQL: {detail}",
+        violations=[f"EXPLAIN_FAILED:{detail}"],
+    )
+    text = str(exc)
+    assert "EXPLAIN rejected SQL" in text
+    assert detail in text
+    assert "EXPLAIN_FAILED" in text
+
+
 def test_retry_exhausted_abstains(semantic):
     attempts = {"n": 0}
 
@@ -56,6 +93,9 @@ def test_retry_exhausted_abstains(semantic):
         gate_with_retry(bad, "x", semantic, con=None, max_retries=2)
     assert attempts["n"] == 3  # initial + 2 retries
     assert ei.value.violations
+    reason = str(ei.value)
+    for item in ei.value.violations:
+        assert item in reason, f"exhausted-retries path dropped {item!r}: {reason!r}"
 
 
 def test_l2_without_model_abstains(monkeypatch):

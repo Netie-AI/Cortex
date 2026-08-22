@@ -1,5 +1,5 @@
 # STATUS.md
-**Last updated:** 2026-07-29 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** FF-03 L2 gate reason names violations (`SqlGateAbstain.__str__`) · Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
 > **2026-07-29 (Pointer demo + DMS Excel-swamp week):**

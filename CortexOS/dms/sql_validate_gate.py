@@ -30,6 +30,14 @@ class SqlGateAbstain(Exception):
         super().__init__(message)
         self.violations = list(violations or [])
 
+    def __str__(self) -> str:
+        # R-0004: str(exc) / f"{exc}" must carry the refusal list, not only
+        # the generic message (answer_engine interpolates this into the reason).
+        base = super().__str__()
+        if not self.violations:
+            return base
+        return f"{base}: {'; '.join(self.violations)}"
+
 
 def explain_dry_run(con: Any, sql: str) -> tuple[bool, str]:
     """Run EXPLAIN without executing the query body. Returns (ok, detail)."""
