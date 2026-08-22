@@ -7,8 +7,9 @@ answer engine still abstains.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from CortexOS.dms.sql_guardrail import GuardrailResult, validate_sql
 
