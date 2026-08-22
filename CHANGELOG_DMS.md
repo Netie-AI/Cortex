@@ -2,6 +2,18 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Workspace + Cursor connectors — 2026-08-22
+
+Cortex is the orchestration layer. Cursor is a worker surface. Normal chat
+goes to the chatbot workspace; every new **task** opens a **new** Cursor chat
+on cortex / netie / dms / chatbot (env `CORTEX_WS_*`, Windows defaults
+`D:\Cortex` `D:\Netie` `D:\DMS` `D:\chatbot`). Retrieve + instruct live on
+`CursorSessionPort`. No LangGraph. No sidebar clicks (parked).
+
+HTTP: `GET /api/connectors` (UI), `/workspaces`, `POST /dispatch`,
+`/cursor/chats`, `/cursor/chats/{id}/messages`, `/instruct`.
+distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
+
 ## ANS-04 unknown subject abstain — 2026-08-22
 
 `answer("top 3 customers by amount")` was badged `governed_metric` and rendered

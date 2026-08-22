@@ -53,6 +53,7 @@ def create_app() -> Any:
     from netie.api.search import register_search_routes
 
     from CortexOS import __version__ as engine_version
+    from CortexOS.api.connector_routes import register_connector_routes
     from CortexOS.api.contract_routes import register_contract_routes
     from CortexOS.api.feature_stubs import (
         AGENTIC_STUB_ROUTES,
@@ -61,6 +62,7 @@ def create_app() -> Any:
     from CortexOS.packaging import extra_available
 
     register_contract_routes(app)
+    register_connector_routes(app)
     register_search_routes(app)
     register_dag_run_routes(app)
     register_engine_routes(app)

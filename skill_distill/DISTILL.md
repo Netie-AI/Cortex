@@ -7,7 +7,7 @@
 | Root | `skill_distill/` |
 | Policy | Capture → Normalize → Learn → Promote (rules/skills/subagents) → Parking-lot if deferred |
 | Owners | Netie engine (Cortex) builders |
-| Last process | 2026-07-30T13:57:26Z (1 capture(s) ingested) |
+| Last process | 2026-08-22T14:04:47Z (14 capture(s) ingested) |
 
 ---
 
@@ -110,6 +110,7 @@ Use this when starting a full distill sprint. Check boxes only after a capture e
 - [x] Rules (user / project), skills, AGENTS.md
 - [x] Browser / Playwright automation path
 - [x] Model routing / Composer vs frontier _(live 2026-07-25 — `captures/2026-07-25_cursor_model-routing-multitask.md`)_
+- [x] Cortex as the loop (connectors: new-task Cursor chat, normal chat = chatbot) _(2026-08-22 — `captures/2026-08-22_cursor_orchestration-outside-editor.md`)_
 
 ### Netie engine mapping (must answer for each topic)
 - [x] What Cortex already has
