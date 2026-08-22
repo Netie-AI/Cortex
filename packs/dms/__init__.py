@@ -22,9 +22,45 @@ def register_engine_seams() -> None:
     packs.dms`` — or anything under it — is enough to light the ledger up.
     """
     from CortexOS.audit import register_ledger
+    from CortexOS.dms.l2_generation import register_l2_generation
     from packs.dms.audit import ledger
+    from packs.dms.generative import promotion, schema_retrieval, sql_generator
 
     register_ledger(ledger)
+    register_l2_generation(
+        _PackL2Generation(sql_generator, schema_retrieval, promotion)
+    )
+
+
+class _PackL2Generation:
+    """Thin adapter so CortexOS.dms.answer_engine never imports packs.* (C2)."""
+
+    def __init__(self, sql_generator: Any, schema_retrieval: Any, promotion: Any) -> None:
+        self._sql = sql_generator
+        self._schema = schema_retrieval
+        self._promo = promotion
+
+    def is_configured(self) -> bool:
+        return bool(self._sql.is_configured())
+
+    def retrieve(self, question: str) -> dict[str, Any]:
+        return self._schema.retrieve(question)
+
+    def generate_candidates(
+        self,
+        question: str,
+        schema: dict[str, Any] | None = None,
+        *,
+        prior_violations: list[str] | None = None,
+    ) -> list[str]:
+        return list(
+            self._sql.generate_candidates(
+                question, schema, prior_violations=prior_violations
+            )
+        )
+
+    def record_validated(self, question: str, sql: str) -> Any:
+        return self._promo.record_validated(question, sql)
 
 
 register_engine_seams()
