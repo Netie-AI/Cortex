@@ -186,31 +186,123 @@ def _location(question: str) -> str | None:
 
 _EXCLUSION_STOP = re.compile(
     r"\b(?:what|show|list|give|find|get|top|bottom|best|worst|highest|lowest|"
-    r"ranked?|numbers?|ranks?|selling|sold)\b",
+    r"ranked?|numbers?|ranks?|selling|sold|"
+    r"tunjukkan|tunjuk|senaraikan|senarai|bagi|papar|paparkan)\b",
     re.I,
 )
+# Fillers only. Conjunctions live here so they can be stripped when trailing,
+# and must not be copied into `_EXCLUSION_STOP` - that is the ANS-01 class.
 _EXCLUSION_SKIP = frozenset(
-    {"THE", "A", "AN", "SKU", "AND", "OR", "FROM", "BY", "OF", "ALL", "ANY"}
+    {
+        "THE", "A", "AN", "SKU", "SKUS", "AND", "OR", "FROM", "BY", "OF", "ALL",
+        "ANY", "DARI", "DALAM", "DAN", "ATAU", "YANG", "ITU", "INI",
+    }
 )
+_EXCLUSION_VERB_RE = re.compile(
+    r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|"
+    r"without|except|"
+    r"kecuali|buang|selain|keluarkan)\s+(?:the\s+)?(.+)",
+    flags=re.I,
+)
+_EXCLUSION_JOINER_RE = re.compile(r"[,/]+|\b(?:and|or|dan|atau)\b", re.I)
+_SKU_SHAPED_RE = re.compile(r"^SKU[-_]?[A-Za-z0-9]+$", re.I)
+
+
+def _strip_trailing_filler(clause: str) -> str:
+    """Drop filler the clause ends on, so the resolver sees only entities.
+
+    ANS-01. `_EXCLUSION_STOP` used to decide where the clause ends and omitted
+    ``and`` / ``dan``; `_EXCLUSION_SKIP` contained them. The stop path then
+    handed ``sku-beta and`` to the fuzzy resolver, which cannot match exactly.
+    One list decides the trailing strip (R-0004). Only *trailing* tokens go, so
+    ``ignore BETA and GAMMA`` keeps the joiner.
+    """
+    tokens = clause.split()
+    while tokens and tokens[-1].strip("'\".,").upper() in _EXCLUSION_SKIP:
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def _resolves_at_all(text: str) -> bool:
+    token = text.strip().strip("'\".,")
+    if not token:
+        return False
+    try:
+        from packs.dms.semantic import values as vd
+
+        res = vd.resolve(token, "sku")
+    except Exception:
+        return False
+    return bool(res.ok and res.value)
+
+
+def _looks_named(part: str) -> bool:
+    """True when *part* is an entity the customer named, not a stray adverb.
+
+    A fuzzy hit counts (the clarify/compile path decides). SKU-shaped tokens
+    count even when the warehouse does not encode them, so a later unknown
+    SKU is reported rather than silently dropped. Adverbs get no hit.
+    """
+    bare = part.strip().strip("'\".,")
+    if not bare:
+        return False
+    return _resolves_at_all(bare) or bool(_SKU_SHAPED_RE.match(bare))
+
+
+def _entity_parts(cand: str) -> str | None:
+    parts = [p.strip().strip("'\".,") for p in _EXCLUSION_JOINER_RE.split(cand)]
+    parts = [p for p in parts if p]
+    if not parts or not all(_looks_named(p) for p in parts):
+        return None
+    return " and ".join(parts)
+
+
+def _entity_span(clause: str) -> str | None:
+    """Longest leading span of entities joined by conjunctions.
+
+    Ends the clause positively, at what resolves, so an unknown adverb cannot
+    reopen ANS-01 (R-0004). Returns None when nothing resolves, leaving the
+    trailing-filler fallback.
+    """
+    whole = clause.strip().strip("'\".,")
+    if not whole:
+        return None
+    named_whole = _entity_parts(whole)
+    if named_whole is not None:
+        return named_whole
+    tokens = whole.split()
+    for end in range(len(tokens) - 1, 0, -1):
+        named = _entity_parts(" ".join(tokens[:end]))
+        if named is not None:
+            return named
+    return None
+
+
+def _exclusion_clauses(q: str) -> list[str]:
+    out: list[str] = []
+    for m in _EXCLUSION_VERB_RE.finditer(q):
+        clause = m.group(1)
+        stop = _EXCLUSION_STOP.search(clause)
+        if stop:
+            clause = clause[: stop.start()]
+        clause = clause.strip().strip("'\".,")
+        anchored = _entity_span(clause)
+        clause = anchored if anchored is not None else _strip_trailing_filler(clause)
+        if clause and clause.lower() not in out:
+            out.append(clause)
+    return out
 
 
 def _excluded_skus(q: str) -> list[str]:
     """Named SKUs to drop from a ranking.
 
     Captures the full exclusion clause so ``excluding SKU-A and SKU-B`` keeps
-    both tokens (the old regex only took the first token after the verb).
+    both tokens. Trailing skip-list words are stripped before the resolver
+    so `_EXCLUSION_STOP` and `_EXCLUSION_SKIP` cannot disagree about ``and``.
     """
     out: list[str] = []
-    for m in re.finditer(
-        r"\b(?:ignor(?:e|ing)|exclud(?:e|ing)|remov(?:e|ing)|drop(?:ping)?|without|except)\s+(?:the\s+)?(.+)",
-        q,
-        flags=re.I,
-    ):
-        clause = m.group(1)
-        stop = _EXCLUSION_STOP.search(clause)
-        if stop:
-            clause = clause[: stop.start()]
-        for token in re.split(r"\s*(?:,|/|\band\b|\bor\b)\s*", clause, flags=re.I):
+    for clause in _exclusion_clauses(q):
+        for token in _EXCLUSION_JOINER_RE.split(clause):
             t = token.strip().strip("'\"")
             tm = re.match(r"^([A-Za-z0-9][\w-]*)$", t)
             if not tm:
@@ -422,12 +514,15 @@ def undefined_subject(question: str) -> str | None:
     return subject
 
 
+_SKU_SUBJECTS = frozenset({"sku", "skus", "item", "items", "product", "products"})
+
+
 def _subject_allows_sales_rank(q: str) -> bool:
-    """Sales rank is SKUs. A named non-SKU subject must not become a SKU list."""
+    """Sales rank is SKUs. Category/supplier/etc. must not become a SKU list."""
     subject = _named_subject(q)
     if subject is None:
         return True
-    return _known_subject_map().get(subject) == "SKUs"
+    return subject in _SKU_SUBJECTS
 
 
 def _wants_sales_rank(q: str, q_raw: str) -> bool:
@@ -442,6 +537,77 @@ def _wants_sales_rank(q: str, q_raw: str) -> bool:
     if _rank_window(q_raw) and re.search(r"\b(sku|skus|revenue|sales|sell)\b", q):
         return True
     return False
+
+
+#: "i mean ...", "you meant ..." - a repair phrase, not an average.
+_DISCOURSE_LEADIN = re.compile(r"^\W*(?:i|we|you)\s+mean(?:t)?\b[\s,:-]*", re.I)
+
+#: Words that aggregate *values*. Narrower than `_wants_aggregate`, which also
+#: carries counting words: counting a ranking of five is five; summing one has
+#: no governed metric.
+_VALUE_AGGREGATE = re.compile(
+    r"\b(sum|summed|summing|total|totals|totalled|totalling|average|averaged|avg|"
+    r"mean|median|combined|altogether|aggregate|cumulative|overall|added up)\b",
+    re.I,
+)
+_CARDINAL = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+#: A ranking must say how many, or continue into a participle. That is what
+#: separates "top 5" / "highest selling" from "bottom line" / "top-level".
+_RANKING = re.compile(
+    r"\b(top|bottom|highest|lowest|largest|smallest|biggest|best|worst|leading|"
+    rf"foremost|poorest)\b(?:\W{{0,3}}{_CARDINAL}\b|\s+\w+ing\b)",
+    re.I,
+)
+
+
+def _aggregate_over_ranking(question: str) -> str | None:
+    """Reason this question aggregates over a ranking, or None if it does not.
+
+    ANS-02. Every metric either ranks or aggregates. None does both, so
+    "the sum of the top 5 selling SKUs" has no plan. The router used to answer
+    with the ranking, badged governed_metric. Order decides it, not membership:
+    an aggregate *before* the ranking applies to it; an aggregate *after* is
+    the sort key. This is a mitigation (word lists), not Cortex#14 step 1.
+    """
+    question = _DISCOURSE_LEADIN.sub("", question)
+    agg = _VALUE_AGGREGATE.search(question)
+    if agg is None:
+        return None
+    rank = _RANKING.search(question)
+    if rank is None or agg.start() > rank.start():
+        return None
+    return (
+        f"no governed metric computes a {agg.group(0).lower()} over a ranking - "
+        f"ask for the ranking on its own first, then 'sum of them'"
+    )
+
+
+def _grouped_ranking_unanswerable(question: str) -> str | None:
+    """Reason this ranking asks for a grouping no metric returns, or None.
+
+    ANS-03. "top 3 categories by total revenue" used to hit ``revenue_total``
+    and return one warehouse-wide row under governed_metric. Unknown subjects
+    stay with ANS-04. SKU rankings stay answerable (R-0005).
+    """
+    from packs.dms.semantic.vocabulary import normalize_for_routing
+
+    q = _DISCOURSE_LEADIN.sub("", normalize_for_routing(question))
+    if _RANKING.search(q) is None:
+        return None
+    subject = _named_subject(q)
+    if subject is None or subject in _SKU_SUBJECTS:
+        return None
+    if subject not in _known_subject_map():
+        return None
+    return (
+        f"no governed metric ranks {subject} by the requested measure - "
+        f"it would collapse the grouping into one population row"
+    )
+
+
+def _shape_refusal(question: str) -> str | None:
+    """Plan-shape mismatch the router must not paper over with an adjacent metric."""
+    return _aggregate_over_ranking(question) or _grouped_ranking_unanswerable(question)
 
 
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
@@ -462,6 +628,9 @@ def route_to_metric(question: str) -> MetricPlan | None:
     q_raw = question.lower()
     q = normalize_for_routing(question)
 
+    if _shape_refusal(question):
+        return None
+
     # scalars first — "how many X" must not fall through to a listing
     if re.search(r"\b(how many|number of|count of|count)\b", q) and "cold storage" in q:
         return _metric_plan("cold_storage_count", {}, "count of cold-storage locations")
@@ -481,8 +650,13 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
     if re.search(r"\b(revenue|sales|sold)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
         return _metric_plan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
-    # G6 — bare total revenue (no month/window); must not fall through to abstain
-    if re.search(r"\btotal\b", q) and re.search(r"\b(revenue|sales)\b", q):
+    # G6 — bare total revenue (no month/window); must not fall through to abstain.
+    # A ranking that happens to say "total revenue" as its sort key is not this.
+    if (
+        re.search(r"\btotal\b", q)
+        and re.search(r"\b(revenue|sales)\b", q)
+        and _RANKING.search(_DISCOURSE_LEADIN.sub("", q)) is None
+    ):
         return _metric_plan("revenue_total", {}, "total outbound revenue")
     if re.search(r"\b(revenue|sales)\b", q) and not re.search(
         r"\b(top|best|highest|most|sku|skus|rank|per|by|each)\b", q
@@ -903,6 +1077,7 @@ def _aggregate_prior(
     """
     q = question.lower()
     wants_avg = bool(re.search(r"\b(average|avg|mean)\b", q))
+    wants_sum = bool(re.search(r"\b(sum|sums|total|altogether|combined)\b", q)) and not wants_avg
     scale = _scale_factor(q)
     nums = _numeric_columns(rows)
     measure = _pick_measure(nums)
@@ -949,6 +1124,22 @@ def _aggregate_prior(
             # Literal SELECT — no unknown column vs warehouse allowlist.
             sql = f"SELECT CAST({avg_val} AS DOUBLE) AS {col}"
             return sql, [{col: avg_val}]
+
+    if wants_sum and measure and rows:
+        vals = []
+        for row in rows:
+            raw = row.get(measure)
+            if raw is None:
+                continue
+            try:
+                vals.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        if vals:
+            total = round(sum(vals), 2)
+            col = f"sum_{measure}"
+            sql = f"SELECT CAST({total} AS DOUBLE) AS {col}"
+            return sql, [{col: total}]
 
     tree = sqlglot.parse_one(prior_sql, read="duckdb")
     tree.set("limit", None)
@@ -1089,6 +1280,9 @@ def answer(
     # L0 certified → L1 metric → L-skill → L3 abstain
     # Skills run after governed routes so golden/certified paths stay authoritative.
     if sql is None:
+        refused = _shape_refusal(question)
+        if refused:
+            return _abs(refused)
         unknown = undefined_subject(question)
         if unknown:
             named = ", ".join(_answerable_entities())
