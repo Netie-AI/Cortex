@@ -112,14 +112,14 @@ def _resolve_export_table(table: str) -> str:
 def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
     """Pull allowlisted warehouse rows via the C4 connection helper (read-only)."""
     from CortexOS.dms.warehouse_db import (
-        DEFAULT_DB,
         get_connection,
         read_only_queries_enabled,
     )
+    from CortexOS.execution.warehouse import warehouse_path
 
     name = _resolve_export_table(table)
     lim = max(1, min(int(limit or 5000), 50_000))
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    con = get_connection(warehouse_path(), read_only=read_only_queries_enabled())
     try:
         rel = con.execute(f"SELECT * FROM {name} LIMIT {lim}")
         cols = [d[0] for d in rel.description]
@@ -134,20 +134,20 @@ def _export_parquet_snapshot(table: str, limit: int = 5000) -> dict[str, Any]:
     from pathlib import Path
 
     from CortexOS.dms.warehouse_db import (
-        DEFAULT_DB,
         get_connection,
         read_only_queries_enabled,
     )
+    from CortexOS.execution.warehouse import warehouse_path
 
     name = _resolve_export_table(table)
     lim = max(1, min(int(limit or 5000), 50_000))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    root = Path(os.environ.get("DMS_EXPORT_DIR") or (Path(DEFAULT_DB).resolve().parent / "exports"))
+    root = Path(os.environ.get("DMS_EXPORT_DIR") or (warehouse_path().resolve().parent / "exports"))
     out_dir = root / f"export_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{name}.parquet"
 
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    con = get_connection(warehouse_path(), read_only=read_only_queries_enabled())
     try:
         # Identifier already allowlisted; limit is int-bounded.
         con.execute(

@@ -47,7 +47,9 @@ python scripts/handoff.py --claude   # supervisor
 `data/dms_demo.duckdb` and `packs/data/dms_ops.db` are runtime stores, rebuilt from
 committed source — the CSVs in `data/samples/` and the pack's ontology YAML. A running
 engine (and a plain `pytest` run) writes to both, so neither is in git. Nothing needs
-them to exist: the code creates them on first use. To build them explicitly:
+them to exist: the code creates them on first use. Point Cortex and DMS Studio at the
+same file with `DMS_WAREHOUSE_DB` (absolute path; unset keeps this repo's demo file).
+To build them explicitly:
 
 ```powershell
 python -m CortexOS.dms.warehouse_db   # data/dms_demo.duckdb from data/samples/*.csv

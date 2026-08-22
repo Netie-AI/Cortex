@@ -17,6 +17,7 @@ from CortexOS.execution.warehouse import (
     connect_write,
     get_connection,
     read_only_queries_enabled,
+    warehouse_path,
 )
 
 # Re-export connection helpers so existing callers keep importing from here.
@@ -33,6 +34,7 @@ __all__ = [
     "preview_table",
     "read_only_queries_enabled",
     "table_row_counts",
+    "warehouse_path",
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,7 +115,7 @@ def load_inventory_csv(
     csv_path: Path | str | None = None,
     db_path: Path | str | None = None,
 ) -> Path:
-    db_path = Path(db_path or DEFAULT_DB)
+    db_path = warehouse_path(db_path)
     con = connect_write(db_path)
     try:
         for table, fname in TABLE_FILES.items():
@@ -181,7 +183,7 @@ def main() -> None:
     load_inventory_csv()
     counts = table_row_counts()
     total = sum(counts.values())
-    print(f"DuckDB loaded at {DEFAULT_DB}")
+    print(f"DuckDB loaded at {warehouse_path()}")
     for t, n in counts.items():
         print(f"  {t}: {n}")
     print(f"  TOTAL: {total}")

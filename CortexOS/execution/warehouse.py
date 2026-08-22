@@ -3,6 +3,12 @@
 C4: every warehouse connection in CortexOS goes through this module so
 ``enforce_manifest`` / ``submit`` can sit in front of reads. Callers outside
 ``CortexOS.execution`` must not ``import duckdb``.
+
+Path contract (Cortex#14 / TAS-DMS): both products honor ``DMS_WAREHOUSE_DB``.
+Resolved at *call* time — an import-time snapshot made Cortex answer
+``<Cortex>/data/dms_demo.duckdb`` while DMS Studio wrote
+``<DMS>/data/dms_demo.duckdb``. Unset env keeps the in-repo demo file
+(documented demo grant; unbound ``/dms/query`` still serves demo revenue).
 """
 
 from __future__ import annotations
@@ -12,15 +18,30 @@ import threading
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = Path(os.environ.get("DMS_WAREHOUSE_DB") or ROOT / "data" / "dms_demo.duckdb")
+from CortexOS.paths import data_path
+
+WAREHOUSE_DB_ENV = "DMS_WAREHOUSE_DB"
+FALLBACK_DB_NAME = "dms_demo.duckdb"
+FALLBACK_DB = data_path(FALLBACK_DB_NAME)
+# Back-compat alias: the no-env demo file. Opens go through warehouse_path()
+# so a later DMS_WAREHOUSE_DB still wins (import-time DEFAULT_DB did not).
+DEFAULT_DB = FALLBACK_DB
 
 _RO_LOCK = threading.Lock()
 _RO_CONNECTIONS: dict[str, Any] = {}
 
 
 def warehouse_path(db_path: Path | str | None = None) -> Path:
-    return Path(db_path or DEFAULT_DB)
+    """Resolve the serving DuckDB path.
+
+    Explicit paths that are *not* the repo fallback win (tests pass a tmp
+    file). The fallback and ``None`` re-read ``DMS_WAREHOUSE_DB`` so
+    ``get_connection(DEFAULT_DB)`` after a late env set is not a silent miss.
+    """
+    env = (os.environ.get(WAREHOUSE_DB_ENV) or "").strip()
+    if db_path is None or Path(db_path) == FALLBACK_DB:
+        return Path(env) if env else FALLBACK_DB
+    return Path(db_path)
 
 
 def read_only_queries_enabled() -> bool:
@@ -105,6 +126,8 @@ def connect_write(db_path: Path | str | None = None) -> Any:
 
 __all__ = [
     "DEFAULT_DB",
+    "FALLBACK_DB",
+    "WAREHOUSE_DB_ENV",
     "close_cached_connections",
     "connect_write",
     "get_connection",

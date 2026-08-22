@@ -1,6 +1,11 @@
 # STATUS.md
-**Last updated:** 2026-07-29 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Cortex#14 warehouse path (`DMS_WAREHOUSE_DB`) · Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
+
+> **2026-08-22 (Cortex#14 warehouse path):** Serving DuckDB is `DMS_WAREHOUSE_DB`,
+> resolved at call time in `warehouse_path()`. Unset env keeps
+> `data/dms_demo.duckdb` (demo grant). Test: `tests/test_execution/test_warehouse_path.py`.
+> FF-03: `SqlGateAbstain` puts violations in `str(exc)`. No MSSQL.
 
 > **2026-07-29 (Pointer demo + DMS Excel-swamp week):**
 > **Pointer (Netie Clicks):** stack health + Act fail-closed on `:8010`; false PNG verify soft for

@@ -2,6 +2,27 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Warehouse path — Cortex reads the DuckDB DMS ingest writes — 2026-08-22
+
+**Bug (TAS-DMS / Cortex#14).** `DEFAULT_DB` in `CortexOS/execution/warehouse.py`
+was snapshotted at import to `<Cortex>/data/dms_demo.duckdb`. DMS Studio wrote
+`<DMS>/data/dms_demo.duckdb` (18 tables); chat answered the six-table demo file.
+Upload was silent to Q2.
+
+**Fix.** `warehouse_path()` re-reads `DMS_WAREHOUSE_DB` at call time. Passing the
+import-time fallback (`DEFAULT_DB`) still honors a later env set, so
+`get_connection(DEFAULT_DB)` is not a miss. Unset env keeps the in-repo demo
+file — unbound `POST /dms/query` still serves demo revenue (documented grant).
+No MSSQL federation.
+
+**Also (dms#59 FF-03).** `SqlGateAbstain` now puts `violations` into `str(exc)`
+so L2 abstain reasons name the refused SQL, not only "exhausted retries".
+
+**Tests:** `tests/test_execution/test_warehouse_path.py` fails if reader and
+writer resolve different files, or if a second CortexOS module hardcodes
+`dms_demo.duckdb`.
+
+
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
 **New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:

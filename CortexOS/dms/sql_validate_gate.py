@@ -27,8 +27,8 @@ class SqlGateAbstain(Exception):
     """Raised when validation/EXPLAIN retries are exhausted — caller must abstain."""
 
     def __init__(self, message: str, *, violations: list[str] | None = None) -> None:
-        super().__init__(message)
         self.violations = list(violations or [])
+        super().__init__(f"{message}: {'; '.join(self.violations)}" if self.violations else message)
 
 
 def explain_dry_run(con: Any, sql: str) -> tuple[bool, str]:

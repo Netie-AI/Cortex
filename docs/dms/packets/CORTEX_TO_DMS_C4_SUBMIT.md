@@ -82,7 +82,7 @@ HTTP mapping for contract routes: security / policy refusals → **403** with
 | `CORTEX_READ_POOL_CONCURRENCY` | semaphore size | `4` |
 | `CORTEX_READ_POOL_QUEUE_TIMEOUT_S` | wait for a slot | `5` |
 | `CORTEX_STATEMENT_TIMEOUT_S` | per-statement cap (best-effort) | `30` |
-| `DMS_WAREHOUSE_DB` | serving DuckDB path | `data/dms_demo.duckdb` |
+| `DMS_WAREHOUSE_DB` | **shared** serving DuckDB path (Studio ingest + Cortex answers). Absolute path. Resolved at call time in `CortexOS.execution.warehouse.warehouse_path`. Unset keeps the in-repo demo file (demo grant). | `<repo>/data/dms_demo.duckdb` |
 | `DMS_READ_ONLY_QUERIES` | prefer read-only warehouse opens | off |
 
 JWKS is refreshed at API startup (cold path). Hot-path verify never hits the

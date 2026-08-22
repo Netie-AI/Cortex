@@ -10,7 +10,6 @@ warehouse backend ships as the reference implementation and registers lazily.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Protocol
@@ -71,14 +70,7 @@ def _dms_duckdb_backend(
     """
     from CortexOS.execution.warehouse import get_connection, warehouse_path
 
-    root = Path(__file__).resolve().parents[2]
-    path = (
-        Path(db_path)
-        if db_path is not None
-        else warehouse_path(
-            os.environ.get("DMS_WAREHOUSE_DB") or root / "data" / "dms_demo.duckdb"
-        )
-    )
+    path = warehouse_path(db_path)
     cols_sql = ", ".join(_quote(c) for c in columns)
     where_sql = ""
     values: list[Any] = []

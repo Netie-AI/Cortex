@@ -116,7 +116,7 @@ def lakehouse_status_mode() -> str:
 
 @router.post("/sync-warehouse")
 def sync_warehouse(caller: Caller = Depends(require_role("steward"))) -> dict[str, Any]:
-    """Copy lake.silver → dms_demo.duckdb so /dms/query reads medallion silver."""
+    """Copy lake.silver → the serving warehouse so /dms/query reads medallion silver."""
     _ = caller
     from scripts.lakehouse_migrate import sync_warehouse_from_silver
 

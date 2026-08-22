@@ -56,6 +56,9 @@ def test_retry_exhausted_abstains(semantic):
         gate_with_retry(bad, "x", semantic, con=None, max_retries=2)
     assert attempts["n"] == 3  # initial + 2 retries
     assert ei.value.violations
+    # dms#59 FF-03: violations must reach str(exc), not only the attribute.
+    rendered = str(ei.value)
+    assert all(v in rendered for v in ei.value.violations)
 
 
 def test_l2_without_model_abstains(monkeypatch):

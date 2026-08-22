@@ -1,7 +1,18 @@
 # Next lane prompts — always continue (Cursor ↔ Claude)
 
-**Updated:** 2026-07-29 after honesty audit (DMS Friday slice elevated)  
+**Updated:** 2026-08-22 after Cortex#14 warehouse path  
 **Rule:** After every hand-back, both lanes leave the *next* prompt written here and in STATUS.
+
+## Cortex#14 follow — DMS must set the same env (owner: DMS)
+
+```text
+Cortex now resolves the serving DuckDB at call time via DMS_WAREHOUSE_DB
+(CortexOS.execution.warehouse.warehouse_path). Unset = <Cortex>/data/dms_demo.duckdb
+(demo grant). Studio ingest on the DMS product home must set the same absolute
+path or chat will keep answering a different file. Do not add MSSQL live
+federation (EPIC-020 extract-only).
+```
+
 
 ---
 
