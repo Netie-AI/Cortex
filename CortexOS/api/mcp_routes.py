@@ -123,7 +123,11 @@ async def mcp_call_tool(
             raise HTTPException(status_code=400, detail={"ok": False, "error": "question required"})
         from CortexOS.dms.answer_engine import answer as answer_fn
 
-        result = answer_fn(question, session_id=args.get("session_id"))
+        result = answer_fn(
+            question,
+            session_id=args.get("session_id"),
+            require_grounding=True,
+        )
         return {"ok": True, "name": name, "result": result}
 
     if name == "lakehouse.tables":

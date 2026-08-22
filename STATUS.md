@@ -1,4 +1,12 @@
 # STATUS.md
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Unbound session abstain (founder spec 2026-08-22)
+
+> **2026-08-22 (unbound session abstain):** `POST /dms/query` with no binding
+> (or a self-issued wide grant, e.g. `session_id=demo-unbound`) now abstains.
+> `route_to_metric` states the tables its plan will read. Bound demo-table
+> questions still answer (R-0005). Did not mint a Space grant; did not treat
+> Cortex#36 "total" abstain as this fix; Cortex#39 (customers -> SKUs) left alone.
+
 **Last updated:** 2026-07-29 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 

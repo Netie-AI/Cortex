@@ -886,7 +886,12 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     return answer, sources
 
 
-def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+def answer_question(
+    question: str,
+    *,
+    session_id: str | None = None,
+    require_grounding: bool = False,
+) -> dict[str, Any]:
     """Q2 — route through the layered answer engine (certified → governed metric →
     abstain). Falls back to the legacy heuristic path only if the engine is
     unavailable, so behavior degrades safely rather than breaking.
@@ -899,7 +904,14 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
         from CortexOS.dms.answer_engine import answer as _engine_answer
         from CortexOS.execution.manifest import ManifestError
 
-        result = _engine_answer(question, session_id=session_id)
+        result = _engine_answer(
+            question, session_id=session_id, require_grounding=require_grounding
+        )
+        # A served turn that nothing grants must not fall through to the
+        # pre-Q2 ranked-SQL path. That bridge opens its own connection and
+        # would answer from the demo warehouse under the abstain.
+        if result.get("grant_kind") == "none":
+            return result
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
         # until a dedicated governed metric exists. Word-boundary match only — bare
         # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.

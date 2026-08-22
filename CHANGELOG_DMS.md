@@ -2,6 +2,23 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Unbound session must abstain — 2026-08-22
+
+A session with no binding was answering from the demo warehouse on
+`POST /dms/query` (badge `governed_metric`, `grant_kind local-self-issued`,
+all six demo tables granted). The table-intersect never fired because the
+self-issued grant already contained every table.
+
+- `route_to_metric` now returns the tables its plan will read (from the metric
+  definition, not by re-parsing compiled SQL).
+- Served doors (`/dms/query`, `/mcp/call`) fail closed when nothing is bound
+  or the grant is self-issued. They do not mint a Space grant.
+- Bound demo-table questions still answer (R-0005). A bound abstain names the
+  sources the session *can* answer over.
+- Rewrote `test_unbound_session_still_answers_and_says_the_grant_is_self_issued`
+  to expect abstain. Cortex#36 "total" routing and Cortex#39 (customers -> SKUs)
+  are untouched.
+
 ## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
 
 **New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:

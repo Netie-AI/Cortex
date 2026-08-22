@@ -8,6 +8,7 @@ engine treat a compiled metric as trustworthy without the LLM writing SQL.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -16,6 +17,22 @@ from typing import Any
 import yaml
 
 from packs.dms.semantic import values as valuedict
+
+_TABLE_REF = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][\w]*)", re.IGNORECASE)
+
+
+def stated_tables(sql: str) -> tuple[str, ...]:
+    """Tables a metric or certified template says it will read.
+
+    Taken from the definition, not from compiled SQL at query time. Template
+    slots (``{limit}``, ``{wh}``) sit outside FROM/JOIN identifiers.
+    """
+    seen: list[str] = []
+    for match in _TABLE_REF.finditer(sql or ""):
+        name = match.group(1).lower()
+        if name not in seen:
+            seen.append(name)
+    return tuple(seen)
 
 ROOT = Path(__file__).resolve().parents[3]
 SEMANTIC_DIR = ROOT / "packs" / "dms" / "semantic"
@@ -35,6 +52,7 @@ class Metric:
     synonyms: list[str] = field(default_factory=list)
     result_columns: list[str] = field(default_factory=list)
     params: dict[str, dict] = field(default_factory=dict)
+    tables: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -45,6 +63,7 @@ class CertifiedQuery:
     verified_by: str = ""
     verified_at: str = ""
     tags: list[str] = field(default_factory=list)
+    tables: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -217,11 +236,13 @@ def _load_metrics() -> dict[str, Metric]:
     data = yaml.safe_load(METRICS_PATH.read_text(encoding="utf-8"))
     metrics: dict[str, Metric] = {}
     for raw in data.get("metrics", []):
+        sql = raw["sql"].strip()
         m = Metric(
-            id=raw["id"], kind=raw["kind"], sql=raw["sql"].strip(),
+            id=raw["id"], kind=raw["kind"], sql=sql,
             synonyms=list(raw.get("synonyms") or []),
             result_columns=list(raw.get("result_columns") or []),
             params=dict(raw.get("params") or {}),
+            tables=stated_tables(sql),
         )
         if m.id in metrics:
             raise SemanticError(f"duplicate metric id {m.id!r}")
@@ -237,10 +258,12 @@ def _load_certified() -> list[CertifiedQuery]:
         if raw["id"] in seen:
             raise SemanticError(f"duplicate certified id {raw['id']!r}")
         seen.add(raw["id"])
+        sql = raw["sql"].strip()
         out.append(CertifiedQuery(
-            id=raw["id"], question=raw["question"], sql=raw["sql"].strip(),
+            id=raw["id"], question=raw["question"], sql=sql,
             verified_by=raw.get("verified_by", ""), verified_at=raw.get("verified_at", ""),
             tags=list(raw.get("tags") or []),
+            tables=stated_tables(sql),
         ))
     return out
 

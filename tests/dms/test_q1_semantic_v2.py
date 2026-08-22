@@ -38,6 +38,16 @@ def test_load_all_validates():
         assert pii not in dicts
 
 
+def test_every_metric_and_certified_query_states_the_tables_it_reads():
+    """Cortex#14 step 1: the plan states tables; do not wait for compiled SQL."""
+    m = load_all()
+    missing_metrics = [mid for mid, metric in m.metrics.items() if not metric.tables]
+    assert missing_metrics == [], missing_metrics
+    assert m.metrics["revenue_total"].tables == ("transactions",)
+    missing_cq = [cq.id for cq in m.certified if not cq.tables]
+    assert missing_cq == [], missing_cq
+
+
 def test_metric_templates_compile_and_execute():
     report = validate_all(execute=True)
     m = load_all()
