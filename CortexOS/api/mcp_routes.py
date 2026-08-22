@@ -119,6 +119,62 @@ def _tool_catalog() -> list[dict[str, Any]]:
             },
             "read_only": False,
         },
+        {
+            "name": "auto_caller.pick",
+            "description": (
+                "Research auto-caller: pick first-party Cortex/AirGPT tools for a goal. "
+                "Community WhatsApp MCP is listed then P16-parked; no live send."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string"},
+                    "top_k": {"type": "integer", "default": 5},
+                },
+                "required": ["goal"],
+            },
+            "read_only": True,
+        },
+        {
+            "name": "constructor.ghost",
+            "description": "Compile a Constructor canvas into a Cortex DAG (no LLM run).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "nodes": {"type": "array"},
+                    "edges": {"type": "array"},
+                },
+                "required": ["nodes"],
+            },
+            "read_only": True,
+        },
+        {
+            "name": "constructor.recommend",
+            "description": "Recommend live Constructor coordination patterns.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "nodes": {"type": "array"},
+                    "edges": {"type": "array"},
+                },
+            },
+            "read_only": True,
+        },
+        {
+            "name": "memory.query",
+            "description": "Query the Cortex persistent memory store.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "vector": {"type": "array"},
+                    "k": {"type": "integer", "default": 5},
+                    "scope": {"type": "string"},
+                    "collection": {"type": "string"},
+                },
+                "required": ["vector"],
+            },
+            "read_only": True,
+        },
     ]
 
 
@@ -194,6 +250,72 @@ async def mcp_call_tool(
             raise HTTPException(status_code=400, detail={"ok": False, "error": "goal required"})
         result = DISCOVERY_TOOLS[name](**args)
         return {"ok": True, "name": name, "result": result}
+
+    if name == "auto_caller.pick":
+        from CortexOS.discovery.auto_caller import pick
+
+        goal = str(args.get("goal") or args.get("query") or "").strip()
+        if not goal:
+            raise HTTPException(status_code=400, detail={"ok": False, "error": "goal required"})
+        return {"ok": True, "name": name, "result": pick(goal, top_k=int(args.get("top_k") or 5))}
+
+    if name == "constructor.ghost":
+        from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
+
+        try:
+            program = compile_constructor_graph(
+                {"nodes": args.get("nodes") or [], "edges": args.get("edges") or []}
+            )
+        except ConstructorGraphError as exc:
+            raise HTTPException(status_code=400, detail={"ok": False, "error": str(exc)}) from exc
+        return {
+            "ok": True,
+            "name": name,
+            "result": {
+                "ghost": True,
+                "entry_node_id": program.entry_node_id,
+                "output_node_id": program.output_node_id,
+                "node_count": len(program.nodes),
+            },
+        }
+
+    if name == "constructor.recommend":
+        from CortexOS.constructor_graph import recommend_extras
+        from CortexOS.execution import coordination_patterns
+
+        kinds = [str(n.get("kind") or "") for n in (args.get("nodes") or [])]
+        prompt = " ".join(kinds) or "foundry ontology insight app"
+        rec = coordination_patterns.recommend_from_prompt(prompt, extras=recommend_extras(kinds))
+        wanted = {"single_agent", "generator_verifier", "orchestrator_subagent"}
+        approaches = [row for row in coordination_patterns.catalog() if row["id"] in wanted]
+        return {
+            "ok": True,
+            "name": name,
+            "result": {"recommendation": rec.as_dict(), "approaches": approaches},
+        }
+
+    if name == "memory.query":
+        from CortexOS.api import memory_routes
+
+        vector = args.get("vector")
+        if not isinstance(vector, list) or not vector:
+            raise HTTPException(status_code=400, detail={"ok": False, "error": "vector required"})
+        hits = memory_routes._STORE.query(
+            vector,
+            k=int(args.get("k") or 5),
+            scope=args.get("scope") if args.get("scope") in ("personal", "company") else None,
+            collection=args.get("collection"),
+        )
+        return {
+            "ok": True,
+            "name": name,
+            "result": {
+                "hits": [
+                    {"id": h.id, "score": round(h.score, 6), "text": h.text, "meta": h.meta}
+                    for h in hits
+                ]
+            },
+        }
 
     if name == "computer_control.status":
         from CortexOS.connectors import computer_control as cc
