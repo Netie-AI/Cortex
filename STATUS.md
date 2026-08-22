@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** ANS-04 unknown-subject abstain (Cortex#39)
+**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** auto-merge perfect PRs
+
+> **2026-08-22 (auto-merge):** CI job `auto-merge` squash-merges non-draft PRs when
+> every required check is green. Rule `.cursor/rules/merge-perfect.mdc`.
+
+> **2026-08-22 (constructor + computer control):** `GET /api/connectors` is
+> a Constructor-style agent desk. Computer control (UACC, computer-control-mcp,
+> Windows-MCP) is a fail-closed probe. Default off. No in-process mouse.
+> Distill `skill_distill/captures/2026-08-22_computer-control-mcp.md`.
+
+> **2026-08-22 (connectors):** Cortex dispatches workspaces and Cursor chats.
+> New task = new Cursor chat. Normal chat = chatbot repo. Retrieve/instruct
+> via `/api/connectors`. Not LangGraph. Distill capture
+> `skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md`.
 
 > **2026-08-22 (ANS-04 / Cortex#39):** A question that names a subject the
 > semantic layer does not define (customers) no longer answers as SKUs under

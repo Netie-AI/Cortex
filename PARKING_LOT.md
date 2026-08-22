@@ -95,6 +95,11 @@ measured hotspot (cProfile / py-spy) shows >10% of governed request time in a
 listed path.
 
 ### P19 open distill debts
+- [ ] Windows-MCP cannot run on Linux cloud agents — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
+- [ ] In-process UACC/PyAutoGUI execute is not wired; uacc-mcp sidecar is the path — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
+- [ ] Scraping sibling repos / Outlier is out of scope — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
+- [ ] Optional HTTP bridge (CORTEX_CURSOR_BRIDGE_URL) can drive a local Cursor sidecar later — `distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md`
+- [ ] Native click-the-sidebar / open Cursor GUI from the engine process is not available — `distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md`
 - [ ] Review capture for deferred items — `distill: skill_distill/captures/2026-07-29_dms-spaces_chatgpt-for-excel.md`
 - [ ] Review capture for deferred items — `distill: skill_distill/captures/2026-07-29_pointer-demo_dms-lake-map.md`
 - [ ] Review capture for deferred items — `distill: skill_distill/captures/2026-07-29_cortex-honesty_dms-friday.md`

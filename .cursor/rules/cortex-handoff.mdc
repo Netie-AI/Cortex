@@ -22,6 +22,7 @@ After any ship, gate update, or handoff refresh that changes tracked files:
 1. `git status` — stage only intentional changes (never `key.md`, `env.local`, `.next/`, secrets).
 2. Commit with a concise message (why, not file list).
 3. **`git push origin HEAD`** — always push; do not leave shipped work local-only.
+4. When the PR is **perfect** (CI green, not draft, mergeable, no conflicts), squash-merge it. Cloud-agent `gh` cannot merge; CI job `auto-merge` does. Do not sit on a green PR.
 
 If push fails (auth, conflict), report the error and fix before ending the session.
 

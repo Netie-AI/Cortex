@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from CortexOS.discovery.find import find_mcp, find_skills, find_subagents, discover_for_goal
-from CortexOS.discovery.catalog import load_sources, catalog_snapshot, clear_catalog_cache
+from CortexOS.discovery.catalog import catalog_snapshot, clear_catalog_cache, load_sources
+from CortexOS.discovery.find import discover_for_goal, find_mcp, find_skills, find_subagents
 
 
 def setup_function():
@@ -55,6 +55,18 @@ def test_find_mcp_github():
     assert res["ok"] is True
     assert res["matches"]
     assert all(m["kind"] == "mcp" for m in res["matches"])
+
+
+def test_find_mcp_computer_control():
+    ids = {i.id for i in catalog_snapshot()}
+    assert {"mcp:uacc", "mcp:windows-mcp", "mcp:computer-control-mcp"} <= ids
+    res = find_mcp(
+        "uacc computer control mouse keyboard pyautogui windows-mcp",
+        top_k=12,
+    )
+    assert res["ok"] is True
+    hit_ids = {m["id"] for m in res["matches"]}
+    assert hit_ids & {"mcp:uacc", "mcp:windows-mcp", "mcp:computer-control-mcp"}
 
 
 def test_find_subagents():
