@@ -30,6 +30,9 @@ categories:
     - id: gen_unknown_entity_literal
       question: "what is PEGASUS-MOON on-time rate last quarter"
       expect: abstain
+    - id: unknown_subject_customers
+      question: "top 3 customers by amount"
+      expect: abstain
 
   abstain_out_of_scope:
     - id: weather_joke
