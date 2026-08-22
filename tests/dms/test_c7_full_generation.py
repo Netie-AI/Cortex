@@ -28,7 +28,13 @@ def test_schema_cache_invalidates_on_clear():
 
 
 def test_literal_normalize_beta_to_sku_beta():
+    from bench.accuracy import _ensure_db_loaded
+
+    _ensure_db_loaded()
     valuedict.refresh()
+    assert "SKU-BETA" in valuedict.values_for("sku"), (
+        "warehouse value dict missing SKU-BETA — sample CSVs must include it"
+    )
     sql = "SELECT sku FROM transactions WHERE sku = 'BETA' LIMIT 5"
     out = literal_normalize.normalize_sql_literals(sql)
     assert out.ok is True

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,12 +12,14 @@ ROOT = Path(__file__).resolve().parents[2]
 START_PS1 = ROOT / "scripts" / "start_cortex_engine.ps1"
 INSTALL_PS1 = ROOT / "scripts" / "install_engine_autostart.ps1"
 _POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+_WINDOWS = sys.platform == "win32"
 
 
 @pytest.mark.skipif(not START_PS1.is_file(), reason="start script missing")
-@pytest.mark.skipif(_POWERSHELL is None, reason="powershell not on PATH")
+@pytest.mark.skipif(not _WINDOWS, reason="powershell dry-run is Windows-only")
 def test_start_cortex_engine_dry_run():
     shell = _POWERSHELL
+    assert shell, "Windows runner must have powershell or pwsh"
     r = subprocess.run(
         [
             shell,
@@ -44,9 +47,10 @@ def test_start_cortex_engine_dry_run():
 
 
 @pytest.mark.skipif(not INSTALL_PS1.is_file(), reason="install script missing")
-@pytest.mark.skipif(_POWERSHELL is None, reason="powershell not on PATH")
+@pytest.mark.skipif(not _WINDOWS, reason="powershell dry-run is Windows-only")
 def test_install_engine_autostart_dry_run():
     shell = _POWERSHELL
+    assert shell, "Windows runner must have powershell or pwsh"
     r = subprocess.run(
         [
             shell,

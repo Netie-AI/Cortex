@@ -153,11 +153,32 @@ def _run_canonical(sql: str) -> list[dict]:
 
 
 def _ensure_db_loaded() -> None:
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, load_inventory_csv, table_row_counts
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        close_cached_connections,
+        get_connection,
+        load_inventory_csv,
+        table_row_counts,
+    )
+    from packs.dms.semantic import values as valuedict
 
     counts = table_row_counts(DEFAULT_DB) if DEFAULT_DB.exists() else {}
-    if not counts or sum(counts.values()) == 0:
+    needs_load = not counts or sum(counts.values()) == 0
+    if not needs_load:
+        con = get_connection(DEFAULT_DB, read_only=True)
+        try:
+            row = con.execute(
+                "SELECT 1 FROM transactions WHERE sku = 'SKU-BETA' LIMIT 1"
+            ).fetchone()
+            needs_load = row is None
+        except Exception:  # noqa: BLE001 — missing table means the seed never ran
+            needs_load = True
+        finally:
+            con.close()
+    if needs_load:
+        close_cached_connections()
         load_inventory_csv()
+    valuedict.refresh()
 
 
 def score_item(item: GoldenItem) -> ItemResult:
