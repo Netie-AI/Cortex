@@ -1,0 +1,21 @@
+---
+description: Auto-merge PRs that are perfect; do not keep dead weight
+alwaysApply: true
+---
+
+# Merge perfect, drop the rest
+
+distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
+
+**Perfect** means all of: not draft, base is `main` / `dms-v2` / `dms-integrated-engine`, `mergeable=MERGEABLE`, no conflicts, and these checks are SUCCESS: `lint-type-test`, `base-install`, `protected-paths`, `rls-proof`, `secrets-scan`. Local `pytest -q` already ran green on the same SHA.
+
+When a PR is perfect, squash-merge it. Do not wait for a human. Cloud-agent `gh` is read-only; CI job `auto-merge` is the merge. If that job cannot merge (review required), it enables GitHub auto-merge.
+
+Do **not** merge when any required check failed, the PR is draft, dirty/behind, or it weakens a refusal / reclassifies hostile SQL / hand-edits `contract/*.json` / adds `_C2_ALLOWLIST` names. Those are not perfect.
+
+## Remove useless work
+
+- Do not add LangGraph, CrewAI, n8n, Money Gainer, or Outlier scraping.
+- Do not keep a dead search box, duplicate blurb, or a parked item that is only "review this capture".
+- Do not open a second orchestrator. Cortex already is the loop.
+- Close or skip draft PRs that duplicate a landed fix. Do not pile drive-by refactors onto a green PR.

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "mcp:uacc",
+      "kind": "mcp",
+      "name": "uacc",
+      "description": "Universal AI Computer Control. Mouse, keyboard, screenshot, OCR via MCP. pip install uacc then uacc-mcp.",
+      "url": "https://pypi.org/project/uacc/",
+      "source": "cortex/connectors",
+      "category": "Computer control",
+      "tags": ["mcp", "computer-control", "mouse", "keyboard", "ocr", "uacc", "pyautogui"],
+      "install_hint": "pip install uacc ; uacc-mcp. Cortex probe: computer_control.status. Arm with CORTEX_COMPUTER_CONTROL=1.",
+      "reputation": "local"
+    },
+    {
+      "id": "mcp:computer-control-mcp",
+      "kind": "mcp",
+      "name": "computer-control-mcp",
+      "description": "Computer control MCP (mcp.so / mcpmarket): mouse, keyboard, OCR via PyAutoGUI, RapidOCR, ONNXRuntime.",
+      "url": "https://github.com/AB498/computer-control-mcp",
+      "source": "cortex/connectors",
+      "category": "Computer control",
+      "tags": ["mcp", "computer-control", "mouse", "keyboard", "ocr", "pyautogui"],
+      "install_hint": "pip install computer-control-mcp",
+      "reputation": "community"
+    },
+    {
+      "id": "mcp:windows-mcp",
+      "kind": "mcp",
+      "name": "Windows-MCP",
+      "description": "CursorTouch Windows-MCP: computer use on Windows desktops. Does not run on Linux cloud agents.",
+      "url": "https://github.com/CursorTouch/Windows-MCP",
+      "source": "cortex/connectors",
+      "category": "Computer control",
+      "tags": ["mcp", "computer-control", "windows", "mouse", "keyboard"],
+      "install_hint": "Windows only: https://github.com/CursorTouch/Windows-MCP",
+      "reputation": "community"
+    }
+  ]
+}

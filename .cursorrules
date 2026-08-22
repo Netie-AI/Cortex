@@ -35,18 +35,22 @@ looks local, and several of them fail silently.
 - Editing `tests/contract/**`, `tests/invariants/**`, or `.importlinter` needs
   `INVARIANT-CHANGE:` in the commit body. If you are editing one to make a test pass,
   the test is probably right.
-- Engine version (`2.5.0`) and contract version (`1.1.0`) are independent lines. Never
+- Engine version (`2.5.0`) and contract version (`1.2.0`) are independent lines. Never
   assume they are equal.
 - Adding a contract field is a **minor**; removing, renaming or retyping one a consumer
   reads is a **major**. Bump `version.py` *and* `pyproject.toml`, then regenerate the
   spec in the same commit.
 - DMS may — and should — pin `cortex-contract` as a dependency. It must never import
   `CortexOS`.
+- **Merge when perfect.** Not draft, base `main`/`dms-v2`/`dms-integrated-engine`,
+  all of lint-type-test / base-install / protected-paths / rls-proof / secrets-scan
+  SUCCESS, mergeable CLEAN. CI job `auto-merge` squash-merges. Do not keep dead
+  drafts, LangGraph, Outlier scraping, or duplicate parked "review this capture" items.
 
 ## Verify
 
 ```bash
-python -m pytest tests/ -q      # 1058 passed, 10 skipped
+python -m pytest tests/ -q
 ruff check CortexOS packages/cortex_contract scripts tests/packaging tests/contract
 mypy
 lint-imports                    # NOT `python -m importlinter.cli` — that exits 0

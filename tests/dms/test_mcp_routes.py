@@ -26,6 +26,8 @@ def test_mcp_list_tools(client):
     assert "agent.status" in names
     assert "auto_caller.pick" in names
     assert "constructor.ghost" in names
+    assert "computer_control.status" in names
+    assert "computer_control.invoke" in names
 
 
 def test_mcp_call_agent_status(client):
@@ -39,3 +41,22 @@ def test_mcp_call_agent_status(client):
 def test_mcp_unknown_tool(client):
     res = client.post("/mcp/call", json={"name": "nope.tool", "arguments": {}})
     assert res.status_code == 404
+
+
+def test_mcp_computer_control_status_and_invoke_fail_closed(client, monkeypatch):
+    monkeypatch.delenv("CORTEX_COMPUTER_CONTROL", raising=False)
+    status = client.post(
+        "/mcp/call", json={"name": "computer_control.status", "arguments": {}}
+    )
+    assert status.status_code == 200
+    body = status.json()
+    assert body["ok"] is True
+    assert body["result"]["armed"] is False
+    click = client.post(
+        "/mcp/call",
+        json={"name": "computer_control.invoke", "arguments": {"action": "click"}},
+    )
+    assert click.status_code == 200
+    out = click.json()
+    assert out["ok"] is False
+    assert out["result"]["executed"] is False

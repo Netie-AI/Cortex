@@ -2,6 +2,35 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Auto-merge perfect PRs — 2026-08-22
+
+CI job `auto-merge` squash-merges a non-draft PR when lint-type-test,
+base-install, protected-paths, rls-proof, and secrets-scan are all SUCCESS
+and the PR is mergeable. Drafts, dirty/behind, and failed checks stay open.
+Rule: `.cursor/rules/merge-perfect.mdc`.
+
+## Constructor desk + computer-control probe — 2026-08-22
+
+Operator desk at `GET /api/connectors` (Constructor-style sidebar). Agents
+post into the existing dispatch port. Pointer reports the computer-control
+probe. UACC / computer-control-mcp / Windows-MCP are catalogued. Default
+OFF. Invoke fails closed. This Linux host cannot attach Windows-MCP and does
+not `pip install uacc`. MCP tools: `computer_control.status` (read-only),
+`computer_control.invoke` (gated). Workspaces add pointer / omi / openvault.
+distill: skill_distill/captures/2026-08-22_computer-control-mcp.md
+
+## Workspace + Cursor connectors — 2026-08-22
+
+Cortex is the orchestration layer. Cursor is a worker surface. Normal chat
+goes to the chatbot workspace; every new **task** opens a **new** Cursor chat
+on cortex / netie / dms / chatbot (env `CORTEX_WS_*`, Windows defaults
+`D:\Cortex` `D:\Netie` `D:\DMS` `D:\chatbot`). Retrieve + instruct live on
+`CursorSessionPort`. No LangGraph. No sidebar clicks (parked).
+
+HTTP: `GET /api/connectors` (UI), `/workspaces`, `POST /dispatch`,
+`/cursor/chats`, `/cursor/chats/{id}/messages`, `/instruct`.
+distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
+
 ## ANS-04 unknown subject abstain — 2026-08-22
 
 `answer("top 3 customers by amount")` was badged `governed_metric` and rendered
