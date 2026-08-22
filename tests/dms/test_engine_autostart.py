@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ def test_start_cortex_engine_dry_run():
     assert "8010" in hint.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="install writes a Windows Start Menu shortcut")
 @pytest.mark.skipif(_POWERSHELL is None, reason="powershell not on PATH")
 @pytest.mark.skipif(not INSTALL_PS1.is_file(), reason="install script missing")
 def test_install_engine_autostart_dry_run():
