@@ -18,6 +18,10 @@ CHANGELOG_PATH = SAMPLES / "inventory_changelog.jsonl"
 class DMSQueryRequest(BaseModel):
     question: str
     session_id: str = Field(default="demo")
+    # A Space is what grounds a turn. Optional on the wire so a client that
+    # binds its grant through /v1/contract/* is unaffected, but one of the two
+    # has to be present or the route refuses - see require_grounding below.
+    space_id: str | None = Field(default=None)
 
 
 class DMSQueryResponse(BaseModel):
@@ -105,7 +109,17 @@ def register_dms_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         from CortexOS.dms.query_service import answer_question
 
-        out = answer_question(body.question, session_id=body.session_id)
+        # require_grounding is the product surface saying a customer is on the
+        # other end. In-process callers - the corpus, the benches, seeding - read
+        # the local warehouse legitimately and keep the mint; a served turn that
+        # nothing grants abstains instead of widening to every table the pack
+        # declares (P0-DEMO-02).
+        out = answer_question(
+            body.question,
+            session_id=body.session_id,
+            space_id=body.space_id,
+            require_grounding=True,
+        )
         # Mark when warehouse tables were synced from lake.silver (medallion path).
         if out.get("query_source") is None:
             out["query_source"] = os.environ.get(

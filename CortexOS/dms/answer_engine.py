@@ -1286,8 +1286,61 @@ def _local_verified(session_id: str | None) -> VerifiedManifest:
     )
 
 
+def _abstain_no_grant(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
+    """Refuse a served turn that nothing grants, and say what would ground it.
+
+    Deliberately not :func:`_abstain`: that one offers example questions drawn
+    from the semantic layer, and suggesting demo-warehouse questions to a caller
+    who has selected no Space is the same wrong answer in a politer voice. There
+    is nothing to suggest here, because nothing is bound - so the answer says
+    what to do instead, which is the only actionable thing available.
+
+    ``grant_kind`` is reported as ``none`` rather than omitted. A field that
+    disappears reads as 'not applicable'; the point is that the value is known
+    and it is nothing (R-0011).
+    """
+    return {
+        "answer": (
+            "I can't answer that yet - nothing is grounding this session "
+            f"({reason}). Select a Space, or bind a session grant, and ask again. "
+            "Until then I have no sources to read and would be guessing."
+        ),
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": f"ungrounded session: {reason}",
+        "total_count": 0,
+        "suggestions": [],
+        "grant_kind": "none",
+        "granted_sources": [],
+    }
+
+
+class UngroundedSession(Exception):
+    """A served turn arrived with nothing granting it anything.
+
+    Distinct from 'the grant refused this query', which is a manifest decision
+    with a refusal type behind it. Here there is no grant to consult: nobody
+    selected a Space and nobody bound a session, so any answer would be about
+    data the asker never pointed at.
+
+    The engine used to mint one covering every table the pack declares, which is
+    how a question about an uploaded workbook was answered from the demo
+    warehouse under a governed badge. Carries a reason the abstain can show.
+    """
+
+
 def resolve_grant(
-    session_id: str | None, verified: VerifiedManifest | None
+    session_id: str | None,
+    verified: VerifiedManifest | None,
+    *,
+    require_grounding: bool = False,
 ) -> tuple[VerifiedManifest, str, str]:
     """The one place that decides which grant governs a turn.
 
@@ -1309,14 +1362,25 @@ def resolve_grant(
     The reason is returned rather than logged because an expired binding
     widening back to the full local grant is the most dangerous of the three
     outcomes, and the caller has to be able to see which one they got.
+
+    ``require_grounding`` is the policy, and it is a parameter rather than a
+    second opinion. The engine cannot tell whether a customer is on the other
+    end of a call; the transport can, and says so. In-process callers - the
+    corpus, the benches, seeding - read the local warehouse legitimately and
+    keep the mint. A served door passes True, and a turn nothing grants abstains
+    rather than quietly widening to every table the pack declares.
     """
     if verified is not None:
         return verified, SESSION_GRANT, ""
     try:
         return get_session_registry().resolve(session_id), SESSION_GRANT, ""
     except SessionExpired:
+        if require_grounding:
+            raise UngroundedSession("the session grant expired") from None
         return _local_verified(session_id), LOCAL_GRANT, "session manifest expired"
     except SessionUnbound:
+        if require_grounding:
+            raise UngroundedSession("no Space or session grant is bound") from None
         return _local_verified(session_id), LOCAL_GRANT, "no session manifest bound"
 
 
@@ -2131,6 +2195,7 @@ def answer(
     session_id: str | None = None,
     space_id: str | None = None,
     verified: VerifiedManifest | None = None,
+    require_grounding: bool = False,
 ) -> dict[str, Any]:
     """Answer under exactly one grant, and say on the envelope which one.
 
@@ -2138,7 +2203,15 @@ def answer(
     branch below can run without one, and the disclosure is stamped after every
     branch so no branch can omit it.
     """
-    grant, kind, degraded = resolve_grant(session_id, verified)
+    try:
+        grant, kind, degraded = resolve_grant(
+            session_id, verified, require_grounding=require_grounding
+        )
+    except UngroundedSession as exc:
+        # No grant exists, so there is nothing to stamp and nothing to read.
+        # Answering here is what let 'total revenue in my uploaded file' return
+        # the demo warehouse under a governed badge (P0-DEMO-02).
+        return _abstain_no_grant(question, str(uuid.uuid4()), reason=str(exc))
     result = _answer(question, session_id=session_id, space_id=space_id, verified=grant)
     return stamp_grant(result, verified=grant, kind=kind, degraded=degraded)
 

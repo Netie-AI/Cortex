@@ -30,6 +30,7 @@ def _tool_catalog() -> list[dict[str, Any]]:
                 "properties": {
                     "question": {"type": "string"},
                     "session_id": {"type": "string"},
+                    "space_id": {"type": "string"},
                 },
                 "required": ["question"],
             },
@@ -127,7 +128,17 @@ async def mcp_call_tool(
         # bound grant itself, so this route cannot be given a different one
         # than /dms/query or /v1/contract/ask (SEC-01). Do not "fix" this by
         # minting a grant here - a second resolver is how the two disagreed.
-        result = answer_fn(question, session_id=args.get("session_id"))
+        #
+        # require_grounding for the same reason /dms/query sets it: this is a
+        # served door, so a turn nothing grants abstains rather than widening to
+        # every table the pack declares. Leaving it off here would have made
+        # this the one door P0-DEMO-02 still walked through.
+        result = answer_fn(
+            question,
+            session_id=args.get("session_id"),
+            space_id=args.get("space_id"),
+            require_grounding=True,
+        )
         return {"ok": True, "name": name, "result": result}
 
     if name == "lakehouse.tables":

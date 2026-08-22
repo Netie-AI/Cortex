@@ -1122,7 +1122,13 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     return answer, sources
 
 
-def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+def answer_question(
+    question: str,
+    *,
+    session_id: str | None = None,
+    space_id: str | None = None,
+    require_grounding: bool = False,
+) -> dict[str, Any]:
     """Q2 - route through the layered answer engine (certified -> governed metric ->
     abstain). Falls back to the legacy heuristic path only if the engine is
     unavailable, so behavior degrades safely rather than breaking.
@@ -1148,12 +1154,27 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
         ungrounded_tables,
     )
 
-    grant, kind, degraded = resolve_grant(session_id, None)
+    from CortexOS.dms.answer_engine import UngroundedSession, _abstain_no_grant
+
+    try:
+        grant, kind, degraded = resolve_grant(
+            session_id, None, require_grounding=require_grounding
+        )
+    except UngroundedSession as exc:
+        # The legacy bridge below is a second executor. It has to be unreachable
+        # here too, or the refusal would hold on the engine path and leak on the
+        # fallback - which is how SEC-01 survived its first fix.
+        return _abstain_no_grant(question, str(uuid.uuid4()), reason=str(exc))
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
         from CortexOS.execution.manifest import ManifestError
 
-        result = _engine_answer(question, session_id=session_id)
+        result = _engine_answer(
+            question,
+            session_id=session_id,
+            space_id=space_id,
+            verified=grant,
+        )
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
         # until a dedicated governed metric exists. Word-boundary match only - bare
         # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.

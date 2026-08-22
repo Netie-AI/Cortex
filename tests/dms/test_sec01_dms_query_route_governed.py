@@ -227,28 +227,69 @@ def test_granted_session_still_answers_a_certified_query(dms_http) -> None:
     assert "SKU-" in body["answer"]
 
 
-def test_unbound_session_still_answers_and_says_the_grant_is_self_issued(
-    dms_http,
-) -> None:
-    """R-0005 + R-0011.
+def test_an_ungrounded_served_turn_refuses_instead_of_widening(dms_http) -> None:
+    """P0-DEMO-02, decided: the demo does not get to be the reason this leaks.
 
-    Nothing bound a manifest for this session, so the local mint still runs -
-    the demo must keep working. But a self-issued grant is a weaker claim than a
-    signed one, and a degradation visible only in a log line is a silent one.
+    This test used to assert the opposite - that an unbound session still
+    answers, with `grant_kind == "local-self-issued"` - and it was written as a
+    deliberate R-0005 control so a bare demo kept working. It was also, in
+    effect, a green certification of an open P0: "total revenue in my uploaded
+    file" returned MYR 80,375,993.99 out of the demo warehouse under a governed
+    badge, and this test said that was intended.
+
+    The founder retired the demo constraint, so grounding wins. A served turn
+    that nothing grants now abstains and says what would ground it. Nothing is
+    refused that was legitimately answerable - there was never a grant here to
+    answer from.
     """
-    body = _ask(dms_http, "what is our total revenue", "never-bound-session")
+    body = _ask(dms_http, "total revenue in my uploaded file", "never-bound-session")
 
-    assert body["rows"], "an unbound demo session must still answer"
-    assert body["grant_kind"] == "local-self-issued"
-    assert "local-self-issued" in (body.get("assumptions") or "")
-    assert body["query_plan"]["grant_kind"] == "local-self-issued"
+    assert body["badge"] == "abstain", body
+    assert body["rows"] == []
+    assert body["sql_used"] is None
+    assert body["grant_kind"] == "none"
+    assert "80375993" not in str(body).replace(",", "")
+    assert "space" in body["answer"].lower(), body["answer"]
 
 
-def test_expired_binding_falls_back_visibly_rather_than_silently(
+def test_the_ungrounded_refusal_reaches_every_served_door(dms_http) -> None:
+    """/mcp/call is a door too, and it was the one most likely to be forgotten.
+
+    Both surfaces resolve through the same `resolve_grant`, so this asserts the
+    policy travelled with it rather than being set on whichever route someone
+    remembered.
+    """
+    r = dms_http.post(
+        "/mcp/call",
+        json={
+            "name": "answer_engine.answer",
+            "arguments": {
+                "question": "total revenue in my uploaded file",
+                "session_id": "never-bound-mcp",
+            },
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    result = r.json()["result"]
+    assert result["badge"] == "abstain", result
+    assert result["rows"] == []
+    assert "80375993" not in str(result).replace(",", "")
+
+
+def test_an_expired_binding_refuses_rather_than_widening(
     dms_http, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An expired grant widening back to the local mint is the most dangerous
-    fallback of the three, so it is the one that must be loudest (R-0011)."""
+    """The most dangerous fallback of the three, and now it is not a fallback.
+
+    This asserted that an expired grant widened back to the local mint and said
+    so on the envelope - honest, but a wide grant honestly labelled is still
+    wide, and an expiry is exactly when a caller has least reason to expect one.
+    On a served door it now refuses.
+
+    In-process callers still degrade to the mint, because `require_grounding`
+    defaults to False and the corpus reads the local warehouse legitimately.
+    """
     from CortexOS.execution import session_manifests
 
     def _expired(self, session_id, *, now=None):
@@ -260,7 +301,9 @@ def test_expired_binding_falls_back_visibly_rather_than_silently(
 
     body = _ask(dms_http, "what is our total revenue", WIDE_SESSION)
 
-    assert body["grant_kind"] == "local-self-issued"
+    assert body["badge"] == "abstain", body
+    assert body["rows"] == []
+    assert body["grant_kind"] == "none"
     assert "expired" in (body.get("assumptions") or "").lower()
 
 
@@ -374,13 +417,26 @@ def test_legacy_delayed_bridge_still_serves_a_granted_session(dms_http) -> None:
     assert "SHP-" in body["answer"]
 
 
-def test_legacy_delayed_bridge_still_serves_an_unbound_demo_session(dms_http) -> None:
-    """R-0005 + R-0011: unbound demo keeps working, and says the grant is minted."""
+def test_the_legacy_bridge_is_not_a_way_around_the_grounding_refusal(
+    dms_http,
+) -> None:
+    """The second executor has to refuse for the same reason as the first.
+
+    `answer_question` falls through to a legacy ranked-SQL path when the engine
+    abstains on a "most delayed" question. That bridge opens its own connection,
+    so a grounding refusal enforced only on the engine path would hold on one
+    executor and leak on the other - which is how the original SEC-01 defect
+    survived its first fix.
+
+    This previously asserted the opposite, that an unbound demo session still
+    got rows out of `shipments` under a minted grant.
+    """
     body = _ask(dms_http, "show me the most delayed shipments", "never-bound-delayed")
 
-    assert body["rows"]
-    assert body["source_table"] == "shipments"
-    assert body["grant_kind"] == "local-self-issued"
+    assert body["badge"] == "abstain", body
+    assert body["rows"] == []
+    assert body["source_table"] is None
+    assert body["grant_kind"] == "none"
 
 
 # -- (3) the MCP tool call inherits the same grant ----------------------------
