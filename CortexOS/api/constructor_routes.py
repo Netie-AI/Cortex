@@ -39,6 +39,20 @@ class ConstructorRunBody(BaseModel):
     run_id: str = "constructor_run"
 
 
+class IssueKeyBody(BaseModel):
+    label: str = "constructor cortex viewer"
+    tier: str = "free"
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
+
+def _require_loopback(request: Request, action: str) -> None:
+    host = (request.client.host if request.client else "") or ""
+    if host not in _LOOPBACK_HOSTS:
+        raise HTTPException(status_code=403, detail=f"{action} is loopback-only")
+
+
 def _skin_dir() -> Path:
     raw = (os.environ.get("CONSTRUCTOR_SKIN_DIR") or r"D:\Constructor").strip()
     return Path(raw)
@@ -74,12 +88,32 @@ label,input,button{display:block;margin:.5rem 0}input{padding:.5rem;min-width:20
 button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}</style>
 </head><body>
 <h1>Cortex</h1>
-<p>Engine path. Paste an API key. No key, no access.</p>
+<p>Engine path. Paste an OpenVault issued key (ov_...). Keys live in OpenVault, not Cortex.</p>
 <form method="post" action="/cortex/session">
-<label for="key">API key</label>
+<label for="key">OpenVault key</label>
 <input id="key" name="key" type="password" autocomplete="off" required/>
 <button type="submit">Continue</button>
 </form>
+<p><button type="button" id="issue">Generate OpenVault key</button></p>
+<pre id="once"></pre>
+<script>
+document.getElementById("issue").onclick = async function () {
+  var once = document.getElementById("once");
+  once.textContent = "Issuing...";
+  var r = await fetch("/cortex/constructor/issue-key", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: "{}"
+  });
+  var j = await r.json();
+  if (!j.token) {
+    once.textContent = r.status + " " + JSON.stringify(j);
+    return;
+  }
+  document.getElementById("key").value = j.token;
+  once.textContent = "Shown once. Token is in the box. Continue. Lost keys cannot be recovered.";
+};
+</script>
 </body></html>
 """
 
@@ -87,6 +121,22 @@ button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}<
 @router.get("/cortex/login", response_class=HTMLResponse)
 def cortex_login() -> HTMLResponse:
     return HTMLResponse(_LOGIN_HTML)
+
+
+@router.post("/cortex/constructor/issue-key")
+def constructor_issue_key(request: Request, body: IssueKeyBody = IssueKeyBody()) -> dict[str, Any]:
+    """Loopback mint. OpenVault holds the secret. Cortex never stores it."""
+    _require_loopback(request, "issue OpenVault key")
+    from CortexOS.integrations.openvault_client import post_json
+
+    payload = {
+        "label": body.label.strip() or "constructor cortex viewer",
+        "tier": body.tier.strip() or "free",
+    }
+    out = post_json("/api/apikeys", payload, timeout=5.0)
+    if not out or not out.get("token"):
+        raise HTTPException(status_code=503, detail="OpenVault did not issue a key")
+    return out
 
 
 @router.post("/cortex/session", response_model=None)
@@ -174,6 +224,52 @@ def constructor_asset(
     return FileResponse(_skin_file(name))
 
 
+@router.post("/cortex/constructor/ghost")
+def constructor_ghost(
+    body: ConstructorRunBody,
+    caller: Caller = Depends(require_constructor_viewer),
+) -> dict[str, Any]:
+    from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
+
+    try:
+        program = compile_constructor_graph({"nodes": body.nodes, "edges": body.edges})
+    except ConstructorGraphError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "ghost": True,
+        "actor": caller.actor,
+        "entry_node_id": program.entry_node_id,
+        "output_node_id": program.output_node_id,
+        "nodes": [
+            {
+                "id": n.id,
+                "kind": n.type.value if hasattr(n.type, "value") else str(n.type),
+                "constructor_kind": (n.annotations or {}).get("constructor_kind"),
+                "inputs": n.inputs,
+            }
+            for n in program.nodes
+        ],
+    }
+
+
+@router.post("/cortex/constructor/recommend")
+def constructor_recommend(
+    body: ConstructorRunBody,
+    caller: Caller = Depends(require_constructor_viewer),
+) -> dict[str, Any]:
+    from CortexOS.constructor_graph import recommend_extras
+    from CortexOS.execution import coordination_patterns
+
+    kinds = [str(n.get("kind") or "") for n in body.nodes]
+    prompt = " ".join(kinds) or "foundry ontology insight app"
+    rec = coordination_patterns.recommend_from_prompt(prompt, extras=recommend_extras(kinds))
+    wanted = {"single_agent", "generator_verifier", "orchestrator_subagent"}
+    approaches = [row for row in coordination_patterns.catalog() if row["id"] in wanted]
+    _ = caller
+    return {"ok": True, "recommendation": rec.as_dict(), "approaches": approaches}
+
+
 @router.post("/cortex/constructor/run")
 async def constructor_run(
     request: Request,
@@ -200,7 +296,10 @@ async def constructor_run(
         router_m = ModelRouter()
 
     ctx = ExecutionContext(body.run_id, {"actor": caller.actor})
-    dag_result = await run_dag(program, ctx, router_m, ledger)
+    try:
+        dag_result = await run_dag(program, ctx, router_m, ledger)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     serialized: dict[str, Any] = {}
     for nid, nr in dag_result.outputs.items():
         serialized[nid] = {"output": nr.output, "tier": nr.tier, "cost_myr": nr.cost_myr}

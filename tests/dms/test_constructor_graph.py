@@ -44,12 +44,16 @@ def dms_client(api_keys_env, tmp_path, monkeypatch):
     return TestClient(create_app())
 
 
-def test_compile_sample_has_four_emit_nodes():
+def test_compile_sample_has_exactly_one_emit():
     program = compile_constructor_graph(SAMPLE)
     assert [n.id for n in program.nodes] == ["n1", "n2", "n3", "n4"]
     assert program.nodes[1].inputs == ["n1"]
     assert program.entry_node_id == "n1"
     assert program.output_node_id == "n4"
+    from netie.fabrication.dsl_parser import NodeType
+
+    emits = [n for n in program.nodes if n.type == NodeType.EMIT]
+    assert len(emits) == 1
 
 
 def test_compile_rejects_unknown_kind():
@@ -60,7 +64,8 @@ def test_compile_rejects_unknown_kind():
 def test_login_open_constructor_redirects_without_key(dms_client):
     login = dms_client.get("/cortex/login")
     assert login.status_code == 200
-    assert "API key" in login.text
+    assert "OpenVault" in login.text
+    assert "Generate OpenVault key" in login.text
     bare = dms_client.get("/cortex/constructor/", follow_redirects=False)
     assert bare.status_code == 303
     assert "/cortex/login" in bare.headers["location"]
@@ -83,6 +88,71 @@ def test_run_401_without_key(dms_client):
     assert res.status_code == 401
 
 
+def test_ghost_compiles_with_viewer_key(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/constructor/ghost",
+        json=SAMPLE,
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["ghost"] is True
+    assert body["output_node_id"] == "n4"
+    assert len(body["nodes"]) == 4
+
+
+def test_recommend_returns_three_live_patterns(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/constructor/recommend",
+        json=SAMPLE,
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    ids = {row["id"] for row in body["approaches"]}
+    assert ids == {"single_agent", "generator_verifier", "orchestrator_subagent"}
+    assert body["recommendation"]["pattern"] == "generator_verifier"
+
+
+FOUNDRY = {
+    "nodes": [
+        {"id": "c1", "kind": "connector"},
+        {"id": "o1", "kind": "ontology"},
+        {"id": "i1", "kind": "insight"},
+        {"id": "f1", "kind": "foundry"},
+        {"id": "a1", "kind": "app"},
+        {"id": "g1", "kind": "audit"},
+    ],
+    "edges": [
+        {"from": "c1", "to": "o1"},
+        {"from": "o1", "to": "i1"},
+        {"from": "i1", "to": "f1"},
+        {"from": "f1", "to": "a1"},
+        {"from": "f1", "to": "g1"},
+    ],
+}
+
+
+def test_compile_foundry_path_emits_the_app():
+    program = compile_constructor_graph(FOUNDRY)
+    assert program.output_node_id == "a1"
+    from netie.fabrication.dsl_parser import NodeType
+
+    emits = [n for n in program.nodes if n.type == NodeType.EMIT]
+    assert [n.id for n in emits] == ["a1"]
+
+
+def test_recommend_foundry_picks_orchestrator(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/constructor/recommend",
+        json=FOUNDRY,
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["recommendation"]["pattern"] == "orchestrator_subagent"
+
+
 def test_run_compiles_with_viewer_key(dms_client, api_keys_env):
     res = dms_client.post(
         "/cortex/constructor/run",
@@ -93,3 +163,17 @@ def test_run_compiles_with_viewer_key(dms_client, api_keys_env):
     body = res.json()
     assert set(body["nodes"]) == {"n1", "n2", "n3", "n4"}
     assert body["actor"] == "api_viewer"
+
+
+def test_issue_key_uses_openvault_token(dms_client, monkeypatch):
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        lambda *a, **k: {
+            "ok": True,
+            "token": "ov_test_once",
+            "key": {"key_id": "abc", "label": "constructor cortex viewer", "tier": "free"},
+        },
+    )
+    res = dms_client.post("/cortex/constructor/issue-key", json={})
+    assert res.status_code == 200
+    assert res.json()["token"].startswith("ov_")

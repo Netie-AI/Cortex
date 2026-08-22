@@ -24,6 +24,8 @@ def test_mcp_list_tools(client):
     assert "answer_engine.answer" in names
     assert "lakehouse.tables" in names
     assert "agent.status" in names
+    assert "auto_caller.pick" in names
+    assert "constructor.ghost" in names
 
 
 def test_mcp_call_agent_status(client):

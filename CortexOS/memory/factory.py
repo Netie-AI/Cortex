@@ -23,8 +23,12 @@ def get_store(root: str | Path | None = None, dim: int | None = None) -> VectorS
     backend = os.getenv("CORTEX_MEMORY_BACKEND", "").lower()
     store_name = os.getenv("CORTEX_MEMORY_STORE", "").lower()
     if backend == "rawknn" or store_name == "rawknn":
-        return RawKnnStore(
-            root or _DEFAULT_RAWKNN_ROOT,
-            dim=_DEFAULT_RAWKNN_DIM if dim is None else dim,
-        )
+        env_root = os.getenv("CORTEX_MEMORY_ROOT")
+        env_dim = os.getenv("CORTEX_MEMORY_DIM")
+        chosen_dim = dim
+        if chosen_dim is None and env_dim:
+            chosen_dim = int(env_dim)
+        if chosen_dim is None:
+            chosen_dim = _DEFAULT_RAWKNN_DIM
+        return RawKnnStore(root or env_root or _DEFAULT_RAWKNN_ROOT, dim=chosen_dim)
     return InMemoryStore()

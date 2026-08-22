@@ -13,6 +13,7 @@ OpenVault + FreeBuild lane, never this module.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import threading
@@ -32,6 +33,7 @@ STATUS_BLOCKED = "blocked"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 
+BUILTIN_CONSTRUCTOR_ID = "builtin-constructor"
 _lock = threading.Lock()
 
 _JSON_FIELDS = ("manifest", "findings", "reasons", "unsafe_members")
@@ -103,10 +105,79 @@ def get_app(app_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row) if row else None
 
 
+def ensure_builtin_constructor(*, skin_dir: str | Path | None = None) -> dict[str, Any]:
+    """Register Constructor as a hosted Cortex app (no extra process, no extra port)."""
+    init()
+    skin = Path(
+        skin_dir
+        or os.environ.get("CONSTRUCTOR_SKIN_DIR")
+        or r"D:\Constructor"
+    )
+    now = time.time()
+    manifest = {
+        "schema": app_package.MANIFEST_SCHEMA,
+        "name": "Constructor",
+        "stack": "static",
+        "builtin": True,
+        "served_by": "cortex",
+        "launch_path": "/cortex/constructor/",
+        "skin_dir": str(skin),
+    }
+    existing = get_app(BUILTIN_CONSTRUCTOR_ID)
+    with _lock, _conn() as conn:
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO apps (
+                  id, name, stack, status, port, dir, manifest, findings, reasons,
+                  unsafe_members, created_at, updated_at, approved_at, run_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    BUILTIN_CONSTRUCTOR_ID,
+                    "Constructor",
+                    "static",
+                    STATUS_APPROVED,
+                    None,
+                    str(skin),
+                    json.dumps(manifest),
+                    "[]",
+                    "[]",
+                    "[]",
+                    now,
+                    now,
+                    now,
+                    "hosted",
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE apps SET name=?, stack=?, status=?, dir=?, manifest=?,
+                                updated_at=?, run_status='hosted', port=NULL
+                WHERE id=?
+                """,
+                (
+                    "Constructor",
+                    "static",
+                    STATUS_APPROVED,
+                    str(skin),
+                    json.dumps(manifest),
+                    now,
+                    BUILTIN_CONSTRUCTOR_ID,
+                ),
+            )
+    return {"ok": True, "app": get_app(BUILTIN_CONSTRUCTOR_ID)}
+
+
 def list_apps() -> list[dict[str, Any]]:
+    ensure_builtin_constructor()
     with _conn() as conn:
         rows = conn.execute("SELECT * FROM apps ORDER BY created_at DESC").fetchall()
-    return [_row_to_dict(r) for r in rows]
+    apps = [_row_to_dict(r) for r in rows]
+    user = [a for a in apps if not (a.get("manifest") or {}).get("builtin")]
+    hosted = [a for a in apps if (a.get("manifest") or {}).get("builtin")]
+    return user + hosted
 
 
 def import_zip_bytes(data: bytes, *, name: str | None = None) -> dict[str, Any]:
@@ -316,6 +387,26 @@ def start_app(app_id: str) -> dict[str, Any]:
         return {"ok": False, "error": "unknown_app"}
     if record["status"] != STATUS_APPROVED:
         return {"ok": False, "error": f"not_approved:{record['status']}"}
+
+    manifest = record.get("manifest") or {}
+    if manifest.get("builtin") and manifest.get("served_by") == "cortex":
+        now = time.time()
+        with _lock, _conn() as conn:
+            conn.execute(
+                """
+                UPDATE apps SET run_status = 'hosted', pid = NULL, last_error = '',
+                                updated_at = ?
+                WHERE id = ?
+                """,
+                (now, app_id),
+            )
+        return {
+            "ok": True,
+            "hosted": True,
+            "url": manifest.get("launch_path") or "/cortex/constructor/",
+            "app": get_app(app_id),
+        }
+
     if not record.get("port"):
         return {"ok": False, "error": "no_port"}
 
@@ -401,6 +492,8 @@ def list_running() -> list[dict[str, Any]]:
 def delete_app(app_id: str) -> bool:
     record = get_app(app_id)
     if record is None:
+        return False
+    if (record.get("manifest") or {}).get("builtin"):
         return False
     try:
         stop_app(app_id)
