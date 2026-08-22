@@ -892,6 +892,58 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     return answer, sources
 
 
+def try_l2_generate(question: str, *, use_explain_con: bool) -> tuple[str | None, str, str]:
+    """C7-full L2 generate. Packs imports stay here (C2: query_service is ignored).
+
+    Returns ``(safe_sql, assumptions, "")`` on success, or
+    ``(None, "", abstain_reason)`` when L2 cannot answer.
+    """
+    try:
+        from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
+        from packs.dms.generative import promotion as l2_promotion
+        from packs.dms.generative import schema_retrieval, sql_generator
+    except ImportError:
+        return None, "", "no verified answer path (L2 import failed)"
+
+    if not sql_generator.is_configured():
+        return None, "", "no verified answer path (L2 not wired)"
+
+    semantic_early = load_semantic_layer()
+    reduced = schema_retrieval.retrieve(question)
+
+    def _gen(prior: list[str]) -> str | None:
+        cands = sql_generator.generate_candidates(
+            question,
+            reduced,
+            prior_violations=prior,
+        )
+        return cands[0] if cands else None
+
+    con_explain = None
+    try:
+        if use_explain_con:
+            con_explain = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+        gate = gate_with_retry(_gen, question, semantic_early, con=con_explain, max_retries=2)
+    except SqlGateAbstain as exc:
+        return None, "", f"L2 generation failed validation gate: {exc}"
+    finally:
+        if con_explain is not None:
+            con_explain.close()
+
+    if not gate.passed or not gate.safe_sql:
+        return None, "", "L2 generation failed validation gate"
+
+    assumptions = (
+        f"L2 FreeRoute SQL over reduced schema "
+        f"tables={list((reduced.get('tables') or {}).keys())}"
+    )
+    try:
+        l2_promotion.record_validated(question, gate.safe_sql)
+    except Exception:  # noqa: BLE001 — promotion signal must not block answers
+        pass
+    return gate.safe_sql, assumptions, ""
+
+
 def answer_question(
     question: str,
     *,

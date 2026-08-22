@@ -30,12 +30,7 @@ from CortexOS.dms.sql_guardrail import (
     AuditEntry,
     log_audit,
 )
-from CortexOS.dms.warehouse_db import (
-    DEFAULT_DB,
-    get_connection,
-    load_semantic_layer,
-    read_only_queries_enabled,
-)
+from CortexOS.dms.warehouse_db import load_semantic_layer
 from CortexOS.execution.manifest import ManifestError, VerifiedManifest
 
 # Reused from the existing service (loaded lazily to avoid import cycle at module load).
@@ -851,68 +846,16 @@ def answer(
                 assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
 
     if sql is None:
-        # C7-full L2: schema retrieval → FreeRoute generate → validate gate.
-        # Never fall back to the L1 keyword cascade or a smaller model.
+        # C7-full L2: generate via query_service so this module does not import packs.
         if os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes"):
-            try:
-                from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
-                from packs.dms.generative import promotion as l2_promotion
-                from packs.dms.generative import schema_retrieval, sql_generator
-            except ImportError:  # noqa: BLE001
-                return _abstain(question, audit_id, reason="no verified answer path (L2 import failed)")
+            from CortexOS.dms.query_service import try_l2_generate
 
-            if not sql_generator.is_configured():
-                return _abstain(question, audit_id, reason="no verified answer path (L2 not wired)")
-
-            semantic_early = load_semantic_layer()
-            reduced = schema_retrieval.retrieve(question)
-            prior_box: dict[str, list[str]] = {"v": []}
-
-            def _gen(prior: list[str]) -> str | None:
-                prior_box["v"] = list(prior)
-                cands = sql_generator.generate_candidates(
-                    question,
-                    reduced,
-                    prior_violations=prior,
-                )
-                return cands[0] if cands else None
-
-            con_explain = None
-            try:
-                if verified is None:
-                    con_explain = get_connection(
-                        DEFAULT_DB, read_only=read_only_queries_enabled()
-                    )
-                gate = gate_with_retry(
-                    _gen,
-                    question,
-                    semantic_early,
-                    con=con_explain,
-                    max_retries=2,
-                )
-            except SqlGateAbstain as exc:
-                return _abstain(
-                    question,
-                    audit_id,
-                    reason=f"L2 generation failed validation gate: {exc}",
-                )
-            finally:
-                if con_explain is not None:
-                    con_explain.close()
-
-            if not gate.passed or not gate.safe_sql:
-                return _abstain(question, audit_id, reason="L2 generation failed validation gate")
-
-            sql = gate.safe_sql
-            layer, badge = "generated", "L2_VALIDATED"
-            assumptions = (
-                f"L2 FreeRoute SQL over reduced schema "
-                f"tables={list((reduced.get('tables') or {}).keys())}"
+            sql, assumptions, l2_reason = try_l2_generate(
+                question, use_explain_con=verified is None
             )
-            try:
-                l2_promotion.record_validated(question, sql)
-            except Exception:  # noqa: BLE001 — promotion signal must not block answers
-                pass
+            if l2_reason:
+                return _abstain(question, audit_id, reason=l2_reason)
+            layer, badge = "generated", "L2_VALIDATED"
         else:
             return _abstain(question, audit_id, reason="no governed metric or certified query matched")
 
