@@ -95,10 +95,17 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
                 "constructor_kind": raw["kind"],
                 "object_type": raw.get("object_type"),
                 "action_type": raw.get("action_type"),
+                "data_point": raw.get("data_point"),
+                "data_type": raw.get("data_type"),
+                "fetch_from": raw.get("fetch_from"),
+                "stream": bool(raw.get("stream")),
             },
         }
-        if ntype in (NodeType.LLM_JUDGED, NodeType.AGENT_TASK, NodeType.RAG_ANSWER):
-            fields["default_tier"] = "T0"
+        tier = str(raw.get("tier") or "T0").upper()
+        if tier not in ("T0", "T1"):
+            tier = "T0"
+        if ntype in (NodeType.LLM_JUDGED, NodeType.AGENT_TASK, NodeType.RAG_ANSWER, NodeType.TOOL_CALL):
+            fields["default_tier"] = tier
             fields["max_tier"] = "T1"
         if ntype == NodeType.TOOL_CALL:
             fields["tool_name"] = str(raw.get("action_type") or "export_pptx")

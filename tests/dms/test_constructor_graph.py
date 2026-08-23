@@ -61,6 +61,40 @@ def test_compile_rejects_unknown_kind():
         compile_constructor_graph({"nodes": [{"id": "x", "kind": "n8n"}], "edges": []})
 
 
+def test_compile_ontology_fields_land_on_the_dag():
+    program = compile_constructor_graph(
+        {
+            "nodes": [
+                {
+                    "id": "c1",
+                    "kind": "connector",
+                    "object_type": "inventory",
+                    "data_point": "sku",
+                    "data_type": "string",
+                    "fetch_from": "warehouse.inventory",
+                    "tier": "T1",
+                    "stream": False,
+                },
+                {
+                    "id": "t1",
+                    "kind": "tool_call",
+                    "action_type": "export_pptx",
+                    "object_type": "inventory",
+                    "tier": "T0",
+                },
+                {"id": "a1", "kind": "app"},
+            ],
+            "edges": [{"from": "c1", "to": "t1"}, {"from": "t1", "to": "a1"}],
+        }
+    )
+    by_id = {n.id: n for n in program.nodes}
+    assert by_id["c1"].annotations["object_type"] == "inventory"
+    assert by_id["c1"].annotations["data_point"] == "sku"
+    assert by_id["c1"].annotations["fetch_from"] == "warehouse.inventory"
+    assert by_id["t1"].tool_name == "export_pptx"
+    assert program.output_node_id == "a1"
+
+
 def test_login_open_constructor_redirects_without_key(dms_client):
     login = dms_client.get("/cortex/login")
     assert login.status_code == 200

@@ -163,6 +163,28 @@ h1 {
   background: var(--accent);
 }
 
+.inspect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.inspect-form label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inspect-form select,
+.inspect-form input {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  font-size: 12px;
+}
+
 #inspect-json {
   margin: 0;
   white-space: pre-wrap;

@@ -91,6 +91,13 @@ function compileIR(state) {
         id: n.id,
         kind: kind,
         constructor_kind: n.kind,
+        object_type: n.object_type || null,
+        data_point: n.data_point || null,
+        data_type: n.data_type || null,
+        action_type: n.action_type || null,
+        fetch_from: n.fetch_from || null,
+        tier: n.tier || "T0",
+        stream: !!n.stream,
         note: n.note,
         requires_confirm: n.kind === "tool_call",
       };
@@ -155,7 +162,10 @@ function localGhostWalk() {
       ghost: C.ghost || !write,
       write: !!write,
       would: node.note,
-      action_type: node.kind === "tool_call" ? "export_pptx" : "agent.checked",
+      action_type: node.action_type || (node.kind === "tool_call" ? "export_pptx" : "agent.checked"),
+      object_type: node.object_type || null,
+      data_point: node.data_point || null,
+      fetch_from: node.fetch_from || null,
     });
   }
   C.markGhostWalk(order);
@@ -278,21 +288,32 @@ async function cortexPost(path, body) {
   }
 }
 
-async function liveOrGhost() {
+async function liveOrGhost(forceLive) {
   const C = window.Constructor;
   const ir = compileIR(C.getState());
+  if (forceLive) {
+    if (!cortexOrigin()) {
+      return "Live run is Cortex only (POST /cortex/constructor/run). Pages never fetch. Open http://127.0.0.1:8012/cortex . app.netie.ai/cortex is still LiteSpeed 404.";
+    }
+    C.setGhost(false);
+    const remote = await cortexPost("/cortex/constructor/run", {
+      nodes: C.getState().nodes,
+      edges: C.getState().edges,
+    });
+    C.showAudit({ mode: "cortex-run", ir: ir, remote: remote });
+    if (!remote || remote.ok === false) {
+      return (
+        "Cortex run_dag failed (" +
+        ((remote && (remote.status || remote.error || remote.detail)) || "offline") +
+        "). No internal fallback."
+      );
+    }
+    return "Cortex run_dag accepted. Actor " + (remote.actor || "?") + ". Audit has node outputs.";
+  }
   if (C.ghost || !cortexOrigin()) {
     return ghostRun();
   }
-  const remote = await cortexPost("/cortex/constructor/run", {
-    nodes: C.getState().nodes,
-    edges: C.getState().edges,
-  });
-  C.showAudit({ mode: "cortex-run", ir: ir, remote: remote });
-  if (!remote || remote.ok === false) {
-    return "Cortex run blocked (" + (remote && (remote.status || remote.error) || "offline") + "). Fell back to ghost. " + ghostRun();
-  }
-  return "Cortex accepted the DAG. Audit panel has the engine reply.";
+  return liveOrGhost(true);
 }
 
 function chatSay(role, text) {
@@ -308,23 +329,62 @@ async function handleChat(raw) {
   const text = raw.trim();
   const t = text.toLowerCase();
   const C = window.Constructor;
-  if (!t) return "Say what to build.";
+  if (!t) return "Say the object, point, action, or run all.";
   if (t === "help") {
-    return "foundry path. ghost on/off. ghost run. propose 3. maximize. run. add <kind>. wire <id> to <id>.";
+    return "set object inventory|suppliers. set point sku. set action export_pptx. set fetch warehouse.inventory. set tier T0|T1. set stream on|off. foundry path. ghost on/off. ghost run. propose 3. maximize. run all. bench. add <kind>. wire <id> to <id>.";
+  }
+  const setObj = t.match(/^set object (\S+)$/);
+  if (setObj) {
+    if (!C.OBJECTS[setObj[1]]) return "Object must be inventory or suppliers (Cortex ontology).";
+    return C.patchSelected("object_type", setObj[1])
+      ? "Object " + setObj[1] + " on selected node."
+      : "Select a node first.";
+  }
+  const setPoint = t.match(/^set point (\S+)$/);
+  if (setPoint) {
+    return C.patchSelected("data_point", setPoint[1])
+      ? "Data point " + setPoint[1] + "."
+      : "Select a node first.";
+  }
+  const setType = t.match(/^set type (\S+)$/);
+  if (setType) {
+    return C.patchSelected("data_type", setType[1]) ? "Data type " + setType[1] + "." : "Select a node first.";
+  }
+  const setAct = t.match(/^set action (\S+)$/);
+  if (setAct) {
+    if (C.ACTIONS.indexOf(setAct[1]) < 0) return "Action must be export_pptx, item.intake, or agent.checked.";
+    return C.patchSelected("action_type", setAct[1]) ? "Action " + setAct[1] + "." : "Select a node first.";
+  }
+  const setFetch = t.match(/^set fetch (.+)$/);
+  if (setFetch) {
+    return C.patchSelected("fetch_from", setFetch[1].trim())
+      ? "Fetch/place " + setFetch[1].trim() + "."
+      : "Select a node first.";
+  }
+  const setTier = t.match(/^set tier (t[01])$/);
+  if (setTier) {
+    const tier = setTier[1].toUpperCase();
+    return C.patchSelected("tier", tier) ? "Router tier " + tier + " (ModelRouter)." : "Select a node first.";
+  }
+  if (/^set stream on$/.test(t)) {
+    return C.patchSelected("stream", true) ? "Stream flag on. Cortex /dms/streams. Pages cannot stream." : "Select a node.";
+  }
+  if (/^set stream off$/.test(t)) {
+    return C.patchSelected("stream", false) ? "Stream flag off." : "Select a node.";
   }
   if (/ghost off/.test(t)) {
     C.setGhost(false);
-    return "Ghost off. Live walk may write on tool_call/app nodes. Cortex writes still need a key.";
+    return "Ghost off. run all calls Cortex run_dag. Pages still cannot fetch.";
   }
   if (/ghost on|ghost mode/.test(t)) {
     C.setGhost(true);
-    return "Ghost on. Dry-run only. Action types are ledgered as would-call, not executed.";
+    return "Ghost on. Dry-run only.";
   }
   if (/^ghost( run)?$/.test(t) || /dry.?run/.test(t)) {
     C.setGhost(true);
     return await ghostRun();
   }
-  if (/propose|bakeoff|approach/.test(t)) {
+  if (/propose|bakeoff|approach/.test(t) && !/openclaw/.test(t)) {
     const ranked = await rankApproaches();
     return (
       "Ranked 3 Cortex patterns. Winner: " +
@@ -344,7 +404,7 @@ async function handleChat(raw) {
     C.setGhost(true);
     const ranked = await rankApproaches();
     return (
-      "Loaded connector -> ontology -> insight -> foundry -> app. Ghost on. Winner: " +
+      "Loaded connector -> ontology -> insight -> foundry -> app + export_pptx. Ghost on. Winner: " +
       ranked[0].name +
       "."
     );
@@ -360,17 +420,23 @@ async function handleChat(raw) {
     const ok = C.wire(wire[1], wire[2]);
     return ok ? "Wired " + wire[1] + " -> " + wire[2] : "Need two existing node ids.";
   }
-  if (/^run$/.test(t) || /live run|execute/.test(t)) {
-    return await liveOrGhost();
+  if (/^run all$/.test(t) || /run api|execute all|live run/.test(t)) {
+    return await liveOrGhost(true);
   }
-  C.loadFoundryPath();
-  C.setGhost(true);
-  const ranked = await rankApproaches();
-  return (
-    "Built the foundry path and ghost-ranked 3 Cortex approaches. Winner: " +
-    ranked[0].name +
-    ". Next: maximize / run / add agent."
-  );
+  if (/^run$/.test(t) || /execute/.test(t)) {
+    return await liveOrGhost(false);
+  }
+  if (/^bench$/.test(t) || /openclaw|testbench|accuracy/.test(t)) {
+    const ranked = await rankApproaches();
+    return (
+      "Cortex G1 bakeoff (repo, not a live OpenClaw rerun): static DAG 4.1 vs OpenClaw 1.7. DMS golden 36/36, 0 confident-wrong. This graph winner: " +
+      ranked[0].name +
+      " score " +
+      ranked[0].score +
+      ". Constructor does not invent an OpenClaw host."
+    );
+  }
+  return "Unknown. Type help. I will not silently rebuild the foundry path.";
 }
 
 function bindChat() {
@@ -402,9 +468,9 @@ function bindChat() {
       chatSay("assistant", await handleChat("run"));
     });
   }
-  chatSay(
+    chatSay(
     "assistant",
-    "Stranger path is already on the canvas: connector -> ontology -> insight -> foundry -> app. Ghost is on. Try: ghost run, then propose 3, then maximize. Pages never fetch. Live run needs Cortex + OpenVault key."
+    "Select a node. Set object/point/action. Ghost dry-runs. run all hits Cortex run_dag (not Pages). Type help."
   );
   rankApproaches();
 }

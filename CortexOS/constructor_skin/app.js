@@ -1,4 +1,4 @@
-const STORAGE_KEY = "netie.constructor.v1";
+const STORAGE_KEY = "netie.constructor.v2";
 const KINDS = {
   ingest: { label: "Ingest", note: "Read operations into the graph." },
   connector: { label: "Connector", note: "First-party Cortex input. No n8n." },
@@ -17,6 +17,28 @@ const nodesEl = document.getElementById("nodes");
 const wiresEl = document.getElementById("wires");
 const inspectJson = document.getElementById("inspect-json");
 const inspectEmpty = document.getElementById("inspect-empty");
+const inspectForm = document.getElementById("inspect-form");
+
+const OBJECTS = {
+  inventory: {
+    points: {
+      sku: "string",
+      quantity_kg: "number",
+      location_id: "string",
+      unit_cost_myr: "number",
+    },
+  },
+  suppliers: {
+    points: {
+      supplier_id: "string",
+      supplier_name: "string",
+      lead_time_days: "integer",
+      risk_score: "number",
+    },
+  },
+};
+const ACTIONS = ["export_pptx", "item.intake", "agent.checked"];
+const TIERS = ["T0", "T1"];
 
 const state = load() || sample();
 let selectedId = state.nodes[0] ? state.nodes[0].id : null;
@@ -35,7 +57,12 @@ function foundrySample() {
         kind: "connector",
         x: 32,
         y: 48,
-        object_type: "Source",
+        object_type: "inventory",
+        data_point: "sku",
+        data_type: "string",
+        fetch_from: "warehouse.inventory",
+        tier: "T0",
+        stream: false,
         note: "First-party Cortex input. No n8n. WhatsApp stays a draft, not a send.",
       },
       {
@@ -43,8 +70,11 @@ function foundrySample() {
         kind: "ontology",
         x: 240,
         y: 48,
-        object_type: "Supplier",
-        note: "Objects: Source, Supplier, Insight, App. Actions: cite, compile, emit.",
+        object_type: "suppliers",
+        data_point: "supplier_id",
+        data_type: "string",
+        fetch_from: "warehouse.suppliers",
+        note: "Cortex ontology objects/links/actions. Not a custom type picker.",
       },
       {
         id: "i1",
@@ -59,7 +89,7 @@ function foundrySample() {
         kind: "foundry",
         x: 240,
         y: 200,
-        action_type: "compile",
+        action_type: "export_pptx",
         note: "Compile insights into a governed Cortex app. Not an Activepieces clone.",
       },
       {
@@ -77,6 +107,18 @@ function foundrySample() {
         y: 200,
         note: "Why this node exists. Ghost ledgers would-call, not a second EMIT.",
       },
+      {
+        id: "t1",
+        kind: "tool_call",
+        x: 656,
+        y: 200,
+        action_type: "export_pptx",
+        object_type: "inventory",
+        data_point: "sku",
+        data_type: "string",
+        tier: "T0",
+        note: "F8 governed write. requires_confirm. Only real tool on this pack is export_pptx.",
+      },
     ],
     edges: [
       { from: "c1", to: "o1" },
@@ -84,6 +126,7 @@ function foundrySample() {
       { from: "i1", to: "f1" },
       { from: "f1", to: "a1" },
       { from: "f1", to: "g1" },
+      { from: "f1", to: "t1" },
     ],
   };
 }
@@ -180,25 +223,83 @@ function showInspect() {
   const node = state.nodes.find((n) => n.id === selectedId);
   if (!node) {
     inspectJson.hidden = true;
+    inspectForm.hidden = true;
     inspectEmpty.hidden = false;
     return;
   }
   inspectEmpty.hidden = true;
-  inspectJson.hidden = false;
-  inspectJson.textContent = JSON.stringify(
-    {
-      id: node.id,
-      kind: node.kind,
-      note: node.note,
-      object_type: node.object_type || null,
-      action_type: node.action_type || null,
-      inbound: state.edges.filter((e) => e.to === node.id).map((e) => e.from),
-      outbound: state.edges.filter((e) => e.from === node.id).map((e) => e.to),
-    },
-    null,
-    2
+  inspectJson.hidden = true;
+  inspectForm.hidden = false;
+  const obj = node.object_type && OBJECTS[node.object_type] ? node.object_type : "inventory";
+  const points = OBJECTS[obj].points;
+  const point = node.data_point && points[node.data_point] ? node.data_point : Object.keys(points)[0];
+  const dtype = node.data_type || points[point];
+  const action = ACTIONS.indexOf(node.action_type) >= 0 ? node.action_type : "export_pptx";
+  const tier = TIERS.indexOf(node.tier) >= 0 ? node.tier : "T0";
+  inspectForm.innerHTML =
+    fieldSelect("object_type", "Object (ontology)", Object.keys(OBJECTS), obj) +
+    fieldSelect("data_point", "Data point", Object.keys(points), point) +
+    fieldSelect("data_type", "Data type", ["string", "number", "integer", "boolean", "date"], dtype) +
+    fieldSelect("action_type", "Action", ACTIONS, action) +
+    '<label>Fetch / place</label><input name="fetch_from" value="' +
+    escapeAttr(node.fetch_from || "") +
+    '" placeholder="warehouse.inventory" />' +
+    fieldSelect("tier", "Router tier (ModelRouter, not a network LB)", TIERS, tier) +
+    fieldSelect("stream", "Stream (/dms/streams flag)", ["false", "true"], node.stream ? "true" : "false") +
+    '<p class="hint">These write onto the DAG Cortex compiles. Pages never fetch. Live run is POST /cortex/constructor/run.</p>';
+}
+
+function fieldSelect(name, label, values, current) {
+  return (
+    "<label>" +
+    label +
+    '</label><select name="' +
+    name +
+    '">' +
+    values
+      .map(function (v) {
+        return (
+          '<option value="' +
+          v +
+          '"' +
+          (v === current ? " selected" : "") +
+          ">" +
+          v +
+          "</option>"
+        );
+      })
+      .join("") +
+    "</select>"
   );
 }
+
+function escapeAttr(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function patchSelected(field, value) {
+  const node = state.nodes.find((n) => n.id === selectedId);
+  if (!node) return false;
+  if (field === "stream") node.stream = value === true || value === "true";
+  else node[field] = value;
+  if (field === "object_type" && OBJECTS[value]) {
+    const first = Object.keys(OBJECTS[value].points)[0];
+    node.data_point = first;
+    node.data_type = OBJECTS[value].points[first];
+  }
+  if (field === "data_point" && OBJECTS[node.object_type] && OBJECTS[node.object_type].points[value]) {
+    node.data_type = OBJECTS[node.object_type].points[value];
+  }
+  save();
+  render();
+  return true;
+}
+
+inspectForm.addEventListener("change", (event) => {
+  const el = event.target;
+  if (!el || !el.name) return;
+  patchSelected(el.name, el.value);
+});
 
 document.querySelectorAll("[data-add]").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -343,6 +444,7 @@ function setGhost(on) {
 
 function showAudit(obj) {
   inspectEmpty.hidden = true;
+  inspectForm.hidden = true;
   inspectJson.hidden = false;
   inspectJson.textContent = JSON.stringify(obj, null, 2);
 }
@@ -370,6 +472,8 @@ function ensureKinds(kinds) {
 
 window.Constructor = {
   KINDS,
+  OBJECTS,
+  ACTIONS,
   ghost: true,
   getState: () => state,
   addNode,
@@ -379,6 +483,8 @@ window.Constructor = {
   markGhostWalk,
   loadFoundryPath,
   ensureKinds,
+  patchSelected,
+  selectedId: () => selectedId,
   render,
   save,
 };

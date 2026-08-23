@@ -324,7 +324,7 @@ async def constructor_run(
     serialized: dict[str, Any] = {}
     for nid, nr in dag_result.outputs.items():
         serialized[nid] = {"output": nr.output, "tier": nr.tier, "cost_myr": nr.cost_myr}
-    return {"run_id": body.run_id, "actor": caller.actor, "nodes": serialized}
+    return {"ok": True, "run_id": body.run_id, "actor": caller.actor, "nodes": serialized}
 
 
 def register_constructor_routes(app: Any) -> None:

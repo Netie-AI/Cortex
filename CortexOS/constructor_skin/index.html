@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Constructor — Netie</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=2" />
   </head>
   <body>
     <header class="top">
@@ -55,6 +55,7 @@
       <aside class="inspect" id="inspect">
         <div class="eyebrow">AUDIT</div>
         <p class="hint" id="inspect-empty">Select a node, or ghost-run the graph.</p>
+        <form id="inspect-form" class="inspect-form" hidden></form>
         <pre id="inspect-json" hidden></pre>
         <div class="eyebrow">APPROACHES</div>
         <div id="approaches" class="approaches"></div>
@@ -68,7 +69,7 @@
         <textarea
           id="chat-input"
           rows="2"
-          placeholder="foundry path. ghost run. propose 3. maximize. run."
+          placeholder="set object inventory. set point sku. set action export_pptx. run all. bench."
         ></textarea>
         <button type="submit">Send</button>
       </form>
