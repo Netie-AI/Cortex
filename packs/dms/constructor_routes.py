@@ -88,7 +88,7 @@ button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}<
 </head><body>
 <h1>Cortex</h1>
 <p>Engine path. Paste an OpenVault issued key (ov_...). Keys live in OpenVault, not Cortex.</p>
-<form method="post" action="/cortex/session">
+<form id="login" method="post" action="/cortex/session">
 <label for="key">OpenVault key</label>
 <input id="key" name="key" type="password" autocomplete="off" required/>
 <button type="submit">Continue</button>
@@ -96,6 +96,21 @@ button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}<
 <p><button type="button" id="issue">Generate OpenVault key</button></p>
 <pre id="once"></pre>
 <script>
+document.getElementById("login").onsubmit = async function (e) {
+  e.preventDefault();
+  var once = document.getElementById("once");
+  var r = await fetch("/cortex/session", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    credentials: "same-origin",
+    body: JSON.stringify({key: document.getElementById("key").value})
+  });
+  if (r.ok || r.redirected || r.status === 303) {
+    window.location.href = "/cortex/constructor/";
+    return;
+  }
+  once.textContent = r.status + " " + await r.text();
+};
 document.getElementById("issue").onclick = async function () {
   var once = document.getElementById("once");
   once.textContent = "Issuing...";
@@ -145,7 +160,13 @@ async def cortex_session(request: Request) -> RedirectResponse:
         body = SessionBody.model_validate(await request.json())
         key = body.key.strip()
     else:
-        form = await request.form()
+        try:
+            form = await request.form()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Send JSON {key: ...} (form parse failed)",
+            ) from exc
         key = str(form.get("key") or "").strip()
     caller = resolve_caller(key)
     if caller is None:
