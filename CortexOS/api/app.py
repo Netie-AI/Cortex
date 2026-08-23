@@ -125,12 +125,9 @@ def create_app() -> Any:
         register_stream_routes(app)
         register_agent_routes(app)
         register_action_routes(app)
-        import os
+        from packs.dms.constructor_routes import register_constructor_routes
 
-        if os.environ.get("CORTEX_OPENAPI_CONTRACT_EXPORT") != "1":
-            from packs.dms.constructor_routes import register_constructor_routes
-
-            register_constructor_routes(app)
+        register_constructor_routes(app)
         try:
             from CortexOS.api.a2a_routes import register_a2a_routes
 
