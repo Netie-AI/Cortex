@@ -313,3 +313,27 @@ def test_issue_key_uses_openvault_token(dms_client, monkeypatch):
     res = dms_client.post("/cortex/constructor/issue-key", json={})
     assert res.status_code == 200
     assert res.json()["token"].startswith("ov_")
+
+
+def test_demo_keys_rejected_when_refused(monkeypatch):
+    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
+    monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    from packs.dms.security.api_auth import parse_api_keys, resolve_caller
+
+    assert parse_api_keys() == {}
+    assert resolve_caller("dms-demo-viewer-key") is None
+
+
+def test_ov_token_resolves_via_openvault(monkeypatch):
+    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
+    monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        lambda *a, **k: {"ok": True, "key": {"key_id": "k1", "tier": "free"}},
+    )
+    from packs.dms.security.api_auth import resolve_caller
+
+    caller = resolve_caller("ov_live_secret_value")
+    assert caller is not None
+    assert caller.role == "viewer"
+    assert caller.actor == "ov_k1"

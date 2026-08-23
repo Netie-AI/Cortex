@@ -148,8 +148,11 @@ def constructor_issue_key(request: Request, body: IssueKeyBody = IssueKeyBody())
         "tier": body.tier.strip() or "free",
     }
     out = post_json("/api/apikeys", payload, timeout=5.0)
-    if not out or not out.get("token"):
+    token = str((out or {}).get("token") or (out or {}).get("token") or "").strip()
+    if not out or not token:
         raise HTTPException(status_code=503, detail="OpenVault did not issue a key")
+    out = dict(out)
+    out["token"] = token
     return out
 
 
