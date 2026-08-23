@@ -26,8 +26,17 @@ class Caller:
     actor: str
 
 
+def _refuse_demo_keys() -> bool:
+    return os.environ.get("DMS_REFUSE_DEMO_KEYS", "").lower() in ("1", "true", "yes")
+
+
 def _keys_source() -> str:
-    return (os.environ.get("DMS_API_KEYS") or "").strip() or _DEMO_KEYS
+    raw = (os.environ.get("DMS_API_KEYS") or "").strip()
+    if raw:
+        return raw
+    if _refuse_demo_keys():
+        return ""
+    return _DEMO_KEYS
 
 
 def auth_required() -> bool:
@@ -65,10 +74,26 @@ def extract_api_key(
     return None
 
 
+def _caller_from_openvault(token: str) -> Caller | None:
+    from CortexOS.integrations.openvault_client import post_json
+
+    out = post_json("/api/apikeys/verify", {"token": token}, timeout=3.0)
+    if not out or out.get("ok") is not True:
+        return None
+    key = out.get("key") if isinstance(out.get("key"), dict) else {}
+    actor = str(key.get("key_id") or key.get("id") or "openvault")
+    return Caller(role="viewer", actor=f"ov_{actor}")
+
+
 def resolve_caller(api_key: str | None) -> Caller | None:
     if not api_key:
         return None
-    return parse_api_keys().get(api_key)
+    found = parse_api_keys().get(api_key)
+    if found is not None:
+        return found
+    if api_key.startswith("ov_"):
+        return _caller_from_openvault(api_key)
+    return None
 
 
 def role_at_least(have: str, need: str) -> bool:
