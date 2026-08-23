@@ -337,3 +337,29 @@ def test_ov_token_resolves_via_openvault(monkeypatch):
     assert caller is not None
     assert caller.role == "viewer"
     assert caller.actor == "ov_k1"
+
+
+def test_ov_token_rejects_valid_false(monkeypatch):
+    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
+    monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        lambda *a, **k: {"ok": True, "valid": False},
+    )
+    from packs.dms.security.api_auth import resolve_caller
+
+    assert resolve_caller("ov_dead") is None
+
+
+def test_ov_token_accepts_flat_valid_true(monkeypatch):
+    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
+    monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        lambda *a, **k: {"ok": True, "valid": True, "key_id": "flat1", "tier": "free"},
+    )
+    from packs.dms.security.api_auth import resolve_caller
+
+    caller = resolve_caller("ov_flat")
+    assert caller is not None
+    assert caller.actor == "ov_flat1"
