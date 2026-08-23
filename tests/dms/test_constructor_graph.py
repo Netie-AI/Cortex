@@ -119,6 +119,7 @@ def test_login_open_constructor_redirects_without_key(dms_client):
     login = dms_client.get("/cortex/login")
     assert login.status_code == 200
     assert "OpenVault" in login.text
+    assert "DMS_API_KEYS" in login.text
     assert "Generate OpenVault key" in login.text
     bare = dms_client.get("/cortex/constructor/", follow_redirects=False)
     assert bare.status_code == 303
@@ -313,6 +314,16 @@ def test_issue_key_uses_openvault_token(dms_client, monkeypatch):
     res = dms_client.post("/cortex/constructor/issue-key", json={})
     assert res.status_code == 200
     assert res.json()["token"].startswith("ov_")
+
+
+def test_issue_key_503_tells_hyperlift_to_set_keys(dms_client, monkeypatch):
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        lambda *a, **k: None,
+    )
+    res = dms_client.post("/cortex/constructor/issue-key", json={})
+    assert res.status_code == 503
+    assert "DMS_API_KEYS" in res.text
 
 
 def test_demo_keys_rejected_when_refused(monkeypatch):

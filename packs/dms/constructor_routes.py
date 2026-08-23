@@ -87,7 +87,7 @@ label,input,button{display:block;margin:.5rem 0}input{padding:.5rem;min-width:20
 button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}</style>
 </head><body>
 <h1>Cortex</h1>
-<p>Engine path. Paste an OpenVault issued key (ov_...). Keys live in OpenVault, not Cortex.</p>
+<p>Engine path. Paste an ov_ OpenVault key, or an operator key from DMS_API_KEYS. Demo keys are refused. Generate only works when OpenVault is on this machine.</p>
 <form id="login" method="post" action="/cortex/session">
 <label for="key">OpenVault key</label>
 <input id="key" name="key" type="password" autocomplete="off" required/>
@@ -150,7 +150,13 @@ def constructor_issue_key(request: Request, body: IssueKeyBody = IssueKeyBody())
     out = post_json("/api/apikeys", payload, timeout=5.0)
     token = str((out or {}).get("token") or (out or {}).get("token") or "").strip()
     if not out or not token:
-        raise HTTPException(status_code=503, detail="OpenVault did not issue a key")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "OpenVault did not issue a key. Generate needs OpenVault on loopback. "
+                "On Hyperlift, set DMS_API_KEYS in the manager and paste that key."
+            ),
+        )
     out = dict(out)
     out["token"] = token
     return out
