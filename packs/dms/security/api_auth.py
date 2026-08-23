@@ -80,8 +80,12 @@ def _caller_from_openvault(token: str) -> Caller | None:
     out = post_json("/api/apikeys/verify", {"token": token}, timeout=3.0)
     if not out or out.get("ok") is not True:
         return None
+    if out.get("valid") is False:
+        return None
     key = out.get("key") if isinstance(out.get("key"), dict) else {}
-    actor = str(key.get("key_id") or key.get("id") or "openvault")
+    actor = str(key.get("key_id") or key.get("id") or out.get("key_id") or "")
+    if not actor:
+        return None
     return Caller(role="viewer", actor=f"ov_{actor}")
 
 

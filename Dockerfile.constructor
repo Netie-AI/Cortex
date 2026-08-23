@@ -10,6 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PACK=dms \
     DMS_REFUSE_DEMO_KEYS=1 \
     PORT=8080
+# Hyperlift: set PORT=8080 in the manager if you override it. Pair OpenVault via
+# OPENVAULT_BASE_URL, or set DMS_API_KEYS there. Never bake keys into this image.
 
 WORKDIR /app
 
