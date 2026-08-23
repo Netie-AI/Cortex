@@ -617,13 +617,21 @@ def _suggestions(question: str, limit: int = 3) -> list[str]:
             seen.append(qtext)
         if len(seen) >= limit:
             break
-    if not seen:  # cold: offer a stable default trio
-        seen = [
-            "Top 5 selling SKUs by revenue",
-            "Which SKUs are below reorder level in warehouse A?",
-            "Show warehouse capacity utilisation",
-        ][:limit]
-    return seen
+    if not seen:  # cold: certified titles + metric labels from the pack
+        from packs.dms.semantic.catalog_answer import _metric_label
+
+        for cq in model.certified:
+            seen.append(cq.question)
+            if len(seen) >= limit:
+                break
+        if len(seen) < limit:
+            for metric in model.metrics.values():
+                label = _metric_label(metric)
+                if label not in seen:
+                    seen.append(label)
+                if len(seen) >= limit:
+                    break
+    return seen[:limit]
 
 
 def _abstain(
@@ -658,6 +666,43 @@ def _abstain(
         "assumptions": reason,
         "total_count": 0,
         "suggestions": [] if granted_sources else suggestions,
+    }
+
+
+def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
+    """META-01 — browse what the semantic layer can answer (no SQL)."""
+    from packs.dms.semantic.catalog_answer import build_catalog_answer
+    from packs.dms.semantic.loader import load_all
+
+    payload = build_catalog_answer()
+    model = load_all()
+    suggestions = [cq.question for cq in model.certified[:5]]
+    if len(suggestions) < 3:
+        from packs.dms.semantic.catalog_answer import _metric_label
+
+        for metric in model.metrics.values():
+            label = _metric_label(metric)
+            if label not in suggestions:
+                suggestions.append(label)
+            if len(suggestions) >= 5:
+                break
+    return {
+        "answer": payload["answer"],
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "sql",
+        "rows": [],
+        "source_table": None,
+        "layer": payload["layer"],
+        "badge": payload["badge"],
+        "assumptions": "semantic layer catalog (no SQL)",
+        "total_count": 0,
+        "suggestions": suggestions,
+        "query_plan": _honest_plan(
+            question, None, layer=payload["layer"], assumptions="catalog browse"
+        ),
     }
 
 
@@ -1088,7 +1133,13 @@ def answer(
 
     # L0 certified → L1 metric → L-skill → L3 abstain
     # Skills run after governed routes so golden/certified paths stay authoritative.
+    # Catalog browse is not a named warehouse subject — check it before
+    # undefined_subject, or "data" / "catalog" abstain as unknown nouns.
     if sql is None:
+        from packs.dms.semantic.catalog_answer import is_catalog_intent
+
+        if is_catalog_intent(question):
+            return _done(_catalog_response(question, audit_id))
         unknown = undefined_subject(question)
         if unknown:
             named = ", ".join(_answerable_entities())
