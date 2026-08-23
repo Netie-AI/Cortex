@@ -23,16 +23,27 @@ const OBJECTS = {
   inventory: {
     points: {
       sku: "string",
-      quantity_kg: "number",
+      sku_name: "string",
+      category: "string",
+      supplier_id: "string",
       location_id: "string",
+      storage_bin: "string",
+      quantity_kg: "number",
+      reorder_level_kg: "number",
       unit_cost_myr: "number",
+      last_restocked: "date",
+      expiry_date: "date",
+      is_hazardous: "boolean",
     },
   },
   suppliers: {
     points: {
       supplier_id: "string",
       supplier_name: "string",
+      country: "string",
       lead_time_days: "integer",
+      payment_terms: "string",
+      last_audit_date: "date",
       risk_score: "number",
     },
   },
@@ -246,7 +257,7 @@ function showInspect() {
     '" placeholder="warehouse.inventory" />' +
     fieldSelect("tier", "Router tier (ModelRouter, not a network LB)", TIERS, tier) +
     fieldSelect("stream", "Stream (/dms/streams flag)", ["false", "true"], node.stream ? "true" : "false") +
-    '<p class="hint">These write onto the DAG Cortex compiles. Pages never fetch. Live run is POST /cortex/constructor/run.</p>';
+    '<p class="hint">Object/point/type write onto the DAG. Fetch/place is DuckDB (warehouse.inventory). Action export_pptx is F8; item.intake and agent.checked are events. Tier is ModelRouter T0/T1 on tool/agent, not a network LB. Stream lists /dms/streams. Pages never fetch.</p>';
 }
 
 function fieldSelect(name, label, values, current) {
@@ -470,12 +481,27 @@ function ensureKinds(kinds) {
   }
 }
 
+function replaceCatalog(objects, actions) {
+  Object.keys(OBJECTS).forEach(function (k) {
+    delete OBJECTS[k];
+  });
+  Object.keys(objects || {}).forEach(function (k) {
+    OBJECTS[k] = objects[k];
+  });
+  if (Array.isArray(actions) && actions.length) {
+    ACTIONS.length = 0;
+    for (let i = 0; i < actions.length; i++) ACTIONS.push(actions[i]);
+  }
+  render();
+}
+
 window.Constructor = {
   KINDS,
   OBJECTS,
   ACTIONS,
   ghost: true,
   getState: () => state,
+  selected: () => state.nodes.find((n) => n.id === selectedId) || null,
   addNode,
   wire,
   setGhost,
@@ -484,6 +510,7 @@ window.Constructor = {
   loadFoundryPath,
   ensureKinds,
   patchSelected,
+  replaceCatalog,
   selectedId: () => selectedId,
   render,
   save,
@@ -492,8 +519,8 @@ window.Constructor = {
 const power = document.getElementById("power");
 if (power) {
   power.textContent = cortexOrigin()
-    ? "Powered by Cortex. Paste an OpenVault ov_ key, then Run. Ghost stays a dry-run."
-    : "Sketch (no fetch). Try: ghost run / propose 3 / maximize. Live engine: https://app.netie.ai/cortex";
+    ? "Powered by Cortex. Paste key, then fetch / run all. Ghost is dry-run. Production https://app.netie.ai/cortex is still LiteSpeed 404 until the host proxies this pack."
+    : "Sketch (no fetch). Live run needs http://127.0.0.1:8012/cortex . https://app.netie.ai/cortex is still LiteSpeed 404.";
 }
 const keyBox = document.getElementById("cortex-key");
 if (keyBox && !cortexOrigin()) keyBox.hidden = true;

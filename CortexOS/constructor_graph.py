@@ -86,6 +86,10 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
         ntype = NodeType.EMIT if nid == output else _KIND_TO_TYPE[raw["kind"]]
         if ntype == NodeType.EMIT and nid != output:
             ntype = NodeType.DETERMINISTIC_RULE
+        action = str(raw.get("action_type") or "")
+        # Only export_pptx is an F8 tool. item.intake / agent.checked are ledger events.
+        if ntype == NodeType.TOOL_CALL and action and action != "export_pptx":
+            ntype = NodeType.DOCUMENT_REF
         fields: dict[str, Any] = {
             "id": nid,
             "kind": ntype,
@@ -101,6 +105,8 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
                 "stream": bool(raw.get("stream")),
             },
         }
+        if ntype == NodeType.DOCUMENT_REF:
+            fields["context_key"] = nid
         tier = str(raw.get("tier") or "T0").upper()
         if tier not in ("T0", "T1"):
             tier = "T0"
@@ -108,7 +114,11 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
             fields["default_tier"] = tier
             fields["max_tier"] = "T1"
         if ntype == NodeType.TOOL_CALL:
-            fields["tool_name"] = str(raw.get("action_type") or "export_pptx")
+            fields["tool_name"] = action or "export_pptx"
+            fields["annotations"]["params"] = {
+                "title": f"Constructor {raw.get('object_type') or ''} {raw.get('data_point') or ''}".strip(),
+                "body": str(raw.get("fetch_from") or raw.get("object_type") or "constructor run"),
+            }
         dsl_nodes.append(DSLNode.model_validate(fields))
 
     program = AgenticDSLProgram(

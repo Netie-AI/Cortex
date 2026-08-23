@@ -230,6 +230,14 @@ def constructor_index(
     return FileResponse(_skin_file("index.html"))
 
 
+@router.get("/cortex/constructor/ontology")
+def constructor_ontology(caller: Caller = Depends(require_constructor_viewer)) -> dict[str, Any]:
+    from packs.dms.constructor_fetch import catalog
+
+    _ = caller
+    return {"ok": True, **catalog()}
+
+
 @router.get("/cortex/constructor/{name}", response_model=None)
 def constructor_asset(
     name: str,
@@ -242,6 +250,27 @@ def constructor_asset(
     except HTTPException:
         return RedirectResponse(url=PREFIX + "/login", status_code=303)
     return FileResponse(_skin_file(name))
+
+
+@router.post("/cortex/constructor/fetch")
+def constructor_fetch(
+    body: ConstructorRunBody,
+    caller: Caller = Depends(require_constructor_viewer),
+) -> dict[str, Any]:
+    from packs.dms.constructor_fetch import fetch_slice
+
+    _ = caller
+    node = next((n for n in body.nodes if isinstance(n, dict)), None)
+    if node is None:
+        raise HTTPException(status_code=400, detail="nodes must include one object")
+    slice_ = fetch_slice(
+        object_type=node.get("object_type"),
+        data_point=node.get("data_point"),
+        data_type=node.get("data_type"),
+        fetch_from=node.get("fetch_from"),
+        stream=bool(node.get("stream")),
+    )
+    return {"ok": True, "slice": slice_}
 
 
 @router.post("/cortex/constructor/ghost")
@@ -316,7 +345,36 @@ async def constructor_run(
     if not isinstance(router_m, ModelRouter):
         router_m = ModelRouter()
 
-    ctx = ExecutionContext(body.run_id, {"actor": caller.actor})
+    from packs.dms.constructor_fetch import fetch_slice
+
+    seed: dict[str, Any] = {"actor": caller.actor}
+    fetches: dict[str, Any] = {}
+    for node in program.nodes:
+        ann = node.annotations if isinstance(node.annotations, dict) else {}
+        if not (
+            node.context_key
+            or ann.get("fetch_from")
+            or ann.get("object_type")
+            or ann.get("stream")
+        ):
+            continue
+        slice_ = fetch_slice(
+            object_type=ann.get("object_type"),
+            data_point=ann.get("data_point"),
+            data_type=ann.get("data_type"),
+            fetch_from=ann.get("fetch_from"),
+            stream=bool(ann.get("stream")),
+        )
+        key = node.context_key or node.id
+        seed[key] = slice_
+        fetches[node.id] = {
+            "table": slice_.get("table"),
+            "row_count": slice_.get("row_count"),
+            "error": slice_.get("error"),
+            "stream": slice_.get("stream"),
+        }
+
+    ctx = ExecutionContext(body.run_id, seed)
     try:
         dag_result = await run_dag(program, ctx, router_m, ledger)
     except ValueError as exc:
@@ -324,7 +382,13 @@ async def constructor_run(
     serialized: dict[str, Any] = {}
     for nid, nr in dag_result.outputs.items():
         serialized[nid] = {"output": nr.output, "tier": nr.tier, "cost_myr": nr.cost_myr}
-    return {"ok": True, "run_id": body.run_id, "actor": caller.actor, "nodes": serialized}
+    return {
+        "ok": True,
+        "run_id": body.run_id,
+        "actor": caller.actor,
+        "nodes": serialized,
+        "fetches": fetches,
+    }
 
 
 def register_constructor_routes(app: Any) -> None:

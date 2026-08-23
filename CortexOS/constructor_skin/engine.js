@@ -281,10 +281,47 @@ async function cortexPost(path, body) {
       credentials: "same-origin",
       body: JSON.stringify(body || {}),
     });
+    const text = await res.text();
+    let parsed = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        detail: (parsed && (parsed.detail || parsed.error)) || text.slice(0, 240),
+      };
+    }
+    return parsed;
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function cortexGet(path) {
+  if (!cortexOrigin()) return null;
+  const keyEl = document.getElementById("cortex-key");
+  const key = keyEl && keyEl.value ? keyEl.value.trim() : "";
+  const headers = {};
+  if (key) headers["X-API-Key"] = key;
+  try {
+    const res = await fetch(path, { method: "GET", headers: headers, credentials: "same-origin" });
     if (!res.ok) return { ok: false, status: res.status };
     return await res.json();
   } catch (err) {
     return { ok: false, error: String(err) };
+  }
+}
+
+async function loadOntology() {
+  const C = window.Constructor;
+  if (!cortexOrigin() || !C.replaceCatalog) return;
+  const remote = await cortexGet("/cortex/constructor/ontology");
+  if (remote && remote.ok && remote.objects) {
+    C.replaceCatalog(remote.objects, remote.actions);
   }
 }
 
@@ -308,7 +345,8 @@ async function liveOrGhost(forceLive) {
         "). No internal fallback."
       );
     }
-    return "Cortex run_dag accepted. Actor " + (remote.actor || "?") + ". Audit has node outputs.";
+    const nfetch = remote.fetches ? Object.keys(remote.fetches).length : 0;
+    return "Cortex run_dag accepted. Actor " + (remote.actor || "?") + ". Fetches " + nfetch + ". Audit has node outputs.";
   }
   if (C.ghost || !cortexOrigin()) {
     return ghostRun();
@@ -331,20 +369,26 @@ async function handleChat(raw) {
   const C = window.Constructor;
   if (!t) return "Say the object, point, action, or run all.";
   if (t === "help") {
-    return "set object inventory|suppliers. set point sku. set action export_pptx. set fetch warehouse.inventory. set tier T0|T1. set stream on|off. foundry path. ghost on/off. ghost run. propose 3. maximize. run all. bench. add <kind>. wire <id> to <id>.";
+    return "set object inventory|suppliers. set point sku. set type string. set action export_pptx. set fetch warehouse.inventory. set tier T0|T1. set stream on|off. fetch. foundry path. ghost on/off. ghost run. propose 3. maximize. run all. bench. add <kind>. wire <id> to <id>.";
   }
   const setObj = t.match(/^set object (\S+)$/);
   if (setObj) {
-    if (!C.OBJECTS[setObj[1]]) return "Object must be inventory or suppliers (Cortex ontology).";
+    if (!C.OBJECTS[setObj[1]]) {
+      return "Object must be a Cortex ontology table: " + Object.keys(C.OBJECTS).join(", ") + ".";
+    }
     return C.patchSelected("object_type", setObj[1])
       ? "Object " + setObj[1] + " on selected node."
       : "Select a node first.";
   }
   const setPoint = t.match(/^set point (\S+)$/);
   if (setPoint) {
-    return C.patchSelected("data_point", setPoint[1])
-      ? "Data point " + setPoint[1] + "."
-      : "Select a node first.";
+    const node = C.selected && C.selected();
+    if (!node) return "Select a node first.";
+    const obj = node.object_type && C.OBJECTS[node.object_type] ? node.object_type : "inventory";
+    if (!C.OBJECTS[obj] || !C.OBJECTS[obj].points[setPoint[1]]) {
+      return "Point not on " + obj + ". " + Object.keys((C.OBJECTS[obj] && C.OBJECTS[obj].points) || {}).join(", ");
+    }
+    return C.patchSelected("data_point", setPoint[1]) ? "Data point " + setPoint[1] + "." : "Select a node first.";
   }
   const setType = t.match(/^set type (\S+)$/);
   if (setType) {
@@ -360,6 +404,9 @@ async function handleChat(raw) {
     return C.patchSelected("fetch_from", setFetch[1].trim())
       ? "Fetch/place " + setFetch[1].trim() + "."
       : "Select a node first.";
+  }
+  if (/^set tier (t[01])$/.test(t) === false && t.match(/^set tier /)) {
+    return "Tier must be T0 or T1 (ModelRouter). Not a network load balancer.";
   }
   const setTier = t.match(/^set tier (t[01])$/);
   if (setTier) {
@@ -420,6 +467,34 @@ async function handleChat(raw) {
     const ok = C.wire(wire[1], wire[2]);
     return ok ? "Wired " + wire[1] + " -> " + wire[2] : "Need two existing node ids.";
   }
+  if (/^fetch$/.test(t) || /^fetch now$/.test(t)) {
+    if (!cortexOrigin()) {
+      return "Fetch is Cortex only (POST /cortex/constructor/fetch). Pages never fetch. Open http://127.0.0.1:8012/cortex . app.netie.ai/cortex is still LiteSpeed 404.";
+    }
+    const node = C.selected && C.selected();
+    if (!node) return "Select a node first.";
+    const remote = await cortexPost("/cortex/constructor/fetch", { nodes: [node], edges: [] });
+    C.showAudit({ mode: "cortex-fetch", remote: remote });
+    if (!remote || remote.ok === false) {
+      return (
+        "Fetch failed (" +
+        ((remote && (remote.status || remote.detail || remote.error)) || "offline") +
+        "). No internal fallback."
+      );
+    }
+    const s = remote.slice || {};
+    return (
+      "Fetched " +
+      (s.table || "none") +
+      " " +
+      (s.data_point || "") +
+      ": " +
+      (s.row_count || 0) +
+      " rows" +
+      (s.error ? " (" + s.error + ")" : "") +
+      "."
+    );
+  }
   if (/^run all$/.test(t) || /run api|execute all|live run/.test(t)) {
     return await liveOrGhost(true);
   }
@@ -428,8 +503,30 @@ async function handleChat(raw) {
   }
   if (/^bench$/.test(t) || /openclaw|testbench|accuracy/.test(t)) {
     const ranked = await rankApproaches();
+    let live = "";
+    if (cortexOrigin()) {
+      const remote = await cortexPost("/cortex/constructor/fetch", {
+        nodes: [
+          {
+            id: "bench",
+            kind: "connector",
+            object_type: "inventory",
+            data_point: "sku",
+            fetch_from: "warehouse.inventory",
+          },
+        ],
+        edges: [],
+      });
+      if (remote && remote.ok && remote.slice) {
+        live = " Live DuckDB inventory rows: " + (remote.slice.row_count || 0) + ".";
+      } else {
+        live = " Live warehouse fetch failed (no fake score).";
+      }
+    }
     return (
-      "Cortex G1 bakeoff (repo, not a live OpenClaw rerun): static DAG 4.1 vs OpenClaw 1.7. DMS golden 36/36, 0 confident-wrong. This graph winner: " +
+      "Cortex G1 bakeoff (repo, not a live OpenClaw rerun): static DAG 4.1 vs OpenClaw 1.7. DMS golden 36/36, 0 confident-wrong." +
+      live +
+      " This graph winner: " +
       ranked[0].name +
       " score " +
       ranked[0].score +
@@ -470,8 +567,9 @@ function bindChat() {
   }
     chatSay(
     "assistant",
-    "Select a node. Set object/point/action. Ghost dry-runs. run all hits Cortex run_dag (not Pages). Type help."
+    "Select a node. Set object/point/action/fetch. Type fetch to hit DuckDB. run all hits Cortex run_dag (not Pages). Type help."
   );
+  loadOntology();
   rankApproaches();
 }
 

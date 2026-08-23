@@ -91,8 +91,28 @@ def test_compile_ontology_fields_land_on_the_dag():
     assert by_id["c1"].annotations["object_type"] == "inventory"
     assert by_id["c1"].annotations["data_point"] == "sku"
     assert by_id["c1"].annotations["fetch_from"] == "warehouse.inventory"
+    assert by_id["c1"].context_key == "c1"
     assert by_id["t1"].tool_name == "export_pptx"
+    assert by_id["t1"].default_tier is not None
     assert program.output_node_id == "a1"
+
+
+def test_event_action_is_not_an_f8_tool():
+    from netie.fabrication.dsl_parser import NodeType
+
+    program = compile_constructor_graph(
+        {
+            "nodes": [
+                {"id": "t1", "kind": "tool_call", "action_type": "item.intake"},
+                {"id": "a1", "kind": "app"},
+            ],
+            "edges": [{"from": "t1", "to": "a1"}],
+        }
+    )
+    by_id = {n.id: n for n in program.nodes}
+    assert by_id["t1"].type == NodeType.DOCUMENT_REF
+    assert by_id["t1"].tool_name is None
+    assert by_id["t1"].annotations["action_type"] == "item.intake"
 
 
 def test_login_open_constructor_redirects_without_key(dms_client):
@@ -209,6 +229,76 @@ def test_run_compiles_with_viewer_key(dms_client, api_keys_env):
     body = res.json()
     assert set(body["nodes"]) == {"n1", "n2", "n3", "n4"}
     assert body["actor"] == "api_viewer"
+
+
+def test_ontology_catalog_is_live_yaml(dms_client, api_keys_env):
+    res = dms_client.get(
+        "/cortex/constructor/ontology",
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert "sku" in body["objects"]["inventory"]["points"]
+    assert "export_pptx" in body["actions"]
+    assert "warehouse.inventory" in body["fetch_places"]
+
+
+def test_fetch_reads_warehouse_inventory(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/constructor/fetch",
+        json={
+            "nodes": [
+                {
+                    "id": "c1",
+                    "kind": "connector",
+                    "object_type": "inventory",
+                    "data_point": "sku",
+                    "fetch_from": "warehouse.inventory",
+                }
+            ],
+            "edges": [],
+        },
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    slice_ = body["slice"]
+    assert slice_["table"] == "inventory"
+    assert slice_["data_point"] == "sku"
+    assert slice_["error"] is None
+    assert isinstance(slice_["rows"], list)
+    assert slice_["row_count"] >= 1
+
+
+def test_run_seeds_fetch_onto_document_ref(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/constructor/run",
+        json={
+            "nodes": [
+                {
+                    "id": "c1",
+                    "kind": "connector",
+                    "object_type": "inventory",
+                    "data_point": "sku",
+                    "fetch_from": "warehouse.inventory",
+                },
+                {"id": "a1", "kind": "app"},
+            ],
+            "edges": [{"from": "c1", "to": "a1"}],
+        },
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["fetches"]["c1"]["table"] == "inventory"
+    assert body["fetches"]["c1"]["row_count"] >= 1
+    out = body["nodes"]["c1"]["output"]
+    assert out["table"] == "inventory"
+    assert isinstance(out["rows"], list)
+    assert out["rows"]
 
 
 def test_issue_key_uses_openvault_token(dms_client, monkeypatch):
