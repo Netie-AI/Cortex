@@ -8,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CORTEX_PROFILE=core \
     PACK=dms \
-    DMS_REFUSE_DEMO_KEYS=1
+    DMS_REFUSE_DEMO_KEYS=1 \
+    PORT=8080
 
 WORKDIR /app
 
@@ -27,8 +28,9 @@ COPY contract ./contract
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
-EXPOSE 8010
+# Hyperlift default app port is 8080 (set PORT in Hyperlift Manager, not EXPOSE).
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8010/cortex/login || exit 1
+    CMD curl -fsS http://127.0.0.1:${PORT}/cortex/login || exit 1
 
-CMD ["python", "-m", "uvicorn", "CortexOS.api.main:app", "--host", "0.0.0.0", "--port", "8010"]
+CMD ["sh", "-c", "python -m uvicorn CortexOS.api.main:app --host 0.0.0.0 --port ${PORT}"]
