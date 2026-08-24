@@ -172,6 +172,8 @@ def _app_openapi() -> dict[str, Any]:
     # Full profile for export — never emit a core-shrunk route table.
     os.environ["CORTEX_PROFILE"] = "full"
     os.environ.setdefault("CORTEX_REQUIRE_AGENTIC_MARKER", "1")
+    # Constructor models are not contract routes; keep them off this artifact.
+    os.environ["CORTEX_OPENAPI_CONTRACT_EXPORT"] = "1"
 
     from CortexOS.api.app import create_app
 

@@ -64,7 +64,7 @@ class RawKnnStore:
                 raise ValueError(
                     f"dim mismatch: store has {self._manifest['dim']}, got {dim}")
             self._manifest["dim"] = dim
-        self._db = sqlite3.connect(self.root / _META)
+        self._db = sqlite3.connect(self.root / _META, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(
             """CREATE TABLE IF NOT EXISTS records(

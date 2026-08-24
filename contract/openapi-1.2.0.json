@@ -833,6 +833,36 @@
         "title": "ConfirmDimsRequest",
         "type": "object"
       },
+      "ConstructorRunBody": {
+        "properties": {
+          "edges": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "run_id": {
+            "default": "constructor_run",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "ConstructorRunBody",
+        "type": "object"
+      },
       "ContractAnswer": {
         "properties": {
           "answer": {
@@ -2980,6 +3010,22 @@
           "photo"
         ],
         "title": "IntakeRequest",
+        "type": "object"
+      },
+      "IssueKeyBody": {
+        "properties": {
+          "label": {
+            "default": "constructor cortex viewer",
+            "title": "Label",
+            "type": "string"
+          },
+          "tier": {
+            "default": "free",
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "title": "IssueKeyBody",
         "type": "object"
       },
       "JustWorksIn": {
