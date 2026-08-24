@@ -294,10 +294,16 @@ def snapshot() -> dict[str, Any]:
         if r.get("status") in ("completed", "error", "stopped")
     ]
     # list_runs(active) lacks nested agents — hydrate via get_run for panel fidelity.
-    running = [_panel_task(workflow_store.get_run(r["id"])) for r in active if r.get("id")]
-    finished = [
-        _panel_task(workflow_store.get_run(r["id"])) for r in finished_raw if r.get("id")
-    ]
+    running = []
+    for r in active:
+        run = workflow_store.get_run(r["id"]) if r.get("id") else {}
+        if run:
+            running.append(_panel_task(run))
+    finished = []
+    for r in finished_raw:
+        run = workflow_store.get_run(r["id"]) if r.get("id") else {}
+        if run:
+            finished.append(_panel_task(run))
     return {"ok": True, "running": running, "finished": finished}
 
 

@@ -1,0 +1,218 @@
+"""Crew configuration - provider-agnostic model resolution.
+
+The crew layer never requires one specific model host. Resolution walks a
+chain (explicit ``CREW_MODEL``, then live OpenVault FreeRoute, then Anthropic,
+Cursor, OpenRouter, DeepSeek, any OpenAI-compatible endpoint, and last a
+locally reachable Ollama). The winner is stamped on every reply envelope.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from CortexOS.paths import data_path
+
+DEFAULT_PORT = 8020  # 8010 is the engine, 8765 is reserved for AirGPT.
+
+
+@dataclass(frozen=True)
+class Provider:
+    label: str
+    model: str
+    source: str
+    configured: bool
+    active: bool = False
+    api_base: str | None = None
+
+    def public(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "model": self.model,
+            "source": self.source,
+            "configured": self.configured,
+            "active": self.active,
+        }
+
+
+@dataclass
+class CrewSettings:
+    port: int
+    engine_url: str
+    engine_session: str
+    data_dir: Path
+    master_computer_control: bool
+    ui_dir: Path = field(default_factory=lambda: Path(__file__).parent / "ui")
+    max_agents_per_space: int = 8
+    max_llm_calls_per_run: int = 40
+    max_steps_per_agent: int = 12
+    confirm_timeout_s: int = 300
+    llm_timeout_s: int = 180
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "crew.db"
+
+    @property
+    def mcp_config_path(self) -> Path:
+        return self.data_dir / "mcp_servers.json"
+
+
+def load_settings() -> CrewSettings:
+    data_dir = Path(os.environ.get("CREW_DATA_DIR") or data_path("crew"))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    from CortexOS.crew.keys import apply_saved
+
+    apply_saved(data_dir)
+    return CrewSettings(
+        port=int(os.environ.get("CREW_PORT", str(DEFAULT_PORT))),
+        engine_url=os.environ.get("CREW_ENGINE_URL", "http://127.0.0.1:8010").rstrip("/"),
+        # "demo" is the engine's bound demo session; unbound sessions abstain
+        # by design (ANS work), and crew renders that abstention honestly.
+        engine_session=os.environ.get("CREW_ENGINE_SESSION", "demo"),
+        data_dir=data_dir,
+        master_computer_control=os.environ.get("CORTEX_COMPUTER_CONTROL", "").strip()
+        in {"1", "true", "TRUE", "yes", "on"},
+    )
+
+
+_OLLAMA_CACHE: tuple[float, str | None] = (0.0, None)
+
+
+def _ollama_first_model(base_url: str, timeout: float = 0.8) -> str | None:
+    """Return the first locally available Ollama model tag, cached for 60s.
+
+    Ollama is optional and last in the chain - never required, never probed
+    more than once a minute.
+    """
+    global _OLLAMA_CACHE
+    ts, cached = _OLLAMA_CACHE
+    if time.monotonic() - ts < 60.0:
+        return cached
+    found: str | None = None
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/tags", timeout=timeout) as resp:
+            tags = json.loads(resp.read().decode("utf-8", "replace"))
+        models = tags.get("models") or []
+        if models:
+            found = str(models[0].get("name") or "") or None
+    except Exception:
+        found = None
+    _OLLAMA_CACHE = (time.monotonic(), found)
+    return found
+
+
+def resolve_providers() -> list[Provider]:
+    """Build the provider chain; exactly the first configured entry is active."""
+    env = os.environ
+    chain: list[Provider] = []
+
+    explicit = env.get("CREW_MODEL", "").strip()
+    chain.append(
+        Provider(
+            label="explicit",
+            model=explicit or "(set CREW_MODEL to any litellm model string)",
+            source="CREW_MODEL",
+            configured=bool(explicit),
+        )
+    )
+    ov_ok = False
+    if env.get("CREW_OPENVAULT", "1") != "0":
+        from CortexOS.crew.openvault import healthz
+
+        ov_ok = bool(healthz().get("ok"))
+    chain.append(
+        Provider(
+            label="openvault",
+            model="openvault/auto",
+            source="OpenVault FreeRoute (loopback, keys stay in the vault)",
+            configured=ov_ok,
+            api_base=env.get("CREW_OPENVAULT_URL", "http://127.0.0.1:5000"),
+        )
+    )
+    chain.append(
+        Provider(
+            label="anthropic",
+            model="anthropic/" + env.get("CREW_ANTHROPIC_MODEL", "claude-sonnet-5"),
+            source="ANTHROPIC_API_KEY",
+            configured=bool(env.get("ANTHROPIC_API_KEY")),
+        )
+    )
+    cursor_base = env.get("CREW_CURSOR_BASE_URL", "https://api.cursor.com/v1").strip() or None
+    chain.append(
+        Provider(
+            label="cursor",
+            model="openai/" + env.get("CREW_CURSOR_MODEL", "grok-4.6"),
+            source="CURSOR_API_KEY",
+            configured=bool(env.get("CURSOR_API_KEY")),
+            api_base=cursor_base,
+        )
+    )
+    chain.append(
+        Provider(
+            label="openrouter",
+            model="openrouter/" + env.get("CREW_OPENROUTER_MODEL", "deepseek/deepseek-chat"),
+            source="OPENROUTER_API_KEY",
+            configured=bool(env.get("OPENROUTER_API_KEY")),
+        )
+    )
+    chain.append(
+        Provider(
+            label="xai",
+            model="xai/" + env.get("CREW_XAI_MODEL", "grok-4"),
+            source="XAI_API_KEY",
+            configured=bool(env.get("XAI_API_KEY")),
+        )
+    )
+    chain.append(
+        Provider(
+            label="deepseek",
+            model="deepseek/" + env.get("CREW_DEEPSEEK_MODEL", "deepseek-chat"),
+            source="DEEPSEEK_API_KEY",
+            configured=bool(env.get("DEEPSEEK_API_KEY")),
+        )
+    )
+    openai_base = env.get("CREW_OPENAI_BASE_URL", "").strip() or None
+    chain.append(
+        Provider(
+            label="openai-compatible",
+            model="openai/" + env.get("CREW_OPENAI_MODEL", "gpt-4o-mini"),
+            source="OPENAI_API_KEY / CREW_OPENAI_BASE_URL",
+            configured=bool(env.get("OPENAI_API_KEY") or openai_base),
+            api_base=openai_base,
+        )
+    )
+    ollama_model: str | None = None
+    if env.get("CREW_ALLOW_OLLAMA", "1") != "0":
+        ollama_model = _ollama_first_model(
+            env.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+        )
+    chain.append(
+        Provider(
+            label="ollama",
+            model=f"ollama/{ollama_model}" if ollama_model else "(no local ollama detected)",
+            source="autodetect",
+            configured=bool(ollama_model),
+        )
+    )
+
+    out: list[Provider] = []
+    activated = False
+    for p in chain:
+        if p.configured and not activated:
+            out.append(Provider(p.label, p.model, p.source, True, True, p.api_base))
+            activated = True
+        else:
+            out.append(p)
+    return out
+
+
+def active_provider(chain: list[Provider] | None = None) -> Provider | None:
+    for p in chain if chain is not None else resolve_providers():
+        if p.active:
+            return p
+    return None

@@ -2,10 +2,12 @@
 
 Normalized facts from `captures/`. Updated by `scripts/distill_ingest.py`.
 
-_Last ingest: 2026-08-22T14:34:04Z_
+_Last ingest: 2026-08-24T05:40:00Z_
 
 | Date | Capture | Facts | Promotions |
 |------|---------|-------|------------|
+| 2026-08-24 | `skill_distill/captures/2026-08-24_cursor_outreach-voice-skills.md` | 5 | skill packs + spawn auto-copy |
+| 2026-08-23 | `skill_distill/captures/2026-08-23_crew_auto-detect-spawn.md` | 0 | — |
 | 2026-07-24 | `skill_distill/captures/2026-07-24_claude-app_capabilities-seed.md` | 5 | parking, rule, skill |
 | 2026-07-25 | `skill_distill/captures/2026-07-25_claude-code_all-lanes.md` | 22 | none, parking, rule, skill, subagent |
 | 2026-07-25 | `skill_distill/captures/2026-07-25_claude-code_distill-inferred.md` | 6 | none, parking, rule, skill |

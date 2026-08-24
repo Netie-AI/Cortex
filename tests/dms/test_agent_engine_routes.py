@@ -139,6 +139,16 @@ def test_app_errors_arrive_in_plain_english(client):
     assert detail["fix"]
 
 
+def test_workflows_tasks_returns_panel_lists(client):
+    res = client.get("/api/workflows/tasks")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["running"] == []
+    assert body["finished"] == []
+
+
 def test_activity_control_panel(client):
     client.post(
         "/api/routines",
