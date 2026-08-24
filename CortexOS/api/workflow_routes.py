@@ -123,7 +123,12 @@ def register_workflow_routes(app: Any) -> None:
         workflow_runner.set_hardware(body.hardware)
         return {"ok": True, "hardware": workflow_runner.get_hardware()}
 
-    @app.get("/api/workflows/task/{task_id}/events")
+    # response_model=None: this handler is declared inside a factory, so with
+    # `from __future__ import annotations` its return type reaches FastAPI as
+    # ForwardRef("StreamingResponse") which pydantic cannot resolve from module
+    # globals. It raised only while generating the OpenAPI schema, so the route
+    # served fine and scripts/export_openapi.py was the thing that broke.
+    @app.get("/api/workflows/task/{task_id}/events", response_model=None)
     async def task_events(task_id: str) -> StreamingResponse:
         if not workflow_store.get_run(task_id):
             raise HTTPException(status_code=404, detail="unknown task")
