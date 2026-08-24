@@ -148,13 +148,20 @@ def test_resolve_ov_model_prefers_grok_high_when_cursor_key(monkeypatch) -> None
     assert openvault.resolve_ov_model("auto") == "groq/llama"
 
 
+# Deliberately not shaped like a real key. scripts/secrets_scan.py matches
+# `sk-` followed by 20+ key characters, and a tracked file containing one is a
+# CI failure whether or not the value is fake. The assertions below only need a
+# distinctive string, so there is no reason to write a realistic secret here.
+FAKE_CURSOR_KEY = "cursor-test-value-do-not-leak"
+
+
 def test_cursor_key_status_never_returns_secret(monkeypatch) -> None:
-    monkeypatch.setenv("CURSOR_API_KEY", "sk-secret-value-do-not-leak")
+    monkeypatch.setenv("CURSOR_API_KEY", FAKE_CURSOR_KEY)
     st = openvault.cursor_key_status()
     assert st["configured"] is True
-    assert st["chars"] == len("sk-secret-value-do-not-leak")
+    assert st["chars"] == len(FAKE_CURSOR_KEY)
     assert st["model"] == "grok-4.6"
-    assert "sk-secret-value-do-not-leak" not in str(st)
+    assert FAKE_CURSOR_KEY not in str(st)
 
 
 
