@@ -16,6 +16,7 @@ def test_catalog_names_the_specialists() -> None:
         "Email",
         "Connector",
         "Browser",
+        "SEO",
         "Skills",
         "Routines",
         "Watchdog",
@@ -24,7 +25,17 @@ def test_catalog_names_the_specialists() -> None:
     assert prd is not None and "PRD agent" in prd.role
     marketing = by_name("Marketing")
     assert marketing is not None
-    assert marketing.skills == ("outreach", "chat-human")
+    assert marketing.skills == (
+        "outreach",
+        "chat-human",
+        "computer-reach",
+        "proposal-artifact",
+        "feedback-learn",
+    )
+    email = by_name("Email")
+    assert email is not None
+    assert "feedback-learn" in email.skills
+    assert "chat-human" in email.skills
     ticket = by_name("Ticket")
     assert ticket is not None
     assert "netie_board" in ticket.role

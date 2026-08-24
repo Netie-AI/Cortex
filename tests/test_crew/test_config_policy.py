@@ -110,6 +110,13 @@ def test_policy_master_switch_and_arming_fail_closed() -> None:
     assert allowed == policy.DENY
 
 
+def test_login_wall_is_takeover_not_silent_type() -> None:
+    assert policy.needs_takeover("Type", {"password": "x"}) is True
+    assert policy.needs_takeover("click", {"selector": "#login"}) is True
+    assert policy.needs_takeover("fill", {"otp": "123456"}) is True
+    assert policy.needs_takeover("click", {"x": 10, "y": 20}) is False
+
+
 def test_cursor_key_defaults_to_grok_46_not_fast(clean_env: pytest.MonkeyPatch) -> None:
     clean_env.setenv("CURSOR_API_KEY", "x")
     active = config.active_provider()

@@ -8,15 +8,27 @@ a server process may even start, the operator must arm each server in the UI,
 and mutating tools still take a per-call confirm (``policy.decide``).
 
 Every state a server can be in is visible in ``/crew/mcp`` - starting,
-ready, failed with the stderr tail, or stopped - because a dead automation
-server that looks connected would burn an agent's whole step budget.
+ready, suspended, failed with the stderr tail, or stopped - because a dead
+automation server that looks connected would burn an agent's whole step
+budget.
+
+An armed server does not sit resident. After ``CREW_MCP_IDLE_STOP_S`` seconds
+with no tool call the process is **suspended**: killed, but still armed and
+still advertising its tools, so the next call starts it again transparently.
+Computer control is needed in bursts - a few seconds while an agent drives the
+desktop - and holding a desktop-automation process resident between those
+bursts costs memory on a machine that is already tight, for no capability.
+Suspension is reported in the status string rather than hidden, so nobody
+reads "armed" as "running" (KB R-0011).
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +38,22 @@ PROTOCOL_VERSION = "2025-06-18"
 STREAM_LIMIT = 8 * 1024 * 1024  # Windows-MCP snapshots can be megabytes
 START_TIMEOUT_S = 45
 CALL_TIMEOUT_S = 90
+#: Suspend an armed-but-unused server after this long. 0 disables suspension.
+DEFAULT_IDLE_STOP_S = 300
+#: How often the reaper looks for idle servers.
+REAP_INTERVAL_S = 30
+SUSPENDED = "suspended (idle; starts on the next call)"
+
+
+def idle_stop_seconds() -> int:
+    """Idle window before an armed server is suspended, from the environment."""
+    raw = os.environ.get("CREW_MCP_IDLE_STOP_S", "").strip()
+    if not raw:
+        return DEFAULT_IDLE_STOP_S
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return DEFAULT_IDLE_STOP_S
 
 # Committed default: catalogue Windows-MCP but leave it disarmed. Arming is a
 # runtime decision persisted to data/crew/mcp_servers.json, never to git.
@@ -109,12 +137,37 @@ class MCPClient:
         self.spec = spec
         self.status = "stopped"
         self.tools: list[dict[str, Any]] = []
+        # Retained across a suspend so a sleeping server still advertises what
+        # it can do; without this its tools would vanish from the model's tool
+        # list and nothing could ever wake it.
+        self.known_tools: list[dict[str, Any]] = []
+        self.last_used: float = 0.0
+        self._inflight = 0
         self._proc: asyncio.subprocess.Process | None = None
         self._futures: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self._next_id = 0
         self._reader_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._stderr_tail: deque[str] = deque(maxlen=50)
+
+    @property
+    def suspended(self) -> bool:
+        return self.status == SUSPENDED
+
+    @property
+    def idle_s(self) -> float:
+        """Seconds since the last tool call, or 0 when never used or busy."""
+        if self.last_used <= 0 or self._inflight:
+            return 0.0
+        return max(0.0, time.monotonic() - self.last_used)
+
+    def offered_tools(self) -> list[dict[str, Any]]:
+        """Tools an agent may call: live when ready, remembered when suspended."""
+        if self.status.startswith("ready"):
+            return self.tools
+        if self.suspended:
+            return self.known_tools
+        return []
 
     def _fail(self, reason: str) -> None:
         self.status = f"failed: {reason}"
@@ -159,6 +212,8 @@ class MCPClient:
                 self._request("tools/list", {}), timeout=START_TIMEOUT_S
             )
             self.tools = list(listing.get("tools") or [])
+            self.known_tools = list(self.tools)
+            self.last_used = time.monotonic()
             server_info = init.get("serverInfo") or {}
             self.status = f"ready ({server_info.get('name', 'unknown')}, {len(self.tools)} tools)"
         except (TimeoutError, RuntimeError, OSError) as exc:
@@ -169,9 +224,15 @@ class MCPClient:
     async def call(self, tool: str, args: dict[str, Any], timeout: int = CALL_TIMEOUT_S) -> str:
         if self._proc is None or not self.status.startswith("ready"):
             raise RuntimeError(f"MCP server '{self.spec.name}' is not ready ({self.status})")
-        result = await asyncio.wait_for(
-            self._request("tools/call", {"name": tool, "arguments": args}), timeout=timeout
-        )
+        self.last_used = time.monotonic()
+        self._inflight += 1
+        try:
+            result = await asyncio.wait_for(
+                self._request("tools/call", {"name": tool, "arguments": args}), timeout=timeout
+            )
+        finally:
+            self._inflight -= 1
+            self.last_used = time.monotonic()
         parts: list[str] = []
         for block in result.get("content") or []:
             if isinstance(block, dict) and block.get("type") == "text":
@@ -201,6 +262,13 @@ class MCPClient:
         if self.status.startswith(("ready", "starting")):
             self.status = "stopped"
         self.tools = []
+
+    async def suspend(self) -> None:
+        """Kill the process but stay armed. The next call brings it back."""
+        if self._proc is None:
+            return
+        await self.stop()
+        self.status = SUSPENDED
 
     async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self._next_id += 1
@@ -268,10 +336,14 @@ class MCPClient:
 class MCPManager:
     """Owns one client per catalogued server; arming starts, disarming stops."""
 
-    def __init__(self, config_path: Path, master_on: bool) -> None:
+    def __init__(
+        self, config_path: Path, master_on: bool, idle_stop_s: int | None = None
+    ) -> None:
         self.config_path = config_path
         self.master_on = master_on
+        self.idle_stop_s = idle_stop_seconds() if idle_stop_s is None else max(0, idle_stop_s)
         self.clients: dict[str, MCPClient] = {}
+        self._reaper: asyncio.Task[None] | None = None
         for spec in load_specs(config_path):
             self.clients[spec.name] = MCPClient(spec)
 
@@ -283,8 +355,57 @@ class MCPManager:
                 await client.start()
 
     async def stop_all(self) -> None:
+        await self.stop_reaper()
         for client in self.clients.values():
             await client.stop()
+
+    async def ensure_ready(self, name: str) -> MCPClient | None:
+        """Wake a suspended server so a call can go through.
+
+        Only a *suspended* server is restarted. A failed one is left failed:
+        retrying a broken spawn on every tool call would spend an agent's whole
+        step budget re-reading the same error.
+        """
+        client = self.clients.get(name)
+        if client is None or not self.master_on or not client.spec.armed:
+            return client
+        if client.suspended:
+            await client.start()
+        return client
+
+    async def reap_idle(self) -> list[str]:
+        """Suspend every ready server that has gone quiet. Returns their names."""
+        if self.idle_stop_s <= 0:
+            return []
+        napped: list[str] = []
+        for client in self.clients.values():
+            if client.status.startswith("ready") and client.idle_s >= self.idle_stop_s:
+                await client.suspend()
+                napped.append(client.spec.name)
+        return napped
+
+    def start_reaper(self, interval_s: int = REAP_INTERVAL_S) -> None:
+        if self._reaper is not None or self.idle_stop_s <= 0:
+            return
+        self._reaper = asyncio.create_task(self._reap_loop(interval_s))
+
+    async def stop_reaper(self) -> None:
+        task, self._reaper = self._reaper, None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def _reap_loop(self, interval_s: int) -> None:
+        while True:
+            try:
+                await asyncio.sleep(max(1, min(interval_s, self.idle_stop_s)))
+                await self.reap_idle()
+            except asyncio.CancelledError:
+                return
+            except Exception:  # noqa: BLE001 - the reaper must never kill the server
+                continue
 
     async def arm(self, name: str, armed: bool) -> MCPClient:
         client = self.clients.get(name)
@@ -314,21 +435,29 @@ class MCPManager:
                     "status": status,
                     "armed": client.spec.armed,
                     "enabled": self.master_on,
+                    "running": client.status.startswith(("ready", "starting")),
+                    "suspended": client.suspended,
+                    "idle_s": int(client.idle_s),
+                    "idle_stop_s": self.idle_stop_s,
                     "tools": [
                         {
                             "name": t.get("name", ""),
                             "description": (t.get("description") or "")[:200],
                         }
-                        for t in client.tools
+                        for t in client.offered_tools()
                     ],
                 }
             )
         return out
 
     def tool_catalog(self) -> list[tuple[str, dict[str, Any]]]:
-        """(server_name, tool_dict) for every tool on every ready server."""
+        """(server_name, tool_dict) for every callable tool.
+
+        Includes suspended servers. A sleeping server is still armed and one
+        call away from running, so hiding its tools would make idle-suspend a
+        capability loss instead of a memory saving.
+        """
         out: list[tuple[str, dict[str, Any]]] = []
         for client in self.clients.values():
-            if client.status.startswith("ready"):
-                out.extend((client.spec.name, tool) for tool in client.tools)
+            out.extend((client.spec.name, tool) for tool in client.offered_tools())
         return out

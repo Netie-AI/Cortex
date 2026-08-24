@@ -84,6 +84,9 @@ class CrewApp:
 
         ensure_skill_packs(self.settings.data_dir / "skills")
         await self.mcp.start_armed()
+        # Armed servers do not stay resident. The reaper suspends one once it
+        # goes quiet; the next approved tool call starts it again.
+        self.mcp.start_reaper()
 
     async def shutdown(self) -> None:
         await self.runtime.shutdown()
@@ -102,7 +105,8 @@ class MessageIn(BaseModel):
 
 
 class ConfirmIn(BaseModel):
-    approved: bool
+    approved: bool = False
+    takeover: bool = False
 
 
 class ArmIn(BaseModel):
@@ -143,6 +147,8 @@ def build_router(crew: CrewApp) -> APIRouter:
             "engine": await crew.bridge.health(),
             "openvault": healthz(),
             "computer_control": crew.settings.master_computer_control,
+            "grok_offloaded": True,
+            "grok_autostart": False,
             "mcp": mcp,
         }
 
@@ -238,7 +244,9 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.post("/confirms/{confirm_id}")
     async def decide(confirm_id: str, body: ConfirmIn) -> dict[str, Any]:
-        row = crew.runtime.decide_confirm(confirm_id, body.approved)
+        row = crew.runtime.decide_confirm(
+            confirm_id, body.approved, takeover=body.takeover
+        )
         if row is None:
             raise HTTPException(404, "unknown confirm")
         return {"ok": True, "confirm": row}

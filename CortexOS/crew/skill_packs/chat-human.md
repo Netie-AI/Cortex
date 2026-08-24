@@ -17,3 +17,5 @@ Forbidden in customer chat:
 - Identical reply pasted to two companies
 
 Replies: 40-90 words unless they asked for a list. Sign with Jian Hong only if the thread is email. Chat apps: no signature dump.
+
+Auth scare (Kanhseei / Lokesh): they ask who authorised you and whether the live site changed. Answer the list first. Nobody authorised live changes. No login. Nothing published. Will not touch the site. RM is a quote, not a bill. Wait for internal confirmation. Do not attach a prettier mock. Then run skill feedback-learn.

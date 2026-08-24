@@ -167,3 +167,15 @@ def test_load_settings_honors_computer_control_env(monkeypatch, tmp_path) -> Non
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL", raising=False)
     settings = config.load_settings()
     assert settings.master_computer_control is False
+
+
+def test_ingest_csv_drop_refuses_when_vault_off(monkeypatch, tmp_path) -> None:
+    from CortexOS.crew.openvault import ingest_csv_drop
+
+    monkeypatch.setenv("CREW_OPENVAULT", "0")
+    csv_path = tmp_path / "vault.csv"
+    csv_path.write_text("env_key,secret\nCURSOR_API_KEY,super-secret\n", encoding="utf-8")
+    result = ingest_csv_drop(csv_path)
+    assert result["ok"] is False
+    assert "CREW_OPENVAULT" in str(result.get("detail"))
+    assert "super-secret" not in str(result)

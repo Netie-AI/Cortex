@@ -5,12 +5,10 @@ from __future__ import annotations
 import pytest
 
 from CortexOS.crew.detect import attached_skills, match_capabilities, plan, render
-from CortexOS.crew.llm import LLMResult
+from CortexOS.crew.llm import LLMResult, ToolCall
 from CortexOS.crew.runtime import CrewRuntime
 from CortexOS.crew.store import CrewStore
 from tests.test_crew.conftest import FakeBridge, FakeLLM, FakeMCPClient, wait_run_done
-
-from CortexOS.crew.llm import ToolCall
 
 
 def _tc(tool: str, **args: object) -> ToolCall:
@@ -74,16 +72,32 @@ def test_detect_fixtures_open_source_shapes(text, pattern, caps, spawn) -> None:
     assert match_capabilities(text) == got.capabilities or set(caps) <= set(got.capabilities)
 
 
-def test_outreach_detect_attaches_human_skills() -> None:
+def test_linkedin_and_seo_detect() -> None:
+    li = plan("help me go to linkedin connect a few people politely")
+    assert "Marketing" in li.capabilities
+    assert "computer-reach" in attached_skills(li.capabilities)
+    seo = plan("seo meta description for the hours page")
+    assert "SEO" in seo.capabilities
+    assert "seo" in attached_skills(seo.capabilities)
     got = plan("draft outreach for a factory sales inbox")
     assert "Marketing" in got.capabilities
     assert got.spawn is True
     skills = attached_skills(got.capabilities)
     assert "outreach" in skills
     assert "chat-human" in skills
+    assert "computer-reach" in skills
     text = render(got)
     assert "Default skills (auto-copied on spawn):" in text
     assert "outreach" in text
+
+
+def test_feedback_and_auth_detect() -> None:
+    got = plan("learn from this bad feedback in the Gmail thread")
+    assert "Skills" in got.capabilities
+    assert "feedback-learn" in attached_skills(got.capabilities)
+    auth = plan("who authorised the website modifications")
+    assert "Email" in auth.capabilities
+    assert "feedback-learn" in attached_skills(auth.capabilities)
 
 
 @pytest.mark.asyncio
@@ -164,10 +178,12 @@ async def test_marketing_spawn_copies_outreach_skill(rig) -> None:
     prompt = agent["role_prompt"] or ""
     assert "Skill outreach" in prompt
     assert "Skill chat-human" in prompt
+    assert "Skill computer-reach" in prompt
     assert "Jian Hong" in prompt
     stored = str(agent.get("skills") or "")
     assert "outreach" in stored
     assert "chat-human" in stored
+    assert "computer-reach" in stored
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,11 @@ GROK_IDS = (
     "d0416a9b-85f7-4d57-bf9f-c59254e4e074",  # Grok bot monthly limit
     "a88f874b-0e88-44b6-a86a-4a3f00dd1efd",  # leftover Grok fleet
     "9536be94-4e8d-4b09-9937-770915f90f10",  # GROK_SYNC / no fourth orchestrator
+    "6a72678b-7580-4ad6-ab2d-31b0c56f26fc",  # Grok bot orchestration insights
+    "adcd2964-de59-4460-9620-3cd4de0421b8",  # Grok bot landing page
+    "cee06f28-4de0-4bcb-a239-b4e6e8c65551",  # Agent orchestration workflow
+    "be41b451-8492-4658-a0fd-80d5f076c3ae",  # Cortex build for hackathon
+    "0265bdf2-ac8c-4bcd-9b1c-c851fca26732",  # Agent system design
 )
 
 

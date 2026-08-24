@@ -65,6 +65,26 @@ INTERNAL_TOOLS = frozenset(
 ALLOW = "allow"
 CONFIRM = "confirm"
 DENY = "deny"
+TAKEOVER = "takeover"
+
+# Arg keys / tool names that mean the operator should type, not the agent.
+_AUTH_KEYS = frozenset({"password", "passwd", "pass", "secret", "token", "otp", "totp", "pin"})
+_AUTH_HINTS = ("password", "passwd", "login", "signin", "sign-in", "otp", "2fa", "totp", "auth")
+
+
+def needs_takeover(tool: str, args: dict | None = None) -> bool:
+    """True when this confirm is a login/2FA wall. UI shows the takeover popup."""
+    parts = [tool]
+    for key, val in (args or {}).items():
+        parts.append(str(key))
+        parts.append(str(val)[:80])
+    blob = " ".join(parts).lower()
+    if any(h in blob for h in _AUTH_HINTS):
+        return True
+    for key in args or {}:
+        if str(key).lower() in _AUTH_KEYS:
+            return True
+    return False
 
 
 def decide(

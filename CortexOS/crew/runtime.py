@@ -201,12 +201,19 @@ class CrewRuntime:
         task.add_done_callback(ctx.tasks.discard)
         return run["id"]
 
-    def decide_confirm(self, confirm_id: str, approved: bool) -> dict[str, Any] | None:
-        row = self.store.decide_confirm(confirm_id, approved)
+    def decide_confirm(
+        self, confirm_id: str, approved: bool, *, takeover: bool = False
+    ) -> dict[str, Any] | None:
+        row = self.store.decide_confirm(confirm_id, approved, takeover=takeover)
         pair = self._confirms.get(confirm_id)
         if pair is not None:
             event, holder = pair
-            holder["approved"] = approved
+            if takeover:
+                holder["verdict"] = "takeover"
+                holder["approved"] = False
+            else:
+                holder["verdict"] = "approved" if approved else "denied"
+                holder["approved"] = approved
             event.set()
         if row is not None:
             self.bus.emit(row["space_id"], "confirm", {"confirm": row})
@@ -667,8 +674,15 @@ class CrewRuntime:
                 denied=denied,
             )
             if decision == policy.CONFIRM:
-                approved = await self._await_confirm(ctx, row, f"{server}.{real_tool}", args)
-                if not approved:
+                verdict = await self._await_confirm(ctx, row, f"{server}.{real_tool}", args)
+                if verdict == "takeover":
+                    msg = (
+                        "OPERATOR TOOK OVER AUTH. Do not type passwords, OTP, or 2FA. "
+                        "Wait until the page is already logged in, then continue with that session."
+                    )
+                    self._persist_tool(ctx, row, f"{server}.{real_tool}", args, msg)
+                    return msg
+                if verdict != "approved":
                     decision, reason = policy.DENY, "operator denied (or approval timed out)"
                 else:
                     decision, reason = policy.ALLOW, "operator approved"
@@ -676,6 +690,10 @@ class CrewRuntime:
                 self._persist_tool(ctx, row, f"{server}.{real_tool}", args, f"denied: {reason}")
                 return f"DENIED: {reason}"
             assert client is not None
+            # The server may be armed but suspended for idleness. Wake it only
+            # now that the call is approved: a denied call must never be the
+            # reason a desktop-automation process starts.
+            await self.mcp.ensure_ready(server)
             try:
                 outcome = await client.call(real_tool, args)
             except (RuntimeError, TimeoutError, OSError) as exc:
@@ -909,12 +927,12 @@ class CrewRuntime:
 
     async def _await_confirm(
         self, ctx: RunContext, row: dict[str, Any], tool: str, args: dict[str, Any]
-    ) -> bool:
+    ) -> str:
         confirm = self.store.create_confirm(
             ctx.space_id, run_id=ctx.id, agent_id=row["id"], tool=tool, args=args
         )
         event = asyncio.Event()
-        holder: dict[str, Any] = {"approved": False}
+        holder: dict[str, Any] = {"approved": False, "verdict": "denied"}
         self._confirms[confirm["id"]] = (event, holder)
         self.bus.emit(ctx.space_id, "confirm", {"confirm": confirm})
         try:
@@ -924,10 +942,10 @@ class CrewRuntime:
             refreshed = self.store.get_confirm(confirm["id"])
             if refreshed is not None:
                 self.bus.emit(ctx.space_id, "confirm", {"confirm": refreshed})
-            return False
+            return "denied"
         finally:
             self._confirms.pop(confirm["id"], None)
-        return bool(holder["approved"])
+        return str(holder.get("verdict") or "denied")
 
     # -- helpers -----------------------------------------------------------
 

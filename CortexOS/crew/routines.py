@@ -12,7 +12,7 @@ def catalog() -> list[dict[str, Any]]:
             "when": "every 15 min",
             "layer": "schtasks + estate-watchdog.ps1",
             "active": True,
-            "instruction": "Keep Plane + snapshot alive. Do not implement tickets here.",
+            "instruction": "Keep Plane + Crew/OpenVault alive. Do not auto-start Grok Bot. Do not implement tickets here.",
         },
         {
             "name": "Crew night_watch",

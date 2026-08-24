@@ -51,11 +51,15 @@ def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture()
 def settings(tmp_path: Path) -> CrewSettings:
+    from CortexOS.crew.board import ensure_skill_packs
+
+    data_dir = tmp_path / "crew"
+    ensure_skill_packs(data_dir / "skills")
     return CrewSettings(
         port=0,
         engine_url="http://127.0.0.1:9",  # closed port: engine visibly offline
         engine_session="demo",
-        data_dir=tmp_path / "crew",
+        data_dir=data_dir,
         master_computer_control=False,
         confirm_timeout_s=5,
         llm_timeout_s=5,
@@ -111,21 +115,49 @@ class FakeBridge:
 
 
 class FakeMCPClient:
+    """Stand-in for MCPClient. Mirrors the whole interface the manager uses,
+    including idle suspension - a double that is missing a method the real
+    client has turns into a crashed run rather than a failed assertion."""
+
     def __init__(self, name: str, tools: list[dict[str, Any]], armed: bool = True) -> None:
         self.spec = SimpleNamespace(name=name, armed=armed, command=[], env={}, cwd=None)
         self.status = f"ready (fake, {len(tools)} tools)"
         self.tools = tools
+        self.known_tools = list(tools)
+        self.suspended = False
+        self.idle_s = 0.0
+        self.last_used = 0.0
         self.called: list[tuple[str, dict[str, Any]]] = []
+        self.starts = 0
+
+    def offered_tools(self) -> list[dict[str, Any]]:
+        if self.status.startswith("ready"):
+            return self.tools
+        if self.suspended:
+            return self.known_tools
+        return []
 
     async def call(self, tool: str, args: dict[str, Any], timeout: int = 90) -> str:
+        if self.suspended or not self.status.startswith("ready"):
+            raise RuntimeError(f"MCP server '{self.spec.name}' is not ready ({self.status})")
         self.called.append((tool, args))
         return f"ok-{tool}"
 
-    async def start(self) -> None:  # pragma: no cover - interface parity
-        pass
+    async def start(self) -> None:
+        self.starts += 1
+        self.suspended = False
+        self.status = f"ready (fake, {len(self.known_tools)} tools)"
+        self.tools = list(self.known_tools)
 
-    async def stop(self) -> None:  # pragma: no cover - interface parity
-        pass
+    async def stop(self) -> None:
+        self.suspended = False
+        self.status = "stopped"
+        self.tools = []
+
+    async def suspend(self) -> None:
+        self.suspended = True
+        self.status = "suspended (idle; starts on the next call)"
+        self.tools = []
 
 
 @pytest.fixture()

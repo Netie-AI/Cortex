@@ -505,11 +505,14 @@ class CrewStore:
         out["args"] = _loads(out.get("args")) or {}
         return out
 
-    def decide_confirm(self, confirm_id: str, approved: bool) -> dict[str, Any] | None:
+    def decide_confirm(
+        self, confirm_id: str, approved: bool, *, takeover: bool = False
+    ) -> dict[str, Any] | None:
+        status = "takeover" if takeover else ("approved" if approved else "denied")
         with self._lock:
             self._db.execute(
                 "UPDATE confirms SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
-                ("approved" if approved else "denied", _now(), confirm_id),
+                (status, _now(), confirm_id),
             )
             self._db.commit()
         return self.get_confirm(confirm_id)

@@ -7,7 +7,10 @@ from CortexOS.crew.store import CrewStore
 def test_connector_catalog_names_netie_owners() -> None:
     rows = catalog(uacc_enabled=True, uacc_armed=True)
     slugs = {r["slug"] for r in rows}
-    assert {"openvault", "cortex", "plane", "uacc", "gmail", "github", "cursor"} <= slugs
+    assert {"openvault", "cortex", "plane", "uacc", "gmail", "github", "cursor", "grok"} <= slugs
+    grok = next(r for r in rows if r["slug"] == "grok")
+    assert "OFFLOADED" in grok["layer"]
+    assert grok["connected"] is False
     uacc = next(r for r in rows if r["slug"] == "uacc")
     assert uacc["connected"] is True
     cursor = next(r for r in rows if r["slug"] == "cursor")
@@ -114,6 +117,8 @@ def test_routines_keep_human_as_money_authority() -> None:
     assert "PR check" in names
     money = next(r for r in routines() if r["name"] == "Money / Decision")
     assert "Human is money" in money["instruction"]
+    estate = next(r for r in routines() if r["name"] == "NetieEstate24x7")
+    assert "Grok Bot" in estate["instruction"]
 
 
 def test_discover_exports_skips_appdata(tmp_path) -> None:

@@ -17,4 +17,6 @@ Ask, in order. Stop at the first yes.
 
 Kill-criterion: if the next step needs a secret we do not have, name the operator action (paste key, confirm click, send mail) and stop.
 
+Inbound customer mail: skill feedback-learn then chat-human. Append feedback-log.md. Do not spawn a new extract send in the same tick.
+
 Output: options, evidence, recommendation, what would change it. One owner. ASCII.

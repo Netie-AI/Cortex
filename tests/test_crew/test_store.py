@@ -74,3 +74,10 @@ def test_confirm_lifecycle(tmp_path: Path) -> None:
     # a decided confirm cannot flip
     again = store.decide_confirm(c["id"], approved=False)
     assert again is not None and again["status"] == "approved"
+
+    wall = store.create_confirm(
+        space["id"], run_id=None, agent_id=None, tool="uacc.type_text", args={"password": "x"}
+    )
+    took = store.decide_confirm(wall["id"], approved=False, takeover=True)
+    assert took is not None and took["status"] == "takeover"
+    assert store.pending_confirms(space["id"]) == []

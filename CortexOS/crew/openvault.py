@@ -235,6 +235,46 @@ def ingest_cursor_from_files(root: Path | None = None) -> dict[str, Any]:
     return result
 
 
+def ingest_csv_drop(path: Path) -> dict[str, Any]:
+    """Vault rows from a dropped CSV. Never returns secret values.
+
+    Columns: env_key,secret  (optional label). Passkeys/WebAuthn stay in the
+    browser; this path is API keys and site passwords the operator chose to
+    drop. Do not commit the CSV. Do not print values.
+    """
+    import csv
+
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0"}
+    if not path.is_file():
+        return {"ok": False, "detail": f"missing {path.name}"}
+    pushed: list[str] = []
+    errors: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        return {"ok": False, "detail": str(exc)}
+    reader = csv.DictReader(text.splitlines())
+    if not reader.fieldnames:
+        return {"ok": False, "detail": "empty csv"}
+    fields = {str(f or "").strip().lower(): str(f or "") for f in reader.fieldnames}
+    key_col = fields.get("env_key") or fields.get("key") or fields.get("name")
+    secret_col = fields.get("secret") or fields.get("password") or fields.get("value")
+    if not key_col or not secret_col:
+        return {"ok": False, "detail": "need columns env_key,secret"}
+    for row in reader:
+        env_key = str(row.get(key_col) or "").strip()
+        secret = str(row.get(secret_col) or "").strip()
+        if not env_key or not secret:
+            continue
+        result = upsert_env_key(env_key, secret)
+        if result.get("ok"):
+            pushed.append(env_key)
+        else:
+            errors.append(f"{env_key}:{result.get('detail')}")
+    return {"ok": not errors, "pushed": pushed, "errors": errors, "n": len(pushed)}
+
+
 SEEDED_CORTEX_LABEL = "Netie Cortex (seeded)"
 
 

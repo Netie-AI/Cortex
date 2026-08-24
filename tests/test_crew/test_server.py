@@ -27,6 +27,8 @@ def test_health_and_roles_and_spaces(client) -> None:
     assert health["ok"] is True
     assert health["provider"]["label"] == "explicit"
     assert health["computer_control"] is False
+    assert health["grok_offloaded"] is True
+    assert health["grok_autostart"] is False
     assert health["openvault"]["ok"] is False
     roles = client.http.get("/crew/roles").json()
     names = {r["name"] for r in roles}
@@ -94,6 +96,9 @@ def test_ui_index_is_served(client) -> None:
     assert "Auto-detect" in page.text
     assert "Spawn the " not in page.text
     assert "Ask the Manager. Auto-detect who to spawn." in page.text
+    assert "Login or 2FA. Take over this computer." in page.text
+    assert "Done, I logged in" in page.text
+    assert "class=\"takeover\"" in page.text or 'class="takeover"' in page.text
     assert "role-chip--hit" in page.text or "Templates, not a roster" in page.text
     assert "Draft skill" in page.text
     assert "Tickets" in page.text

@@ -237,3 +237,40 @@ async def test_mutating_mcp_waits_for_operator_approve(settings, crew_env) -> No
     answer = [m for m in store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "approved" in answer["content"].lower()
     store.close()
+
+
+async def test_takeover_skips_mutating_click(settings, crew_env) -> None:
+    settings.master_computer_control = True
+    store = CrewStore(settings.db_path)
+    bus = EventBus()
+    mcp = MCPManager(settings.mcp_config_path, master_on=True)
+    fake = FakeMCPClient("uacc", [{"name": "type_text", "inputSchema": {"type": "object"}}], armed=True)
+    mcp.clients["uacc"] = fake
+    llm = FakeLLM()
+    runtime = CrewRuntime(store, bus, settings, mcp, FakeBridge(), llm_chat=llm)
+
+    space = store.create_space("Desk")
+    llm.manager.extend(
+        [
+            LLMResult(tool_calls=[_tc("mcp_uacc_type_text", password="x")]),
+            LLMResult(text="You took over auth."),
+        ]
+    )
+
+    async def auto_takeover() -> None:
+        for _ in range(200):
+            pending = store.pending_confirms(space["id"])
+            if pending:
+                runtime.decide_confirm(pending[0]["id"], False, takeover=True)
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("confirm never appeared")
+
+    waiter = asyncio.create_task(auto_takeover())
+    await runtime.on_user_message(space["id"], "log in")
+    await wait_run_done(runtime, space["id"])
+    await waiter
+    assert fake.called == []
+    tools = [m for m in store.list_messages(space["id"]) if m["role"] == "tool"]
+    assert tools and "TOOK OVER" in tools[0]["content"]
+    store.close()

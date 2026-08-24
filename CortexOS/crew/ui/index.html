@@ -102,6 +102,19 @@
     </aside>
   </div>
   <div class="toasts" id="toasts"></div>
+  <div class="takeover" id="takeover" hidden>
+    <div class="takeover__box" role="dialog" aria-modal="true" aria-labelledby="takeoverTitle">
+      <p class="takeover__kicker">Needs you</p>
+      <h2 id="takeoverTitle">Login or 2FA. Take over this computer.</h2>
+      <p class="empty" id="takeoverBody">The agent stopped before typing secrets. Finish Chrome yourself. This stays up until you click Done, Let the agent click, or Deny.</p>
+      <pre class="takeover__args" id="takeoverArgs"></pre>
+      <div class="takeover__actions">
+        <button class="ok" id="takeoverDone" type="button">Done, I logged in</button>
+        <button class="ghost" id="takeoverApprove" type="button">Let the agent click</button>
+        <button class="ghost deny" id="takeoverDeny" type="button">Deny</button>
+      </div>
+    </div>
+  </div>
   <div class="scrim scrim--palette" id="palette">
     <div class="palette">
       <div class="palette__query">
@@ -177,6 +190,18 @@
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    const AUTH_KEYS = /password|passwd|secret|token|otp|totp|pin|2fa/i;
+    function redactArgs(args) {
+      const out = {};
+      Object.entries(args || {}).forEach(([k, v]) => {
+        out[k] = AUTH_KEYS.test(k) || AUTH_KEYS.test(String(v)) ? "[redacted]" : v;
+      });
+      return out;
+    }
+    function isAuthConfirm(c) {
+      const blob = (c.tool || "") + " " + Object.keys(c.args || {}).join(" ");
+      return AUTH_KEYS.test(blob) || /login|signin|sign-in|auth/i.test(blob);
     }
     // Escape first, then re-introduce a small closed set of markup. Agents emit
     // fenced code and tool dumps constantly, and a flat escaped blob made those
@@ -452,21 +477,36 @@
     function renderConfirms() {
       const pending = state.confirms.filter((c) => c.status === "pending");
       const bar = $("approvalBar");
+      const overlay = $("takeover");
       if (!pending.length) {
         $("confirms").innerHTML = `<div class="empty">None pending. Human is money and decision authority.</div>`;
         bar.hidden = true; bar.innerHTML = "";
+        overlay.hidden = true;
         return;
       }
       const html = pending.map((c) =>
-        `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">${esc(JSON.stringify(c.args || {}))}</div></div>
+        `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">${esc(JSON.stringify(redactArgs(c.args)))}</div></div>
+         <button data-id="${c.id}" data-act="takeover">Take over</button>
          <button data-id="${c.id}" data-ok="1">Approve</button>
          <button class="deny" data-id="${c.id}" data-ok="0">Deny</button></div>`
       ).join("");
       $("confirms").innerHTML = html;
       bar.hidden = false;
       bar.innerHTML = `<div class="approvals__head">${pending.length} call${pending.length > 1 ? "s" : ""} waiting on you</div>` + html;
-      [$("confirms"), bar].forEach((root) => root.querySelectorAll("button[data-id]").forEach((el) =>
-        el.onclick = () => decide(el.dataset.id, el.dataset.ok === "1")));
+      const bind = (root) => root.querySelectorAll("button[data-id]").forEach((el) => {
+        el.onclick = () => {
+          if (el.dataset.act === "takeover") decide(el.dataset.id, false, true);
+          else decide(el.dataset.id, el.dataset.ok === "1", false);
+        };
+      });
+      bind($("confirms")); bind(bar);
+      const lead = pending.find(isAuthConfirm) || pending[0];
+      overlay.hidden = false;
+      overlay.dataset.id = lead.id;
+      $("takeoverTitle").textContent = isAuthConfirm(lead)
+        ? "Login or 2FA. Take over this computer."
+        : "Agent is waiting. Take over if this is a login wall.";
+      $("takeoverArgs").textContent = lead.tool + " " + JSON.stringify(redactArgs(lead.args));
     }
     function renderMcp() {
       const masterOn = state.mcp.some((s) => s.enabled);
@@ -688,9 +728,13 @@
         $("input").value = text; growInput();
       }
     }
-    async function decide(id, approved) {
-      try { await api("/crew/confirms/" + id, { method: "POST", body: JSON.stringify({ approved }) }); }
-      catch (err) { toast(err.message, "bad"); }
+    async function decide(id, approved, takeover) {
+      try {
+        await api("/crew/confirms/" + id, {
+          method: "POST",
+          body: JSON.stringify({ approved: !!approved, takeover: !!takeover })
+        });
+      } catch (err) { toast(err.message, "bad"); }
     }
     async function arm(name, armed) {
       try { await api("/crew/mcp/" + encodeURIComponent(name) + "/arm", { method: "POST", body: JSON.stringify({ armed }) }); }
@@ -707,6 +751,18 @@
     }
 
     $("send").onclick = send;
+    $("takeoverDone").onclick = () => {
+      const id = $("takeover").dataset.id;
+      if (id) decide(id, false, true);
+    };
+    $("takeoverApprove").onclick = () => {
+      const id = $("takeover").dataset.id;
+      if (id) decide(id, true, false);
+    };
+    $("takeoverDeny").onclick = () => {
+      const id = $("takeover").dataset.id;
+      if (id) decide(id, false, false);
+    };
     $("input").addEventListener("input", growInput);
     $("input").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }

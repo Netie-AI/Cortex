@@ -21,7 +21,7 @@ _ROWS: tuple[dict[str, str], ...] = (
     {"slug": "slack", "name": "Slack", "layer": "not a second board", "probe": ""},
     {"slug": "notion", "name": "Notion", "layer": "operator paste", "probe": ""},
     {"slug": "cursor", "name": "Cursor", "layer": "this IDE; no infinite cloud swarm", "probe": ""},
-    {"slug": "grok", "name": "Grok Bot", "layer": "capped xAI app; do not clone UI", "probe": ""},
+    {"slug": "grok", "name": "Grok Bot", "layer": "OFFLOADED to Crew :8020; watchdog must not auto-start", "probe": ""},
 )
 
 
