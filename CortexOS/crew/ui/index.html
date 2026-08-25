@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cortex Crew</title>
+  <link rel="stylesheet" href="/stolen.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="rail" id="rail">
+      <div class="rail__brand">
+        <button class="rail__tab" id="toggleRail" title="Hide rail" type="button">[</button>
+        <div class="rail__wordmark rail__hideable">Cortex Crew<small>from Guaca rail + Rakazo ink</small></div>
+      </div>
+      <div class="rail__hideable" style="padding:0 0.75rem">
+        <div class="chip" id="providerChip">no provider</div>
+        <button class="rail__search rail__hideable" id="openSearch" type="button">Search<span class="rail__key">Ctrl K</span></button>
+        <button class="gear" id="openSettings">Providers / API keys</button>
+        <button class="gear" id="openPlugins">Plugins</button>
+        <button class="gear" id="openHost" type="button">This computer</button>
+        <button class="gear" id="openTeach" type="button">Teach</button>
+        <button class="gear" id="openVoice" type="button">Voice</button>
+        <p class="empty" style="margin:0.4rem 0 0">Drop chats or .eml here. No import button. Check PRs in chat.</p>
+      </div>
+      <div class="rail__body rail__hideable" id="spaces"></div>
+      <div class="rail__hideable" style="padding:0 0.55rem 0.7rem">
+        <button class="new-space" id="newSpace">+ New space</button>
+      </div>
+    </aside>
+    <main>
+      <div class="pane__head">
+        <h1 id="spaceTitle">Select a space</h1>
+        <div class="top-actions">
+          <span class="conn" id="conn" title="Live event stream">live</span>
+          <div class="status" id="runStatus"></div>
+          <button class="ghost" id="uiSmaller" type="button" title="Smaller text">A-</button>
+          <button class="ghost" id="uiBigger" type="button" title="Bigger text">A+</button>
+          <button class="ghost" id="toggleActivity" title="Show only agent-to-agent traffic">Activity</button>
+          <button class="ghost danger" id="cancelRun" hidden>Cancel</button>
+        </div>
+      </div>
+      <div class="focus-bar" id="focusBar" hidden></div>
+      <div class="pane__wrap">
+        <div class="pane__scroll" id="log"></div>
+        <button class="jump" id="jump" type="button" hidden>New below</button>
+      </div>
+      <div class="approvals" id="approvalBar" hidden></div>
+      <div class="composer">
+        <div id="roles" class="role-chips"></div>
+        <div class="composer__row">
+          <textarea class="composer__input" id="input" rows="1" placeholder="Ask the Manager. Auto-detect who to spawn."></textarea>
+          <button class="composer__send" id="send" title="Send">^</button>
+        </div>
+      </div>
+    </main>
+    <aside class="inspector" id="insp">
+      <div class="inspector__head">
+        <h2 class="inspector__title">Desk</h2>
+        <button class="inspector__tab" id="toggleInsp" title="Hide inspector" type="button">]</button>
+      </div>
+      <div class="inspector__body">
+        <div class="insp-block">
+          <h2 class="inspector__title">Crew</h2>
+          <div id="agents" class="empty">No agents yet.</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Skills / tone</h2>
+          <div id="skills" class="empty">loading...</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Activity</h2>
+          <div id="graph" class="graph"></div>
+          <div id="activity" class="empty">Agent-to-agent traffic lands here.</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Approvals</h2>
+          <div id="confirms" class="empty">None pending. Human is money and decision authority.</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Tickets</h2>
+          <div id="tickets" class="empty">loading...</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">PRs / mail / keys</h2>
+          <div id="desk" class="empty">loading...</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Routines</h2>
+          <div id="routines" class="empty">loading...</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Computer control</h2>
+          <div id="mcpMaster" class="warn"></div>
+          <div id="mcp"></div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Engine</h2>
+          <div id="engine" class="empty">checking...</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts"></div>
+  <div class="takeover" id="takeover" hidden>
+    <div class="takeover__box" role="dialog" aria-modal="true" aria-labelledby="takeoverTitle">
+      <p class="takeover__kicker">Needs you</p>
+      <h2 id="takeoverTitle">Login or 2FA. Take over this computer.</h2>
+      <p class="empty" id="takeoverBody">The agent stopped before typing secrets. Finish Chrome yourself. This stays up until you click Done, Let the agent click, or Deny.</p>
+      <pre class="takeover__args" id="takeoverArgs"></pre>
+      <div class="takeover__actions">
+        <button class="ok" id="takeoverDone" type="button">Done, I logged in</button>
+        <button class="ghost" id="takeoverApprove" type="button">Let the agent click</button>
+        <button class="ghost deny" id="takeoverDeny" type="button">Deny</button>
+      </div>
+    </div>
+  </div>
+  <div class="scrim scrim--palette" id="palette">
+    <div class="palette">
+      <div class="palette__query">
+        <input class="palette__input" id="searchQ" placeholder="Search spaces, agents, messages" />
+      </div>
+      <div id="searchHits" class="inspector__body"></div>
+    </div>
+  </div>
+  <div class="host" id="teach">
+    <div class="skill-card">
+      <h2>Draft skill</h2>
+      <p class="empty">Write the task as markdown. Saved under data/crew/skills. Not Grok AppData.</p>
+      <label>Name</label>
+      <input id="skillName" placeholder="monday-briefing" />
+      <label>Playbook</label>
+      <textarea id="skillBody" rows="8" placeholder="Goal:&#10;Steps:&#10;Do not:"></textarea>
+      <button class="ok" id="saveSkill" type="button" style="margin-top:0.8rem">Save skill</button>
+      <button class="ghost" id="closeTeach" type="button">Close</button>
+    </div>
+  </div>
+  <div class="host" id="voice">
+    <div class="host__box">
+      <h2>Voice</h2>
+      <p id="voiceStatus">checking...</p>
+      <button class="ghost" id="closeVoice" type="button">Close</button>
+    </div>
+  </div>
+  <div class="host" id="host">
+    <div class="host__box">
+      <h2>Where should bots run?</h2>
+      <p>This PC uses UACC for mouse and keyboard. Mutating clicks still wait for human Approve. Docker/Grok Team Computer is not in this app. Do not turn this on for a shared server.</p>
+      <button class="ok" id="hostThis" type="button">Use this computer</button>
+      <button class="ghost" id="hostOff" type="button">Keep computer control disarmed</button>
+    </div>
+  </div>
+  <div class="plugins" id="plugins">
+    <div class="plugins__box">
+      <div class="plugins__head">
+        <h2>Plugins</h2>
+        <button class="ghost" id="closePlugins" type="button">Close</button>
+      </div>
+      <input class="plugins__search" id="pluginSearch" placeholder="Search apps" />
+      <div id="pluginList" class="inspector__body"></div>
+    </div>
+  </div>
+  <div class="scrim" id="settings">
+    <div class="dialog">
+      <h2>Providers</h2>
+      <p class="empty">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
+      <form id="keysForm"></form>
+      <div class="chain" id="providerChain"></div>
+      <div class="dialog-foot">
+        <button class="ghost" id="closeSettings" type="button">Close</button>
+        <button class="ok" id="saveKeys" type="button">Save keys</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const state = {
+      spaces: [], spaceId: null, messages: [], mounted: new Set(),
+      agents: [], confirms: [], mcp: [], plugins: [],
+      source: null, seq: 0, runId: null, draft: "", keyFields: [],
+      plan: null, skills: [], roles: [],
+      activityOnly: false, focusAgent: null,
+      stick: true, unread: 0, retry: null, live: false
+    };
+    const $ = (id) => document.getElementById(id);
+    const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+      return data;
+    });
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    const AUTH_KEYS = /password|passwd|secret|token|otp|totp|pin|2fa/i;
+    function redactArgs(args) {
+      const out = {};
+      Object.entries(args || {}).forEach(([k, v]) => {
+        out[k] = AUTH_KEYS.test(k) || AUTH_KEYS.test(String(v)) ? "[redacted]" : v;
+      });
+      return out;
+    }
+    function isAuthConfirm(c) {
+      const blob = (c.tool || "") + " " + Object.keys(c.args || {}).join(" ");
+      return AUTH_KEYS.test(blob) || /login|signin|sign-in|auth/i.test(blob);
+    }
+    // Escape first, then re-introduce a small closed set of markup. Agents emit
+    // fenced code and tool dumps constantly, and a flat escaped blob made those
+    // unreadable - which is why answers were being scrolled straight past.
+    function fmt(text) {
+      const chunks = String(text ?? "").split("```");
+      let out = "";
+      for (let i = 0; i < chunks.length; i++) {
+        if (i % 2 === 1) {
+          out += '<pre class="code">' + esc(chunks[i].replace(/^[A-Za-z0-9_+-]*\n/, "")) + "</pre>";
+        } else {
+          out += esc(chunks[i])
+            .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+            .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+        }
+      }
+      return out;
+    }
+    function toast(text, kind) {
+      const el = document.createElement("div");
+      el.className = "toast" + (kind ? " toast--" + kind : "");
+      el.textContent = text;
+      $("toasts").appendChild(el);
+      setTimeout(() => el.classList.add("out"), 4200);
+      setTimeout(() => el.remove(), 4800);
+    }
+    function clock(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "";
+      return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    }
+    function agentOf(id) { return state.agents.find((x) => x.id === id) || null; }
+    function nameOf(id) { const a = agentOf(id); return a ? a.name : null; }
+    function colorOf(id) { const a = agentOf(id); return (a && a.color) || "#8b949e"; }
+
+    // -- transcript, mounted one node at a time ----------------------------
+    // The old renderer rewrote the whole log on every streamed token: it threw
+    // away the reader's text selection, fought their scroll, and got slower the
+    // longer the conversation ran.
+
+    function passesFilter(m) {
+      if (state.focusAgent) return m.agent_id === state.focusAgent || m.to_agent_id === state.focusAgent;
+      if (state.activityOnly) return m.role === "agent";
+      return true;
+    }
+    function whoLine(m) {
+      const t = clock(m.created_at);
+      const time = t ? `<span class="stamp">${esc(t)}</span>` : "";
+      if (m.role === "user") return `<span>You</span>${time}`;
+      if (m.role === "assistant") return `<span>Manager</span>${time}`;
+      if (m.role === "agent") {
+        const wire = (m.meta && m.meta.a2a) || {};
+        const from = wire.from || nameOf(m.agent_id) || "agent";
+        const to = wire.to || nameOf(m.to_agent_id) || "space";
+        const kind = wire.kind || "message";
+        const tint = esc(colorOf(m.agent_id));
+        return `<span class="pill" style="border-color:${tint};color:${tint}">${esc(kind)}</span>`
+          + `<span>${esc(from)} -&gt; ${esc(to)}</span>${time}`;
+      }
+      if (m.role === "tool") return `<span>${esc((m.meta && m.meta.tool) || "tool")}</span>${time}`;
+      return `<span>${esc(m.role)}</span>${time}`;
+    }
+    function badgeOf(m) {
+      const meta = m.meta || {};
+      const env = meta.envelope || {};
+      if (env.badge) return `<span class="badge">${esc(env.badge)}${env.audit_id ? " " + esc(env.audit_id) : ""}</span>`;
+      if (meta.model) return `<span class="badge">${esc(meta.provider || "")} ${esc(meta.model)}</span>`;
+      return "";
+    }
+    function msgNode(m) {
+      const el = document.createElement("article");
+      el.className = "msg " + m.role;
+      el.dataset.id = m.id;
+      const body = String(m.content || "");
+      if (m.role === "tool" || (m.role === "agent" && body.length > 420)) {
+        // Long tool dumps and long wire messages collapse. They are evidence,
+        // not the answer, and at full length they buried the answer.
+        const head = body.split("\n")[0].slice(0, 110);
+        el.innerHTML = `<div class="who">${whoLine(m)}${badgeOf(m)}</div>`
+          + `<details class="bubble fold"><summary>${esc(head)}${body.length > head.length ? " ..." : ""}</summary>`
+          + `<div class="fold__body">${fmt(body)}</div></details>`;
+      } else {
+        el.innerHTML = `<div class="who">${whoLine(m)}${badgeOf(m)}</div><div class="bubble">${fmt(body)}</div>`;
+      }
+      if (m.role === "agent") el.style.setProperty("--wire", colorOf(m.agent_id));
+      return el;
+    }
+    function nearBottom() {
+      const log = $("log");
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    }
+    function toBottom() {
+      const log = $("log");
+      log.scrollTop = log.scrollHeight;
+      state.stick = true; state.unread = 0; $("jump").hidden = true;
+    }
+    function draftNode() {
+      let node = document.getElementById("draftMsg");
+      if (!node) {
+        node = document.createElement("article");
+        node.id = "draftMsg";
+        node.className = "msg assistant draft";
+        node.innerHTML = '<div class="who"><span>Manager</span></div><div class="bubble"></div>';
+        $("log").appendChild(node);
+      }
+      return node;
+    }
+    function paintDraft() {
+      if (!state.draft) {
+        const n = document.getElementById("draftMsg");
+        if (n) n.remove();
+        return;
+      }
+      draftNode().querySelector(".bubble").textContent = state.draft;
+      if (state.stick) toBottom();
+    }
+    function mount(m) {
+      if (state.mounted.has(m.id) || !passesFilter(m)) return;
+      state.mounted.add(m.id);
+      const stick = state.stick;
+      const draft = document.getElementById("draftMsg");
+      const node = msgNode(m);
+      if (draft) $("log").insertBefore(node, draft); else $("log").appendChild(node);
+      if (stick) toBottom();
+      else { state.unread += 1; $("jump").hidden = false; $("jump").textContent = state.unread + " new below"; }
+    }
+    function renderLog() {
+      $("log").innerHTML = "";
+      state.mounted = new Set();
+      state.unread = 0; $("jump").hidden = true;
+      const rows = state.messages.filter(passesFilter);
+      if (!rows.length) {
+        $("log").innerHTML = `<div class="empty">Nothing here yet.</div>`;
+      } else {
+        rows.forEach((m) => { state.mounted.add(m.id); $("log").appendChild(msgNode(m)); });
+      }
+      paintDraft();
+      toBottom();
+      renderWire();
+    }
+    function addMessage(m) {
+      if (state.messages.some((x) => x.id === m.id)) return false;
+      state.messages.push(m);
+      state.messages.sort((a, b) => (a.seq || 0) - (b.seq || 0));
+      state.seq = Math.max(state.seq, m.seq || 0);
+      // A message that sorts before the tail cannot simply be appended.
+      if (state.messages[state.messages.length - 1].id === m.id) mount(m); else renderLog();
+      return true;
+    }
+
+    // -- the agent-to-agent panel ------------------------------------------
+
+    function wireRows() { return state.messages.filter((m) => m.role === "agent"); }
+    function renderWire() {
+      const a2a = wireRows();
+      $("activity").innerHTML = a2a.length
+        ? a2a.slice(-40).map((m) => {
+            const w = (m.meta && m.meta.a2a) || {};
+            const from = w.from || nameOf(m.agent_id) || "agent";
+            const to = w.to || nameOf(m.to_agent_id) || "space";
+            return `<div class="wire" style="border-left-color:${esc(colorOf(m.agent_id))}">`
+              + `<b>${esc(from)} -&gt; ${esc(to)}</b> <i>${esc(w.kind || "message")}</i>`
+              + `<div>${esc(String(m.content || "").slice(0, 240))}</div></div>`;
+          }).join("")
+        : `<div class="empty">Agent-to-agent traffic lands here.</div>`;
+      renderGraph(a2a);
+    }
+    // A live picture of who is actually talking to whom. The flat list could
+    // not show that one teammate was carrying every edge, or that a spawned
+    // agent had never been spoken to at all.
+    function renderGraph(a2a) {
+      const nodes = state.agents.slice(0, 8);
+      if (nodes.length < 2) { $("graph").innerHTML = ""; return; }
+      const W = 200, H = 150, cx = W / 2, cy = H / 2, r = 52;
+      const at = {};
+      nodes.forEach((a, i) => {
+        const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+        at[a.id] = { x: cx + r * Math.cos(ang), y: cy + r * Math.sin(ang), a: a };
+      });
+      const edges = {};
+      a2a.forEach((m) => {
+        if (!at[m.agent_id] || !at[m.to_agent_id]) return;
+        const k = m.agent_id + ">" + m.to_agent_id;
+        edges[k] = (edges[k] || 0) + 1;
+      });
+      const last = a2a.length ? a2a[a2a.length - 1] : null;
+      const lastKey = last ? last.agent_id + ">" + last.to_agent_id : "";
+      const lines = Object.keys(edges).map((k) => {
+        const ends = k.split(">");
+        const p = at[ends[0]], q = at[ends[1]];
+        const hot = k === lastKey;
+        return `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${q.x.toFixed(1)}" y2="${q.y.toFixed(1)}"`
+          + ` stroke="${hot ? "#4fc48c" : esc(p.a.color || "#8b949e")}" stroke-width="${Math.min(4, 0.8 + edges[k] * 0.5).toFixed(1)}"`
+          + ` opacity="${hot ? 0.95 : 0.45}" />`;
+      }).join("");
+      const dots = nodes.map((a) => {
+        const p = at[a.id];
+        const busy = a.status === "thinking" || a.status === "acting";
+        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${busy ? 8 : 6}"`
+          + ` fill="${esc(a.color || "#8b949e")}" stroke="${busy ? "#4fc48c" : "none"}" stroke-width="1.5">`
+          + `<title>${esc(a.name)} (${esc(a.status)})</title></circle>`
+          + `<text x="${p.x.toFixed(1)}" y="${(p.y + 17).toFixed(1)}" text-anchor="middle" class="gnode">${esc(a.name.slice(0, 9))}</text>`;
+      }).join("");
+      $("graph").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="agent to agent traffic">${lines}${dots}</svg>`;
+    }
+
+    // -- panels -------------------------------------------------------------
+
+    function setProvider(active, chain) {
+      $("providerChip").textContent = active ? (active.label + " / " + active.model) : "no provider configured";
+      if (chain) {
+        $("providerChain").innerHTML = chain.map((p) =>
+          `<div class="${p.active ? "on" : ""}">${esc(p.label)} ${p.configured ? "ready" : "unset"} - ${esc(p.model)}</div>`
+        ).join("");
+      }
+    }
+    function renderSpaces() {
+      $("spaces").innerHTML = state.spaces.map((s, i) =>
+        `<button class="space${s.id === state.spaceId ? " active" : ""}" data-id="${s.id}"><span class="ord">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}</button>`
+      ).join("");
+      $("spaces").querySelectorAll(".space").forEach((el) => el.onclick = () => selectSpace(el.dataset.id));
+    }
+    function renderFocus() {
+      const bar = $("focusBar");
+      if (state.focusAgent) {
+        const a = agentOf(state.focusAgent);
+        bar.hidden = false;
+        bar.innerHTML = `Showing only traffic touching <b>${esc(a ? a.name : "agent")}</b> <button class="ghost" id="clearFocus" type="button">Show all</button>`;
+        $("clearFocus").onclick = () => { state.focusAgent = null; renderAgents(); renderFocus(); renderLog(); };
+      } else { bar.hidden = true; bar.innerHTML = ""; }
+    }
+    function renderAgents() {
+      if (!state.agents.length) { $("agents").innerHTML = `<div class="empty">No agents yet.</div>`; return; }
+      $("agents").innerHTML = state.agents.map((a) => {
+        const cap = a.capability ? " - " + a.capability : "";
+        const model = a.model ? " - " + a.model : "";
+        const deny = a.deny_tools ? " - deny " + a.deny_tools : "";
+        const busy = a.status === "thinking" || a.status === "acting";
+        return `<button class="agent${state.focusAgent === a.id ? " agent--on" : ""}" data-id="${esc(a.id)}" type="button" title="Show only this agent's traffic">`
+          + `<div class="orb ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#a8c95f")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
+          + `<div>${esc(a.name)}<small>${esc(a.status)}${esc(cap)}${esc(model)}${esc(deny)}</small></div></button>`;
+      }).join("");
+      $("agents").querySelectorAll(".agent").forEach((el) => el.onclick = () => {
+        state.focusAgent = state.focusAgent === el.dataset.id ? null : el.dataset.id;
+        renderAgents(); renderFocus(); renderLog();
+      });
+    }
+    function renderSkills(rows) {
+      const list = rows || state.skills || [];
+      if (!list.length) {
+        $("skills").innerHTML = `<div class="empty">None yet. Teach saves markdown. tone.md is ASCII grok-bot default.</div>`;
+        return;
+      }
+      $("skills").innerHTML = list.map((s) =>
+        `<div class="routines-row">${esc(s.title)}<small>${esc(s.head || s.path || "")}</small></div>`
+      ).join("");
+    }
+    function renderRoles(roles) {
+      state.roles = roles || state.roles || [];
+      if (!state.roles.length) return;
+      const hits = new Set((state.plan && state.plan.capabilities || []).map((c) => c.name));
+      const pattern = state.plan && state.plan.pattern ? state.plan.pattern : "idle";
+      $("roles").innerHTML =
+        `<div class="empty">Auto-detect. Templates, not a roster. ${esc(pattern)}</div>` +
+        state.roles.map((r) =>
+          `<span class="role-chip${hits.has(r.name) ? " role-chip--hit" : ""}" title="${esc(r.blurb)}">${esc(r.name)}</span>`
+        ).join("");
+    }
+    // Approvals block a run. They used to live only in the inspector, which is
+    // collapsible - so an operator with it closed saw a run that had simply
+    // stopped, with nothing saying it was waiting on them.
+    function renderConfirms() {
+      const pending = state.confirms.filter((c) => c.status === "pending");
+      const bar = $("approvalBar");
+      const overlay = $("takeover");
+      if (!pending.length) {
+        $("confirms").innerHTML = `<div class="empty">None pending. Human is money and decision authority.</div>`;
+        bar.hidden = true; bar.innerHTML = "";
+        overlay.hidden = true;
+        return;
+      }
+      const html = pending.map((c) =>
+        `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">${esc(JSON.stringify(redactArgs(c.args)))}</div></div>
+         <button data-id="${c.id}" data-act="takeover">Take over</button>
+         <button data-id="${c.id}" data-ok="1">Approve</button>
+         <button class="deny" data-id="${c.id}" data-ok="0">Deny</button></div>`
+      ).join("");
+      $("confirms").innerHTML = html;
+      bar.hidden = false;
+      bar.innerHTML = `<div class="approvals__head">${pending.length} call${pending.length > 1 ? "s" : ""} waiting on you</div>` + html;
+      const bind = (root) => root.querySelectorAll("button[data-id]").forEach((el) => {
+        el.onclick = () => {
+          if (el.dataset.act === "takeover") decide(el.dataset.id, false, true);
+          else decide(el.dataset.id, el.dataset.ok === "1", false);
+        };
+      });
+      bind($("confirms")); bind(bar);
+      const lead = pending.find(isAuthConfirm) || pending[0];
+      overlay.hidden = false;
+      overlay.dataset.id = lead.id;
+      $("takeoverTitle").textContent = isAuthConfirm(lead)
+        ? "Login or 2FA. Take over this computer."
+        : "Agent is waiting. Take over if this is a login wall.";
+      $("takeoverArgs").textContent = lead.tool + " " + JSON.stringify(redactArgs(lead.args));
+    }
+    function renderMcp() {
+      const masterOn = state.mcp.some((s) => s.enabled);
+      $("mcpMaster").textContent = masterOn
+        ? "Master on. Arm a server, then mutating clicks still wait for human approve."
+        : "Off. Set CORTEX_COMPUTER_CONTROL=1 and restart, then arm UACC or Windows-MCP here.";
+      $("mcp").innerHTML = state.mcp.map((s) =>
+        `<div class="mcp-row"><div>${esc(s.name)}<small>${esc(s.status)}</small></div>
+         <label class="empty"><input type="checkbox" data-name="${esc(s.name)}" ${s.armed ? "checked" : ""} ${masterOn ? "" : "disabled"} /> arm</label></div>`
+      ).join("");
+      $("mcp").querySelectorAll("input").forEach((el) => el.onchange = () => arm(el.dataset.name, el.checked));
+    }
+    function renderRoutines(rows) {
+      if (!rows || !rows.length) { $("routines").innerHTML = `<div class="empty">None.</div>`; return; }
+      $("routines").innerHTML = rows.map((r) =>
+        `<div class="routines-row">${esc(r.name)}<small>${esc(r.when)} - ${esc(r.layer)}</small></div>`
+      ).join("");
+    }
+    function renderPlugins() {
+      const q = ($("pluginSearch").value || "").toLowerCase();
+      const rows = state.plugins.filter((p) => !q || (p.name + p.slug + p.layer).toLowerCase().indexOf(q) >= 0);
+      $("pluginList").innerHTML = rows.map((p) =>
+        `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
+         <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#7A7A80">${esc(p.slug)} - ${esc(p.layer)}</small></div>
+         <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : "mapped"}</div></div>`
+      ).join("");
+    }
+    function renderTickets(board) {
+      if (!board || !board.tickets || !board.tickets.length) {
+        $("tickets").innerHTML = `<div class="empty">${esc((board && board.law) || "No CLAIMS.json")}</div>`;
+        return;
+      }
+      $("tickets").innerHTML = `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>` +
+        board.tickets.slice(0, 12).map((t) =>
+          `<div class="routines-row">${esc(t.ticket)}<small>${esc(t.role)} - write=${t.may_write}</small></div>`
+        ).join("");
+    }
+    function renderDesk(desk) {
+      if (!desk) { $("desk").innerHTML = `<div class="empty">Desk unavailable.</div>`; return; }
+      const prs = (desk.prs && desk.prs.prs) || [];
+      const mail = desk.inbox || {};
+      const cursor = desk.cursor || {};
+      const prLines = prs.length
+        ? prs.slice(0, 8).map((p) => `<div class="routines-row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
+        : `<div class="empty">${esc((desk.prs && desk.prs.detail) || "No open PRs (or gh not in this folder). Ask in chat.")}</div>`;
+      $("desk").innerHTML =
+        `<div class="empty">${esc(desk.law || "")}</div>` +
+        `<div class="routines-row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
+        `<div class="routines-row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
+        prLines;
+    }
+    function renderKeyForm(fields, status) {
+      $("keysForm").innerHTML = fields.map((f) => {
+        const on = status[f.key] && status[f.key].configured;
+        return `<div class="field"><label>${esc(f.label)} ${on ? "(set)" : ""}</label>
+          <input name="${esc(f.key)}" type="${f.key.indexOf("KEY") >= 0 ? "password" : "text"}" placeholder="${esc(f.hint)}" autocomplete="off" /></div>`;
+      }).join("");
+    }
+    function growInput() {
+      const node = $("input");
+      node.style.height = "auto";
+      node.style.height = Math.min(node.scrollHeight, 192) + "px";
+    }
+    function setConn(live) {
+      state.live = live;
+      $("conn").textContent = live ? "live" : "reconnecting";
+      $("conn").classList.toggle("off", !live);
+    }
+
+    // -- boot and space switching -------------------------------------------
+
+    async function boot() {
+      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills] = await Promise.all([
+        api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
+        api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
+        api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
+        api("/crew/tickets").catch(() => ({ tickets: [] })),
+        api("/crew/desk").catch(() => null),
+        api("/crew/skills").catch(() => [])
+      ]);
+      renderRoles(roles || []);
+      state.skills = skills || [];
+      renderSkills(state.skills);
+      state.keyFields = keys.fields || [];
+      renderKeyForm(state.keyFields, keys.status || {});
+      setProvider(prov.active, prov.chain);
+      const ov = health.openvault || {};
+      const eng = health.engine || {};
+      $("engine").textContent = [
+        eng.ok ? ("engine " + (eng.url || "ok")) : ("engine offline"),
+        ov.ok ? ("vault " + (ov.url || "ok")) : ("vault down"),
+        health.computer_control ? "computer-control master on" : "computer-control master off"
+      ].join(" - ");
+      state.mcp = mcp;
+      renderMcp();
+      state.plugins = plugs || [];
+      renderPlugins();
+      renderRoutines(routines || []);
+      renderTickets(tickets || {});
+      renderDesk(desk);
+      state.spaces = spaces;
+      if (!state.spaces.length) {
+        const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title: "General" }) });
+        state.spaces = [created];
+      }
+      renderSpaces();
+      await selectSpace(state.spaces[0].id);
+    }
+    async function selectSpace(id) {
+      state.spaceId = id;
+      state.draft = "";
+      state.runId = null;
+      state.focusAgent = null;
+      state.stick = true;
+      const space = state.spaces.find((s) => s.id === id);
+      $("spaceTitle").textContent = space ? space.title : "Space";
+      renderSpaces();
+      const [messages, agents, confirms] = await Promise.all([
+        api("/crew/spaces/" + id + "/messages"),
+        api("/crew/spaces/" + id + "/agents"),
+        api("/crew/confirms?space_id=" + id),
+      ]);
+      state.messages = messages;
+      state.seq = messages.reduce((n, m) => Math.max(n, m.seq || 0), 0);
+      state.agents = agents;
+      state.confirms = confirms;
+      renderFocus(); renderAgents(); renderConfirms(); renderLog();
+      listen(id);
+    }
+    // Refetch everything newer than what we hold. Used on reconnect and on the
+    // server's resync signal, which is how a client that fell behind stops
+    // rendering a transcript with holes in it.
+    async function catchUp(id) {
+      try {
+        const rows = await api("/crew/spaces/" + id + "/messages?after=" + state.seq);
+        let changed = false;
+        rows.forEach((m) => { if (addMessage(m)) changed = true; });
+        const [agents, confirms] = await Promise.all([
+          api("/crew/spaces/" + id + "/agents"),
+          api("/crew/confirms?space_id=" + id),
+        ]);
+        state.agents = agents; state.confirms = confirms;
+        renderAgents(); renderConfirms();
+        if (changed) renderWire();
+      } catch (err) { toast("Could not catch up: " + err.message, "bad"); }
+    }
+    function listen(id) {
+      if (state.retry) { clearTimeout(state.retry); state.retry = null; }
+      if (state.source) { state.source.close(); state.source = null; }
+      const open = () => {
+        if (state.spaceId !== id) return;
+        // Reopen with the current seq rather than letting EventSource retry the
+        // original URL, whose `after` would be frozen at first-connect time.
+        const src = new EventSource("/crew/spaces/" + id + "/events?after=" + state.seq);
+        state.source = src;
+        src.onopen = () => setConn(true);
+        src.onerror = () => {
+          setConn(false);
+          src.close();
+          if (state.spaceId === id) state.retry = setTimeout(open, 1500);
+        };
+        const apply = (ev) => {
+          const data = JSON.parse(ev.data);
+          if (data.message) {
+            if (data.message.role === "assistant") { state.draft = ""; paintDraft(); }
+            addMessage(data.message);
+            if (data.message.role === "agent") renderWire();
+          }
+          if (data.agent) {
+            const i = state.agents.findIndex((a) => a.id === data.agent.id);
+            if (i >= 0) state.agents[i] = data.agent; else state.agents.push(data.agent);
+            renderAgents(); renderGraph(wireRows());
+          }
+          if (data.confirm) {
+            const i = state.confirms.findIndex((c) => c.id === data.confirm.id);
+            if (i >= 0) state.confirms[i] = data.confirm; else state.confirms.push(data.confirm);
+            renderConfirms();
+          }
+          if (data.plan) { state.plan = data.plan; renderRoles(); }
+          if (data.status) {
+            $("runStatus").textContent = data.status + (data.stats && data.stats.llm_calls ? " - " + data.stats.llm_calls + " calls" : "");
+            $("cancelRun").hidden = data.status !== "running";
+            if (data.status !== "running") { state.draft = ""; paintDraft(); }
+          }
+        };
+        ["message", "agent", "confirm", "run", "detect"].forEach((name) => src.addEventListener(name, apply));
+        src.addEventListener("delta", (ev) => {
+          const data = JSON.parse(ev.data);
+          if (data.text) { state.draft += data.text; paintDraft(); }
+          $("runStatus").textContent = "streaming";
+        });
+        src.addEventListener("resync", (ev) => {
+          let dropped = 0;
+          try { dropped = (JSON.parse(ev.data) || {}).dropped || 0; } catch (e) { dropped = 0; }
+          toast("Missed " + dropped + " update" + (dropped === 1 ? "" : "s") + "; refetching.", "warn");
+          catchUp(id);
+        });
+      };
+      open();
+    }
+
+    // -- actions -------------------------------------------------------------
+
+    async function send() {
+      const text = $("input").value.trim();
+      if (!text || !state.spaceId) return;
+      $("input").value = ""; growInput();
+      state.stick = true;
+      try {
+        // A run in flight is not a reason to refuse input: the server queues
+        // the message into the Manager's mailbox, which is how the operator
+        // steers a run that is already going.
+        const posted = await api("/crew/spaces/" + state.spaceId + "/messages", { method: "POST", body: JSON.stringify({ text }) });
+        if (posted.queued) toast("Queued for the running crew.");
+        state.runId = posted.run_id || state.runId;
+        $("cancelRun").hidden = !state.runId;
+      } catch (err) {
+        toast(err.message, "bad");
+        $("input").value = text; growInput();
+      }
+    }
+    async function decide(id, approved, takeover) {
+      try {
+        await api("/crew/confirms/" + id, {
+          method: "POST",
+          body: JSON.stringify({ approved: !!approved, takeover: !!takeover })
+        });
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    async function arm(name, armed) {
+      try { await api("/crew/mcp/" + encodeURIComponent(name) + "/arm", { method: "POST", body: JSON.stringify({ armed }) }); }
+      catch (err) { toast(err.message, "bad"); }
+      state.mcp = await api("/crew/mcp");
+      renderMcp();
+    }
+    function setScale(delta) {
+      const root = document.documentElement;
+      const cur = parseFloat(getComputedStyle(root).getPropertyValue("--ui-scale")) || 1;
+      const next = Math.min(1.4, Math.max(0.85, +(cur + delta).toFixed(2)));
+      root.style.setProperty("--ui-scale", String(next));
+      try { localStorage.setItem("crew.scale", String(next)); } catch (e) { /* private mode */ }
+    }
+
+    $("send").onclick = send;
+    $("takeoverDone").onclick = () => {
+      const id = $("takeover").dataset.id;
+      if (id) decide(id, false, true);
+    };
+    $("takeoverApprove").onclick = () => {
+      const id = $("takeover").dataset.id;
+      if (id) decide(id, true, false);
+    };
+    $("takeoverDeny").onclick = () => {
+      const id = $("takeover").dataset.id;
+      if (id) decide(id, false, false);
+    };
+    $("input").addEventListener("input", growInput);
+    $("input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    $("log").addEventListener("scroll", () => {
+      state.stick = nearBottom();
+      if (state.stick) { state.unread = 0; $("jump").hidden = true; }
+    });
+    $("jump").onclick = toBottom;
+    $("newSpace").onclick = async () => {
+      const title = prompt("Space name", "New space");
+      if (!title) return;
+      try {
+        const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title }) });
+        state.spaces.push(created);
+        renderSpaces();
+        await selectSpace(created.id);
+      } catch (err) { toast(err.message, "bad"); }
+    };
+    $("toggleActivity").onclick = () => {
+      state.activityOnly = !state.activityOnly;
+      $("toggleActivity").classList.toggle("on", state.activityOnly);
+      renderLog();
+    };
+    $("cancelRun").onclick = async () => {
+      if (!state.runId) return;
+      try { await api("/crew/runs/" + state.runId + "/cancel", { method: "POST" }); }
+      catch (err) { toast(err.message, "bad"); }
+    };
+    $("toggleRail").onclick = () => {
+      const rail = $("rail");
+      const autoHidden = window.matchMedia("(max-width: 900px)").matches
+        && !rail.classList.contains("rail--pinned")
+        && !rail.classList.contains("rail--closed");
+      if (autoHidden) { rail.classList.add("rail--pinned"); return; }
+      rail.classList.toggle("rail--closed");
+      rail.classList.add("rail--pinned");
+    };
+    $("toggleInsp").onclick = () => {
+      const insp = $("insp");
+      const autoHidden = window.matchMedia("(max-width: 900px)").matches
+        && !insp.classList.contains("inspector--pinned")
+        && !insp.classList.contains("inspector--closed");
+      if (autoHidden) { insp.classList.add("inspector--pinned"); return; }
+      insp.classList.toggle("inspector--closed");
+      insp.classList.add("inspector--pinned");
+    };
+    $("uiSmaller").onclick = () => setScale(-0.05);
+    $("uiBigger").onclick = () => setScale(0.05);
+    $("openSettings").onclick = () => $("settings").classList.add("open");
+    $("closeSettings").onclick = () => $("settings").classList.remove("open");
+    $("openPlugins").onclick = () => $("plugins").classList.add("open");
+    $("closePlugins").onclick = () => $("plugins").classList.remove("open");
+    $("pluginSearch").oninput = renderPlugins;
+    async function runSearch() {
+      const q = $("searchQ").value.trim();
+      let hits = [];
+      try { hits = q.length < 2 ? [] : await api("/crew/search?q=" + encodeURIComponent(q)); }
+      catch (err) { toast(err.message, "bad"); }
+      $("searchHits").innerHTML = hits.length
+        ? hits.map((h) => `<button class="palette__hit" data-space="${esc(h.space_id)}"><b>${esc(h.kind)}</b> ${esc(h.title)}<small>${esc(h.snippet)}</small></button>`).join("")
+        : `<div class="empty" style="padding:1rem">No results</div>`;
+      $("searchHits").querySelectorAll(".palette__hit").forEach((el) => el.onclick = () => {
+        $("palette").classList.remove("open");
+        selectSpace(el.dataset.space);
+      });
+    }
+    function openSearch() { $("palette").classList.add("open"); $("searchQ").focus(); runSearch(); }
+    $("openSearch").onclick = openSearch;
+    $("searchQ").oninput = () => { clearTimeout(state._st); state._st = setTimeout(runSearch, 120); };
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openSearch(); }
+      if (e.key === "Escape") {
+        ["palette", "host", "teach", "voice", "settings", "plugins"].forEach((id) => $(id).classList.remove("open"));
+      }
+    });
+    $("palette").onclick = (e) => { if (e.target.id === "palette") $("palette").classList.remove("open"); };
+    $("settings").onclick = (e) => { if (e.target.id === "settings") $("settings").classList.remove("open"); };
+    $("openHost").onclick = () => $("host").classList.add("open");
+    $("openTeach").onclick = () => $("teach").classList.add("open");
+    $("closeTeach").onclick = () => $("teach").classList.remove("open");
+    $("saveSkill").onclick = async () => {
+      try {
+        await api("/crew/skills", { method: "POST", body: JSON.stringify({
+          title: $("skillName").value.trim() || "skill",
+          body: $("skillBody").value.trim() || "Goal:\nSteps:\nDo not:\n",
+        }) });
+        $("teach").classList.remove("open");
+        state.skills = await api("/crew/skills").catch(() => state.skills);
+        renderSkills(state.skills);
+        toast("Skill saved.");
+      } catch (err) { toast(err.message, "bad"); }
+    };
+    $("openVoice").onclick = async () => {
+      $("voice").classList.add("open");
+      try {
+        const v = await api("/crew/voice");
+        $("voiceStatus").textContent = v.reason || "Voice is not configured.";
+      } catch (err) { $("voiceStatus").textContent = err.message; }
+    };
+    $("closeVoice").onclick = () => $("voice").classList.remove("open");
+    $("hostThis").onclick = async () => {
+      try {
+        await api("/crew/computer", { method: "POST", body: JSON.stringify({ host: "this-pc" }) });
+        state.mcp = await api("/crew/mcp");
+        renderMcp();
+        $("host").classList.remove("open");
+      } catch (err) { toast(err.message, "bad"); }
+    };
+    $("hostOff").onclick = async () => {
+      try { await api("/crew/computer", { method: "POST", body: JSON.stringify({ host: "off" }) }); }
+      catch (err) { toast(err.message, "bad"); }
+      $("host").classList.remove("open");
+      state.mcp = await api("/crew/mcp");
+      renderMcp();
+    };
+    $("saveKeys").onclick = async () => {
+      const body = {};
+      $("keysForm").querySelectorAll("input").forEach((el) => {
+        if (el.value.trim()) body[el.name] = el.value.trim();
+      });
+      try {
+        const saved = await api("/crew/keys", { method: "POST", body: JSON.stringify({ keys: body }) });
+        setProvider(saved.active, saved.chain);
+        renderKeyForm(state.keyFields, saved.status);
+        $("keysForm").querySelectorAll("input").forEach((el) => { el.value = ""; });
+        $("settings").classList.remove("open");
+        toast("Keys saved to OpenVault.");
+      } catch (err) { toast(err.message, "bad"); }
+    };
+    async function ingestDroppedFiles(files) {
+      const list = Array.from(files || []);
+      for (const file of list) {
+        const text = await file.text();
+        const name = (file.name || "").toLowerCase();
+        const mailish = name.endsWith(".eml") || /^from:\s/i.test(text) || /^subject:\s/i.test(text);
+        const path = mailish ? "/crew/import/mail" : "/crew/import";
+        const imported = await api(path, { method: "POST", body: JSON.stringify({ title: file.name, text }) });
+        if (imported.space) {
+          state.spaces.push(imported.space);
+          renderSpaces();
+          await selectSpace(imported.space.id);
+          toast("Ingested " + file.name + " into its own space.");
+        }
+      }
+    }
+    const veil = document.createElement("div");
+    veil.id = "dropVeil";
+    veil.className = "drop-veil";
+    veil.textContent = "Drop chats, .eml, jsonl, or markdown. No import button.";
+    document.body.appendChild(veil);
+    let dragDepth = 0;
+    const hasFiles = (e) => {
+      const dt = e.dataTransfer;
+      return !!dt && Array.from(dt.types || []).indexOf("Files") >= 0;
+    };
+    document.addEventListener("dragenter", (e) => {
+      if (!hasFiles(e)) return;   // dragging a text selection used to raise the veil too
+      e.preventDefault();
+      dragDepth += 1;
+      veil.classList.add("on");
+    });
+    document.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+    document.addEventListener("dragleave", (e) => {
+      if (!dragDepth) return;
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) veil.classList.remove("on");
+    });
+    document.addEventListener("drop", async (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      veil.classList.remove("on");
+      try { await ingestDroppedFiles(e.dataTransfer && e.dataTransfer.files); }
+      catch (err) { toast(err.message, "bad"); }
+    });
+    try {
+      const saved = parseFloat(localStorage.getItem("crew.scale"));
+      if (saved) document.documentElement.style.setProperty("--ui-scale", String(saved));
+    } catch (e) { /* private mode */ }
+    window.addEventListener("online", () => { if (state.spaceId) catchUp(state.spaceId); });
+    boot().catch((err) => { $("log").innerHTML = `<div class="empty">${esc(err.message)}</div>`; toast(err.message, "bad"); });
+  </script>
+</body>
+</html>

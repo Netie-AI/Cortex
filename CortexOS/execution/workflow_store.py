@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from CortexOS.paths import data_path
@@ -31,16 +32,34 @@ _subscribers: dict[str, list[queue.Queue]] = {}
 _sub_lock = threading.Lock()
 
 
+def _open(path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(path), check_same_thread=False, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=8000")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        # WAL shm can IOERR on Windows after a crashed writer in this process;
+        # DELETE journal still serves the panel.
+        conn.execute("PRAGMA journal_mode=DELETE")
+    return conn
+
+
 def _conn() -> sqlite3.Connection:
     path = DB_PATH if DB_PATH.is_absolute() else data_path("workflows", "runs.db")
     # Refuse cwd-relative paths — WinError 433 when uvicorn cwd is not the repo.
     if not path.is_absolute():
         raise RuntimeError(f"workflow DB path must be absolute, got {path!r}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), check_same_thread=False, timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    last: sqlite3.OperationalError | None = None
+    for attempt in range(3):
+        try:
+            return _open(path)
+        except sqlite3.OperationalError as exc:
+            last = exc
+            time.sleep(0.05 * (attempt + 1))
+    assert last is not None
+    raise last
 
 
 def init() -> None:

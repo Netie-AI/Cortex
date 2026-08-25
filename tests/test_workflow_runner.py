@@ -195,6 +195,24 @@ def test_panel_snapshot_shape():
     assert any(t["id"] == res["run_id"] for t in snap["finished"])
 
 
+def test_store_retries_transient_disk_io(monkeypatch):
+    import sqlite3 as _sqlite3
+
+    calls = {"n": 0}
+    real_connect = _sqlite3.connect
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _sqlite3.OperationalError("disk I/O error")
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(_sqlite3, "connect", flaky)
+    rows = workflow_store.list_runs()
+    assert rows == []
+    assert calls["n"] >= 2
+
+
 def test_alias_netie_smoothness():
     t = workflow_templates.get("smoothness_audit")
     assert t is not None

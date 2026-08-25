@@ -1,0 +1,14 @@
+# Subagents findings -- Cortex-crew
+
+| Date | Topic | Keywords | Main idea | Path |
+|------|-------|----------|-----------|------|
+| 2026-08-24 | crew-golden-checkouts | crew, golden, worktree, merge, origin/main, governed-metric | Crew golden is D:\Cortex-crew. Engine golden is D:\Cortex ANS branch. origin/main is published engine. Do not merge pin worktrees into crew. | `2026-08-24_crew-skill-passdown.md` |
+| 2026-08-24 | overnight-watchdog-tickets | overnight, watchdog, night_watch, tickets, verify, paging-file, ram, schtask | Overnight died because schtask skipped Crew/OV. estate now calls night_watch -SkipEstate. Scale = seat existing writers. Low RAM skips gh/gate. | `2026-08-24_overnight-watchdog-tickets.md` |
+| 2026-08-23 | workflows-tasks-500 | workflows, tasks, sqlite, wal, disk-io, 500 | GET /api/workflows/tasks 500 = store disk I/O (wedged WAL). Activity already isolated it. Retry WAL then DELETE. Restart wedged :8010. | `2026-08-23_workflows-tasks-500.md` |
+| 2026-08-23 | crew-auto-detect-spawn | crew, detect, spawn, capability, verifier, grants | Pills are templates. Detect the job. Job-named spawn + allow/deny + optional verifier. No LangGraph. | `2026-08-23_crew-auto-detect-spawn.md` |
+| 2026-08-23 | crew-pointer-watchdog-planes | crew, pointer, watchdog, plane, orchestrator, uacc, r-0003 | Four loops. Crew is sidecar chat. Until-goal is Ticket Runner + different-run verify. Estate watchdog launch-only. Pointer human-confirm. | `2026-08-23_crew-pointer-watchdog-planes.md` |
+| 2026-08-23 | crew-desk-drop-prs | crew, desk_status, drop, prs, grok-4.6, imap | Chat-driven PRs/mail/keys. Drop files, no import buttons. Cursor/OV grok-4.6 high not fast. | `2026-08-23_crew-desk-drop-prs.md` |
+| 2026-08-23 | crew-stolen-ui | crew, guaca, rakazo, stolen.css, inspector-closed, computer-control, grok-bot | Crew UI stolen from Guaca/Rakazo clones. Hideable bars. Computer control via env. No infinite Cursor swarm. | `2026-08-23_crew-stolen-ui.md` |
+| 2026-08-23 | crew-openvault-desktop | crew, openvault, freeroute, cursor-key, computer-control-off, prefix-cache, gemini | Desktop Crew on :8020; models via OpenVault; computer control always off; seeded Cortex key must stay disabled. | `2026-08-23_crew-openvault-desktop.md` |
+| 2026-08-23 | crew-agentic-interface | crew, grokbot, guaca, a2a, uacc, windows-mcp | Standalone :8020 crew UI with specialist spawn + MCP behind master switch. 22 tests. | `2026-08-23_crew-agentic-interface.md` |
+| 2026-08-23 | crew-isolated-worktree | crew, guaca, rakazo, uacc, a2a, worktree | Crew lives on D:\Cortex-crew. Do not write it into the governed-metric checkout. | `2026-08-23_crew-isolated-worktree.md` |

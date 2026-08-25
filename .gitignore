@@ -64,6 +64,7 @@ data/engine/
 data/bench/
 data/workflows/
 data/apps/
+data/crew/
 data/lakehouse/
 data/ingest_drop/
 data/samples/*.xlsx

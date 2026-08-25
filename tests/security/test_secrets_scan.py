@@ -1,7 +1,20 @@
 """C-SEC-3 proof tests — secrets scanner: clean tree passes, planted secrets caught."""
 from __future__ import annotations
 
-from scripts.secrets_scan import scan_repo, scan_text
+from pathlib import Path
+
+from scripts.secrets_scan import (
+    CHUNK_CHARS,
+    WHOLE_READ_LIMIT,
+    _scan_streaming,
+    scan_file,
+    scan_repo,
+    scan_text,
+)
+
+# A realistic shape, planted on purpose. This file is in SELF_ALLOW precisely so
+# the scanner's own fixtures do not trip it.
+_PLANTED = "sk-" + "abcdefghijklmnopqrstuvwx123456"
 
 
 def test_clean_tree_has_no_findings():
@@ -46,6 +59,43 @@ def test_github_classic_ghs_still_detected():
 
 def test_demo_keys_are_not_findings():
     assert scan_text("X-API-Key: dms-demo-steward-key") == []
+
+
+def test_a_small_file_is_scanned_whole(tmp_path: Path):
+    small = tmp_path / "small.py"
+    small.write_text(f"key = {_PLANTED!r}\n", encoding="utf-8")
+    assert any(name == "openai_style_key" for name, _ in scan_file(small))
+
+
+def test_a_file_too_big_to_read_whole_is_still_scanned(tmp_path: Path):
+    """The gate used to die with MemoryError on a multi-megabyte tracked file.
+
+    Reading whole is now capped, and anything larger is streamed. The secret is
+    placed across a chunk boundary because that is the case a naive chunked
+    read silently misses - and a scanner that misses is worse than one that
+    crashes, because it reports clean.
+    """
+    big = tmp_path / "big.jsonl"
+    head = "x" * (CHUNK_CHARS - 11) + " "  # planted secret starts at CHUNK_CHARS-10
+    filler = " " + "y" * (WHOLE_READ_LIMIT + 1024)
+    big.write_text(head + _PLANTED + filler, encoding="utf-8")
+    assert big.stat().st_size > WHOLE_READ_LIMIT, "fixture must exceed the whole-read cap"
+    assert any(name == "openai_style_key" for name, _ in scan_file(big))
+
+
+def test_the_chunk_overlap_does_not_double_report(tmp_path: Path):
+    big = tmp_path / "big.jsonl"
+    head = "x" * (CHUNK_CHARS - 11) + " "
+    big.write_text(head + _PLANTED + " " + "y" * (CHUNK_CHARS * 2), encoding="utf-8")
+    hits = [h for h in _scan_streaming(big) if h[0] == "openai_style_key"]
+    assert len(hits) == 1, f"overlap region reported the same secret twice: {hits}"
+
+
+def test_an_unreadable_file_is_reported_not_skipped(tmp_path: Path):
+    """A scan that stopped early must not read as clean (KB R-0011)."""
+    missing = tmp_path / "gone.jsonl"
+    findings = _scan_streaming(missing)
+    assert findings and findings[0][0] == "unscannable_file"
 
 
 def test_pattern_names_in_docs_do_not_trip():
