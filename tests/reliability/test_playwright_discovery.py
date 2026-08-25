@@ -26,12 +26,21 @@ def _free_port() -> int:
 
 @pytest.fixture(scope="module")
 def api_base(tmp_path_factory):
+    # This fixture used to chdir into a temp directory and set two environment
+    # variables, and restore neither. Both are process-wide, so every test that
+    # ran afterwards in the same session inherited a moved working directory
+    # and a PACK the suite never asked for. A fixture that leaves global state
+    # changed makes later failures depend on collection order, which is how a
+    # green suite locally turns red in CI for no visible reason.
+    previous_cwd = os.getcwd()
+    previous_env = {k: os.environ.get(k) for k in ("PACK", "DMS_AUTH_DISABLED")}
     os.environ["PACK"] = "dms"
     os.environ["DMS_AUTH_DISABLED"] = "1"
     home = tmp_path_factory.mktemp("pw_api")
     os.chdir(home)
 
     import uvicorn
+
     from CortexOS.api.app import create_app
 
     app = create_app()
@@ -58,9 +67,17 @@ def api_base(tmp_path_factory):
             pytest.fail("uvicorn failed to become healthy")
         req.dispose()
 
-    yield base
-    server.should_exit = True
-    thread.join(timeout=5)
+    try:
+        yield base
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        os.chdir(previous_cwd)
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_playwright_health(api_base):

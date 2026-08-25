@@ -21,6 +21,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Validate the checkout this script lives in, not whatever else is importable.
+# Run as `python scripts/export_openapi.py`, sys.path[0] is the scripts/ folder,
+# so `import CortexOS` falls through to site-packages - and an editable install
+# elsewhere on this machine points at a different worktree. The gate then
+# regenerates one repo's spec and compares it against another's, which reads as
+# drift that no edit here can fix. Put our own root first.
+if str(ROOT) not in sys.path[:1]:
+    sys.path.insert(0, str(ROOT))
+
 # Keep in lockstep with CortexOS.api.contract_routes.CONTRACT_ROUTE_IDS.
 CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
     {
