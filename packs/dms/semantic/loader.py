@@ -296,6 +296,16 @@ def reload() -> SemanticModel:
     return load_all()
 
 
+def normalize_certified_sql(cq: CertifiedQuery) -> tuple[str, list[str]]:
+    """Value-norm certified SQL (VQ-01). Pack-side so the engine never names generative."""
+    from packs.dms.generative.literal_normalize import normalize_sql_literals
+
+    norm = normalize_sql_literals(cq.sql)
+    if not norm.ok:
+        return cq.sql, list(norm.violations)
+    return (norm.sql or cq.sql), []
+
+
 def validate_all(*, execute: bool = True) -> dict[str, Any]:
     """Compile every metric with sample params and execute every certified query.
 

@@ -1218,13 +1218,11 @@ def answer(
             planned_tables = tuple(cq.tables)
             # VQ-01 — certified SQL is a trusted asset; literals still must
             # match the column encoding (BETA → SKU-BETA). Unresolved → abstain.
-            from packs.dms.generative.literal_normalize import normalize_sql_literals
+            from packs.dms.semantic.loader import normalize_certified_sql
 
-            norm = normalize_sql_literals(sql)
-            if not norm.ok:
-                return _abs(f"certified query {cq.id} unresolved literal {norm.violations}")
-            if norm.sql:
-                sql = norm.sql
+            sql, violations = normalize_certified_sql(cq)
+            if violations:
+                return _abs(f"certified query {cq.id} unresolved literal {violations}")
         else:
             plan = route_to_metric(question)
             if plan is not None:

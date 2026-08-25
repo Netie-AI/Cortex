@@ -15,6 +15,9 @@ from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_
 
 @pytest.fixture(scope="module")
 def semantic():
+    from bench.accuracy import _ensure_db_loaded
+
+    _ensure_db_loaded()
     return load_semantic_layer()
 
 

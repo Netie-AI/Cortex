@@ -158,9 +158,10 @@ def test_postgres_concurrent_appends_consistent(postgres_ledger):
 
 
 def test_postgres_append_only_trigger(postgres_ledger):
-    from packs.dms.audit.ledger import append
     from sqlalchemy import text
     from sqlalchemy.exc import DBAPIError
+
+    from packs.dms.audit.ledger import append
 
     append("pg-tester", "immutable.check", {"ok": True})
 
