@@ -95,6 +95,9 @@ measured hotspot (cProfile / py-spy) shows >10% of governed request time in a
 listed path.
 
 ### P19 open distill debts
+- [ ] Cursor is not as strong as Cortex at fail-closed warehouse governance; Cortex is not as strong as Cursor at general tool-loop agency — `distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`
+- [ ] Content awareness: agentic loop vs lookup vs refuse is a first-class mode, not a model vibe — `distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`
+- [ ] G3 agentic loop (prompt compiler, turn class, native tools, skill select-or-generate, model hierarchy) -- plan in P23 -- `distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`
 - [ ] Windows-MCP cannot run on Linux cloud agents — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
 - [ ] In-process UACC/PyAutoGUI execute is not wired; uacc-mcp sidecar is the path — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
 - [ ] Scraping sibling repos / Outlier is out of scope — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
@@ -184,6 +187,16 @@ Still open before calling C4 "full":
 
 **Next ordered mins (packets only until started):** C5 → C8 → C7 → C11 → C9-full.
 OpenVault trust root (`30a8d9a`) already settled.
+
+---
+
+## P23 — Agentic loop capability (system prompt + turn class + native tools + skill pick)
+**Need:** Cortex must be usable as the loop when AirGPT / DMS / Crew / Pointer / Constructor connect -- without becoming Cursor, and without a third orchestrator.
+**Honest now:** specialist `prompt_library` + Crew `MANAGER_CHARTER` are strong; `AGENT_TASK` is a 4-step JSON-in-text loop; `find_skills` is not auto-called; JudgmentModel is keyword heuristics; JEPA is a family proxy. Connecting the API does **not** yield a Cursor/Claude-class agent.
+**PRD:** `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md` (G3.0-G3.6).
+**distill:** `skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`
+**First slice when promoted:** G3.0 system prompt compiler only (answer vs agentic vs plan vs computer_control vs abstain).
+**Condition:** owner explicit promote (this file's move-out rule). Do not start G3 mid-sprint on a DMS envelope ticket. Never LangGraph. Never weaken `manifest.py`.
 
 ---
 

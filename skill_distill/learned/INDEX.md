@@ -2,12 +2,10 @@
 
 Normalized facts from `captures/`. Updated by `scripts/distill_ingest.py`.
 
-_Last ingest: 2026-08-24T05:40:00Z_
+_Last ingest: 2026-08-25T22:39:51Z_
 
 | Date | Capture | Facts | Promotions |
 |------|---------|-------|------------|
-| 2026-08-24 | `skill_distill/captures/2026-08-24_cursor_outreach-voice-skills.md` | 5 | skill packs + spawn auto-copy |
-| 2026-08-23 | `skill_distill/captures/2026-08-23_crew_auto-detect-spawn.md` | 0 | — |
 | 2026-07-24 | `skill_distill/captures/2026-07-24_claude-app_capabilities-seed.md` | 5 | parking, rule, skill |
 | 2026-07-25 | `skill_distill/captures/2026-07-25_claude-code_all-lanes.md` | 22 | none, parking, rule, skill, subagent |
 | 2026-07-25 | `skill_distill/captures/2026-07-25_claude-code_distill-inferred.md` | 6 | none, parking, rule, skill |
@@ -23,6 +21,9 @@ _Last ingest: 2026-08-24T05:40:00Z_
 | 2026-07-30 | `skill_distill/captures/2026-07-30_cursor_excel-powerbi-demo-loop.md` | 0 | — |
 | 2026-08-22 | `skill_distill/captures/2026-08-22_computer-control-mcp.md` | 6 | parking, rule |
 | 2026-08-22 | `skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md` | 6 | parking, rule |
+| 2026-08-23 | `skill_distill/captures/2026-08-23_crew_auto-detect-spawn.md` | 0 | — |
+| 2026-08-24 | `skill_distill/captures/2026-08-24_cursor_outreach-voice-skills.md` | 0 | — |
+| 2026-08-25 | `skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md` | 10 | none, parking, rule, skill |
 
 ## Auto-extracted facts
 
@@ -111,4 +112,17 @@ _Last ingest: 2026-08-24T05:40:00Z_
 - (high/inferred → rule) Workspace roots are env-mapped (Cortex, Netie, DMS, chatbot); D:\ defaults are Windows docs, not hardcoded runtime
 - (high/observed → parking) Native click-the-sidebar / open Cursor GUI from the engine process is not available
 - (med/inferred → parking) Optional HTTP bridge (CORTEX_CURSOR_BRIDGE_URL) can drive a local Cursor sidecar later
+
+### skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md
+
+- (high/observed → rule) Cursor cloud agents use native function tools plus lazy GetDynamicTools/CallDynamicTool
+- (high/observed → skill) Skills are description-gated; agent must Read the SKILL.md when relevant, not preload all
+- (high/observed → rule) Task children are context-blind unless the parent prompt is complete
+- (high/observed → rule) MCP namespace error (Github) must not halt the rest of the loop
+- (high/observed → rule) Communication laws (lead with answer, cite code, no fake verification) are system-prompt, not optional style
+- (high/inferred → parking) Content awareness: agentic loop vs lookup vs refuse is a first-class mode, not a model vibe
+- (high/observed → parking) Cursor is not as strong as Cortex at fail-closed warehouse governance; Cortex is not as strong as Cursor at general tool-loop agency
+- (high/observed → rule) Model pin this run was cursor-grok-4.6-high; no silent substitute
+- (high/observed → none) CreateGoal is explicit-user-only; do not spam goals
+- (high/observed → none) Cloud git: feature branch prefix, ManagePullRequest for PRs, gh read-only for merge
 

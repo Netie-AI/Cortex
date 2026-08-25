@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## P23 agentic-loop PRD (plan, not built) — 2026-08-25
+
+Mapped the Netie estate (Cortex, OpenVault, AirGPT, DMS, Constructor, Crew,
+Pointer, Control, KB, OpenIDE, Spaces) and scored the engine against a live
+Cursor cloud-agent loop. Verdict: API connect != Cursor-class agency.
+PRD: `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md`. Parking P23.
+distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md
+No execution-path change. No LangGraph.
+
 ## DMS handoff — F40 / FF-03 / VQ-01 / EPIC-015 / ledger honesty — 2026-08-25
 
 Cortex engine half of the DMS handoff. Did not re-implement DMS envelope mapping.
