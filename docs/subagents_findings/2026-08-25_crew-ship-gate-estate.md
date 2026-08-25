@@ -18,6 +18,7 @@ Claude can scaffold. Crew now refuses a ship when required evidence is missing. 
 - Cortex: local-first engine. PASS on catalog evidence. WCAG skipped (demo UI).
 - constructor: public Pages. FAIL tests/privacy/a11y/license.
 - Operator screenshot (private, this token 404s): dms, Netie-KB, Netie, Pointer, landing, Space, netie-control, RUMA-Houser, ViKing. FAIL private_unseen.
+- 2026-08-25 PAT re-probe: fine-grained token as jian-hong still 404s Cortex. Cursor All-repos screenshot is Helio.AI, not Netie-AI. See `2026-08-25_github-pat-cannot-see-private.md`.
 - AirGPT / chatbot / OMI: not in the screenshot. Still unseen to this token.
 - jian-hong/Vking: public personal duplicate of Netie-AI/VKing. FAIL accidental_personal_copy.
 - jian-hong/Python_Automation_JH: venv committed (~8809 files).
