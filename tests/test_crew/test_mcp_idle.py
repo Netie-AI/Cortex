@@ -30,8 +30,16 @@ def _tc(tool: str, **args: object) -> ToolCall:
     return ToolCall(id=f"c-{tool}", name=tool, args=dict(args))
 
 
-def _armed_rig(settings, *, tool: str = "screenshot"):
-    """A crew wired to one armed fake MCP server, master switch on."""
+def _armed_rig(settings, crew_env, *, tool: str = "screenshot"):
+    """A crew wired to one armed fake MCP server, master switch on.
+
+    ``crew_env`` is a required positional rather than a convenience: without it
+    the provider chain resolves against whatever keys happen to be exported on
+    the developer's machine. A test that drives the runtime then passes locally
+    and fails in CI, where there are no keys and the run aborts with "no model
+    provider configured" before it reaches a single tool call. Taking the
+    fixture here makes that impossible to forget.
+    """
     settings.master_computer_control = True
     store = CrewStore(settings.db_path)
     mcp = MCPManager(settings.mcp_config_path, master_on=True, idle_stop_s=60)
@@ -45,8 +53,8 @@ def _armed_rig(settings, *, tool: str = "screenshot"):
 # -- the reaper ------------------------------------------------------------
 
 
-async def test_a_quiet_server_is_suspended(settings) -> None:
-    _store, mcp, fake, _llm, _rt = _armed_rig(settings)
+async def test_a_quiet_server_is_suspended(settings, crew_env) -> None:
+    _store, mcp, fake, _llm, _rt = _armed_rig(settings, crew_env)
     fake.idle_s = 999.0
     napped = await mcp.reap_idle()
     assert napped == ["uacc"]
@@ -55,15 +63,15 @@ async def test_a_quiet_server_is_suspended(settings) -> None:
     _store.close()
 
 
-async def test_a_recently_used_server_is_left_alone(settings) -> None:
-    _store, mcp, fake, _llm, _rt = _armed_rig(settings)
+async def test_a_recently_used_server_is_left_alone(settings, crew_env) -> None:
+    _store, mcp, fake, _llm, _rt = _armed_rig(settings, crew_env)
     fake.idle_s = 1.0
     assert await mcp.reap_idle() == []
     assert fake.suspended is False
     _store.close()
 
 
-async def test_suspension_can_be_turned_off(settings) -> None:
+async def test_suspension_can_be_turned_off(settings, crew_env) -> None:
     settings.master_computer_control = True
     store = CrewStore(settings.db_path)
     mcp = MCPManager(settings.mcp_config_path, master_on=True, idle_stop_s=0)
@@ -87,8 +95,8 @@ async def test_idle_window_reads_the_environment(monkeypatch) -> None:
 # -- what a suspended server still looks like -------------------------------
 
 
-async def test_a_suspended_server_still_advertises_its_tools(settings) -> None:
-    _store, mcp, fake, _llm, _rt = _armed_rig(settings, tool="screenshot")
+async def test_a_suspended_server_still_advertises_its_tools(settings, crew_env) -> None:
+    _store, mcp, fake, _llm, _rt = _armed_rig(settings, crew_env, tool="screenshot")
     fake.idle_s = 999.0
     await mcp.reap_idle()
     catalog = [name for _server, tool in mcp.tool_catalog() for name in [tool["name"]]]
@@ -96,8 +104,8 @@ async def test_a_suspended_server_still_advertises_its_tools(settings) -> None:
     _store.close()
 
 
-async def test_status_says_suspended_rather_than_running(settings) -> None:
-    _store, mcp, fake, _llm, _rt = _armed_rig(settings)
+async def test_status_says_suspended_rather_than_running(settings, crew_env) -> None:
+    _store, mcp, fake, _llm, _rt = _armed_rig(settings, crew_env)
     fake.idle_s = 999.0
     await mcp.reap_idle()
     row = next(r for r in mcp.status() if r["name"] == "uacc")
@@ -112,8 +120,8 @@ async def test_status_says_suspended_rather_than_running(settings) -> None:
 # -- waking, and not waking -------------------------------------------------
 
 
-async def test_an_approved_call_wakes_a_suspended_server(settings) -> None:
-    store, mcp, fake, llm, runtime = _armed_rig(settings, tool="screenshot")
+async def test_an_approved_call_wakes_a_suspended_server(settings, crew_env) -> None:
+    store, mcp, fake, llm, runtime = _armed_rig(settings, crew_env, tool="screenshot")
     fake.idle_s = 999.0
     await mcp.reap_idle()
     assert fake.suspended is True
@@ -168,8 +176,8 @@ async def test_a_denied_call_does_not_start_a_suspended_server(settings, crew_en
     store.close()
 
 
-async def test_the_reaper_starts_and_stops_cleanly(settings) -> None:
-    _store, mcp, fake, _llm, _rt = _armed_rig(settings)
+async def test_the_reaper_starts_and_stops_cleanly(settings, crew_env) -> None:
+    _store, mcp, fake, _llm, _rt = _armed_rig(settings, crew_env)
     mcp.idle_stop_s = 1
     mcp.start_reaper(interval_s=1)
     assert mcp._reaper is not None
@@ -181,8 +189,8 @@ async def test_the_reaper_starts_and_stops_cleanly(settings) -> None:
     _store.close()
 
 
-async def test_the_reaper_does_not_start_when_suspension_is_off(settings) -> None:
-    _store, mcp, _fake, _llm, _rt = _armed_rig(settings)
+async def test_the_reaper_does_not_start_when_suspension_is_off(settings, crew_env) -> None:
+    _store, mcp, _fake, _llm, _rt = _armed_rig(settings, crew_env)
     mcp.idle_stop_s = 0
     mcp.start_reaper()
     assert mcp._reaper is None
