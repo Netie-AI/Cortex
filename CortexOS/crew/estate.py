@@ -17,6 +17,20 @@ from typing import Any
 
 ORG_DEFAULT = "Netie-AI"
 
+# 2026-08-25: a fine-grained PAT as jian-hong still cannot see private
+# Netie-AI repos (including Cortex). Cursor App All-repos on Helio.AI is
+# a different org. Do not store PATs in this tree.
+ACCESS_NOTE = (
+    "Fine-grained PAT as jian-hong authenticated and still 404'd "
+    "Netie-AI/Cortex plus every private product name. GitHub reported "
+    "allows_permissionless_access=true; /user/orgs empty; org membership 403. "
+    "This cloud gh can read Netie-AI/Cortex (Cursor App on this repo) and "
+    "still 404s dms/Netie-KB/Pointer. Cursor All-repos on Helio.AI is not "
+    "Netie-AI. Helio.AI is not an API slug; HelioAI has 0 repos visible to "
+    "that PAT. Grant Cursor on Netie-AI -> All repositories. Revoke any PAT "
+    "pasted in chat. Do not commit tokens."
+)
+
 # Capability template names in roles.py. Gate is the sweep owner.
 PRODUCTION_CAPS: tuple[str, ...] = (
     "Security",
@@ -535,6 +549,7 @@ def snapshot(*, live: bool | None = None, org: str | None = None) -> dict[str, A
         "expected_unseen": expected_unseen,
         "probed": "2026-08-25",
         "detail": live_detail,
+        "access_note": ACCESS_NOTE,
         "private_jian_hong": "invisible to this token; only public jian-hong repos were scanned",
         "law": (
             "Adaptive ship-gate. Detect the job. Spawn Gate for a sweep, not one "
@@ -555,6 +570,9 @@ def render(snap: dict[str, Any] | None = None) -> str:
     detail = str(data.get("detail") or "")
     if detail:
         lines.append(detail)
+    access_note = str(data.get("access_note") or "")
+    if access_note:
+        lines.append(access_note)
     unknown = data.get("unknown_live") or []
     if unknown:
         lines.append("Live repos not in catalog: " + ", ".join(unknown))

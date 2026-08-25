@@ -2,6 +2,14 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## GitHub PAT still cannot see private Netie-AI — 2026-08-25
+
+Used the operator fine-grained PAT as `jian-hong`. It authenticates and still
+404s `Netie-AI/Cortex` and every private product name. GitHub header
+`allows_permissionless_access=true`. Cursor All-repos on Helio.AI is a
+different org than this Cortex checkout. `estate_status` now prints that
+access note. Revoke any PAT pasted in chat.
+
 ## DMS handoff — F40 / FF-03 / VQ-01 / EPIC-015 / ledger honesty — 2026-08-25
 
 Cortex engine half of the DMS handoff. Did not re-implement DMS envelope mapping.

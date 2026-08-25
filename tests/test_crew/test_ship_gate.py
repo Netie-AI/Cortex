@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from CortexOS.crew.detect import attached_skills, plan
-from CortexOS.crew.estate import CATALOG, by_slug, required_domains, snapshot
+from CortexOS.crew.estate import CATALOG, by_slug, render, required_domains, snapshot
 from CortexOS.crew.roles import by_name, catalog
 from CortexOS.crew.ship_gate import FAIL, PASS, SKIP, evaluate, evaluate_all, render_slug
 
@@ -70,6 +70,13 @@ def test_estate_snapshot_offline_names_the_law(monkeypatch) -> None:
     text_law = snap["law"]
     assert "compliance certificate" in text_law.lower() or "certificate" in text_law
     assert "auto-merge" in text_law.lower()
+    note = str(snap.get("access_note") or "")
+    assert "permissionless" in note
+    assert "Helio.AI" in note
+    assert "Revoke" in note
+    rendered = render(snap)
+    assert "Netie-AI/Cortex" in rendered
+    assert "do not commit tokens" in rendered.lower()
 
 
 def test_ship_gate_adaptive_verdicts_are_in_the_report() -> None:

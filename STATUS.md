@@ -18,6 +18,11 @@
 > chain (`list_entries`). No get-entry port. Verify fails closed past the tip
 > and on seq gaps. DMS PR #92 can keep calling whole-chain verify.
 
+> **2026-08-25 (PAT probe):** Fine-grained PAT as jian-hong still 404s
+> Netie-AI/Cortex and private product names (`allows_permissionless_access`).
+> Cursor All-repos on Helio.AI is not this checkout. Grant Cursor on Netie-AI
+> All repositories. Revoke any PAT pasted in chat.
+
 > **2026-08-25 (crew ship-gate):** Cortex Crew governs github.com/Netie-AI
 > before shipping. Capability templates: Security, Reliability, Infra,
 > Architecture, Observability, Surface. Deterministic `ship_gate` +
