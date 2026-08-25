@@ -44,6 +44,7 @@ SURFACE_DOMAINS: dict[str, tuple[str, ...]] = {
     "chat": ("Security", "Reliability", "Infra", "Surface", "Observability"),
     "vertical": ("Security", "Reliability", "Infra", "Architecture", "Observability"),
     "missing": (),
+    "unseen": (),
     "accidental": ("Security",),
     "fork": ("Architecture",),
 }
@@ -85,7 +86,7 @@ class Fingerprint:
 
     @property
     def kind(self) -> str:
-        if self.placement in {"missing", "accidental", "fork"}:
+        if self.placement in {"missing", "unseen", "accidental", "fork"}:
             return self.placement
         if self.empty:
             return "empty"
@@ -136,8 +137,9 @@ CATALOG: tuple[Fingerprint, ...] = (
         notes=(
             "Local-first engine. Demo UI is not a public marketing site.",
             "SOC2/HIPAA/GDPR: not certified by file presence.",
-            "Netie-KB / AirGPT / DMS / chatbot / Pointer / OMI are not GitHub repos in this org.",
-            "Create them under Netie-AI. Do not leave SoT on D:\\ or github.com/jian-hong.",
+            "Private Netie-AI product repos exist (operator screenshot 2026-08-25).",
+            "This token gets GitHub 404 on private repos it cannot read. That is not absence.",
+            "Grant the GitHub App 'All repositories' (or select dms, Netie-KB, Pointer, ...).",
         ),
     ),
     _fp(
@@ -281,29 +283,107 @@ CATALOG: tuple[Fingerprint, ...] = (
         has_ci=True,
         notes=("Precision manufacturing samples. Observability compose exists.",),
     ),
-    # Expected private/local products. 404 on GitHub 2026-08-25. Do not ship from D:\ only.
+    # Private product repos. Operator screenshot 2026-08-25. This token still 404s them.
+    _fp(
+        slug="dms",
+        full_name="Netie-AI/dms",
+        private=True,
+        language="Python",
+        surfaces=("unseen", "vertical"),
+        placement="unseen",
+        notes=(
+            "Operator screenshot: Netie DMS -- ChatGPT for Excel/databases (Cortex consumer).",
+            "This token 404s private repos. Grant GitHub App access. Do not treat 404 as missing.",
+        ),
+    ),
+    _fp(
+        slug="Netie-KB",
+        full_name="Netie-AI/Netie-KB",
+        private=True,
+        language="Python",
+        surfaces=("unseen",),
+        placement="unseen",
+        notes=("Operator screenshot: Netie-KB exists (Python). Token cannot read it.",),
+    ),
+    _fp(
+        slug="Netie",
+        full_name="Netie-AI/Netie",
+        private=True,
+        language="Python",
+        surfaces=("unseen",),
+        placement="unseen",
+        notes=("Operator screenshot: Netie exists (Python). Orchestration KB home.",),
+    ),
+    _fp(
+        slug="Pointer",
+        full_name="Netie-AI/Pointer",
+        private=True,
+        language="JavaScript",
+        surfaces=("unseen",),
+        placement="unseen",
+        notes=("Operator screenshot: Pointer exists (JavaScript). Act/computer-control client.",),
+    ),
+    _fp(
+        slug="landing",
+        full_name="Netie-AI/landing",
+        private=True,
+        language="HTML",
+        surfaces=("unseen", "web"),
+        placement="unseen",
+        notes=("Operator screenshot: landing exists (HTML). Constructor ticket landing#9.",),
+    ),
+    _fp(
+        slug="Space",
+        full_name="Netie-AI/Space",
+        private=True,
+        language="JavaScript",
+        surfaces=("unseen", "web"),
+        placement="unseen",
+        notes=("Operator screenshot: Space exists (JavaScript). DMS Spaces product surface.",),
+    ),
+    _fp(
+        slug="netie-control",
+        full_name="Netie-AI/netie-control",
+        private=True,
+        language="Python",
+        surfaces=("unseen", "crew"),
+        placement="unseen",
+        notes=(
+            "Operator screenshot: operator shell Plane 4. Displays and launches; holds no keys, decides no route.",
+            "Not a key vault. OpenVault holds keys.",
+        ),
+    ),
+    _fp(
+        slug="RUMA-Houser",
+        full_name="Netie-AI/RUMA-Houser",
+        private=True,
+        language="",
+        surfaces=("unseen",),
+        placement="unseen",
+        notes=("Operator screenshot: RUMA-Houser exists. Do not modify packs/ruma unless asked.",),
+    ),
+    _fp(
+        slug="ViKing",
+        full_name="Netie-AI/ViKing",
+        private=True,
+        language="Python",
+        surfaces=("unseen",),
+        placement="unseen",
+        notes=(
+            "Operator screenshot: ViKing exists private. Distinct from public Netie-AI/VKing.",
+            "jian-hong/Vking is still an accidental public copy of the public VKing tree.",
+        ),
+    ),
     _fp(
         slug="AirGPT",
         full_name="Netie-AI/AirGPT",
         private=True,
         language="Python",
-        surfaces=("missing", "chat"),
-        placement="missing",
+        surfaces=("unseen", "chat"),
+        placement="unseen",
         notes=(
-            "Host shell. Local D:\\AirGPT. Not on GitHub (404). STATUS: initial commit pending.",
-            "Create Netie-AI/AirGPT private. Do not push to jian-hong.",
-        ),
-    ),
-    _fp(
-        slug="DMS",
-        full_name="Netie-AI/DMS",
-        private=True,
-        language="Python",
-        surfaces=("missing", "vertical"),
-        placement="missing",
-        notes=(
-            "Consumer product. Local D:\\DMS. Planned origin github.com/Netie-AI/DMS.git. 404 today.",
-            "Create the private org repo before shipping Spaces to a customer.",
+            "Not in the 2026-08-25 screenshot. Local D:\\AirGPT may still be the SoT.",
+            "If it is a private org repo, this token cannot see it. Grant GitHub App access.",
         ),
     ),
     _fp(
@@ -311,36 +391,18 @@ CATALOG: tuple[Fingerprint, ...] = (
         full_name="Netie-AI/chatbot",
         private=True,
         language="",
-        surfaces=("missing", "chat"),
-        placement="missing",
-        notes=("CORTEX_WS_CHATBOT -> D:\\chatbot. Not on GitHub. Normal-chat product has no origin.",),
-    ),
-    _fp(
-        slug="Pointer",
-        full_name="Netie-AI/Pointer",
-        private=True,
-        language="",
-        surfaces=("missing",),
-        placement="missing",
-        notes=("Act/computer-control client. Local D:\\Pointer. Not on GitHub.",),
-    ),
-    _fp(
-        slug="Netie",
-        full_name="Netie-AI/Netie",
-        private=True,
-        language="",
-        surfaces=("missing",),
-        placement="missing",
-        notes=("Netie KB / orchestration. Local D:\\Netie. Netie-KB is not a repo in the org.",),
+        surfaces=("unseen", "chat"),
+        placement="unseen",
+        notes=("CORTEX_WS_CHATBOT. Not in the screenshot. Token cannot confirm presence.",),
     ),
     _fp(
         slug="OMI",
         full_name="Netie-AI/OMI",
         private=True,
         language="",
-        surfaces=("missing",),
-        placement="missing",
-        notes=("OMI router. Local D:\\OMI. Not on GitHub.",),
+        surfaces=("unseen",),
+        placement="unseen",
+        notes=("CORTEX_WS_OMI. Not in the screenshot. Token cannot confirm presence.",),
     ),
     # Accidental stores on github.com/jian-hong (founder personal). Token cannot see private there.
     _fp(
@@ -459,6 +521,7 @@ def snapshot(*, live: bool | None = None, org: str | None = None) -> dict[str, A
     ]
     accidental = [public_row(fp) for fp in CATALOG if fp.placement == "accidental"]
     expected_missing = [public_row(fp) for fp in CATALOG if fp.placement == "missing"]
+    expected_unseen = [public_row(fp) for fp in CATALOG if fp.placement == "unseen"]
     return {
         "ok": True,
         "org": org_name,
@@ -469,14 +532,16 @@ def snapshot(*, live: bool | None = None, org: str | None = None) -> dict[str, A
         "missing_from_live": missing,
         "accidental": accidental,
         "expected_missing": expected_missing,
+        "expected_unseen": expected_unseen,
         "probed": "2026-08-25",
         "detail": live_detail,
         "private_jian_hong": "invisible to this token; only public jian-hong repos were scanned",
         "law": (
             "Adaptive ship-gate. Detect the job. Spawn Gate for a sweep, not one "
             "specialist per heading. File presence is not a compliance certificate. "
-            "AirGPT/DMS/chatbot/Pointer/Netie/OMI must live under Netie-AI, not D:\\ only "
-            "and not github.com/jian-hong. Human is money/decision. Do not auto-merge."
+            "A GitHub 404 from this token is not proof a private repo is missing. "
+            "Grant the GitHub App All repositories. Do not build a remote-login box. "
+            "OpenVault holds keys. Human is money/decision. Do not auto-merge."
         ),
     }
 
@@ -498,10 +563,15 @@ def render(snap: dict[str, Any] | None = None) -> str:
         lines.append("Accidental personal copies:")
         for row in accidental:
             lines.append(f"- {row.get('full_name')} [{row.get('kind')}]")
-    expected = data.get("expected_missing") or []
+    expected = data.get("expected_unseen") or []
     if expected:
-        lines.append("Expected private products missing from GitHub:")
+        lines.append("Private repos this token cannot read (operator confirmed they exist):")
         for row in expected:
+            lines.append(f"- {row.get('full_name')} (grant GitHub App access)")
+    missing_rows = data.get("expected_missing") or []
+    if missing_rows:
+        lines.append("Expected products with no GitHub origin:")
+        for row in missing_rows:
             lines.append(f"- {row.get('full_name')} (create under Netie-AI)")
     jh = data.get("private_jian_hong")
     if jh:

@@ -76,6 +76,19 @@ def _score_repo(fp: Fingerprint) -> list[Check]:
     )
     apiish = bool({"api", "engine", "keys", "news"} & set(fp.surfaces))
 
+    if fp.placement == "unseen":
+        out.append(
+            _check(
+                "Reliability",
+                "private_unseen",
+                FAIL,
+                "github 404-to-this-token",
+                "Repo exists. This token cannot read private Netie-AI repos (GitHub returns 404). "
+                "Grant the GitHub App All repositories. Do not claim the repo is missing. "
+                "Do not build a remote-login box or share GPU from this agent VM.",
+            )
+        )
+        return out
     if fp.placement == "missing":
         out.append(
             _check(

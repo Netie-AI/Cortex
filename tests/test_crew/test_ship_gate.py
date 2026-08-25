@@ -49,8 +49,13 @@ def test_estate_catalog_covers_netie_ai() -> None:
     personal = by_slug("jian-hong/Vking")
     assert personal is not None
     assert personal.placement == "accidental"
-    assert by_slug("AirGPT").placement == "missing"
-    assert by_slug("DMS").placement == "missing"
+    assert by_slug("AirGPT").placement == "unseen"
+    assert by_slug("dms").placement == "unseen"
+    assert by_slug("DMS").full_name == "Netie-AI/dms"
+    assert by_slug("Netie-KB").placement == "unseen"
+    assert by_slug("netie-control").placement == "unseen"
+    assert by_slug("ViKing").full_name == "Netie-AI/ViKing"
+    assert by_slug("VKing").full_name == "Netie-AI/VKing"
 
 
 def test_estate_snapshot_offline_names_the_law(monkeypatch) -> None:
@@ -58,9 +63,9 @@ def test_estate_snapshot_offline_names_the_law(monkeypatch) -> None:
     snap = snapshot()
     assert snap["org"] == "Netie-AI"
     assert snap["n"] == len(CATALOG)
-    assert snap["expected_missing"]
-    assert any(r["full_name"] == "Netie-AI/AirGPT" for r in snap["expected_missing"])
-    assert any(r["full_name"] == "Netie-AI/DMS" for r in snap["expected_missing"])
+    assert snap["expected_unseen"]
+    assert any(r["full_name"] == "Netie-AI/dms" for r in snap["expected_unseen"])
+    assert any(r["full_name"] == "Netie-AI/Netie-KB" for r in snap["expected_unseen"])
     assert any(r["full_name"] == "jian-hong/Vking" for r in snap["accidental"])
     text_law = snap["law"]
     assert "compliance certificate" in text_law.lower() or "certificate" in text_law
@@ -97,10 +102,15 @@ def test_ship_gate_adaptive_verdicts_are_in_the_report() -> None:
 
     air = render_slug("AirGPT")
     assert "SHIP FAIL" in air
-    assert "missing_origin" in air
-    assert "jian-hong" in air
-    dms = render_slug("DMS")
-    assert "missing_origin" in dms
+    assert "private_unseen" in air
+    assert "remote-login" in air
+    dms = render_slug("dms")
+    assert "private_unseen" in dms
+    assert "Do not claim the repo is missing" in dms
+    kb = render_slug("Netie-KB")
+    assert "private_unseen" in kb
+    control = render_slug("netie-control")
+    assert "private_unseen" in control
     vking_copy = render_slug("jian-hong/Vking")
     assert "accidental_personal_copy" in vking_copy
     assert "Do not ship from here" in vking_copy
