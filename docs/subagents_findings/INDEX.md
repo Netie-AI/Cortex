@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-08-25 | dms-handoff-f40-ff03 | F40, refused, SESSION, FF-03, SqlGateAbstain, VQ-01, certified, EPIC-015, ledger.verify | Refused is abstain not SESSION. L2 must return gate violations. Certified L0 takes declared synonyms + BETA value-norm. Append fails closed without a get-entry port. RAG-02/03 shipped; RAG-01 is demo Qdrant. | `2026-08-25_dms-handoff-f40-ff03.md` |
 | 2026-08-25 | crew-ship-gate-estate | crew, ship-gate, estate, netie-ai, production, security, wcag, detect, jian-hong, airgpt, dms | Production headings are capability templates plus a deterministic ship-gate. Private Netie-AI repos exist; this token 404s them. Grant GitHub App access. Do not build a remote-login box. | `2026-08-25_crew-ship-gate-estate.md` |
 | 2026-08-24 | crew-golden-checkouts | crew, golden, worktree, merge, origin/main, governed-metric | Crew golden is D:\Cortex-crew. Engine golden is D:\Cortex ANS branch. origin/main is published engine. Do not merge pin worktrees into crew. | `2026-08-24_crew-skill-passdown.md` |
 | 2026-08-24 | overnight-watchdog-tickets | overnight, watchdog, night_watch, tickets, verify, paging-file, ram, schtask | Overnight died because schtask skipped Crew/OV. estate now calls night_watch -SkipEstate. Scale = seat existing writers. Low RAM skips gh/gate. | `2026-08-24_overnight-watchdog-tickets.md` |

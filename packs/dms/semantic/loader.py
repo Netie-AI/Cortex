@@ -64,6 +64,7 @@ class CertifiedQuery:
     verified_at: str = ""
     tags: list[str] = field(default_factory=list)
     tables: tuple[str, ...] = ()
+    synonyms: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -253,17 +254,26 @@ def _load_metrics() -> dict[str, Metric]:
 def _load_certified() -> list[CertifiedQuery]:
     data = yaml.safe_load(CERTIFIED_PATH.read_text(encoding="utf-8"))
     seen: set[str] = set()
+    phrases: set[str] = set()
     out: list[CertifiedQuery] = []
     for raw in data.get("certified", []):
         if raw["id"] in seen:
             raise SemanticError(f"duplicate certified id {raw['id']!r}")
         seen.add(raw["id"])
         sql = raw["sql"].strip()
+        synonyms = list(raw.get("synonyms") or [])
+        for phrase in (raw["question"], *synonyms):
+            key = re.sub(r"[^a-z0-9]+", " ", (phrase or "").lower()).strip()
+            if key and key in phrases:
+                raise SemanticError(f"duplicate certified phrase {phrase!r}")
+            if key:
+                phrases.add(key)
         out.append(CertifiedQuery(
             id=raw["id"], question=raw["question"], sql=sql,
             verified_by=raw.get("verified_by", ""), verified_at=raw.get("verified_at", ""),
             tags=list(raw.get("tags") or []),
             tables=stated_tables(sql),
+            synonyms=synonyms,
         ))
     return out
 
@@ -284,6 +294,16 @@ def reload() -> SemanticModel:
     load_all.cache_clear()
     valuedict.refresh()
     return load_all()
+
+
+def normalize_certified_sql(cq: CertifiedQuery) -> tuple[str, list[str]]:
+    """Value-norm certified SQL (VQ-01). Pack-side so the engine never names generative."""
+    from packs.dms.generative.literal_normalize import normalize_sql_literals
+
+    norm = normalize_sql_literals(cq.sql)
+    if not norm.ok:
+        return cq.sql, list(norm.violations)
+    return (norm.sql or cq.sql), []
 
 
 def validate_all(*, execute: bool = True) -> dict[str, Any]:

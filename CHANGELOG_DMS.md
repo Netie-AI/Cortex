@@ -2,6 +2,24 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## DMS handoff — F40 / FF-03 / VQ-01 / EPIC-015 / ledger honesty — 2026-08-25
+
+Cortex engine half of the DMS handoff. Did not re-implement DMS envelope mapping.
+
+- **F40:** `_is_abstain_signal` treats `refused` as abstain. `_abstain_refused`
+  emits route/layer/badge=`refused`. Contract ask never stamps `Badge.SESSION`
+  on a refusal. Manifest refusals use `_abstain_refused`.
+- **FF-03:** `SqlGateAbstain.__str__` names `.violations`. `L2Attempt` returns
+  them instead of dropping them. Draft Cortex PR #41 left conflicting.
+- **VQ-01:** certified queries load `synonyms:`; L0 match is exact on canonical
+  or declared synonym; BETA rewrites to SKU-BETA before lookup; certified SQL
+  runs `normalize_sql_literals`.
+- **EPIC-015:** re-sliced in ARCHITECTURE.md. Retrieve + route-then-doc-RAG are
+  shipped; live Qdrant demo is the RAG-01 remainder.
+- **ledger.verify:** append read-back via existing `list_entries`. Phantom
+  id+hash → 500 `ledger_append_not_on_chain`. Verify fails closed past the tip
+  and on seq gaps. No sixth DMS port.
+
 ## Crew production ship-gate (Netie-AI estate) — 2026-08-25
 
 Crew capability templates for Security, Reliability, Infra, Architecture,

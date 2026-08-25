@@ -32,7 +32,7 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 | DAG runner | Partial — no Temporal, limited fan-out |
 | Cost ledger | Partial |
 | Model routing T0–T3 | Partial |
-| Hybrid RAG | Partial — not wired to demo |
+| Hybrid RAG | Retrieve + fusion shipped (`CortexOS/rag/*`, extras). Route-then-doc-RAG shipped (`RAG_KEYWORDS` → `rag_answer` over the contract corpus). Live Qdrant in the demo is still not wired. RAG-02 / RAG-03 closed; RAG-01 remainder is demo Qdrant, not the retrieve stack. |
 | WASM sandbox | Scaffold only |
 | A2A / personality | Planned (RUMA) |
 
@@ -74,7 +74,7 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 - Production WASM / microVM
 - Postgres ledger CI verification / RLS proof (DSN optional locally) — Claude Code packet
 - SOPS production secrets hygiene — Claude Code packet
-- Live Qdrant RAG in demo
+- Live Qdrant RAG in demo (retrieve + route-then-doc-RAG are shipped; this is the RAG-01 remainder)
 - `@agent` chat dispatch + DBOS durable resume (S1 remainder)
 - U0 Data Studio single page
 - F8 governed tool-call publish

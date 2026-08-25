@@ -1,5 +1,22 @@
 # STATUS.md
-**Last updated:** 2026-08-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** crew production ship-gate
+**Last updated:** 2026-08-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** DMS handoff (F40 / FF-03 / VQ-01 / EPIC-015)
+
+> **2026-08-25 (DMS handoff — Cortex engine half):**
+> **F40 / Cortex#11:** `route|layer|badge=refused` is an abstain signal. Contract
+> provenance is `Badge.ABSTAIN`, never `SESSION`. `_abstain_refused` is the
+> engine emitter. DMS envelope mapping stays in DMS (PR #66).
+> **FF-03 / dms#59:** `SqlGateAbstain.__str__` and `L2Attempt.violations` keep
+> the gate's refusal list. Isolated from draft PR #41 (conflicting).
+> **VQ-01 / dms#39:** tree was clean (R-0006). Certified queries match declared
+> synonyms; BETA → SKU-BETA on L0 lookup; certified SQL runs value-norm.
+> **EPIC-015 / #34:** RAG-02 retrieve and RAG-03 route-then-doc-RAG are closed
+> in this tree (`CortexOS/rag/*`, `RAG_KEYWORDS` → `rag_answer`). Re-slice:
+> RAG-01 remainder is live Qdrant in the demo, not "PARTIAL retrieve". DMS
+> RAG-04/05 stay closed. GitHub issues API is 403 here so boxes are sliced in
+> ARCHITECTURE.md / this file, not closed on the epic.
+> **ledger.verify:** append fails closed if the returned id+hash is not on the
+> chain (`list_entries`). No get-entry port. Verify fails closed past the tip
+> and on seq gaps. DMS PR #92 can keep calling whole-chain verify.
 
 > **2026-08-25 (crew ship-gate):** Cortex Crew governs github.com/Netie-AI
 > before shipping. Capability templates: Security, Reliability, Infra,

@@ -332,12 +332,25 @@ def _sqlite_verify(*, db_path: Path, start_seq: int) -> VerifyResult:
                 (start_seq - 1,),
             ).fetchone()
             prev_hash = prior["entry_hash"] if prior else GENESIS_HASH
+        if not rows:
+            if start_seq > 0:
+                # Fail closed: asking to verify past the tip is not "ok".
+                return VerifyResult(ok=False, broken_at=start_seq)
+            return VerifyResult(ok=True)
+        first = int(rows[0]["seq"])
+        if start_seq == 0 and first != 0:
+            return VerifyResult(ok=False, broken_at=first)
+        expected_seq = start_seq if start_seq > 0 else first
         for row in rows:
+            seq = int(row["seq"])
+            if seq != expected_seq:
+                return VerifyResult(ok=False, broken_at=seq)
             payload = json.loads(row["payload"])
-            expected = compute_entry_hash(int(row["seq"]), prev_hash or GENESIS_HASH, payload, row["created_at"])
+            expected = compute_entry_hash(seq, prev_hash or GENESIS_HASH, payload, row["created_at"])
             if row["entry_hash"] != expected or row["prev_hash"] != (prev_hash or GENESIS_HASH):
-                return VerifyResult(ok=False, broken_at=int(row["seq"]))
+                return VerifyResult(ok=False, broken_at=seq)
             prev_hash = row["entry_hash"]
+            expected_seq = seq + 1
         return VerifyResult(ok=True)
     finally:
         con.close()
@@ -364,12 +377,24 @@ def _postgres_verify(*, start_seq: int) -> VerifyResult:
                 {"seq": start_seq - 1},
             ).mappings().first()
             prev_hash = prior["entry_hash"] if prior else GENESIS_HASH
+        if not rows:
+            if start_seq > 0:
+                return VerifyResult(ok=False, broken_at=start_seq)
+            return VerifyResult(ok=True)
+        first = int(rows[0]["seq"])
+        if start_seq == 0 and first != 0:
+            return VerifyResult(ok=False, broken_at=first)
+        expected_seq = start_seq if start_seq > 0 else first
         for row in rows:
+            seq = int(row["seq"])
+            if seq != expected_seq:
+                return VerifyResult(ok=False, broken_at=seq)
             payload = json.loads(row["payload"])
-            expected = compute_entry_hash(int(row["seq"]), prev_hash or GENESIS_HASH, payload, row["created_at"])
+            expected = compute_entry_hash(seq, prev_hash or GENESIS_HASH, payload, row["created_at"])
             if row["entry_hash"] != expected or row["prev_hash"] != (prev_hash or GENESIS_HASH):
-                return VerifyResult(ok=False, broken_at=int(row["seq"]))
+                return VerifyResult(ok=False, broken_at=seq)
             prev_hash = row["entry_hash"]
+            expected_seq = seq + 1
         return VerifyResult(ok=True)
 
 
