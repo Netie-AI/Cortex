@@ -88,6 +88,8 @@ async def test_desk_status_lands_in_transcript(rig, monkeypatch) -> None:
     tools = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"]
     assert tools and "Cursor key" in tools[0]["content"]
     assert "auto-merge" in tools[0]["content"].lower() or "Do not auto-merge" in tools[0]["content"]
+    assert "Estate:" in tools[0]["content"]
+    assert "ship_gate" in tools[0]["content"]
     answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "chat" in answer["content"].lower()
 
@@ -147,6 +149,27 @@ async def test_netie_board_is_in_the_transcript(rig, tmp_path, monkeypatch) -> N
     answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "ANS-01" in answer["content"]
     assert "SEATED" in answer["content"]
+
+
+async def test_ship_gate_lands_fail_in_the_transcript(rig, monkeypatch) -> None:
+    monkeypatch.setenv("CREW_LIVE_PROBES", "0")
+    space = rig.store.create_space("Ship")
+    rig.llm.manager.extend(
+        [
+            LLMResult(tool_calls=[_tc("ship_gate", repo="AIM")]),
+            LLMResult(text="AIM is empty. SHIP FAIL. Cannot ship. No merge."),
+        ]
+    )
+    await rig.runtime.on_user_message(space["id"], "before shipping AIM")
+    await wait_run_done(rig.runtime, space["id"])
+    tools = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"]
+    assert tools
+    assert "SHIP FAIL" in tools[0]["content"]
+    assert "Empty repo cannot ship" in tools[0]["content"]
+    assert "auto-merge" in tools[0]["content"].lower() or "Do not auto-merge" in tools[0]["content"]
+    answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
+    assert "FAIL" in answer["content"]
+    assert "empty" in answer["content"].lower()
 
 
 async def test_dead_model_is_a_visible_system_message(rig) -> None:

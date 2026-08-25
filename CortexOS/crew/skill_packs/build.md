@@ -11,5 +11,4 @@ Rules:
 - Cursor model: grok-4.6 high, not fast. Do not spawn one cloud agent per issue.
 
 Verify default for crew code:
-cd D:\Cortex-crew
-D:\Cortex\.venv\Scripts\python.exe -m pytest tests/test_crew -q
+python -m pytest tests/test_crew -q

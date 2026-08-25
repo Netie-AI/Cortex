@@ -99,6 +99,35 @@ def test_github_list_prs_uses_injected_runner(monkeypatch) -> None:
     assert "auto-merge" in out["law"].lower() or "Do not auto-merge" in out["law"]
 
 
+def test_github_list_org_repos_uses_injected_runner(monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+    monkeypatch.setenv("CREW_GH_ORG", "Netie-AI")
+
+    class Result:
+        def __init__(self, code: int, stdout: str) -> None:
+            self.returncode = code
+            self.stdout = stdout
+            self.stderr = ""
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        assert "repo" in argv and "list" in argv and "Netie-AI" in argv
+        return Result(
+            0,
+            '[{"name":"Cortex","description":"engine","isPrivate":true,'
+            '"url":"https://github.com/Netie-AI/Cortex","updatedAt":"2026-08-25T00:00:00Z",'
+            '"primaryLanguage":{"name":"Python"}}]',
+        )
+
+    out = github_mod.list_org_repos("Netie-AI", runner=runner)
+    assert out["ok"] is True
+    assert out["org"] == "Netie-AI"
+    assert out["repos"][0]["name"] == "Cortex"
+    assert out["repos"][0]["private"] is True
+    assert "auto-merge" in out["law"].lower()
+
+
 def test_inbox_without_creds_tells_operator_to_drop(monkeypatch) -> None:
     from CortexOS.crew import inbox as inbox_mod
 

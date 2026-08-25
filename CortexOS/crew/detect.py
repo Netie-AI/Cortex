@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from CortexOS.crew import roles
+from CortexOS.crew.estate import PRODUCTION_CAPS
 
 # Word/phrase cues onto capability templates. Names are templates, not agents.
 CUES: dict[str, tuple[str, ...]] = {
@@ -31,7 +32,76 @@ CUES: dict[str, tuple[str, ...]] = {
     ),
     "PRD": ("prd", "requirements doc", "product requirements", "write a spec"),
     "Epic": ("epic", "slice into epics", "sequence the work", "break the prd"),
-    "Gate": ("gate", "invariant", "invariants", "lint-imports", "manifest refusal", "rls-proof"),
+    "Gate": (
+        "gate",
+        "invariant",
+        "invariants",
+        "lint-imports",
+        "manifest refusal",
+        "rls-proof",
+        "before shipping",
+        "production ready",
+        "production essentials",
+        "ship gate",
+        "ship this",
+    ),
+    "Security": (
+        "sql injection",
+        "xss",
+        "csrf",
+        "rbac",
+        "encryption at rest",
+        "secret rotation",
+        "gdpr",
+        "hipaa",
+        "soc 2",
+        "soc2",
+        "input validation",
+    ),
+    "Reliability": (
+        "unit tests",
+        "integration tests",
+        "end-to-end",
+        "load test",
+        "circuit breaker",
+        "graceful degradation",
+        "retry logic",
+        "edge case",
+    ),
+    "Infra": (
+        "ci/cd",
+        "infrastructure as code",
+        "disaster recovery",
+        "kubernetes",
+        "docker",
+        "cdn setup",
+        "database migrations",
+    ),
+    "Architecture": (
+        "connection pooling",
+        "api versioning",
+        "idempotency",
+        "webhook handling",
+        "background jobs",
+        "sharding",
+    ),
+    "Observability": (
+        "distributed tracing",
+        "real user monitoring",
+        "sentry",
+        "vulnerability scanning",
+        "cost optimization",
+        "error tracking",
+    ),
+    "Surface": (
+        "wcag",
+        "accessibility",
+        "internationalization",
+        "i18n",
+        "privacy policy",
+        "feature flags",
+        "a/b testing",
+    ),
     "Marketing": (
         "outbound",
         "founder voice",
@@ -97,6 +167,33 @@ _VERIFY = (
     "gate this",
     "against invariants",
 )
+
+_SHIP = (
+    "before shipping",
+    "production ready",
+    "production essentials",
+    "ship gate",
+    "ship this",
+)
+
+
+def _collapse_production_sweep(text: str, caps: tuple[str, ...]) -> tuple[str, ...]:
+    """A production sweep is one Gate, not six specialists.
+
+    One or two named domains stay (SQL injection, WCAG). Three or more
+    production headings, or explicit ship-gate wording with a sweep,
+    collapse to Gate so max_agents_per_space is not blown.
+    """
+    prod = tuple(c for c in caps if c in PRODUCTION_CAPS)
+    others = tuple(c for c in caps if c not in PRODUCTION_CAPS)
+    sweep = _hit(text, _SHIP) and len(prod) >= 2
+    if sweep or len(prod) >= 3:
+        if "Gate" in others:
+            return others
+        return ("Gate",) + others
+    if _hit(text, _SHIP) and "Gate" not in caps:
+        return ("Gate",) + caps
+    return caps
 
 
 @dataclass(frozen=True)
@@ -198,6 +295,7 @@ def plan(text: str) -> Detected:
         )
 
     caps = match_capabilities(raw)
+    caps = _collapse_production_sweep(raw, caps)
     verify = _hit(raw, _VERIFY)
     rec = None
     try:

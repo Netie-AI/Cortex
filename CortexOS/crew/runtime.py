@@ -62,7 +62,7 @@ tell the user what was denied and why instead of pretending it ran.
 - Do not spawn infinite Cursor cloud chats. One issue per human-opened chat. Ticket Runner seats \
 existing writers.
 - Models go through OpenVault FreeRoute. Cursor chats use grok-4.6 (high), never grok-fast.
-- To check PRs, mail, connectors, or the Cursor key, call desk_status. Do not ask the operator to click import or PR buttons. Dropped files already become spaces.
+- To check PRs, mail, connectors, the Cursor key, or the GitHub org estate, call desk_status or estate_status. Before shipping, call ship_gate (repo=slug or repo=all). Do not ask the operator to click import or PR buttons. Dropped files already become spaces.
 - Your final plain-text reply is the only thing the user reads. Keep it direct. Plain ASCII only.
 
 """ + roles.charter_block()
@@ -520,6 +520,23 @@ class CrewRuntime:
                 [],
             ),
             spec(
+                "estate_status",
+                "List github.com/Netie-AI repos with adaptive surfaces and which production "
+                "domains apply (Security/Reliability/Infra/Architecture/Observability/Surface). "
+                "Static catalog plus optional live gh. Do not clone every repo. Do not auto-merge.",
+                {},
+                [],
+            ),
+            spec(
+                "ship_gate",
+                "Run the deterministic production ship-gate. repo is a Netie-AI slug, "
+                "full_name, or 'all'. Fail closed on missing evidence. Skip is not pass. "
+                "File presence is not SOC2/HIPAA/GDPR. Spawn domain teammates only for FAIL "
+                "items. Do not auto-merge.",
+                {"repo": {"type": "string", "description": "Cortex, Netie-AI/AIM, or all"}},
+                ["repo"],
+            ),
+            spec(
                 "cortex_ask",
                 "Ask the governed Cortex engine a data question. Returns the answer with its"
                 " badge, sources and audit id. The engine may abstain; report that honestly.",
@@ -746,6 +763,22 @@ class CrewRuntime:
             )
             text = render(snap)
             self._persist_tool(ctx, row, "desk_status", {}, text)
+            return text
+
+        if name == "estate_status":
+            from CortexOS.crew.estate import render as estate_render
+            from CortexOS.crew.estate import snapshot as estate_snapshot
+
+            text = estate_render(estate_snapshot())
+            self._persist_tool(ctx, row, "estate_status", {}, text)
+            return text
+
+        if name == "ship_gate":
+            from CortexOS.crew.ship_gate import render_slug
+
+            repo = str(args.get("repo", "")).strip() or "all"
+            text = render_slug(repo)
+            self._persist_tool(ctx, row, "ship_gate", {"repo": repo}, text)
             return text
 
         if name == "cortex_ask":

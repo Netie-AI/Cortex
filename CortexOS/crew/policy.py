@@ -58,6 +58,8 @@ INTERNAL_TOOLS = frozenset(
         "finish",
         "netie_board",
         "desk_status",
+        "estate_status",
+        "ship_gate",
         "rename_agent",
     }
 )

@@ -1,5 +1,14 @@
 # STATUS.md
-**Last updated:** 2026-08-22 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** auto-merge perfect PRs
+**Last updated:** 2026-08-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** crew production ship-gate
+
+> **2026-08-25 (crew ship-gate):** Cortex Crew governs github.com/Netie-AI
+> before shipping. Capability templates: Security, Reliability, Infra,
+> Architecture, Observability, Surface. Deterministic `ship_gate` +
+> `estate_status`. Detect collapses a production sweep to Gate. File
+> presence is not a compliance certificate. Human merges. Private product
+> repos (dms, Netie-KB, Pointer, landing, Space, netie-control, ViKing) exist;
+> this token cannot read them. Grant GitHub App All repositories. Do not
+> build a remote-login box. jian-hong/Vking is an accidental public copy.
 
 > **2026-08-22 (auto-merge):** CI job `auto-merge` squash-merges non-draft PRs when
 > every required check is green. Rule `.cursor/rules/merge-perfect.mdc`.
