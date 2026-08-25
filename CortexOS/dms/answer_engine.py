@@ -89,13 +89,46 @@ def _certified_index() -> dict[str, Any]:
     from packs.dms.semantic.loader import load_all
 
     model = load_all()
-    return {_normalize(cq.question): cq for cq in model.certified}
+    index: dict[str, Any] = {}
+    for cq in model.certified:
+        for phrase in (cq.question, *cq.synonyms):
+            key = _normalize(phrase)
+            if key:
+                index[key] = cq
+    return index
 
 
 def match_certified(question: str):
-    """L0 — EXACT normalized match only (high precision; never fuzzy, so a
-    scoped question can't collide with an unscoped certified query)."""
-    return _certified_index().get(_normalize(question))
+    """L0 — exact normalized match on the canonical question or a declared synonym.
+
+    Synonyms are SME-declared aliases, not fuzzy overlap. A scoped question
+    still cannot collide with an unscoped certified query unless that alias
+    was written down. Value-norm: SKU-shaped tokens are rewritten to the
+    column encoding (BETA → SKU-BETA) before lookup (VQ-01).
+    """
+    key = _normalize(question)
+    hit = _certified_index().get(key)
+    if hit is not None:
+        return hit
+    rewritten = _normalize(_rewrite_certified_value_tokens(question))
+    if rewritten != key:
+        return _certified_index().get(rewritten)
+    return None
+
+
+def _rewrite_certified_value_tokens(question: str) -> str:
+    """Replace SKU-shaped tokens with the warehouse encoding. Fail open on miss."""
+    from packs.dms.semantic import values as valuedict
+
+    def _one(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        res = valuedict.resolve(raw, "sku")
+        if res.ok and res.value and res.value.lower() != raw.lower():
+            return res.value
+        return raw
+
+    # SKU-BETA / bare BETA — never rewrite counts ("top 5") into SKU-00005.
+    return re.sub(r"\bSKU[-\s]?[A-Za-z0-9-]+\b|\bBETA\b", _one, question, flags=re.I)
 
 
 # ── slot extractors ──────────────────────────────────────────────────────────
@@ -669,6 +702,36 @@ def _abstain(
     }
 
 
+def _abstain_refused(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """Policy / manifest refusal. Distinct from coverage abstain.
+
+    Emits route/layer/badge = ``refused``. Contract mapping must treat this as
+    an abstain signal (F40) — never Badge.SESSION. DMS owns the customer
+    envelope; this is the engine half only.
+    """
+    del question
+    return {
+        "answer": f"I can't answer that ({reason}).",
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "refused",
+        "rows": [],
+        "source_table": None,
+        "layer": "refused",
+        "badge": "refused",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": [],
+    }
+
+
 def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
     """META-01 — browse what the semantic layer can answer (no SQL)."""
     from packs.dms.semantic.catalog_answer import build_catalog_answer
@@ -1153,6 +1216,15 @@ def answer(
             assumptions = f"certified query {cq.id}"
             metric_id = cq.id
             planned_tables = tuple(cq.tables)
+            # VQ-01 — certified SQL is a trusted asset; literals still must
+            # match the column encoding (BETA → SKU-BETA). Unresolved → abstain.
+            from packs.dms.generative.literal_normalize import normalize_sql_literals
+
+            norm = normalize_sql_literals(sql)
+            if not norm.ok:
+                return _abs(f"certified query {cq.id} unresolved literal {norm.violations}")
+            if norm.sql:
+                sql = norm.sql
         else:
             plan = route_to_metric(question)
             if plan is not None:
@@ -1280,7 +1352,13 @@ def answer(
                 entry.passed = False
                 entry.violations = [type(exc).__name__]
                 log_audit(entry)
-                return _abs(f"{type(exc).__name__}: {exc}")
+                return _done(
+                    _abstain_refused(
+                        question,
+                        audit_id,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                )
             total_count = _true_count(gate.safe_sql, verified=verified)
             entry.row_count = len(rows)
             log_audit(entry)

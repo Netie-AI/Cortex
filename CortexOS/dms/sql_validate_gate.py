@@ -31,6 +31,15 @@ class SqlGateAbstain(Exception):
         super().__init__(message)
         self.violations = list(violations or [])
 
+    def __str__(self) -> str:
+        # FF-03 / dms#59 — callers interpolate `{exc}` into the envelope reason.
+        # Exception.__str__ is only args[0], which dropped unknown-column /
+        # unbound-table / EXPLAIN detail sitting on `.violations`.
+        base = super().__str__()
+        if not self.violations:
+            return base
+        return f"{base}: {', '.join(self.violations)}"
+
 
 def explain_dry_run(con: Any, sql: str) -> tuple[bool, str]:
     """Run EXPLAIN without executing the query body. Returns (ok, detail)."""

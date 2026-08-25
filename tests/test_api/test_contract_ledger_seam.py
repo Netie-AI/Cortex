@@ -37,19 +37,34 @@ class _StubLedger:
     def __init__(self) -> None:
         self.appended: list[tuple[str, str, dict]] = []
         self.verified: list[int] = []
+        self.entries: list[dict] = []
 
     def append(self, actor: str, event_type: str, payload: dict) -> dict:
         self.appended.append((actor, event_type, payload))
-        return {
-            "id": "e1",
+        entry = {
+            "id": f"e{len(self.appended)}",
             "seq": len(self.appended),
             "actor": actor,
             "event_type": event_type,
             "payload": payload,
             "prev_hash": "0" * 64,
-            "entry_hash": "a" * 64,
+            "entry_hash": ("a" * 63) + str(len(self.appended) % 10),
             "created_at": "2026-07-30T00:00:00Z",
         }
+        self.entries.append(entry)
+        return entry
+
+    def list_entries(
+        self,
+        *,
+        from_seq: int = 0,
+        limit: int = 100,
+        event_type: str | None = None,
+    ) -> list[dict]:
+        rows = [e for e in self.entries if e["seq"] >= from_seq]
+        if event_type:
+            rows = [e for e in rows if e["event_type"] == event_type]
+        return rows[:limit]
 
     def verify(self, *, start_seq: int = 0) -> dict:
         self.verified.append(start_seq)
@@ -92,6 +107,44 @@ def test_ledger_routes_go_through_the_registry() -> None:
     assert stub.verified == [3]
     assert entry.actor == "tester"
     assert chain.ok is True
+
+
+class _LyingLedger:
+    """Append returns id+hash; list_entries and verify see an empty chain."""
+
+    def append(self, actor: str, event_type: str, payload: dict) -> dict:
+        return {
+            "id": "phantom",
+            "seq": 1,
+            "actor": actor,
+            "event_type": event_type,
+            "payload": payload,
+            "prev_hash": "0" * 64,
+            "entry_hash": "b" * 64,
+            "created_at": "2026-07-30T00:00:00Z",
+        }
+
+    def list_entries(self, **_kwargs) -> list:
+        return []
+
+    def verify(self, *, start_seq: int = 0) -> dict:
+        return {"ok": True, "broken_at": None}
+
+
+def test_append_fails_closed_when_entry_is_not_on_the_chain() -> None:
+    ledger_registry.register_ledger(_LyingLedger())
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            contract_routes.contract_ledger_append(
+                contract_routes.LedgerAppendRequest(
+                    actor="tester", event_type="demo.event", payload={"k": "v"}
+                )
+            )
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail["code"] == "ledger_append_not_on_chain"
 
 
 @pytest.mark.parametrize(

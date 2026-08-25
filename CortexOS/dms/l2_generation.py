@@ -84,6 +84,7 @@ class L2Attempt:
     layer: str = "generated"
     badge: str = "L2_VALIDATED"
     assumptions: str = ""
+    violations: list[str] | None = None
 
 
 def attempt_l2(question: str, *, verified: Any = None) -> L2Attempt | None:
@@ -135,13 +136,19 @@ def attempt_l2(question: str, *, verified: Any = None) -> L2Attempt | None:
             max_retries=2,
         )
     except SqlGateAbstain as exc:
-        return L2Attempt(reason=f"L2 generation failed validation gate: {exc}")
+        return L2Attempt(
+            reason=f"L2 generation failed validation gate: {exc}",
+            violations=list(exc.violations),
+        )
     finally:
         if con_explain is not None:
             con_explain.close()
 
     if not gate.passed or not gate.safe_sql:
-        return L2Attempt(reason="L2 generation failed validation gate")
+        return L2Attempt(
+            reason="L2 generation failed validation gate",
+            violations=list(gate.violations),
+        )
 
     sql = gate.safe_sql
     try:

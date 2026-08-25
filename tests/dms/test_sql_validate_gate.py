@@ -56,6 +56,51 @@ def test_retry_exhausted_abstains(semantic):
         gate_with_retry(bad, "x", semantic, con=None, max_retries=2)
     assert attempts["n"] == 3  # initial + 2 retries
     assert ei.value.violations
+    for v in ei.value.violations:
+        assert v in str(ei.value)
+
+
+def test_sql_gate_abstain_str_includes_violations():
+    exc = SqlGateAbstain(
+        "SQL validation gate exhausted retries",
+        violations=["UNKNOWN_COLUMN:nope", "EXPLAIN_FAILED:x"],
+    )
+    text = str(exc)
+    assert "UNKNOWN_COLUMN:nope" in text
+    assert "EXPLAIN_FAILED:x" in text
+    assert "exhausted retries" in text
+
+
+def test_sql_gate_abstain_str_without_violations_is_bare():
+    assert str(SqlGateAbstain("SQL validation gate exhausted retries")) == (
+        "SQL validation gate exhausted retries"
+    )
+
+
+def test_l2_attempt_keeps_gate_violations(monkeypatch):
+    from CortexOS.dms import l2_generation
+
+    class _Port:
+        def is_configured(self) -> bool:
+            return True
+
+        def retrieve_schema(self, question: str) -> dict:
+            return {"tables": {"inventory": {}}}
+
+        def generate_candidates(self, question, schema, *, prior_violations=None):
+            return ["SELEC bad FROM nowhere"]
+
+        def record_validated(self, question, sql):
+            return None
+
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    monkeypatch.setattr(l2_generation, "resolve_l2_generation", lambda: _Port())
+    out = l2_generation.attempt_l2("free form anything")
+    assert out is not None
+    assert out.sql is None
+    assert out.violations
+    for v in out.violations:
+        assert v in (out.reason or "")
 
 
 def test_l2_without_model_abstains(monkeypatch):

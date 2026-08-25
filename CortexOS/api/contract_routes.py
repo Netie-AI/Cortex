@@ -101,6 +101,7 @@ _FLAT_BADGE: dict[str, Badge] = {
     "generated": Badge.QUERY_SKILL,  # L2_VALIDATED on DMS side
     "l2_validated": Badge.QUERY_SKILL,
     "abstain": Badge.ABSTAIN,
+    "refused": Badge.ABSTAIN,  # F40 — contract has no REFUSED badge; never SESSION
     "blocked": Badge.BLOCKED,
 }
 
@@ -119,10 +120,13 @@ def _is_abstain_signal(data: dict[str, Any]) -> bool:
     route = str(data.get("route") or "").lower()
     badge = str(data.get("badge") or "").lower()
     layer = str(data.get("layer") or "").lower()
-    return route in {"needs_clarification", "abstain", "blocked"} or badge in {
+    # "refused" is an engine abstain (F40 / Cortex#11). It is none of the
+    # older tokens, so omitting it stamped Badge.SESSION on a refusal.
+    return route in {"needs_clarification", "abstain", "blocked", "refused"} or badge in {
         "abstain",
         "blocked",
-    } or layer in {"abstain", "blocked"}
+        "refused",
+    } or layer in {"abstain", "blocked", "refused"}
 
 
 def _provenance_from_flat(data: dict[str, Any]) -> Provenance:
@@ -303,8 +307,41 @@ def _ledger() -> Any:
 async def contract_ledger_append(body: LedgerAppendRequest) -> LedgerEntry:
     # No docstring: FastAPI publishes it as the operation `description`, and the
     # released spec (contract/openapi-1.1.0.json) has none for this operation.
-    entry = _ledger().append(body.actor, body.event_type, body.payload)
-    return LedgerEntry.model_validate(_as_mapping(entry))
+    ledger = _ledger()
+    entry = LedgerEntry.model_validate(_as_mapping(ledger.append(body.actor, body.event_type, body.payload)))
+    if not _entry_is_on_chain(ledger, entry):
+        # Honesty: id+hash that never landed is indistinguishable from a write
+        # to DMS, which then calls ledger.verify (whole-chain ok) and trusts it.
+        # There is no get-entry in cortex-contract 1.2.0 — fail closed here.
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "ledger_append_not_on_chain",
+                "message": "append returned id+hash that is not on the chain",
+            },
+        )
+    return entry
+
+
+def _entry_is_on_chain(ledger: Any, entry: LedgerEntry) -> bool:
+    """True when list_entries can see this id+hash. Missing list_entries → fail closed."""
+    if not hasattr(ledger, "list_entries"):
+        return False
+    try:
+        rows = ledger.list_entries(from_seq=entry.seq, limit=1)
+    except TypeError:
+        rows = ledger.list_entries()
+    except Exception:  # noqa: BLE001 — a chain we cannot read is not proven
+        return False
+    for row in rows or []:
+        mapped = _as_mapping(row) if not isinstance(row, LedgerEntry) else {
+            "id": row.id,
+            "entry_hash": row.entry_hash,
+            "seq": row.seq,
+        }
+        if mapped.get("id") == entry.id and mapped.get("entry_hash") == entry.entry_hash:
+            return True
+    return False
 
 
 @router.post("/ledger/verify", response_model=ChainVerification, operation_id="ledger.verify")
@@ -315,7 +352,11 @@ async def contract_ledger_verify(body: LedgerVerifyRequest) -> ChainVerification
         result = ledger.verify_chain(start_seq=body.start_seq)
     else:
         result = ledger.verify(start_seq=body.start_seq)
-    return ChainVerification.model_validate(_as_mapping(result))
+    mapped = _as_mapping(result)
+    # Fail closed: an implementation that cannot produce ok=True/False is a miss.
+    if "ok" not in mapped:
+        return ChainVerification(ok=False, broken_at=body.start_seq or 0)
+    return ChainVerification.model_validate(mapped)
 
 
 @router.get("/tools", response_model=ToolRegistryResponse, operation_id="tool.registry")

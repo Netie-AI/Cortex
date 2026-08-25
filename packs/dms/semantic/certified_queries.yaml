@@ -9,6 +9,9 @@
 certified:
   - id: cq_sku_count
     question: "How many SKUs do we have in inventory?"
+    synonyms:
+      - "How many SKUs in inventory?"
+      - "SKU count in inventory"
     sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
     verified_by: seed
     verified_at: "2026-07-20"
@@ -27,6 +30,9 @@ certified:
 
   - id: cq_sales_top5_value
     question: "Top 5 selling SKUs by revenue"
+    synonyms:
+      - "Top 5 selling SKUs by sales"
+      - "Top 5 SKUs by revenue"
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
       FROM transactions WHERE txn_type = 'OUT'
