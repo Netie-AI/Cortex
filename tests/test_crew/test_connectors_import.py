@@ -120,7 +120,7 @@ def test_github_list_org_repos_uses_injected_runner(monkeypatch) -> None:
             '"primaryLanguage":{"name":"Python"}}]',
         )
 
-    out = github_mod.list_org_repos(runner=runner)
+    out = github_mod.list_org_repos("Netie-AI", runner=runner)
     assert out["ok"] is True
     assert out["org"] == "Netie-AI"
     assert out["repos"][0]["name"] == "Cortex"

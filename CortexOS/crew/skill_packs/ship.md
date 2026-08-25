@@ -12,6 +12,9 @@ Order:
 Adaptive:
 - RTL/OpenHBM: sim/lint/formal. No WCAG.
 - Empty/AIM: fail. Cannot ship.
+- Missing origin (AirGPT, DMS, chatbot, Pointer, Netie, OMI): fail. Create under Netie-AI. Not D:\\ only. Not jian-hong.
+- Accidental personal copy (jian-hong/Vking): fail. Canonical is Netie-AI/VKing. Archive or make private.
+- jian-hong/optio: fail. Third-party swarm fork. Do not merge into Cortex.
 - Public Pages/web-only: privacy + a11y required.
 - Local engine/vault consoles: not scored as marketing sites.
 

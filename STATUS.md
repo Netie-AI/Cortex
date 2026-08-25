@@ -5,7 +5,9 @@
 > before shipping. Capability templates: Security, Reliability, Infra,
 > Architecture, Observability, Surface. Deterministic `ship_gate` +
 > `estate_status`. Detect collapses a production sweep to Gate. File
-> presence is not a compliance certificate. Human merges.
+> presence is not a compliance certificate. Human merges. AirGPT/DMS and
+> other local products are missing GitHub origins. jian-hong/Vking is an
+> accidental personal copy of Netie-AI/VKing.
 
 > **2026-08-22 (auto-merge):** CI job `auto-merge` squash-merges non-draft PRs when
 > every required check is green. Rule `.cursor/rules/merge-perfect.mdc`.

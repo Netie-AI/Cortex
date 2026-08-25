@@ -41,64 +41,77 @@ def _repos() -> list[str]:
 
 
 def list_org_repos(org: str | None = None, *, runner: RunFn | None = None) -> dict[str, Any]:
-    """List GitHub repos in CREW_GH_ORG (default Netie-AI). Read only."""
+    """List GitHub repos for CREW_GH_ORG / CREW_GH_OWNERS. Read only."""
     if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        owners = [org] if org else [o.strip() for o in os.environ.get("CREW_GH_OWNERS", "Netie-AI,jian-hong").split(",") if o.strip()]
         return {
             "ok": False,
             "detail": "CREW_LIVE_PROBES=0",
             "repos": [],
-            "org": org or os.environ.get("CREW_GH_ORG", "Netie-AI"),
+            "org": org or (owners[0] if owners else "Netie-AI"),
+            "owners": owners,
         }
     run = runner or _run
-    org_name = (org or os.environ.get("CREW_GH_ORG") or "Netie-AI").strip() or "Netie-AI"
-    argv = [
-        "gh",
-        "repo",
-        "list",
-        org_name,
-        "--limit",
-        "100",
-        "--json",
-        "name,description,isPrivate,url,updatedAt,primaryLanguage",
-    ]
-    try:
-        result = run(argv, timeout=20)
-    except FileNotFoundError:
-        return {"ok": False, "detail": "gh not installed", "repos": [], "org": org_name}
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"ok": False, "detail": type(exc).__name__, "repos": [], "org": org_name}
-    if result.returncode != 0:
-        return {
-            "ok": False,
-            "detail": (result.stderr or result.stdout or "gh failed")[:400],
-            "repos": [],
-            "org": org_name,
-        }
-    try:
-        rows = json.loads(result.stdout or "[]")
-    except ValueError:
-        return {"ok": False, "detail": "invalid json", "repos": [], "org": org_name}
+    if org:
+        owners = [org.strip()]
+    else:
+        owners = [
+            o.strip()
+            for o in os.environ.get("CREW_GH_OWNERS", "Netie-AI,jian-hong").split(",")
+            if o.strip()
+        ]
+        if not owners:
+            owners = [os.environ.get("CREW_GH_ORG") or "Netie-AI"]
     repos: list[dict[str, Any]] = []
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict):
+    errors: list[str] = []
+    for org_name in owners:
+        argv = [
+            "gh",
+            "repo",
+            "list",
+            org_name,
+            "--limit",
+            "100",
+            "--json",
+            "name,description,isPrivate,url,updatedAt,primaryLanguage",
+        ]
+        try:
+            result = run(argv, timeout=20)
+        except FileNotFoundError:
+            return {"ok": False, "detail": "gh not installed", "repos": [], "org": org_name, "owners": owners}
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(f"{org_name}:{type(exc).__name__}")
             continue
-        lang = row.get("primaryLanguage") or {}
-        lang_name = lang.get("name") if isinstance(lang, dict) else ""
-        repos.append(
-            {
-                "name": row.get("name"),
-                "description": row.get("description") or "",
-                "private": bool(row.get("isPrivate")),
-                "url": row.get("url") or "",
-                "updated": row.get("updatedAt") or "",
-                "language": lang_name or "",
-            }
-        )
+        if result.returncode != 0:
+            errors.append((result.stderr or result.stdout or "gh failed")[:200])
+            continue
+        try:
+            rows = json.loads(result.stdout or "[]")
+        except ValueError:
+            errors.append(f"{org_name}: invalid json")
+            continue
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            lang = row.get("primaryLanguage") or {}
+            lang_name = lang.get("name") if isinstance(lang, dict) else ""
+            repos.append(
+                {
+                    "name": row.get("name"),
+                    "owner": org_name,
+                    "description": row.get("description") or "",
+                    "private": bool(row.get("isPrivate")),
+                    "url": row.get("url") or "",
+                    "updated": row.get("updatedAt") or "",
+                    "language": lang_name or "",
+                }
+            )
     return {
-        "ok": True,
-        "detail": "",
+        "ok": not errors or bool(repos),
+        "detail": "; ".join(errors)[:400] if errors else "",
         "repos": repos,
-        "org": org_name,
+        "org": owners[0] if owners else "Netie-AI",
+        "owners": owners,
         "law": "Report in chat. Do not auto-merge. Adaptive catalog lives in crew.estate.",
     }
 

@@ -19,6 +19,8 @@ description: Adaptive production ship-gate for github.com/Netie-AI repos via Cor
 | web-only public | Tests + privacy + a11y. |
 | rtl (OpenHBM) | sim/lint/formal. No WCAG. |
 | empty (AIM) | FAIL. Cannot ship. |
+| missing (AirGPT, DMS, chatbot, Pointer, Netie, OMI) | FAIL. Create private Netie-AI origin. |
+| accidental (jian-hong/Vking) | FAIL. Canonical is the org repo. |
 
 File presence is not SOC2/HIPAA/GDPR.
 

@@ -10,6 +10,10 @@ github.com/Netie-AI. Surfaces pick domains (RTL skips WCAG; empty AIM fails).
 A six-heading sweep collapses to one Gate. Skip is not pass. File presence
 is not SOC2/HIPAA/GDPR. Tools: `estate_status`, `ship_gate`. Do not auto-merge.
 
+Also scores expected private products that are still local-only (AirGPT, DMS,
+chatbot, Pointer, Netie, OMI) as missing_origin, and flags accidental personal
+copies on github.com/jian-hong (Vking duplicate, committed venv, optio fork).
+
 ## Auto-merge perfect PRs — 2026-08-22
 
 CI job `auto-merge` squash-merges a non-draft PR when lint-type-test,

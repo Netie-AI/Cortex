@@ -22,7 +22,7 @@ def test_catalog_includes_production_templates() -> None:
 
 
 def test_estate_catalog_covers_netie_ai() -> None:
-    slugs = {fp.slug for fp in CATALOG}
+    slugs = {fp.slug for fp in CATALOG if fp.placement == "canonical"}
     assert slugs == {
         "Cortex",
         "constructor",
@@ -44,13 +44,24 @@ def test_estate_catalog_covers_netie_ai() -> None:
     ctor = by_slug("constructor")
     assert ctor is not None
     assert "Surface" in required_domains(ctor)
+    assert by_slug("VKing") is not None
+    assert by_slug("VKing").full_name == "Netie-AI/VKing"
+    personal = by_slug("jian-hong/Vking")
+    assert personal is not None
+    assert personal.placement == "accidental"
+    assert by_slug("AirGPT").placement == "missing"
+    assert by_slug("DMS").placement == "missing"
 
 
 def test_estate_snapshot_offline_names_the_law(monkeypatch) -> None:
     monkeypatch.setenv("CREW_LIVE_PROBES", "0")
     snap = snapshot()
     assert snap["org"] == "Netie-AI"
-    assert snap["n"] == 11
+    assert snap["n"] == len(CATALOG)
+    assert snap["expected_missing"]
+    assert any(r["full_name"] == "Netie-AI/AirGPT" for r in snap["expected_missing"])
+    assert any(r["full_name"] == "Netie-AI/DMS" for r in snap["expected_missing"])
+    assert any(r["full_name"] == "jian-hong/Vking" for r in snap["accidental"])
     text_law = snap["law"]
     assert "compliance certificate" in text_law.lower() or "certificate" in text_law
     assert "auto-merge" in text_law.lower()
@@ -84,6 +95,19 @@ def test_ship_gate_adaptive_verdicts_are_in_the_report() -> None:
     assert "Infra/ci" in analog
     assert "does not review or enable" in analog
 
+    air = render_slug("AirGPT")
+    assert "SHIP FAIL" in air
+    assert "missing_origin" in air
+    assert "jian-hong" in air
+    dms = render_slug("DMS")
+    assert "missing_origin" in dms
+    vking_copy = render_slug("jian-hong/Vking")
+    assert "accidental_personal_copy" in vking_copy
+    assert "Do not ship from here" in vking_copy
+    optio = render_slug("jian-hong/optio")
+    assert "second_orchestrator" in optio
+    assert "Do not merge into Cortex" in optio
+
 
 def test_unknown_repo_fails_closed() -> None:
     text = render_slug("not-a-netie-repo")
@@ -95,7 +119,7 @@ def test_estate_sweep_counts_fails() -> None:
     reports = evaluate_all()
     text = render_slug("all")
     failed = [r for r in reports if r.verdict == FAIL]
-    assert len(reports) == 11
+    assert len(reports) == len(CATALOG)
     assert len(failed) >= 1
     assert f"FAIL={len(failed)}" in text
     assert "AIM" in text

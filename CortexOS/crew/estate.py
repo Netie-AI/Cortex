@@ -41,6 +41,11 @@ SURFACE_DOMAINS: dict[str, tuple[str, ...]] = {
     "ci_tool": ("Reliability", "Infra"),
     "manufacturing": ("Security", "Reliability", "Observability"),
     "crew": ("Security", "Reliability"),
+    "chat": ("Security", "Reliability", "Infra", "Surface", "Observability"),
+    "vertical": ("Security", "Reliability", "Infra", "Architecture", "Observability"),
+    "missing": (),
+    "accidental": ("Security",),
+    "fork": ("Architecture",),
 }
 
 
@@ -69,10 +74,19 @@ class Fingerprint:
     has_sentry: bool = False
     has_a11y: bool = False
     empty: bool = False
+    placement: str = "canonical"
     notes: tuple[str, ...] = ()
 
     @property
+    def owner(self) -> str:
+        if "/" in self.full_name:
+            return self.full_name.split("/", 1)[0]
+        return ORG_DEFAULT
+
+    @property
     def kind(self) -> str:
+        if self.placement in {"missing", "accidental", "fork"}:
+            return self.placement
         if self.empty:
             return "empty"
         for name in (
@@ -83,6 +97,8 @@ class Fingerprint:
             "news",
             "ci_tool",
             "manufacturing",
+            "chat",
+            "vertical",
             "docs",
             "web",
             "api",
@@ -120,7 +136,8 @@ CATALOG: tuple[Fingerprint, ...] = (
         notes=(
             "Local-first engine. Demo UI is not a public marketing site.",
             "SOC2/HIPAA/GDPR: not certified by file presence.",
-            "Netie-KB is not a repo in this org as of 2026-08-25.",
+            "Netie-KB / AirGPT / DMS / chatbot / Pointer / OMI are not GitHub repos in this org.",
+            "Create them under Netie-AI. Do not leave SoT on D:\\ or github.com/jian-hong.",
         ),
     ),
     _fp(
@@ -177,7 +194,10 @@ CATALOG: tuple[Fingerprint, ...] = (
         language="Python",
         surfaces=("docs",),
         has_readme=False,
-        notes=("Plan/docs tree. No .github/workflows on 2026-08-25.",),
+        notes=(
+            "Plan/docs tree. No .github/workflows on 2026-08-25.",
+            "Public personal copy also at jian-hong/Vking (older branch run-0003). Canonical is this repo.",
+        ),
     ),
     _fp(
         slug="OpenForge",
@@ -243,7 +263,10 @@ CATALOG: tuple[Fingerprint, ...] = (
         language="",
         surfaces=("empty",),
         empty=True,
-        notes=("Empty repo (LinkedIn Alternative). Cannot ship.",),
+        notes=(
+            "Empty repo (LinkedIn Alternative). Cannot ship.",
+            "jian-hong/aim is a 2025 TypeScript app, not this tree. Name collision only.",
+        ),
     ),
     _fp(
         slug="Vertex",
@@ -258,6 +281,104 @@ CATALOG: tuple[Fingerprint, ...] = (
         has_ci=True,
         notes=("Precision manufacturing samples. Observability compose exists.",),
     ),
+    # Expected private/local products. 404 on GitHub 2026-08-25. Do not ship from D:\ only.
+    _fp(
+        slug="AirGPT",
+        full_name="Netie-AI/AirGPT",
+        private=True,
+        language="Python",
+        surfaces=("missing", "chat"),
+        placement="missing",
+        notes=(
+            "Host shell. Local D:\\AirGPT. Not on GitHub (404). STATUS: initial commit pending.",
+            "Create Netie-AI/AirGPT private. Do not push to jian-hong.",
+        ),
+    ),
+    _fp(
+        slug="DMS",
+        full_name="Netie-AI/DMS",
+        private=True,
+        language="Python",
+        surfaces=("missing", "vertical"),
+        placement="missing",
+        notes=(
+            "Consumer product. Local D:\\DMS. Planned origin github.com/Netie-AI/DMS.git. 404 today.",
+            "Create the private org repo before shipping Spaces to a customer.",
+        ),
+    ),
+    _fp(
+        slug="chatbot",
+        full_name="Netie-AI/chatbot",
+        private=True,
+        language="",
+        surfaces=("missing", "chat"),
+        placement="missing",
+        notes=("CORTEX_WS_CHATBOT -> D:\\chatbot. Not on GitHub. Normal-chat product has no origin.",),
+    ),
+    _fp(
+        slug="Pointer",
+        full_name="Netie-AI/Pointer",
+        private=True,
+        language="",
+        surfaces=("missing",),
+        placement="missing",
+        notes=("Act/computer-control client. Local D:\\Pointer. Not on GitHub.",),
+    ),
+    _fp(
+        slug="Netie",
+        full_name="Netie-AI/Netie",
+        private=True,
+        language="",
+        surfaces=("missing",),
+        placement="missing",
+        notes=("Netie KB / orchestration. Local D:\\Netie. Netie-KB is not a repo in the org.",),
+    ),
+    _fp(
+        slug="OMI",
+        full_name="Netie-AI/OMI",
+        private=True,
+        language="",
+        surfaces=("missing",),
+        placement="missing",
+        notes=("OMI router. Local D:\\OMI. Not on GitHub.",),
+    ),
+    # Accidental stores on github.com/jian-hong (founder personal). Token cannot see private there.
+    _fp(
+        slug="Vking-personal",
+        full_name="jian-hong/Vking",
+        private=False,
+        language="Python",
+        surfaces=("accidental", "docs"),
+        placement="accidental",
+        notes=(
+            "Public personal duplicate of Netie-AI/VKing. Same cortex SKILL card. Branch run-0003 vs org run-0004.",
+            "Archive or make private. Canonical is Netie-AI/VKing. Do not ship from jian-hong.",
+        ),
+    ),
+    _fp(
+        slug="Python_Automation_JH",
+        full_name="jian-hong/Python_Automation_JH",
+        private=False,
+        language="Python",
+        surfaces=("accidental",),
+        placement="accidental",
+        notes=(
+            "Windows venv/ committed (~8809 files). .gitignore does not list venv.",
+            "Not a Cortex copy. Accidental store. Do not treat as a Netie product origin.",
+        ),
+    ),
+    _fp(
+        slug="optio",
+        full_name="jian-hong/optio",
+        private=False,
+        language="",
+        surfaces=("fork",),
+        placement="fork",
+        notes=(
+            "Fork of a third-party agent-swarm orchestrator. Do not merge into Cortex. Cortex is the loop.",
+            "A token-shaped file is committed. Operator must rotate if it was real. Crew does not print it.",
+        ),
+    ),
 )
 
 
@@ -265,13 +386,19 @@ def by_slug(name: str) -> Fingerprint | None:
     key = name.strip()
     if not key:
         return None
-    if "/" in key:
-        key = key.split("/", 1)[1]
     low = key.lower()
     for row in CATALOG:
-        if row.slug.lower() == low:
+        if row.full_name.lower() == low:
             return row
-    return None
+    tail = low.split("/", 1)[-1]
+    hits = [row for row in CATALOG if row.slug.lower() == tail]
+    if not hits:
+        # Allow AirGPT via "airgpt" even when slug has no hyphen variants.
+        hits = [row for row in CATALOG if row.slug.lower().replace("-", "") == tail.replace("-", "")]
+    if not hits:
+        return None
+    org = [h for h in hits if h.full_name.lower().startswith("netie-ai/")]
+    return (org or hits)[0]
 
 
 def required_domains(fp: Fingerprint) -> tuple[str, ...]:
@@ -291,9 +418,11 @@ def public_row(fp: Fingerprint) -> dict[str, Any]:
     return {
         "slug": fp.slug,
         "full_name": fp.full_name,
+        "owner": fp.owner,
         "private": fp.private,
         "language": fp.language,
         "kind": fp.kind,
+        "placement": fp.placement,
         "surfaces": list(fp.surfaces),
         "domains": list(required_domains(fp)),
         "empty": fp.empty,
@@ -321,9 +450,15 @@ def snapshot(*, live: bool | None = None, org: str | None = None) -> dict[str, A
         live_detail = str(listed.get("detail") or "")
         live_names = [str(r.get("name") or "") for r in (listed.get("repos") or []) if r.get("name")]
     rows = [public_row(fp) for fp in CATALOG]
-    catalog_slugs = {fp.slug for fp in CATALOG}
+    catalog_slugs = {fp.slug for fp in CATALOG if fp.owner == org_name}
     unknown = [n for n in live_names if n not in catalog_slugs]
-    missing = [fp.slug for fp in CATALOG if live_names and fp.slug not in live_names]
+    missing = [
+        fp.slug
+        for fp in CATALOG
+        if fp.placement == "canonical" and fp.owner == org_name and live_names and fp.slug not in live_names
+    ]
+    accidental = [public_row(fp) for fp in CATALOG if fp.placement == "accidental"]
+    expected_missing = [public_row(fp) for fp in CATALOG if fp.placement == "missing"]
     return {
         "ok": True,
         "org": org_name,
@@ -332,12 +467,16 @@ def snapshot(*, live: bool | None = None, org: str | None = None) -> dict[str, A
         "live_names": live_names,
         "unknown_live": unknown,
         "missing_from_live": missing,
+        "accidental": accidental,
+        "expected_missing": expected_missing,
         "probed": "2026-08-25",
         "detail": live_detail,
+        "private_jian_hong": "invisible to this token; only public jian-hong repos were scanned",
         "law": (
             "Adaptive ship-gate. Detect the job. Spawn Gate for a sweep, not one "
             "specialist per heading. File presence is not a compliance certificate. "
-            "Human is money/decision. Do not auto-merge."
+            "AirGPT/DMS/chatbot/Pointer/Netie/OMI must live under Netie-AI, not D:\\ only "
+            "and not github.com/jian-hong. Human is money/decision. Do not auto-merge."
         ),
     }
 
@@ -354,6 +493,19 @@ def render(snap: dict[str, Any] | None = None) -> str:
     unknown = data.get("unknown_live") or []
     if unknown:
         lines.append("Live repos not in catalog: " + ", ".join(unknown))
+    accidental = data.get("accidental") or []
+    if accidental:
+        lines.append("Accidental personal copies:")
+        for row in accidental:
+            lines.append(f"- {row.get('full_name')} [{row.get('kind')}]")
+    expected = data.get("expected_missing") or []
+    if expected:
+        lines.append("Expected private products missing from GitHub:")
+        for row in expected:
+            lines.append(f"- {row.get('full_name')} (create under Netie-AI)")
+    jh = data.get("private_jian_hong")
+    if jh:
+        lines.append("jian-hong private: " + str(jh))
     for row in data.get("repos") or []:
         domains = ",".join(row.get("domains") or []) or "(none)"
         empty = " EMPTY" if row.get("empty") else ""

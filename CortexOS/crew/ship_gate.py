@@ -76,6 +76,40 @@ def _score_repo(fp: Fingerprint) -> list[Check]:
     )
     apiish = bool({"api", "engine", "keys", "news"} & set(fp.surfaces))
 
+    if fp.placement == "missing":
+        out.append(
+            _check(
+                "Reliability",
+                "missing_origin",
+                FAIL,
+                "github 404",
+                "Not on GitHub. Create a private Netie-AI repo. Do not leave SoT on D:\\ or jian-hong.",
+            )
+        )
+        return out
+    if fp.placement == "accidental":
+        out.append(
+            _check(
+                "Security",
+                "accidental_personal_copy",
+                FAIL,
+                fp.full_name,
+                "Accidental store on github.com/jian-hong. Canonical is Netie-AI. Archive or make private. Do not ship from here.",
+            )
+        )
+        return out
+    if fp.placement == "fork":
+        out.append(
+            _check(
+                "Architecture",
+                "second_orchestrator",
+                FAIL,
+                fp.full_name,
+                "Third-party agent-swarm fork. Do not merge into Cortex. Cortex is the loop. Rotate any committed token-shaped file.",
+            )
+        )
+        return out
+
     if fp.empty:
         out.append(
             _check(
@@ -343,6 +377,6 @@ def render_slug(name: str) -> str:
     if report is None:
         return (
             f"SHIP FAIL  unknown repo '{name}'. "
-            "Call estate_status. Catalog is github.com/Netie-AI as of 2026-08-25."
+            "Call estate_status. Catalog is github.com/Netie-AI plus expected private products and jian-hong accidentals as of 2026-08-25."
         )
     return render_report(report)
