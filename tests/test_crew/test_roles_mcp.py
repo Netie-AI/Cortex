@@ -20,6 +20,12 @@ def test_catalog_names_the_specialists() -> None:
         "Skills",
         "Routines",
         "Watchdog",
+        "Security",
+        "Reliability",
+        "Infra",
+        "Architecture",
+        "Observability",
+        "Surface",
     }
     prd = by_name("prd")
     assert prd is not None and "PRD agent" in prd.role

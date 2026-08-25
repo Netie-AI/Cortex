@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from CortexOS.crew import connectors, github, inbox
+from CortexOS.crew import connectors, estate, github, inbox
 from CortexOS.crew.openvault import cursor_key_status
 
 
@@ -13,6 +13,7 @@ def snapshot(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> dict[st
     prs = github.list_prs()
     mail = inbox.status()
     cursor = cursor_key_status()
+    estate_snap = estate.snapshot()
     return {
         "ok": True,
         "connectors": plugs,
@@ -20,10 +21,12 @@ def snapshot(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> dict[st
         "prs": prs,
         "inbox": mail,
         "cursor": cursor,
+        "estate": estate_snap,
         "law": (
             "Ask in chat to check PRs or mail. Drop files to import. "
             "Human is money and decision authority. Do not auto-merge or auto-send. "
-            "Cursor chats use grok-4.6 (high), not fast. Ticket Runner seats existing writers."
+            "Cursor chats use grok-4.6 (high), not fast. Ticket Runner seats existing writers. "
+            "Before shipping, call ship_gate. File presence is not a compliance certificate."
         ),
     }
 
@@ -52,4 +55,10 @@ def render(snap: dict[str, Any] | None = None) -> str:
     for plug in data.get("connectors") or []:
         state = "connected" if plug.get("connected") else "mapped"
         lines.append(f"- {plug.get('slug')}: {state} ({plug.get('layer')})")
+    estate_snap = data.get("estate") or {}
+    n_estate = estate_snap.get("n") or 0
+    lines.append(
+        f"Estate: {n_estate} {estate_snap.get('org') or 'Netie-AI'} repos. "
+        "Call estate_status for surfaces. Call ship_gate before shipping."
+    )
     return "\n".join(lines)

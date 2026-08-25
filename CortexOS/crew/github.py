@@ -40,6 +40,69 @@ def _repos() -> list[str]:
     return seen
 
 
+def list_org_repos(org: str | None = None, *, runner: RunFn | None = None) -> dict[str, Any]:
+    """List GitHub repos in CREW_GH_ORG (default Netie-AI). Read only."""
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        return {
+            "ok": False,
+            "detail": "CREW_LIVE_PROBES=0",
+            "repos": [],
+            "org": org or os.environ.get("CREW_GH_ORG", "Netie-AI"),
+        }
+    run = runner or _run
+    org_name = (org or os.environ.get("CREW_GH_ORG") or "Netie-AI").strip() or "Netie-AI"
+    argv = [
+        "gh",
+        "repo",
+        "list",
+        org_name,
+        "--limit",
+        "100",
+        "--json",
+        "name,description,isPrivate,url,updatedAt,primaryLanguage",
+    ]
+    try:
+        result = run(argv, timeout=20)
+    except FileNotFoundError:
+        return {"ok": False, "detail": "gh not installed", "repos": [], "org": org_name}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": type(exc).__name__, "repos": [], "org": org_name}
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "detail": (result.stderr or result.stdout or "gh failed")[:400],
+            "repos": [],
+            "org": org_name,
+        }
+    try:
+        rows = json.loads(result.stdout or "[]")
+    except ValueError:
+        return {"ok": False, "detail": "invalid json", "repos": [], "org": org_name}
+    repos: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        lang = row.get("primaryLanguage") or {}
+        lang_name = lang.get("name") if isinstance(lang, dict) else ""
+        repos.append(
+            {
+                "name": row.get("name"),
+                "description": row.get("description") or "",
+                "private": bool(row.get("isPrivate")),
+                "url": row.get("url") or "",
+                "updated": row.get("updatedAt") or "",
+                "language": lang_name or "",
+            }
+        )
+    return {
+        "ok": True,
+        "detail": "",
+        "repos": repos,
+        "org": org_name,
+        "law": "Report in chat. Do not auto-merge. Adaptive catalog lives in crew.estate.",
+    }
+
+
 def list_prs(limit: int = 20, *, runner: RunFn | None = None) -> dict[str, Any]:
     """List open PRs for CLAIMS repos (or CREW_GH_REPOS). Never merges."""
     if os.environ.get("CREW_LIVE_PROBES", "1") == "0":

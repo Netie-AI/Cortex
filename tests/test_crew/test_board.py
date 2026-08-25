@@ -48,6 +48,8 @@ def test_skill_packs_seed_without_overwrite(tmp_path) -> None:
     names = {p.name for p in written}
     assert "outreach.md" in names
     assert "chat-human.md" in names
+    assert "ship.md" in names
+    assert "security.md" in names
     assert (folder / "tone.md").exists()
     body = read_skill(folder, "outreach")
     assert "Jian Hong" in body

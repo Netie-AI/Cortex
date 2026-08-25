@@ -10,6 +10,7 @@ See also root `AGENTS.md` and `skill_distill/DISTILL.md`.
 | `Run distill-session against Claude Code` | distill-session |
 | `Distill Cursor multitask + MCP into skill_distill` | distill-session |
 | `Ingest distill captures` | shell: `python scripts/distill_ingest.py` |
+| `Gate the Netie-AI estate before shipping` | crew-ship-gate |
 
 ---
 

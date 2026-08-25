@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-08-25 | crew-ship-gate-estate | crew, ship-gate, estate, netie-ai, production, security, wcag, detect | Production headings are capability templates plus a deterministic ship-gate. Sweep collapses to Gate. Surfaces pick domains. File presence is not SOC2/HIPAA/GDPR. | `2026-08-25_crew-ship-gate-estate.md` |
 | 2026-08-24 | crew-golden-checkouts | crew, golden, worktree, merge, origin/main, governed-metric | Crew golden is D:\Cortex-crew. Engine golden is D:\Cortex ANS branch. origin/main is published engine. Do not merge pin worktrees into crew. | `2026-08-24_crew-skill-passdown.md` |
 | 2026-08-24 | overnight-watchdog-tickets | overnight, watchdog, night_watch, tickets, verify, paging-file, ram, schtask | Overnight died because schtask skipped Crew/OV. estate now calls night_watch -SkipEstate. Scale = seat existing writers. Low RAM skips gh/gate. | `2026-08-24_overnight-watchdog-tickets.md` |
 | 2026-08-23 | workflows-tasks-500 | workflows, tasks, sqlite, wal, disk-io, 500 | GET /api/workflows/tasks 500 = store disk I/O (wedged WAL). Activity already isolated it. Retry WAL then DELETE. Restart wedged :8010. | `2026-08-23_workflows-tasks-500.md` |

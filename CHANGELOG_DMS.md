@@ -2,6 +2,14 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Crew production ship-gate (Netie-AI estate) — 2026-08-25
+
+Crew capability templates for Security, Reliability, Infra, Architecture,
+Observability, and Surface, plus a deterministic `ship_gate` over
+github.com/Netie-AI. Surfaces pick domains (RTL skips WCAG; empty AIM fails).
+A six-heading sweep collapses to one Gate. Skip is not pass. File presence
+is not SOC2/HIPAA/GDPR. Tools: `estate_status`, `ship_gate`. Do not auto-merge.
+
 ## Auto-merge perfect PRs — 2026-08-22
 
 CI job `auto-merge` squash-merges a non-draft PR when lint-type-test,
