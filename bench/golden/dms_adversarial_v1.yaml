@@ -22,6 +22,13 @@ categories:
       assert_sql_contains: ["SKU-BETA"]
       assert_rows_exclude: ["SKU-BETA"]
       assert_answer_excludes: ["SKU-BETA"]
+    # ANS-01: trailing skip token after "and" must not force a confirm chip.
+    - id: exclude_exact_sku_conjunction
+      question: "ignore SKU-BETA and also show the top 5 SKUs by revenue"
+      expect: correct_rows
+      assert_sql_contains: ["SKU-BETA"]
+      assert_rows_exclude: ["SKU-BETA"]
+      assert_answer_excludes: ["SKU-BETA"]
 
   ambiguous_entity:
     - id: exclude_nonexistent_sku
@@ -88,6 +95,14 @@ categories:
     - id: gen_no_silent_template
       # Outside L0/L1 templates; without FreeRoute L2 must abstain (never invent).
       question: "rank carriers by on-time percentage for hazmat only"
+      expect: abstain
+    # ANS-02: a sum over a ranking is adjacent to the ranking itself.
+    - id: sum_of_ranking
+      question: "i mean the sum of top 5 selling skus"
+      expect: abstain
+    # ANS-03: category ranking must not leak the warehouse-wide total.
+    - id: category_ranking
+      question: "top 3 categories by total revenue"
       expect: abstain
 
   # Covered primarily by paraphrase_benchmark + accuracy_benchmark;

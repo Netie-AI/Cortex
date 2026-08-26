@@ -71,6 +71,23 @@ HTTP: `GET /api/connectors` (UI), `/workspaces`, `POST /dispatch`,
 `/cursor/chats`, `/cursor/chats/{id}/messages`, `/instruct`.
 distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
 
+## ANS-01/02/03 answer-path shape — 2026-08-22
+
+Three tickets, one funnel. The router was answering a question adjacent to
+the one asked, badged `governed_metric`.
+
+- ANS-01: an exclusion clause that names an exact SKU plus a conjunction
+  (`and` / `dan` / Malay `keluarkan`…`dari`) now ends at the entities that
+  resolve, so the two stop/skip lists cannot disagree. Applied and answered.
+- ANS-02: an aggregate over a ranking (sum/average/total of top N) abstains
+  and names the two-step path that works. Discourse lead-in `i mean` is not
+  an average.
+- ANS-03: a ranking grouped by a known non-SKU dimension abstains rather
+  than returning the warehouse-wide `revenue_total` as one row. SKU rankings
+  that say "by total revenue" still rank.
+- Asserted on rendered text and rows, not SQL. ANS-04 unknown-subject
+  abstain is unchanged.
+
 ## ANS-04 unknown subject abstain — 2026-08-22
 
 `answer("top 3 customers by amount")` was badged `governed_metric` and rendered
