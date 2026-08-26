@@ -35,7 +35,7 @@ from CortexOS.execution.manifest import (
     ManifestVerifier,
     canonical_manifest_bytes,
 )
-from packages.cortex_contract.execution import Manifest
+from cortex_contract.execution import Manifest
 
 DEMO_WAREHOUSE_REVENUE = "80375993.99"
 DEMO_WAREHOUSE_REVENUE_GROUPED = "80,375,993"
