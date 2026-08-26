@@ -48,6 +48,22 @@ def test_explain_passes_valid_select(semantic):
         con.close()
 
 
+def test_str_carries_violations():
+    exc = SqlGateAbstain(
+        "SQL validation gate exhausted retries",
+        violations=["UNKNOWN_COL:foo", "UNBOUND:bar"],
+    )
+    text = str(exc)
+    assert "SQL validation gate exhausted retries" in text
+    assert "UNKNOWN_COL:foo" in text
+    assert "UNBOUND:bar" in text
+
+
+def test_str_without_violations_is_bare_message():
+    exc = SqlGateAbstain("SQL validation gate exhausted retries")
+    assert str(exc) == "SQL validation gate exhausted retries"
+
+
 def test_retry_exhausted_abstains(semantic):
     attempts = {"n": 0}
 
@@ -59,6 +75,9 @@ def test_retry_exhausted_abstains(semantic):
         gate_with_retry(bad, "x", semantic, con=None, max_retries=2)
     assert attempts["n"] == 3  # initial + 2 retries
     assert ei.value.violations
+    rendered = str(ei.value)
+    for item in ei.value.violations[:5]:
+        assert item in rendered
     for v in ei.value.violations:
         assert v in str(ei.value)
 

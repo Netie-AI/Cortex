@@ -32,6 +32,12 @@ class SqlGateAbstain(Exception):
         self.violations = list(violations or [])
 
     def __str__(self) -> str:
+        base = super().__str__()
+        if not self.violations:
+            return base
+        return f"{base} ({'; '.join(self.violations[:5])})"
+
+    def __str__(self) -> str:
         # FF-03 / dms#59 — callers interpolate `{exc}` into the envelope reason.
         # Exception.__str__ is only args[0], which dropped unknown-column /
         # unbound-table / EXPLAIN detail sitting on `.violations`.
