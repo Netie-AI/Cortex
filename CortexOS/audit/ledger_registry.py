@@ -9,7 +9,7 @@ declared here, the active vertical pack pushes its implementation in with
 :func:`register_ledger`, and engine code pulls it back out with
 :func:`resolve_ledger`. The arrow only ever points packs → CortexOS.
 
-A provider is anything satisfying ``packages.cortex_contract.ledger.LedgerWriter``
+A provider is anything satisfying ``cortex_contract.ledger.LedgerWriter``
 (``append`` / ``verify`` / ``list_entries``) — a module object qualifies, and
 keeping it a module means ``unittest.mock.patch`` on the pack's functions still
 lands, because attributes resolve at call time.
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import importlib
 
-from packages.cortex_contract.ledger import LedgerWriter
+from cortex_contract.ledger import LedgerWriter
 
 
 class LedgerNotRegistered(RuntimeError):

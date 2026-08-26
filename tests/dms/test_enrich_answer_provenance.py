@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from CortexOS.api.contract_routes import _enrich_answer, _provenance_from_flat
-from packages.cortex_contract.answer import Badge, Provenance
+from cortex_contract.answer import Badge, Provenance
 
 
 def test_provenance_from_flat_needs_clarification_is_abstain():

@@ -165,6 +165,12 @@ pretty = true
 # package from the root) and refuses to run at all.
 mypy_path = "packages"
 namespace_packages = false
+# A setuptools build/ tree under the package is a *copy* of it, so mypy sees two
+# modules named cortex_contract and stops with "errors prevented further
+# checking" — exit 2, nothing type-checked, and it reads like an environment
+# glitch rather than a disabled gate. Any `pip install -e .` or `python -m
+# build` recreates it, so excluding it is the fix; deleting it is not.
+exclude = '(^|/)build/'
 # Packaging / release infra only — engine modules remain gradually typed.
 files = [
     "CortexOS/packaging.py",
