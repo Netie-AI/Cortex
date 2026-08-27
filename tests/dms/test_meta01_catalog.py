@@ -7,6 +7,17 @@ from CortexOS.dms.answer_engine import answer as engine_answer
 from packs.dms.semantic.catalog_answer import is_catalog_intent
 from packs.dms.semantic.loader import load_all
 
+
+@pytest.fixture(scope="module", autouse=True)
+def ensure_db():
+    from bench.accuracy import _ensure_db_loaded
+    from packs.dms.semantic.loader import reload
+
+    _ensure_db_loaded()
+    reload()
+    yield
+
+
 # Phrasings that used to split: two routed, two abstained. Also a couple of
 # same-class wordings so the matcher is an intent, not a remembered list.
 CATALOG_PHRASES = (
@@ -24,12 +35,16 @@ CATALOG_PHRASES = (
 def _assert_catalog_payload(r: dict) -> None:
     assert r["route"] != "needs_clarification"
     assert r["layer"] == "catalog"
+    # Catalog prose is never a green session grant.
     assert r["badge"] == "catalog"
+    assert r["badge"] != "session"
     assert r["sql_used"] is None
     assert r["rows"] == []
-    answer = (r.get("answer") or "").lower()
-    assert "certified" in answer
-    assert "table" in answer
+    answer = r.get("answer") or ""
+    assert answer.strip(), "catalog rendered no customer-visible text"
+    low = answer.lower()
+    assert "certified" in low
+    assert "table" in low
     suggestions = r.get("suggestions") or []
     assert suggestions
     model = load_all()
@@ -56,3 +71,14 @@ def test_meta01_revenue_still_governed():
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "revenue_total"
+
+    r = engine_answer(q)
+    assert r["badge"] != "session"
+    assert r["badge"] != "catalog"
+    assert r["layer"] == "governed_metric"
+    rows = r.get("rows") or []
+    assert rows, f"revenue returned no rows: {r.get('answer')!r}"
+    text = r.get("answer") or ""
+    assert text.strip(), "revenue rendered no answer text"
+    assert any(ch.isdigit() for ch in text)
+    assert float(rows[0]["revenue_myr"]) > 0
