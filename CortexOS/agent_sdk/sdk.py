@@ -248,11 +248,11 @@ def _ledger_denial(
     run_id: str | None,
     db_path: Path | str | None,
 ) -> None:
-    from packs.dms.audit import ledger  # shared pack-agnostic ledger spine (F1)
+    from CortexOS.audit import resolve_ledger
 
-    ledger.append(
+    resolve_ledger().append(
         actor,
         "action.tool_call_denied",
         {"tool": action_id, "verdict": verdict, "reason": reason, "run_id": run_id, "path": None},
-        db_path=db_path,
+        db_path=None if db_path is None else str(db_path),
     )
