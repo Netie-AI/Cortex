@@ -99,20 +99,8 @@ def plug_in(app: Any | None = None, *, pack: str = "dms") -> dict[str, Any]:
 
         register_dms_routes(app)
         registered.append("dms_routes")
-        try:
-            from CortexOS.api.chat_routes import register_chat_routes
-
-            register_chat_routes(app)
-            registered.append("chat_routes")
-        except ImportError:
-            pass
-        try:
-            from CortexOS.api.warehouse_routes import register_warehouse_routes
-
-            register_warehouse_routes(app)
-            registered.append("warehouse_routes")
-        except ImportError:
-            pass
+        # register_dms_routes already registers chat + warehouse. A second
+        # call emits Duplicate Operation ID warnings and shadows the first.
         try:
             from CortexOS.api.brain_routes import register_brain_routes
 

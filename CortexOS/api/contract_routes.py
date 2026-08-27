@@ -148,7 +148,10 @@ def _provenance_from_flat(data: dict[str, Any]) -> Provenance:
             assumptions=assumptions,
             metric_id=data.get("metric_id") if isinstance(data.get("metric_id"), str) else None,
         )
-    badge = _FLAT_BADGE.get(badge_raw, Badge.SESSION)
+    # Fail closed: catalog / document / sql_not_analyzable / empty / unknown
+    # must never invent SESSION (F40 class — dms#33). Only mapped tokens stay
+    # confident; an unrecognised token is an abstain, not a green badge.
+    badge = _FLAT_BADGE.get(badge_raw, Badge.ABSTAIN)
     return Provenance(
         layer=layer or "engine",
         badge=badge,

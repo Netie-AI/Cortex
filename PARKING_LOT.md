@@ -7,7 +7,7 @@
 Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened.
 
 ## P2 — WASM / Firecracker production hardening
-**Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*
+**Condition:** First enterprise client conversation. *(Not shipped. DOC-01 deleted the unused `wasm_isolate` scaffold; do not cite that path.)*
 
 ## P3 — DAG token optimization + Temporal durable execution
 **Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`. S1 watcher agents activate DBOS path per BUILD_PLAN_V2 — governed detect→draft→approve landed; durable resume still open.)*
@@ -95,6 +95,9 @@ measured hotspot (cProfile / py-spy) shows >10% of governed request time in a
 listed path.
 
 ### P19 open distill debts
+- [ ] Rank phase must checkpoint survey JSON so a session-limit cannot drop the work-list — `distill: skill_distill/captures/2026-08-27_claude-code_workflows-runtime.md`
+- [ ] GitHub CI pytest is already on push/PR; missing piece is oracle/accuracy gates (F42) — `distill: skill_distill/captures/2026-08-27_cursor_dms-local-ci-bootstrap.md`
+- [ ] GitHub CI pytest is already on push/PR; missing piece is oracle/accuracy CLI (F42) — `distill: skill_distill/captures/2026-08-27_cursor_dms-local-ci-bootstrap.md`
 - [ ] Windows-MCP cannot run on Linux cloud agents — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
 - [ ] In-process UACC/PyAutoGUI execute is not wired; uacc-mcp sidecar is the path — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`
 - [ ] Scraping sibling repos / Outlier is out of scope — `distill: skill_distill/captures/2026-08-22_computer-control-mcp.md`

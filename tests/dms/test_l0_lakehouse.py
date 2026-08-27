@@ -17,6 +17,7 @@ def lake_home(tmp_path, monkeypatch):
     home = tmp_path / "lakehouse"
     monkeypatch.setenv("DMS_LAKEHOUSE_HOME", str(home))
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(tmp_path / "dms_demo.duckdb"))
     # Fresh capability probe per test.
     from packs.dms.lakehouse import catalog
 

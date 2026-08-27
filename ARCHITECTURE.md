@@ -8,7 +8,7 @@
 ```
 CLIENT     demo/dms-ui/ (Next.js 14) — query, warehouse, chat, brain, skills, audit
      │ HTTP
-API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse routes)
+API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse, `/v1/contract/*`)
      │
 PACK       packs/dms/ — vision, audit, chat, tasks, skills, lakehouse, security
      │
@@ -16,6 +16,15 @@ RUNTIME    CortexOS/ — engine registry, memory plane, compliance, ponytail, RA
      │
 DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (target)
 ```
+
+---
+
+## 2a. Contract surface (what a consumer pins)
+
+DMS (and any other consumer) speaks HTTP at `POST|GET /v1/contract/*`
+(operationIds: ask, submit, ledger.append, ledger.verify, tool.registry,
+drillthrough) and pins the `cortex-contract` package. It must never import
+`CortexOS`. Spec: `contract/openapi-1.2.0.json` (generated, never hand-edited).
 
 ---
 
@@ -33,7 +42,6 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 | Cost ledger | Partial |
 | Model routing T0–T3 | Partial |
 | Hybrid RAG | Retrieve + fusion shipped (`CortexOS/rag/*`, extras). Route-then-doc-RAG shipped (`RAG_KEYWORDS` → `rag_answer` over the contract corpus). Live Qdrant in the demo is still not wired. RAG-02 / RAG-03 closed; RAG-01 remainder is demo Qdrant, not the retrieve stack. |
-| WASM sandbox | Scaffold only |
 | A2A / personality | Planned (RUMA) |
 
 ### DMS pack

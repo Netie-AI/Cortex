@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from CortexOS.api.contract_routes import _enrich_answer, _provenance_from_flat
 from cortex_contract.answer import Badge, Provenance
+
+from CortexOS.api.contract_routes import _enrich_answer, _provenance_from_flat
 
 
 def test_provenance_from_flat_needs_clarification_is_abstain():
@@ -120,3 +121,16 @@ def test_abstain_refused_emits_refused_fields():
     assert data["route"] == "refused"
     assert data["layer"] == "refused"
     assert data["badge"] == "refused"
+
+
+def test_provenance_unknown_badge_is_abstain_not_session():
+    """F40 class: catalog / document / empty / sql_not_analyzable must not SESSION."""
+    for raw in ("catalog", "document", "sql_not_analyzable", "refused_by_manifest", ""):
+        prov = _provenance_from_flat({"badge": raw, "route": "sql", "layer": "engine"})
+        assert prov.badge == Badge.ABSTAIN, raw
+        assert prov.badge != Badge.SESSION, raw
+
+
+def test_provenance_mapped_certified_stays_certified():
+    prov = _provenance_from_flat({"badge": "certified", "route": "sql", "layer": "engine"})
+    assert prov.badge == Badge.CERTIFIED
