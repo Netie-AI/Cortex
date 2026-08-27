@@ -39,10 +39,9 @@ python scripts/handoff.py --claude   # supervisor
 .\demo\run_demo.ps1 -Fast    # restart in ~30s
 ```
 
-- UI: http://localhost:3000
-- Warehouse: http://localhost:3000/warehouse
-- Chat: http://localhost:3000/chat
-- API: http://localhost:8000/health
+- Demo UI: http://localhost:3000
+- Demo API (``demo/run_demo.ps1``): http://localhost:8000/health
+- Engine launcher (``scripts/start_cortex_engine.ps1``): http://localhost:8010/health
 
 **Show script:** [docs/DEMO.md](docs/DEMO.md)
 

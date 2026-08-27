@@ -13,7 +13,7 @@ Shared across Cortex · OpenVault · AirGPT · OpenIDE. Keep this file identical
 | **OpenVault** | Safe manager + final shipper — where things live, model keys, **FreeRoute** (best-route + budget, OmniRoute-class), one-click connect APIs + local ground models, gating, one-click deploy/host | Running the agent loop itself; picking DAG vs LangGraph |
 | **OpenIDE** | Standalone coding app — activates coding expert slice of brain (TSX/canvas, tools, web search, FS, PRs) | Being the host/deploy console |
 | **AirGPT** | Standalone host shell / control plane — phone, settings, pairing, apps hub; thin bridge to Cortex + OpenVault | Owning orchestration forever; second key vault |
-| **DMS / Spaces** | Reference + product consumer — ChatGPT-for-Excel/DB; Spaces = ACL-scoped sandboxes on Cortex lake/query | Being the engine; Pointer Act UI |
+| **DMS / Spaces** | Reference + product consumer — ChatGPT-for-Excel/DB; Spaces are a planned ACL-scoped sandbox on Cortex lake/query, not a shipped surface | Being the engine; Pointer Act UI |
 | **Pointer** | External Act / computer-control client → Cortex engine | DMS Spaces demo surface; custody/deploy |
 
 ---

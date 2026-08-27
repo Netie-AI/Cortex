@@ -160,6 +160,35 @@ def _provenance_from_flat(data: dict[str, Any]) -> Provenance:
     )
 
 
+def _contributing_sources(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Sources panel cards from granted tables. Never invent on abstain."""
+    if _is_abstain_signal(data):
+        return []
+    names: list[str] = []
+    granted = data.get("granted_sources")
+    if isinstance(granted, list):
+        names.extend(str(x) for x in granted if x)
+    table = data.get("source_table")
+    if isinstance(table, str) and table.strip() and table.strip() not in names:
+        names.append(table.strip())
+    if not names:
+        return []
+    rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+    n_rows = len(rows) if rows else None
+    share = round(1.0 / len(names), 4)
+    return [
+        {
+            "ref_id": name,
+            "container": "warehouse",
+            "member": name,
+            "kind": "table",
+            "row_count": n_rows if len(names) == 1 else None,
+            "contribution": share,
+        }
+        for name in names
+    ]
+
+
 def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> dict[str, Any]:
     """Attach T7 answer_id + drillthrough_token when SQL is present.
 
@@ -183,7 +212,10 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = [assumptions.strip()]
     elif not isinstance(assumptions, list):
         data["assumptions"] = []
-    data.setdefault("contributing_sources", [])
+    if _is_abstain_signal(data):
+        data["contributing_sources"] = []
+    elif not data.get("contributing_sources"):
+        data["contributing_sources"] = _contributing_sources(data)
     sql = data.get("sql_used")
     # Never mint drillthrough for abstain/blocked answers.
     if _is_abstain_signal(data):
@@ -232,6 +264,7 @@ async def contract_ask(body: AskRequest) -> Answer:
             session_id=body.session_id,
             space_id=body.space_id,
             verified=verified,
+            require_grounding=True,
         )
     except ManifestError as exc:
         code = getattr(exc, "code", "manifest_error")

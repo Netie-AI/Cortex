@@ -28,8 +28,9 @@ External supervisor. Verify F7 remainder against `docs/dms/BUILD_PLAN.md` § FEA
 
 ## Test snapshot
 ```
-pytest tests/dms/test_f7_rbac.py -q → 8 passed
-pytest -q → 153 passed, 4 skipped
+Not a live count. This file is a role template. Run `python -m pytest tests/ -q`
+and treat STATUS.md / the last gate log as the count, not the 153-test snapshot
+that used to live here.
 ```
 
 ## Reference
