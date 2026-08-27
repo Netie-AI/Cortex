@@ -121,6 +121,13 @@ def _score(item: AdvItem, resp: dict[str, Any]) -> str:
     if route != "sql":
         return "wrong"
 
+    # Negative assertions are vacuous on an empty result set. A predicate that
+    # matched nothing (SKU-BETA / NOT IN ('BETA')) is wrong, not correct.
+    if not rows:
+        return "wrong"
+    if not str(answer).strip():
+        return "wrong"
+
     for needle in item.assert_sql_contains:
         if needle.upper() not in sql:
             return "wrong"
