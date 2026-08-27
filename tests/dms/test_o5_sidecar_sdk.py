@@ -37,6 +37,42 @@ def env(tmp_path, monkeypatch, warehouse_db):
 
 
 @pytest.fixture
+def granted_session():
+    from datetime import datetime, timedelta, timezone
+
+    from cortex_contract.execution import Manifest
+
+    from CortexOS.execution.manifest import VerifiedManifest
+    from CortexOS.execution.pool import PoolConfig, reset_read_pool_for_tests
+    from CortexOS.execution.session_manifests import (
+        get_session_registry,
+        reset_session_registry_for_tests,
+    )
+
+    reset_session_registry_for_tests()
+    reset_read_pool_for_tests(PoolConfig("default", 4, 5.0, 30.0))
+    now = datetime.now(timezone.utc)
+    verified = VerifiedManifest(
+        manifest=Manifest(
+            session_id="sidecar-wide",
+            org_id="acme",
+            pool_id="default",
+            issuer_key_id="int-1",
+            allowed_paths=["/data/pool/acme/**"],
+            row_predicates={"inventory": "1=1", "suppliers": "1=1", "locations": "1=1"},
+            issued_at=now.isoformat(),
+            expires_at=(now + timedelta(minutes=5)).isoformat(),
+            signature="not-checked-here",
+        ),
+        issuer_kid="int-1",
+        verified_at=now,
+    )
+    get_session_registry().bind(verified)
+    yield "sidecar-wide"
+    reset_session_registry_for_tests()
+
+
+@pytest.fixture
 def client(env):
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app
@@ -48,10 +84,10 @@ VIEWER = {"X-API-Key": "sk-viewer-test"}
 STEWARD = {"X-API-Key": "sk-steward-test"}
 
 
-def test_query_objects_hides_pii_columns(client):
+def test_query_objects_hides_pii_columns(client, granted_session):
     res = client.post(
         "/dms/sidecar/query-objects",
-        json={"object_type": "suppliers", "limit": 5},
+        json={"object_type": "suppliers", "limit": 5, "session_id": granted_session},
         headers=VIEWER,
     )
     assert res.status_code == 200, res.text

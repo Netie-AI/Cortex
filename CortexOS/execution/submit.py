@@ -8,6 +8,7 @@ through this module.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from cortex_contract.execution import Manifest, QueryResult, SubmitRequest
@@ -177,11 +178,14 @@ def execute_sql(
     pool_id: str | None = None,
     db_path: Any = None,
     explain_gate: bool | None = None,
+    params: Sequence[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms).
 
     When ``explain_gate`` is True (default: env ``DMS_EXPLAIN_GATE`` unset or
     truthy), run DuckDB EXPLAIN after manifest enforce and before fetch.
+    ``params`` are forwarded to both EXPLAIN and the fetch execute so bind
+    placeholders in caller SQL survive predicate wrapping.
     """
     import os
 
@@ -201,7 +205,7 @@ def execute_sql(
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
         try:
             if use_explain:
-                ok, detail = explain_dry_run(con, safe_sql)
+                ok, detail = explain_dry_run(con, safe_sql, params=params)
                 if not ok:
                     raise SqlGateAbstain(
                         f"EXPLAIN rejected SQL: {detail}",
@@ -214,7 +218,7 @@ def execute_sql(
                     con.execute(f"SET statement_timeout='{int(timeout_s * 1000)}ms'")
                 except Exception:  # noqa: BLE001
                     pass
-            rel = con.execute(safe_sql)
+            rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
             rows_raw = rel.fetchall()
             columns = [d[0] for d in rel.description] if rel.description else []
             rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]

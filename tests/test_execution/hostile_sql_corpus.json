@@ -644,6 +644,20 @@
       "expected": "reject_predicate_bypass",
       "why_it_might_slip": "The outer query references 'orders', so a name-based injector believes the predicate landed. But 'orders' here is a derived-table alias over an in-manifest glob read, never the base table. An injector that dedupes by name will mark 'orders' handled and skip it, and one that rewrites the alias only filters an already-materialized unfiltered scan.",
       "sql": "SELECT orders.tenant_id, count(*) AS n\nFROM (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')\n) AS orders\nGROUP BY orders.tenant_id"
+    },
+    {
+      "name": "sdk_shaped_read_of_ungranted_table",
+      "sql": "SELECT \"id\" FROM \"secrets\" LIMIT 3",
+      "technique": "ungranted_table_via_quoted_identifier",
+      "why_it_might_slip": "The Agent SDK emits double-quoted identifiers. A quoted bare name is not a file path, so the path screen does not fire, and grant checking is the only remaining control. If the table-name walk dropped quotes or treated the identifier as a path it had already cleared, an SDK read of a table the manifest never named would pass.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "sdk_shaped_read_keeps_predicate_under_bind_params",
+      "sql": "SELECT \"id\", \"tenant_id\" FROM \"orders\" WHERE \"tenant_id\" = ? AND \"region\" = ? LIMIT 3",
+      "technique": "predicate_injection_with_bind_parameters",
+      "why_it_might_slip": "The SDK wraps filters as positional ? placeholders. Predicate wrapping moves the table into a FROM subquery. If the injected predicate ever carried a placeholder, or the rewrite reordered the tree, every positional bind would silently attach to the wrong column and the caller would get rows it did not ask for under a manifest that looked enforced.",
+      "expected": "allow_but_predicate_must_apply"
     }
   ],
   "_expected_values": {
