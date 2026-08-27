@@ -103,7 +103,21 @@ def test_query_low_stock(loaded_db, monkeypatch):
     result = query_service.answer_question("Which SKUs are below reorder level?")
     assert result["violations_blocked"] == []
     assert result["sql_used"]
-    assert result.get("row_count", 0) >= 0
+    rows = result.get("rows") or []
+    assert rows, f"low-stock listing empty: {result.get('answer')!r}"
+    for row in rows:
+        assert row.get("sku")
+        qty = float(row["quantity_kg"])
+        assert qty >= 0
+        reorder = row.get("reorder_level_kg", row.get("reorder_level"))
+        if reorder is not None:
+            assert qty < float(reorder)
+    rendered = result.get("answer") or ""
+    assert rendered.strip(), "low-stock rendered no answer text"
+    low = rendered.lower()
+    assert "below reorder" in low or "reorder level" in low
+    for row in rows[:8]:
+        assert str(row["sku"]) in rendered
 
 
 def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):

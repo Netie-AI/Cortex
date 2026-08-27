@@ -238,6 +238,23 @@ def test_l2_disabled_by_default(monkeypatch):
     assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
 
 
+def _assert_exclusion_visible(r: dict, excluded: list[str], *, n: int = 5) -> None:
+    """Customer-visible exclusion: non-empty ranking rows, text lists them, omitted SKUs stay out."""
+    rows = r.get("rows") or []
+    assert rows, f"exclusion returned zero rows: {r.get('answer')!r}"
+    assert 1 <= len(rows) <= n
+    skus = [str(row["sku"]).upper() for row in rows]
+    rendered = r.get("answer") or ""
+    assert rendered.strip(), "rendered answer was empty"
+    for token in excluded:
+        assert token.upper() not in skus
+        assert token.upper() not in rendered.upper()
+    for sku in skus:
+        assert sku in rendered.upper()
+    assert "None" not in rendered
+    assert "?" not in rendered
+
+
 def test_top_sku_excludes_named_sku():
     r = answer_question("ignoring SKU-00173 what is the top 5 sku by revenue")
     assert r["route"] == "sql"
@@ -245,13 +262,7 @@ def test_top_sku_excludes_named_sku():
     sql = (r["sql_used"] or "").upper()
     assert "SKU-00173" in sql
     assert "NOT" in sql and "IN" in sql
-    skus = [row["sku"].upper() for row in (r.get("rows") or [])]
-    assert "SKU-00173" not in skus
-    assert len(skus) <= 5
-    answer = r.get("answer") or ""
-    assert "SKU-00173" not in answer.upper()
-    assert "None" not in answer
-    assert "?" not in answer
+    _assert_exclusion_visible(r, ["SKU-00173"])
 
 
 def test_top_sku_excludes_bare_beta_token():
@@ -261,10 +272,7 @@ def test_top_sku_excludes_bare_beta_token():
     assert r["layer"] == "governed_metric"
     sql = (r["sql_used"] or "").upper()
     assert "SKU-BETA" in sql
-    skus = [str(row["sku"]).upper() for row in (r.get("rows") or [])]
-    assert "SKU-BETA" not in skus
-    answer = (r.get("answer") or "").upper()
-    assert "SKU-BETA" not in answer
+    _assert_exclusion_visible(r, ["SKU-BETA"])
 
 
 def test_top_sku_excludes_multiple_and_bare_token():
@@ -275,19 +283,13 @@ def test_top_sku_excludes_multiple_and_bare_token():
     assert r["layer"] == "governed_metric"
     sql = (r["sql_used"] or "").upper()
     assert "SKU-00173" in sql and "SKU-00241" in sql
-    skus = [row["sku"].upper() for row in (r.get("rows") or [])]
-    assert "SKU-00173" not in skus
-    assert "SKU-00241" not in skus
-    answer = (r.get("answer") or "").upper()
-    assert "SKU-00173" not in answer
-    assert "SKU-00241" not in answer
+    _assert_exclusion_visible(r, ["SKU-00173", "SKU-00241"])
 
     bare = answer_question("ignoring 00173 what is the top 5 sku by revenue")
     assert bare["route"] == "sql"
     bare_sql = (bare["sql_used"] or "").upper()
     assert "SKU-00173" in bare_sql
-    bare_skus = [row["sku"].upper() for row in (bare.get("rows") or [])]
-    assert "SKU-00173" not in bare_skus
+    _assert_exclusion_visible(bare, ["SKU-00173"])
 
 
 def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
@@ -311,6 +313,14 @@ def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
     sql = (r["sql_used"] or "").upper()
     assert "SKU-00173" not in sql
     assert "NOT IN" not in sql
+    rows = r.get("rows") or []
+    assert rows, f"stale-replay returned zero rows: {r.get('answer')!r}"
+    rendered = r.get("answer") or ""
+    assert rendered.strip(), "stale-replay rendered no answer text"
+    low = rendered.lower()
+    assert "sales" in low or "ranked" in low or "myr" in low
+    for row in rows:
+        assert str(row["sku"]) in rendered
 
 
 def test_low_stock_followup_uses_inventory_not_placeholders():
