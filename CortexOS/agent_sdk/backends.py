@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from typing import Any, Protocol
 
+from CortexOS.execution.manifest import VerifiedManifest
+
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -26,6 +28,7 @@ class QueryBackend(Protocol):
         filters: dict[str, Any],
         limit: int,
         *,
+        verified: VerifiedManifest,
         db_path: Path | str | None = None,
     ) -> list[dict[str, Any]]: ...
 
@@ -61,15 +64,20 @@ def _dms_duckdb_backend(
     filters: dict[str, Any],
     limit: int,
     *,
+    verified: VerifiedManifest | None = None,
     db_path: Path | str | None = None,
 ) -> list[dict[str, Any]]:
     """Reference backend: the DMS DuckDB warehouse (object type id == table name).
 
-    Opens via ``CortexOS.execution.warehouse`` only — no direct ``duckdb`` import
-    (C4). Ungoverned agent reads remain a C4.follow concern relative to
-    ``enforce_manifest``; the AST invariant is what this change closes.
+    Every read goes through ``execute_sql`` -> ``enforce_manifest``. Missing
+    verified is a hard refuse — this backend never opens an ungoverned connection.
     """
-    from CortexOS.execution.warehouse import get_connection, warehouse_path
+    from CortexOS.execution.session_manifests import SessionUnbound
+    from CortexOS.execution.submit import execute_sql
+    from CortexOS.execution.warehouse import warehouse_path
+
+    if verified is None:
+        raise SessionUnbound("manifest is required for warehouse reads")
 
     root = Path(__file__).resolve().parents[2]
     path = (
@@ -89,10 +97,7 @@ def _dms_duckdb_backend(
             values.append(value)
         where_sql = " WHERE " + " AND ".join(parts)
     sql = f"SELECT {cols_sql} FROM {_quote(object_type)}{where_sql} LIMIT {int(limit)}"
-    con = get_connection(path, read_only=True)
-    try:
-        rel = con.execute(sql, values)
-        names = [d[0] for d in rel.description]
-        return [dict(zip(names, row, strict=False)) for row in rel.fetchall()]
-    finally:
-        con.close()
+    rows, _, _ = execute_sql(
+        verified, sql, params=values or None, db_path=path
+    )
+    return rows

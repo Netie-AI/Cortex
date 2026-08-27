@@ -7,7 +7,7 @@ answer engine still abstains.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,10 +41,15 @@ class SqlGateAbstain(Exception):
         return f"{base}: {', '.join(self.violations)}"
 
 
-def explain_dry_run(con: Any, sql: str) -> tuple[bool, str]:
+def explain_dry_run(
+    con: Any, sql: str, params: Sequence[Any] | None = None
+) -> tuple[bool, str]:
     """Run EXPLAIN without executing the query body. Returns (ok, detail)."""
     try:
-        con.execute(f"EXPLAIN {sql}")
+        if params is not None:
+            con.execute(f"EXPLAIN {sql}", params)
+        else:
+            con.execute(f"EXPLAIN {sql}")
         return True, "ok"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)[:400]
