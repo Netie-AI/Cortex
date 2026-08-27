@@ -1,0 +1,34 @@
+[project]
+name = "night-shift"
+version = "0.1.0"
+description = "Night Shift - SME factory agent fleet that finishes a chore once, even after a crash"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "google-adk>=1.16.0",
+  "google-genai>=1.0.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+gcp = [
+  "google-cloud-firestore>=2.19.0",
+  "google-cloud-pubsub>=2.25.0",
+]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+night-shift = "night_shift.server:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["night_shift*"]

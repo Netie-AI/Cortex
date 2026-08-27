@@ -1,0 +1,13 @@
+---
+description: Skills and MCP live at user scope plus Netie-KB - do not fork copies in this repo
+alwaysApply: true
+---
+
+# Skills / MCP (Cortex)
+
+Do not add a private skills tree here (R-0016, S-0004).
+
+- Registry: `E:\Netie-KB` via `python E:\Netie-KB\scripts\kb.py search "<kw>"`
+- Cursor loaders: `%USERPROFILE%\.cursor\skills\` (`uacc-playwright`, `netie-prd`, `netie-kb`)
+- Engine YAML cards stay: `skills/*.yaml` (Cortex discovery)
+- Map: `E:\Netie\Internal\Agents\SKILLS_AND_MCP.md`
