@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-08-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** DMS handoff (F40 / FF-03 / VQ-01 / EPIC-015)
+**Last updated:** 2026-08-27 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon)
+
+> **2026-08-27 (recon rank + wave 1):** Claude Code `cortex-recon-decompose`
+> surveyed 70 items (43 startable); rank died on session limit and was filled
+> in `docs/subagents_findings/2026-08-27_recon-decompose-ranked.md`. Wave 1
+> on this tree: unknown contract badges fail closed to ABSTAIN (not SESSION);
+> `lakehouse_migrate` writes through `connect_write`; chat routes registered
+> once; `[project]` CVE floors; four Claude Code workflow templates landed
+> in `workflow_templates.py`. PRs #70/#71 are MERGEABLE but Actions is
+> billing-blocked (UNSTABLE, auto-merge skipped).
+>
+> **2026-08-26 (merged):** ANS-01/02/03 (#67) refuse adjacent governed_metric
+> answers. DOC-01 (#68) stops claiming Wasm sandboxing the engine never ran.
+> CONTRACT-01 (#69) one module identity for `cortex_contract`.
 
 > **2026-08-25 (DMS handoff — Cortex engine half):**
 > **F40 / Cortex#11:** `route|layer|badge=refused` is an abstain signal. Contract
@@ -59,7 +72,7 @@
 > C2: `answer_engine` does not import `packs.dms.generative`; L2 goes through
 > `CortexOS.dms.l2_generation.attempt_l2`. `.importlinter` C2 KEPT.
 
-**Last updated:** 2026-07-29 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+**Last updated:** 2026-07-29 (historical block below — the header at the top of this file is current) | **Then-active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
 > **2026-07-29 (Pointer demo + DMS Excel-swamp week):**
@@ -487,7 +500,7 @@
 
 ## Test baseline
 ```
-pytest -q  (expect ≥330; local RLS skips without DSN)
+pytest -q  (count lives in the last gate log, not this file; local RLS skips without DSN)
 python -m scripts.secrets_scan  → 0 findings
 CI: Test + Secrets Scan + RLS Proof → success
 ```

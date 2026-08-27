@@ -96,3 +96,20 @@ def test_contract_routes_operation_ids() -> None:
     )
     for oid in CONTRACT_ROUTE_IDS:
         assert f'"{oid}"' in export
+
+
+def test_create_app_does_not_warn_duplicate_operation_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """register_dms_routes already registers chat; a second call warns on every boot."""
+    import warnings
+
+    monkeypatch.setenv("PACK", "dms")
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_PROFILE", "core")
+    monkeypatch.delenv("CORTEX_REQUIRE_AGENTIC_MARKER", raising=False)
+    from CortexOS.api.app import create_app
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        create_app()
+    dupes = [str(w.message) for w in caught if "Duplicate Operation ID" in str(w.message)]
+    assert not dupes, dupes

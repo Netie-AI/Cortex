@@ -461,12 +461,239 @@ BUG_HUNT = WorkflowTemplate(
     inputs=("target",),
 )
 
+_VERIFY_LENSES = (
+    ("facts", "Refute factual claims by reading the actual files. STATUS.md is not evidence."),
+    ("constitution", "Find contradictions with written law (CLAUDE.md, PRODUCT_ROLES, NETIE.md)."),
+    ("completeness", "Report MISSING founder/brief elements, or MISLEADING silent drops of intent."),
+)
+
+RECON_DECOMPOSE = WorkflowTemplate(
+    id="recon_decompose",
+    name="Recon and decompose",
+    description=(
+        "Parallel read-only sweeps over tickets, sibling repos, deps, invariants "
+        "and docs, then one rank step into a startable work-list."
+    ),
+    triggers=(
+        "recon decompose",
+        "decompose into tickets",
+        "buildable tickets",
+        "startable work",
+        "ranked work-list",
+        "estate recon",
+        "survey cortex",
+    ),
+    default_toolset="code_and_web",
+    inputs=("topic", "areas", "house"),
+    phases=(
+        PhaseSpec(
+            id="survey",
+            title="Survey",
+            detail="one read-only agent per area",
+            agents=(
+                AgentSpec(
+                    id="survey",
+                    purpose="Survey one area for startable work",
+                    prompt_id="recon.survey",
+                    toolset="code_and_web",
+                    effort="high",
+                    max_tokens=2200,
+                    fan_over="areas",
+                    fan_max=12,
+                ),
+            ),
+        ),
+        PhaseSpec(
+            id="rank",
+            title="Rank",
+            detail="merge into one ranked buildable work-list",
+            depends_on=("survey",),
+            agents=(
+                AgentSpec(
+                    id="rank",
+                    purpose="De-duplicate, collision-map, and rank startable items",
+                    prompt_id="recon.rank",
+                    toolset="none",
+                    effort="high",
+                    max_tokens=2600,
+                ),
+            ),
+        ),
+    ),
+)
+
+ADVERSARIAL_VERIFY = WorkflowTemplate(
+    id="adversarial_verify",
+    name="Adversarial verify",
+    description=(
+        "Three parallel lenses (facts, constitution, completeness) try to refute "
+        "a document against the tree, then a report of what survived."
+    ),
+    triggers=(
+        "adversarially verify",
+        "fact-check this paper",
+        "refute claims",
+        "constitution check",
+        "completeness critic",
+        "verify the white paper",
+    ),
+    default_toolset="code",
+    inputs=("target",),
+    phases=(
+        PhaseSpec(
+            id="verify",
+            title="Verify",
+            detail="one agent per lens",
+            agents=tuple(
+                AgentSpec(
+                    id=f"verify-{lens}",
+                    purpose=f"Adversarial {lens} lens",
+                    prompt_id="verify.lens",
+                    toolset="code",
+                    effort="high",
+                    max_tokens=1800,
+                    vars={"lens": lens, "lens_detail": detail},
+                )
+                for lens, detail in _VERIFY_LENSES
+            ),
+        ),
+        PhaseSpec(
+            id="report",
+            title="Report",
+            detail="rank confirmed findings",
+            depends_on=("verify",),
+            agents=(
+                AgentSpec(
+                    id="report",
+                    purpose="Write the surviving findings",
+                    prompt_id="audit.report",
+                    toolset="none",
+                    effort="high",
+                    max_tokens=2000,
+                ),
+            ),
+        ),
+    ),
+)
+
+TICKET_TRIAGE = WorkflowTemplate(
+    id="ticket_triage",
+    name="Ticket triage",
+    description=(
+        "One agent per repo reads tickets against repo law, then a blocker-chain "
+        "pass maps cross-repo holds."
+    ),
+    triggers=(
+        "triage tickets",
+        "triage all open issues",
+        "ticket triage",
+        "blocker chain",
+        "cross-repo blockers",
+    ),
+    default_toolset="code",
+    inputs=("topic", "repos"),
+    phases=(
+        PhaseSpec(
+            id="triage",
+            title="Repo triage",
+            detail="one agent per repo",
+            agents=(
+                AgentSpec(
+                    id="triage",
+                    purpose="Triage one repo's open tickets",
+                    prompt_id="triage.repo",
+                    toolset="code",
+                    effort="high",
+                    max_tokens=1800,
+                    fan_over="repos",
+                    fan_max=10,
+                ),
+            ),
+        ),
+        PhaseSpec(
+            id="blockers",
+            title="Blocker chain",
+            detail="map cross-repo holds",
+            depends_on=("triage",),
+            agents=(
+                AgentSpec(
+                    id="blockers",
+                    purpose="Map the cross-repo blocker chain",
+                    prompt_id="recon.rank",
+                    toolset="none",
+                    effort="medium",
+                    max_tokens=1600,
+                ),
+            ),
+        ),
+    ),
+)
+
+BUILD_AND_VERIFY = WorkflowTemplate(
+    id="build_and_verify",
+    name="Build and verify",
+    description=(
+        "Fan builders over a ranked ticket list, then a different-run verify "
+        "per patch (R-0003)."
+    ),
+    triggers=(
+        "build and verify",
+        "fan out builders",
+        "seat the work-list",
+        "build these tickets",
+        "until-goal verify",
+    ),
+    default_toolset="code",
+    inputs=("topic", "tickets", "house"),
+    phases=(
+        PhaseSpec(
+            id="build",
+            title="Build",
+            detail="one builder per ticket",
+            agents=(
+                AgentSpec(
+                    id="build",
+                    purpose="Land one startable ticket",
+                    prompt_id="build.one",
+                    toolset="code",
+                    effort="high",
+                    max_tokens=2000,
+                    fan_over="tickets",
+                    fan_max=8,
+                ),
+            ),
+        ),
+        PhaseSpec(
+            id="verify",
+            title="Verify",
+            detail="different-run refute of each patch",
+            depends_on=("build",),
+            agents=(
+                AgentSpec(
+                    id="verify",
+                    purpose="Refute one builder's patch",
+                    prompt_id="verify.patch",
+                    toolset="code",
+                    effort="medium",
+                    max_tokens=900,
+                    fan_over="tickets",
+                    fan_max=8,
+                ),
+            ),
+        ),
+    ),
+)
+
 TEMPLATES: tuple[WorkflowTemplate, ...] = (
     DEEP_RESEARCH,
     DOCUMENT_QA,
     SMOOTHNESS_AUDIT,
     CODE_REVIEW,
     BUG_HUNT,
+    RECON_DECOMPOSE,
+    ADVERSARIAL_VERIFY,
+    TICKET_TRIAGE,
+    BUILD_AND_VERIFY,
 )
 
 _BY_ID: dict[str, WorkflowTemplate] = {t.id: t for t in TEMPLATES}

@@ -7,7 +7,7 @@
 | Root | `skill_distill/` |
 | Policy | Capture → Normalize → Learn → Promote (rules/skills/subagents) → Parking-lot if deferred |
 | Owners | Netie engine (Cortex) builders |
-| Last process | 2026-08-24T05:40:00Z (outreach/voice skill pass-down capture) |
+| Last process | 2026-08-27T14:41:30Z (1 capture(s) ingested) |
 
 ---
 

@@ -272,6 +272,94 @@ Return JSON only:
 behaviour"}]}
 """
 
+_RECON_SURVEY = """\
+YOU ARE IN READ-ONLY RECON unless the caller says otherwise.
+Do not weaken a refusal, add allowlist entries, or hand-edit a frozen contract.
+
+Area: {{area}}
+Topic: {{topic}}
+House: {{house}}
+
+Report only what you verified by reading files or running commands. Cite file:line.
+STATUS.md and docstrings are not evidence of behaviour.
+
+Return JSON only:
+{"area":"...","summary":"2-4 sentences of verified facts",
+ "items":[{"id":"kebab","title":"...","repo":"...","startable":true,
+ "blocked_by":"","evidence":"file:line","files":["..."],
+ "plan":"...","verify_cmd":"a command that can fail",
+ "risk":"low|medium|high","value":"low|medium|high",
+ "touches_protected_paths":false,"independent":true}]}
+"""
+
+_RECON_RANK = """\
+You merge recon items into one ranked build list.
+
+House: {{house}}
+Survey JSON: {{findings}}
+
+Drop anything not startable, held-PR, or founder-blocked. Merge duplicates.
+Order by value desc, risk asc. Group file collisions into one item.
+Every survivor needs a verify command that can fail.
+
+Return JSON only:
+{"areas":[...],"raw_item_count":0,
+ "ranked":[{"id":"...","title":"...","startable":true,"files":[],
+ "verify_cmd":"...","risk":"low","value":"high","independent":true}]}
+"""
+
+_VERIFY_LENS = """\
+Adversarial lens: {{lens}}
+{{lens_detail}}
+
+Target: {{target}}
+
+Report only WRONG, UNSUPPORTED, MISLEADING, MISSING, or OK-BUT-NOTE.
+Cite file:line. Do not praise. If a claim checks out, omit it.
+
+Return JSON only:
+{"findings":[{"claim":"...","verdict":"WRONG|UNSUPPORTED|MISLEADING|MISSING|OK-BUT-NOTE",
+ "evidence":"...","suggested_fix":"..."}]}
+"""
+
+_TRIAGE_REPO = """\
+Triage open tickets for repo {{repo}} at {{repo_path}}.
+
+Read the repo law (CLAUDE.md / AGENTS.md) first. Do not plan work that
+breaks it. For each ticket: what it requires, what origin/main already
+does (verify in code, not the ticket body), startable or blocked_by.
+
+Return JSON only:
+{"repo":"{{repo}}","test_command":"...","tickets":[{"number":0,"title":"...",
+ "startable":true,"blocked_by":"","plan":"...","verify_cmd":"..."}]}
+"""
+
+_BUILD_ONE = """\
+Build this ticket and nothing else.
+
+Id: {{id}}
+Title: {{title}}
+Plan: {{plan}}
+Files: {{files}}
+Verify: {{verify_cmd}}
+House: {{house}}
+
+Do not touch held PRs, founder-blocked issues, manifest.py refusals,
+_C2_ALLOWLIST additions, or contract/*.json. Stage explicit paths.
+"""
+
+_VERIFY_PATCH = """\
+You are a different run from the builder (R-0003). Verify the patch.
+
+Ticket: {{id}}
+Claimed verify: {{verify_cmd}}
+Diff summary: {{findings}}
+
+Try to refute: does the test actually fail if the bug returns? Does the
+patch weaken a refusal or skip a gate? Return JSON only:
+{"ok":true,"refuted":[],"residual":[]}
+"""
+
 _GENERIC_WORKER = """\
 {{instruction}}
 
@@ -338,6 +426,12 @@ _BUILTIN: tuple[Prompt, ...] = (
     Prompt("review.dimension", "Review — one dimension", _REVIEW_DIMENSION, "builtin"),
     Prompt("bug.find", "Bug hunt — find round", _BUG_FIND, "builtin"),
     Prompt("generic.worker", "Generic worker", _GENERIC_WORKER, "builtin"),
+    Prompt("recon.survey", "Recon — survey one area", _RECON_SURVEY, "builtin"),
+    Prompt("recon.rank", "Recon — rank work-list", _RECON_RANK, "builtin"),
+    Prompt("verify.lens", "Adversarial verify — one lens", _VERIFY_LENS, "builtin"),
+    Prompt("triage.repo", "Ticket triage — one repo", _TRIAGE_REPO, "builtin"),
+    Prompt("build.one", "Build one ticket", _BUILD_ONE, "builtin"),
+    Prompt("verify.patch", "Verify a builder's patch", _VERIFY_PATCH, "builtin"),
 )
 
 _BY_ID: dict[str, Prompt] = {p.id: p for p in _BUILTIN}
