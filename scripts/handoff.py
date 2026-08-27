@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,18 +23,8 @@ def _read(path: Path) -> str:
 
 
 def _pytest_summary() -> str:
-    try:
-        r = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/", "-q", "--tb=no"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        lines = (r.stdout or r.stderr or "").strip().splitlines()
-        return lines[-1] if lines else "pytest: no output"
-    except Exception as exc:
-        return f"pytest: skipped ({exc})"
+    """Do not run the suite. A stamped count here is not a gate."""
+    return "not a live count; run `python -m pytest tests/ -q`"
 
 
 def _patch_test_snapshot(content: str, summary: str) -> str:

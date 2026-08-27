@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CONTRACT-01 one module identity — 2026-08-26
+
+`cortex_contract` is one package. Consumers pin it; they do not import `CortexOS`.
+Merged as #69.
+
+## DOC-01 stop claiming Wasm sandboxing — 2026-08-26
+
+README / ARCHITECTURE no longer claim an in-process Wasm sandbox the engine
+never ran. Merged as #68.
+
 ## GitHub PAT still cannot see private Netie-AI — 2026-08-25
 
 Used the operator fine-grained PAT as `jian-hong`. It authenticates and still

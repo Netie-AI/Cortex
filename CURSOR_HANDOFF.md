@@ -18,7 +18,7 @@ Builder. **F7 remainder in progress** — F6 PASS (2026-07-03). F8 blocked.
 |---|---|
 | F6 skill capture | PASS |
 | F7 remainder | RBAC on `/dms/skills/*` + rate limit shipped; RLS/SOPS next |
-| Tests | **153 passed, 4 skipped** |
+| Tests | See STATUS.md / last gate log. This file is not a live count. |
 
 ## F7 remainder — done this slice
 - `packs/dms/security/api_auth.py` — API-key → viewer/steward/admin
