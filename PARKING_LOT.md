@@ -95,6 +95,13 @@ measured hotspot (cProfile / py-spy) shows >10% of governed request time in a
 listed path.
 
 ### P19 open distill debts
+- [ ] POST /dms/agents/computer-use is 404 on this Cortex dms pack - `distill: skill_distill/captures/2026-08-23_cursor_pointer-uacc-connect.md`
+- [ ] P-05 Pointer-as-MCP actuator stays parked - `distill: skill_distill/captures/2026-08-23_cursor_pointer-uacc-connect.md`
+- [ ] Lazy-load torch in pip uacc is still a site-packages change — `distill: skill_distill/captures/2026-08-23_cursor_uacc-playwright-reliability.md`
+- [ ] P1 Palantir AIP and O6 stay parked under powered-by-Cortex — `distill: skill_distill/captures/2026-08-22_cursor_constructor-powered-by-cortex.md`
+- [ ] P17 hosted-API packaging stays parked; O5 sidecar plus compile-then-run is enough — `distill: skill_distill/captures/2026-08-22_cursor_constructor-powered-by-cortex.md`
+- [ ] O1-O5+O7 ontology plumbing shipped; O6 and P1 not shipped — `distill: skill_distill/captures/2026-08-22_cursor_chat-to-workflow-constructor.md`
+- [ ] Palantir-as-a-service full parity stays PARKING_LOT P1 — `distill: skill_distill/captures/2026-08-22_cursor_chat-to-workflow-constructor.md`
 - [ ] Review capture for deferred items — `distill: skill_distill/captures/2026-07-29_dms-spaces_chatgpt-for-excel.md`
 - [ ] Review capture for deferred items — `distill: skill_distill/captures/2026-07-29_pointer-demo_dms-lake-map.md`
 - [ ] Review capture for deferred items — `distill: skill_distill/captures/2026-07-29_cortex-honesty_dms-friday.md`

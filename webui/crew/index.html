@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cortex Crew</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+</head>
+<body>
+<div id="app">
+  <nav id="rail">
+    <div class="rail-brand">
+      <span class="brand-mark">🛰️</span>
+      <span class="brand-name">Cortex Crew</span>
+    </div>
+    <div id="space-tabs"></div>
+    <button class="rail-row special" id="activity-row" data-channel="activity">
+      <span class="avatar sys">📡</span>
+      <span class="row-name">Activity</span>
+    </button>
+    <div id="agent-list"></div>
+    <div class="rail-footer">
+      <button id="btn-new-agent" title="New agent">＋ Agent</button>
+      <button id="btn-new-space" title="New space">＋ Space</button>
+      <button id="btn-settings" title="Settings">⚙</button>
+    </div>
+  </nav>
+
+  <main id="main">
+    <header id="pane-header">
+      <span id="pane-avatar" class="avatar lg">📡</span>
+      <div class="pane-title">
+        <h1 id="pane-name">Activity</h1>
+        <span id="pane-sub">everything the crew says, live</span>
+      </div>
+      <div class="pane-actions">
+        <button id="btn-edit-agent" class="ghost" hidden>Edit</button>
+        <button id="btn-stop-run" class="danger" hidden>■ Stop</button>
+      </div>
+    </header>
+    <section id="transcript" role="log" aria-live="polite"></section>
+    <footer id="composer-bar">
+      <textarea id="composer" rows="1"
+        placeholder="Message this agent — Enter to send, Shift+Enter for a new line"></textarea>
+      <button id="btn-send">Send</button>
+    </footer>
+  </main>
+
+  <aside id="inspector">
+    <h2>Engine</h2>
+    <div class="inspect-card" id="model-card">
+      <div class="kv"><span>Model</span><b id="ins-model">–</b></div>
+      <div class="kv"><span>Backend</span><b id="ins-base">–</b></div>
+      <div class="kv"><span>Status</span><b id="ins-llm-status">checking…</b></div>
+    </div>
+    <h2>Computer control</h2>
+    <div class="inspect-card" id="mcp-card">loading…</div>
+    <h2>Usage</h2>
+    <div class="inspect-card" id="usage-card">
+      <div class="kv"><span>Runs</span><b id="ins-runs">0</b></div>
+      <div class="kv"><span>Tokens in</span><b id="ins-ptok">0</b></div>
+      <div class="kv"><span>Tokens out</span><b id="ins-ctok">0</b></div>
+    </div>
+  </aside>
+</div>
+
+<dialog id="dlg-agent">
+  <form method="dialog" id="agent-form">
+    <h2 id="agent-form-title">New agent</h2>
+    <label>Name <input name="name" required maxlength="40" placeholder="Scout"></label>
+    <div class="row2">
+      <label>Face
+        <select name="emoji">
+          <option>🤖</option><option>🧭</option><option>🔎</option><option>⚖️</option>
+          <option>✍️</option><option>🛠️</option><option>🧪</option><option>📈</option>
+          <option>🦉</option><option>🦊</option><option>🐙</option><option>🛰️</option>
+          <option>🧠</option><option>🗜️</option><option>📦</option><option>🎯</option>
+        </select>
+      </label>
+      <label>Color <input type="color" name="color" value="#3fd68f"></label>
+    </div>
+    <label>Charter
+      <textarea name="system_prompt" rows="5"
+        placeholder="What this agent is for, in a few sentences."></textarea>
+    </label>
+    <label>Model override <input name="model" placeholder="(space default)"></label>
+    <label class="check"><input type="checkbox" name="computer_enabled">
+      Can use this computer (screen, mouse, keyboard — no shell)</label>
+    <menu>
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="ok" id="agent-form-save">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="dlg-settings">
+  <form method="dialog" id="settings-form">
+    <h2>Settings</h2>
+    <label>Inference endpoint
+      <input name="base_url" placeholder="http://127.0.0.1:11434/v1">
+    </label>
+    <label>Default model
+      <input name="model" list="model-options" placeholder="qwen3:4b">
+      <datalist id="model-options"></datalist>
+    </label>
+    <label>Computer-control server
+      <select name="computer_server">
+        <option value="windows-mcp">windows-mcp (accessibility tree)</option>
+        <option value="computer-control-mcp">computer-control-mcp (pixels + OCR)</option>
+      </select>
+    </label>
+    <div id="settings-mcp-note" class="hint"></div>
+    <menu>
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="ok">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<div id="empty-state" hidden>
+  <div class="empty-card">
+    <div class="empty-face">🛰️</div>
+    <h1>Cortex Crew</h1>
+    <p>Local agents that talk to you — and to each other. No cloud required.</p>
+    <button id="btn-starter">Hire the starter crew</button>
+    <p class="hint">Manager · Scout · Critic · Scribe</p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

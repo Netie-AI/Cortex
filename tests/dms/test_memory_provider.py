@@ -48,3 +48,6 @@ def test_memory_context_provider_returns_vector_hits_and_optional_context():
     assert context["chat_turns"] == [{"content": "chat:s-1"}]
     assert context["notes"] == ["saved note"]
     assert context["text_blob"] == "relevant fact\nchat:s-1\nsaved note"
+    assert context["layers"]["session"] == context["chat_turns"]
+    assert context["layers"]["long_term"] == context["notes"]
+    assert [hit.id for hit in context["layers"]["vector"]] == ["memory"]

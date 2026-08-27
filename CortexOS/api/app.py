@@ -97,6 +97,11 @@ def create_app() -> Any:
                 pass
         register_feature_stubs(app, extra="agentic", feature=_key, routes=stubs)
 
+    # Crew is stdlib + FastAPI. It is the engine's agent fleet, not a pack.
+    from CortexOS.api.crew_routes import register_crew_routes
+
+    register_crew_routes(app)
+
     if pack.name == "dms":
         from netie.api.action_routes import register_action_routes
         from netie.api.agent_routes import register_agent_routes
@@ -123,6 +128,9 @@ def create_app() -> Any:
         register_stream_routes(app)
         register_agent_routes(app)
         register_action_routes(app)
+        from packs.dms.constructor_routes import register_constructor_routes
+
+        register_constructor_routes(app)
         try:
             from CortexOS.api.a2a_routes import register_a2a_routes
 
