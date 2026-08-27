@@ -402,9 +402,9 @@ async def execute_rag_answer_node(node: DSLNode, context: ExecutionContext) -> N
     actor = context.get("actor")
     if actor:
         try:
-            from packs.dms.audit.ledger import append as ledger_append
+            from CortexOS.audit import resolve_ledger
 
-            ledger_append(
+            resolve_ledger().append(
                 str(actor),
                 "rag.answer",
                 {"run_id": context.run_id, "n_hits": out.get("n_hits"), "rounds": out.get("rounds")},

@@ -41,11 +41,8 @@ ignore_imports =
     CortexOS.dms.seed_demo -> packs.**
     CortexOS.nlp.local_inference -> packs.**
     CortexOS.execution.tool_runner -> packs.**
-    CortexOS.execution.dag_runner -> packs.**
-    CortexOS.execution.goal_audit -> packs.**
     CortexOS.ponytail.middleware -> packs.**
     CortexOS.ontology.registry -> packs.**
-    CortexOS.agent_sdk.sdk -> packs.**
 
 [importlinter:contract:2]
 name = packaging helpers stay independent of optional planes

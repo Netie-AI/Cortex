@@ -35,9 +35,10 @@ EVENT_TERMINATION_BLOCKED = "goal.termination_blocked"
 
 def _append(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        from packs.dms.audit import ledger  # shared pack-agnostic F1 spine
+        from CortexOS.audit import resolve_ledger
 
-        entry = ledger.append(ACTOR, event_type, payload, db_path=LEDGER_DB_PATH)
+        db_path = None if LEDGER_DB_PATH is None else str(LEDGER_DB_PATH)
+        entry = resolve_ledger().append(ACTOR, event_type, payload, db_path=db_path)
         return {"ok": True, "event": event_type, "seq": getattr(entry, "seq", None)}
     except Exception as exc:  # never crash the engine on an audit outage…
         return {"ok": False, "event": event_type, "error": f"{type(exc).__name__}: {exc}"}

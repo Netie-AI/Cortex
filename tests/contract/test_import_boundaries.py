@@ -56,12 +56,9 @@ _C2_ALLOWLIST = {
     "query_service.py",
     "answer_engine.py",
     "tool_runner.py",
-    "dag_runner.py",
-    "goal_audit.py",
     "local_inference.py",
     "middleware.py",
     "registry.py",  # CortexOS/ontology/registry.py
-    "sdk.py",  # CortexOS/agent_sdk/sdk.py
 }
 
 
@@ -82,3 +79,16 @@ def test_cortexos_must_not_import_packs() -> None:
         "Forbidden CortexOS -> packs imports (not in C2 allowlist):\n"
         + "\n".join(offenders)
     )
+
+
+def test_c2_ledger_port_evacuated() -> None:
+    """goal_audit / dag_runner / agent_sdk go through CortexOS.audit, not packs.*."""
+    for name in ("goal_audit.py", "dag_runner.py", "sdk.py"):
+        assert name not in _C2_ALLOWLIST, name
+    for rel in (
+        "CortexOS/execution/goal_audit.py",
+        "CortexOS/execution/dag_runner.py",
+        "CortexOS/agent_sdk/sdk.py",
+    ):
+        packs = [m for m in _imports(ROOT / rel) if m.startswith("packs")]
+        assert not packs, f"{rel} still imports {packs}"

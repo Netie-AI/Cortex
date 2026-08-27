@@ -1,41 +1,57 @@
 # 2026-08-27 recon-decompose ranked work-list
 
-PREFLIGHT: HIT on overnight RAM/worktree findings. MISS on this ranked list until now.
-Survey: Claude Code workflow `cortex-recon-decompose` (wf_7e30789f-75b). Rank phase died on session limit. Ranked here from 70 raw / 43 startable items.
+PREFLIGHT: HIT. Survey: Claude Code workflow `cortex-recon-decompose` (wf_7e30789f-75b). Rank died on session limit; the 43 startable items were recovered from the 11 survey StructuredOutputs (70 raw).
 
 distill: skill_distill/captures/2026-08-27_claude-code_workflows-runtime.md
 
 ## House (do not violate)
 
-Held PRs: Cortex #4, #41, #43, #44. Founder-blocked: #12, #13, #17, #18, #42. Never weaken `manifest.py`. Never add `_C2_ALLOWLIST` entries. Never hand-edit `contract/*.json`. GitHub Actions for Netie-AI is billing-blocked (checks fail in ~4s, zero steps) so red CI is not a code signal.
+Held PRs: Cortex #4, #41, #43, #44. Founder-blocked: #12, #13, #17, #18, #42. Never weaken `manifest.py`. Never add `_C2_ALLOWLIST` entries. Never hand-edit `contract/*.json`. GitHub Actions for Netie-AI is billing-blocked (checks fail in ~2-4s, zero steps) so red CI is not a code signal. Do not merge Dependabot majors that bump demo/dms-ui to Next 16 or React 19.
 
-## File-ownership map (do not parallel-write)
+## Landed (this fleet, origin/main)
 
-| Owner | Files |
-|-------|--------|
-| badge-fail-closed | CortexOS/api/contract_routes.py, tests/dms/test_enrich_answer_provenance.py |
-| dep-floors | pyproject.toml, tests/packaging/test_dependency_floors.py |
-| lakehouse-connect-write | scripts/lakehouse_migrate.py |
-| dedupe-chat | CortexOS/api/app.py, packs/dms/__init__.py, tests/packaging/test_profile_routes.py |
-| p22-sdk (separate branch) | CortexOS/agent_sdk/sdk.py, backends.py |
-| adv-bench (separate branch) | bench/adversarial.py |
-| answer-path gates (separate branch) | tests/dms/test_q2_answer_engine.py, tests/test_dms/test_dms_pipeline.py, tests/dms/test_certified_synonyms.py, tests/dms/test_meta01_catalog.py |
-| ledger-port (not this wave; collides sdk.py) | goal_audit.py, dag_runner.py, sdk.py, ontology/registry.py, tests/contract/test_import_boundaries.py |
+| Item | Where |
+|------|--------|
+| badge-unknown-defaults-confident / f40-unknown-badge | Cortex #73 |
+| pyproject-single-dependency-table / dep-floor-regression-gate | Cortex #73 |
+| lakehouse-sync-connect-write | Cortex #73 |
+| dedupe-chat-route-registration | Cortex #73 |
+| recon/adversarial/ticket/build workflow templates | Cortex #73 |
+| p22-govern-agent-sdk-reads | Cortex #75 |
+| adv-bench-vacuous-negative-assertions | Cortex #72 |
+| q2-exclusion / pipeline-lowstock / certified-catalog | Cortex #74 |
+| epic002-release-ships-unverified-wheel | Cortex #71 |
+| contributing-sources / contract-ask grounding / handoff / changelog / dependabot / product-roles | Cortex #76 |
+| netie-kb-index-date-nondeterminism | Netie-KB #1 |
+| dms-59-ff03 / dms-resync-stale-vendored-contract | dms #100 |
+| pointer-hud-report-control | Pointer #38 |
+| openvault-stale-tickets-38-39-verify | OpenVault #45 |
+| ledger-port-evacuate-four (goal_audit, dag_runner, sdk; registry still held) | Cortex wave2 C2 branch |
+| pointer-word-sink-independent-verify | Pointer main `test/invariants/word-sink.test.js` PASS 2026-08-28 |
 
-## Ranked startable (value desc, risk asc)
+## Ranked remaining startable (value desc, risk asc)
 
-1. badge-fail-closed -- unknown engine badge must not stamp SESSION (catalog/document/sql_not_analyzable/empty). F40 class. high/low
-2. pyproject floors -- delete dead poetry caret table; raise litellm/cryptography/pillow/starlette/fastapi. high/low
-3. lakehouse connect_write -- scripts/lakehouse_migrate.py raw duckdb.connect is a live RW/RO collision. high/low
-4. p22 govern SDK reads -- query_objects bypasses enforce_manifest. high/medium (other branch)
-5. adv-bench vacuous negatives -- SKU-BETA class. high/medium (other branch)
-6. answer-path gate repairs -- q2 zero-rows, low-stock tautology, catalog plan-only. high/low (other branch)
-7. Netie-KB index date -- real red CI (other repo)
-8. Pointer #29 HUD report -- unstarted (other repo)
-9. docs honesty -- WASM row, contract surface, STATUS double header, test baseline >=330
-10. dedupe chat route registration -- spec-neutral, collision-free vs PR #44
-11. OpenVault #38/#39 verify-and-close
-12. DMS vendored OpenAPI 1.2.0 stale vs Cortex main
+1. c2-gate-blind-to-nested-imports -- AST vs grimp; CLAUDE.md names the weaker gate. Protected. high/medium
+2. dms-ui-next-15-5-21-and-overrides -- `npm install --package-lock-only` only; do not merge Dependabot Next 16 / React 19. high/medium
+3. move-api-auth-to-engine -- C2 evacuate. high/medium
+4. harden-allowlist-to-paths -- basename `registry.py` is too wide. Protected. high/low
+5. architecture-truth-pass -- WASM row still in ARCHITECTURE.md. high/low
+6. warehouse-ephemeral-attach-helper -- catalog.py in-memory duckdb + ATTACH. medium/medium
+7. p22-corpus-cases-sdk-read-shape -- add hostile cases only, never reclassify. medium/low
+8. epic001-one-documented-start-command -- README :8000 vs :8010 leftover. medium/low
+9. meta01-close-or-carry-envelope-half -- envelope fields still missing on some paths. medium/low
+10. move-crypto-to-engine / move-seed-demo-to-pack -- C2 remaining. medium/low
+11. dms-contract-pin-gate-cannot-detect-staleness -- dms repo. medium/low
+12. netie-kb-generated-rules-dead-drive-path -- Netie-KB. medium/low
+13. dms-ui-next-14-2-35-fallback -- only if Next 15 is refused. medium/low
+14. netie-control-no-ci-workflow -- low
+15. ci-doctor-no-readme-no-ci -- low
+
+## Parked against held PRs (were startable in survey, not startable now)
+
+- accuracy-gate-can-fail-proof -- PR #4 edits `bench/accuracy.py`
+- status-refresh -- PR #4 edits STATUS.md
+- ontology/registry ledger-port -- PR #4 edits `CortexOS/ontology/registry.py`
 
 ## Blocked (keep, do not start)
 
@@ -43,5 +59,6 @@ SEC-01 residual / query_service legacy -- PR #44. EVAL-01 corpus modules -- PR #
 
 ## Merge park
 
-PR #71 (EPIC-002 wheel test) MERGEABLE but UNSTABLE: org Actions billing-blocked, auto-merge skipped. Local claim: 3 passed. Do not squash-merge against merge-when-perfect until billing lifts or a human admin-merges.
-PR #70 (night_shift WIP, +1782) MERGEABLE UNSTABLE -- too large to treat as "perfect". Do not merge from this wave.
+PR #70 (night_shift WIP, +1782) -- too large. Do not merge.
+Dependabot #77-#81 (swr / react 19 / recharts 3 / next 16) -- do not merge; majors, RAM, live demo.
+Held drafts #4 / #43 / #44 stay held.
