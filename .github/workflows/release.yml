@@ -59,6 +59,23 @@ jobs:
           mkdir -p dist_release
           cp packages/cortex_contract/dist/cortex_contract-*.whl dist_release/
 
+      - name: Verify the contract wheel we are about to ship
+        # DMS pins cortex-contract so the canonicalisation rule is the SAME CODE
+        # as the engine's. A wheel that drifts from the repo makes every manifest
+        # DMS signs fail verification, and it presents as a signature bug, not a
+        # packaging bug. Replay the frozen vectors against THIS artifact - the
+        # exact file attached below - rather than against a rebuild of the tree.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist_release/cortex_contract-*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one cortex-contract wheel, found ${#wheels[@]}"
+            exit 1
+          fi
+          echo "verifying ${wheels[0]}"
+          CORTEX_CONTRACT_WHEEL="${wheels[0]}" python -m pytest tests/packaging/test_contract_wheel.py -q
+
       - name: Changelog since previous tag
         id: changelog
         run: |

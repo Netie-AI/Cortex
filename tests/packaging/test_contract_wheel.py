@@ -64,6 +64,19 @@ print(f"wheel-ok {checked}")
 
 @pytest.fixture(scope="module")
 def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The wheel these assertions run against.
+
+    ``CORTEX_CONTRACT_WHEEL`` points them at an ALREADY-BUILT artifact instead
+    of a fresh one. The release workflow sets it to the exact file it is about
+    to attach to the GitHub Release, so the wheel a consumer downloads is the
+    wheel that was proved - not a rebuild that merely came from the same tree.
+    """
+    prebuilt = (os.environ.get("CORTEX_CONTRACT_WHEEL") or "").strip()
+    if prebuilt:
+        wheel = Path(prebuilt)
+        assert wheel.is_file(), f"CORTEX_CONTRACT_WHEEL={prebuilt!r} is not a file"
+        assert wheel.suffix == ".whl", f"CORTEX_CONTRACT_WHEEL={prebuilt!r} is not a wheel"
+        return wheel
     out = tmp_path_factory.mktemp("contract_wheel")
     proc = subprocess.run(
         [sys.executable, "-m", "pip", "wheel", str(PKG_DIR), "--no-deps", "-w", str(out)],
@@ -113,3 +126,22 @@ def test_artifact_reproduces_every_canonical_vector(
     )
     assert proc.returncode == 0, f"probe failed:\n{proc.stdout}\n{proc.stderr}"
     assert "wheel-ok" in proc.stdout
+
+
+def test_release_workflow_verifies_the_wheel_it_attaches() -> None:
+    """The proof is only worth having if the release actually runs it.
+
+    release.yml builds the cortex-contract wheel into dist_release/ and attaches
+    it to the GitHub Release. Without this step that artifact ships unproved, so
+    deleting the step must fail here rather than silently in a consumer's build.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "CORTEX_CONTRACT_WHEEL" in workflow, (
+        "release.yml no longer points the canonical-vector proof at the wheel it ships"
+    )
+    assert "tests/packaging/test_contract_wheel.py" in workflow, (
+        "release.yml no longer runs the contract-wheel proof"
+    )
+    build_at = workflow.index("python -m build --wheel packages/cortex_contract")
+    verify_at = workflow.index("CORTEX_CONTRACT_WHEEL")
+    assert build_at < verify_at, "the wheel must be verified after it is built, not before"
