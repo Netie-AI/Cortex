@@ -249,6 +249,22 @@ def by_name(name: str) -> Role | None:
     return None
 
 
+# Idle specialists seeded into every new space so the desk looks like a crew,
+# not an empty chat. Manager is separate. Cap lives in CrewSettings.
+DEFAULT_ROSTER: tuple[str, ...] = (
+    "Ticket",
+    "PRD",
+    "Epic",
+    "Gate",
+    "Watchdog",
+    "Connector",
+    "Skills",
+    "Browser",
+    "Security",
+    "SEO",
+)
+
+
 def catalog() -> list[dict[str, str]]:
     return [r.public() for r in ROLES]
 

@@ -47,11 +47,17 @@ class CrewSettings:
     data_dir: Path
     master_computer_control: bool
     ui_dir: Path = field(default_factory=lambda: Path(__file__).parent / "ui")
-    max_agents_per_space: int = 8
+    max_agents_per_space: int = 16
     max_llm_calls_per_run: int = 40
     max_steps_per_agent: int = 12
     confirm_timeout_s: int = 300
     llm_timeout_s: int = 180
+    #: Prompt ceiling for one agent turn, in estimated tokens. Deliberately below
+    #: the smallest model window in use and already net of the static prefix
+    #: (charter + roster + detect + toolspecs), so compaction fires before the
+    #: provider refuses the request. A run that dies on a context-length error
+    #: reads to the operator as an outage, not as a full transcript.
+    context_budget_tokens: int = 60_000
 
     @property
     def db_path(self) -> Path:

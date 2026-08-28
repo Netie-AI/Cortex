@@ -61,6 +61,27 @@ INTERNAL_TOOLS = frozenset(
         "estate_status",
         "ship_gate",
         "rename_agent",
+        "write_todos",
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "glob_files",
+        "load_skill",
+        "compact_conversation",
+        # Durable per-space recall. Reads and writes inside the space jail only,
+        # so ALLOW is the right verdict; none of these is a computer-control tool.
+        "remember",
+        "recall",
+        "forget",
+        # Planning only: orders candidate work into waves and returns text. It
+        # spawns nothing and schedules nothing - Cortex dag_runner still decides
+        # governed work shape.
+        "plan_waves",
+        # Deliberately NOT listed: "run_command". CortexOS/crew/shell.py is a
+        # gate with no executor behind it, and an unknown internal tool is
+        # refused by decide() below. Adding the name here would be the first
+        # half of giving crew agents a shell.
     }
 )
 

@@ -81,3 +81,32 @@ def test_confirm_lifecycle(tmp_path: Path) -> None:
     took = store.decide_confirm(wall["id"], approved=False, takeover=True)
     assert took is not None and took["status"] == "takeover"
     assert store.pending_confirms(space["id"]) == []
+
+
+def test_an_existing_database_gains_the_approval_columns(tmp_path: Path) -> None:
+    """An operator's crew.db predates the approval arms; opening it must migrate.
+
+    Without the ALTER TABLE the first spawn carrying reject_tools raises
+    OperationalError inside a run, which surfaces as "Run crashed" and reads as
+    a model failure rather than a schema one.
+    """
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    old = sqlite3.connect(str(db_path))
+    old.executescript(
+        "CREATE TABLE agents (id TEXT PRIMARY KEY, space_id TEXT NOT NULL,"
+        " name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '',"
+        " color TEXT NOT NULL DEFAULT '', role_prompt TEXT NOT NULL DEFAULT '',"
+        " status TEXT NOT NULL DEFAULT 'idle', spawned_by TEXT,"
+        " created_at TEXT NOT NULL, UNIQUE (space_id, name));"
+    )
+    old.commit()
+    old.close()
+
+    store = CrewStore(db_path)
+    space = store.create_space("Legacy")
+    agent = store.upsert_agent(space["id"], "Scout", reject_tools=["cortex_ask"])
+    assert agent["reject_tools"] == '["cortex_ask"]'
+    assert agent["approve_tools"] == ""
+    store.close()

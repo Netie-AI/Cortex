@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS agents (
     spawned_by TEXT,
     allow_tools TEXT NOT NULL DEFAULT '',
     deny_tools TEXT NOT NULL DEFAULT '',
+    approve_tools TEXT NOT NULL DEFAULT '',
+    reject_tools TEXT NOT NULL DEFAULT '',
     capability TEXT NOT NULL DEFAULT '',
     verify INTEGER NOT NULL DEFAULT 0,
     verify_criteria TEXT NOT NULL DEFAULT '',
@@ -76,6 +78,15 @@ CREATE TABLE IF NOT EXISTS confirms (
     created_at TEXT NOT NULL,
     decided_at TEXT
 );
+CREATE TABLE IF NOT EXISTS todos (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_todos_space ON todos (space_id, ord);
 """
 
 
@@ -117,6 +128,7 @@ class CrewStore:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.executescript(_SCHEMA)
             self._migrate_agents()
+            self._migrate_spaces()
             self._db.commit()
 
     def _migrate_agents(self) -> None:
@@ -125,6 +137,11 @@ class CrewStore:
         extras = (
             ("allow_tools", "TEXT NOT NULL DEFAULT ''"),
             ("deny_tools", "TEXT NOT NULL DEFAULT ''"),
+            # Per-agent approval arms (CortexOS/crew/approvals.py). They can only
+            # add friction, so an older database that lacks them is not a hole:
+            # the empty default is the crew-wide policy verdict unchanged.
+            ("approve_tools", "TEXT NOT NULL DEFAULT ''"),
+            ("reject_tools", "TEXT NOT NULL DEFAULT ''"),
             ("capability", "TEXT NOT NULL DEFAULT ''"),
             ("verify", "INTEGER NOT NULL DEFAULT 0"),
             ("verify_criteria", "TEXT NOT NULL DEFAULT ''"),
@@ -134,6 +151,14 @@ class CrewStore:
         for name, ddl in extras:
             if name not in cols:
                 self._db.execute(f"ALTER TABLE agents ADD COLUMN {name} {ddl}")
+
+    def _migrate_spaces(self) -> None:
+        rows = self._db.execute("PRAGMA table_info(spaces)").fetchall()
+        cols = {str(r[1]) for r in rows}
+        if "compact_seq" not in cols:
+            self._db.execute(
+                "ALTER TABLE spaces ADD COLUMN compact_seq INTEGER NOT NULL DEFAULT 0"
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -169,7 +194,11 @@ class CrewStore:
         return [dict(r) for r in rows]
 
     def update_space(self, space_id: str, **fields: Any) -> dict[str, Any] | None:
-        allowed = {k: v for k, v in fields.items() if k in {"title", "ord", "model", "system_prompt"}}
+        allowed = {
+            k: v
+            for k, v in fields.items()
+            if k in {"title", "ord", "model", "system_prompt", "compact_seq"}
+        }
         if allowed:
             sets = ", ".join(f"{k} = ?" for k in allowed)
             with self._lock:
@@ -197,6 +226,8 @@ class CrewStore:
         spawned_by: str | None = None,
         allow_tools: Any = "",
         deny_tools: Any = "",
+        approve_tools: Any = "",
+        reject_tools: Any = "",
         capability: str = "",
         verify: bool = False,
         verify_criteria: Any = "",
@@ -205,6 +236,8 @@ class CrewStore:
     ) -> dict[str, Any]:
         allow_s = _dumps(allow_tools)
         deny_s = _dumps(deny_tools)
+        approve_s = _dumps(approve_tools)
+        reject_s = _dumps(reject_tools)
         crit_s = _dumps(verify_criteria)
         skills_s = _dumps(skills)
         model_s = (model or "").strip()
@@ -220,6 +253,10 @@ class CrewStore:
                 patch["allow_tools"] = allow_s
             if deny_s and deny_s != (existing.get("deny_tools") or ""):
                 patch["deny_tools"] = deny_s
+            if approve_s and approve_s != (existing.get("approve_tools") or ""):
+                patch["approve_tools"] = approve_s
+            if reject_s and reject_s != (existing.get("reject_tools") or ""):
+                patch["reject_tools"] = reject_s
             if capability and capability != (existing.get("capability") or ""):
                 patch["capability"] = capability
             if verify_i and int(existing.get("verify") or 0) != verify_i:
@@ -244,8 +281,9 @@ class CrewStore:
         with self._lock:
             self._db.execute(
                 "INSERT INTO agents (id, space_id, name, icon, color, role_prompt, spawned_by,"
-                " allow_tools, deny_tools, capability, verify, verify_criteria, model, skills,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " allow_tools, deny_tools, approve_tools, reject_tools, capability, verify,"
+                " verify_criteria, model, skills, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     agent_id,
                     space_id,
@@ -256,6 +294,8 @@ class CrewStore:
                     spawned_by,
                     allow_s,
                     deny_s,
+                    approve_s,
+                    reject_s,
                     capability,
                     verify_i,
                     crit_s,
@@ -431,6 +471,54 @@ class CrewStore:
                     }
                 )
         return hits[:limit]
+
+    # -- todos -------------------------------------------------------------
+
+    TODO_STATUSES = frozenset({"pending", "in_progress", "completed"})
+
+    def list_todos(self, space_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM todos WHERE space_id = ? ORDER BY ord ASC", (space_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def replace_todos(self, space_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Replace the space checklist. At most one in_progress item."""
+        cleaned: list[tuple[str, str]] = []
+        in_progress = 0
+        for raw in items[:30]:
+            if not isinstance(raw, dict):
+                continue
+            content = str(raw.get("content") or "").strip()
+            if not content:
+                continue
+            status = str(raw.get("status") or "pending").strip().lower()
+            if status not in self.TODO_STATUSES:
+                status = "pending"
+            if status == "in_progress":
+                in_progress += 1
+                if in_progress > 1:
+                    status = "pending"
+            cleaned.append((content[:500], status))
+        with self._lock:
+            self._db.execute("DELETE FROM todos WHERE space_id = ?", (space_id,))
+            for ord_, (content, status) in enumerate(cleaned):
+                self._db.execute(
+                    "INSERT INTO todos (id, space_id, ord, content, status, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (_new_id(), space_id, ord_, content, status, _now()),
+                )
+            self._db.commit()
+        return self.list_todos(space_id)
+
+    def render_todos(self, space_id: str) -> str:
+        rows = self.list_todos(space_id)
+        if not rows:
+            return "No todos."
+        marks = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
+        lines = [f"{marks.get(r['status'], '[ ]')} {r['content']}" for r in rows]
+        return "\n".join(lines)
 
     # -- runs --------------------------------------------------------------
 

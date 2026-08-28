@@ -1,6 +1,6 @@
 """Cortex Crew - the agentic chat surface over the engine.
 
-Guaca-shaped local UI (spaces rail, one conversation, visible agent-to-agent
+Local operator UI (spaces rail, one conversation, visible agent-to-agent
 traffic) where a Manager agent answers directly or spawns teammates, teammates
 talk to each other over an in-process A2A inbox, governed data questions go to
 the running Cortex engine (`POST /dms/query`) and arrive with their badge and
