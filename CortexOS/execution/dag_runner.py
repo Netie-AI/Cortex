@@ -471,6 +471,8 @@ async def execute_a2a_call_node(node: DSLNode, context: ExecutionContext) -> Nod
 
 async def execute_tool_call_node(node: DSLNode, context: ExecutionContext) -> NodeResult:
     """F8 — sandboxed TOOL_CALL via host tool_runner (allowlist + ledger)."""
+    import asyncio
+
     from netie.execution.tool_runner import ToolCallError, run_tool_call
 
     params: dict[str, Any] = {}
@@ -484,10 +486,16 @@ async def execute_tool_call_node(node: DSLNode, context: ExecutionContext) -> No
     if isinstance(ann_params, dict):
         params.update(ann_params)
 
+    rows = params.pop("rows", None)
+    if isinstance(rows, list) and "title" not in params:
+        params["title"] = str(params.get("table") or "Constructor export")
+    if isinstance(rows, list) and "body" not in params:
+        params["body"] = str(len(rows)) + " preview rows, " + str(params.get("row_count") or len(rows)) + " total"
+
     actor = str(context.get("actor") or "system")
     tool = node.tool_name or ""
     try:
-        result = run_tool_call(tool, params, actor=actor, run_id=context.run_id)
+        result = await asyncio.to_thread(run_tool_call, tool, params, actor=actor, run_id=context.run_id)
     except ToolCallError as exc:
         return NodeResult(
             node_id=node.id,
