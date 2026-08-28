@@ -43,10 +43,13 @@ Local: `pytest tests/contract/` 82 passed; `lint-imports` 2 kept.
    `QueryObjectsRequest.session_id` — would have failed `export_openapi.py
    --check` the moment billing cleared.
 
-Local mirror (2026-08-28): ruff/mypy/lint-imports/versions/secrets/base PASS;
-pytest **1474 passed**. RLS not run locally (no docker/postgres).
+Local mirror (2026-08-28): ruff/mypy/lint-imports/versions/secrets/base/
+protected-paths PASS; pytest **1474 passed**; **rls-proof PASS** on local
+Postgres 16 (`test_rls_blocks_out_of_scope_read`). Artifact:
+`/opt/cursor/artifacts/cicd-local-gate-report.md`.
 
 Repo is **private** — no free public Actions minutes. Billing is mandatory.
+Billing unblock email sent to oojianhongg@gmail.com.
 
 ## Unblock
 

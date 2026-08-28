@@ -1,16 +1,15 @@
 # STATUS.md
 **Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon) + **CI billing unblock**
 
-> **2026-08-28 (CI gate — FAIL org billing, code vectors PASS):** Every Gmail
-> CI failure for Cortex (`main`, #85, #84, #82, #70, #86) is the same
-> annotation: jobs never start (0 steps, ~2s) because Netie-AI Actions
-> payments failed or the spending limit is exhausted. Private repo = no free
-> public minutes. Fix: https://github.com/organizations/Netie-AI/settings/billing
-> then re-run. Local mirror (this branch): ruff/mypy/lint-imports/versions/
-> secrets/base-install PASS; full pytest **1474 passed**; OpenAPI drift fixed
-> (`QueryObjectsRequest.session_id` regenerated). RLS needs Actions Postgres
-> (no local docker). App runner rewrites bare `python`/`python3` to
-> `sys.executable`.
+> **2026-08-28 (CI gate — FAIL org billing, FULL local mirror PASS):** Every
+> Gmail CI failure for Cortex (`main`, #85, #84, #82, #70, #86) is Actions
+> billing: jobs never start (0 steps, ~2s). Private repo = no free minutes.
+> Fix: https://github.com/organizations/Netie-AI/settings/billing then reply
+> in the goal thread. Local required-check mirror on #86: ruff/mypy/
+> lint-imports/versions/openapi/secrets/base/protected-paths **PASS**; pytest
+> **1474**; rls-proof **PASS** on local Postgres 16. OpenAPI
+> `QueryObjectsRequest.session_id` regenerated; app_runner uses
+> `sys.executable`. Artifact: `/opt/cursor/artifacts/cicd-local-gate-report.md`.
 
 > **2026-08-27 (recon rank + wave 1):** Claude Code `cortex-recon-decompose`
 > surveyed 70 items (43 startable); rank died on session limit and was filled
