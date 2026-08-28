@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## Engine capability: cost ledger + DAG parallel + T0 routing — 2026-08-28
+
+General Cortex engine (not DMS-specific):
+
+- **Cost ledger:** `run_dag` hydrates prior spend from Postgres at run start;
+  `records_for_run()` filters in-process records; `GET /api/engine/runs/{run_id}/cost`
+  returns total MYR + node records; `POST /run` response includes `total_myr`.
+- **DAG runner API:** `parallel`, `max_parallel`, and `resume` exposed on `RunDAGRequest`.
+- **T0 routing:** `invoke_routed_completion` short-circuits Tier T0 — zero cost, no adapter call.
+
 ## CI gate: billing FAIL + python spawn + OpenAPI drift — 2026-08-28
 
 Email CI reds across `main` and open PRs are org Actions billing (jobs never

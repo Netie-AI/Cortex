@@ -1,5 +1,10 @@
 # STATUS.md
-**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon) + **CI billing unblock**
+**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** engine capability (cost ledger, DAG parallel, T0) + CI billing unblock**
+
+> **2026-08-28 (engine capability — general Cortex, not DMS demo):** Cost ledger
+> hydrates at `run_dag` start; `GET /api/engine/runs/{run_id}/cost` + `total_myr`
+> on `POST /run`. DAG API exposes `parallel` / `max_parallel` / `resume`. T0
+> routes skip the adapter (zero MYR). Branch `cursor/engine-capability-eb95`.
 
 > **2026-08-28 (CI gate — FAIL org billing, FULL local mirror PASS):** Every
 > Gmail CI failure is Actions unable to start jobs on this **private** repo

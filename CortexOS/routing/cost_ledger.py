@@ -111,6 +111,9 @@ class CostLedger:
     def records(self) -> list[NodeExecutionRecord]:
         return list(self._records)
 
+    def records_for_run(self, run_id: str) -> list[NodeExecutionRecord]:
+        return [record for record in self._records if record.run_id == run_id]
+
     def export_dicts(self) -> list[dict[str, Any]]:
         return [asdict(record) for record in self._records]
 
