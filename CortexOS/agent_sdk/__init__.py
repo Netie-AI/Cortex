@@ -16,6 +16,8 @@ The hosted API layer (PARKING_LOT P17) wraps this same surface over the wire;
 ``packs/<pack>/agents/sdk.py`` may bind it with the pack pre-selected.
 """
 
+from CortexOS.agent_sdk.backends import register_query_backend
+from CortexOS.agent_sdk.hooks import clear_agent_hooks, register_agent_hook
 from CortexOS.agent_sdk.sdk import (
     AgentActor,
     SdkDenied,
@@ -25,8 +27,6 @@ from CortexOS.agent_sdk.sdk import (
     list_object_types,
     query_objects,
 )
-from CortexOS.agent_sdk.backends import register_query_backend
-from CortexOS.agent_sdk.hooks import clear_agent_hooks, register_agent_hook
 
 __all__ = [
     "AgentActor",

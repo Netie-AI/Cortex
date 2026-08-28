@@ -1,4 +1,3 @@
-import os
 try:
     from docx import Document
 except ImportError:
@@ -18,5 +17,5 @@ def extract_docx(filepath, outpath):
     with open(outpath, 'w', encoding='utf-8') as f:
         f.write('\n'.join(fullText))
 
-extract_docx('Netie_Cortex_v1_Architecture.docx', 'v1_arch.txt')
-extract_docx('Netie_Cortex_v2_Strategic_Architecture.docx', 'v2_arch.txt')
+extract_docx('docs/archive/source/Netie_Cortex_v1_Architecture.docx', 'docs/archive/v1_arch.txt')
+extract_docx('docs/archive/source/Netie_Cortex_v2_Strategic_Architecture.docx', 'docs/archive/v2_arch.txt')

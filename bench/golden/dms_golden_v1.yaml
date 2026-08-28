@@ -47,6 +47,34 @@ items:
     key_columns: [sku, sales_value_myr]
     round: 2
     tags: [sales, rank]
+    category: core_exact
+
+  - id: sales_top5_exclude_beta
+    tier: core
+    question: "excluding BETA, top 5 sku by revenue"
+    match: resultset
+    canonical_sql: >
+      SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
+      GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
+    key_columns: [sku, sales_value_myr]
+    round: 2
+    tags: [sales, rank, value_normalization]
+    category: value_normalization
+
+  # ANS-01: exact SKU + conjunction + trailing skip token must exclude and answer.
+  - id: exclude_exact_sku_conjunction
+    tier: core
+    question: "ignore SKU-BETA and also show the top 5 SKUs by revenue"
+    match: resultset
+    canonical_sql: >
+      SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
+      GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
+    key_columns: [sku, sales_value_myr]
+    round: 2
+    tags: [sales, rank, value_normalization, ans-01]
+    category: value_normalization
 
   - id: sales_top3_volume
     tier: core
@@ -374,3 +402,23 @@ items:
     question: "Tell me a joke about robots"
     match: abstain
     tags: [abstain]
+
+  - id: abstain_unknown_subject_customers
+    tier: safety
+    question: "top 3 customers by amount"
+    match: abstain
+    tags: [abstain, unknown-subject]
+
+  # ANS-02: aggregate-over-ranking has no governed metric.
+  - id: abstain_sum_of_ranking
+    tier: safety
+    question: "i mean the sum of top 5 selling skus"
+    match: abstain
+    tags: [abstain, ans-02]
+
+  # ANS-03: grouped ranking must not return the warehouse as one row.
+  - id: abstain_category_ranking
+    tier: safety
+    question: "top 3 categories by total revenue"
+    match: abstain
+    tags: [abstain, ans-03]

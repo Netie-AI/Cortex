@@ -20,7 +20,7 @@ async def run_weekly_episodic_to_semantic_rollup(*, postgres_engine: Any = None,
 
 
 def register_weekly_summarizer(
-    scheduler: "AsyncIOScheduler",
+    scheduler: AsyncIOScheduler,
     *,
     job: Callable[[], Awaitable[int]] | None = None,
 ) -> None:
@@ -40,7 +40,7 @@ def register_weekly_summarizer(
     )
 
 
-def shutdown_scheduler(scheduler: "AsyncIOScheduler | None") -> None:
+def shutdown_scheduler(scheduler: AsyncIOScheduler | None) -> None:
     """Best-effort stop for process teardown."""
     if scheduler is None:
         return

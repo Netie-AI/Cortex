@@ -1,0 +1,32 @@
+skill_id: find_skills_v1
+name: Find Skills
+description: >
+  Discover the best agent skills (then MCP servers / subagents) for a goal from
+  curated GitHub awesome-list references and local SkillCards. Ask:
+  "Are there any good skills for [GOAL]?" Optionally seed SkillOpt evolution.
+category: meta
+example_intents:
+  - "Are there any good skills for playwright testing?"
+  - "Find a skill for PDF extraction"
+  - "What MCP server should I use for GitHub?"
+  - "Find a subagent for code review"
+  - "Install find-skills and search for deployment skills"
+required_tools:
+  - find_skills
+  - find_mcp
+  - find_subagents
+required_network:
+  - "raw.githubusercontent.com"
+  - "github.com"
+annotations:
+  implies_install: "npx skills add vercel-labs/skills --skill find-skills -g -y"
+  evolve_with: "microsoft/SkillOpt"
+  sources:
+    - "https://github.com/punkpeye/awesome-mcp-servers"
+    - "https://github.com/rohitg00/awesome-claude-code-toolkit"
+    - "https://github.com/BehiSecc/awesome-claude-skills"
+    - "https://github.com/itgoyo/awesome-agent-skills"
+    - "https://github.com/microsoft/SkillOpt"
+max_tier: 1
+version: "1.0.0"
+author: "cortex"

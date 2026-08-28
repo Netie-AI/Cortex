@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# Public Constructor on /cortex. Auth stays on. Do not copy Dockerfile.core
+# (that image sets DMS_AUTH_DISABLED=1).
+# Hyperlift default path is Dockerfile (identical copy of this file).
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    CORTEX_PROFILE=core \
+    PACK=dms \
+    DMS_REFUSE_DEMO_KEYS=1 \
+    PORT=8080
+# Hyperlift: set PORT=8080 in the manager if you override it. Pair OpenVault via
+# OPENVAULT_BASE_URL, or set DMS_API_KEYS there. Never bake keys into this image.
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY netie ./netie
+COPY CortexOS ./CortexOS
+COPY packs ./packs
+COPY packages ./packages
+COPY contract ./contract
+COPY data/samples ./data/samples
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir ".[dms]" \
+    && python -c "from CortexOS.dms.warehouse_db import load_inventory_csv; load_inventory_csv()"
+
+# Hyperlift default app port is 8080 (set PORT in Hyperlift Manager, not EXPOSE).
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:${PORT}/cortex/login || exit 1
+
+CMD ["sh", "-c", "python -m uvicorn CortexOS.api.main:app --host 0.0.0.0 --port ${PORT}"]

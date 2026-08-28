@@ -44,7 +44,7 @@ try:
     from redis.asyncio import Redis as AsyncRedis
 
     class RedisWorkingStore:
-        def __init__(self, redis: "AsyncRedis", *, ttl_seconds: int = DEFAULT_WORKING_TTL_S) -> None:
+        def __init__(self, redis: AsyncRedis, *, ttl_seconds: int = DEFAULT_WORKING_TTL_S) -> None:
             self._r = redis
             self._ttl = ttl_seconds
 
@@ -71,7 +71,7 @@ except ImportError:  # pragma: no cover — optional redis extra
     RedisWorkingStore = None  # type: ignore[misc, assignment]
 
 
-async def fetch_semantic_facts(engine: "AsyncEngine", user_id: str) -> dict[str, str]:
+async def fetch_semantic_facts(engine: AsyncEngine, user_id: str) -> dict[str, str]:
     from sqlalchemy import text
 
     facts: dict[str, str] = {}
@@ -92,7 +92,7 @@ async def build_context_window(
     user_id: str,
     *,
     working: WorkingMemoryStore,
-    semantic_engine: "AsyncEngine | None" = None,
+    semantic_engine: AsyncEngine | None = None,
 ) -> str:
     """Text block injected ahead of routed prompts — working transcript + Postgres facts."""
     turns = await working.get_recent_turns(session_id)
@@ -127,4 +127,4 @@ def update_preference_vec(
     """EMA blend for personalization (§3.4 architecture)."""
     if not previous_vec:
         return clicked_vec
-    return [((1 - alpha) * p) + (alpha * c) for p, c in zip(previous_vec, clicked_vec)]
+    return [((1 - alpha) * p) + (alpha * c) for p, c in zip(previous_vec, clicked_vec, strict=False)]

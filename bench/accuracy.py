@@ -139,7 +139,11 @@ def _multiset_equal(a: list[tuple], b: list[tuple]) -> bool:
 def _run_canonical(sql: str) -> list[dict]:
     from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
 
-    con = get_connection(DEFAULT_DB)
+    # read_only: the benchmark must not take DuckDB's EXCLUSIVE read-write lock.
+    # A live API process holding that lock made canonical SQL fail at random
+    # ("IO Error: ... used by another process") — the documented "flaky golden
+    # benchmark". Read-only connections share the file.
+    con = get_connection(DEFAULT_DB, read_only=True)
     try:
         rel = con.execute(sql)
         cols = [d[0] for d in rel.description] if rel.description else []

@@ -1,6 +1,14 @@
-from pydantic import BaseModel
+import uuid
 from typing import Literal
+
+from netie.crypto.ephemeral_keys import EphemeralKeyPair, generate_session_key, sign_manifest_data
+from netie.fabrication.dag_compiler import CompiledDAG
+from netie.fabrication.dsl_parser import NodeType
+from netie.result import Ok, Result
+from pydantic import BaseModel
+
 from .dsl_parser import InferenceTier
+
 
 class FilesystemPermission(BaseModel):
     paths: list[str]
@@ -28,11 +36,8 @@ class CapabilityManifest(BaseModel):
     signature: str | None = None             # ephemeral key signature
     is_verified: bool = False
 
-import uuid
-from netie.result import Ok, Err, Result
-from netie.crypto.ephemeral_keys import generate_session_key, sign_manifest_data, EphemeralKeyPair
-from netie.fabrication.dag_compiler import CompiledDAG
-from netie.fabrication.dsl_parser import NodeType
+
+
 
 def generate_manifest(dag: CompiledDAG, keypair: EphemeralKeyPair | None = None) -> Result[CapabilityManifest]:
     if not keypair:

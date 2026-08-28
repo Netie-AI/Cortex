@@ -50,7 +50,7 @@ def finetune(*, model_id: str, output_dir: Path, max_steps: int = 50) -> None:
         from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
         from trl import SFTTrainer
     except ImportError as exc:
-        print(f"Install GPU extras: pip install transformers peft trl datasets accelerate", file=sys.stderr)
+        print("Install GPU extras: pip install transformers peft trl datasets accelerate", file=sys.stderr)
         raise SystemExit(1) from exc
 
     rows = _load_rows(DEFAULT_DATA)

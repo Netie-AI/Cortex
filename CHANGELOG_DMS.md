@@ -2,6 +2,257 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CI gate: billing FAIL + python spawn + OpenAPI drift — 2026-08-28
+
+Email CI reds across `main` and open PRs are org Actions billing (jobs never
+start; private repo). `app_runner._render_argv` maps bare `python`/`python3`
+to `sys.executable`. Regenerated `contract/openapi-1.2.0.json` for additive
+`QueryObjectsRequest.session_id` so `export_openapi.py --check` passes.
+Local mirror of all required checks PASS including rls-proof on Postgres 16
+(1474 pytest). GitHub checks still red until Billing & plans is fixed.
+
+## CONTRACT-01 one module identity — 2026-08-26
+
+`cortex_contract` is one package. Consumers pin it; they do not import `CortexOS`.
+Merged as #69.
+
+## DOC-01 stop claiming Wasm sandboxing — 2026-08-26
+
+README / ARCHITECTURE no longer claim an in-process Wasm sandbox the engine
+never ran. Merged as #68.
+
+## GitHub PAT still cannot see private Netie-AI — 2026-08-25
+
+Used the operator fine-grained PAT as `jian-hong`. It authenticates and still
+404s `Netie-AI/Cortex` and every private product name. GitHub header
+`allows_permissionless_access=true`. Cursor All-repos on Helio.AI is a
+different org than this Cortex checkout. `estate_status` now prints that
+access note. Revoke any PAT pasted in chat.
+
+## DMS handoff — F40 / FF-03 / VQ-01 / EPIC-015 / ledger honesty — 2026-08-25
+
+Cortex engine half of the DMS handoff. Did not re-implement DMS envelope mapping.
+
+- **F40:** `_is_abstain_signal` treats `refused` as abstain. `_abstain_refused`
+  emits route/layer/badge=`refused`. Contract ask never stamps `Badge.SESSION`
+  on a refusal. Manifest refusals use `_abstain_refused`.
+- **FF-03:** `SqlGateAbstain.__str__` names `.violations`. `L2Attempt` returns
+  them instead of dropping them. Draft Cortex PR #41 left conflicting.
+- **VQ-01:** certified queries load `synonyms:`; L0 match is exact on canonical
+  or declared synonym; BETA rewrites to SKU-BETA before lookup; certified SQL
+  runs `normalize_sql_literals`.
+- **EPIC-015:** re-sliced in ARCHITECTURE.md. Retrieve + route-then-doc-RAG are
+  shipped; live Qdrant demo is the RAG-01 remainder.
+- **ledger.verify:** append read-back via existing `list_entries`. Phantom
+  id+hash → 500 `ledger_append_not_on_chain`. Verify fails closed past the tip
+  and on seq gaps. No sixth DMS port.
+
+## Crew production ship-gate (Netie-AI estate) — 2026-08-25
+
+Crew capability templates for Security, Reliability, Infra, Architecture,
+Observability, and Surface, plus a deterministic `ship_gate` over
+github.com/Netie-AI. Surfaces pick domains (RTL skips WCAG; empty AIM fails).
+A six-heading sweep collapses to one Gate. Skip is not pass. File presence
+is not SOC2/HIPAA/GDPR. Tools: `estate_status`, `ship_gate`. Do not auto-merge.
+
+Also scores private product repos the operator screenshot confirmed
+(dms, Netie-KB, Pointer, landing, Space, netie-control, ViKing, RUMA-Houser).
+A GitHub 404 from this token is not absence. Grant the GitHub App
+All repositories. Do not build a remote-login box. Flags accidental
+copies on github.com/jian-hong (Vking duplicate, committed venv, optio fork).
+
+## Auto-merge perfect PRs — 2026-08-22
+
+CI job `auto-merge` squash-merges a non-draft PR when lint-type-test,
+base-install, protected-paths, rls-proof, and secrets-scan are all SUCCESS
+and the PR is mergeable. Drafts, dirty/behind, and failed checks stay open.
+Rule: `.cursor/rules/merge-perfect.mdc`.
+
+## Constructor desk + computer-control probe — 2026-08-22
+
+Operator desk at `GET /api/connectors` (Constructor-style sidebar). Agents
+post into the existing dispatch port. Pointer reports the computer-control
+probe. UACC / computer-control-mcp / Windows-MCP are catalogued. Default
+OFF. Invoke fails closed. This Linux host cannot attach Windows-MCP and does
+not `pip install uacc`. MCP tools: `computer_control.status` (read-only),
+`computer_control.invoke` (gated). Workspaces add pointer / omi / openvault.
+distill: skill_distill/captures/2026-08-22_computer-control-mcp.md
+
+## Workspace + Cursor connectors — 2026-08-22
+
+Cortex is the orchestration layer. Cursor is a worker surface. Normal chat
+goes to the chatbot workspace; every new **task** opens a **new** Cursor chat
+on cortex / netie / dms / chatbot (env `CORTEX_WS_*`, Windows defaults
+`D:\Cortex` `D:\Netie` `D:\DMS` `D:\chatbot`). Retrieve + instruct live on
+`CursorSessionPort`. No LangGraph. No sidebar clicks (parked).
+
+HTTP: `GET /api/connectors` (UI), `/workspaces`, `POST /dispatch`,
+`/cursor/chats`, `/cursor/chats/{id}/messages`, `/instruct`.
+distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
+
+## ANS-01/02/03 answer-path shape — 2026-08-22
+
+Three tickets, one funnel. The router was answering a question adjacent to
+the one asked, badged `governed_metric`.
+
+- ANS-01: an exclusion clause that names an exact SKU plus a conjunction
+  (`and` / `dan` / Malay `keluarkan`…`dari`) now ends at the entities that
+  resolve, so the two stop/skip lists cannot disagree. Applied and answered.
+- ANS-02: an aggregate over a ranking (sum/average/total of top N) abstains
+  and names the two-step path that works. Discourse lead-in `i mean` is not
+  an average.
+- ANS-03: a ranking grouped by a known non-SKU dimension abstains rather
+  than returning the warehouse-wide `revenue_total` as one row. SKU rankings
+  that say "by total revenue" still rank.
+- Asserted on rendered text and rows, not SQL. ANS-04 unknown-subject
+  abstain is unchanged.
+
+## ANS-04 unknown subject abstain — 2026-08-22
+
+`answer("top 3 customers by amount")` was badged `governed_metric` and rendered
+as Top 3 sales over SKU rows. There is no customers table. `_wants_sales_rank`
+matched bare `top N` and ignored the unconsumed subject noun. A correct grant
+did not make the substitution honest (different from #14/#45 unbound).
+
+- Named subject nouns are checked against the semantic layer's tables/aliases
+  before L0/L1/skills. An undefined subject abstains and names the entities
+  the layer can answer about.
+- Sales rank will not compile when the named subject is not a SKU.
+- Bound demo-table questions still answer (R-0005). Unbound still abstains.
+- Asserted on rendered text and rows, not SQL.
+
+## Unbound session must abstain — 2026-08-22
+
+A session with no binding was answering from the demo warehouse on
+`POST /dms/query` (badge `governed_metric`, `grant_kind local-self-issued`,
+all six demo tables granted). The table-intersect never fired because the
+self-issued grant already contained every table.
+
+- `route_to_metric` now returns the tables its plan will read (from the metric
+  definition, not by re-parsing compiled SQL).
+- Served doors (`/dms/query`, `/mcp/call`) fail closed when nothing is bound
+  or the grant is self-issued. They do not mint a Space grant.
+- Bound demo-table questions still answer (R-0005). A bound abstain names the
+  sources the session *can* answer over.
+- Rewrote `test_unbound_session_still_answers_and_says_the_grant_is_self_issued`
+  to expect abstain. Cortex#36 "total" routing and Cortex#39 (customers -> SKUs)
+  are untouched.
+- C2: L2 generation no longer imports `packs.dms.generative` from
+  `answer_engine`. The engine holds `L2GenerationPort`; `attempt_l2` lives on
+  that seam. Pack registers the adapter. No C2 ignore added.
+- Sample warehouse now includes `SKU-BETA` in inventory and one IN
+  transaction so G4 `BETA` -> `SKU-BETA` can resolve. OUT rankings unchanged.
+  PowerShell autostart tests skip when `powershell` is not on PATH.
+- Vocabulary maps `kilograms` / `by weight` to the volume rank the router
+  already knows, so those paraphrases stop compiling as sales-by-value.
+
+## Router audit — generalization benchmark, routing fixes, hot-path perf — 2026-07-27
+
+**New measurement.** `bench/paraphrase.py` + `bench/golden/dms_paraphrase_v1.yaml`:
+85 ordinary paraphrases of the 36 golden intents, scored against the same canonical
+SQL. `bench.accuracy` cannot detect brittleness — the L1 router is hand-written
+regex, so it passes its own phrasings by construction. Baseline was **23.5%**
+robustness; now **64.7%**, with **0 confidently wrong** answers (100% answered
+precision) and golden still 36/36.
+
+**Routing fixes (a bad classifier failing in both directions):**
+- `destructive_intent()` replaces `\b(drop|delete|…|update|create)\b` over raw
+  English. It refused `"update me on the delayed shipments"` and `"cost by
+  drop-off point"`, and missed `"wipe all supplier records"`, `"remove the
+  inventory table"`, `"erase everything in inventory"`. Now SQL-statement shapes
+  + (mutation verb → data object), benign idioms stripped first, copula-preceded
+  verbs ignored; refusals carry an auditable cause. Enforcement is unchanged —
+  `sql_guardrail`'s sqlglot AST check was always the real gate.
+- `RAG_KEYWORDS` fired on the bare openers `what does` / `explain`, so analytics
+  questions were answered from the supplier-contract corpus. Now requires a
+  document noun.
+- Dead branch: `\b(utilis|utiliz|how full|usage)\b` could not match the word
+  "utilisation" (trailing `\b` fails before "ation"). Hidden because the golden
+  question hits L0 certified. Now `utilis\w*`.
+- `packs/dms/semantic/vocabulary.py` (new) — business phrasing → router
+  vocabulary in front of L1, the idea already declared as `synonyms:` on every
+  metric and read by nothing. **Slots stay on the original question**, so a
+  rewrite of the words can never move a number, a threshold or a direction;
+  asserted by test.
+
+**Perf — 85% of query latency was overhead, not work.** Single-thread
+**1090 ms → 80 ms/query (13.6×)**; 8-thread **3.4 → 38.5 q/s (11.3×)**, p50
+**1694 → 95 ms**, p95 **6048 → 727 ms**, errors 2 → 0. `pytest tests/dms`
+339 s → 156 s.
+- fresh DuckDB connection per question (~500 ms) → one cached read-only instance
+  per process, cursor per caller. A read-write open **evicts** the cached reader
+  first — DuckDB refuses two connections to one file with different
+  configurations, and without eviction the cached reader locks the writer out of
+  its own process (caught by the suite, fixed).
+- `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX` script on **every** query
+  (~440 ms, maintaining an index that is never read) → once per process
+- `Path.resolve()` / `mkdir()` per query → once
+- `table_row_counts` / `preview_table` are pure reads and no longer take the
+  write lock
+
+**Root cause found for the documented flaky golden benchmark.** `STATUS.md`
+recorded the cause as unestablished and suspected `packs/data/dms_ops.db`
+(SQLite). It is `data/dms_demo.duckdb`: DuckDB takes an **exclusive** file lock
+for read-write connections, so a live API process locks the benchmark out —
+`IO Error: … used by another process. File is already open in … (PID 27532)`.
+`get_connection(..., read_only=True)` + `DMS_READ_ONLY_QUERIES` fixes it (3
+consecutive clean runs with the server up). The same flag is the prerequisite for
+running more than one reader process — writer caveat documented in the audit.
+
+**Docs:** `docs/dms/ROUTER_STATES.md` (complete two-router state map, live-probed,
+including the finding that `query_skill` has 42 stored skills and 0 retrievals),
+`docs/dms/FOUNDATION_AUDIT_2026-07-27.md` (layer-by-layer vs Databricks/Snowflake,
+measured; the lakehouse is `built` but holds zero tables and the answer engine
+does not read from it).
+
+**Tests:** `test_destructive_intent.py` (30 cases), `test_vocabulary_normalization.py`
+(invariants: comparisons, directions, numbers and entities must survive
+normalization). Suite **668 passed, 6 skipped, 0 failures** with
+`DMS_READ_ONLY_QUERIES` both ON and OFF.
+
+## Seek learning UI + G2.3 Claude handoff — 2026-07-27
+
+- Seek UI: `value_why`, learned chip, Accept/Dismiss → `/outcome`, history, Not audited
+- Proxies: `/api/cortex/goals/{id}/outcome`, `/values`
+- G2.2 acknowledged SHIPPED; next Claude locked to G2.3 OSR
+  `docs/dms/packets/CURSOR_TO_CLAUDE_G2_3_OSR_2026-07-27.md`
+- `NEXT_LANES.md` refreshed
+
+## Seek UI + G2.2 Claude handoff — 2026-07-26
+
+- AirGPT Platform **Seek** page: bind `EnterpriseGoal` → Seek now → assumptions + proposals
+- Proxies: `/api/cortex/goals*`, `/api/engine/seek` (+ cortex_client helpers)
+- G2.0/G2.1 acknowledged SHIPPED (Claude); next packet
+  `docs/dms/packets/CURSOR_TO_CLAUDE_G2_2_ACTION_VALUE_2026-07-26.md`
+- Standing continue file: `docs/dms/packets/NEXT_LANES.md`
+
+## Cursor lane — Routines/Apps UI + G2 Claude handoff — 2026-07-26
+
+- AirGPT: Routines page → Cortex draft/preview/Create (`/api/cortex/routines*`)
+- AirGPT: Apps hub Cortex packages → `about` / `explained_reasons` / Dockerize (`/api/cortex/apps*`)
+- `cortex_client` helpers + clipdrop proxies (namespaced away from AirGPT `/api/apps` ports)
+- Removed redundant `monkeypatch.chdir` from DMS route fixtures
+- Claude build packet: `docs/dms/packets/CURSOR_TO_CLAUDE_G2_SEEK_2026-07-26.md` (G2.0/G2.1)
+
+## G2 plan — enterprise gen-cFSM loop — 2026-07-26
+
+- **Plan only (no runtime):** `docs/strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md`
+- **Key idea:** proactive-first (actively seek ethical enterprise goal; reactive ingress secondary)
+- Open-set interrupt path + JEPA action-value + DAG gen + ActionEvent compress/uplink +
+  pattern-armed assist + signed update port / minimal OAuth
+- Wired: `CORTEX_FINAL_GOAL.md`, PARKING_LOT **P21**, `STATUS.md`, `P0_INDEX.md` G2,
+  G1 continuation, master-plan H3 bridge
+- **Next code when owner asks:** G2.0 → G2.1 (seeker + silence litmus)
+
+## Oracle-scale E0 — engine unlock + memory/A2A/MCP — 2026-07-24
+
+- **A1 Autostart:** `scripts/install_engine_autostart.ps1`, hardened `start_cortex_engine.ps1` (pid/url hint, DryRun, port 8010); AirGPT `cortex_client.ensure_engine` / `spawn_engine` with `CORTEX_AUTOSPAWN`
+- **A2 Run plan:** `CortexOS/execution/run_plan.py` + `POST /api/engine/run` — dispatches dag/rag/memory/ontology; marketplace → `adapter_unavailable`
+- **A3 RAG DAG:** `RAG_RETRIEVE` / `RAG_RERANK` / `RAG_ANSWER` nodes + Modular-RAG templates (basic/high/max) in `CortexOS/rag/{lexical,templates}.py`
+- **A4 Memory:** `factory.get_store` (RawKnn), `MemoryContextProvider`, `semantic_cache`
+- **A5 A2A:** in-process runtime + `POST /a2a/messages`; DAG `A2A_CALL` executor
+- **A6 MCP (read-only):** `GET /mcp/tools`, `POST /mcp/call` — answer_engine / lakehouse / agent.status
+- **AirGPT B1–B4:** optional rerank (`AIRGPT_RERANK=1`), adaptive depth from benchmark, sqlite-vec install helper, citation chips + files-surfed + stream-guarded confirms
 ## CI/branch hygiene — 2026-07-25
 
 - **Branches:** deleted remote `feat/context-engineering` (merged) and `netie-engine`

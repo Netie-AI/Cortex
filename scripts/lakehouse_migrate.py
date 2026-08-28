@@ -11,10 +11,12 @@ Run: python -m scripts.lakehouse_migrate
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Any
 
-from packs.dms.lakehouse.catalog import connect, lakehouse_mode
 from packs.dms.lakehouse import tables as lt
+from packs.dms.lakehouse.catalog import connect, lakehouse_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "data" / "samples"
@@ -117,6 +119,7 @@ def migrate_all() -> dict:
         gold = migrate_gold(con)
     finally:
         con.close()
+    warehouse = sync_warehouse_from_silver()
     try:
         from packs.dms.audit import ledger
 
@@ -124,10 +127,91 @@ def migrate_all() -> dict:
                       {"mode": lakehouse_mode(),
                        "bronze": sum(bronze.values()),
                        "silver": sum(silver.values()),
-                       "gold": sum(gold.values())})
+                       "gold": sum(gold.values()),
+                       "warehouse_sync": warehouse})
     except Exception:  # noqa: BLE001
         pass
-    return {"mode": lakehouse_mode(), "bronze": bronze, "silver": silver, "gold": gold}
+    return {
+        "mode": lakehouse_mode(),
+        "bronze": bronze,
+        "silver": silver,
+        "gold": gold,
+        "warehouse_sync": warehouse,
+    }
+
+
+def sync_warehouse_from_silver() -> dict[str, Any]:
+    """Copy lake.silver.* into data/dms_demo.duckdb so Q2 SQL keeps working.
+
+    Answer engine / semantic SQL use unqualified table names (inventory, …).
+    After medallion migrate (or Studio promote), this makes Q2 read silver data.
+    """
+    from CortexOS.dms.warehouse_db import KNOWN_TABLES
+    from CortexOS.execution.warehouse import connect_write, warehouse_path
+
+    out: dict[str, Any] = {"ok": False, "tables": {}, "source": "lake.silver"}
+    home = Path(os.environ.get("DMS_LAKEHOUSE_HOME") or ROOT / "data" / "lakehouse")
+    mode = lakehouse_mode()
+    # Probe silver inventory without holding the catalog open during warehouse write.
+    try:
+        lake = connect(read_only=True)
+        try:
+            silver_names = {
+                r[0]
+                for r in lake.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_catalog = 'lake' AND table_schema = 'silver'"
+                ).fetchall()
+            }
+        finally:
+            lake.close()
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = repr(exc)
+        return out
+    if not silver_names:
+        out["error"] = "no silver tables"
+        return out
+
+    db = warehouse_path()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    wh = connect_write(db)
+    try:
+        if mode == "ducklake":
+            wh.execute("INSTALL ducklake")
+            wh.execute("LOAD ducklake")
+            cat = (home / "catalog.sqlite").as_posix()
+            data = (home / "data").as_posix()
+            try:
+                wh.execute(
+                    f"ATTACH 'ducklake:sqlite:{cat}' AS lake_src "
+                    f"(DATA_PATH '{data}', READ_ONLY)"
+                )
+            except Exception:
+                pass
+            src_prefix = "lake_src.silver"
+        else:
+            fb = (home / "fallback.duckdb").as_posix()
+            try:
+                wh.execute(f"ATTACH '{fb}' AS lake_src (READ_ONLY)")
+            except Exception:
+                pass
+            src_prefix = "lake_src.silver"
+
+        for t in KNOWN_TABLES:
+            if t not in silver_names:
+                continue
+            try:
+                wh.execute(f"DROP TABLE IF EXISTS {t}")
+                wh.execute(f"CREATE TABLE {t} AS SELECT * FROM {src_prefix}.{t}")
+                n = wh.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                out["tables"][t] = int(n)
+            except Exception as exc:  # noqa: BLE001
+                out["tables"][t] = f"error:{exc}"
+        out["ok"] = any(isinstance(v, int) for v in out["tables"].values())
+        out["path"] = str(db)
+    finally:
+        wh.close()
+    return out
 
 
 def main() -> None:
@@ -136,6 +220,8 @@ def main() -> None:
     for layer in ("bronze", "silver", "gold"):
         total = sum(result[layer].values())
         print(f"  {layer}: {total} rows across {len(result[layer])} tables")
+    ws = result.get("warehouse_sync") or {}
+    print(f"  warehouse_sync: ok={ws.get('ok')} tables={ws.get('tables')}")
     print(f"tables now: {lt.list_tables()}")
 
 

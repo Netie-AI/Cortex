@@ -51,6 +51,7 @@ RBAC + ledger enforced, **identically for human and agent** (the ontology spine,
    context) with contracts, examples, and auth. The API *is* the product; its docs are part of the product.
 2. **Whitepaper** — the design thesis: ontology-as-memory + LLM-as-reasoner + actions-as-only-write-path;
    why the dual-brain split; how governance stays identical across hosted and self-host.
+   **Canonical file:** [`CORTEX_WHITEPAPER.md`](CORTEX_WHITEPAPER.md) (P18 thesis + ecosystem + branch map).
 3. **Full, thorough understanding (architecture reference)** — built on the O2 codebase map + the dual-brain
    plan, so adoption, configuration, and contribution never require tribal knowledge.
 
@@ -66,3 +67,22 @@ RBAC + ledger enforced, **identically for human and agent** (the ontology spine,
 
 > One-line test for any proposed work: *"Does this make the engine better, or is it just another app on top?"*
 > If the latter, it belongs in a consumer pack, not in Cortex.
+
+---
+
+## Enterprise objective binding (consumer goals on the engine)
+
+Cortex does **not** become a “make money” app. Consumer orgs **bind** an ethical enterprise-value
+goal to the engine’s gen-cFSM + JEPA stack:
+
+- **Key posture — proactive first:** the engine **actively seeks** the bound goal (predict needs,
+  prep work, close loops) even when the user is silent. Reactive inbox/event handling is secondary.
+  Litmus: *if nobody messages for an hour, does the engine still advance \(g\) safely?*
+- **Objective:** increase enterprise value (revenue / margin / retention / cash) **ethically** —
+  safe, secure, consentful, non-deceptive; F5/F7 vetoes always outrank collapse scores.
+- **Everyday loop:** proactive seeker → JEPA-rank next actions → constrained DAGs → audit →
+  compressible action traces; open-set ingress (email/chat/ops) interrupts when novel work arrives.
+- **Local continuity:** signed daily update port + minimal OAuth (account/device) so self-host
+  stays current without a fat shared control plane — see P17 + **P21**.
+
+Full program: `docs/strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md` (phases G2.0–G2.6).

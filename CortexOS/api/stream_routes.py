@@ -1,6 +1,6 @@
 """S0 — OpenDMS streaming intake API (register streams, post events → bronze)."""
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -19,8 +19,8 @@ class CreateStreamRequest(BaseModel):
 
 
 class EventsRequest(BaseModel):
-    events: Optional[list[dict]] = None
-    event: Optional[dict] = None
+    events: list[dict] | None = None
+    event: dict | None = None
 
 
 @router.post("")

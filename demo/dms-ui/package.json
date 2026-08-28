@@ -5,16 +5,23 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3000"
+    "start": "next start -p 3000",
+    "test:e2e": "playwright test",
+    "test:e2e:reliability": "playwright test e2e/reliability.spec.js"
   },
   "dependencies": {
-    "next": "14.2.0",
+    "next": "14.2.35",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "recharts": "^2.12.0",
     "swr": "^2.2.5"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7"
+    "@babel/core": "^7.29.7",
+    "@playwright/test": "^1.49.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.26",
+    "nanoid": "^3.3.18"
   }
 }

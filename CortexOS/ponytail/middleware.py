@@ -27,7 +27,7 @@ import hashlib
 import json
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 BIG_API_PLACEHOLDER = os.getenv("ANTHROPIC_API_KEY", "")
 
@@ -41,7 +41,7 @@ def _cache_key(text: str, user_id: str) -> str:
     return hashlib.sha256(f"{user_id}:{text}".encode()).hexdigest()[:16]
 
 
-def _cache_get(key: str) -> Optional[dict]:
+def _cache_get(key: str) -> dict | None:
     entry = _CACHE.get(key)
     if entry and (time.time() - entry["ts"]) < _CACHE_TTL:
         return entry["value"]
@@ -219,7 +219,7 @@ def ponytail_process(
     raw_text: str,
     user_id: str = "anon",
     intent_hint: str = "",
-    force_tier: Optional[str] = None,
+    force_tier: str | None = None,
     use_cache: bool = True,
 ) -> dict:
     """

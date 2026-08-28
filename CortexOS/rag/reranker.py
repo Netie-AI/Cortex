@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
 from netie.rag.fuser_rrf import FusedHit
 
 log = logging.getLogger(__name__)
@@ -96,7 +95,7 @@ class BGEReranker:
             return [RankedHit(hit=h, rerank_score=0.0) for h in hits[:top_n]]
 
         ranked = sorted(
-            zip(scores, hits),
+            zip(scores, hits, strict=False),
             key=lambda x: x[0],
             reverse=True,
         )

@@ -9,7 +9,7 @@ No from __future__ import annotations (FastAPI rule).
 Pydantic models at module level.
 """
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -23,30 +23,31 @@ router = APIRouter(prefix="/dms/brain", tags=["brain"])
 
 class BrainRunRequest(BaseModel):
     intent: str
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
     actor: str = "user"
 
 
 class ChartRequest(BaseModel):
     query: str
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
 
 
 class ExportRequest(BaseModel):
     query: str
-    table: str = "dms_inventory"
+    table: str = "inventory"
     limit: int = 5000
+    format: str = "csv"  # csv | parquet
 
 
 class EmailRequest(BaseModel):
     request: str
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
     actor: str = "user"
 
 
 class WhatsAppRequest(BaseModel):
     request: str
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
 
 
 class AnalyzeRequest(BaseModel):
@@ -60,16 +61,16 @@ class ReportRequest(BaseModel):
 
 class TaskSuggestRequest(BaseModel):
     use_llm: bool = False
-    trigger_text: Optional[str] = None
+    trigger_text: str | None = None
 
 
 class TaskChoiceRequest(BaseModel):
     task_id: str
     accepted: bool
     actor: str = "user"
-    filled_template: Optional[Dict[str, Any]] = None
-    message_id: Optional[str] = None
-    thread_id: Optional[str] = None
+    filled_template: dict[str, Any] | None = None
+    message_id: str | None = None
+    thread_id: str | None = None
 
 
 class TaskOutcomeRequest(BaseModel):
@@ -81,40 +82,107 @@ class PonytailRequest(BaseModel):
     text: str
     user_id: str = "anon"
     intent_hint: str = ""
-    force_tier: Optional[str] = None
+    force_tier: str | None = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _get_db_data(table: str, limit: int = 5000) -> List[Dict]:
-    """Pull data from DuckDB for generative tasks."""
+_TABLE_ALIASES = {
+    "dms_inventory": "inventory",
+    "dms_transactions": "transactions",
+    "dms_suppliers": "suppliers",
+    "dms_locations": "locations",
+    "dms_shipments": "shipments",
+    "dms_alerts": "alerts",
+}
+
+
+def _resolve_export_table(table: str) -> str:
+    from CortexOS.dms.warehouse_db import KNOWN_TABLES
+
+    name = _TABLE_ALIASES.get((table or "").strip().lower(), (table or "").strip().lower())
+    if name not in KNOWN_TABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown table {table!r}. Allowed: {', '.join(KNOWN_TABLES)}",
+        )
+    return name
+
+
+def _get_db_data(table: str, limit: int = 5000) -> list[dict]:
+    """Pull allowlisted warehouse rows via the C4 connection helper (read-only)."""
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
+
+    name = _resolve_export_table(table)
+    lim = max(1, min(int(limit or 5000), 50_000))
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
-        import duckdb
-        db = duckdb.connect("data/dms_analytics.db", read_only=True)
-        df = db.execute(f"SELECT * FROM {table} LIMIT {limit}").df()
-        return df.to_dict(orient="records")
-    except Exception:
-        return []
+        rel = con.execute(f"SELECT * FROM {name} LIMIT {lim}")
+        cols = [d[0] for d in rel.description]
+        return [dict(zip(cols, row, strict=True)) for row in rel.fetchall()]
+    finally:
+        con.close()
 
 
-def _get_warehouse_context() -> Dict[str, Any]:
-    """Build warehouse context for AI tasks."""
-    ctx: Dict[str, Any] = {}
-    for table in ["dms_inventory", "dms_sales", "dms_movements"]:
-        try:
-            import duckdb
-            db = duckdb.connect("data/dms_analytics.db", read_only=True)
-            df = db.execute(f"SELECT * FROM {table} LIMIT 200").df()
-            ctx[table] = {
-                "row_count": len(df),
-                "columns": list(df.columns),
-                "sample": df.head(3).to_dict(orient="records"),
-            }
-            if len(df) > 0:
-                ctx[table]["stats"] = df.describe(include="all").fillna("").to_dict()
-        except Exception:
-            pass
-    return ctx
+def _export_parquet_snapshot(table: str, limit: int = 5000) -> dict[str, Any]:
+    """Write one isolated Parquet file (Power BI-safe — never the DuckLake folder)."""
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
+
+    name = _resolve_export_table(table)
+    lim = max(1, min(int(limit or 5000), 50_000))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    root = Path(os.environ.get("DMS_EXPORT_DIR") or (Path(DEFAULT_DB).resolve().parent / "exports"))
+    out_dir = root / f"export_{stamp}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{name}.parquet"
+
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    try:
+        # Identifier already allowlisted; limit is int-bounded.
+        con.execute(
+            f"COPY (SELECT * FROM {name} LIMIT {lim}) TO ? (FORMAT PARQUET)",
+            [str(out_path)],
+        )
+        row = con.execute(f"SELECT COUNT(*) FROM {name}").fetchone()
+        total = int(row[0]) if row else 0
+    finally:
+        con.close()
+
+    exported = min(total, lim)
+    return {
+        "filename": out_path.name,
+        "path": str(out_path),
+        "directory": str(out_dir),
+        "row_count": exported,
+        "table": name,
+        "format": "parquet",
+        "summary": (
+            f"Isolated Parquet snapshot of {name} ({exported} rows). "
+            "Point Power BI at this file — not the DuckLake folder."
+        ),
+        "requires_confirm": False,
+    }
+
+
+def _get_warehouse_context() -> dict[str, Any]:
+    """Build warehouse context for AI tasks from allowlisted row counts only."""
+    try:
+        from CortexOS.dms.warehouse_db import table_row_counts
+
+        return {"row_counts": table_row_counts()}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -141,9 +209,15 @@ def brain_chart(req: ChartRequest, caller: Caller = Depends(require_role("viewer
 
 @router.post("/export")
 def brain_export(req: ExportRequest, caller: Caller = Depends(require_role("steward"))):
-    """Export warehouse table as CSV."""
+    """Export an allowlisted warehouse table as CSV or an isolated Parquet snapshot."""
     from packs.dms.generative.brain import export_csv
+
     _ = caller
+    fmt = (req.format or "csv").strip().lower()
+    if fmt == "parquet":
+        return _export_parquet_snapshot(req.table, req.limit)
+    if fmt != "csv":
+        raise HTTPException(status_code=400, detail="format must be 'csv' or 'parquet'")
     rows = _get_db_data(req.table, req.limit)
     return export_csv(req.query, rows)
 
@@ -198,12 +272,13 @@ def brain_report(req: ReportRequest, caller: Caller = Depends(require_role("view
 @router.post("/suggest")
 def task_suggest(req: TaskSuggestRequest, caller: Caller = Depends(require_role("viewer"))):
     """Return ranked task suggestions based on warehouse state."""
-    from packs.dms.tasks.suggest import suggest
     import sqlite3
+
+    from packs.dms.tasks.suggest import suggest
 
     _ = caller
     db_path = os.environ.get("DMS_OPS_DB") or os.environ.get("SQLITE_DB_PATH", "data/dms_ops.db")
-    state: Dict[str, Any] = {"items": [], "locations": [], "recent_movements": [], "compliance_flags": []}
+    state: dict[str, Any] = {"items": [], "locations": [], "recent_movements": [], "compliance_flags": []}
     try:
         with sqlite3.connect(db_path) as conn:
             # Items

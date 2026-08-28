@@ -33,12 +33,30 @@ metrics:
 
   - id: expired_items
     kind: listing
-    synonyms: ["expired", "past expiry", "out of date"]
+    synonyms: ["expired", "past expiry", "out of date", "show expired", "list expired"]
     result_columns: [sku]
     sql: >
       SELECT sku FROM inventory
       WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
       ORDER BY expiry_date ASC
+
+  - id: expired_count
+    kind: scalar
+    synonyms: ["how many expired", "count expired", "number of expired", "expired count"]
+    result_columns: [expired_count]
+    sql: >
+      SELECT COUNT(*) AS expired_count FROM inventory
+      WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE
+
+  - id: expired_last_month
+    kind: scalar
+    synonyms: ["expired last month", "how many expired last month", "expired previous month"]
+    result_columns: [expired_count]
+    sql: >
+      SELECT COUNT(*) AS expired_count FROM inventory
+      WHERE expiry_date IS NOT NULL
+        AND date_trunc('month', CAST(expiry_date AS DATE))
+          = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 
   - id: stale_restock
     kind: listing
@@ -82,11 +100,14 @@ metrics:
     result_columns: [sku, sales_value_myr]
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type = 'OUT'
-      GROUP BY sku ORDER BY sales_value_myr {direction}, sku ASC LIMIT {limit}
+      FROM transactions WHERE txn_type = 'OUT' {exclude_skus}
+      GROUP BY sku ORDER BY sales_value_myr {direction}, sku ASC
+      LIMIT {limit}{offset_clause}
     params:
       limit: {kind: int, default: 5, min: 1, max: 1000}
+      offset_clause: {kind: offset_clause, default: 0, optional: true}
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
+      exclude_skus: {kind: not_in, column: sku, optional: true, resolve: true}
 
   - id: sales_by_volume
     kind: ranked
@@ -94,11 +115,28 @@ metrics:
     result_columns: [sku, total_sold_kg]
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
-      FROM transactions WHERE txn_type = 'OUT'
-      GROUP BY sku ORDER BY total_sold_kg {direction}, sku ASC LIMIT {limit}
+      FROM transactions WHERE txn_type = 'OUT' {exclude_skus}
+      GROUP BY sku ORDER BY total_sold_kg {direction}, sku ASC
+      LIMIT {limit}{offset_clause}
     params:
       limit: {kind: int, default: 5, min: 1, max: 1000}
+      offset_clause: {kind: offset_clause, default: 0, optional: true}
       direction: {kind: enum, values: [ASC, DESC], default: DESC}
+      exclude_skus: {kind: not_in, column: sku, optional: true, resolve: true}
+
+  - id: revenue_total
+    kind: scalar
+    synonyms:
+      - "total revenue"
+      - "what was total revenue"
+      - "overall revenue"
+      - "all-time revenue"
+      - "total sales"
+    result_columns: [revenue_myr]
+    sql: >
+      SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
+      FROM transactions
+      WHERE txn_type = 'OUT'
 
   - id: revenue_windowed
     kind: scalar
@@ -110,6 +148,17 @@ metrics:
       WHERE txn_type = 'OUT' AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL {days} DAY
     params:
       days: {kind: int, default: 30, min: 1, max: 3650}
+
+  - id: revenue_last_month
+    kind: scalar
+    synonyms: ["last month sales", "sales last month", "revenue last month", "last month revenue"]
+    result_columns: [revenue_myr]
+    sql: >
+      SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
+      FROM transactions
+      WHERE txn_type = 'OUT'
+        AND date_trunc('month', CAST("timestamp" AS TIMESTAMP))
+          = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 
   # ── shipments ───────────────────────────────────────────────────────────────
   - id: shipments_by_status

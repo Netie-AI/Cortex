@@ -1,7 +1,6 @@
 import time
 
 import litellm
-
 from netie.routing.adapters._litellm_util import litellm_completion_to_adapter_response
 from netie.routing.adapters.base import AdapterRequest, AdapterResponse, LLMAdapter
 

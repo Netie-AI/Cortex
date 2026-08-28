@@ -248,8 +248,15 @@ def compile_to_sqlite(
                 "(id, from_object, from_property, to_object, to_property, cardinality) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 [
-                    (l.id, l.from_object, l.from_property, l.to_object, l.to_property, l.cardinality)
-                    for l in links
+                    (
+                        link.id,
+                        link.from_object,
+                        link.from_property,
+                        link.to_object,
+                        link.to_property,
+                        link.cardinality,
+                    )
+                    for link in links
                 ],
             )
             conn.executemany(

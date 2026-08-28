@@ -2,6 +2,10 @@
 id: inventory_silver
 source: bronze.inventory_raw
 target: silver.inventory
+lineage: aggregate
+lineage_reason: >
+  Transform projects typed business columns only; bronze provenance columns are
+  not yet selected into silver. Drill-through uses bronze until C9 propagate.
 transform_sql: |
   SELECT
     sku,

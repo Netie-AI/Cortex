@@ -32,9 +32,10 @@ import json
 import sqlite3
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
+from netie.memory.scope import normalize_scope, sql_entry_subseteq_session
 from netie.memory.store import Hit, MemoryRecord, Scope
 
 _MANIFEST = "manifest.json"
@@ -63,7 +64,7 @@ class RawKnnStore:
                 raise ValueError(
                     f"dim mismatch: store has {self._manifest['dim']}, got {dim}")
             self._manifest["dim"] = dim
-        self._db = sqlite3.connect(self.root / _META)
+        self._db = sqlite3.connect(self.root / _META, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(
             """CREATE TABLE IF NOT EXISTS records(
@@ -73,6 +74,25 @@ class RawKnnStore:
                  tier TEXT NOT NULL DEFAULT 'warm', created_at REAL NOT NULL)""")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS ix_scope_coll ON records(scope, collection)")
+        # C6: entry_scope tags — subset filter lives in SQL (NOT EXISTS), not post-rank.
+        self._db.execute(
+            """CREATE TABLE IF NOT EXISTS scope_tags(
+                 record_id TEXT NOT NULL,
+                 tag TEXT NOT NULL,
+                 PRIMARY KEY (record_id, tag),
+                 FOREIGN KEY (record_id) REFERENCES records(id) ON DELETE CASCADE)""")
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS ix_scope_tags_tag ON scope_tags(tag)")
+        # Backfill tags for pre-C6 rows so subset filter cannot treat empty as universal.
+        missing = self._db.execute(
+            """SELECT id, scope FROM records r
+               WHERE NOT EXISTS (SELECT 1 FROM scope_tags t WHERE t.record_id = r.id)"""
+        ).fetchall()
+        if missing:
+            self._db.executemany(
+                "INSERT OR IGNORE INTO scope_tags(record_id, tag) VALUES(?,?)",
+                [(rid, (scope or "personal")) for rid, scope in missing],
+            )
         self._db.commit()
 
     # ── manifest / file plumbing ──────────────────────────────────────────
@@ -132,13 +152,26 @@ class RawKnnStore:
                          role=excluded.role, tier=excluded.tier""",
                     (r.id, row, r.text, json.dumps(r.meta or {}), r.scope,
                      r.collection, r.role, r.tier, r.created_at or time.time()))
+                tags = normalize_scope(r.entry_scope) or frozenset({r.scope})
+                self._db.execute("DELETE FROM scope_tags WHERE record_id=?", (r.id,))
+                self._db.executemany(
+                    "INSERT INTO scope_tags(record_id, tag) VALUES(?,?)",
+                    [(r.id, t) for t in sorted(tags)],
+                )
                 n_written += 1
         self._db.commit()
         self._save_manifest()
         return n_written
 
-    def query(self, vector: list[float], *, k: int = 5,
-              scope: Scope | None = None, collection: str | None = None) -> list[Hit]:
+    def query(
+        self,
+        vector: list[float],
+        *,
+        k: int = 5,
+        scope: Scope | None = None,
+        collection: str | None = None,
+        session_scope: frozenset[str] | None = None,
+    ) -> list[Hit]:
         np = _np()
         n, d = int(self._manifest["count"]), int(self._manifest["dim"])
         if n == 0 or d == 0:
@@ -147,42 +180,53 @@ class RawKnnStore:
         nrm = self._mmap(_NORMS, (n,))
         q = np.asarray(vector, dtype=np.float32)
         qn = float(np.linalg.norm(q)) or 1.0
-        if not scope and not collection:
-            # Unfiltered fast path: score every row straight off the map, then
-            # SELECT only the winning k rows (avoids a full-table SQL fetch).
-            denom = np.asarray(nrm) * qn
+
+        sess = normalize_scope(session_scope) if session_scope is not None else None
+        # Filtered path when collection, legacy scope, or C6 session_scope is set.
+        # session_scope uses SQL NOT EXISTS (entry ⊆ session) before vector gather.
+        if sess is not None or scope or collection:
+            cond, args = [], []
+            if sess is not None:
+                clause, s_args = sql_entry_subseteq_session(session_tags=sess)
+                cond.append(clause)
+                args.extend(s_args)
+            elif scope:
+                cond.append("scope=?")
+                args.append(scope)
+            if collection:
+                cond.append("collection=?")
+                args.append(collection)
+            cands = self._db.execute(
+                "SELECT id,row,text,meta FROM records r WHERE " + " AND ".join(cond),
+                args,
+            ).fetchall()
+            if not cands:
+                return []
+            rows = np.array([c[1] for c in cands], dtype=np.int64)
+            mat = np.asarray(mm[rows])                  # gather only candidate rows
+            denom = np.asarray(nrm[rows]) * qn
             denom[denom == 0] = 1.0
-            scores_by_row = (mm @ q) / denom
-            top_rows = np.argsort(-scores_by_row)[:k]
-            marks = ",".join("?" * len(top_rows))
-            got = {int(r): (i, t, m) for i, r, t, m in self._db.execute(
-                f"SELECT id,row,text,meta FROM records WHERE row IN ({marks})",
-                [int(r) for r in top_rows]).fetchall()}
+            scores = (mat @ q) / denom
+            top = np.argsort(-scores)[:k]
             return [
-                Hit(got[int(r)][0], float(scores_by_row[r]), got[int(r)][1],
-                    json.loads(got[int(r)][2] or "{}"))
-                for r in top_rows if int(r) in got
+                Hit(cands[i][0], float(scores[i]), cands[i][2], json.loads(cands[i][3] or "{}"))
+                for i in top
             ]
-        # Filtered path — D6: SQL prefilter before touching vector bytes.
-        cond, args = [], []
-        if scope:
-            cond.append("scope=?"); args.append(scope)
-        if collection:
-            cond.append("collection=?"); args.append(collection)
-        cands = self._db.execute(
-            "SELECT id,row,text,meta FROM records WHERE " + " AND ".join(cond), args
-        ).fetchall()
-        if not cands:
-            return []
-        rows = np.array([c[1] for c in cands], dtype=np.int64)
-        mat = np.asarray(mm[rows])                  # gather only candidate rows
-        denom = np.asarray(nrm[rows]) * qn
+
+        # Unfiltered fast path: score every row straight off the map, then
+        # SELECT only the winning k rows (avoids a full-table SQL fetch).
+        denom = np.asarray(nrm) * qn
         denom[denom == 0] = 1.0
-        scores = (mat @ q) / denom
-        top = np.argsort(-scores)[:k]
+        scores_by_row = (mm @ q) / denom
+        top_rows = np.argsort(-scores_by_row)[:k]
+        marks = ",".join("?" * len(top_rows))
+        got = {int(r): (i, t, m) for i, r, t, m in self._db.execute(
+            f"SELECT id,row,text,meta FROM records WHERE row IN ({marks})",
+            [int(r) for r in top_rows]).fetchall()}
         return [
-            Hit(cands[i][0], float(scores[i]), cands[i][2], json.loads(cands[i][3] or "{}"))
-            for i in top
+            Hit(got[int(r)][0], float(scores_by_row[r]), got[int(r)][1],
+                json.loads(got[int(r)][2] or "{}"))
+            for r in top_rows if int(r) in got
         ]
 
     def evict(self, *, policy: str = "cold", max_keep: int | None = None) -> int:

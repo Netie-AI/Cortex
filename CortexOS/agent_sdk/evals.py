@@ -13,9 +13,10 @@ evals harness ships unverifiable agents.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from CortexOS.ontology.registry import load_action_types, load_object_types, pack_dir_for
 

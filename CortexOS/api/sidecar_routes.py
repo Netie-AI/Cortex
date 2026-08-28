@@ -16,7 +16,7 @@ Denial verdicts map to status codes (403 rbac/filter_hidden, 404 unknown,
 409 confirm_required) with {"verdict": ...} detail so the client can react.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -38,14 +38,14 @@ class ClassifyRequest(BaseModel):
 class AuditAppendRequest(BaseModel):
     actor: str = "airgpt"
     event_type: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("/dms/secure")
 def dms_secure(
     req: SecureRequest,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from packs.dms import secure_message
 
     _ = caller
@@ -57,7 +57,7 @@ def dms_secure(
 def dms_classify(
     req: ClassifyRequest,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from packs.dms import classify_message
 
     _ = caller
@@ -68,7 +68,7 @@ def dms_classify(
 def dms_audit_append(
     req: AuditAppendRequest,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from packs.dms import append_ledger
 
     # Actor comes from the authenticated key; client-supplied actor is
@@ -81,7 +81,7 @@ def dms_audit_append(
 
 @router.get("/dms/audit/verify")
 @router.post("/dms/audit/verify")
-def dms_audit_verify(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+def dms_audit_verify(caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     from packs.dms import verify_ledger
 
     _ = caller
@@ -92,7 +92,7 @@ def dms_audit_verify(caller: Caller = Depends(require_role("viewer"))) -> Dict[s
 def dms_audit_tail(
     limit: int = 20,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from dataclasses import asdict
 
     from packs.dms.audit.ledger import list_entries
@@ -105,15 +105,16 @@ def dms_audit_tail(
 
 class QueryObjectsRequest(BaseModel):
     object_type: str
-    filters: Dict[str, Any] = Field(default_factory=dict)
+    filters: dict[str, Any] = Field(default_factory=dict)
     limit: int = 50
+    session_id: str | None = None
 
 
 class CallActionRequest(BaseModel):
     action_id: str
-    params: Dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
     confirmed: bool = False
-    run_id: Optional[str] = None
+    run_id: str | None = None
 
 
 _DENIAL_STATUS = {
@@ -121,7 +122,9 @@ _DENIAL_STATUS = {
     "unregistered": 404,
     "confirm_required": 409,
     "not_invocable": 400,
-    # rbac / filter_hidden / bad_actor and anything new default to 403
+    "session_unbound": 409,
+    "session_expired": 409,
+    # rbac / filter_hidden / bad_actor / path_not_allowed default to 403
 }
 
 
@@ -134,12 +137,17 @@ def _sdk_http_error(exc) -> HTTPException:
 def sidecar_query_objects(
     req: QueryObjectsRequest,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from CortexOS.agent_sdk import SdkDenied, query_objects
 
     try:
         rows = query_objects(
-            req.object_type, req.filters, actor=caller, limit=req.limit, pack="dms"
+            req.object_type,
+            req.filters,
+            actor=caller,
+            limit=req.limit,
+            pack="dms",
+            session_id=req.session_id,
         )
     except SdkDenied as exc:
         raise _sdk_http_error(exc) from exc
@@ -154,7 +162,7 @@ def sidecar_query_objects(
 def sidecar_call_action(
     req: CallActionRequest,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     # Route stays viewer-min ON PURPOSE: the SDK's registry-driven role gate is
     # the single write-path authority (one gate, not two drifting ones), and its
     # denials are ledgered — an HTTP 403 here would be an unaudited refusal.

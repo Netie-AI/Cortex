@@ -6,14 +6,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from netie.config import get_config
 from pydantic import BaseModel, Field
 from starlette.requests import Request
-
-from netie.config import get_config
-from netie.rag.fuser_rrf import FusedHit, fuse_dense_sparse
-from netie.rag.personalization import personalized_score
-from netie.rag.reranker import BGEReranker, RankedHit
-from netie.rag.retriever_sparse import retrieve_sparse
 
 log = logging.getLogger(__name__)
 
@@ -44,25 +39,35 @@ class SearchResponse(BaseModel):
 
 
 def register_search_routes(app: Any) -> None:
-    from fastapi import APIRouter
+    """Always register ``POST /search`` — core profile returns HTTP 501."""
+    from fastapi import APIRouter, HTTPException
 
-    if not hasattr(app.state, "bge_reranker"):
-        app.state.bge_reranker = BGEReranker()
+    from CortexOS.api.feature_stubs import feature_not_installed_detail
+    from CortexOS.packaging import FeatureNotInstalled, extra_available, require_extra
 
-    cfg = get_config()
-    if getattr(app.state, "dense_retriever", None) is None and getattr(
-        cfg, "qdrant_url", None
-    ):
+    if extra_available("rag"):
         try:
-            from netie.rag.retriever_dense import build_dense_retriever
+            from netie.rag.reranker import BGEReranker
 
-            app.state.dense_retriever = build_dense_retriever(
-                qdrant_url=str(cfg.qdrant_url),
-                collection_name=cfg.qdrant_collection_listings,
-                embedder_model=cfg.embedder_model,
-            )
+            if not hasattr(app.state, "bge_reranker"):
+                app.state.bge_reranker = BGEReranker()
+
+            cfg = get_config()
+            if getattr(app.state, "dense_retriever", None) is None and getattr(
+                cfg, "qdrant_url", None
+            ):
+                try:
+                    from netie.rag.retriever_dense import build_dense_retriever
+
+                    app.state.dense_retriever = build_dense_retriever(
+                        qdrant_url=str(cfg.qdrant_url),
+                        collection_name=cfg.qdrant_collection_listings,
+                        embedder_model=cfg.embedder_model,
+                    )
+                except Exception as exc:
+                    log.debug("Dense retriever skipped on startup (%s)", exc)
         except Exception as exc:
-            log.debug("Dense retriever skipped on startup (%s)", exc)
+            log.info("RAG init deferred — /search will 501 until ready (%s)", exc)
 
     router = APIRouter(tags=["search"])
 
@@ -73,6 +78,17 @@ def register_search_routes(app: Any) -> None:
 
     @router.post("/search", response_model=SearchResponse)
     async def search(req: SearchRequest, request: Request) -> SearchResponse:
+        try:
+            require_extra("rag", feature="search")
+        except FeatureNotInstalled as exc:
+            raise HTTPException(
+                status_code=501, detail=feature_not_installed_detail(exc)
+            ) from exc
+
+        from netie.rag.fuser_rrf import fuse_dense_sparse
+        from netie.rag.reranker import BGEReranker
+        from netie.rag.retriever_sparse import retrieve_sparse
+
         engine = getattr(request.app.state, "db_engine", None)
         reranker: BGEReranker = request.app.state.bge_reranker
         dense_retriever = getattr(request.app.state, "dense_retriever", None)
@@ -149,7 +165,7 @@ async def get_interaction_count(engine: Any | None, user_id: str | None) -> int:
 
 
 def apply_personalization(
-    ranked: list[RankedHit],
+    ranked: list[Any],
     *,
     interactions_count: int,
     user_pref_vec: list[float] | None = None,
@@ -157,13 +173,16 @@ def apply_personalization(
     collaborative_resolver: Callable[[str], float] | None = None,
     gamma_one: float = 0.15,
     gamma_two: float = 0.10,
-) -> list[RankedHit]:
+) -> list[Any]:
+    from netie.rag.personalization import personalized_score
+    from netie.rag.reranker import RankedHit
+
     if interactions_count < 5:
         return ranked
     cos_fn = cosine_resolver or (lambda _lid: 0.0)
     col_fn = collaborative_resolver or (lambda _lid: 0.0)
     _ = user_pref_vec  # Future: similarity vs listing embedding derived from prefs
-    out: list[RankedHit] = []
+    out: list[Any] = []
     for r in ranked:
         lid = r.hit.listing_id
         new_score = personalized_score(

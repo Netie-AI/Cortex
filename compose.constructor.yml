@@ -1,0 +1,18 @@
+# Public Constructor on /cortex. Auth stays on.
+# Hyperlift: build this file, not docker-compose.yml (Qdrant) and not Dockerfile.core
+# (Dockerfile.core sets DMS_AUTH_DISABLED=1).
+services:
+  cortex:
+    build:
+      context: .
+      dockerfile: Dockerfile.constructor
+    ports:
+      - "8010:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PACK: dms
+      DMS_REFUSE_DEMO_KEYS: "1"
+      # 127.0.0.1 inside the container is the container, not OpenVault on the VM.
+      OPENVAULT_BASE_URL: http://host.docker.internal:5000
+    restart: unless-stopped

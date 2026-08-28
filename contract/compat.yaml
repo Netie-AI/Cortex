@@ -1,0 +1,78 @@
+# Which contract lines this engine still serves.
+#
+# A consumer pins a MAJOR.MINOR and reads the matching frozen spec beside this
+# file. Listing a version here is a promise: the running engine accepts requests
+# shaped by that spec, and `scripts/check_contract_compat.py` proves each newer
+# minor differs from its predecessor only additively.
+#
+# Rules:
+#   - Add a minor when a field or endpoint is added that an older consumer can
+#     ignore. Both specs stay listed, and both stay on disk.
+#   - Never remove an entry while a consumer might be pinned to it, and never
+#     delete a frozen spec — that strands them with nothing to verify against.
+#   - A breaking change means a new MAJOR and a coordinated consumer release.
+#     It is not a commit.
+
+contract_major: 1
+
+supported:
+  - version: "1.0"
+    spec: openapi-1.0.0.json
+    status: superseded
+    contract_surface: false
+    notes: >
+      NOT a contract surface, and retained only so nothing that fetched it is
+      left with a dangling reference. R1 exported this before
+      CortexOS/api/contract_routes.py existed, so it is a dump of the entire
+      engine route table — 169 operations, none of which are the five contract
+      operationIds. It does carry the Contract* schemas, which is why a consumer
+      generated against it gets the types but no endpoints and has to hand-write
+      every call.
+
+      Consequence for consumers: a client generated from this file must be
+      regenerated from 1.1.0. There is no compatibility to preserve, because
+      there was never a contract surface here to be compatible with.
+
+      Kept on disk, excluded from the pairwise additive check — comparing 169
+      engine routes against 5 contract routes reports 164 phantom removals and
+      buries the real signal.
+
+  - version: "1.1"
+    spec: openapi-1.1.0.json
+    status: supported
+    contract_surface: true
+    notes: >
+      First real contract surface: exactly the five allowlisted operationIds
+      (ask, submit, ledger.append, ledger.verify, tool.registry).
+      Manifest gains pool_id, issued_at, issuer_key_id and per-table
+      row_predicates, all optional on the wire. row_predicate_sql is deprecated
+      but present, so a 1.0 producer still validates. Strictness lives in the
+      verifier (CortexOS.execution.manifest), not the type: a manifest without an
+      issuer is refused at verification, where the refusal can be audited.
+
+  - version: "1.2"
+    spec: openapi-1.2.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive T7 provenance: Answer gains answer_id, assumptions[],
+      contributing_sources[], drillthrough_token; new operationId drillthrough.
+      1.1 clients ignore the new fields. canonical_manifest_bytes unchanged.
+
+deprecated:
+  # Present on the wire, removed at the next major. Consumers should migrate.
+  - field: Manifest.row_predicate_sql
+    since: "1.1"
+    removed_in: "2.0"
+    reason: >
+      One predicate string cannot say which table it applies to, so it cannot be
+      injected per table. Send row_predicates instead.
+
+# Canonicalisation is part of the contract, not an implementation detail: DMS
+# signs the bytes that cortex_contract.canonical_manifest_bytes() produces and
+# Cortex verifies them. contract/testvectors/manifest_canonical.jsonl pins that
+# rule so any language can prove agreement without reimplementing it from prose.
+canonicalisation:
+  function: cortex_contract.execution.canonical_manifest_bytes
+  signature_encoding: unpadded-base64url-ed25519
+  testvectors: testvectors/manifest_canonical.jsonl

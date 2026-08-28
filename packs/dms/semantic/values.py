@@ -15,6 +15,7 @@ from functools import lru_cache
 # Column → source table for the DISTINCT scan.
 VALUE_COLUMNS: dict[str, str] = {
     "category": "inventory",
+    "sku": "transactions",
     "status": "shipments",
     "carrier": "shipments",
     "country": "suppliers",
@@ -22,7 +23,7 @@ VALUE_COLUMNS: dict[str, str] = {
     "severity": "alerts",
     "txn_type": "transactions",
 }
-MAX_VALUES = 200
+MAX_VALUES = 1000
 
 
 @dataclass(slots=True)
@@ -48,11 +49,15 @@ def _sensitive() -> set[str]:
 
 @lru_cache(maxsize=1)
 def _dictionaries() -> dict[str, list[str]]:
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        read_only_queries_enabled,
+    )
 
     sensitive = _sensitive()
     out: dict[str, list[str]] = {}
-    con = get_connection(DEFAULT_DB)
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
         for col, table in VALUE_COLUMNS.items():
             if col in sensitive:
@@ -120,6 +125,31 @@ def resolve(entity_text: str, column: str) -> Resolution:
     by_norm = {norm(v): v for v in values}
     if norm(text) in by_norm:
         return Resolution(by_norm[norm(text)], 0.95, column, [by_norm[norm(text)]])
+
+    # 2b. SKU encoding — bare `BETA` / `00173` → `SKU-BETA` / `SKU-00173`
+    if column == "sku":
+        candidates = []
+        if not lower.startswith("sku"):
+            candidates.append(f"SKU-{text.upper()}")
+            if text.isdigit():
+                candidates.append(f"SKU-{int(text):05d}")
+                candidates.append(f"SKU-{text.zfill(5)}")
+        else:
+            # SKU-BETA already canonical form — still must exist in the dict
+            candidates.append(text.upper())
+            m = re.match(r"^sku[-\s]?(.+)$", text, flags=re.I)
+            if m:
+                rest = m.group(1).strip().upper()
+                candidates.append(f"SKU-{rest}")
+                if rest.isdigit():
+                    candidates.append(f"SKU-{int(rest):05d}")
+        for cand in candidates:
+            if cand in values:
+                return Resolution(cand, 0.95, column, [cand])
+            if cand.lower() in by_lower:
+                return Resolution(by_lower[cand.lower()], 0.95, column, [by_lower[cand.lower()]])
+            if norm(cand) in by_norm:
+                return Resolution(by_norm[norm(cand)], 0.95, column, [by_norm[norm(cand)]])
 
     # 3. location dual-coding
     if column == "location_code":

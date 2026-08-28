@@ -92,11 +92,16 @@ function Wait-HttpOk {
 Set-Location $Root
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-$envFile = Join-Path $Root "env.local"
-if (Import-EnvLocal -Path $envFile) {
-    Write-Ok "Loaded env.local"
+$envCandidates = @(
+    (Join-Path $env:NETIE_SECRETS_DIR "Cortex.env.local"),
+    "D:\NetieSecrets\Cortex.env.local",
+    (Join-Path $Root "env.local")
+) | Where-Object { $_ -and $_.Trim() }
+$envFile = $envCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($envFile -and (Import-EnvLocal -Path $envFile)) {
+    Write-Ok "Loaded secrets from $envFile"
 } else {
-    Write-Warn "No env.local - LLM features use mock mode. Copy env.local.example to env.local"
+    Write-Warn "No env.local — put secrets at D:\NetieSecrets\Cortex.env.local (outside the repo). LLM features use mock mode."
 }
 
 $env:PYTHONPATH = $Root

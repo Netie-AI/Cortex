@@ -1,5 +1,9 @@
+import numpy as np
+from netie.result import Ok, Result
 from rank_bm25 import BM25Okapi
-from .skill_registry import SkillRegistry, SkillCard
+
+from .skill_registry import SkillCard, SkillRegistry
+
 
 def _tokenize(text: str) -> list[str]:
     return text.lower().split()
@@ -29,19 +33,24 @@ class BM25Index:
         
         results = [
             (card, score)
-            for card, score in zip(self.cards, scores)
+            for card, score in zip(self.cards, scores, strict=False)
             if score > 0
         ]
         
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_n]
 
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from netie.result import Ok, Err, Result
+
 
 class DenseReranker:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        from CortexOS.packaging import require_extra
+
+        # Reranking needs the embedding model only — not the document index half
+        # of the rag extra.
+        require_extra("rag", feature="DenseReranker", modules=("sentence_transformers",))
+        from sentence_transformers import SentenceTransformer
+
         self.model = SentenceTransformer(model_name)
         
     def rerank(self, intent: str, candidates: list[tuple[SkillCard, float]], top_k: int = 8) -> list[SkillCard]:
@@ -74,7 +83,7 @@ class DenseReranker:
                 scores.append(float(score))
                 
         # Sort by score
-        scored_candidates = list(zip(candidate_cards, scores))
+        scored_candidates = list(zip(candidate_cards, scores, strict=False))
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
         
         return [c for c, _ in scored_candidates[:top_k]], [s for _, s in scored_candidates[:top_k]]

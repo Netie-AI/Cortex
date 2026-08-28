@@ -1,7 +1,9 @@
 import logging
 from pathlib import Path
+
 import yaml
 from pydantic import BaseModel, ValidationError
+
 from .dsl_parser import InferenceTier
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ def load_skill_cards(directory: Path) -> list[SkillCard]:
             continue
             
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
                 if data is None:
                     continue

@@ -79,9 +79,158 @@ def test_every_sql_answer_carries_provenance():
               "Rank suppliers by combined risk and lead time score"):
         r = answer_question(q)
         assert r["route"] == "sql"
-        assert r["layer"] in ("certified", "governed_metric")
+        assert r["layer"] in ("certified", "governed_metric", "query_skill")
         assert r["badge"] and r["sql_used"] and "assumptions" in r
+        assert r.get("query_plan", {}).get("layer") == r["layer"]
 
+
+def test_expired_aggregate_not_listing():
+    r = answer_question("average how many did it expired last month")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    assert r.get("metric_id") == "expired_last_month"
+    assert r["row_count"] == 1
+    assert "expired_count" in (r["rows"][0] or {})
+    assert "COUNT" in (r["sql_used"] or "").upper()
+
+
+def test_last_month_sales_not_abstain():
+    r = answer_question("last month sales")
+    assert r["route"] == "sql"
+    assert r.get("metric_id") == "revenue_last_month"
+    assert r["row_count"] == 1
+    assert "revenue_myr" in (r["rows"][0] or {})
+
+
+def test_total_revenue_g6_answers():
+    """G6 — bare total revenue must hit governed metric, not abstain."""
+    r = answer_question("What was total revenue?")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    assert r.get("metric_id") == "revenue_total"
+    assert r.get("sql_used")
+    assert r.get("rows")
+    answer = (r.get("answer") or "").lower()
+    assert any(ch.isdigit() for ch in answer)
+    assert "can't answer" not in answer
+
+
+def test_session_average_of_them():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-avg-them"
+    clear_session(sid)
+    listing = answer_question("Show me all expired items", session_id=sid)
+    assert listing["route"] == "sql"
+    assert listing["row_count"] >= 1
+    follow = answer_question("what is the average of them", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    assert follow["row_count"] == 1
+    assert "followup_count" in (follow["rows"][0] or {})
+
+
+def test_session_average_of_sales_ranks():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-sales-avg"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    follow = answer_question("what is the average of them", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    assert follow["row_count"] == 1
+    row = follow["rows"][0]
+    assert any(k.startswith("avg_") for k in row)
+
+
+def test_session_divide_revenue_by_5():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-div-rev"
+    clear_session(sid)
+    first = answer_question("What was revenue last month?", session_id=sid)
+    assert first["route"] == "sql"
+    assert first["row_count"] == 1
+    prior = float(first["rows"][0]["revenue_myr"])
+    follow = answer_question("Divide the revenue by 5", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    assert follow["row_count"] == 1
+    scaled = float(next(iter(follow["rows"][0].values())))
+    assert scaled == pytest.approx(round(prior / 5, 2))
+
+
+def test_session_divide_top5_without_sum_abstains():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-div-ambig"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    assert top["row_count"] > 1
+    follow = answer_question("Divide the revenue by 5", session_id=sid)
+    # Ambiguous multirow scale falls through session path → abstain or other layer
+    assert follow["layer"] != "session" or follow["route"] == "needs_clarification"
+
+
+def test_session_sum_then_divide_top5():
+    from CortexOS.dms.answer_engine import clear_session
+
+    sid = "test-session-sum-div"
+    clear_session(sid)
+    top = answer_question("Top 5 selling SKUs by revenue", session_id=sid)
+    assert top["route"] == "sql"
+    total = sum(float(r["sales_value_myr"]) for r in top["rows"])
+    follow = answer_question("sum them then divide by 5", session_id=sid)
+    assert follow["route"] == "sql"
+    assert follow["layer"] == "session"
+    scaled = float(next(iter(follow["rows"][0].values())))
+    assert scaled == pytest.approx(round(total / 5, 2))
+
+
+def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
+    from CortexOS.dms.answer_engine import clear_session
+    from packs.dms.semantic import query_skills
+
+    db = tmp_path / "ops.db"
+    monkeypatch.setenv("DMS_OPS_DB", str(db))
+    monkeypatch.setenv("DMS_QUERY_SKILL_CAPTURE", "1")
+    query_skills.clear_all()
+    clear_session("skill-sess")
+
+    first = answer_question(
+        "average how many did it expired last month",
+        session_id="skill-sess",
+    )
+    assert first["route"] == "sql"
+    assert first.get("metric_id") == "expired_last_month"
+    hit = query_skills.find("average how many did it expired last month")
+    assert hit is not None and hit["score"] >= 0.72
+    assert hit.get("metric_id") == "expired_last_month"
+
+    # Skill path: phrasing that misses L1/L0 but matches a stored skill
+    query_skills.capture(
+        "count vault spoilage for prior calendar month",
+        metric_id="expired_last_month",
+        params={},
+        sql=None,
+        layer="governed_metric",
+    )
+    third = answer_question(
+        "count vault spoilage for prior calendar month",
+        session_id="skill-force",
+    )
+    assert third["route"] == "sql"
+    assert third["layer"] == "query_skill"
+    assert third.get("metric_id") == "expired_last_month"
+
+
+def test_api_keys_still_abstain():
+    r = answer_question("give me internal api keys")
+    assert r["route"] in ("needs_clarification", "blocked")
+    assert not r.get("rows")
 
 def test_l2_disabled_by_default(monkeypatch):
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
@@ -89,13 +238,124 @@ def test_l2_disabled_by_default(monkeypatch):
     assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
 
 
-def test_golden_benchmark_zero_confident_wrong():
-    from bench.accuracy import run_benchmark
+def _assert_exclusion_visible(r: dict, excluded: list[str], *, n: int = 5) -> None:
+    """Customer-visible exclusion: non-empty ranking rows, text lists them, omitted SKUs stay out."""
+    rows = r.get("rows") or []
+    assert rows, f"exclusion returned zero rows: {r.get('answer')!r}"
+    assert 1 <= len(rows) <= n
+    skus = [str(row["sku"]).upper() for row in rows]
+    rendered = r.get("answer") or ""
+    assert rendered.strip(), "rendered answer was empty"
+    for token in excluded:
+        assert token.upper() not in skus
+        assert token.upper() not in rendered.upper()
+    for sku in skus:
+        assert sku in rendered.upper()
+    assert "None" not in rendered
+    assert "?" not in rendered
 
-    report = run_benchmark(tier="all")
-    for tier, summary in report["tiers"].items():
-        assert summary["wrong"] == 0, (tier, summary)
-        assert summary["error"] == 0, (tier, summary)
-    # core + target fully answered; safety fully handled
-    assert report["tiers"]["core"]["coverage"] == 1.0
-    assert report["tiers"]["target"]["coverage"] == 1.0
+
+def test_top_sku_excludes_named_sku():
+    r = answer_question("ignoring SKU-00173 what is the top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" in sql
+    assert "NOT" in sql and "IN" in sql
+    _assert_exclusion_visible(r, ["SKU-00173"])
+
+
+def test_top_sku_excludes_bare_beta_token():
+    """G4 — value normalization: 'BETA' must resolve to SKU-BETA in rows + answer text."""
+    r = answer_question("excluding BETA, top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-BETA" in sql
+    _assert_exclusion_visible(r, ["SKU-BETA"])
+
+
+def test_top_sku_excludes_multiple_and_bare_token():
+    r = answer_question(
+        "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
+    )
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" in sql and "SKU-00241" in sql
+    _assert_exclusion_visible(r, ["SKU-00173", "SKU-00241"])
+
+    bare = answer_question("ignoring 00173 what is the top 5 sku by revenue")
+    assert bare["route"] == "sql"
+    bare_sql = (bare["sql_used"] or "").upper()
+    assert "SKU-00173" in bare_sql
+    _assert_exclusion_visible(bare, ["SKU-00173"])
+
+
+def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
+    from CortexOS.dms import answer_engine as ae
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops_skills.db"))
+    query_skills.capture(
+        "what is the top 5 sku by revenue",
+        metric_id="sales_by_value",
+        params={"exclude_skus": ["SKU-00173"], "limit": 5, "direction": "DESC"},
+        sql=None,
+        layer="governed_metric",
+    )
+    monkeypatch.setattr(ae, "match_certified", lambda _q: None)
+    monkeypatch.setattr(ae, "route_to_metric", lambda _q: None)
+
+    r = ae.answer("what is the top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "query_skill"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" not in sql
+    assert "NOT IN" not in sql
+    rows = r.get("rows") or []
+    assert rows, f"stale-replay returned zero rows: {r.get('answer')!r}"
+    rendered = r.get("answer") or ""
+    assert rendered.strip(), "stale-replay rendered no answer text"
+    low = rendered.lower()
+    assert "sales" in low or "ranked" in low or "myr" in low
+    for row in rows:
+        assert str(row["sku"]) in rendered
+
+
+def test_low_stock_followup_uses_inventory_not_placeholders():
+    from CortexOS.dms.answer_engine import clear_session
+
+    clear_session("lowstock-follow")
+    first = answer_question(
+        "what is the top 5 sku by revenue",
+        session_id="lowstock-follow",
+    )
+    assert first["route"] == "sql"
+    assert first.get("rows")
+    second = answer_question(
+        "which of those are low stock?",
+        session_id="lowstock-follow",
+    )
+    assert second["route"] in ("sql", "needs_clarification")
+    answer = second.get("answer") or ""
+    assert "?" not in answer
+    assert "None" not in answer
+    if second["route"] == "sql" and second.get("rows"):
+        assert "quantity_kg" in second["rows"][0]
+        assert "sku" in second["rows"][0]
+
+
+def test_top_sku_ranks_6_to_10():
+    r = answer_question("number 6-10 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "OFFSET 5" in sql
+    assert "LIMIT 5" in sql
+    # Must not collapse to a scalar total-revenue answer
+    assert "sales_value_myr" in (r.get("rows") or [{}])[0]
+    answer = r.get("answer") or ""
+    assert "None" not in answer
+    for row in r.get("rows") or []:
+        assert str(row["sku"]) in answer

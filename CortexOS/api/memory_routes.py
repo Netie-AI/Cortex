@@ -11,64 +11,68 @@ findings land. Vectors are supplied by the caller until the embedder is wired
 No from __future__ import annotations (FastAPI rule).
 Pydantic models at module level.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-
-from packs.dms.security.api_auth import Caller, require_role
+from netie.memory.factory import get_store
 from netie.memory.store import (
     BRUTE_FORCE_MAX,
     Hit,
-    InMemoryStore,
     MemoryRecord,
     select_store,
 )
+from pydantic import BaseModel
+
+from packs.dms.security.api_auth import Caller, require_role
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
-# M0 singleton — swapped for a store factory (select_store) once persistent
-# backends exist. Personal scope only until role labels land (M4).
-_STORE = InMemoryStore()
+# Tests may replace this module-level store with an isolated backend instance.
+_STORE = get_store()
 
 
 class UpsertRecordIn(BaseModel):
     id: str
     text: str
-    vector: Optional[List[float]] = None
-    meta: Dict[str, Any] = {}
+    vector: list[float] | None = None
+    meta: dict[str, Any] = {}
     scope: str = "personal"
     collection: str = "default"
-    role: Optional[str] = None
+    role: str | None = None
     tier: str = "warm"
+    entry_scope: list[str] = []
 
 
 class UpsertIn(BaseModel):
-    records: List[UpsertRecordIn]
+    records: list[UpsertRecordIn]
 
 
 class QueryIn(BaseModel):
-    vector: List[float]
+    vector: list[float]
     k: int = 5
-    scope: Optional[str] = None
-    collection: Optional[str] = None
+    scope: str | None = None
+    collection: str | None = None
+    session_scope: list[str] | None = None
 
 
 @router.post("/upsert")
 async def memory_upsert(
     body: UpsertIn,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     _ = caller
-    recs = [
-        MemoryRecord(
-            id=r.id, text=r.text, vector=r.vector, meta=r.meta,
-            scope=r.scope if r.scope in ("personal", "company") else "personal",
-            collection=r.collection, role=r.role,
-            tier=r.tier if r.tier in ("hot", "warm", "cold") else "warm",
+    recs = []
+    for r in body.records:
+        entry = frozenset(t for t in (r.entry_scope or []) if t and str(t).strip())
+        recs.append(
+            MemoryRecord(
+                id=r.id, text=r.text, vector=r.vector, meta=r.meta,
+                scope=r.scope if r.scope in ("personal", "company") else "personal",
+                collection=r.collection, role=r.role,
+                tier=r.tier if r.tier in ("hot", "warm", "cold") else "warm",
+                entry_scope=entry,
+            )
         )
-        for r in body.records
-    ]
     n = _STORE.upsert(recs)
     stats = _STORE.stats()
     return {"ok": True, "upserted": n, "stats": stats,
@@ -79,12 +83,18 @@ async def memory_upsert(
 async def memory_query(
     body: QueryIn,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     _ = caller
-    hits: List[Hit] = _STORE.query(
+    sess = (
+        frozenset(t for t in body.session_scope if t and str(t).strip())
+        if body.session_scope is not None
+        else None
+    )
+    hits: list[Hit] = _STORE.query(
         body.vector, k=body.k,
         scope=body.scope if body.scope in ("personal", "company") else None,
         collection=body.collection,
+        session_scope=sess,
     )
     return {"ok": True, "hits": [
         {"id": h.id, "score": round(h.score, 6), "text": h.text, "meta": h.meta}
@@ -93,7 +103,7 @@ async def memory_query(
 
 
 @router.get("/stats")
-async def memory_stats(caller: Caller = Depends(require_role("viewer"))) -> Dict[str, Any]:
+async def memory_stats(caller: Caller = Depends(require_role("viewer"))) -> dict[str, Any]:
     _ = caller
     stats = _STORE.stats()
     return {"ok": True, **stats,

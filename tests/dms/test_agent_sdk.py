@@ -37,6 +37,47 @@ def ledger_db(tmp_path, monkeypatch):
     return db
 
 
+@pytest.fixture
+def granted_session():
+    """Wide in-process grant so visibility tests still read through enforce_manifest."""
+    from datetime import datetime, timedelta, timezone
+
+    from cortex_contract.execution import Manifest
+
+    from CortexOS.execution.manifest import VerifiedManifest
+    from CortexOS.execution.pool import PoolConfig, reset_read_pool_for_tests
+    from CortexOS.execution.session_manifests import (
+        get_session_registry,
+        reset_session_registry_for_tests,
+    )
+
+    reset_session_registry_for_tests()
+    reset_read_pool_for_tests(PoolConfig("default", 4, 5.0, 30.0))
+    now = datetime.now(timezone.utc)
+    verified = VerifiedManifest(
+        manifest=Manifest(
+            session_id="sdk-wide",
+            org_id="acme",
+            pool_id="default",
+            issuer_key_id="int-1",
+            allowed_paths=["/data/pool/acme/**"],
+            row_predicates={
+                "inventory": "1=1",
+                "suppliers": "1=1",
+                "locations": "1=1",
+            },
+            issued_at=now.isoformat(),
+            expires_at=(now + timedelta(minutes=5)).isoformat(),
+            signature="not-checked-here",
+        ),
+        issuer_kid="int-1",
+        verified_at=now,
+    )
+    get_session_registry().bind(verified)
+    yield "sdk-wide"
+    reset_session_registry_for_tests()
+
+
 # -- 1. visibility ----------------------------------------------------------
 
 def test_schema_listing_strips_hidden_properties():
@@ -46,19 +87,28 @@ def test_schema_listing_strips_hidden_properties():
     assert "supplier_name" in names
 
 
-def test_query_returns_only_visible_columns(warehouse):
-    rows = dms_sdk.query_objects("suppliers", actor=VIEWER, limit=5, db_path=warehouse)
+def test_query_returns_only_visible_columns(warehouse, granted_session):
+    rows = dms_sdk.query_objects(
+        "suppliers", actor=VIEWER, limit=5, db_path=warehouse, session_id=granted_session
+    )
     assert rows, "sample warehouse should have suppliers"
     for row in rows:
         assert {"email", "phone", "contact_person"}.isdisjoint(row)
         assert "supplier_name" in row
 
 
-def test_filters_work_and_hidden_filter_is_refused(warehouse):
-    all_rows = dms_sdk.query_objects("inventory", actor=VIEWER, limit=500, db_path=warehouse)
+def test_filters_work_and_hidden_filter_is_refused(warehouse, granted_session):
+    all_rows = dms_sdk.query_objects(
+        "inventory", actor=VIEWER, limit=500, db_path=warehouse, session_id=granted_session
+    )
     category = all_rows[0]["category"]
     filtered = dms_sdk.query_objects(
-        "inventory", {"category": category}, actor=VIEWER, limit=500, db_path=warehouse
+        "inventory",
+        {"category": category},
+        actor=VIEWER,
+        limit=500,
+        db_path=warehouse,
+        session_id=granted_session,
     )
     assert filtered and all(r["category"] == category for r in filtered)
     assert len(filtered) <= len(all_rows)
@@ -125,11 +175,15 @@ def test_event_kind_not_invocable_and_unregistered(ledger_db):
 
 # -- 3. identity ------------------------------------------------------------
 
-def test_api_auth_caller_duck_types(warehouse):
+def test_api_auth_caller_duck_types(warehouse, granted_session):
     from packs.dms.security.api_auth import Caller
 
     rows = dms_sdk.query_objects(
-        "locations", actor=Caller(role="viewer", actor="api_viewer"), limit=3, db_path=warehouse
+        "locations",
+        actor=Caller(role="viewer", actor="api_viewer"),
+        limit=3,
+        db_path=warehouse,
+        session_id=granted_session,
     )
     assert rows and "location_code" in rows[0]
 

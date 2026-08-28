@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -18,7 +19,9 @@ from packs.dms.tasks.gate import init_task_events_schema
 
 _SKILL_BOOST_WEIGHT = 0.25
 _MATCH_THRESHOLD = 0.5
-_EMBED_DIM = 32
+# 32 buckets collided often enough that unrelated phrases crossed the 0.5
+# threshold (worst observed cosine 0.722); 256 drops that to 0.289.
+_EMBED_DIM = 256
 
 
 def _sqlite_path() -> str:
@@ -88,12 +91,19 @@ def normalize_trigger(text: str) -> str:
     return " ".join(text.lower().split())
 
 
+def _word_bucket(word: str) -> int:
+    """Stable bucket — builtin hash() is PYTHONHASHSEED-randomised per process,
+    which puts every worker/restart in a different embedding space."""
+    digest = hashlib.blake2b(word.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % _EMBED_DIM
+
+
 def text_embedding(text: str) -> list[float]:
     """Deterministic bag-of-words hash embedding — no ML deps."""
     words = re.findall(r"\w+", text.lower())
     vec = [0.0] * _EMBED_DIM
     for word in words:
-        vec[hash(word) % _EMBED_DIM] += 1.0
+        vec[_word_bucket(word)] += 1.0
     norm = math.sqrt(sum(x * x for x in vec)) or 1.0
     return [x / norm for x in vec]
 
@@ -360,8 +370,9 @@ def boost_candidates_from_skills(
         for skill in skills:
             if skill["task_id"] != cand["task_id"]:
                 continue
-            emb = skill.get("embedding") or text_embedding(skill["trigger_pattern"])
-            emb_json = json.dumps(emb) if isinstance(emb, list) else "[]"
+            # Recompute from the stored pattern — rows captured before the
+            # deterministic-bucket fix hold vectors from a different hash space.
+            emb_json = json.dumps(text_embedding(skill["trigger_pattern"]))
             score = match_trigger(trigger_text, skill["trigger_pattern"], emb_json)
             best = max(best, score)
         if best >= _MATCH_THRESHOLD:

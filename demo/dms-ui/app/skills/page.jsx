@@ -3,13 +3,23 @@
 import { useState } from "react";
 import useSWR from "swr";
 import AppShell from "../../components/AppShell";
-import { ApiOfflineError, deactivateSkill, fetchSkills, fetchSkillCaptureConfig, setSkillCaptureConfig } from "../../lib/api";
+import {
+  ApiOfflineError,
+  deactivateSkill,
+  fetchSkills,
+  fetchSkillCaptureConfig,
+  setSkillCaptureConfig,
+  findSkills,
+} from "../../lib/api";
 import { useRole } from "../../context/RoleContext";
 
 export default function SkillsPage() {
   const { role } = useRole();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [goal, setGoal] = useState("playwright e2e testing");
+  const [findResult, setFindResult] = useState(null);
+  const [evolve, setEvolve] = useState(false);
 
   const { data: config, mutate: mutateConfig } = useSWR("skill-config", fetchSkillCaptureConfig);
   const { data: skills, isLoading, mutate: mutateSkills } = useSWR("skills", () => fetchSkills(false));
@@ -44,10 +54,111 @@ export default function SkillsPage() {
     }
   }
 
+  async function onFindSkills(e) {
+    e?.preventDefault?.();
+    const q = (goal || "").trim();
+    if (!q) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await findSkills(q, { topK: 8, evolve });
+      setFindResult(res);
+    } catch (err) {
+      if (!(err instanceof ApiOfflineError)) setError(String(err.message || err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const captureOn = Boolean(config?.capture_enabled);
+  const best = findResult?.best;
 
   return (
     <AppShell loading={isLoading || busy}>
+      <div className="cx-label" style={{ marginBottom: 8 }}>
+        FIND SKILLS
+      </div>
+      <p className="cx-empty-desc" style={{ marginBottom: 12 }}>
+        Are there any good skills for [{goal || "GOAL"}]? Skills first from GitHub awesome-lists + local
+        cards, then MCP/subagents. Evolve with SkillOpt when enabled.
+      </p>
+
+      <form onSubmit={onFindSkills} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        <input
+          data-testid="find-skills-goal"
+          className="cx-input"
+          style={{ flex: "1 1 280px", minWidth: 200 }}
+          value={goal}
+          onChange={(ev) => setGoal(ev.target.value)}
+          placeholder="e.g. playwright testing, PDF extract, GitHub MCP"
+          aria-label="Skill discovery goal"
+        />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          <input
+            data-testid="find-skills-evolve"
+            type="checkbox"
+            checked={evolve}
+            onChange={(ev) => setEvolve(ev.target.checked)}
+          />
+          SkillOpt seed
+        </label>
+        <button data-testid="find-skills-submit" type="submit" className="cx-entry-btn">
+          FIND SKILLS
+        </button>
+      </form>
+
+      {best && (
+        <div data-testid="find-skills-best" style={{ marginBottom: 20 }}>
+          <div className="cx-label" style={{ marginBottom: 6 }}>
+            BEST MATCH
+          </div>
+          <p style={{ margin: "0 0 4px" }}>
+            <strong>{best.name}</strong>{" "}
+            <span style={{ color: "var(--cx-muted)", fontSize: 12 }}>
+              {best.kind} · score {best.score}
+            </span>
+          </p>
+          <p className="cx-empty-desc" style={{ marginBottom: 6 }}>
+            {best.description}
+          </p>
+          <p className="cx-empty-desc" style={{ marginBottom: 6 }}>
+            {best.install_hint}
+          </p>
+          {best.url ? (
+            <a href={best.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+              {best.url}
+            </a>
+          ) : null}
+        </div>
+      )}
+
+      {findResult?.matches?.length > 0 && (
+        <table className="cx-data-table" data-testid="find-skills-results" style={{ marginBottom: 28 }}>
+          <thead>
+            <tr>
+              <th>NAME</th>
+              <th>KIND</th>
+              <th>SCORE</th>
+              <th>SOURCE</th>
+              <th>INSTALL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {findResult.matches.map((m, i) => (
+              <tr key={m.id} className={i % 2 === 1 ? "row-alt" : ""}>
+                <td>{m.name}</td>
+                <td>{m.kind}</td>
+                <td>{m.score}</td>
+                <td>{m.source}</td>
+                <td style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {m.install_hint}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
       <div className="cx-label" style={{ marginBottom: 8 }}>
         CAPTURED SKILLS (F6)
       </div>

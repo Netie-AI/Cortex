@@ -3,8 +3,9 @@
 Reads go through the existing deterministic sqlglot guardrail (read-only,
 allowlist extended to lake schemas). RBAC via the F7 api_auth dependency.
 """
+from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/dms/lakehouse", tags=["lakehouse"])
 
 class LakeQueryRequest(BaseModel):
     sql: str
-    snapshot_id: Optional[int] = None
+    snapshot_id: int | None = None
 
 
 @router.get("/status")
@@ -100,7 +101,7 @@ def query(
 
         rel = con.execute(result.safe_sql)
         cols = [d[0] for d in rel.description] if rel.description else []
-        rows = [dict(zip(cols, row)) for row in rel.fetchall()]
+        rows = [dict(zip(cols, row, strict=False)) for row in rel.fetchall()]
     finally:
         con.close()
     return {"sql_used": result.safe_sql, "rows": rows, "row_count": len(rows),
@@ -111,6 +112,15 @@ def lakehouse_status_mode() -> str:
     from packs.dms.lakehouse.catalog import lakehouse_mode
 
     return lakehouse_mode()
+
+
+@router.post("/sync-warehouse")
+def sync_warehouse(caller: Caller = Depends(require_role("steward"))) -> dict[str, Any]:
+    """Copy lake.silver → dms_demo.duckdb so /dms/query reads medallion silver."""
+    _ = caller
+    from scripts.lakehouse_migrate import sync_warehouse_from_silver
+
+    return sync_warehouse_from_silver()
 
 
 def register_lakehouse_routes(app) -> None:

@@ -21,6 +21,9 @@ class BGEM3Embedder:
     """Lazy-load SentenceTransformer; exposes ``dimension`` for Qdrant collection sizing."""
 
     def __init__(self, model_name: str | None = None, *, device: str | None = None) -> None:
+        from CortexOS.packaging import require_extra
+
+        require_extra("rag", feature="BGEM3Embedder")
         from sentence_transformers import SentenceTransformer
 
         self.model_name = model_name or default_embedder_model_name()

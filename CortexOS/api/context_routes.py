@@ -1,7 +1,7 @@
-"""Context engineering HTTP surface for AirGPT / OpenIDE sidecar clients."""
+"""Context engineering HTTP surface for AirGPT / FreeIDE sidecar clients."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -18,12 +18,12 @@ class AssembleRequest(BaseModel):
     memory: str = ""
     retrieval: str = ""
     state: str = ""
-    messages: List[str] = Field(default_factory=list)
+    messages: list[str] = Field(default_factory=list)
     token_budget: int = Field(default=4096, ge=256, le=128000)
 
 
 class CompactRequest(BaseModel):
-    messages: List[str] = Field(default_factory=list)
+    messages: list[str] = Field(default_factory=list)
     token_budget: int = Field(default=1200, ge=64, le=32000)
     keep_tail: int = Field(default=4, ge=1, le=40)
 
@@ -38,7 +38,7 @@ class NoteAppendRequest(BaseModel):
 def context_assemble(
     req: AssembleRequest,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from CortexOS.context_engineering import ContextRequest, assemble_context
 
     _ = caller
@@ -70,7 +70,7 @@ def context_assemble(
 def context_compact(
     req: CompactRequest,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from CortexOS.context_engineering import compact_messages, estimate_tokens
 
     _ = caller
@@ -92,7 +92,7 @@ def context_compact(
 def context_notes_append(
     req: NoteAppendRequest,
     caller: Caller = Depends(require_role("steward")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from CortexOS.context_engineering import NoteStore, default_notes_path
 
     _ = caller
@@ -106,7 +106,7 @@ def context_notes_append(
 def context_notes_read(
     workspace_root: str,
     caller: Caller = Depends(require_role("viewer")),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from CortexOS.context_engineering import NoteStore, default_notes_path, estimate_tokens
 
     _ = caller

@@ -1,0 +1,56 @@
+[importlinter]
+root_packages =
+    CortexOS
+    packs
+include_external_packages = False
+
+[importlinter:contract:1]
+name = the engine never reaches into a pack (C2 boundary)
+type = forbidden
+source_modules =
+    CortexOS
+forbidden_modules =
+    packs
+# Packs register into the engine; the engine only ever holds a port. Enforced at
+# lint as well as in tests/contract/test_import_boundaries.py, because a single
+# AST test is one file away from being skipped and this boundary is permanent.
+# The allowlist in that test is pre-C2 debt being evacuated, so this contract
+# ignores those known imports rather than pretending they are gone.
+ignore_imports =
+    CortexOS.api.engine_routes -> packs.**
+    CortexOS.api.chat_routes -> packs.**
+    CortexOS.api.skill_routes -> packs.**
+    CortexOS.api.task_routes -> packs.**
+    CortexOS.api.agent_routes -> packs.**
+    CortexOS.api.brain_routes -> packs.**
+    CortexOS.api.ingest_routes -> packs.**
+    CortexOS.api.lakehouse_routes -> packs.**
+    CortexOS.api.memory_routes -> packs.**
+    CortexOS.api.pipeline_routes -> packs.**
+    CortexOS.api.stream_routes -> packs.**
+    CortexOS.api.warehouse_routes -> packs.**
+    CortexOS.api.action_routes -> packs.**
+    CortexOS.api.sidecar_routes -> packs.**
+    CortexOS.api.a2a_routes -> packs.**
+    CortexOS.api.mcp_routes -> packs.**
+    CortexOS.api.discovery_routes -> packs.**
+    CortexOS.api.app -> packs.**
+    CortexOS.api.telemetry_routes -> packs.**
+    CortexOS.api.context_routes -> packs.**
+    CortexOS.dms.query_service -> packs.**
+    CortexOS.dms.seed_demo -> packs.**
+    CortexOS.nlp.local_inference -> packs.**
+    CortexOS.execution.tool_runner -> packs.**
+    CortexOS.ponytail.middleware -> packs.**
+    CortexOS.ontology.registry -> packs.**
+
+[importlinter:contract:2]
+name = packaging helpers stay independent of optional planes
+type = independence
+modules =
+    CortexOS.packaging
+independent_from =
+    CortexOS.rag
+    CortexOS.execution.dag_runner
+    CortexOS.execution.osr
+    CortexOS.execution.seeker

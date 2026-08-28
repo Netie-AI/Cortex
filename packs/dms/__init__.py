@@ -6,11 +6,31 @@ from typing import Any
 
 __all__ = [
     "plug_in",
+    "register_engine_seams",
     "secure_message",
     "classify_message",
     "append_ledger",
     "verify_ledger",
 ]
+
+
+def register_engine_seams() -> None:
+    """Hand the engine our implementations of the ports it owns (C2 inversion).
+
+    ``CortexOS`` may not import ``packs.*``, so the arrow points this way instead:
+    the engine declares the seam, we fill it. Runs on import, so ``import
+    packs.dms`` — or anything under it — is enough to light the ledger up.
+    """
+    from CortexOS.audit import register_ledger
+    from CortexOS.dms.l2_generation import register_l2_generation
+    from packs.dms.audit import ledger
+    from packs.dms.generative.l2_adapter import DmsL2Generation
+
+    register_ledger(ledger)
+    register_l2_generation(DmsL2Generation())
+
+
+register_engine_seams()
 
 
 def secure_message(text: str, *, block_scam: bool = True) -> dict[str, Any]:
@@ -79,20 +99,8 @@ def plug_in(app: Any | None = None, *, pack: str = "dms") -> dict[str, Any]:
 
         register_dms_routes(app)
         registered.append("dms_routes")
-        try:
-            from CortexOS.api.chat_routes import register_chat_routes
-
-            register_chat_routes(app)
-            registered.append("chat_routes")
-        except ImportError:
-            pass
-        try:
-            from CortexOS.api.warehouse_routes import register_warehouse_routes
-
-            register_warehouse_routes(app)
-            registered.append("warehouse_routes")
-        except ImportError:
-            pass
+        # register_dms_routes already registers chat + warehouse. A second
+        # call emits Duplicate Operation ID warnings and shadows the first.
         try:
             from CortexOS.api.brain_routes import register_brain_routes
 

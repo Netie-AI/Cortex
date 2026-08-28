@@ -1,0 +1,671 @@
+{
+  "_readme": "Adversarial SQL for C3 manifest enforcement. Each case must produce the stated outcome at the executor \u2014 not at the LLM, not in the UI. Add cases here rather than inline in tests so the corpus can be replayed against any future enforcer.",
+  "manifest": {
+    "allowed_paths": [
+      "/data/pool/tenant_a/*.parquet",
+      "/data/pool/shared/reference.parquet"
+    ],
+    "row_predicates": {
+      "orders": "tenant_id = 'a'",
+      "users": "tenant_id = 'a'"
+    }
+  },
+  "cases": [
+    {
+      "name": "aggregate_subquery_in_having",
+      "sql": "SELECT u.tenant_id, count(*) AS n FROM users AS u GROUP BY u.tenant_id HAVING count(*) < (SELECT count(*) FROM orders)",
+      "technique": "having_aggregate_subquery",
+      "why_it_might_slip": "HAVING is walked even less often than WHERE. The orders reference lives inside an aggregate comparison, so the global order count becomes an oracle: binary-searching the comparison across queries reveals the exact cross-tenant row count without returning a single foreign row.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "alias_shadows_governed_table_name",
+      "sql": "SELECT orders.id FROM users AS orders WHERE orders.id IN (SELECT user_id FROM orders)",
+      "technique": "alias_collision_cross_binding",
+      "why_it_might_slip": "users is aliased to 'orders' while a real orders reference sits in the IN subquery. An injector that keys on the visible relation name applies the orders predicate (tenant_id = 'a') to the users relation and may consider the users predicate unmatched, or apply both predicates to the wrong scopes. Column resolution of orders.id is also ambiguous between the alias and the inner table, so a rewriter that requalifies columns can silently rebind them.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "catalog_schema_qualified_names",
+      "sql": "SELECT o.id FROM memory.main.orders AS o JOIN main.users AS u ON u.id = o.user_id",
+      "technique": "qualified_name_mismatch",
+      "why_it_might_slip": "Building the lookup key from the rendered table expression yields 'memory.main.orders' and 'main.users', neither of which is a manifest key. Conversely a check that only compares the bare .name may pass the path check while a differently-built key skips predicate injection \u00e2\u20ac\u201d the two code paths disagree on what the table is called.",
+      "expected": "reject_path",
+      "enforcer_note": "Cortex fails closed on three-part names. memory.main.orders reaches into a catalog the manifest never mentions, and on a connection with a lakehouse already attached that is a way out that never touches ATTACH. Two-part main.users is still allowed and still filtered."
+    },
+    {
+      "name": "cte_reused_in_self_join",
+      "sql": "WITH o AS (SELECT * FROM orders) SELECT a.id AS l, b.id AS r FROM o AS a JOIN o AS b ON a.user_id = b.user_id AND a.id < b.id",
+      "technique": "nested_cte",
+      "why_it_might_slip": "The CTE body is the only real reference to orders; the outer query references 'o' twice. An injector that rewrites references in the top-level FROM list finds no table named orders there and rewrites nothing, while a naive scope walker may rewrite the CTE alias 'o' (not in the manifest) and silently no-op. Correct behaviour: predicate applied once inside the CTE body, and 'o' must not be treated as a governed name.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "duckdb_from_first_syntax",
+      "sql": "FROM orders SELECT tenant_id, count(*) AS n GROUP BY tenant_id",
+      "technique": "from_first_syntax",
+      "why_it_might_slip": "DuckDB's FROM-first form. Anything doing regex or token-order reasoning ('find SELECT, then the FROM after it') fails to locate the table, and code that rebuilds the query by string surgery around the SELECT keyword produces either a pass-through or invalid SQL that gets retried unenforced.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "duckdb_pivot_statement_on_orders",
+      "sql": "PIVOT orders ON tenant_id USING sum(amount)",
+      "technique": "pivot_statement",
+      "why_it_might_slip": "sqlglot parses this as a top-level Pivot node, not a Select \u00e2\u20ac\u201d the table reference sits in a statement slot no Select-oriented walker visits, and the output columns are derived dynamically from the distinct tenant_id values found. If the predicate is not injected, the very column names of the result enumerate every tenant in the pool.",
+      "expected": "reject_statement",
+      "enforcer_note": "PIVOT is a read, but its table sits in a statement slot the Select-oriented rewriter does not reach, and its output columns are derived from the very column being filtered. Refused by statement class rather than half-enforced. Supporting PIVOT means proving injection through its own AST shape first."
+    },
+    {
+      "name": "except_set_op_difference_probe",
+      "sql": "SELECT id FROM orders EXCEPT SELECT id FROM orders WHERE tenant_id = 'a'",
+      "technique": "set_op_difference_probe",
+      "why_it_might_slip": "Both legs are the permitted table, so path and name checks are trivially happy. If the predicate is injected on only one leg (or the injector treats the right leg as already compliant because it literally contains tenant_id = 'a'), the difference is exactly the set of other tenants' order ids. Correct enforcement makes this provably empty.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "lateral_correlated_subquery",
+      "sql": "SELECT u.id, x.total FROM users AS u, LATERAL (SELECT sum(o.amount) AS total FROM orders AS o WHERE o.user_id = u.id) AS x",
+      "technique": "lateral_join",
+      "why_it_might_slip": "The LATERAL subquery is a comma-join operand whose body is a nested Select with an outer correlation to u.id. Wrapping orders as a subquery must preserve that correlation \u00e2\u20ac\u201d a rewriter that hoists or materialises the wrapped table breaks the lateral reference (error) or, worse, drops the predicate to keep the query runnable.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "legit_read_shared_reference_join",
+      "sql": "SELECT r.k, o.id FROM orders o JOIN read_parquet('/data/pool/shared/reference.parquet') r ON o.k = r.k",
+      "technique": "legit_shared_path",
+      "why_it_might_slip": "This is fully in-manifest: shared/reference.parquet is allowed and orders is permitted, but the enforcer must still inject the orders predicate on o while leaving the reference read untouched, and must not over-reject the legitimate shared path.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "mixed_case_and_quoted_identifiers",
+      "sql": "SELECT o.id, u.email FROM ORDERS AS o JOIN \"Users\" AS u ON u.id = o.user_id",
+      "technique": "identifier_case_folding",
+      "why_it_might_slip": "row_predicates is keyed on lowercase 'orders'/'users'. A dict lookup on table.name gives 'ORDERS' and 'Users' \u00e2\u20ac\u201d both miss. DuckDB resolves identifiers case-insensitively even when double-quoted, so the query runs against the governed tables while the name-keyed injector applies nothing.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "not_exists_anti_join_existence_leak",
+      "sql": "SELECT u.id FROM users AS u WHERE NOT EXISTS (SELECT 1 FROM orders AS o WHERE o.user_id = u.id)",
+      "technique": "anti_join_existence_leak",
+      "why_it_might_slip": "Even a correct injector must notice this one flips polarity: if orders inside NOT EXISTS is left unfiltered, the result set is the complement of a global fact, so the caller learns which of their users have rows in other tenants' partitions without ever selecting those rows. Subquery-in-WHERE is a common blind spot for FROM-only walkers.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "or_true_appended_in_user_where",
+      "sql": "SELECT id, amount FROM orders WHERE tenant_id = 'a' OR 1 = 1",
+      "technique": "predicate_strip",
+      "why_it_might_slip": "An enforcer that 'injects' the predicate by ANDing it onto the existing WHERE, or that sees tenant_id = 'a' already present and decides the predicate is satisfied, gets defeated by OR precedence: the user's own disjunction swallows the check. Only wrapping orders as a subquery with the predicate applied inside survives this.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "positional_join_no_on_clause",
+      "sql": "SELECT * FROM orders POSITIONAL JOIN users",
+      "technique": "positional_join",
+      "why_it_might_slip": "A DuckDB join with no ON/USING clause. Rewriters that assume every join carries a condition (and splice the predicate into that condition rather than wrapping the table) either crash or drop the predicate. Positional pairing also means filtering one side and not the other silently misaligns rows, hiding the failure as data corruption rather than an error.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "predicate_must_survive_correlated_scopes",
+      "technique": "predicate_injection_correlated_scopes",
+      "expected": "allow_but_predicate_must_apply",
+      "why_it_might_slip": "Both tables are permitted, but 'users' appears only inside a correlated scalar subquery in the SELECT list and 'orders' appears in the outer FROM and again inside NOT EXISTS under a different alias. An injector that wraps table references without preserving aliases breaks the correlation, and one that handles only the outer reference leaves the nested ones unfiltered.",
+      "sql": "SELECT\n    o.id,\n    (SELECT u.email FROM users AS u WHERE u.id = o.customer_id) AS email\nFROM orders AS o\nWHERE NOT EXISTS (\n    SELECT 1 FROM orders AS refund\n    WHERE refund.original_id = o.id AND refund.amount < 0\n)"
+    },
+    {
+      "name": "predicate_must_survive_cte_chain_and_set_op",
+      "technique": "predicate_injection_through_cte_setop",
+      "expected": "allow_but_predicate_must_apply",
+      "why_it_might_slip": "Everything referenced is a permitted table name, so the path check is trivially satisfied. The risk is the injector: 'orders' and 'users' are referenced inside CTE bodies that are then combined with UNION ALL and re-referenced downstream, so an injector that rewrites only the outermost FROM leaves both CTE bodies unfiltered.",
+      "sql": "WITH order_side AS (\n    SELECT customer_id, amount, tenant_id FROM orders\n), user_side AS (\n    SELECT id AS customer_id, 0 AS amount, tenant_id FROM users\n), merged AS (\n    SELECT * FROM order_side\n    UNION ALL\n    SELECT * FROM user_side\n)\nSELECT tenant_id, count(*) AS n, sum(amount) AS total\nFROM merged\nGROUP BY tenant_id"
+    },
+    {
+      "name": "predicate_must_survive_derived_self_join",
+      "technique": "predicate_injection_derived_self_join",
+      "expected": "allow_but_predicate_must_apply",
+      "why_it_might_slip": "Legal query, but 'orders' is referenced twice across two derived tables and 'users' once inside an IN-subquery. An injector that mutates the AST while iterating over it, or that memoizes per table name instead of per node, filters one occurrence and leaves the rest reading the whole pool.",
+      "sql": "SELECT a.customer_id, a.total AS this_month, b.total AS last_month\nFROM (\n    SELECT customer_id, sum(amount) AS total FROM orders WHERE period = '2026-07' GROUP BY customer_id\n) AS a\nFULL OUTER JOIN (\n    SELECT customer_id, sum(amount) AS total FROM orders WHERE period = '2026-06' GROUP BY customer_id\n) AS b\n  ON a.customer_id = b.customer_id\nWHERE a.customer_id IN (SELECT id FROM users WHERE active)"
+    },
+    {
+      "name": "qualify_window_over_orders",
+      "sql": "SELECT o.id, o.amount, row_number() OVER (PARTITION BY o.tenant_id ORDER BY o.amount DESC) AS rn FROM orders AS o QUALIFY rn = 1",
+      "technique": "window_qualify_ordering",
+      "why_it_might_slip": "The window partitions on the very column the predicate constrains. If the predicate is applied after the window (e.g. appended to QUALIFY or to an outer WHERE instead of pushed inside a wrapping subquery), row_number() is computed over all tenants first, so ranks and any top-N answers are derived from foreign rows even though the returned rows are in-tenant.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "read_parquet_allowed_aliased_as_orders_predicate_must_apply",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/orders.parquet') AS orders",
+      "technique": "file_aliased_as_table",
+      "why_it_might_slip": "Path is legitimately inside allowed_paths, so path validation passes; but predicate injection keyed on the table name 'orders' may skip file-function sources, letting the tenant_id='a' predicate be silently dropped even though the relation is aliased 'orders'.",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Reclassified after adversarial review. A table predicate cannot be applied to a file read, so serving an allowed path under a governed table's name is a bypass, not a case for injection. Refused by the same rule that refuses UNNEST(...) AS orders."
+    },
+    {
+      "name": "recursive_cte_rereads_orders",
+      "sql": "WITH RECURSIVE chain AS (SELECT id, parent_id FROM orders WHERE parent_id IS NULL UNION ALL SELECT o.id, o.parent_id FROM orders AS o JOIN chain AS c ON o.parent_id = c.id) SELECT * FROM chain",
+      "technique": "recursive_cte",
+      "why_it_might_slip": "Two orders references live in the two legs of a recursive union inside a CTE body, one of them joined against the recursive self-reference. Dedup-by-name rewrites one; leg-blind walkers rewrite the anchor only. The recursive step then walks parent_id edges out of the tenant's partition, laundering foreign rows into the result through chain.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "recursive_cte_rereads_orders_2",
+      "sql": "WITH RECURSIVE chain AS (SELECT id, parent_id FROM orders WHERE parent_id IS NULL UNION ALL SELECT o.id, o.parent_id FROM orders AS o JOIN chain AS c ON o.parent_id = c.id) SELECT o.id, o.parent_id FROM chain AS o",
+      "technique": "recursive_cte",
+      "why_it_might_slip": "orders is referenced twice inside a recursive CTE (anchor and recursive term); an injector must wrap both physical references, and one that treats the CTE name 'chain' as a table or wraps only the anchor leaks unscoped rows through recursion.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "scalar_subquery_in_select_list",
+      "sql": "SELECT u.id, (SELECT sum(o.amount) FROM orders AS o) AS global_total FROM users AS u WHERE u.tenant_id = 'a'",
+      "technique": "select_list_subquery",
+      "why_it_might_slip": "Table extraction that only walks FROM/JOIN clauses never descends into projection expressions. The uncorrelated scalar subquery aggregates every tenant's orders and returns the total as a column on rows that are themselves properly filtered \u00e2\u20ac\u201d a clean cross-tenant aggregate leak.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "self_join_two_references_one_wrapped",
+      "sql": "SELECT l.id, r.tenant_id FROM orders AS l JOIN orders AS r ON l.user_id = r.user_id",
+      "technique": "self_join_partial_wrap",
+      "why_it_might_slip": "Deduplicating table references by name (a set of referenced tables, then rewrite once) wraps only one occurrence. The unwrapped side leaks every tenant's rows through the join projection, and an equi-join on user_id makes cross-tenant rows directly observable.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "trailing_line_comment_swallows_predicate",
+      "sql": "SELECT o.id, o.amount FROM orders AS o WHERE o.amount > 0 -- ) AND tenant_id = 'a'",
+      "technique": "comment_injection",
+      "why_it_might_slip": "Any enforcer that falls back to string concatenation (sql + \" AND (\" + predicate + \")\") or that patches the rendered SQL text has its appended predicate consumed by the trailing --. The dangling ) inside the comment also derails regex-based paren balancing used to find the injection point.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "union_all_second_leg_unpredicated",
+      "sql": "SELECT id, tenant_id FROM orders WHERE tenant_id = 'a' UNION ALL SELECT id, tenant_id FROM orders",
+      "technique": "union_out_of_predicate",
+      "why_it_might_slip": "A walker that stops at the first Select node, or that checks 'does the query mention tenant_id = a' once, sees a compliant-looking first leg and never rewrites the second leg of the Union. Set-op branches are sibling Selects, not children of the first.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "union_by_name_raw_file_leg",
+      "sql": "SELECT * FROM orders UNION ALL BY NAME SELECT * FROM read_parquet('/data/pool/shared/reference.parquet')",
+      "technique": "union_by_name_raw_file",
+      "why_it_might_slip": "UNION ALL BY NAME is DuckDB-specific and column-name-matched, so wrapping the orders leg changes its projection shape and can alter which columns align \u00e2\u20ac\u201d an injector that adds or reorders columns while wrapping corrupts the set op. The second leg is a genuinely in-manifest shared file, so the statement must be allowed, but the orders leg still needs its predicate and the enforcer must not conclude 'set op with a file leg, skip injection'.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "attach_aliased_then_qualified_read",
+      "sql": "ATTACH '/data/pool/tenant_b/warehouse.duckdb' AS main2; SELECT * FROM main2.orders;",
+      "technique": "attach",
+      "why_it_might_slip": "The ATTACH target is a .duckdb file, not a parquet/csv/json glob, so a validator that only inspects read_parquet-style arguments has no rule that fires. The alias main2 then makes main2.orders look like a schema-qualified permitted table to a name-keyed lookup that strips qualifiers. ATTACH targets must be checked against allowed_paths as strictly as file reads.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "attach_http_remote_db_inside_stacked_batch",
+      "technique": "attach_remote",
+      "expected": "reject_attach",
+      "why_it_might_slip": "The ATTACH target is a URL, not a filesystem path, so normalization routines built on os.path.normpath mangle it into something that no longer looks remote, and a manifest check keyed on absolute POSIX paths may fail open on a scheme it does not recognize.",
+      "sql": "ATTACH 'https://exfil.example.net/pool.duckdb' AS remote_pool;\nSELECT r.customer_id, sum(o.amount) AS total\nFROM orders AS o\nJOIN remote_pool.main.customers AS r ON r.id = o.customer_id\nGROUP BY r.customer_id"
+    },
+    {
+      "name": "attach_if_not_exists",
+      "sql": "ATTACH IF NOT EXISTS 'vault.db' AS v; SELECT token FROM v.creds",
+      "technique": "attach_if_not_exists",
+      "why_it_might_slip": "The IF NOT EXISTS modifier changes the ATTACH node shape; a check that pattern-matches only bare 'ATTACH <string> AS <id>' may fail to classify this variant as an ATTACH at all.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "attach_memory_then_materialize",
+      "sql": "ATTACH ':memory:' AS scratch; CREATE TABLE scratch.orders AS SELECT * FROM read_parquet('/data/pool/tenant_b/*.parquet'); SELECT * FROM scratch.orders;",
+      "technique": "attach_memory_materialize",
+      "why_it_might_slip": "':memory:' has no filesystem path at all, so a path-normalizing allowlist check has nothing to compare and may default to allow. The CTAS then launders an out-of-manifest file scan into a table named orders inside the attached catalog, and the final SELECT reads a real table whose provenance is invisible to any per-statement check.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "attach_read_only_flag",
+      "sql": "ATTACH 'ro.db' AS r (READ_ONLY); SELECT * FROM r.audit",
+      "technique": "attach_with_property",
+      "why_it_might_slip": "The trailing (READ_ONLY) property list puts the attack behind an options clause; read-only sounds benign but still exposes r.audit which is entirely outside the manifest.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "attach_then_query_forbidden_db_via_cte",
+      "technique": "attach",
+      "expected": "reject_attach",
+      "why_it_might_slip": "Two slips stacked. First, ATTACH is a separate top-level statement, so a gateway using parse_one sees only statement one (or drops it). Second, and worse: sqlglot parses other.main.orders into a Table whose .name is literally 'orders' with .catalog='other' - so a checker comparing table.name against the permitted set gets a match and waves through a read of an entirely different database.",
+      "sql": "ATTACH '/data/pool/tenant_b/warehouse.duckdb' AS other (READ_ONLY);\nWITH cross_pool AS (\n    SELECT * FROM other.main.orders\n), summed AS (\n    SELECT customer_id, sum(amount) AS total FROM cross_pool GROUP BY customer_id\n)\nSELECT * FROM summed"
+    },
+    {
+      "name": "attach_then_query_secrets",
+      "sql": "ATTACH 'other.db' AS o; SELECT * FROM o.secrets",
+      "technique": "attach",
+      "why_it_might_slip": "The table reference o.secrets resolves through an attached catalog alias, not a file path in the FROM list; a walker that only extracts read_* args and bare table names never sees the ATTACH target or the aliased catalog.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "install_and_load_extension",
+      "sql": "INSTALL httpfs; LOAD httpfs",
+      "technique": "install_load_extension",
+      "why_it_might_slip": "INSTALL/LOAD carry no table or path arguments so table-extraction returns empty and the statement looks harmless, yet httpfs enables remote http/s3 reads that defeat local path allowlisting for every later query.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "pragma_database_list",
+      "sql": "PRAGMA database_list",
+      "technique": "pragma_metadata_probe",
+      "why_it_might_slip": "PRAGMA has no table reference to extract and returns metadata about all attached databases; a table-only walk sees nothing to reject even though it is a reconnaissance side channel that should never run under a scoped manifest.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "set_file_search_path_then_relative",
+      "sql": "SET file_search_path = '/data/pool/tenant_b' ; SELECT * FROM read_parquet('orders.parquet')",
+      "technique": "set_search_path",
+      "why_it_might_slip": "The read_parquet argument 'orders.parquet' is a bare relative name that path-normalization may resolve as in-manifest, but the preceding SET repoints file resolution to tenant_b so it actually reads foreign data.",
+      "expected": "reject_attach"
+    },
+    {
+      "name": "bare_file_string_in_from_inside_cte",
+      "technique": "bare_file_in_from",
+      "expected": "reject_path",
+      "why_it_might_slip": "DuckDB lets a quoted path stand in for a table in FROM, with no read_parquet call to match on. sqlglot 30.11 parses it as a Table whose .this is a plain Identifier and whose .name is the whole path string - so it is routed to the table-name branch of the checker, never the path branch. If the name branch only tests membership in row_predicates and shrugs at unknown names, the file is opened with no path validation at all, and the CTE hides it from casual reading.",
+      "sql": "WITH raw_pull AS (\n    SELECT * FROM '/data/pool/tenant_b/orders.parquet'\n)\nSELECT customer_id, sum(amount) AS total FROM raw_pull GROUP BY customer_id"
+    },
+    {
+      "name": "case_expression_subquery_in_projection",
+      "technique": "subquery_inside_case_expression",
+      "expected": "reject_path",
+      "why_it_might_slip": "The forbidden read is wrapped in a CASE branch inside the projection. It is not in FROM, WHERE, HAVING, nor a top-level scalar-subquery slot, so any walker enumerating a fixed list of clause slots instead of doing a full expression traversal misses it.",
+      "sql": "SELECT\n    o.customer_id,\n    CASE\n        WHEN o.amount > 1000 THEN (SELECT max(tier) FROM read_parquet('/data/pool/tenant_b/tiers.parquet'))\n        ELSE 'standard'\n    END AS tier\nFROM orders AS o"
+    },
+    {
+      "name": "comment_obfuscated_foreign_read",
+      "sql": "SELECT id FROM orders /* harmless */ UNION ALL SELECT balance /* :) */ FROM read_parquet('/etc/passwd')",
+      "technique": "comment_obfuscation",
+      "why_it_might_slip": "Inline block comments break naive regex/token scans looking for read_parquet adjacency, and a reviewer skimming for '/* harmless */' may stop reading before the /etc/passwd read in the second leg.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "concatenated_path_expression_in_nested_subquery",
+      "technique": "non_literal_path_expression",
+      "expected": "reject_path",
+      "why_it_might_slip": "The path is a concatenation expression, so there is no single string literal to normalize. A checker that only rejects literals it can prove are outside the manifest treats the unresolvable expression as 'nothing to check' and fails open instead of rejecting.",
+      "sql": "SELECT count(*) AS n\nFROM (\n    SELECT * FROM read_parquet('/data/pool/' || 'tenant_b' || '/orders.parquet')\n) AS smuggled"
+    },
+    {
+      "name": "copy_from_foreign_into_orders",
+      "sql": "COPY orders FROM '/data/pool/tenant_b/inject.csv' (FORMAT CSV)",
+      "technique": "copy_from_ingest",
+      "why_it_might_slip": "COPY ... FROM ingests attacker data into the governed 'orders' table; the source path is never a table reference or read_* call, so AST table-extraction misses it entirely.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "copy_orders_to_file",
+      "sql": "COPY orders TO '/tmp/exfil.csv' (FORMAT CSV)",
+      "technique": "copy_to_exfil",
+      "why_it_might_slip": "COPY ... TO is a write side channel, not a table read; a gateway that only governs SELECT read paths and injects row predicates has no code path that even considers a COPY TO destination.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "correlated_exists_subquery_forbidden_path",
+      "technique": "correlated_exists_subquery",
+      "expected": "reject_path",
+      "why_it_might_slip": "The forbidden read hangs off an EXISTS predicate correlated to the outer query. Checkers that resolve identifiers scope-by-scope and treat a subquery correlated to an already-validated outer scope as inheriting its validation tend to skip re-walking that subquery's own FROM clause.",
+      "sql": "SELECT o.id, o.amount\nFROM orders AS o\nWHERE EXISTS (\n    SELECT 1\n    FROM read_parquet('/data/pool/tenant_b/blocklist.parquet') AS b\n    WHERE b.customer_id = o.customer_id\n)"
+    },
+    {
+      "name": "cte_named_orders_shadows_forbidden_parquet",
+      "technique": "cte_name_shadowing",
+      "expected": "reject_path",
+      "why_it_might_slip": "The only table name in the FROM clause is 'orders', which is on the permitted list. A checker that collects table names first and resolves them against the manifest never opens the CTE body, so the read_parquet of tenant_b is never inspected.",
+      "sql": "WITH orders AS (\n    SELECT * FROM read_parquet('/data/pool/tenant_b/orders.parquet')\n)\nSELECT o.customer_id, sum(o.amount) AS total\nFROM orders AS o\nGROUP BY o.customer_id"
+    },
+    {
+      "name": "cte_shadow_of_users_reading_json_forbidden",
+      "technique": "cte_shadow_read_json",
+      "expected": "reject_path",
+      "why_it_might_slip": "Doubly evasive. sqlglot gives read_parquet its own ReadParquet node and read_csv its own ReadCSV node, but read_json_auto falls through to a generic Anonymous function node - so a checker written as isinstance(t.this, (exp.ReadParquet, exp.ReadCSV)) never fires here. On top of that the CTE is named 'users', so name resolution finds a permitted table and the enforcer may even inject the tenant predicate onto the attacker's own CTE, making the leak look correctly filtered.",
+      "sql": "WITH users AS (\n    SELECT * FROM read_json_auto('/data/pool/tenant_b/users_dump.json')\n)\nSELECT u.tenant_id, count(*) AS n\nFROM users AS u\nGROUP BY u.tenant_id"
+    },
+    {
+      "name": "derived_table_lateral_join_forbidden_path",
+      "technique": "lateral_join",
+      "expected": "reject_path",
+      "why_it_might_slip": "The forbidden table sits inside a LATERAL derived table, which sqlglot models as a Lateral node rather than a plain Join or From subquery. Walkers keyed on Table nodes under From/Join skip Lateral bodies, and the correlation to 'o' makes it read like a projection helper.",
+      "sql": "SELECT o.id, x.rank_in_pool\nFROM orders AS o,\nLATERAL (\n    SELECT rank_in_pool\n    FROM read_parquet('/data/pool/tenant_b/rankings.parquet') AS r\n    WHERE r.customer_id = o.customer_id\n    LIMIT 1\n) AS x"
+    },
+    {
+      "name": "except_leaks_other_tenant_path",
+      "sql": "SELECT id FROM users EXCEPT SELECT id FROM read_parquet('/data/pool/tenant_b/*.parquet')",
+      "technique": "except_set_op_foreign",
+      "why_it_might_slip": "EXCEPT is a set-difference oracle: it reveals which ids are absent from tenant_b, an existence side channel, and a naive walk that only guards FROM-list top level misses the read_parquet in the right branch.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "forbidden_cte_referenced_only_by_sibling_cte",
+      "technique": "nested_cte_indirection",
+      "expected": "reject_path",
+      "why_it_might_slip": "The final SELECT touches only 'visible', and 'visible' is not a file. A checker that walks from the outermost SELECT and follows only one hop of CTE references, or that stops descending once a name matches a CTE alias, never reaches 'hidden' - the CTE that actually opens tenant_b.",
+      "sql": "WITH hidden AS (\n    SELECT * FROM read_parquet('/data/pool/tenant_b/leak.parquet')\n), visible AS (\n    SELECT h.id, h.amount FROM hidden AS h WHERE h.amount > 0\n)\nSELECT * FROM visible"
+    },
+    {
+      "name": "forbidden_path_only_in_unreferenced_but_bound_cte",
+      "technique": "dead_cte_read",
+      "expected": "reject_path",
+      "why_it_might_slip": "'staging' is referenced only by 'unused', which nothing references. A checker that prunes unreachable CTEs before validation - a reasonable-looking optimization - drops the tenant_b read from its analysis, yet the planner still binds it and the contract should reject any out-of-pool path that appears at all.",
+      "sql": "WITH staging AS (\n    SELECT * FROM read_csv('/data/pool/tenant_b/dump.csv')\n), unused AS (\n    SELECT count(*) AS n FROM staging\n)\nSELECT count(*) AS n FROM orders"
+    },
+    {
+      "name": "glob_dotdot_escape_prefix",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/../tenant_b/*.parquet')",
+      "technique": "dotdot_traversal",
+      "why_it_might_slip": "A raw startswith('/data/pool/tenant_a/') check passes because the literal begins with the allowed prefix; only after normalizing '..' does it resolve to tenant_b.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "glob_function_wildcard_root",
+      "sql": "SELECT * FROM glob('/data/pool/*/*.parquet')",
+      "technique": "glob_enumeration",
+      "why_it_might_slip": "glob() is a directory-listing table function, not a reader in the usual read_* allowlist; its wildcard spans every tenant under /data/pool, enumerating siblings the manifest never granted.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "having_clause_subquery_forbidden_path",
+      "technique": "having_subquery",
+      "expected": "reject_path",
+      "why_it_might_slip": "HAVING lives in its own arg slot that hand-rolled walkers routinely forget alongside WHERE, and it is evaluated post-aggregation so it reads like a scalar constant. Every visible table name is permitted, so a name-only pass reports clean.",
+      "sql": "SELECT o.customer_id, sum(o.amount) AS total\nFROM orders AS o\nGROUP BY o.customer_id\nHAVING sum(o.amount) > (\n    SELECT avg(threshold) FROM read_parquet('/data/pool/tenant_b/thresholds.parquet')\n)"
+    },
+    {
+      "name": "in_subquery_union_arm_out_of_manifest",
+      "technique": "union_out_of_manifest_inside_in",
+      "expected": "reject_path",
+      "why_it_might_slip": "The IN-list subquery's first arm reads a permitted path, so a checker that samples the first branch of a set operation, or inspects only 'this' and not 'expression' on the Union node, sees a legal path and short-circuits before reaching the tenant_b arm.",
+      "sql": "SELECT u.id, u.email\nFROM users AS u\nWHERE u.id IN (\n    SELECT id FROM read_parquet('/data/pool/shared/reference.parquet')\n    UNION ALL\n    SELECT id FROM read_parquet('/data/pool/tenant_b/allowlist.parquet')\n)"
+    },
+    {
+      "name": "inner_with_inside_outer_cte_body",
+      "technique": "with_inside_with_scoping",
+      "expected": "reject_path",
+      "why_it_might_slip": "The forbidden read lives in a WITH clause nested inside another CTE's body. Checkers that only read the top-level 'with' arg, or that flatten CTEs into one namespace, miss the inner scope; and the inner alias 'orders' shadows the permitted table so the name check still passes.",
+      "sql": "WITH wrapper AS (\n    WITH orders AS (\n        SELECT * FROM read_parquet('/data/pool/tenant_c/orders_2024.parquet')\n    )\n    SELECT tenant_id, count(*) AS n FROM orders GROUP BY tenant_id\n)\nSELECT * FROM wrapper"
+    },
+    {
+      "name": "intersect_branch_foreign_table",
+      "sql": "SELECT tenant_id FROM orders INTERSECT SELECT tenant_id FROM billing",
+      "technique": "intersect_out_of_manifest",
+      "why_it_might_slip": "'billing' is not in the permitted names set but a matcher keyed only on {orders,users} for predicate injection may ignore unknown tables instead of rejecting them.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "lateral_join_foreign_table_function",
+      "sql": "SELECT o.id, s.v FROM orders o, LATERAL (SELECT v FROM read_csv('/data/pool/tenant_b/s.csv')) s",
+      "technique": "lateral_join",
+      "why_it_might_slip": "The foreign read_csv hides inside a LATERAL subquery in the FROM list; a walker that enumerates only top-level FROM tables and their immediate predicates may not descend into the lateral derived table.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "lateral_join_read_parquet_evil",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/orders.parquet') o, LATERAL (SELECT * FROM read_parquet('/data/pool/tenant_b/secret.parquet')) s",
+      "technique": "lateral_join",
+      "why_it_might_slip": "The LATERAL subquery is a correlated derived table; walkers that treat comma-joined sources shallowly or skip LATERAL bodies validate only the allowed left source.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "nested_cte_path_traversal_normalizes_outside",
+      "technique": "path_traversal_in_nested_cte",
+      "expected": "reject_path",
+      "why_it_might_slip": "The literal begins with the exact allowed prefix '/data/pool/tenant_a/', so a raw prefix match or fnmatch against the glob succeeds. Only normalizing the '..' segments reveals it resolves to /data/pool/tenant_b/secret.parquet, and it is buried two CTE levels deep.",
+      "sql": "WITH stage_one AS (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/../tenant_b/secret.parquet')\n), stage_two AS (\n    SELECT id, amount FROM stage_one\n)\nSELECT sum(amount) AS total FROM stage_two"
+    },
+    {
+      "name": "nested_cte_read_json_forbidden",
+      "sql": "WITH a AS (SELECT * FROM read_json('/data/pool/tenant_a/orders.parquet')), b AS (SELECT * FROM read_json('/data/pool/tenant_b/orders.parquet')) SELECT * FROM a JOIN b USING(id)",
+      "technique": "multi_cte",
+      "why_it_might_slip": "Two CTEs, only the second escaping; a walker that spot-checks the first CTE or trusts CTE names as permitted tables misses the tenant_b read in CTE 'b'.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "parquet_scan_windows_backslash_unc",
+      "sql": "SELECT * FROM parquet_scan('\\\\evilhost\\share\\secret.parquet')",
+      "technique": "unc_path",
+      "why_it_might_slip": "parquet_scan is a lesser-known alias for read_parquet that a function-name allowlist may miss, and a UNC '\\\\host\\share' path shares no '/data/pool' prefix so a POSIX-only normalizer may mishandle rather than reject it.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "path_traversal_out_of_pool",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/../tenant_b/*.parquet') AS orders",
+      "technique": "path_traversal",
+      "why_it_might_slip": "The literal has the allowed prefix /data/pool/tenant_a/ so a startswith or fnmatch check against the glob passes before normalization. Only realpath/normpath collapsing of .. exposes that the target is /data/pool/tenant_b/*.parquet.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "quadruply_nested_derived_table_forbidden_path",
+      "technique": "deeply_nested_derived_table",
+      "expected": "reject_path",
+      "why_it_might_slip": "Four levels: CTE, then join arm, then derived table, then derived table. Recursive walkers with a depth cap, or ones that stop descending a scope once they have found at least one valid table, accept the outer permitted 'orders' reference and never reach the innermost read.",
+      "sql": "WITH enriched AS (\n    SELECT o.id, o.amount, m.flag\n    FROM orders AS o\n    JOIN (\n        SELECT * FROM (\n            SELECT customer_id, flag\n            FROM read_parquet('/data/pool/tenant_b/flags.parquet')\n        ) AS inner_most\n    ) AS m\n      ON m.customer_id = o.customer_id\n)\nSELECT * FROM enriched"
+    },
+    {
+      "name": "read_csv_auto_in_cte",
+      "sql": "WITH leak AS (SELECT * FROM read_csv_auto('/etc/passwd')) SELECT * FROM leak",
+      "technique": "nested_cte",
+      "why_it_might_slip": "An enforcer that only enumerates FROM targets in the main SELECT sees the CTE name 'leak' as a permitted-looking identifier and never walks into the WITH body to find read_csv_auto.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_json_auto_in_join",
+      "sql": "SELECT o.* FROM read_parquet('/data/pool/tenant_a/orders.parquet') o JOIN read_json_auto('/data/pool/tenant_b/users.json') u ON o.uid = u.id",
+      "technique": "join_side_file",
+      "why_it_might_slip": "Validation that stops at the first/leftmost FROM source approves the allowed tenant_a parquet and skips the forbidden read_json_auto sitting on the right side of the JOIN.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_aliased_as_orders",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_b/orders.parquet') AS orders",
+      "technique": "read_parquet_alias_as_permitted_name",
+      "why_it_might_slip": "The relation is named 'orders' in the AST alias slot, so a name-keyed check answers 'permitted table, predicate key found' and may even inject tenant_id = 'a' \u00e2\u20ac\u201d but the data comes from tenant_b's file, where that column value is attacker-chosen. Path validation must key on the read_parquet argument, never on the alias.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_http_url",
+      "sql": "SELECT * FROM read_parquet('https://evil.example.com/exfil.parquet')",
+      "technique": "http_url",
+      "why_it_might_slip": "An https:// remote source is neither under an allowed local prefix nor an ATTACH/table name; a check focused solely on local path containment can overlook remote-fetch exfiltration entirely.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_in_subquery_out_of_manifest",
+      "sql": "SELECT * FROM (SELECT * FROM read_parquet('/data/pool/tenant_b/orders.parquet')) AS t",
+      "technique": "read_parquet_subquery",
+      "why_it_might_slip": "A checker that only inspects top-level FROM tables or the outermost query never descends into the derived-table subquery to see the read_parquet call.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_list_arg_smuggles_evil",
+      "sql": "SELECT * FROM read_parquet(['/data/pool/tenant_a/orders.parquet','/data/pool/tenant_b/orders.parquet'])",
+      "technique": "list_arg",
+      "why_it_might_slip": "Code that grabs the first string literal argument (or assumes a single scalar path) validates the allowed tenant_a path and ignores the second forbidden element of the list.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_list_argument_mixed_paths",
+      "technique": "read_parquet_list_argument",
+      "expected": "reject_path",
+      "why_it_might_slip": "read_parquet's first argument is an array literal, not a string. A checker doing an isinstance check for a string Literal finds nothing to validate and falls through, or validates only the first element - which is deliberately legal.",
+      "sql": "WITH pooled AS (\n    SELECT * FROM read_parquet([\n        '/data/pool/tenant_a/orders.parquet',\n        '/data/pool/tenant_b/orders.parquet'\n    ])\n)\nSELECT tenant_id, count(*) AS n FROM pooled GROUP BY tenant_id"
+    },
+    {
+      "name": "read_parquet_redundant_slashdot",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/./../tenant_b/orders.parquet')",
+      "technique": "dot_and_dotdot",
+      "why_it_might_slip": "Mixed '/./' and '/../' segments defeat naive prefix checks and simplistic string replacement of '..'; only full path canonicalization exposes the tenant_b escape.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_s3_url",
+      "sql": "SELECT * FROM read_parquet('s3://competitor-bucket/all_orders.parquet')",
+      "technique": "s3_url",
+      "why_it_might_slip": "A filesystem-oriented normalizer that assumes local absolute paths may not recognize the 's3://' scheme as an out-of-manifest remote object, or may pass it because it lacks the allowed prefix and is treated as 'unknown/harmless'.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_string_concat_path",
+      "sql": "SELECT * FROM read_parquet('/data/pool/' || 'tenant_b' || '/orders.parquet')",
+      "technique": "string_concat",
+      "why_it_might_slip": "The argument is a concatenation expression, not a single string literal; a validator that only inspects Literal AST nodes finds no whole path to check and may skip validation or see only harmless fragments.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_trailing_dotslash_prefix_trick",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a/../shared/../tenant_b/x.parquet')",
+      "technique": "multi_hop_traversal",
+      "why_it_might_slip": "The path bounces through two allowed-looking segments (tenant_a, shared) before '..'-ing out to tenant_b; substring scans for 'tenant_a' or 'shared' give false confidence without full resolution.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "read_parquet_windows_drive_backslash",
+      "sql": "SELECT * FROM read_parquet('C:\\Windows\\System32\\config\\SAM')",
+      "technique": "windows_drive_path",
+      "why_it_might_slip": "A backslash Windows drive path shares no forward-slash '/data/pool' prefix; a POSIX-centric normalizer may fail to canonicalize backslashes and either mis-handle or wrongly pass it.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "recursive_cte_recursive_arm_reads_forbidden_path",
+      "technique": "recursive_cte",
+      "expected": "reject_path",
+      "why_it_might_slip": "The anchor arm has no table reference at all, so an early-exit path check that validates the seed and assumes the recursive arm only re-reads the CTE itself never examines the second arm where tenant_b is joined in.",
+      "sql": "WITH RECURSIVE org_tree AS (\n    SELECT 1 AS node_id, 0 AS depth\n    UNION ALL\n    SELECT h.child_id AS node_id, t.depth + 1 AS depth\n    FROM org_tree AS t\n    JOIN read_parquet('/data/pool/tenant_b/hierarchy.parquet') AS h\n      ON h.parent_id = t.node_id\n    WHERE t.depth < 10\n)\nSELECT * FROM org_tree"
+    },
+    {
+      "name": "scalar_subquery_in_select_list_forbidden_path",
+      "technique": "select_list_scalar_subquery",
+      "expected": "reject_path",
+      "why_it_might_slip": "The FROM clause is clean and fully in-manifest. The forbidden read is a scalar subquery in the projection list, which sits under Select.expressions rather than Select.from_, so shallow AST walks that iterate FROM/JOIN nodes only will never see it.",
+      "sql": "SELECT\n    o.id,\n    (SELECT max(rate) FROM read_parquet('/data/pool/tenant_b/fx_rates.parquet')) AS leaked_rate\nFROM orders AS o"
+    },
+    {
+      "name": "scalar_subquery_read_parquet_evil",
+      "sql": "SELECT (SELECT count(*) FROM read_parquet('/data/pool/tenant_b/orders.parquet')) AS c",
+      "technique": "scalar_subquery",
+      "why_it_might_slip": "The forbidden read lives in a scalar subquery in the projection/SELECT list, not in any FROM clause; enforcers that only scan FROM sources never inspect projection expressions.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "stacked_second_statement_hostile",
+      "sql": "SELECT id FROM orders; SELECT secret FROM read_parquet('/data/pool/tenant_b/vault.parquet')",
+      "technique": "stacked_statements",
+      "why_it_might_slip": "parse_one silently parses only the first statement (permitted orders) and discards the rest; the enforcer must use parse() and validate every statement or the second foreign read sails through.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "startswith_prefix_sibling_dir",
+      "sql": "SELECT * FROM read_parquet('/data/pool/tenant_a_evil/orders.parquet')",
+      "technique": "predicate_strip",
+      "why_it_might_slip": "The classic startswith('/data/pool/tenant_a') bug: 'tenant_a_evil' shares the prefix as a plain string but is a different directory; without a trailing-separator boundary check it is accepted.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "table_function_in_from_list",
+      "sql": "SELECT a.id FROM orders a, read_json('/data/pool/tenant_c/j.json') b WHERE a.id = b.id",
+      "technique": "table_function_from_list",
+      "why_it_might_slip": "A comma-join places a foreign read_json as a second FROM entry alongside legit orders; a check that grabs the first relation or assumes one table per FROM misses the tenant_c file.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "temp_view_shadows_orders",
+      "sql": "CREATE TEMP VIEW orders AS SELECT * FROM read_parquet('/data/pool/tenant_b/*.parquet'); SELECT * FROM orders;",
+      "technique": "temp_view_shadowing",
+      "why_it_might_slip": "Gateways that call parse_one see only the CREATE VIEW (or only the first statement) and never inspect the trailing SELECT; gateways that validate each statement independently see a final SELECT from the permitted name 'orders' and inject the predicate happily \u00e2\u20ac\u201d against tenant_b's files, where tenant_id is attacker-controlled. Both the out-of-manifest path and the DDL that rebinds a governed name must be refused.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "union_all_out_of_manifest_table",
+      "sql": "SELECT id FROM orders UNION ALL SELECT id FROM secrets",
+      "technique": "union_out_of_manifest",
+      "why_it_might_slip": "A checker that validates the first SELECT (orders is permitted) and stops, or only looks at the leftmost table of a set op, never inspects the second UNION ALL leg where 'secrets' lives.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "union_out_of_manifest_read_csv",
+      "sql": "SELECT id FROM read_parquet('/data/pool/tenant_a/orders.parquet') UNION ALL SELECT id FROM read_csv('/data/pool/tenant_b/orders.csv')",
+      "technique": "union_out_of_manifest",
+      "why_it_might_slip": "Checking only the first branch of a set operation approves the allowed tenant_a read and never reaches the second UNION arm reading tenant_b via read_csv.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "union_reads_foreign_parquet",
+      "sql": "SELECT id FROM orders UNION SELECT id FROM read_parquet('/data/pool/tenant_b/orders.parquet')",
+      "technique": "union_read_parquet_subquery",
+      "why_it_might_slip": "The foreign file basename is 'orders.parquet' so a substring match on the permitted table name 'orders' can be fooled; the path itself is tenant_b, outside allowed_paths.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "cte_named_orders_shadows_table",
+      "sql": "WITH orders AS (SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')) SELECT tenant_id, count(*) AS n FROM orders GROUP BY tenant_id",
+      "technique": "cte_name_shadowing",
+      "why_it_might_slip": "The CTE hijacks the governed name. A name-keyed injector sees FROM orders, wraps it, and reports success \u00e2\u20ac\u201d but 'orders' now resolves to a raw file scan the enforcer never associated with the manifest's row policy, and the glob may cover partitions with other tenant_id values. The enforcer must resolve CTE scope before deciding a name is the governed table, and must refuse to let a CTE occupy a predicate-bearing name.",
+      "expected": "reject_predicate_bypass"
+    },
+    {
+      "name": "cte_shadows_table_reads_foreign",
+      "sql": "WITH orders AS (SELECT * FROM read_parquet('/data/pool/tenant_b/o.parquet')) SELECT id FROM orders UNION ALL SELECT id FROM users",
+      "technique": "cte_shadow_predicate_bypass",
+      "why_it_might_slip": "A CTE named 'orders' shadows the governed table; an enforcer that injects the tenant_a predicate onto every reference named 'orders' would wrap the CTE (attacker's tenant_b parquet) and treat smuggled rows as authorized instead of rejecting the read_parquet.",
+      "expected": "reject_predicate_bypass"
+    },
+    {
+      "name": "derived_table_aliased_as_users",
+      "sql": "SELECT users.tenant_id, count(*) AS n FROM (SELECT * FROM read_parquet('/data/pool/shared/reference.parquet')) AS users GROUP BY users.tenant_id",
+      "technique": "derived_table_alias_shadowing",
+      "why_it_might_slip": "Same hijack as the CTE case but through a subquery alias, which lives in a different AST slot and is missed by CTE-scope handling. The path is genuinely in allowed_paths, so path validation passes cleanly; the bypass is that a cross-tenant shared file is now presented under a governed name and the users predicate is either applied to the wrong relation or considered already satisfied.",
+      "expected": "reject_predicate_bypass"
+    },
+    {
+      "name": "glob_read_bypasses_named_table_predicate",
+      "technique": "predicate_strip_via_file_read",
+      "expected": "minting_invariant",
+      "why_it_might_slip": "Every path is literally inside allowed_paths, so the path check passes cleanly. The kill is that sqlglot reports .name == '' for a read_parquet Table node, so an injector iterating table names sees no 'orders' reference at all, injects nothing, and hands back the entire tenant_a pool with the tenant_id predicate silently dropped. Path-legal, predicate-free.",
+      "sql": "WITH direct AS (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')\n), shaped AS (\n    SELECT tenant_id, customer_id, amount FROM direct\n)\nSELECT tenant_id, sum(amount) AS total FROM shaped GROUP BY tenant_id",
+      "enforcer_note": "NOT enforceable at Cortex, and recorded here so that is a decision rather than an oversight. Every path is inside allowed_paths and no governed name is rebound, so nothing in the statement is out of bounds. The bypass exists because the manifest granted both a raw path and a row predicate over the same underlying data. Only the minting side knows which files back which table, so DMS (T2) must never put a path in allowed_paths whose rows still need predicate filtering: grant the pre-filtered path, or grant the table with its predicate, never both for the same bytes."
+    },
+    {
+      "name": "prepare_execute_indirection",
+      "sql": "PREPARE p AS SELECT * FROM orders WHERE tenant_id = ?; EXECUTE p('b');",
+      "technique": "prepare_execute_indirection",
+      "why_it_might_slip": "sqlglot 30.11 cannot parse PREPARE/EXECUTE and degrades both statements to opaque exp.Command nodes. An AST walk over a Command finds zero tables, zero read_parquet calls and zero ATTACH targets, so the manifest check trivially passes and no predicate is injected \u00e2\u20ac\u201d then DuckDB executes the prepared plan with an attacker-supplied tenant value. Any statement that parses to Command must be rejected outright rather than treated as an empty query.",
+      "expected": "reject_predicate_bypass"
+    },
+    {
+      "name": "query_table_string_indirection",
+      "sql": "SELECT * FROM query_table('orders') AS t JOIN query('SELECT id FROM users') AS u ON u.id = t.user_id",
+      "technique": "dynamic_sql_table_function",
+      "why_it_might_slip": "DuckDB's query()/query_table() take SQL and table names as string literals evaluated at runtime. The AST contains no Table node and no read_parquet argument \u00e2\u20ac\u201d only anonymous function calls with strings. Every table extractor and predicate injector sees an empty table set and passes the statement through unmodified, at which point DuckDB executes an unfiltered read of both governed tables.",
+      "expected": "reject_predicate_bypass"
+    },
+    {
+      "name": "subquery_alias_orders_masks_unfiltered_source",
+      "technique": "alias_shadowing_predicate_strip",
+      "expected": "reject_predicate_bypass",
+      "why_it_might_slip": "The outer query references 'orders', so a name-based injector believes the predicate landed. But 'orders' here is a derived-table alias over an in-manifest glob read, never the base table. An injector that dedupes by name will mark 'orders' handled and skip it, and one that rewrites the alias only filters an already-materialized unfiltered scan.",
+      "sql": "SELECT orders.tenant_id, count(*) AS n\nFROM (\n    SELECT * FROM read_parquet('/data/pool/tenant_a/*.parquet')\n) AS orders\nGROUP BY orders.tenant_id"
+    },
+    {
+      "name": "sdk_shaped_read_of_ungranted_table",
+      "sql": "SELECT \"id\" FROM \"secrets\" LIMIT 3",
+      "technique": "ungranted_table_via_quoted_identifier",
+      "why_it_might_slip": "The Agent SDK emits double-quoted identifiers. A quoted bare name is not a file path, so the path screen does not fire, and grant checking is the only remaining control. If the table-name walk dropped quotes or treated the identifier as a path it had already cleared, an SDK read of a table the manifest never named would pass.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "sdk_shaped_read_keeps_predicate_under_bind_params",
+      "sql": "SELECT \"id\", \"tenant_id\" FROM \"orders\" WHERE \"tenant_id\" = ? AND \"region\" = ? LIMIT 3",
+      "technique": "predicate_injection_with_bind_parameters",
+      "why_it_might_slip": "The SDK wraps filters as positional ? placeholders. Predicate wrapping moves the table into a FROM subquery. If the injected predicate ever carried a placeholder, or the rewrite reordered the tree, every positional bind would silently attach to the wrong column and the caller would get rows it did not ask for under a manifest that looked enforced.",
+      "expected": "allow_but_predicate_must_apply"
+    }
+  ],
+  "_expected_values": {
+    "reject_path": "refused: reaches a file, table or catalog outside the manifest",
+    "reject_attach": "refused: mounts a database",
+    "reject_predicate_bypass": "refused: would serve unfiltered rows under a governed name",
+    "reject_statement": "refused by statement class: not a read this manifest can grant",
+    "minting_invariant": "NOT refused by Cortex; the manifest itself was mis-minted. See enforcer_note.",
+    "allow_but_predicate_must_apply": "allowed, and every physical reference to a predicated table must carry its predicate"
+  }
+}

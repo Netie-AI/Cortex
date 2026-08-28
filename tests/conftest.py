@@ -40,8 +40,13 @@ def mock_sentence_transformer(monkeypatch):
         types.ModuleType("sentence_transformers.models"),
     )
 
+    # skillmesh imports SentenceTransformer lazily (packaging profiles: the rag
+    # extra may be absent), so the module-level symbol only exists on builds that
+    # still bind it at import time. Where it is absent the sys.modules fake above
+    # already covers the deferred import.
     for mod_name in ("netie.fabrication.skillmesh", "CortexOS.fabrication.skillmesh"):
-        if mod_name in sys.modules:
+        mod = sys.modules.get(mod_name)
+        if mod is not None and hasattr(mod, "SentenceTransformer"):
             monkeypatch.setattr(f"{mod_name}.SentenceTransformer", MockTransformer)
 
     return MockTransformer

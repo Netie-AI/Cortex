@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import csv
 import random
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "data" / "samples"
@@ -85,6 +86,11 @@ LOW_STOCK_WH_A = [
     ("SKU-90006", "First Aid Refill", 6.0, 18.0),
     ("SKU-90007", "Stretch Hood Film", 7.0, 30.0),
     ("SKU-90008", "Humidity Sensor Probe", 2.0, 10.0),
+]
+
+# Named SKUs for value-normalization traps (G4: bare BETA → SKU-BETA).
+NAMED_SKUS = [
+    ("SKU-BETA", "Beta Trial Pack", "FOOD_DRY"),
 ]
 
 SKU_NAMES = [
@@ -276,6 +282,26 @@ def generate_inventory(
             }
         )
 
+    # Named SKUs for G4 value-normalization (BETA → SKU-BETA).
+    for j, (sku, name, category) in enumerate(NAMED_SKUS):
+        sup = suppliers[(j + 3) % len(suppliers)]
+        rows.append(
+            {
+                "sku": sku,
+                "sku_name": name,
+                "category": category,
+                "supplier_id": sup["supplier_id"],
+                "location_id": wh_a["location_id"],
+                "storage_bin": f"WH-A-NAMED-{j + 1:02d}",
+                "quantity_kg": str(rng.randint(40, 120)),
+                "reorder_level_kg": "20",
+                "unit_cost_myr": f"{rng.uniform(20, 80):.2f}",
+                "last_restocked": (today - timedelta(days=rng.randint(5, 40))).isoformat(),
+                "expiry_date": "",
+                "is_hazardous": "false",
+            }
+        )
+
     seen: set[str] = {f"{r['sku']}|{r['location_id']}|{r['storage_bin']}" for r in rows}
     wh_a_id = loc_by_code["WH-A"]["location_id"]
     n_low_target = int(n * 0.15)
@@ -409,6 +435,24 @@ def generate_transactions(
                 "operator_id": f"OP-{rng.randint(1, 50):03d}",
                 "timestamp": ts.isoformat(timespec="seconds"),
                 "reference_doc": f"DOC-{rng.randint(1000, 9999)}" if rng.random() > 0.2 else "",
+            }
+        )
+    # Value dict reads sku from transactions. Named inventory SKUs must appear
+    # here or BETA cannot resolve to SKU-BETA. IN-only so OUT rankings stay put.
+    named_ids = {sku for sku, _name, _cat in NAMED_SKUS}
+    named_inv = [inv for inv in inventory if inv.get("sku") in named_ids]
+    for j, inv in enumerate(named_inv):
+        rows.append(
+            {
+                "txn_id": f"TXN-{210000 + j}",
+                "sku": inv["sku"],
+                "location_id": inv["location_id"],
+                "txn_type": "IN",
+                "quantity_kg": "1.0",
+                "unit_cost_myr": inv["unit_cost_myr"],
+                "operator_id": "OP-001",
+                "timestamp": now.isoformat(timespec="seconds"),
+                "reference_doc": "DOC-NAMED",
             }
         )
     return rows
@@ -566,7 +610,6 @@ def generate_rows(n: int = 200) -> list[dict[str, str]]:
     inv = generate_inventory(rng, locations, suppliers, n=n)
     loc_code_by_id = {r["location_id"]: r["location_code"] for r in locations}
     messy: list[dict[str, str]] = []
-    start = date(2024, 1, 1)
     for idx, row in enumerate(inv):
         m = dict(row)
         code = loc_code_by_id.get(row["location_id"], "WH-A")

@@ -1,17 +1,41 @@
-"""DuckDB warehouse loader + semantic layer helpers."""
+"""DuckDB warehouse loader + semantic layer helpers.
+
+Connection opens live in ``CortexOS.execution.warehouse`` (C4). This module
+keeps loaders, previews, and semantic helpers without importing ``duckdb``.
+"""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from CortexOS.execution.warehouse import (
+    DEFAULT_DB,
+    close_cached_connections,
+    connect_write,
+    get_connection,
+    read_only_queries_enabled,
+)
+
+# Re-export connection helpers so existing callers keep importing from here.
+__all__ = [
+    "DEFAULT_DB",
+    "DEFAULT_SEMANTIC",
+    "KNOWN_TABLES",
+    "SAMPLES",
+    "TABLE_FILES",
+    "close_cached_connections",
+    "get_connection",
+    "load_inventory_csv",
+    "load_semantic_layer",
+    "preview_table",
+    "read_only_queries_enabled",
+    "table_row_counts",
+]
+
 ROOT = Path(__file__).resolve().parents[2]
-# DMS_WAREHOUSE_DB mirrors DMS_OPS_DB (audit ledger): lets a host app isolate
-# the warehouse outside the repo. Must be set before this module is imported.
-DEFAULT_DB = Path(os.environ.get("DMS_WAREHOUSE_DB") or ROOT / "data" / "dms_demo.duckdb")
 DEFAULT_SEMANTIC = ROOT / "packs" / "dms" / "semantic_layer.yaml"
 SAMPLES = ROOT / "data" / "samples"
 
@@ -89,12 +113,8 @@ def load_inventory_csv(
     csv_path: Path | str | None = None,
     db_path: Path | str | None = None,
 ) -> Path:
-    import duckdb
-
     db_path = Path(db_path or DEFAULT_DB)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    con = duckdb.connect(str(db_path))
+    con = connect_write(db_path)
     try:
         for table, fname in TABLE_FILES.items():
             path = SAMPLES / fname
@@ -109,9 +129,9 @@ def load_inventory_csv(
 
 
 def table_row_counts(db_path: Path | str | None = None) -> dict[str, int]:
-    import duckdb
-
-    con = duckdb.connect(str(db_path or DEFAULT_DB))
+    # Pure read: must not take the write lock, and must not evict a cached
+    # reader that other callers in this process are still using.
+    con = get_connection(db_path, read_only=read_only_queries_enabled())
     counts: dict[str, int] = {}
     try:
         for table in KNOWN_TABLES:
@@ -136,10 +156,8 @@ def preview_table(
     if table not in KNOWN_TABLES:
         raise ValueError(f"Unknown table: {table}")
 
-    import duckdb
-
     limit = min(max(to_row - from_row, 1), 500)
-    con = duckdb.connect(str(db_path or DEFAULT_DB))
+    con = get_connection(db_path, read_only=read_only_queries_enabled())
     try:
         total = int(con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         col_rows = con.execute(
@@ -153,16 +171,10 @@ def preview_table(
         )
         rows_raw = rel.fetchall()
         columns = [d[0] for d in rel.description] if rel.description else use_cols
-        rows = [dict(zip(columns, row)) for row in rows_raw]
+        rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
         return rows, total, all_cols
     finally:
         con.close()
-
-
-def get_connection(db_path: Path | str | None = None):
-    import duckdb
-
-    return duckdb.connect(str(db_path or DEFAULT_DB))
 
 
 def main() -> None:

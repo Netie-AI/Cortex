@@ -33,6 +33,31 @@ def test_chain_append_and_verify_ok(ledger_db):
     assert result.broken_at is None
 
 
+def test_verify_past_the_tip_fails_closed(ledger_db):
+    from packs.dms.audit.ledger import append, verify
+
+    append("tester", "seed", {"x": 1}, db_path=ledger_db)
+    result = verify(db_path=ledger_db, start_seq=99)
+    assert result.ok is False
+    assert result.broken_at == 99
+
+
+def test_verify_seq_gap_fails_closed(ledger_db):
+    from packs.dms.audit.ledger import append, verify
+
+    append("tester", "seed", {"x": 0}, db_path=ledger_db)
+    append("tester", "seed", {"x": 1}, db_path=ledger_db)
+    con = sqlite3.connect(str(ledger_db))
+    try:
+        con.execute("DELETE FROM dms_audit_ledger WHERE seq = 0")
+        con.commit()
+    finally:
+        con.close()
+    result = verify(db_path=ledger_db)
+    assert result.ok is False
+    assert result.broken_at is not None
+
+
 def test_tamper_detected(ledger_db):
     from packs.dms.audit.ledger import append, verify
 
@@ -133,9 +158,10 @@ def test_postgres_concurrent_appends_consistent(postgres_ledger):
 
 
 def test_postgres_append_only_trigger(postgres_ledger):
-    from packs.dms.audit.ledger import append
     from sqlalchemy import text
     from sqlalchemy.exc import DBAPIError
+
+    from packs.dms.audit.ledger import append
 
     append("pg-tester", "immutable.check", {"ok": True})
 

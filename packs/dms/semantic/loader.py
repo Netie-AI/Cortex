@@ -8,6 +8,7 @@ engine treat a compiled metric as trustworthy without the LLM writing SQL.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -16,6 +17,22 @@ from typing import Any
 import yaml
 
 from packs.dms.semantic import values as valuedict
+
+_TABLE_REF = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][\w]*)", re.IGNORECASE)
+
+
+def stated_tables(sql: str) -> tuple[str, ...]:
+    """Tables a metric or certified template says it will read.
+
+    Taken from the definition, not from compiled SQL at query time. Template
+    slots (``{limit}``, ``{wh}``) sit outside FROM/JOIN identifiers.
+    """
+    seen: list[str] = []
+    for match in _TABLE_REF.finditer(sql or ""):
+        name = match.group(1).lower()
+        if name not in seen:
+            seen.append(name)
+    return tuple(seen)
 
 ROOT = Path(__file__).resolve().parents[3]
 SEMANTIC_DIR = ROOT / "packs" / "dms" / "semantic"
@@ -35,6 +52,7 @@ class Metric:
     synonyms: list[str] = field(default_factory=list)
     result_columns: list[str] = field(default_factory=list)
     params: dict[str, dict] = field(default_factory=dict)
+    tables: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -45,6 +63,8 @@ class CertifiedQuery:
     verified_by: str = ""
     verified_at: str = ""
     tags: list[str] = field(default_factory=list)
+    tables: tuple[str, ...] = ()
+    synonyms: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -120,6 +140,42 @@ def _render_param(name: str, spec: dict, raw: Any, *, resolve: bool = True) -> s
             raise SemanticError(f"{name}: cannot resolve {raw!r} to a {column} value")
         return f"AND {col_ref} {op} {_q(val)}"
 
+    if kind == "not_in":
+        # optional AND column NOT IN (...); empty when no exclusions
+        if raw in (None, "", [], ()):
+            return ""
+        items = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+        column = spec["column"]
+        resolve = bool(spec.get("resolve"))
+        quoted: list[str] = []
+        for item in items:
+            text = str(item).strip()
+            if not text:
+                continue
+            if resolve:
+                res = valuedict.resolve(text, column)
+                if res is None or not res.ok:
+                    raise SemanticError(
+                        f"{name}: cannot resolve {text!r} to a {column} value"
+                    )
+                val = res.value
+            else:
+                val = text
+            quoted.append(_q(val.upper() if column == "sku" else val))
+        if not quoted:
+            return ""
+        return f"AND {column} NOT IN ({', '.join(quoted)})"
+
+    if kind == "offset_clause":
+        # Omit OFFSET 0 so golden/certified SQL stay byte-stable.
+        try:
+            v = int(raw or 0)
+        except (TypeError, ValueError) as exc:
+            raise SemanticError(f"{name}: expected int, got {raw!r}") from exc
+        if v < 0:
+            raise SemanticError(f"{name}={v} must be >= 0")
+        return f" OFFSET {v}" if v else ""
+
     raise SemanticError(f"{name}: unknown param kind {kind!r}")
 
 
@@ -137,6 +193,10 @@ def _sample_value(spec: dict) -> Any:
     if kind in ("value", "filter"):
         vals = valuedict.values_for(spec["column"])
         return vals[0] if vals else None
+    if kind == "not_in":
+        return []
+    if kind == "offset_clause":
+        return 0
     return None
 
 
@@ -152,10 +212,11 @@ def compile_metric(model: SemanticModel, metric_id: str,
         provided = pname in params
         raw = params.get(pname, spec.get("default"))
         if raw is None and not provided:
+            if spec.get("kind") in ("filter", "not_in", "offset_clause") or spec.get("optional"):
+                empty = [] if spec.get("kind") == "not_in" else (0 if spec.get("kind") == "offset_clause" else "")
+                rendered[pname] = _render_param(pname, spec, empty, resolve=resolve)
+                continue
             if spec.get("required") or spec.get("kind") in ("value",) and not spec.get("optional"):
-                if spec.get("kind") == "filter":  # optional fragment
-                    rendered[pname] = ""
-                    continue
                 raise SemanticError(f"{metric_id}: missing required param {pname!r}")
         rendered[pname] = _render_param(pname, spec, raw, resolve=resolve)
 
@@ -176,11 +237,13 @@ def _load_metrics() -> dict[str, Metric]:
     data = yaml.safe_load(METRICS_PATH.read_text(encoding="utf-8"))
     metrics: dict[str, Metric] = {}
     for raw in data.get("metrics", []):
+        sql = raw["sql"].strip()
         m = Metric(
-            id=raw["id"], kind=raw["kind"], sql=raw["sql"].strip(),
+            id=raw["id"], kind=raw["kind"], sql=sql,
             synonyms=list(raw.get("synonyms") or []),
             result_columns=list(raw.get("result_columns") or []),
             params=dict(raw.get("params") or {}),
+            tables=stated_tables(sql),
         )
         if m.id in metrics:
             raise SemanticError(f"duplicate metric id {m.id!r}")
@@ -191,15 +254,26 @@ def _load_metrics() -> dict[str, Metric]:
 def _load_certified() -> list[CertifiedQuery]:
     data = yaml.safe_load(CERTIFIED_PATH.read_text(encoding="utf-8"))
     seen: set[str] = set()
+    phrases: set[str] = set()
     out: list[CertifiedQuery] = []
     for raw in data.get("certified", []):
         if raw["id"] in seen:
             raise SemanticError(f"duplicate certified id {raw['id']!r}")
         seen.add(raw["id"])
+        sql = raw["sql"].strip()
+        synonyms = list(raw.get("synonyms") or [])
+        for phrase in (raw["question"], *synonyms):
+            key = re.sub(r"[^a-z0-9]+", " ", (phrase or "").lower()).strip()
+            if key and key in phrases:
+                raise SemanticError(f"duplicate certified phrase {phrase!r}")
+            if key:
+                phrases.add(key)
         out.append(CertifiedQuery(
-            id=raw["id"], question=raw["question"], sql=raw["sql"].strip(),
+            id=raw["id"], question=raw["question"], sql=sql,
             verified_by=raw.get("verified_by", ""), verified_at=raw.get("verified_at", ""),
             tags=list(raw.get("tags") or []),
+            tables=stated_tables(sql),
+            synonyms=synonyms,
         ))
     return out
 
@@ -222,6 +296,16 @@ def reload() -> SemanticModel:
     return load_all()
 
 
+def normalize_certified_sql(cq: CertifiedQuery) -> tuple[str, list[str]]:
+    """Value-norm certified SQL (VQ-01). Pack-side so the engine never names generative."""
+    from packs.dms.generative.literal_normalize import normalize_sql_literals
+
+    norm = normalize_sql_literals(cq.sql)
+    if not norm.ok:
+        return cq.sql, list(norm.violations)
+    return (norm.sql or cq.sql), []
+
+
 def validate_all(*, execute: bool = True) -> dict[str, Any]:
     """Compile every metric with sample params and execute every certified query.
 
@@ -235,7 +319,8 @@ def validate_all(*, execute: bool = True) -> dict[str, Any]:
     if execute:
         from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
 
-        con = get_connection(DEFAULT_DB)
+        # explain/validate is an offline tool: never take the exclusive write lock
+        con = get_connection(DEFAULT_DB, read_only=True)
     try:
         for mid, metric in model.metrics.items():
             sample = {p: _sample_value(spec) for p, spec in metric.params.items()}

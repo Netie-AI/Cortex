@@ -1,3 +1,11 @@
+<!-- generated 2026-08-28T00:40:15+00:00 -->
+<!-- generated 2026-08-28T00:29:14+00:00 -->
+<!-- generated 2026-08-28T00:26:04+00:00 -->
+<!-- generated 2026-08-28T00:20:31+00:00 -->
+<!-- generated 2026-08-25T22:32:53+00:00 -->
+<!-- generated 2026-08-22T14:38:13+00:00 -->
+<!-- generated 2026-08-22T14:08:14+00:00 -->
+<!-- generated 2026-08-22T10:17:38+00:00 -->
 <!-- generated 2026-07-25T13:21:20+00:00 -->
 <!-- generated 2026-07-22T05:44:12+00:00 -->
 <!-- generated 2026-07-22T03:57:27+00:00 -->
@@ -15,7 +23,7 @@ Builder. **F7 remainder in progress** — F6 PASS (2026-07-03). F8 blocked.
 |---|---|
 | F6 skill capture | PASS |
 | F7 remainder | RBAC on `/dms/skills/*` + rate limit shipped; RLS/SOPS next |
-| Tests | **153 passed, 4 skipped** |
+| Tests | See STATUS.md / last gate log. This file is not a live count. |
 
 ## F7 remainder — done this slice
 - `packs/dms/security/api_auth.py` — API-key → viewer/steward/admin

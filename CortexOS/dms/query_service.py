@@ -10,10 +10,15 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
+from CortexOS.dms.warehouse_db import (
+    DEFAULT_DB,
+    get_connection,
+    load_semantic_layer,
+    read_only_queries_enabled,
+)
 from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
-from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
-from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_layer
 from packs.dms.security.reversible import secure_reversible
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,11 +31,119 @@ SQL_KEYWORDS = re.compile(
     r"sales?|sold|revenue|transactions?|rank|ranking|score|compare|comparison|benchmark)\b",
     re.I,
 )
+# A question goes to the document corpus only when it NAMES a document. The
+# opener alone is not a signal: "what does shipping cost us by destination" and
+# "explain the drop in sales" are analytics questions, and routing them to RAG
+# returned a confident zero-row answer from the contract corpus.
+_DOC_NOUN = (
+    r"(?:contracts?|supplier agreements?|agreements?|sops?|policy|policies|"
+    r"clauses?|terms and conditions|payment terms|delivery terms|"
+    r"documents?|documentation|paperwork)"
+)
 RAG_KEYWORDS = re.compile(
-    r"\b(what does|explain|according to|contract|supplier agreement|terms)\b",
+    r"\b(?:"
+    rf"according to\b|"
+    rf"(?:what|which|how)\s+(?:does|do|did|is|are)\b[^?]*\b{_DOC_NOUN}\b|"
+    rf"explain\b[^?]*\b{_DOC_NOUN}\b|"
+    rf"{_DOC_NOUN}\b[^?]*\b(?:say|says|state|states|require|requires|specify|specifies)\b|"
+    rf"(?:in|from|per|under)\s+(?:the\s+|our\s+)?{_DOC_NOUN}\b"
+    r")",
     re.I,
 )
-DESTRUCTIVE = re.compile(r"\b(drop|delete|truncate|alter|insert|update|create)\b", re.I)
+# ── destructive-intent detection ─────────────────────────────────────────────
+# A bare verb blocklist (the old `\b(drop|delete|...|update|create)\b`) is wrong
+# in both directions on natural language: it refused ordinary questions
+# ("update me on the delayed shipments", "cost by drop-off point") and missed
+# every plain-English destructive request ("wipe all supplier records"). Actual
+# ENFORCEMENT lives in sql_guardrail's sqlglot AST check, which rejects any
+# write statement whatever the wording — this layer exists to refuse the *intent*
+# early and record it, so it must classify intent, not spot verbs.
+#
+# Order matters: benign idioms are stripped first, then a mutation verb must be
+# followed (within a short window) by something that names stored data.
+
+_SQL_WRITE_SHAPE = re.compile(
+    r"\b(?:"
+    r"drop\s+(?:table|database|schema|view|index)|"
+    r"truncate\s+(?:table\s+)?\w+|"
+    r"delete\s+from|"
+    r"insert\s+into|"
+    r"update\s+\w+\s+set\b|"
+    r"alter\s+(?:table|database|schema)|"
+    r"create\s+(?:table|database|schema|index|or\s+replace)"
+    r")",
+    re.I,
+)
+
+# Idioms where a mutation verb is ordinary English, not a request to write.
+_BENIGN_IDIOM = re.compile(
+    r"\b(?:"
+    r"updates?\s+(?:me|us|them|him|her)|"
+    r"(?:any|the|an|a|status|latest|daily|weekly|monthly)\s+updates?|"
+    r"keep\s+\w+\s+updated|last\s+updated|not\s+updated|never\s+updated|"
+    r"drop-?\s?offs?|dropped|drops?\s+in\b|price\s+drops?|drop\s+shipping|"
+    r"create\s+(?:a\s+|an\s+|the\s+)?"
+    r"(?:report|chart|graph|dashboard|summary|breakdown|visual|forecast|plot)"
+    r")\b",
+    re.I,
+)
+
+_MUTATION_VERB = re.compile(
+    r"\b(drop|delete|truncate|alter|insert|update|create|wipe|erase|purge|"
+    r"remove|clear|destroy|overwrite|reset)\b",
+    re.I,
+)
+
+# Words that make a mutation verb a request against stored data.
+_DATA_OBJECT = re.compile(
+    r"\b(table|tables|database|databases|schema|column|columns|row|rows|"
+    r"record|records|entry|entries|data|dataset|inventory|supplier|suppliers|"
+    r"shipment|shipments|location|locations|transaction|transactions|"
+    r"alert|alerts|warehouse|warehouses|sku|skus|everything|all)\b",
+    re.I,
+)
+
+# How many words may sit between the verb and the thing it acts on.
+_INTENT_WINDOW = 4
+
+# After a copula the word is a predicate adjective ("locations are clear of
+# alerts") or a passive description of something already done ("records were
+# deleted") — neither is a request to mutate anything.
+_COPULA = frozenset({"is", "are", "was", "were", "be", "been", "being", "am"})
+
+
+def destructive_intent(question: str) -> str | None:
+    """Reason string when the question asks to MUTATE stored data, else None.
+
+    Returns the matched evidence so the refusal can be audited with a cause
+    rather than a bare flag.
+    """
+    q = (question or "").strip()
+    if not q:
+        return None
+
+    shape = _SQL_WRITE_SHAPE.search(q)
+    if shape:
+        return f"sql_write_statement:{shape.group(0).lower()}"
+
+    # Remove benign idioms before looking for verbs, so "update me on ..." and
+    # "drop-off point" never reach the verb scan at all.
+    scrubbed = _BENIGN_IDIOM.sub(" ", q)
+    words = re.findall(r"[A-Za-z_]+", scrubbed)
+    for i, word in enumerate(words):
+        if not _MUTATION_VERB.fullmatch(word):
+            continue
+        if i and words[i - 1].lower() in _COPULA:
+            continue
+        window = words[i + 1 : i + 1 + _INTENT_WINDOW]
+        for target in window:
+            if _DATA_OBJECT.fullmatch(target):
+                return f"mutation_intent:{word.lower()} {target.lower()}"
+    return None
+
+
+# Kept as the literal-SQL detector for callers that want the narrow check.
+DESTRUCTIVE = _SQL_WRITE_SHAPE
 DEFAULT_INVENTORY_SQL = (
     "SELECT sku, quantity_kg, location_id, reorder_level_kg, category "
     "FROM inventory ORDER BY sku LIMIT 100"
@@ -120,7 +233,7 @@ class QueryPlan:
 
 def route_question(question: str) -> Literal["sql", "rag", "blocked", "needs_clarification"]:
     q = question.strip()
-    if DESTRUCTIVE.search(q):
+    if destructive_intent(q):
         return "blocked"
     if RAG_KEYWORDS.search(q):
         return "rag"
@@ -515,24 +628,36 @@ def generate_sql(question: str, semantic: dict[str, Any]) -> str:
 
 
 def _format_low_stock_answer(rows: list[dict], wh: str | None) -> str:
+    required = ("sku", "quantity_kg")
+    if not rows or any(k not in rows[0] for k in required):
+        # Do not invent placeholders when the row shape is a count/scalar follow-up.
+        return (
+            "I can't list low-stock SKUs from that prior answer — "
+            "ask a ranking that returns SKUs first, then follow up."
+        )
     loc = f" in {wh}" if wh else ""
     lines = [f"{len(rows)} SKU(s) below reorder level{loc}:"]
     for row in rows[:8]:
-        sku = row.get("sku", "?")
-        qty = row.get("quantity_kg", "?")
-        reorder = row.get("reorder_level_kg", row.get("reorder_level", "?"))
+        sku = row.get("sku")
+        qty = row.get("quantity_kg")
+        reorder = row.get("reorder_level_kg", row.get("reorder_level"))
+        if sku is None or qty is None:
+            continue
         name = row.get("sku_name") or row.get("category") or ""
         bin_id = row.get("storage_bin", "")
         wh_code = row.get("location_code", "")
         detail = f"  · {sku}"
         if name:
             detail += f" ({name})"
-        detail += f" — {qty} kg on hand vs {reorder} kg reorder"
+        reorder_txt = f"{reorder} kg reorder" if reorder is not None else "reorder n/a"
+        detail += f" — {qty} kg on hand vs {reorder_txt}"
         if wh_code:
             detail += f" @ {wh_code}"
         if bin_id:
             detail += f"-{bin_id}"
         lines.append(detail)
+    if len(lines) == 1:
+        return f"No SKUs below reorder level{loc}."
     if len(rows) > 8:
         lines.append(f"  · …and {len(rows) - 8} more (see chart)")
     return "\n".join(lines)
@@ -541,6 +666,13 @@ def _format_low_stock_answer(rows: list[dict], wh: str | None) -> str:
 def _format_capacity_answer(rows: list[dict]) -> str:
     if not rows:
         return "No warehouse capacity data available."
+    if "location_code" not in rows[0] or "pct_used" not in rows[0]:
+        preview = rows[:5]
+        lines = [f"Found {len(rows)} row(s)."]
+        for row in preview:
+            parts = [f"{k}={v}" for k, v in list(row.items())[:5]]
+            lines.append("  · " + ", ".join(parts))
+        return "\n".join(lines)
     over90 = [r for r in rows if float(r.get("pct_used", 0) or 0) > 90]
     lines = [
         f"{len(over90)} of {len(rows)} warehouses are above 90% capacity.",
@@ -557,18 +689,27 @@ def _format_capacity_answer(rows: list[dict]) -> str:
 def _format_generic_answer(rows: list[dict], question: str) -> str:
     if not rows:
         return "No rows matched your query."
-    q = question.lower()
-    if "sale" in q or "sold" in q or "revenue" in q:
+    # Scalar governed metrics (revenue_myr, expired_count, …) before sales-rank phrasing
+    if len(rows) == 1 and len(rows[0]) == 1:
+        key, val = next(iter(rows[0].items()))
+        return f"Result: {key} = {val}"
+    first = rows[0] or {}
+    # Dispatch from returned columns — never invent measures from question words.
+    if "sku" in first and "sales_value_myr" in first:
         lines = [f"Top {len(rows)} sales result(s), ranked by value:"]
         for row in rows[:5]:
-            lines.append(
-                f"  · {row.get('sku')}: MYR {row.get('sales_value_myr')} "
-                f"from {row.get('total_sold_kg')} kg sold ({row.get('transaction_count')} txns)"
-            )
+            lines.append(f"  · {row.get('sku')}: MYR {row.get('sales_value_myr')}")
         if len(rows) > 5:
             lines.append(f"  · …and {len(rows) - 5} more rows")
         return "\n".join(lines)
-    if "delayed" in q or "late" in q:
+    if "sku" in first and "total_sold_kg" in first:
+        lines = [f"Top {len(rows)} sales result(s), ranked by volume:"]
+        for row in rows[:5]:
+            lines.append(f"  · {row.get('sku')}: {row.get('total_sold_kg')} kg sold")
+        if len(rows) > 5:
+            lines.append(f"  · …and {len(rows) - 5} more rows")
+        return "\n".join(lines)
+    if "shipment_id" in first and "days_delayed" in first:
         lines = [f"{len(rows)} delayed shipment row(s), sorted by days delayed:"]
         for row in rows[:5]:
             lines.append(
@@ -578,7 +719,7 @@ def _format_generic_answer(rows: list[dict], question: str) -> str:
         if len(rows) > 5:
             lines.append(f"  · …and {len(rows) - 5} more rows")
         return "\n".join(lines)
-    if any(term in q for term in ("rank", "ranking", "score", "compare", "comparison", "benchmark")):
+    if "supplier_name" in first and "ranking_score" in first:
         lines = [f"{len(rows)} ranked supplier result(s), sorted by combined score:"]
         for row in rows[:5]:
             lines.append(
@@ -588,9 +729,6 @@ def _format_generic_answer(rows: list[dict], question: str) -> str:
         if len(rows) > 5:
             lines.append(f"  · …and {len(rows) - 5} more rows")
         return "\n".join(lines)
-    if len(rows) == 1 and len(rows[0]) == 1:
-        key, val = next(iter(rows[0].items()))
-        return f"Result: {key} = {val}"
     preview = rows[:5]
     lines = [f"Found {len(rows)} row(s)."]
     for row in preview:
@@ -610,10 +748,11 @@ def synthesize_answer(rows: list[dict], question: str) -> str:
             return f"No SKUs below reorder level{hint}. All monitored stock is above threshold."
         return "No rows matched your query."
 
-    if "below reorder" in q or "low stock" in q:
+    first = rows[0] or {}
+    if ("below reorder" in q or "low stock" in q) and "sku" in first and "quantity_kg" in first:
         return _format_low_stock_answer(rows, _detect_warehouse_code(question))
 
-    if "capacity" in q:
+    if "capacity" in q and "pct_used" in first:
         return _format_capacity_answer(rows)
 
     return _format_generic_answer(rows, question)
@@ -714,7 +853,7 @@ def build_chart_spec(rows: list[dict], question: str) -> dict[str, Any] | None:
 
 
 def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
-    con = get_connection(db_path or DEFAULT_DB)
+    con = get_connection(db_path or DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
         crit = con.execute(
             "SELECT COUNT(*) FROM alerts WHERE resolved = false AND severity = 'CRITICAL'"
@@ -747,7 +886,12 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     return answer, sources
 
 
-def answer_question(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+def answer_question(
+    question: str,
+    *,
+    session_id: str | None = None,
+    require_grounding: bool = False,
+) -> dict[str, Any]:
     """Q2 — route through the layered answer engine (certified → governed metric →
     abstain). Falls back to the legacy heuristic path only if the engine is
     unavailable, so behavior degrades safely rather than breaking.
@@ -758,8 +902,16 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
+        from CortexOS.execution.manifest import ManifestError
 
-        result = _engine_answer(question, session_id=session_id)
+        result = _engine_answer(
+            question, session_id=session_id, require_grounding=require_grounding
+        )
+        # A served turn that nothing grants must not fall through to the
+        # pre-Q2 ranked-SQL path. That bridge opens its own connection and
+        # would answer from the demo warehouse under the abstain.
+        if result.get("grant_kind") == "none":
+            return result
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
         # until a dedicated governed metric exists. Word-boundary match only — bare
         # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
@@ -771,6 +923,9 @@ def answer_question(question: str, *, session_id: str | None = None) -> dict[str
         ):
             return _answer_question_legacy(question, session_id=session_id)
         return result
+    except ManifestError:
+        # Never swallow manifest/security refusals into the legacy path.
+        raise
     except Exception:  # noqa: BLE001 — engine failure must not take the API down
         return _answer_question_legacy(question, session_id=session_id)
 
@@ -831,7 +986,7 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     sql = generate_sql(question, semantic)
     query_plan = plan_query(question, sql)
-    con = get_connection(DEFAULT_DB)
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
         guard_result, rows, entry = guard_and_execute(sql, semantic, con)
     finally:

@@ -50,6 +50,16 @@ TEXT_EXT = {".py", ".md", ".yaml", ".yml", ".json", ".toml", ".txt", ".ps1", ".b
             ".sql", ".js", ".jsx", ".ts", ".tsx", ".cfg", ".ini", ".env", ".example",
             ".sh", ".csv", ".jsonl", ".html", ".css"}
 
+# Reading a whole file was unbounded: tracked corpora (.jsonl, .csv) reach tens
+# of megabytes, and read_text() on one of those raised MemoryError on a loaded
+# machine. The scanner then died with a traceback having scanned nothing, which
+# is not a gate (KB R-0007). Anything past the limit is streamed instead.
+WHOLE_READ_LIMIT = 4 * 1024 * 1024
+CHUNK_CHARS = 1 << 20
+# Carried into the next chunk so a secret lying across a chunk boundary is
+# still matched. Must exceed the longest match any pattern above can produce.
+OVERLAP_CHARS = 4096
+
 
 def _git_files(staged: bool) -> list[str]:
     cmd = ["git", "diff", "--cached", "--name-only"] if staged else ["git", "ls-files"]
@@ -69,6 +79,46 @@ def scan_text(text: str) -> list[tuple[str, str]]:
     return findings
 
 
+def scan_file(path: Path) -> list[tuple[str, str]]:
+    """Findings for one file, never holding more than a chunk in memory."""
+    try:
+        if path.stat().st_size <= WHOLE_READ_LIMIT:
+            return scan_text(path.read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return []
+    except MemoryError:
+        pass  # fall through to the streaming path rather than dying
+    return _scan_streaming(path)
+
+
+def _scan_streaming(path: Path) -> list[tuple[str, str]]:
+    """Scan a large file in overlapping chunks.
+
+    A finding seen in the overlap would otherwise be reported twice, so hits
+    are de-duplicated. If the read cannot be finished, that is reported as a
+    finding rather than returning a short list that reads as "clean" - a scan
+    that silently stopped early is exactly the lie this gate exists to prevent
+    (KB R-0011).
+    """
+    seen: set[tuple[str, str]] = set()
+    found: list[tuple[str, str]] = []
+    tail = ""
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            while True:
+                block = handle.read(CHUNK_CHARS)
+                if not block:
+                    break
+                for hit in scan_text(tail + block):
+                    if hit not in seen:
+                        seen.add(hit)
+                        found.append(hit)
+                tail = block[-OVERLAP_CHARS:]
+    except (OSError, MemoryError) as exc:
+        found.append(("unscannable_file", f"{type(exc).__name__}..."))
+    return found
+
+
 def scan_repo(*, staged: bool = False) -> list[str]:
     """Return human-readable violations. Empty list = clean."""
     violations: list[str] = []
@@ -84,11 +134,7 @@ def scan_repo(*, staged: bool = False) -> list[str]:
         path = ROOT / rel
         if not path.is_file() or path.suffix.lower() not in TEXT_EXT:
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for name, snippet in scan_text(text):
+        for name, snippet in scan_file(path):
             violations.append(f"{rel}: {name} ({snippet})")
     return violations
 

@@ -8,7 +8,7 @@
 ```
 CLIENT     demo/dms-ui/ (Next.js 14) — query, warehouse, chat, brain, skills, audit
      │ HTTP
-API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse routes)
+API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse, `/v1/contract/*`)
      │
 PACK       packs/dms/ — vision, audit, chat, tasks, skills, lakehouse, security
      │
@@ -16,6 +16,15 @@ RUNTIME    CortexOS/ — engine registry, memory plane, compliance, ponytail, RA
      │
 DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (target)
 ```
+
+---
+
+## 2a. Contract surface (what a consumer pins)
+
+DMS (and any other consumer) speaks HTTP at `POST|GET /v1/contract/*`
+(operationIds: ask, submit, ledger.append, ledger.verify, tool.registry,
+drillthrough) and pins the `cortex-contract` package. It must never import
+`CortexOS`. Spec: `contract/openapi-1.2.0.json` (generated, never hand-edited).
 
 ---
 
@@ -32,8 +41,7 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 | DAG runner | Partial — no Temporal, limited fan-out |
 | Cost ledger | Partial |
 | Model routing T0–T3 | Partial |
-| Hybrid RAG | Partial — not wired to demo |
-| WASM sandbox | Scaffold only |
+| Hybrid RAG | Retrieve + fusion shipped (`CortexOS/rag/*`, extras). Route-then-doc-RAG shipped (`RAG_KEYWORDS` → `rag_answer` over the contract corpus). Live Qdrant in the demo is still not wired. RAG-02 / RAG-03 closed; RAG-01 remainder is demo Qdrant, not the retrieve stack. |
 | A2A / personality | Planned (RUMA) |
 
 ### DMS pack
@@ -74,7 +82,7 @@ DATA       DuckDB analytics | DuckLake lakehouse (L0) | SQLite ops | Postgres (t
 - Production WASM / microVM
 - Postgres ledger CI verification / RLS proof (DSN optional locally) — Claude Code packet
 - SOPS production secrets hygiene — Claude Code packet
-- Live Qdrant RAG in demo
+- Live Qdrant RAG in demo (retrieve + route-then-doc-RAG are shipped; this is the RAG-01 remainder)
 - `@agent` chat dispatch + DBOS durable resume (S1 remainder)
 - U0 Data Studio single page
 - F8 governed tool-call publish
@@ -112,12 +120,18 @@ POST /dms/query                     → sqlglot → DuckDB
 
 ---
 
-## 6. Branch truth (2026-07-21)
-| Branch | Role |
-|---|---|
-| `dms-v2` | Canonical DMS F1–F6 + F7 RBAC + portable demo |
-| `netie-engine-up` | Engine/memory/lakehouse source line (unrelated history) |
-| `dms-integrated-engine` | This line — dms-v2 + engine/lakehouse port + Phase 0 plan |
+## 6. Branch truth (2026-07-29)
+
+**Canonical write-up:** [`docs/strategy/CORTEX_WHITEPAPER.md`](docs/strategy/CORTEX_WHITEPAPER.md) §7.
+
+| Branch | Tip (measured) | Role |
+|---|---|---|
+| **`main`** | `cd66578` | Integration trunk. Governance + landed engine + DMS pack. Ahead of `origin/main` by skill-embedding fix. **Use this.** |
+| `fix/deterministic-skill-embedding` | `cd66578` | Identical to `main` — already merged; delete after push. |
+| `feat/context-engineering` | `be945ac` | Fully merged into `main` (context assembler + `/api/context`). Historical — delete. |
+| `netie-engine` | `028fbfb` | Diverged Brain-B R&D feeder (not fully merged). Capabilities cherry-picked via path C. Do not rebase. Archive/read-only. |
+
+Retired names (`dms-v2`, `netie-engine-up`, `dms-integrated-engine`) are historical merge parents — not active trunks.
 
 Invariant: F6 skills feed **suggest ranking only**; F5 YAML rules govern execution.
 

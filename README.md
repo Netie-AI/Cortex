@@ -2,16 +2,27 @@
 
 Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
-Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
+**Product roles:** Cortex = central brain (MoE / architecture presets / orchestrate). Keys + leave-machine gate + FreeRoute = **OpenVault**. See [`PRODUCT_ROLES.md`](PRODUCT_ROLES.md).
 
-## Handoff (read first)
+**Whitepaper (architecture · apps · roadmap · branches):** [`docs/strategy/CORTEX_WHITEPAPER.md`](docs/strategy/CORTEX_WHITEPAPER.md)
+
+Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, and runs it on your compute.
+
+**Consumer pin:** DMS pins `cortex-contract` and calls `POST|GET /v1/contract/*` (`contract/openapi-1.2.0.json`). It must never import `CortexOS`.
+
+**What actually guards it today:** SQL is parsed and validated with sqlglot before it runs; every read is enforced against a signed session manifest, so a query cannot reach a table the session never bound; the audit trail is a hash chain; and tool calls go through an allowlisted host runner. Process-level isolation is **not** shipped — untrusted code is packaged and run in containers, not sandboxed in-process. See [`PARKING_LOT.md`](PARKING_LOT.md) P2.
+
+## Read first
 
 | File | When |
 |------|------|
+| [CLAUDE.md](CLAUDE.md) | **Start here.** Invariants, protected paths, how to verify. Any agent or contributor. |
 | [STATUS.md](STATUS.md) | Current gate, debt, next feature |
-| [CURSOR_HANDOFF.md](CURSOR_HANDOFF.md) | Cursor builder startup |
-| [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) | Claude supervisor paste |
 | [docs/PLUG_AND_PLAY.md](docs/PLUG_AND_PLAY.md) | One-call `plug_in(app)` integration |
+
+Older handoff docs (`CURSOR_HANDOFF.md`, `CLAUDE_HANDOFF.md`, `CONTEXT.md`,
+`CORTEX_COMPLETE_PLAN.md`) describe a state the repo has moved past — they still
+reference F7 and a 153-test suite. They are kept for history; do not start from them.
 
 ```powershell
 python scripts/handoff.py --cursor   # builder
@@ -28,14 +39,40 @@ python scripts/handoff.py --claude   # supervisor
 .\demo\run_demo.ps1 -Fast    # restart in ~30s
 ```
 
-- UI: http://localhost:3000
-- Warehouse: http://localhost:3000/warehouse
-- Chat: http://localhost:3000/chat
-- API: http://localhost:8000/health
+- Demo UI: http://localhost:3000
+- Demo API (``demo/run_demo.ps1``): http://localhost:8000/health
+- Engine launcher (``scripts/start_cortex_engine.ps1``): http://localhost:8010/health
 
 **Show script:** [docs/DEMO.md](docs/DEMO.md)
 
+### Generated data (not tracked)
+
+`data/dms_demo.duckdb` and `packs/data/dms_ops.db` are runtime stores, rebuilt from
+committed source — the CSVs in `data/samples/` and the pack's ontology YAML. A running
+engine (and a plain `pytest` run) writes to both, so neither is in git. Nothing needs
+them to exist: the code creates them on first use. To build them explicitly:
+
+```powershell
+python -m CortexOS.dms.warehouse_db   # data/dms_demo.duckdb from data/samples/*.csv
+python -m scripts.seed_ops_db         # packs/data/dms_ops.db: schema, ontology, demo bins
+```
+
 ## Tests
+
+**Broken `myenv` / `.venv_gpu`?** Use the bootstrap venv (Windows, no MSVC/Rust build):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap_venv.ps1
+.\.venv\Scripts\python.exe -m pytest tests\test_openvault_client.py tests\test_openvault_gate.py tests\test_workflow_runner.py -q
+```
+
+Or one shot:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_orchestration_tests.ps1
+```
+
+Full suite (needs all optional deps):
 
 ```powershell
 python -m pytest tests/ -q

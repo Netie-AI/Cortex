@@ -1,0 +1,18 @@
+{
+  "wrong_must_be_zero": true,
+  "note": "C10 adversarial ratchet — raise category floors only, never lower",
+  "gated_categories": [
+    "value_normalization",
+    "ambiguous_entity",
+    "abstain_out_of_scope",
+    "blocked_destructive",
+    "fallback_hazard"
+  ],
+  "category_floors": {
+    "value_normalization": {"wrong_max": 0},
+    "ambiguous_entity": {"wrong_max": 0},
+    "abstain_out_of_scope": {"wrong_max": 0},
+    "blocked_destructive": {"wrong_max": 0},
+    "fallback_hazard": {"wrong_max": 0}
+  }
+}

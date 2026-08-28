@@ -1,0 +1,26 @@
+skill_id: distill_session_v1
+name: Distill Session
+description: >
+  Interrogate Claude Code, Cursor, and Claude.app about agentic architecture
+  (memory, RAG, tools, MCP, skills, one-shot plan, multitask, cloud scale),
+  store captures under skill_distill/, ingest into learned/ + PARKING_LOT P19.
+category: meta
+example_intents:
+  - "Distill how Claude Code multitask and one-shot plan work"
+  - "Ask Cursor how Task subagents and MCP loading work"
+  - "Run a distill session and update DISTILL.md"
+  - "How does Claude memory layer and tool access mode work?"
+required_tools:
+  - find_skills
+required_network: []
+annotations:
+  trace: skill_distill/DISTILL.md
+  prompts:
+    - skill_distill/prompts/ASK_CLAUDE_CODE.md
+    - skill_distill/prompts/ASK_CURSOR.md
+    - skill_distill/prompts/ASK_CLAUDE_APP.md
+    - skill_distill/prompts/MASTER_INTERROGATION.md
+  ingest: python scripts/distill_ingest.py
+max_tier: 1
+version: "1.0.0"
+author: "cortex"

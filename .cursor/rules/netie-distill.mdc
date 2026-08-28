@@ -1,0 +1,20 @@
+---
+description: Always distill Claude/Cursor agentic learnings into skill_distill and cite DISTILL.md
+globs:
+alwaysApply: true
+---
+
+# Netie distill discipline
+
+When you learn how **Claude Code**, **Claude.app**, or **Cursor** implements
+memory, tools, MCP/connectors, skills, subagents, one-shot plans, multitask,
+cloud agents, deploy, or scale:
+
+1. Write a capture under `skill_distill/captures/` (use `_TEMPLATE.md`).
+2. Cite `skill_distill/DISTILL.md` in the capture frontmatter.
+3. Run or remind: `python scripts/distill_ingest.py`.
+4. Deferred work → `PARKING_LOT.md` **P19** with `distill: skill_distill/captures/...`.
+5. Prefer **lazy tool loading** (Find Skills / on-demand MCP schemas) unless a
+   tiny fixed toolset is required — matches Claude “Load tools when needed”.
+
+Do not leave important orchestration knowledge only in chat history.

@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const DEMO_API_KEYS = {
   ANALYST: "dms-demo-viewer-key",
@@ -54,10 +54,28 @@ export async function checkHealth() {
   return request("/health");
 }
 
+function getQuerySessionId() {
+  if (typeof window === "undefined") return "demo";
+  try {
+    const key = "dms_query_session_id";
+    let id = window.localStorage.getItem(key);
+    if (!id) {
+      id =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      window.localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return "demo";
+  }
+}
+
 export async function postQuery(question) {
   return request("/dms/query", {
     method: "POST",
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, session_id: getQuerySessionId() }),
   });
 }
 
@@ -220,4 +238,91 @@ export async function completeTaskEvent({ eventId, outcome, triggerText }) {
       trigger_text: triggerText,
     }),
   });
+}
+
+/** Find Skills — skills-first discovery over curated GitHub refs + local cards. */
+export async function findSkills(goal, { topK = 8, evolve = false } = {}) {
+  return request("/api/discovery/find-skills", {
+    method: "POST",
+    body: JSON.stringify({ goal, top_k: topK, evolve }),
+  });
+}
+
+export async function findMcp(goal, { topK = 8 } = {}) {
+  return request("/api/discovery/find-mcp", {
+    method: "POST",
+    body: JSON.stringify({ goal, top_k: topK }),
+  });
+}
+
+export async function findSubagents(goal, { topK = 8 } = {}) {
+  return request("/api/discovery/find-subagents", {
+    method: "POST",
+    body: JSON.stringify({ goal, top_k: topK }),
+  });
+}
+
+export async function fetchDiscoverySources() {
+  return request("/api/discovery/sources");
+}
+
+// ── Lakehouse / Studio (medallion) ──────────────────────────────────────────
+
+export async function fetchLakehouseStatus() {
+  return request("/dms/lakehouse/status");
+}
+
+export async function fetchLakehouseTables() {
+  return request("/dms/lakehouse/tables");
+}
+
+export async function previewLakeTable(schema, name, limit = 50) {
+  return request(`/dms/lakehouse/tables/${encodeURIComponent(schema)}/${encodeURIComponent(name)}?limit=${limit}`);
+}
+
+export async function fetchLakeSnapshots(schema, name) {
+  return request(
+    `/dms/lakehouse/tables/${encodeURIComponent(schema)}/${encodeURIComponent(name)}/snapshots`
+  );
+}
+
+export async function lakehouseQuery(sql) {
+  return request("/dms/lakehouse/query", {
+    method: "POST",
+    body: JSON.stringify({ sql }),
+  });
+}
+
+export async function ingestFileBase64(filename, contentB64) {
+  return request("/dms/ingest/file", {
+    method: "POST",
+    body: JSON.stringify({ filename, content_b64: contentB64 }),
+  });
+}
+
+export async function fetchIngestLedger() {
+  return request("/dms/ingest/ledger");
+}
+
+export async function fetchPipelines() {
+  return request("/dms/pipelines");
+}
+
+export async function runPipeline(pipelineId) {
+  return request(`/dms/pipelines/${encodeURIComponent(pipelineId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function fetchPipelineEvents(limit = 50) {
+  return request(`/dms/pipelines/events?limit=${limit}`);
+}
+
+export async function fetchPipelineProposals() {
+  return request("/dms/pipelines/proposals");
+}
+
+export async function syncWarehouseFromSilver() {
+  return request("/dms/lakehouse/sync-warehouse", { method: "POST", body: JSON.stringify({}) });
 }

@@ -5,10 +5,9 @@ from __future__ import annotations
 import csv
 import re
 from collections import Counter
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-
 
 ISSUE_TYPES = (
     "TYPE_CHAOS",

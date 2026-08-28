@@ -1,0 +1,201 @@
+# DMS paraphrase robustness set v1 — the GENERALIZATION contract.
+#
+# The golden set (dms_golden_v1.yaml) measures whether the engine answers the
+# exact question it was built against. That number is self-confirming: the L1
+# metric router is hand-written regex, so it passes its own phrasings by
+# construction. This set measures the thing that actually decides whether the
+# product survives contact with an enterprise: does it answer the SAME question
+# asked a DIFFERENT way?
+#
+# Each key is a golden item id. Its paraphrases inherit that item's `match`,
+# `canonical_sql`, `key_columns` and `round` — so a paraphrase is `correct` only
+# if it produces the same result as the canonical SQL, not merely "an answer".
+#
+# Scoring is identical to bench.accuracy: abstain is a SAFE miss (coverage
+# loss), a confidently wrong answer is the only unacceptable outcome.
+#
+# Phrasings are deliberately ordinary — how a supply-chain analyst, a plant
+# manager and a finance controller each ask the same thing. They are NOT
+# adversarial and contain no trick wording.
+
+paraphrases:
+  # ── counts / inventory ─────────────────────────────────────────────────────
+  sku_count:
+    - "how many distinct SKUs are in stock"
+    - "total number of SKUs we carry"
+    - "count our inventory items"
+    - "what's our SKU count"
+    - "how many products are we stocking"
+
+  low_stock_wh_a:
+    - "what is running low in warehouse A"
+    - "SKUs under their reorder point at WH-A"
+    - "which products need replenishment in warehouse A"
+    - "WH-A items below reorder"
+    - "warehouse A stockouts risk"
+
+  low_stock_all:
+    - "what needs reordering"
+    - "everything under the reorder point"
+    - "which products are running low across all sites"
+
+  expired_items:
+    - "what stock has gone past its expiry date"
+    - "show me out of date inventory"
+    - "list SKUs past shelf life"
+
+  stale_restock:
+    - "what has not been topped up in a month"
+    - "items with no restock in 30 days"
+    - "which SKUs have gone stale on the shelf"
+
+  chemicals_list:
+    - "show me everything in the chemicals category"
+    - "what chemical products do we hold"
+
+  # ── sales / revenue ────────────────────────────────────────────────────────
+  sales_top5_value:
+    - "our five biggest earners by sales value"
+    - "which SKUs bring in the most money, top 5"
+    - "rank the top 5 products by revenue"
+    - "top five SKUs ranked by outbound revenue"
+    - "list the highest-revenue products, limit 5"
+    - "show me the five SKUs that sell the most value"
+
+  sales_top5_exclude_beta:
+    - "excluding BETA, top 5 sku by revenue"
+    - "ignore BETA and show top five by revenue"
+    - "top 5 revenue SKUs without SKU-BETA"
+    - "excluding SKU-BETA, what are the top 5 by sales"
+
+  sales_top3_volume:
+    - "three highest selling SKUs by weight"
+    - "top 3 products by units shipped out"
+    - "which 3 SKUs moved the most kilograms"
+
+  revenue_last_30d:
+    - "how much did we sell in the past 30 days"
+    - "revenue over the last thirty days"
+    - "total sales value in the trailing month"
+
+  stock_value_by_category:
+    - "what is our inventory worth per category"
+    - "value of stock held broken down by category"
+
+  sku_count_by_category:
+    - "number of products in each category"
+    - "how many SKUs per category"
+
+  # ── shipments ──────────────────────────────────────────────────────────────
+  delayed_count_scalar:
+    - "what is running late"
+    - "show me the late deliveries"
+    - "which consignments are behind schedule"
+    - "count of delayed shipments"
+    - "how many shipments are delayed"
+
+  in_transit:
+    - "what is on the road right now"
+    - "shipments currently moving"
+
+  arriving_week:
+    - "what lands this week"
+    - "deliveries due in the next seven days"
+
+  delayed_by_carrier:
+    - "which freight companies are causing the delays"
+    - "break the late shipments down by carrier"
+    - "delay count per logistics provider"
+
+  delayed_incoming_per_wh:
+    - "late inbound loads per site"
+    - "how many delayed arrivals at each warehouse"
+
+  cost_by_destination:
+    - "freight spend per destination"
+    - "what does shipping cost us by drop-off point"
+
+  # ── suppliers ──────────────────────────────────────────────────────────────
+  risk_above_070:
+    - "which vendors score worse than 0.7 on risk"
+    - "suppliers with risk over 0.7"
+    - "show me our riskiest vendors above 0.7"
+
+  supplier_ranking:
+    - "rank our vendors on risk and lead time together"
+    - "combined supplier scorecard ranking"
+
+  avg_lead_time_by_country:
+    - "typical lead time per supplier country"
+    - "mean days to deliver by country"
+
+  spend_by_country:
+    - "how much do we spend in each supplier country"
+    - "procurement spend broken down by country"
+
+  audit_overdue:
+    - "which vendors are due for an audit"
+    - "suppliers whose audit has lapsed"
+
+  high_risk_pending:
+    - "risky suppliers who still owe us shipments"
+    - "pending deliveries from high risk vendors"
+
+  # ── capacity / sites ───────────────────────────────────────────────────────
+  capacity_utilisation:
+    - "how full is each warehouse"
+    - "site by site space usage"
+    - "show me utilisation across locations"
+    - "warehouse capacity usage percent"
+    - "utilization by location"
+
+  capacity_above_90:
+    - "which sites are nearly full"
+    - "locations running over 90% capacity"
+
+  most_free_capacity:
+    - "where do we have the most room left"
+    - "which site has the most spare space in kg"
+    - "warehouse with the largest free capacity"
+
+  cold_storage:
+    - "which sites are refrigerated"
+    - "show me the chilled locations"
+
+  cold_storage_count:
+    - "how many refrigerated sites do we run"
+    - "count of cold storage locations"
+
+  active_alerts:
+    - "what is currently flagged"
+    - "show me open warnings across the network"
+
+  cctv_wh_a:
+    - "camera feed for warehouse A"
+    - "which CCTV covers WH-A"
+
+  # ── must abstain (answer does not exist in the semantic layer) ─────────────
+  fallback_best_price:
+    - "who quoted us the cheapest last quarter"
+    - "best priced vendor in Q1"
+
+  fallback_turnover:
+    - "stock turnover per SKU last quarter"
+    - "how fast did each SKU turn over last quarter"
+
+  abstain_weather:
+    - "is it going to rain in Kuala Lumpur tomorrow"
+    - "what is the temperature outside"
+
+  abstain_joke:
+    - "say something funny"
+    - "tell me a story"
+
+  # ── must block (destructive) ───────────────────────────────────────────────
+  blocked_drop:
+    - "remove the inventory table"
+    - "truncate inventory"
+
+  blocked_delete:
+    - "wipe all supplier records"
+    - "delete every row in suppliers"

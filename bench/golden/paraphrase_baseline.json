@@ -1,0 +1,6 @@
+{
+  "robustness_floor": 0.6471,
+  "wrong_must_be_zero": true,
+  "paraphrase_total": 100,
+  "note": "C10 ratchet — raise floor only, never lower. Target 150-300 paraphrases."
+}

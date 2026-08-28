@@ -10,15 +10,31 @@ gates are the blockers; hooks are observability + defense-in-depth.
 A built-in ``after_action`` scanner flags any secret pattern that appears in a
 returned result (output-secrets scanner, P16) on top of the runner's param
 sanitize — belt and braces for tools that return fetched/derived content.
+
+Permission pipeline order (distill Claude Code v2.1.212 — do not reorder):
+  hooks → deny → ask(confirm) → mode → allow → callback
+Netie today: hooks(observe) → registry deny → RBAC deny → confirm_required(ask)
+→ F8 allowlist/sanitize/compliance → ledger. Deny remains un-bypassable.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 EVENTS = ("before_action", "after_action", "on_denied")
 Hook = Callable[[dict], None]
+
+# Documented evaluation order for hosts / future veto hooks.
+PERMISSION_PIPELINE = (
+    "hooks",
+    "deny",
+    "ask",
+    "mode",
+    "allow",
+    "callback",
+)
 
 _HOOKS: dict[str, list[Hook]] = {e: [] for e in EVENTS}
 

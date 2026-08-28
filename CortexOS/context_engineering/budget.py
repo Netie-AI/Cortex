@@ -1,7 +1,7 @@
 """Attention budget — context is finite; allocate by layer priority."""
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 from .layers import LayerId
 

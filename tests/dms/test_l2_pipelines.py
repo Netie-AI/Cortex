@@ -28,6 +28,8 @@ _DEF = {
     "id": "raw_to_silver",
     "source": "bronze.raw",
     "target": "silver.clean",
+    "lineage": "aggregate",
+    "lineage_reason": "test fixture drops provenance; aggregate waiver documented",
     "transform_sql": "SELECT sku, TRY_CAST(TRIM(qty_txt) AS DOUBLE) AS qty, "
                      "TRY_CAST(risk_txt AS DOUBLE) AS risk FROM {source}",
     "expectations": [
@@ -107,6 +109,69 @@ def test_event_log_records_runs(lake_home):
     events = runner.pipeline_events()
     assert events and events[0]["pipeline_id"] == "raw_to_silver"
     assert events[0]["rows_in"] == 4 and events[0]["rows_out"] == 2
+
+
+def test_lineage_required_on_def(lake_home):
+    from packs.dms.pipelines import runner
+
+    bad = {k: v for k, v in _DEF.items() if k not in ("lineage", "lineage_reason")}
+    with pytest.raises(runner.PipelineError, match="lineage"):
+        runner.run_pipeline(bad)
+
+
+def test_aggregate_requires_reason(lake_home):
+    from packs.dms.pipelines import runner
+
+    bad = dict(_DEF, lineage="aggregate", lineage_reason="")
+    with pytest.raises(runner.PipelineError, match="lineage_reason"):
+        runner.run_pipeline(bad)
+
+
+def test_propagate_fails_without_provenance_cols(lake_home):
+    from packs.dms.lakehouse.catalog import connect
+    from packs.dms.pipelines import runner
+
+    con = connect()
+    _seed_raw(con)
+    con.close()
+    pdef = dict(
+        _DEF,
+        id="raw_propagate",
+        target="silver.clean_prop",
+        lineage="propagate",
+        lineage_reason="",  # ignored for propagate
+    )
+    # remove reason key for propagate
+    pdef.pop("lineage_reason", None)
+    run = runner.run_pipeline(pdef)
+    assert run.status == "failed"
+    assert "propagate" in run.error
+
+
+def test_propagate_ok_with_flat_src_cols(lake_home):
+    from packs.dms.lakehouse.catalog import connect
+    from packs.dms.pipelines import runner
+
+    con = connect()
+    _seed_raw(con)
+    con.close()
+    pdef = {
+        "id": "raw_prop_ok",
+        "source": "bronze.raw",
+        "target": "silver.clean_prop_ok",
+        "lineage": "propagate",
+        "transform_sql": (
+            "SELECT sku, TRY_CAST(TRIM(qty_txt) AS DOUBLE) AS qty, "
+            "TRY_CAST(risk_txt AS DOUBLE) AS risk, "
+            "1 AS _src_row, 'ref-1' AS _src_ref_id, 'ing-1' AS _ingest_id "
+            "FROM {source}"
+        ),
+        "expectations": [
+            {"name": "qty_non_negative", "constraint_sql": "qty >= 0", "action": "drop"},
+        ],
+    }
+    run = runner.run_pipeline(pdef)
+    assert run.status == "completed", run.error
 
 
 def test_proposal_requires_approval(lake_home, monkeypatch):

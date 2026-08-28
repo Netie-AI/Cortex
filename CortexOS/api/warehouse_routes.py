@@ -30,7 +30,9 @@ class ScanMoveRequest(BaseModel):
 
 
 class ConfirmDimsRequest(BaseModel):
-    l: float
+    # length/width/height as the wire already spells them — renaming
+    # this field would be a breaking API change, not a style fix.
+    l: float  # noqa: E741
     w: float
     h: float
     unit: str = "m"

@@ -294,9 +294,13 @@ export default function BrainPage() {
           addMessage("assistant", `Chart generated: "${result.title || cmd.query}"`, result, "chart");
           break;
         case "export_csv":
-          result = await callBrain("export", { query: cmd.query, table: "dms_inventory", limit: 5000 });
+          result = await callBrain("export", { query: cmd.query, table: "inventory", limit: 5000 });
           dataType = "csv";
-          addMessage("assistant", `CSV ready: ${result.filename} (${result.row_count} rows). ${result.summary}`, result, "csv");
+          if (result.error) {
+            addMessage("assistant", `Export failed: ${result.error}`, result, "error");
+          } else {
+            addMessage("assistant", `CSV ready: ${result.filename} (${result.row_count} rows). ${result.summary}`, result, "csv");
+          }
           break;
         case "draft_email":
           result = await callBrain("email", { request: cmd.request, context: {} });
@@ -342,9 +346,13 @@ export default function BrainPage() {
         type = "chart";
         addMessage("assistant", result.title || "Chart ready", result, "chart");
       } else if (lower.includes("export") || lower.includes("csv") || lower.includes("download")) {
-        result = await callBrain("export", { query: text, table: "dms_inventory", limit: 5000 });
+        result = await callBrain("export", { query: text, table: "inventory", limit: 5000 });
         type = "csv";
-        addMessage("assistant", `CSV: ${result.filename} (${result.row_count} rows)`, result, "csv");
+        if (result.error) {
+          addMessage("assistant", `Export failed: ${result.error}`, result, "error");
+        } else {
+          addMessage("assistant", `CSV: ${result.filename} (${result.row_count} rows)`, result, "csv");
+        }
       } else if (lower.includes("email") || lower.includes("send to") || lower.includes("draft")) {
         result = await callBrain("email", { request: text, context: {} });
         addMessage("assistant", "Email drafted — review before sending.", result, "email");
@@ -438,7 +446,7 @@ export default function BrainPage() {
                 {msg.dataType === "chart" && msg.data && <ChartRenderer config={msg.data} />}
 
                 {/* CSV */}
-                {msg.dataType === "csv" && msg.data && (
+                {msg.dataType === "csv" && msg.data?.csv_content && msg.data?.filename && (
                   <div className="bg-gray-800 rounded-lg p-3 mt-2">
                     <p className="text-gray-400 text-xs mb-2">{msg.data.summary}</p>
                     <p className="text-gray-500 text-xs mb-3">Columns: {msg.data.columns?.join(", ")}</p>
@@ -449,6 +457,9 @@ export default function BrainPage() {
                       ⬇ Download {msg.data.filename}
                     </button>
                   </div>
+                )}
+                {msg.dataType === "csv" && msg.data?.error && (
+                  <p className="text-amber-400 text-xs mt-2">Export unavailable: {msg.data.error}</p>
                 )}
 
                 {/* Email / WhatsApp */}

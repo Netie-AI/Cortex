@@ -49,9 +49,18 @@ def query_objects(
     actor: Any,
     limit: int = 50,
     db_path: Path | str | None = None,
+    session_id: str | None = None,
+    verified: Any | None = None,
 ):
     return _engine.query_objects(
-        object_type, filters, actor=actor, limit=limit, pack=PACK, db_path=db_path
+        object_type,
+        filters,
+        actor=actor,
+        limit=limit,
+        pack=PACK,
+        db_path=db_path,
+        session_id=session_id,
+        verified=verified,
     )
 
 

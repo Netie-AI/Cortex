@@ -4,8 +4,9 @@ Every function takes ``pack`` (name) or ``pack_dir`` (explicit path — wins whe
 given) so the engine serves any pack; defaults resolve from the PACK env var.
 
 Read path (``query_objects``): only ``agent_visible`` properties are ever
-selected or filterable — for every role. The SDK is the *agent* surface; PII
-kept out of prompts is the point, so there is no privileged bypass here.
+selected or filterable — for every role. A bound session/manifest is required;
+the backend executes through ``enforce_manifest``. The SDK is the *agent*
+surface; PII kept out of prompts is the point, so there is no privileged bypass.
 
 Write path (``call_action``): registry lookup → role gate → confirm gate →
 F8 runner (allowlist → sanitize → compliance → sandbox → F1 ledger). SDK-level
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from CortexOS.agent_sdk.backends import get_query_backend
 from CortexOS.ontology.registry import (
     ActionType,
     FunctionDef,
@@ -28,7 +30,6 @@ from CortexOS.ontology.registry import (
     load_object_types,
     pack_dir_for,
 )
-from CortexOS.agent_sdk.backends import get_query_backend
 
 _ROLE_RANK = {"viewer": 0, "steward": 1, "admin": 2}
 
@@ -118,6 +119,10 @@ def list_functions(
 
 # -- reads -------------------------------------------------------------------
 
+# Self-issued grants are not a session binding (answer_engine.resolve_product_grant).
+_LOCAL_ISSUER_KID = "local-self-issued"
+
+
 def query_objects(
     object_type: str,
     filters: dict[str, Any] | None = None,
@@ -127,8 +132,21 @@ def query_objects(
     pack: str | None = None,
     pack_dir: Path | str | None = None,
     db_path: Path | str | None = None,
+    session_id: str | None = None,
+    verified: Any | None = None,
 ) -> list[dict[str, Any]]:
-    """Rows of one object type — agent-visible columns only, equality filters."""
+    """Rows of one object type — agent-visible columns only, equality filters.
+
+    Reads require a bound session/manifest. Missing or self-issued grants refuse;
+    there is no ungoverned warehouse fallback.
+    """
+    from CortexOS.execution.manifest import ManifestError
+    from CortexOS.execution.session_manifests import (
+        SessionExpired,
+        SessionUnbound,
+        get_session_registry,
+    )
+
     _identity(actor)  # any known role may read visible data
     resolved = _resolve_pack_dir(pack, pack_dir)
     objects = {o.id: o for o in load_object_types(resolved)}
@@ -145,7 +163,32 @@ def query_objects(
             raise SdkDenied(f"unknown property {key!r}", verdict="not_found")
 
     backend = get_query_backend(pack or ("dms" if pack_dir is None else _missing_pack(resolved)))
-    return backend(object_type, visible, dict(filters or {}), max(1, min(int(limit), 500)), db_path=db_path)
+    bound = verified
+    if bound is None:
+        try:
+            bound = get_session_registry().resolve(session_id)
+        except SessionUnbound as exc:
+            raise SdkDenied(str(exc), verdict="session_unbound") from exc
+        except SessionExpired as exc:
+            raise SdkDenied(str(exc), verdict="session_expired") from exc
+    if (getattr(bound, "issuer_kid", None) or "").strip() == _LOCAL_ISSUER_KID:
+        raise SdkDenied(
+            "self-issued grant is not a session binding",
+            verdict="session_unbound",
+        )
+    try:
+        return backend(
+            object_type,
+            visible,
+            dict(filters or {}),
+            max(1, min(int(limit), 500)),
+            verified=bound,
+            db_path=db_path,
+        )
+    except SessionUnbound as exc:
+        raise SdkDenied(str(exc), verdict="session_unbound") from exc
+    except ManifestError as exc:
+        raise SdkDenied(str(exc), verdict=getattr(exc, "code", "manifest_error")) from exc
 
 
 def _missing_pack(pack_dir: Path) -> str:
@@ -205,11 +248,11 @@ def _ledger_denial(
     run_id: str | None,
     db_path: Path | str | None,
 ) -> None:
-    from packs.dms.audit import ledger  # shared pack-agnostic ledger spine (F1)
+    from CortexOS.audit import resolve_ledger
 
-    ledger.append(
+    resolve_ledger().append(
         actor,
         "action.tool_call_denied",
         {"tool": action_id, "verdict": verdict, "reason": reason, "run_id": run_id, "path": None},
-        db_path=db_path,
+        db_path=None if db_path is None else str(db_path),
     )
