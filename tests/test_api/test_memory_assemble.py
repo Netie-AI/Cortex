@@ -10,12 +10,15 @@ from fastapi.testclient import TestClient
 def test_memory_assemble_endpoint(monkeypatch):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    from netie.memory.store import MemoryRecord
+    from netie.memory.store import InMemoryStore, MemoryRecord
 
+    import CortexOS.api.memory_routes as memory_routes
     from CortexOS.api.app import create_app
-    from CortexOS.api.memory_routes import _STORE
 
-    _STORE.upsert([MemoryRecord(id="m1", text="warehouse aisle 3", vector=[1.0, 0.0])])
+    store = InMemoryStore()
+    store.upsert([MemoryRecord(id="m1", text="warehouse aisle 3", vector=[1.0, 0.0])])
+    monkeypatch.setattr(memory_routes, "_STORE", store)
+
     with TestClient(create_app()) as client:
         res = client.post(
             "/api/memory/assemble",
