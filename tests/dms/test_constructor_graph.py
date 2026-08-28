@@ -326,6 +326,25 @@ def test_run_seeds_fetch_onto_document_ref(dms_client, api_keys_env):
     assert out["rows"]
 
 
+def test_session_rejects_broken_json_with_400(dms_client):
+    res = dms_client.post(
+        "/cortex/session",
+        content="{key:no-quotes}",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+def test_session_sets_cookie_for_viewer_key(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/session",
+        json={"key": api_keys_env["viewer"]},
+        follow_redirects=False,
+    )
+    assert res.status_code == 303
+    assert "cortex_api_key" in res.cookies
+
+
 def test_issue_key_uses_openvault_token(dms_client, monkeypatch):
     monkeypatch.setattr(
         "CortexOS.integrations.openvault_client.post_json",
