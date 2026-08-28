@@ -261,11 +261,14 @@ async def test_parallel_layer_runs_siblings_concurrently(monkeypatch):
 
     from netie.execution.dag_runner import NodeResult
 
-    start_times: dict[str, float] = {}
+    # (start, end) per node, so concurrency is asserted as window overlap rather
+    # than against a fixed wall-clock budget (which flakes on a loaded machine).
+    windows: dict[str, tuple[float, float]] = {}
 
     async def slow_execute_node(node, context, router, ledger, workflow_cost_ceiling_myr=None):
-        start_times[node.id] = time.monotonic()
+        started_at = time.monotonic()
         await asyncio.sleep(0.08)
+        windows[node.id] = (started_at, time.monotonic())
         return NodeResult(node_id=node.id, output={"content": node.id}, tier="stub", cost_myr=0.0)
 
     monkeypatch.setattr("netie.execution.dag_runner.execute_node", slow_execute_node)
@@ -310,13 +313,22 @@ async def test_parallel_layer_runs_siblings_concurrently(monkeypatch):
     ledger = CostLedger()
     ctx = ExecutionContext("run_parallel")
 
-    started = time.monotonic()
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None, parallel=True)
-    elapsed = time.monotonic() - started
 
     assert "a" in res.outputs and "b" in res.outputs
-    assert abs(start_times["a"] - start_times["b"]) < 0.05
-    assert elapsed < 0.2
+
+    start_a, end_a = windows["a"]
+    start_b, end_b = windows["b"]
+    # The two siblings were in flight at the same instant. A serial runner gives
+    # overlap <= 0 no matter how fast or slow the host is.
+    overlap = min(end_a, end_b) - max(start_a, start_b)
+    assert overlap > 0, f"siblings did not overlap: {windows}"
+    # The layer finished faster than running the same two nodes back to back.
+    # Both sides are measured from this run, so a slow or loaded host stretches
+    # them together and the comparison holds.
+    layer_span = max(end_a, end_b) - min(start_a, start_b)
+    serial_total = (end_a - start_a) + (end_b - start_b)
+    assert layer_span < serial_total, f"layer_span {layer_span} >= serial {serial_total}"
 
 
 @pytest.mark.asyncio
