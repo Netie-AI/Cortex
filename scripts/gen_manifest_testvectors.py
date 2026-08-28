@@ -33,7 +33,7 @@ OUT = ROOT / "contract" / "testvectors" / "manifest_canonical.jsonl"
 
 sys.path.insert(0, str(ROOT))
 
-from packages.cortex_contract.execution import (  # noqa: E402
+from cortex_contract.execution import (  # noqa: E402
     Manifest,
     canonical_manifest_bytes,
 )

@@ -1,4 +1,5 @@
 # CLAUDE_HANDOFF — Supervisor / Gate Session
+**Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-08-28T00:40:15+00:00
 **Auto-sync:** run `python scripts/handoff.py --write` after every ship or gate. Last generated: 2026-08-25T22:40:21+00:00
 **Paste for Gate F7 remainder when RBAC/RLS/SOPS slice is complete.**
 
@@ -28,8 +29,9 @@ External supervisor. Verify F7 remainder against `docs/dms/BUILD_PLAN.md` § FEA
 
 ## Test snapshot
 ```
-pytest tests/dms/test_f7_rbac.py -q → 8 passed
-pytest -q → 153 passed, 4 skipped
+Not a live count. This file is a role template. Run `python -m pytest tests/ -q`
+and treat STATUS.md / the last gate log as the count, not the 153-test snapshot
+that used to live here.
 ```
 
 ## Reference

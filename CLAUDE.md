@@ -37,8 +37,16 @@ requirement.
 **Specifically: do not add files to `_C2_ALLOWLIST` in
 `tests/contract/test_import_boundaries.py`.** That list is pre-C2 debt being
 evacuated, and its docstring says new crossings must fail immediately. Note it
-matches by **basename**, so `registry.py` silently covers every `registry.py` in the
-tree — `.importlinter` is the stricter check, and the one to trust.
+matches by **exact repo-relative path**, and it may only shrink: evacuating a file
+must delete its line in the same commit.
+
+**Do not trust `lint-imports` alone on this boundary.** import-linter builds its
+graph with grimp, which does not record **function-level** imports — and nearly
+every crossing here is a deferred import inside a function. It reports the C2
+contract KEPT while `CortexOS/dms/answer_engine.py` makes 18 `packs.*` imports
+that are not even in its ignore list. The AST test is the check that can see
+them; `.importlinter` catches the module-level case and is a second net, not the
+stricter one.
 
 ---
 

@@ -37,17 +37,19 @@ from pathlib import Path
 from typing import Any
 
 import sqlglot
+
+# One spelling, the distributed one. This was a try/except that fell back to
+# `packages.cortex_contract`, which imported the same file under a second module
+# identity — so `isinstance(manifest, Manifest)` inside canonical_manifest_bytes
+# could be False and silently canonicalise through the Mapping branch. The bytes
+# agreed only because every Manifest field is a string today (CONTRACT-01).
+from cortex_contract.execution import Manifest, canonical_manifest_bytes
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from CortexOS.paths import data_path
-
-try:  # installed wheel ships the contract as a top-level package
-    from cortex_contract.execution import Manifest, canonical_manifest_bytes
-except ImportError:  # in-repo checkout
-    from packages.cortex_contract.execution import Manifest, canonical_manifest_bytes
 
 __all__ = [
     "ManifestError",

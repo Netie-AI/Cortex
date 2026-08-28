@@ -6,7 +6,11 @@ Netie Cortex: governed agentic runtime for warehouse/logistics SMEs.
 
 **Whitepaper (architecture · apps · roadmap · branches):** [`docs/strategy/CORTEX_WHITEPAPER.md`](docs/strategy/CORTEX_WHITEPAPER.md)
 
-Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, runs it on your compute, and applies Wasm sandboxing + platform security.
+Open-source agentic AI runtime: install locally, bring your own API key (OpenAI, Anthropic, Mistral, etc.). The system takes a natural-language task, synthesizes a minimal execution DAG, and runs it on your compute.
+
+**Consumer pin:** DMS pins `cortex-contract` and calls `POST|GET /v1/contract/*` (`contract/openapi-1.2.0.json`). It must never import `CortexOS`.
+
+**What actually guards it today:** SQL is parsed and validated with sqlglot before it runs; every read is enforced against a signed session manifest, so a query cannot reach a table the session never bound; the audit trail is a hash chain; and tool calls go through an allowlisted host runner. Process-level isolation is **not** shipped — untrusted code is packaged and run in containers, not sandboxed in-process. See [`PARKING_LOT.md`](PARKING_LOT.md) P2.
 
 ## Read first
 
@@ -35,10 +39,9 @@ python scripts/handoff.py --claude   # supervisor
 .\demo\run_demo.ps1 -Fast    # restart in ~30s
 ```
 
-- UI: http://localhost:3000
-- Warehouse: http://localhost:3000/warehouse
-- Chat: http://localhost:3000/chat
-- API: http://localhost:8000/health
+- Demo UI: http://localhost:3000
+- Demo API (``demo/run_demo.ps1``): http://localhost:8000/health
+- Engine launcher (``scripts/start_cortex_engine.ps1``): http://localhost:8010/health
 
 **Show script:** [docs/DEMO.md](docs/DEMO.md)
 

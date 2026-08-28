@@ -107,6 +107,7 @@ class QueryObjectsRequest(BaseModel):
     object_type: str
     filters: dict[str, Any] = Field(default_factory=dict)
     limit: int = 50
+    session_id: str | None = None
 
 
 class CallActionRequest(BaseModel):
@@ -121,7 +122,9 @@ _DENIAL_STATUS = {
     "unregistered": 404,
     "confirm_required": 409,
     "not_invocable": 400,
-    # rbac / filter_hidden / bad_actor and anything new default to 403
+    "session_unbound": 409,
+    "session_expired": 409,
+    # rbac / filter_hidden / bad_actor / path_not_allowed default to 403
 }
 
 
@@ -139,7 +142,12 @@ def sidecar_query_objects(
 
     try:
         rows = query_objects(
-            req.object_type, req.filters, actor=caller, limit=req.limit, pack="dms"
+            req.object_type,
+            req.filters,
+            actor=caller,
+            limit=req.limit,
+            pack="dms",
+            session_id=req.session_id,
         )
     except SdkDenied as exc:
         raise _sdk_http_error(exc) from exc

@@ -70,6 +70,11 @@ class MemoryContextProvider:
             "chat_turns": chat_turns,
             "notes": notes,
             "text_blob": text_blob,
+            "layers": {
+                "session": chat_turns,
+                "vector": vector_hits,
+                "long_term": notes,
+            },
         }
 
     @staticmethod

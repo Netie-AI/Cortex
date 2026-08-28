@@ -7,6 +7,17 @@ Checks:
 2. Engine version in root ``pyproject.toml`` / ``CortexOS.__version__`` is
    consistent.
 3. No source file assumes engine version == contract version.
+4. Installed distribution metadata for the contract, and the version the
+   importable ``cortex_contract`` actually reports, both agree with the source.
+
+Check 4 exists because this script used to pass while ``pip show
+cortex-contract`` said 1.1.0 against a tree whose CONTRACT_VERSION was 1.3.0.
+Metadata is what a consumer resolves a pin against, so stale dist-info is a pin
+that means something other than what it says - and the CONTRACT-01 hazard is
+exactly this: the bare name resolving to a stale install while the tree is what
+was edited, inside the one function whose bytes DMS signs.
+
+This script reports. It never installs, upgrades or repairs anything.
 """
 
 from __future__ import annotations
@@ -14,9 +25,14 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, distribution, packages_distributions
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+#: Printed, never run. Repairing a developer's environment behind their back is
+#: how a check stops being evidence of anything.
+REINSTALL = "python -m pip install --no-deps --force-reinstall -e packages/cortex_contract"
 
 
 def _toml_project_version(path: Path) -> str:
@@ -51,6 +67,106 @@ def _engine_version_py() -> str:
     import CortexOS
 
     return str(CortexOS.__version__)
+
+
+#: The contract's own distribution. Only this one's *version* means the contract
+#: version; see contract_dist_versions.
+_CONTRACT_DIST = "cortex-contract"
+
+
+def contract_dist_versions() -> dict[str, str]:
+    """The contract's own installed distribution, and its version.
+
+    Discovered through the metadata rather than assumed, so a dist whose RECORD
+    is stale is still probed by name.
+
+    **Only the contract's own distribution is compared.** ``netie`` bundles the
+    same module (``pyproject.toml`` includes ``cortex_contract`` from
+    ``packages/``), and it is tempting to check it too - a stale bundled copy is
+    a real hazard. But a bundling distribution's version is the *engine*
+    version, and engine and contract version lines are independent by hard
+    invariant: 2.5.0 tracks G-gates, 1.3.0 tracks the wire. Requiring the netie
+    dist to report the contract version would assert engine == contract, which
+    is the exact coupling check 3 of this same script exists to forbid. The
+    script would then contradict itself, and CI would go red on a tree that is
+    correct.
+
+    The hazard it was reaching for is real and is caught elsewhere, better:
+    ``imported_contract()`` reads CONTRACT_VERSION off whichever module actually
+    loads. A stale bundled copy shadowing the source fails there, on evidence
+    from the import system rather than from a version number that was never
+    claiming to be the contract's.
+    """
+    out: dict[str, str] = {}
+    for name in {*packages_distributions().get("cortex_contract", []), _CONTRACT_DIST}:
+        try:
+            dist = distribution(name)
+        except PackageNotFoundError:
+            continue
+        resolved = dist.metadata["Name"] or name
+        if str(resolved).strip().lower().replace("_", "-") != _CONTRACT_DIST:
+            continue
+        out[resolved] = dist.version
+    return out
+
+
+def imported_contract() -> tuple[str | None, str | None]:
+    """(version, file) of the ``cortex_contract`` this interpreter actually loads."""
+    try:
+        import cortex_contract
+    except ImportError:
+        return None, None
+    return str(cortex_contract.CONTRACT_VERSION), str(getattr(cortex_contract, "__file__", "") or "")
+
+
+def contract_metadata_errors(
+    source_version: str,
+    dist_versions: dict[str, str],
+    imported_version: str | None,
+    imported_file: str | None,
+) -> list[str]:
+    """Compare installed metadata and the loaded module against the source.
+
+    Kept pure so it can be exercised both ways. A comparator only ever seen
+    against one environment is a comparator nobody has watched fail.
+    """
+    errors: list[str] = []
+
+    for dist_name, dist_version in sorted(dist_versions.items()):
+        # Only the contract's own distribution carries the contract version. A
+        # distribution that merely bundles the module carries the ENGINE
+        # version, and holding it to this number would assert engine ==
+        # contract - the coupling check 3 below exists to forbid. Filtered here
+        # as well as in the lookup so the property holds for any caller, not
+        # just the one that happens to feed this today.
+        if str(dist_name).strip().lower().replace("_", "-") != _CONTRACT_DIST:
+            continue
+        if dist_version != source_version:
+            errors.append(
+                f"installed distribution {dist_name!r} reports {dist_version!r} but "
+                f"packages/cortex_contract/version.py says {source_version!r}. "
+                f"pip metadata is what a consumer resolves a pin against, so this "
+                f"pin means something other than what it says.\n"
+                f"      fix your local editable install by running, from the repo root:\n"
+                f"      {REINSTALL}"
+            )
+
+    if imported_version is None:
+        errors.append(
+            "'import cortex_contract' failed - the contract is not importable under "
+            "its distributed name, so no consumer pin resolves.\n"
+            f"      {REINSTALL}"
+        )
+    elif imported_version != source_version:
+        errors.append(
+            f"the importable cortex_contract reports {imported_version!r} but this "
+            f"tree says {source_version!r} (loaded from {imported_file}). A stale "
+            f"copy is shadowing the source - CONTRACT-01's exact hazard, in the one "
+            f"function whose bytes DMS signs.\n"
+            f"      {REINSTALL}"
+        )
+
+    return errors
 
 
 # Patterns that incorrectly couple the two version lines.
@@ -117,16 +233,29 @@ def main() -> int:
     if coupled:
         errors.append("engine/contract versions assumed equal:\n  " + "\n  ".join(coupled))
 
+    dist_versions = contract_dist_versions()
+    imported_version, imported_file = imported_contract()
+    if not dist_versions:
+        # R-0011: say so in the output, not in a log line nobody reads. A check
+        # that quietly compares nothing reports the same green as one that did.
+        print(
+            "NOTE  no installed distribution ships 'cortex_contract' - dist metadata "
+            "not compared. The loaded module's version is still checked."
+        )
+    errors.extend(
+        contract_metadata_errors(contract_py, dist_versions, imported_version, imported_file)
+    )
+
     if errors:
         print("check_versions FAILED:", file=sys.stderr)
         for err in errors:
             print(f"  - {err}", file=sys.stderr)
         return 1
 
-    print(
-        f"OK — engine={engine_py} contract={contract_py} "
-        f"(independent version lines)"
-    )
+    installed = ", ".join(f"{n}=={v}" for n, v in sorted(dist_versions.items())) or "none"
+    print(f"OK  engine={engine_py} contract={contract_py} (independent version lines)")
+    print(f"    installed dists: {installed}")
+    print(f"    loaded contract: {imported_version} from {imported_file}")
     return 0
 
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from cortex_contract.answer import Badge, Provenance
+
 from CortexOS.api.contract_routes import _enrich_answer, _provenance_from_flat
-from packages.cortex_contract.answer import Badge, Provenance
 
 
 def test_provenance_from_flat_needs_clarification_is_abstain():
@@ -120,3 +121,64 @@ def test_abstain_refused_emits_refused_fields():
     assert data["route"] == "refused"
     assert data["layer"] == "refused"
     assert data["badge"] == "refused"
+
+
+def test_provenance_unknown_badge_is_abstain_not_session():
+    """F40 class: catalog / document / empty / sql_not_analyzable must not SESSION."""
+    for raw in ("catalog", "document", "sql_not_analyzable", "refused_by_manifest", ""):
+        prov = _provenance_from_flat({"badge": raw, "route": "sql", "layer": "engine"})
+        assert prov.badge == Badge.ABSTAIN, raw
+        assert prov.badge != Badge.SESSION, raw
+
+
+def test_provenance_mapped_certified_stays_certified():
+    prov = _provenance_from_flat({"badge": "certified", "route": "sql", "layer": "engine"})
+    assert prov.badge == Badge.CERTIFIED
+
+
+def test_enrich_answer_fills_contributing_sources_from_granted_tables():
+    verified = SimpleNamespace(manifest={"tables": {}})
+    data = _enrich_answer(
+        {
+            "answer": "Revenue is 10",
+            "route": "sql",
+            "badge": "governed_metric",
+            "layer": "engine",
+            "audit_id": "aud_src",
+            "sql_used": "SELECT 1",
+            "granted_sources": ["transactions"],
+            "rows": [{"revenue_myr": 10}],
+        },
+        session_id="ses_1",
+        verified=verified,
+    )
+    srcs = data["contributing_sources"]
+    assert srcs
+    assert srcs[0]["ref_id"] == "transactions"
+    assert srcs[0]["kind"] == "table"
+    assert srcs[0]["row_count"] == 1
+
+
+def test_enrich_answer_sources_empty_on_abstain():
+    verified = SimpleNamespace(manifest={"tables": {}})
+    data = _enrich_answer(
+        {
+            "answer": "I can't answer that",
+            "route": "abstain",
+            "badge": "abstain",
+            "granted_sources": ["transactions"],
+            "audit_id": "aud_abs",
+        },
+        session_id="ses_1",
+        verified=verified,
+    )
+    assert data["contributing_sources"] == []
+
+
+def test_contract_ask_requires_grounding():
+    import inspect
+
+    from CortexOS.api import contract_routes
+
+    src = inspect.getsource(contract_routes.contract_ask)
+    assert "require_grounding=True" in src

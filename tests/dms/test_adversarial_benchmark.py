@@ -89,3 +89,42 @@ def test_eleven_categories_declared():
 
 def test_holding_pids_hint_parses_pid_token():
     assert "28008" in _holding_pids_hint(RuntimeError("File locked (PID 28008)"))
+
+
+def _sku_beta_correct_rows_item():
+    from bench.adversarial import AdvItem
+
+    return AdvItem(
+        id="exclude_bare_beta",
+        category="value_normalization",
+        question="excluding BETA, top 5 sku by revenue",
+        expect="correct_rows",
+        assert_sql_contains=["SKU-BETA"],
+        assert_rows_exclude=["SKU-BETA"],
+        assert_answer_excludes=["SKU-BETA"],
+    )
+
+
+def test_score_correct_rows_rejects_vacuous_empty_rows():
+    """NOT IN ('SKU-BETA') that matches nothing must not score correct."""
+    from bench.adversarial import _score
+
+    resp = {
+        "route": "sql",
+        "sql_used": "SELECT sku FROM fact_sales WHERE sku NOT IN ('SKU-BETA') LIMIT 5",
+        "rows": [],
+        "answer": "No matching SKUs.",
+    }
+    assert _score(_sku_beta_correct_rows_item(), resp) == "wrong"
+
+
+def test_score_correct_rows_rejects_empty_answer_text():
+    from bench.adversarial import _score
+
+    resp = {
+        "route": "sql",
+        "sql_used": "SELECT sku FROM fact_sales WHERE sku NOT IN ('SKU-BETA') LIMIT 5",
+        "rows": [{"sku": "SKU-ALPHA"}],
+        "answer": "   ",
+    }
+    assert _score(_sku_beta_correct_rows_item(), resp) == "wrong"

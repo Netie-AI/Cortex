@@ -35,15 +35,34 @@ def test_certified_synonym_hits_l0():
     assert r["layer"] == "certified"
     assert r["badge"] == "certified"
     assert r["route"] == "sql"
-    assert r.get("rows") is not None
-    text = (r.get("answer") or "").lower()
-    assert "sku" in text or r["rows"]
+    rows = r.get("rows") or []
+    assert rows, f"certified sku-count returned no rows: {r.get('answer')!r}"
+    text = r.get("answer") or ""
+    assert text.strip(), "certified sku-count rendered no answer text"
+    assert "sku" in text.lower()
+    assert any(ch.isdigit() for ch in text)
+    assert "sku_count" in rows[0]
+    assert int(rows[0]["sku_count"]) > 0
 
 
 def test_certified_sales_synonym_hits_l0():
     cq = match_certified("Top 5 SKUs by revenue")
     assert cq is not None
     assert cq.id == "cq_sales_top5_value"
+
+    from CortexOS.dms.answer_engine import answer
+
+    r = answer("Top 5 SKUs by revenue")
+    assert r["layer"] == "certified"
+    assert r["badge"] == "certified"
+    assert r["route"] == "sql"
+    rows = r.get("rows") or []
+    assert len(rows) == 5, f"certified top-5 returned {len(rows)} rows: {r.get('answer')!r}"
+    text = r.get("answer") or ""
+    assert text.strip(), "certified top-5 rendered no answer text"
+    for row in rows:
+        assert str(row["sku"]) in text
+        assert "sales_value_myr" in row
 
 
 def test_rewrite_beta_to_sku_beta():

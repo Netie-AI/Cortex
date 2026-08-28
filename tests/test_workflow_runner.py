@@ -83,6 +83,22 @@ def test_catalog_has_smoothness_and_research():
     ids = {w["id"] for w in workflow_runner.list_workflows()}
     assert "smoothness_audit" in ids
     assert "deep_research" in ids
+    assert "recon_decompose" in ids
+    assert "adversarial_verify" in ids
+    assert "ticket_triage" in ids
+    assert "build_and_verify" in ids
+
+
+def test_recognize_recon_decompose():
+    rec = recognize("recon decompose into buildable tickets for Cortex")
+    assert rec.template_id == "recon_decompose"
+    assert rec.as_dict()["should_run"] is True
+
+
+def test_recognize_adversarial_verify():
+    rec = recognize("adversarially verify this paper against the tree")
+    assert rec.template_id == "adversarial_verify"
+    assert rec.as_dict()["should_run"] is True
 
 
 def test_recognize_explicit_fanout():

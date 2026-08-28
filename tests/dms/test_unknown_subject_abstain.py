@@ -30,7 +30,7 @@ from CortexOS.execution.manifest import (
     ManifestVerifier,
     canonical_manifest_bytes,
 )
-from packages.cortex_contract.execution import Manifest
+from cortex_contract.execution import Manifest
 
 WIDE_SESSION = "ans04-http-warehouse"
 CUSTOMER_QUESTIONS = [

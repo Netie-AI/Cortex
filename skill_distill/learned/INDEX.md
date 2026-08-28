@@ -2,7 +2,7 @@
 
 Normalized facts from `captures/`. Updated by `scripts/distill_ingest.py`.
 
-_Last ingest: 2026-08-25T22:39:51Z_
+_Last ingest: 2026-08-27T14:41:30Z_
 
 | Date | Capture | Facts | Promotions |
 |------|---------|-------|------------|
@@ -22,10 +22,24 @@ _Last ingest: 2026-08-25T22:39:51Z_
 | 2026-08-22 | `skill_distill/captures/2026-08-22_computer-control-mcp.md` | 6 | parking, rule |
 | 2026-08-22 | `skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md` | 6 | parking, rule |
 | 2026-08-23 | `skill_distill/captures/2026-08-23_crew_auto-detect-spawn.md` | 0 | — |
-| 2026-08-24 | `skill_distill/captures/2026-08-24_cursor_outreach-voice-skills.md` | 0 | — |
+| 2026-08-24 | `skill_distill/captures/2026-08-24_cursor_outreach-voice-skills.md` | 5 | skill packs + spawn auto-copy |
 | 2026-08-25 | `skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md` | 10 | none, parking, rule, skill |
+| 2026-08-27 | `skill_distill/captures/2026-08-27_claude-code_workflows-runtime.md` | 10 | none, parking, rule, skill |
 
 ## Auto-extracted facts
+
+### skill_distill/captures/2026-08-27_claude-code_workflows-runtime.md
+
+- (high/observed → skill) Claude Code workflows are JS scripts: meta + phase() + parallel() + agent(prompt, {label, phase, schema})
+- (high/observed → skill) Survey-then-rank is the estate recon shape; rank must be a separate phase that can fail without losing survey
+- (high/observed → skill) Each survey agent returns the same item schema (id, startable, blocked_by, files, verify_cmd, risk, value, independent)
+- (high/observed → rule) HOUSE block encodes invariants once; every child inherits them
+- (high/observed → none) Step log is label + tokens + toolCalls + resultPreview, not a hidden chat
+- (high/observed → skill) Adversarial verify is three parallel lenses (facts, constitution, completeness) with a findings schema
+- (high/observed → skill) Ticket triage is one agent per repo then a blocker-chain phase
+- (high/observed → rule) Ground-truth audit refuses STATUS.md as evidence
+- (high/observed → parking) Session-limit can kill only the synthesis step; parent must rank locally and still build
+- (high/observed → skill) Cortex templates already compile to dag_runner; adding recon/verify/triage/build templates does not add a second orchestrator
 
 ### skill_distill/captures/2026-07-24_claude-app_capabilities-seed.md
 

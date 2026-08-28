@@ -103,7 +103,6 @@ def create_app() -> Any:
         from netie.api.action_routes import register_action_routes
         from netie.api.agent_routes import register_agent_routes
         from netie.api.brain_routes import register_brain_routes
-        from netie.api.chat_routes import register_chat_routes
         from netie.api.dms_query import register_dms_routes
         from netie.api.ingest_routes import register_ingest_routes
         from netie.api.lakehouse_routes import register_lakehouse_routes
@@ -114,7 +113,6 @@ def create_app() -> Any:
         from netie.api.task_routes import register_task_routes
 
         register_dms_routes(app)
-        register_chat_routes(app)
         register_brain_routes(app)
         register_task_routes(app)
         register_skill_routes(app)

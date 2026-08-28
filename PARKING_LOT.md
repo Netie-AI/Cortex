@@ -7,7 +7,7 @@
 Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened.
 
 ## P2 — WASM / Firecracker production hardening
-**Condition:** First enterprise client conversation. *(Scaffold: `CortexOS/execution/wasm_isolate.py` — fuel sandbox only.)*
+**Condition:** First enterprise client conversation. *(Not shipped. DOC-01 deleted the unused `wasm_isolate` scaffold; do not cite that path.)*
 
 ## P3 — DAG token optimization + Temporal durable execution
 **Condition:** 100+ DAG runs/day from real clients. *(Partial: Ponytail middleware shipped — see `CortexOS/ponytail/` and `docs/PONYTAIL.md`. S1 watcher agents activate DBOS path per BUILD_PLAN_V2 — governed detect→draft→approve landed; durable resume still open.)*
@@ -95,6 +95,15 @@ measured hotspot (cProfile / py-spy) shows >10% of governed request time in a
 listed path.
 
 ### P19 open distill debts
+- [ ] Rank phase must checkpoint survey JSON so a session-limit cannot drop the work-list — `distill: skill_distill/captures/2026-08-27_claude-code_workflows-runtime.md`
+- [ ] GitHub CI pytest is already on push/PR; missing piece is oracle/accuracy gates (F42) — `distill: skill_distill/captures/2026-08-27_cursor_dms-local-ci-bootstrap.md`
+- [ ] POST /dms/agents/computer-use is 404 on this Cortex dms pack - `distill: skill_distill/captures/2026-08-23_cursor_pointer-uacc-connect.md`
+- [ ] P-05 Pointer-as-MCP actuator stays parked - `distill: skill_distill/captures/2026-08-23_cursor_pointer-uacc-connect.md`
+- [ ] Lazy-load torch in pip uacc is still a site-packages change — `distill: skill_distill/captures/2026-08-23_cursor_uacc-playwright-reliability.md`
+- [ ] P1 Palantir AIP and O6 stay parked under powered-by-Cortex — `distill: skill_distill/captures/2026-08-22_cursor_constructor-powered-by-cortex.md`
+- [ ] P17 hosted-API packaging stays parked; O5 sidecar plus compile-then-run is enough — `distill: skill_distill/captures/2026-08-22_cursor_constructor-powered-by-cortex.md`
+- [ ] O1-O5+O7 ontology plumbing shipped; O6 and P1 not shipped — `distill: skill_distill/captures/2026-08-22_cursor_chat-to-workflow-constructor.md`
+- [ ] Palantir-as-a-service full parity stays PARKING_LOT P1 — `distill: skill_distill/captures/2026-08-22_cursor_chat-to-workflow-constructor.md`
 - [ ] Cursor is not as strong as Cortex at fail-closed warehouse governance; Cortex is not as strong as Cursor at general tool-loop agency — `distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`
 - [ ] Content awareness: agentic loop vs lookup vs refuse is a first-class mode, not a model vibe — `distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`
 - [ ] G3 agentic loop (prompt compiler, turn class, native tools, skill select-or-generate, model hierarchy) -- plan in P23 -- `distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`

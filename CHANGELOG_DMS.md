@@ -2,6 +2,32 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CI gate: billing FAIL + python spawn + OpenAPI drift — 2026-08-28
+
+Email CI reds across `main` and open PRs are org Actions billing (jobs never
+start; private repo). `app_runner._render_argv` maps bare `python`/`python3`
+to `sys.executable`. Regenerated `contract/openapi-1.2.0.json` for additive
+`QueryObjectsRequest.session_id` so `export_openapi.py --check` passes.
+Local mirror of all required checks PASS including rls-proof on Postgres 16
+(1474 pytest). GitHub checks still red until Billing & plans is fixed.
+
+## CONTRACT-01 one module identity — 2026-08-26
+
+`cortex_contract` is one package. Consumers pin it; they do not import `CortexOS`.
+Merged as #69.
+
+## DOC-01 stop claiming Wasm sandboxing — 2026-08-26
+
+README / ARCHITECTURE no longer claim an in-process Wasm sandbox the engine
+never ran. Merged as #68.
+
+## GitHub PAT still cannot see private Netie-AI — 2026-08-25
+
+Used the operator fine-grained PAT as `jian-hong`. It authenticates and still
+404s `Netie-AI/Cortex` and every private product name. GitHub header
+`allows_permissionless_access=true`. Cursor All-repos on Helio.AI is a
+different org than this Cortex checkout. `estate_status` now prints that
+access note. Revoke any PAT pasted in chat.
 ## P23 agentic-loop PRD (plan, not built) — 2026-08-25
 
 Mapped the Netie estate (Cortex, OpenVault, AirGPT, DMS, Constructor, Crew,
@@ -71,6 +97,23 @@ on cortex / netie / dms / chatbot (env `CORTEX_WS_*`, Windows defaults
 HTTP: `GET /api/connectors` (UI), `/workspaces`, `POST /dispatch`,
 `/cursor/chats`, `/cursor/chats/{id}/messages`, `/instruct`.
 distill: skill_distill/captures/2026-08-22_cursor_orchestration-outside-editor.md
+
+## ANS-01/02/03 answer-path shape — 2026-08-22
+
+Three tickets, one funnel. The router was answering a question adjacent to
+the one asked, badged `governed_metric`.
+
+- ANS-01: an exclusion clause that names an exact SKU plus a conjunction
+  (`and` / `dan` / Malay `keluarkan`…`dari`) now ends at the entities that
+  resolve, so the two stop/skip lists cannot disagree. Applied and answered.
+- ANS-02: an aggregate over a ranking (sum/average/total of top N) abstains
+  and names the two-step path that works. Discourse lead-in `i mean` is not
+  an average.
+- ANS-03: a ranking grouped by a known non-SKU dimension abstains rather
+  than returning the warehouse-wide `revenue_total` as one row. SKU rankings
+  that say "by total revenue" still rank.
+- Asserted on rendered text and rows, not SQL. ANS-04 unknown-subject
+  abstain is unchanged.
 
 ## ANS-04 unknown subject abstain — 2026-08-22
 

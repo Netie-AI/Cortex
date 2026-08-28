@@ -12,13 +12,13 @@ Shared across Cortex · OpenVault · AirGPT · OpenIDE · Crew · Constructor ·
 | **Cortex** | Central brain — MoE, pick architecture (DAG / sequential / LangGraph-style / minimal / RAG / memory / computer-control), orchestrate, optimize | Storing keys, one-click deploy UX |
 | **OpenVault** | Safe manager + final shipper — where things live, model keys, **FreeRoute** (best-route + budget, OmniRoute-class), one-click connect APIs + local ground models, gating, one-click deploy/host | Running the agent loop itself; picking DAG vs LangGraph |
 | **OpenIDE** | Standalone coding app — activates coding expert slice of brain (TSX/canvas, tools, web search, FS, PRs) | Being the host/deploy console |
-| **AirGPT** | ChatGPT-layer host shell — phone, settings, pairing, apps hub; thin bridge to Cortex + OpenVault | Owning orchestration forever; second key vault |
-| **DMS / Spaces** | GPT-for-database + Excel; Spaces = ACL sandboxes on Cortex lake/query | Being the engine; Pointer Act UI; general ReAct coding agent |
+| **AirGPT** | Standalone host shell / control plane — phone, settings, pairing, apps hub; thin bridge to Cortex + OpenVault | Owning orchestration forever; second key vault |
+| **DMS / Spaces** | Reference + product consumer — ChatGPT-for-Excel/DB; Spaces are a planned ACL-scoped sandbox on Cortex lake/query, not a shipped surface | Being the engine; Pointer Act UI; a general ReAct coding agent |
+| **Pointer** | External Act / computer-control client → Cortex engine | DMS Spaces demo surface; custody/deploy |
 | **Constructor** | Homemade n8n: chat-compiles canvas, ghost dry-run, ontology sketch (Palantir-shaped, not AIP parity) | A second orchestrator; cloning n8n/Activepieces |
 | **Cortex Crew** | Grok-bot agentic chat skin (Manager + spawn + A2A) over the engine | Second key vault; implementing tickets in estate cron; LangGraph |
 | **Netie Control / Plane** | Display, launch, estate status — fire up apps | Thinking / routing / the agent loop |
 | **Netie-KB / skill_distill** | Distill Claude/Cursor skills into Netie | A live tool loop; skipping ingest |
-| **Pointer** | External Act / computer-control client -> Cortex engine | DMS Spaces demo surface; custody/deploy |
 
 ---
 
