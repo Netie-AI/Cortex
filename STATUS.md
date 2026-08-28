@@ -2,14 +2,13 @@
 **Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon) + **CI billing unblock**
 
 > **2026-08-28 (CI gate — FAIL org billing, FULL local mirror PASS):** Every
-> Gmail CI failure for Cortex (`main`, #85, #84, #82, #70, #86) is Actions
-> billing: jobs never start (0 steps, ~2s). Private repo = no free minutes.
-> Fix: https://github.com/organizations/Netie-AI/settings/billing then reply
-> in the goal thread. Local required-check mirror on #86: ruff/mypy/
-> lint-imports/versions/openapi/secrets/base/protected-paths **PASS**; pytest
-> **1474**; rls-proof **PASS** on local Postgres 16. OpenAPI
-> `QueryObjectsRequest.session_id` regenerated; app_runner uses
-> `sys.executable`. Artifact: `/opt/cursor/artifacts/cicd-local-gate-report.md`.
+> Gmail CI failure is Actions unable to start jobs on this **private** repo
+> (payments failed / spending limit). Unblock **either**: (A) Billing & plans
+> or (B) make repo **public** (description already says open source; free
+> Actions). Agent is 403 on both. Multi-PR audit: #85/#84/#82/#70 code PASS;
+> close Dependabot #78–#81. Local #86 mirror: all required checks PASS
+> including rls-proof. See
+> `docs/subagents_findings/2026-08-28_cicd-multipr-gate-audit.md`.
 
 > **2026-08-27 (recon rank + wave 1):** Claude Code `cortex-recon-decompose`
 > surveyed 70 items (43 startable); rank died on session limit and was filled
