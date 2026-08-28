@@ -37,12 +37,19 @@ Local: `pytest tests/contract/` 82 passed; `lint-imports` 2 kept.
 
 ## Code fix shipped this session
 
-`CortexOS/execution/app_runner._render_argv` rewrites bare `python`/`python3`
-to `sys.executable`. Fixes `start_spawn:[Errno 2] ... 'python'` on images
-that only ship `python3`.
+1. `CortexOS/execution/app_runner._render_argv` rewrites bare `python`/`python3`
+   to `sys.executable`. Fixes `start_spawn:[Errno 2] ... 'python'`.
+2. Regenerated `contract/openapi-1.2.0.json` (+ sha256) for additive
+   `QueryObjectsRequest.session_id` — would have failed `export_openapi.py
+   --check` the moment billing cleared.
+
+Local mirror (2026-08-28): ruff/mypy/lint-imports/versions/secrets/base PASS;
+pytest **1474 passed**. RLS not run locally (no docker/postgres).
+
+Repo is **private** — no free public Actions minutes. Billing is mandatory.
 
 ## Unblock
 
 1. https://github.com/organizations/Netie-AI/settings/billing
 2. Fix payment or raise Actions spending limit
-3. Re-run workflows on `main`, then open PRs
+3. Re-run workflows on `main`, then open PRs (#86 first)

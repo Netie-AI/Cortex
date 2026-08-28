@@ -2,11 +2,13 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
-## CI gate: billing FAIL + python spawn harden — 2026-08-28
+## CI gate: billing FAIL + python spawn + OpenAPI drift — 2026-08-28
 
 Email CI reds across `main` and open PRs are org Actions billing (jobs never
-start). `app_runner._render_argv` now maps bare `python`/`python3` to
-`sys.executable` so static/python app start works when only `python3` exists.
+start; private repo). `app_runner._render_argv` maps bare `python`/`python3`
+to `sys.executable`. Regenerated `contract/openapi-1.2.0.json` for additive
+`QueryObjectsRequest.session_id` so `export_openapi.py --check` passes.
+Local mirror: 1474 pytest passed; RLS still needs Actions Postgres.
 
 ## CONTRACT-01 one module identity — 2026-08-26
 
