@@ -135,6 +135,9 @@ Canonical contract: [`PRODUCT_ROLES.md`](../../PRODUCT_ROLES.md). Keep identical
 | **AirGPT** | Phone / settings / pairing / apps hub — **thin** control plane | Sidecar + Agent SDK bridge (O5). Must not become second vault or third orchestrator. Seek/Routines UI proxies Cortex. |
 | **Pointer / Netie Clicks** | External **Act** client (computer-control) | Calls Cortex Act on `:8010`; fail-closed; OSR band after plan. **Out of DMS Spaces demo scope.** |
 | **OpenIDE** | Coding expert activation | Asks Cortex for brain/tools; no deploy console. |
+| **Constructor** | n8n-shaped canvas + ontology sketch | Skin: `/cortex/constructor/`, `GET /api/connectors`. Not a second orchestrator. |
+| **Cortex Crew** | Grok-bot agentic chat | Skin on :8020; `cortex_ask` + OpenVault. Must not grow a second brain. |
+| **Netie Control / Plane** | Launch + estate status | Watchdog display; does not think. |
 | **Other packs** | `packs/crm`, `packs/ruma`, … | Same Agent SDK + governance; O7 `new_pack` scaffolds. |
 
 ### OpenVault ≈ FreeRoute (honest naming)
@@ -312,6 +315,7 @@ netie-engine ── 028fbfb   ← DIVERGED feeder (not fully merged)
 | Product role disputes | `PRODUCT_ROLES.md` |
 | Engine goal | `docs/strategy/CORTEX_FINAL_GOAL.md` |
 | **This thesis** | `docs/strategy/CORTEX_WHITEPAPER.md` |
+| Agentic loop vs Cursor/Claude (plan) | `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md` |
 | Spaces product | `docs/strategy/DMS_SPACES_PRODUCT_2026-07-29.md` |
 | Deferred ideas | `PARKING_LOT.md` |
 

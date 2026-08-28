@@ -23,6 +23,13 @@
 > answers. DOC-01 (#68) stops claiming Wasm sandboxing the engine never ran.
 > CONTRACT-01 (#69) one module identity for `cortex_contract`.
 
+> **2026-08-25 (P23 agentic loop PRD):** Cortex is a strong governed engine and a
+> weak general ReAct loop. Connecting DMS/AirGPT/Pointer does not yield
+> Cursor/Claude-class agency. Crew is a sustainable **skin** if it stays on
+> `cortex_ask` + OpenVault. Plan only: `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md`.
+> Distill: `skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md`.
+> Do not start G3.0 until this item is promoted out of PARKING_LOT.
+
 > **2026-08-25 (DMS handoff — Cortex engine half):**
 > **F40 / Cortex#11:** `route|layer|badge=refused` is an abstain signal. Contract
 > provenance is `Badge.ABSTAIN`, never `SESSION`. `_abstain_refused` is the

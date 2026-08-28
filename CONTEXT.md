@@ -55,4 +55,5 @@ http://localhost:3000 · /warehouse · /chat · /brain
 `BIG_API_PLACEHOLDER`, `EMBEDDER_MODEL`, `VISION_MODEL`, `DEPTH_SOURCE`, `WHATSAPP_BSP`, `COMPLIANCE_RULE_VERSION`
 
 ## Not in scope now
-Palantir ontology (P1), production WASM (P2), full respond.io (P9) — see `PARKING_LOT.md`.
+Palantir ontology (P1), production WASM (P2), full respond.io (P9), Cursor-class agentic loop (P23/G3 until promoted) -- see `PARKING_LOT.md`.
+Plan: `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md`.

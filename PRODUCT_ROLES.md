@@ -1,7 +1,7 @@
 # PRODUCT_ROLES — Netie surface contract
 
 **Canonical split.** Do not grow a third orchestrator or a second key vault.
-Shared across Cortex · OpenVault · AirGPT · OpenIDE. Keep this file identical.
+Shared across Cortex · OpenVault · AirGPT · OpenIDE · Crew · Constructor · Control. Keep this file identical.
 
 ---
 
@@ -13,8 +13,12 @@ Shared across Cortex · OpenVault · AirGPT · OpenIDE. Keep this file identical
 | **OpenVault** | Safe manager + final shipper — where things live, model keys, **FreeRoute** (best-route + budget, OmniRoute-class), one-click connect APIs + local ground models, gating, one-click deploy/host | Running the agent loop itself; picking DAG vs LangGraph |
 | **OpenIDE** | Standalone coding app — activates coding expert slice of brain (TSX/canvas, tools, web search, FS, PRs) | Being the host/deploy console |
 | **AirGPT** | Standalone host shell / control plane — phone, settings, pairing, apps hub; thin bridge to Cortex + OpenVault | Owning orchestration forever; second key vault |
-| **DMS / Spaces** | Reference + product consumer — ChatGPT-for-Excel/DB; Spaces are a planned ACL-scoped sandbox on Cortex lake/query, not a shipped surface | Being the engine; Pointer Act UI |
+| **DMS / Spaces** | Reference + product consumer — ChatGPT-for-Excel/DB; Spaces are a planned ACL-scoped sandbox on Cortex lake/query, not a shipped surface | Being the engine; Pointer Act UI; a general ReAct coding agent |
 | **Pointer** | External Act / computer-control client → Cortex engine | DMS Spaces demo surface; custody/deploy |
+| **Constructor** | Homemade n8n: chat-compiles canvas, ghost dry-run, ontology sketch (Palantir-shaped, not AIP parity) | A second orchestrator; cloning n8n/Activepieces |
+| **Cortex Crew** | Grok-bot agentic chat skin (Manager + spawn + A2A) over the engine | Second key vault; implementing tickets in estate cron; LangGraph |
+| **Netie Control / Plane** | Display, launch, estate status — fire up apps | Thinking / routing / the agent loop |
+| **Netie-KB / skill_distill** | Distill Claude/Cursor skills into Netie | A live tool loop; skipping ingest |
 
 ---
 
@@ -43,6 +47,11 @@ Cortex thinks; OpenVault knows location + keys + “may this leave / deploy?”
 | Keys / where-is-it / connect / deploy / host / gate | **OpenVault** |
 | Code workspace / PRs / FS tools | **OpenIDE** |
 | Phone / settings chrome / pairing / apps hub | **AirGPT** |
+| Workflow canvas / ontology sketch | **Constructor** |
+| Agentic chat / spawn teammates | **Cortex Crew** |
+| Launch / status of all local apps | **Netie Control** |
+| Distill + skill store | **Netie-KB / skill_distill** |
+| Computer-control Act | **Pointer** -> Cortex |
 
 ---
 
@@ -61,5 +70,8 @@ Cortex thinks; OpenVault knows location + keys + “may this leave / deploy?”
 3. **Deploy / leave-machine gate** = OpenVault. Cortex/AirGPT/OpenIDE request; OpenVault allows or denies.
 4. **Coding expert activation** = OpenIDE asks Cortex; OpenIDE does not host deploy console UX.
 5. **No third orchestrator. No second key vault.**
+6. **Crew / Constructor / Control / AirGPT are skins.** They ask Cortex; they do not own the loop, keys, or ship gate.
 
-When in doubt: brains → Cortex · custody/ship → OpenVault · code → OpenIDE · shell → AirGPT.
+When in doubt: brains -> Cortex · custody/ship -> OpenVault · code -> OpenIDE · shell -> AirGPT · chat-spawn -> Crew · canvas -> Constructor · launch -> Control.
+
+Agentic-loop gap vs Cursor/Claude (plan, not shipped): `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md`.

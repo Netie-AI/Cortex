@@ -28,6 +28,14 @@ Used the operator fine-grained PAT as `jian-hong`. It authenticates and still
 `allows_permissionless_access=true`. Cursor All-repos on Helio.AI is a
 different org than this Cortex checkout. `estate_status` now prints that
 access note. Revoke any PAT pasted in chat.
+## P23 agentic-loop PRD (plan, not built) — 2026-08-25
+
+Mapped the Netie estate (Cortex, OpenVault, AirGPT, DMS, Constructor, Crew,
+Pointer, Control, KB, OpenIDE, Spaces) and scored the engine against a live
+Cursor cloud-agent loop. Verdict: API connect != Cursor-class agency.
+PRD: `docs/strategy/AGENTIC_LOOP_CAPABILITY_PRD_2026-08-25.md`. Parking P23.
+distill: skill_distill/captures/2026-08-25_cursor_cloud-agent-loop.md
+No execution-path change. No LangGraph.
 
 ## DMS handoff — F40 / FF-03 / VQ-01 / EPIC-015 / ledger honesty — 2026-08-25
 
