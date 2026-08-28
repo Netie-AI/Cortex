@@ -56,10 +56,11 @@ async def test_llm_judged_node_calls_router_and_writes_ledger():
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None)
     assert "j1" in res.outputs
     recs = ledger.records()
-    assert len(recs) == 1
-    assert recs[0].status == "ok"
-    assert recs[0].cost_myr > 0
-    assert recs[0].tier in {"T1", "T2", "T3"}
+    j1_recs = [r for r in recs if r.node_id == "j1"]
+    assert len(j1_recs) == 1
+    assert j1_recs[0].status == "ok"
+    assert j1_recs[0].cost_myr > 0
+    assert j1_recs[0].tier in {"T1", "T2", "T3"}
 
 
 @pytest.mark.asyncio
@@ -151,7 +152,9 @@ async def test_deterministic_rule_catches_missing_nric():
     seed = {"doc_type": "spa", "price": 500_000}
     ctx = ExecutionContext("run_comp", seed={"seed_doc": seed})
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None)
-    assert ledger.records() == []
+    recs = ledger.records()
+    assert all(r.cost_myr == 0.0 for r in recs)
+    assert any(r.node_id == "chk" and r.tier == "deterministic" for r in recs)
     assert res.outputs["chk"].output["violations"] == ["spa_must_have_buyer_nric"]
 
 
@@ -191,7 +194,9 @@ async def test_deterministic_rule_stamp_duty_miscalc():
     }
     ctx = ExecutionContext("run_stamp", seed={"seed_doc": seed})
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None)
-    assert ledger.records() == []
+    recs = ledger.records()
+    assert all(r.cost_myr == 0.0 for r in recs)
+    assert any(r.node_id == "chk" for r in recs)
     assert "stamp_duty_calculation" in res.outputs["chk"].output["violations"]
 
 

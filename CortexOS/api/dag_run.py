@@ -109,7 +109,7 @@ def register_dag_run_routes(app: Any) -> None:
             raise HTTPException(status_code=503, detail="Ledger not initialized")
 
         await ledger.hydrate_run_total(run_id)
-        records = ledger.records_for_run(run_id)
+        records = await ledger.fetch_records_for_run(run_id)
         return {
             "run_id": run_id,
             "total_myr": ledger.total_cost(run_id),

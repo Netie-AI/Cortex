@@ -621,6 +621,13 @@ async def run_dag(
             if emit is not None:
                 emit({"type": "node_error", "node": node.id, "error": str(exc)[:300], **_node_meta(node)})
             raise
+        await ledger.ensure_node_record(
+            context.run_id,
+            node.id,
+            tier=nr.tier,
+            cost_myr=float(nr.cost_myr),
+            ceiling_myr=wf if wf is not None else None,
+        )
         if jkey:
             try:
                 step_journal.put_cached(

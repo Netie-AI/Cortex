@@ -11,6 +11,9 @@ General Cortex engine (not DMS-specific):
   returns total MYR + node records; `POST /run` response includes `total_myr`.
 - **DAG runner API:** `parallel`, `max_parallel`, and `resume` exposed on `RunDAGRequest`.
 - **T0 routing:** `invoke_routed_completion` short-circuits Tier T0 — zero cost, no adapter call.
+- **Ledger all nodes:** `ensure_node_record` after every DAG node; Postgres fetch on GET cost.
+- **Memory:** `POST /api/memory/assemble` returns prompt-ready `text_blob` + hits.
+- **RAG health:** `/health/features` exposes `rag.dense_available` + `qdrant_configured`.
 
 ## CI gate: billing FAIL + python spawn + OpenAPI drift — 2026-08-28
 

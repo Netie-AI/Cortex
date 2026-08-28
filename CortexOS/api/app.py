@@ -148,8 +148,12 @@ def create_app() -> Any:
         return {"postgres_configured": eng is not None}
 
     @app.get("/health/features")
-    async def health_features() -> dict[str, Any]:
+    async def health_features(request: Request) -> dict[str, Any]:
         """Installed extras + engine version — used to prove -core ≠ -full images."""
+        from netie.config import get_config
+
+        cfg = get_config()
+        dense_retriever = getattr(request.app.state, "dense_retriever", None)
         return {
             "engine_version": engine_version,
             "profile": __import__("os").environ.get("CORTEX_PROFILE", "") or "default",
@@ -157,6 +161,10 @@ def create_app() -> Any:
                 "agentic": extra_available("agentic"),
                 "rag": extra_available("rag"),
                 "full": extra_available("full"),
+            },
+            "rag": {
+                "dense_available": dense_retriever is not None,
+                "qdrant_configured": bool(getattr(cfg, "qdrant_url", None)),
             },
         }
 

@@ -210,3 +210,93 @@ async def test_t0_skips_adapter_and_records_zero_cost():
     assert len(recs) == 1
     assert recs[0].cost_myr == 0.0
     assert recs[0].tier == "T0"
+
+
+@pytest.mark.asyncio
+async def test_ensure_node_record_skips_when_llm_already_wrote():
+    ledger = CostLedger()
+    rec = NodeExecutionRecord(
+        run_id="run_a",
+        node_id="n1",
+        tier="T2",
+        model="stub",
+        latency_ms=1,
+        prompt_tokens=1,
+        completion_tokens=1,
+        cost_myr=0.04,
+        cache_hit=False,
+        started_at=now_utc(),
+        ended_at=now_utc(),
+        status="ok",
+        ceiling_myr=1.0,
+        error=None,
+    )
+    await ledger.add(rec)
+    await ledger.ensure_node_record("run_a", "n1", tier="deterministic", cost_myr=0.0)
+    assert len(ledger.records_for_run("run_a")) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_records_for_run_merges_db_and_memory(monkeypatch):
+    ledger = CostLedger()
+
+    class FakeResult:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [
+                {
+                    "run_id": "db_run",
+                    "node_id": "from_db",
+                    "tier": "T1",
+                    "model": "db",
+                    "latency_ms": 5,
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "cost_myr": 0.03,
+                    "ceiling_myr": 1.0,
+                    "cache_hit": False,
+                    "started_at": now_utc(),
+                    "ended_at": now_utc(),
+                    "status": "ok",
+                    "error": None,
+                }
+            ]
+
+    class FakeConn:
+        async def execute(self, *_a, **_k):
+            return FakeResult()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return None
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConn()
+
+    await ledger.add(
+        NodeExecutionRecord(
+            run_id="db_run",
+            node_id="local_only",
+            tier="rag",
+            model="none",
+            latency_ms=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            cost_myr=0.0,
+            cache_hit=False,
+            started_at=now_utc(),
+            ended_at=now_utc(),
+            status="ok",
+            ceiling_myr=None,
+            error=None,
+        )
+    )
+    ledger._engine = FakeEngine()  # type: ignore[assignment]
+    merged = await ledger.fetch_records_for_run("db_run")
+    node_ids = {r.node_id for r in merged}
+    assert node_ids == {"from_db", "local_only"}

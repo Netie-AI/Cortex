@@ -53,9 +53,10 @@ def test_judged_node_end_to_end_via_test_client():
     assert payload["nodes"]["j1"]["output"]["content"] == "ok"
     assert payload["total_myr"] > 0
     recs = app.state.ledger.records()
-    assert len(recs) == 1
-    assert recs[0].status == "ok"
-    assert recs[0].cost_myr > 0
+    j1_recs = [r for r in recs if r.node_id == "j1"]
+    assert len(j1_recs) == 1
+    assert j1_recs[0].status == "ok"
+    assert j1_recs[0].cost_myr > 0
 
 
 def test_run_cost_endpoint_returns_total_and_records():
@@ -94,5 +95,6 @@ def test_run_cost_endpoint_returns_total_and_records():
     body = cost.json()
     assert body["run_id"] == "cost_probe"
     assert body["total_myr"] > 0
-    assert len(body["records"]) == 1
-    assert body["records"][0]["node_id"] == "j1"
+    j1_records = [r for r in body["records"] if r["node_id"] == "j1"]
+    assert len(j1_records) == 1
+    assert j1_records[0]["cost_myr"] > 0
