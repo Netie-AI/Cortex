@@ -62,6 +62,7 @@ _UPDATABLE = {
     "timeout_seconds",
     "schedule",
     "predicates",
+    "current_run_id",
 }
 
 
@@ -133,6 +134,7 @@ def init() -> None:
                 "timeout_seconds": f"REAL DEFAULT {int(DEFAULT_TIMEOUT_SECONDS)}",
                 "schedule": "TEXT DEFAULT ''",
                 "predicates": "TEXT DEFAULT '[]'",
+                "current_run_id": "TEXT DEFAULT ''",
             },
         )
 
@@ -301,6 +303,15 @@ def list_runs(rid: str, limit: int = 20) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def _run_by_id(run_id: str) -> dict[str, Any] | None:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM routine_runs WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def _extract_cost(result: dict[str, Any]) -> float:
     nodes = result.get("nodes")
     if isinstance(nodes, dict):
@@ -397,22 +408,47 @@ async def run_once(
         return {"ok": False, "routine_id": rid, "error": "not_runnable"}
 
     now = now or time.time()
+    run_id = f"routine:{rid}:{uuid.uuid4().hex[:8]}"
     if routine["status"] == "running":
         since = float(routine.get("running_since") or 0.0)
         if now - since < RUN_LEASE_SECONDS:
             return {"ok": False, "routine_id": rid, "error": "already_running"}
-        # Stale lease: the previous run died without cleanup — take over.
-
-    run_id = f"routine:{rid}:{uuid.uuid4().hex[:8]}"
+        # Stale lease: reuse the crashed attempt's run_id. If that attempt
+        # already committed, replay -- do not mint a second side effect.
+        stale_id = str(routine.get("current_run_id") or "")
+        if stale_id:
+            prior = _run_by_id(stale_id)
+            if prior and prior.get("status") == "ok":
+                update_routine(
+                    rid, status="idle", running_since=None, current_run_id=None
+                )
+                return {
+                    "ok": True,
+                    "routine_id": rid,
+                    "run_id": stale_id,
+                    "status": prior.get("status"),
+                    "error": "",
+                    "idempotent_replay": True,
+                    "explain": None,
+                    "chosen": None,
+                    "cost_myr": float(prior.get("cost_myr") or 0.0),
+                    "governor": None,
+                    "next_run_at": routine.get("next_run_at"),
+                }
+            run_id = stale_id
     prompt = prompt_override if prompt_override is not None else routine["prompt"]
     vars_merged = {**(routine.get("vars") or {}), **(extra_vars or {})}
     body: dict[str, Any] = {
         "prompt": prompt,
         "session_id": run_id,
         "depth": routine["depth"],
-        "params": {"depth": routine["depth"], **vars_merged},
+        "params": {
+            "depth": routine["depth"],
+            "idempotency_key": run_id,
+            **vars_merged,
+        },
     }
-    update_routine(rid, status="running", running_since=now)
+    update_routine(rid, status="running", running_since=now, current_run_id=run_id)
     timeout_s = float(routine.get("timeout_seconds") or 0.0)
     predicates = routine.get("predicates") or None
     started = time.time()
@@ -449,6 +485,7 @@ async def run_once(
         rid,
         status="idle",
         running_since=None,
+        current_run_id=None,
         last_run_at=now,
         next_run_at=next_run_at,
         error_streak=0 if ok else int(routine["error_streak"]) + 1,

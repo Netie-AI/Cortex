@@ -137,6 +137,37 @@ async def test_lease_blocks_double_run_until_stale():
 
 
 @pytest.mark.asyncio
+async def test_stale_lease_after_commit_does_not_dispatch_twice(monkeypatch):
+    """The two-laptops trap: dispatch finished, process died before idle."""
+    import time as _time
+
+    calls = {"n": 0}
+
+    async def _count(plan, body):
+        calls["n"] += 1
+        assert body["params"]["idempotency_key"]
+        return {"ok": True, "output": "sent"}
+
+    monkeypatch.setattr(rs, "execute_run_plan", _count)
+    routine = rs.create_routine("PO", "place the order", interval_seconds=3600)
+    first = await rs.run_once(routine["id"])
+    assert first["ok"] is True
+    assert calls["n"] == 1
+
+    rs.update_routine(
+        routine["id"],
+        status="running",
+        running_since=_time.time() - rs.RUN_LEASE_SECONDS - 1,
+        current_run_id=first["run_id"],
+    )
+    replay = await rs.run_once(routine["id"])
+    assert replay["idempotent_replay"] is True
+    assert replay["run_id"] == first["run_id"]
+    assert calls["n"] == 1
+    assert rs.get_routine(routine["id"])["status"] == "idle"
+
+
+@pytest.mark.asyncio
 async def test_timeout_bounds_a_hung_run(monkeypatch):
     import asyncio as _asyncio
 
