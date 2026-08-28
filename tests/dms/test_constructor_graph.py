@@ -61,6 +61,30 @@ def test_compile_rejects_unknown_kind():
         compile_constructor_graph({"nodes": [{"id": "x", "kind": "n8n"}], "edges": []})
 
 
+def test_compile_enhance_kind_is_document_ref():
+    from netie.fabrication.dsl_parser import NodeType
+
+    program = compile_constructor_graph(
+        {
+            "nodes": [
+                {
+                    "id": "e1",
+                    "kind": "enhance",
+                    "object_type": "images",
+                    "action_type": "image.enhance",
+                    "fetch_from": "local.model",
+                },
+                {"id": "a1", "kind": "app"},
+            ],
+            "edges": [{"from": "e1", "to": "a1"}],
+        }
+    )
+    by_id = {n.id: n for n in program.nodes}
+    assert by_id["e1"].type == NodeType.DOCUMENT_REF
+    assert by_id["e1"].annotations["constructor_kind"] == "enhance"
+    assert by_id["a1"].type == NodeType.EMIT
+
+
 def test_compile_ontology_fields_land_on_the_dag():
     program = compile_constructor_graph(
         {
