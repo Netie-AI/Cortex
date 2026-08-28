@@ -1,5 +1,15 @@
 # STATUS.md
-**Last updated:** 2026-08-27 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon)
+**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon) + **CI billing unblock**
+
+> **2026-08-28 (CI gate — FAIL org billing, code vectors PASS):** Every Gmail
+> CI failure for Cortex (`main`, #85, #84, #82, #70) is the same annotation:
+> jobs never start (0 steps, ~2s) because Netie-AI Actions payments failed or
+> the spending limit is exhausted. Fix:
+> https://github.com/organizations/Netie-AI/settings/billing — then re-run.
+> Code gate on PR #85 (C2 exact-path allowlist): local `tests/contract/` 82
+> passed, ruff clean, lint-imports 2 kept. App runner now rewrites bare
+> `python`/`python3` argv to `sys.executable` so static spawn works when only
+> `python3` is on PATH (cloud agent / some shells).
 
 > **2026-08-27 (recon rank + wave 1):** Claude Code `cortex-recon-decompose`
 > surveyed 70 items (43 startable); rank died on session limit and was filled

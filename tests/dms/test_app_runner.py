@@ -83,6 +83,29 @@ def test_static_app_start_http_stop():
     assert _port_free(port)
 
 
+def test_render_argv_rewrites_bare_python_to_sys_executable():
+    """Manifests keep the portable token ``python``; spawn must use this interpreter.
+
+    Cloud/agent images often only ship ``python3``. A bare ``python`` argv then
+    raises FileNotFoundError and surfaces as ``start_spawn`` — a silent CI red
+    that has nothing to do with the app under test.
+    """
+    import sys
+
+    from CortexOS.execution import app_runner
+
+    rendered = app_runner._render_argv(["python", "-m", "http.server", "{port}"], 8899)
+    assert rendered == [sys.executable, "-m", "http.server", "8899"]
+    rendered3 = app_runner._render_argv(["python3", "main.py"], 8801)
+    assert rendered3 == [sys.executable, "main.py"]
+    # Non-python argv is left alone (only {port} expands).
+    assert app_runner._render_argv(["node", "server.js", "{port}"], 8802) == [
+        "node",
+        "server.js",
+        "8802",
+    ]
+
+
 def test_docker_stack_refuses_start(tmp_path):
     imported = app_store.import_zip_bytes(
         _zip_bytes({"Dockerfile": "FROM scratch\n", "index.html": "<h1>x</h1>"}),
