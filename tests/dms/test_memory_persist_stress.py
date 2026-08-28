@@ -125,7 +125,9 @@ def test_memory_api_survives_store_reopen(tmp_path, monkeypatch):
     from CortexOS.api import memory_routes
     from CortexOS.memory.factory import get_store as fresh_store
 
-    memory_routes._STORE = fresh_store()
+    # setattr, not plain assignment: this rebinds a module global that other
+    # suites read, and monkeypatch puts the original store back on teardown.
+    monkeypatch.setattr(memory_routes, "_STORE", fresh_store())
     from CortexOS.api.app import create_app
 
     client = TestClient(create_app())
@@ -137,7 +139,7 @@ def test_memory_api_survives_store_reopen(tmp_path, monkeypatch):
     assert up.status_code == 200, up.text
     assert up.json()["upserted"] == 1
     memory_routes._STORE.close()
-    memory_routes._STORE = fresh_store()
+    monkeypatch.setattr(memory_routes, "_STORE", fresh_store())
     q = client.post("/api/memory/query", json={"vector": vec, "k": 1})
     assert q.status_code == 200, q.text
     hits = q.json()["hits"]

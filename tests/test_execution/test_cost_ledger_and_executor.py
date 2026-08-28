@@ -1,3 +1,5 @@
+import sys
+import types
 from dataclasses import replace
 
 import pytest
@@ -238,7 +240,19 @@ async def test_ensure_node_record_skips_when_llm_already_wrote():
 
 @pytest.mark.asyncio
 async def test_fetch_records_for_run_merges_db_and_memory(monkeypatch):
+    # `CostLedger._load_records_from_db` imports `sqlalchemy.text` lazily, inside
+    # the function. sqlalchemy is only in the .[full] extra, so on a default
+    # install the import is the one thing standing between this test and the
+    # merge logic it exists to cover. Standing in the single symbol it needs
+    # keeps the DB-merge path exercised on every install rather than skipped on
+    # most of them; `text()` is an inert SQL marker here, since the engine, the
+    # connection and the result set below are all fakes anyway.
+    sqlalchemy_stub = types.ModuleType("sqlalchemy")
+    sqlalchemy_stub.text = lambda sql: sql  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sqlalchemy", sqlalchemy_stub)
+
     ledger = CostLedger()
+    issued: list[tuple[str, dict]] = []
 
     class FakeResult:
         def mappings(self):
@@ -265,7 +279,8 @@ async def test_fetch_records_for_run_merges_db_and_memory(monkeypatch):
             ]
 
     class FakeConn:
-        async def execute(self, *_a, **_k):
+        async def execute(self, sql, params=None, **_k):
+            issued.append((str(sql), dict(params or {})))
             return FakeResult()
 
         async def __aenter__(self):
@@ -300,3 +315,14 @@ async def test_fetch_records_for_run_merges_db_and_memory(monkeypatch):
     merged = await ledger.fetch_records_for_run("db_run")
     node_ids = {r.node_id for r in merged}
     assert node_ids == {"from_db", "local_only"}
+
+    # The DB leg really ran: one scoped SELECT against node_executions.
+    assert len(issued) == 1
+    sql, params = issued[0]
+    assert "FROM node_executions" in sql
+    assert params == {"r": "db_run"}
+    # The row the fake DB returned was hydrated, not just counted.
+    from_db = next(r for r in merged if r.node_id == "from_db")
+    assert from_db.tier == "T1"
+    assert from_db.cost_myr == 0.03
+    assert from_db.ceiling_myr == 1.0
