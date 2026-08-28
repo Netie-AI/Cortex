@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CI gate: billing FAIL + python spawn + OpenAPI drift — 2026-08-28
+
+Email CI reds across `main` and open PRs are org Actions billing (jobs never
+start; private repo). `app_runner._render_argv` maps bare `python`/`python3`
+to `sys.executable`. Regenerated `contract/openapi-1.2.0.json` for additive
+`QueryObjectsRequest.session_id` so `export_openapi.py --check` passes.
+Local mirror of all required checks PASS including rls-proof on Postgres 16
+(1474 pytest). GitHub checks still red until Billing & plans is fixed.
+
 ## CONTRACT-01 one module identity — 2026-08-26
 
 `cortex_contract` is one package. Consumers pin it; they do not import `CortexOS`.

@@ -2,6 +2,8 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-08-28 | cicd-multipr-gate-audit | cicd, billing, pr-85, dependabot, public-repo | Post-billing: #85/#84/#82/#70 PASS; Dependabot React19/Next16 FAIL. Unblock = billing OR make public. | `2026-08-28_cicd-multipr-gate-audit.md` |
+| 2026-08-28 | cicd-billing-gate-fail | cicd, billing, actions, email, python-spawn | Every Cortex CI email fail is org Actions billing (0 steps). Code vectors PASS. Harden bare python spawn to sys.executable. | `2026-08-28_cicd-billing-gate-fail.md` |
 | 2026-08-27 | control-crew-belt-proxy | control, crew, belt, conveyor, display-only, converse, 405 | Control proxies Crew GET /v1/belt as display-only JSON. Converse stays on Crew :8020. 405s unchanged. Goal open. | `2026-08-27_control-crew-belt-proxy.md` |
 | 2026-08-27 | ecosystem-analog-nearness | ecosystem, analog, nearness, crew, control, openvault, omniroute, deepagents, openwork, jepa | Cortex stays the only decision layer. Crew folds into Control. Closest GitHub is a license-gated pattern source. JEPA is not the live path. | `2026-08-27_ecosystem-analog-nearness.md` |
 | 2026-08-27 | recon-decompose-ranked | recon, workflow, startable, C2, ledger-port, ranked-43 | Rank recovered from 11 survey outputs (70 raw / 43 startable). Top slices landed on main (#71-#76). Remaining: nested-import C2 gate, dms-ui Next 15 overrides, warehouse attach helper. | `2026-08-27_recon-decompose-ranked.md` |

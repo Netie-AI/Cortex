@@ -12,6 +12,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -25,9 +26,17 @@ SUPPORTED_STACKS = frozenset({"python", "static", "node"})
 HEALTH_TIMEOUT_SEC = 15.0
 BUILD_TIMEOUT_SEC = 120.0
 
+# Manifests keep the portable token "python"; spawn must use this interpreter.
+# Cloud/agent images and some CI shells only expose python3 — bare "python"
+# raises FileNotFoundError and surfaces as start_spawn.
+_PYTHON_TOKENS = frozenset({"python", "python3"})
+
 
 def _render_argv(argv: list[str], port: int) -> list[str]:
-    return [part.replace("{port}", str(port)) for part in argv]
+    rendered = [part.replace("{port}", str(port)) for part in argv]
+    if rendered and rendered[0] in _PYTHON_TOKENS:
+        rendered = [sys.executable, *rendered[1:]]
+    return rendered
 
 
 def _port_listening(port: int, host: str = "127.0.0.1") -> bool:
