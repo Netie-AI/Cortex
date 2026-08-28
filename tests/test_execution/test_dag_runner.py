@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from netie.execution.dag_runner import ExecutionContext, run_dag
 from netie.execution.errors import OutboundNotSendable, WorkflowCostCeilingExceeded
 from netie.execution.model_router import BIG_API_PLACEHOLDER, ModelRouter
@@ -57,10 +56,11 @@ async def test_llm_judged_node_calls_router_and_writes_ledger():
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None)
     assert "j1" in res.outputs
     recs = ledger.records()
-    assert len(recs) == 1
-    assert recs[0].status == "ok"
-    assert recs[0].cost_myr > 0
-    assert recs[0].tier in {"T1", "T2", "T3"}
+    j1_recs = [r for r in recs if r.node_id == "j1"]
+    assert len(j1_recs) == 1
+    assert j1_recs[0].status == "ok"
+    assert j1_recs[0].cost_myr > 0
+    assert j1_recs[0].tier in {"T1", "T2", "T3"}
 
 
 @pytest.mark.asyncio
@@ -152,7 +152,9 @@ async def test_deterministic_rule_catches_missing_nric():
     seed = {"doc_type": "spa", "price": 500_000}
     ctx = ExecutionContext("run_comp", seed={"seed_doc": seed})
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None)
-    assert ledger.records() == []
+    recs = ledger.records()
+    assert all(r.cost_myr == 0.0 for r in recs)
+    assert any(r.node_id == "chk" and r.tier == "deterministic" for r in recs)
     assert res.outputs["chk"].output["violations"] == ["spa_must_have_buyer_nric"]
 
 
@@ -192,7 +194,9 @@ async def test_deterministic_rule_stamp_duty_miscalc():
     }
     ctx = ExecutionContext("run_stamp", seed={"seed_doc": seed})
     res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None)
-    assert ledger.records() == []
+    recs = ledger.records()
+    assert all(r.cost_myr == 0.0 for r in recs)
+    assert any(r.node_id == "chk" for r in recs)
     assert "stamp_duty_calculation" in res.outputs["chk"].output["violations"]
 
 
@@ -248,3 +252,111 @@ def test_bumi_rule_only_when_applicable():
         }
     )
     assert "bumi_lot_disclosure" in hits
+
+
+@pytest.mark.asyncio
+async def test_parallel_layer_runs_siblings_concurrently(monkeypatch):
+    import asyncio
+    import time
+
+    from netie.execution.dag_runner import NodeResult
+
+    start_times: dict[str, float] = {}
+
+    async def slow_execute_node(node, context, router, ledger, workflow_cost_ceiling_myr=None):
+        start_times[node.id] = time.monotonic()
+        await asyncio.sleep(0.08)
+        return NodeResult(node_id=node.id, output={"content": node.id}, tier="stub", cost_myr=0.0)
+
+    monkeypatch.setattr("netie.execution.dag_runner.execute_node", slow_execute_node)
+
+    dag = _parse(
+        {
+            "version": "2.0",
+            "intent_hash": "h",
+            "entry_node_id": "a",
+            "output_node_id": "emit",
+            "nodes": [
+                {
+                    "id": "a",
+                    "kind": "llm_judged",
+                    "default_tier": "T3",
+                    "max_tier": "T3",
+                    "provider": BIG_API_PLACEHOLDER,
+                    "prompt": "a",
+                    "max_tokens": 10,
+                    "cost_ceiling_myr": 10.0,
+                    "inputs": [],
+                },
+                {
+                    "id": "b",
+                    "kind": "llm_judged",
+                    "default_tier": "T3",
+                    "max_tier": "T3",
+                    "provider": BIG_API_PLACEHOLDER,
+                    "prompt": "b",
+                    "max_tokens": 10,
+                    "cost_ceiling_myr": 10.0,
+                    "inputs": [],
+                },
+                {"id": "emit", "kind": "EMIT", "tier": 0, "inputs": ["a", "b"]},
+            ],
+        }
+    )
+    router = ModelRouter(
+        adapter_registry=_stub_registry(),
+        provider_aliases={BIG_API_PLACEHOLDER: "anthropic"},
+    )
+    ledger = CostLedger()
+    ctx = ExecutionContext("run_parallel")
+
+    started = time.monotonic()
+    res = await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=None, parallel=True)
+    elapsed = time.monotonic() - started
+
+    assert "a" in res.outputs and "b" in res.outputs
+    assert abs(start_times["a"] - start_times["b"]) < 0.05
+    assert elapsed < 0.2
+
+
+@pytest.mark.asyncio
+async def test_hydrate_run_total_restores_spent_before_ceiling_gate(monkeypatch):
+    ledger = CostLedger()
+
+    async def fake_hydrate(run_id: str) -> float:
+        if run_id == "resume_run":
+            ledger._run_totals[run_id] = 0.09
+        return ledger.total_cost(run_id)
+
+    monkeypatch.setattr(ledger, "hydrate_run_total", fake_hydrate)
+
+    dag = _parse(
+        {
+            "version": "2.0",
+            "intent_hash": "h",
+            "entry_node_id": "n1",
+            "output_node_id": "e1",
+            "nodes": [
+                {
+                    "id": "n1",
+                    "kind": "llm_judged",
+                    "default_tier": "T3",
+                    "max_tier": "T3",
+                    "provider": BIG_API_PLACEHOLDER,
+                    "prompt": "x",
+                    "max_tokens": 10,
+                    "cost_ceiling_myr": 10.0,
+                    "inputs": [],
+                },
+                {"id": "e1", "kind": "EMIT", "tier": 0, "inputs": ["n1"]},
+            ],
+        }
+    )
+    router = ModelRouter(
+        adapter_registry=_stub_registry(rate=0.02),
+        provider_aliases={BIG_API_PLACEHOLDER: "anthropic"},
+    )
+    ctx = ExecutionContext("resume_run")
+    with pytest.raises(WorkflowCostCeilingExceeded):
+        await run_dag(dag, ctx, router, ledger, workflow_cost_ceiling_myr=0.1)
+    assert ledger.records() == []

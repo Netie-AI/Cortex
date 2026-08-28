@@ -6,6 +6,7 @@ from netie.execution.errors import CostCeilingExceeded
 from netie.execution.model_router import ModelRequest, ModelRouter
 from netie.routing.adapters.base import AdapterRequest, AdapterResponse
 from netie.routing.cost_ledger import CostLedger, NodeExecutionRecord, now_utc
+from netie.routing.tiers import Tier
 from netie.routing.token_estimate import estimate_prompt_tokens
 
 
@@ -54,6 +55,39 @@ async def invoke_routed_completion(
         workflow_cost_ceiling_myr,
         node_cost_ceiling_myr if node_cost_ceiling_myr is not None else model_req.cost_ceiling_myr,
     )
+
+    if routed.tier == Tier.T0:
+        started_at = now_utc()
+        ended_at = started_at
+        record = NodeExecutionRecord(
+            run_id=run_id,
+            node_id=node_id,
+            tier=routed.tier.value,
+            model=routed.model,
+            latency_ms=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            cost_myr=0.0,
+            cache_hit=False,
+            started_at=started_at,
+            ended_at=ended_at,
+            status="ok",
+            ceiling_myr=ceiling,
+            error=None,
+        )
+        await ledger.add(record)
+        return RoutedCompletionOutcome(
+            response=AdapterResponse(
+                content="",
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency_ms=0,
+                raw={"tier": "T0", "skipped_adapter": True, "reason": routed.reason},
+            ),
+            tier=routed.tier.value,
+            model=routed.model,
+            cost_myr=0.0,
+        )
 
     prompt_blob = f"{adapter_req.system}\n{adapter_req.prompt}"
     est_prompt_tokens = estimate_prompt_tokens(

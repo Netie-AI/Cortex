@@ -75,6 +75,8 @@ def test_health_features_reports_profile(monkeypatch: pytest.MonkeyPatch) -> Non
     assert body_f["extras"]["agentic"] is True
     # rag depends on whether third-party modules are installed in this venv
     assert "rag" in body_f["extras"]
+    assert body["rag"]["dense_available"] is False
+    assert "qdrant_configured" in body["rag"]
     assert body_f["extras"] != body["extras"] or body_f["profile"] != body["profile"]
 
 

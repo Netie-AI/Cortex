@@ -111,6 +111,95 @@ class CostLedger:
     def records(self) -> list[NodeExecutionRecord]:
         return list(self._records)
 
+    def records_for_run(self, run_id: str) -> list[NodeExecutionRecord]:
+        return [record for record in self._records if record.run_id == run_id]
+
+    def has_node_record(self, run_id: str, node_id: str) -> bool:
+        return any(r.run_id == run_id and r.node_id == node_id for r in self._records)
+
+    async def ensure_node_record(
+        self,
+        run_id: str,
+        node_id: str,
+        *,
+        tier: str,
+        cost_myr: float = 0.0,
+        ceiling_myr: float | None = None,
+    ) -> None:
+        """Write a ledger row when a node finished without ``invoke_routed_completion``."""
+        if self.has_node_record(run_id, node_id):
+            return
+        ts = now_utc()
+        await self.add(
+            NodeExecutionRecord(
+                run_id=run_id,
+                node_id=node_id,
+                tier=tier,
+                model="none",
+                latency_ms=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_myr=round(cost_myr, 6),
+                cache_hit=False,
+                started_at=ts,
+                ended_at=ts,
+                status="ok",
+                ceiling_myr=ceiling_myr,
+                error=None,
+            )
+        )
+
+    _SELECT_RUN_SQL = """
+        SELECT run_id, node_id, tier, model, latency_ms,
+               prompt_tokens, completion_tokens, cost_myr, ceiling_myr,
+               cache_hit, started_at, ended_at, status, error
+        FROM node_executions
+        WHERE run_id = :r
+        ORDER BY started_at ASC
+    """
+
+    async def _load_records_from_db(self, run_id: str) -> list[NodeExecutionRecord]:
+        if self._engine is None:
+            return []
+        from sqlalchemy import text
+
+        async with self._engine.connect() as conn:
+            result = await conn.execute(text(self._SELECT_RUN_SQL), {"r": run_id})
+            rows = result.mappings().all()
+        out: list[NodeExecutionRecord] = []
+        for row in rows:
+            out.append(
+                NodeExecutionRecord(
+                    run_id=str(row["run_id"]),
+                    node_id=str(row["node_id"]),
+                    tier=str(row["tier"]),
+                    model=str(row["model"]),
+                    latency_ms=int(row["latency_ms"] or 0),
+                    prompt_tokens=int(row["prompt_tokens"] or 0),
+                    completion_tokens=int(row["completion_tokens"] or 0),
+                    cost_myr=float(row["cost_myr"] or 0),
+                    cache_hit=bool(row["cache_hit"]),
+                    started_at=row["started_at"],
+                    ended_at=row["ended_at"],
+                    status=str(row["status"]),
+                    ceiling_myr=float(row["ceiling_myr"]) if row["ceiling_myr"] is not None else None,
+                    error=str(row["error"]) if row["error"] is not None else None,
+                )
+            )
+        return out
+
+    async def fetch_records_for_run(self, run_id: str) -> list[NodeExecutionRecord]:
+        """Merge Postgres rows (when configured) with this worker's in-process cache."""
+        db_records = await self._load_records_from_db(run_id)
+        seen = {(r.node_id, r.started_at) for r in db_records}
+        merged = list(db_records)
+        for record in self.records_for_run(run_id):
+            key = (record.node_id, record.started_at)
+            if key not in seen:
+                merged.append(record)
+                seen.add(key)
+        return merged
+
     def export_dicts(self) -> list[dict[str, Any]]:
         return [asdict(record) for record in self._records]
 

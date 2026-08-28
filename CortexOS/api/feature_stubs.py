@@ -123,4 +123,5 @@ RAG_STUB_ROUTES: list[tuple[str, str]] = [
 
 AGENTIC_DAG_STUB_ROUTES: list[tuple[str, str]] = [
     ("POST", "/run"),
+    ("GET", "/api/engine/runs/{run_id}/cost"),
 ]

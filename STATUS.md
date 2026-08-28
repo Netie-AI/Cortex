@@ -1,5 +1,9 @@
 # STATUS.md
-**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon) + **CI billing unblock**
+**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** engine capability (cost ledger, DAG parallel, T0) + CI billing unblock**
+
+> **2026-08-28 (engine wave 2):** Ledger row per DAG node (`ensure_node_record`);
+> Postgres merge on `GET /api/engine/runs/{id}/cost`; `POST /api/memory/assemble`;
+> `/health/features` → `rag.dense_available`. PR #87 branch.
 
 > **2026-08-28 (CI gate — FAIL org billing, FULL local mirror PASS):** Every
 > Gmail CI failure is Actions unable to start jobs on this **private** repo

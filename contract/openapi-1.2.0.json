@@ -327,6 +327,63 @@
         "title": "AskRequest",
         "type": "object"
       },
+      "AssembleIn": {
+        "properties": {
+          "k": {
+            "default": 5,
+            "title": "K",
+            "type": "integer"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "session_scope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Scope"
+          },
+          "vector": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Vector",
+            "type": "array"
+          }
+        },
+        "required": [
+          "vector"
+        ],
+        "title": "AssembleIn",
+        "type": "object"
+      },
       "AssembleRequest": {
         "properties": {
           "examples": {
@@ -4014,6 +4071,27 @@
             "description": "DAG envelope (parsed directly)",
             "title": "Dag",
             "type": "object"
+          },
+          "max_parallel": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Parallel"
+          },
+          "parallel": {
+            "default": false,
+            "title": "Parallel",
+            "type": "boolean"
+          },
+          "resume": {
+            "default": false,
+            "title": "Resume",
+            "type": "boolean"
           },
           "run_id": {
             "default": "integration_run",

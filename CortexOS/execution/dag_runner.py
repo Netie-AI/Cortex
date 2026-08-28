@@ -229,6 +229,8 @@ def _price_one_call(
         metadata={"is_vip": bool(context.get("is_vip", False))},
     )
     routed = router.route(model_req)
+    if routed.tier == Tier.T0:
+        return 0.0
     blob = f"{node.system or ''}\n{prompt}"
     from netie.execution.executor import adapter_token_estimate_family
 
@@ -569,6 +571,7 @@ async def run_dag(
 
     wf = workflow_cost_ceiling_myr
     wf_val = wf if wf is not None else math.inf
+    await ledger.hydrate_run_total(context.run_id)
     journal_on = _journal_enabled()
     result = DAGResult()
     emit = on_event if callable(on_event) else None
@@ -618,6 +621,13 @@ async def run_dag(
             if emit is not None:
                 emit({"type": "node_error", "node": node.id, "error": str(exc)[:300], **_node_meta(node)})
             raise
+        await ledger.ensure_node_record(
+            context.run_id,
+            node.id,
+            tier=nr.tier,
+            cost_myr=float(nr.cost_myr),
+            ceiling_myr=wf if wf is not None else None,
+        )
         if jkey:
             try:
                 step_journal.put_cached(

@@ -55,6 +55,14 @@ class QueryIn(BaseModel):
     session_scope: list[str] | None = None
 
 
+class AssembleIn(BaseModel):
+    vector: list[float]
+    k: int = 5
+    scope: str | None = None
+    session_scope: list[str] | None = None
+    session_id: str | None = None
+
+
 @router.post("/upsert")
 async def memory_upsert(
     body: UpsertIn,
@@ -100,6 +108,44 @@ async def memory_query(
         {"id": h.id, "score": round(h.score, 6), "text": h.text, "meta": h.meta}
         for h in hits
     ]}
+
+
+@router.post("/assemble")
+async def memory_assemble(
+    body: AssembleIn,
+    caller: Caller = Depends(require_role("viewer")),
+) -> dict[str, Any]:
+    """Assemble vector + optional chat/note layers into one prompt-ready blob."""
+    _ = caller
+    from netie.memory.context_provider import MemoryContextProvider
+
+    sess = (
+        frozenset(t for t in body.session_scope if t and str(t).strip())
+        if body.session_scope is not None
+        else None
+    )
+    scope = body.scope if body.scope in ("personal", "company") else None
+    assembled = MemoryContextProvider(_STORE).assemble(
+        body.vector,
+        k=body.k,
+        scope=scope,
+        session_scope=sess,
+        session_id=body.session_id,
+    )
+    vector_hits = assembled.get("vector_hits") or []
+    return {
+        "ok": True,
+        "text_blob": assembled.get("text_blob") or "",
+        "hits": [
+            {"id": h.id, "score": round(h.score, 6), "text": h.text, "meta": h.meta}
+            for h in vector_hits
+        ],
+        "layers": {
+            "vector_count": len(vector_hits),
+            "chat_count": len(assembled.get("chat_turns") or []),
+            "notes_count": len(assembled.get("notes") or []),
+        },
+    }
 
 
 @router.get("/stats")
