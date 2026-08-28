@@ -24,7 +24,9 @@ from packs.dms.security.api_auth import (
 
 COOKIE = "cortex_api_key"
 PREFIX = "/cortex"
-SKIN_NAMES = frozenset({"index.html", "app.js", "styles.css", "engine.js", "README.md"})
+SKIN_NAMES = frozenset(
+    {"index.html", "app.js", "styles.css", "engine.js", "README.md", "favicon.ico", "favicon.svg"}
+)
 
 router = APIRouter(tags=["constructor"])
 
@@ -350,7 +352,7 @@ async def constructor_run(
 
     from packs.dms.constructor_fetch import fetch_slice
 
-    seed: dict[str, Any] = {"actor": caller.actor}
+    seed: dict[str, Any] = {"actor": caller.actor, "confirmed": True}
     fetches: dict[str, Any] = {}
     for node in program.nodes:
         ann = node.annotations if isinstance(node.annotations, dict) else {}
@@ -379,7 +381,14 @@ async def constructor_run(
 
     ctx = ExecutionContext(body.run_id, seed)
     try:
-        dag_result = await run_dag(program, ctx, router_m, ledger)
+        import asyncio
+
+        dag_result = await asyncio.wait_for(run_dag(program, ctx, router_m, ledger), timeout=45)
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="run_dag timed out after 45s. Ghost still compiles. Slim the tool_call payload or retry ingest->app.",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     serialized: dict[str, Any] = {}
