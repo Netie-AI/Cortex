@@ -19,6 +19,7 @@ _KINDS = frozenset(
         "agent",
         "hypothesize",
         "improve",
+        "enhance",
         "audit",
         "tool_call",
     }
@@ -34,6 +35,7 @@ _KIND_TO_TYPE = {
     "agent": NodeType.AGENT_TASK,
     "hypothesize": NodeType.DOCUMENT_REF,
     "improve": NodeType.DOCUMENT_REF,
+    "enhance": NodeType.DOCUMENT_REF,
     "audit": NodeType.DOCUMENT_REF,
     "tool_call": NodeType.TOOL_CALL,
 }
