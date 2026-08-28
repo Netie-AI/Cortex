@@ -168,7 +168,11 @@ def constructor_issue_key(request: Request, body: IssueKeyBody = IssueKeyBody())
 async def cortex_session(request: Request) -> RedirectResponse:
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
-        body = SessionBody.model_validate(await request.json())
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Send JSON {key: ...}") from exc
+        body = SessionBody.model_validate(payload)
         key = body.key.strip()
     else:
         try:
