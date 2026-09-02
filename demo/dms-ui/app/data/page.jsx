@@ -115,14 +115,14 @@ export default function DataPage() {
           className={`cx-toggle-btn${variant === "messy" ? " active" : ""}`}
           onClick={() => setVariant("messy")}
         >
-          MESSY DATA
+          Messy
         </button>
         <button
           type="button"
           className={`cx-toggle-btn${variant === "clean" ? " active" : ""}`}
           onClick={() => setVariant("clean")}
         >
-          CLEAN DATA
+          Clean
         </button>
       </div>
 
@@ -191,17 +191,17 @@ export default function DataPage() {
       {variant === "clean" && changelogAgg.length > 0 && (
         <div className="cx-changelog-section">
           <div className="cx-label" style={{ marginBottom: 12 }}>
-            CLEANING CHANGELOG
+            Cleaning changelog
           </div>
           <table className="cx-data-table">
             <thead>
               <tr>
-                <th>RULE</th>
-                <th>FIELD</th>
-                <th>BEFORE</th>
-                <th>AFTER</th>
-                <th>ROWS</th>
-                {role.canApprove && <th>ACTION</th>}
+                <th>Rule</th>
+                <th>Field</th>
+                <th>Before</th>
+                <th>After</th>
+                <th>Rows</th>
+                {role.canApprove && <th>Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -215,7 +215,7 @@ export default function DataPage() {
                   {role.canApprove && (
                     <td>
                       <button type="button" className="cx-approve-btn">
-                        APPROVE
+                        Approve
                       </button>
                     </td>
                   )}
@@ -229,7 +229,7 @@ export default function DataPage() {
       {variant === "clean" && (
         <div className="cx-entry-section">
           <div className="cx-label" style={{ marginBottom: 12 }}>
-            NEW DATA ENTRY
+            New entry
           </div>
           <div className="cx-entry-step">
             <textarea
@@ -240,14 +240,14 @@ export default function DataPage() {
               placeholder={`Paste new inventory rows here — any format accepted\ne.g. SKU001, 50kg, Warehouse A, reorder at 10kg, supplier Acme`}
             />
             <button type="button" className="cx-entry-btn" onClick={runAnalysis}>
-              ANALYSE ENTRY →
+              Analyse entry
             </button>
           </div>
 
           {analysis && (
             <div className="cx-entry-result">
               <div className="cx-label" style={{ marginBottom: 12 }}>
-                PROPOSED ENTRY
+                Proposed entry
               </div>
               <table className="cx-data-table cx-proposed-table">
                 <tbody>
@@ -270,7 +270,7 @@ export default function DataPage() {
               {analysis.issues?.length > 0 && (
                 <>
                   <div className="cx-label" style={{ margin: "16px 0 8px" }}>
-                    ISSUES DETECTED
+                    Issues
                   </div>
                   {analysis.issues.map((issue, i) => (
                     <div key={i} className="cx-entry-issue">
@@ -283,7 +283,7 @@ export default function DataPage() {
               {analysis.hidden_issues?.length > 0 && (
                 <>
                   <div className="cx-label" style={{ margin: "16px 0 8px" }}>
-                    HIDDEN ISSUES
+                    Hidden issues
                   </div>
                   {analysis.hidden_issues.map((issue, i) => (
                     <div key={i} className="cx-entry-hidden">
@@ -300,7 +300,7 @@ export default function DataPage() {
                   onClick={approveEntry}
                   disabled={!role.canApprove || approveLoading}
                 >
-                  APPROVE & ADD →
+                  Approve and add
                 </button>
                 <button
                   type="button"
@@ -310,7 +310,7 @@ export default function DataPage() {
                     setPermError("");
                   }}
                 >
-                  REJECT
+                  Reject
                 </button>
               </div>
             </div>

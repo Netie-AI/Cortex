@@ -1,5 +1,8 @@
-# CONTEXT.md — Netie / CortexOS / DMS Brain
-**Keep under ~800 tokens. Locked decisions only — workflow in CURSOR_HANDOFF.md.**
+# CONTEXT.md -- Netie / CortexOS / DMS Brain
+> HISTORICAL. Do not start here. Live state is `STATUS.md`. The 153-test count
+> below is a 2026-06 snapshot, not the baseline (STATUS floor >=330).
+
+**Keep under ~800 tokens. Locked decisions only -- workflow in CURSOR_HANDOFF.md.**
 
 ---
 

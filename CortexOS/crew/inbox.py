@@ -59,7 +59,7 @@ def fetch(limit: int = 8) -> dict[str, Any]:
         return status()
     client: imaplib.IMAP4_SSL | None = None
     try:
-        client = imaplib.IMAP4_SSL(host, timeout=12)
+        client = imaplib.IMAP4_SSL(host, timeout=1.5)
         client.login(user, secret)
         client.select("INBOX", readonly=True)
         _typ, data = client.search(None, "ALL")

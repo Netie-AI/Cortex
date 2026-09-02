@@ -12,7 +12,9 @@ start a third orchestrator and it does not revive LangGraph.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from CortexOS.crew import roles
@@ -101,6 +103,18 @@ CUES: dict[str, tuple[str, ...]] = {
         "privacy policy",
         "feature flags",
         "a/b testing",
+        "make a website",
+        "build a website",
+        "make a site",
+        "landing page",
+        "3d website",
+        "3d site",
+        "clone http",
+        "clone https",
+        "clone www",
+        "clone a site",
+        "clone the site",
+        "clone this site",
     ),
     "Marketing": (
         "outbound",
@@ -144,6 +158,12 @@ CUES: dict[str, tuple[str, ...]] = {
         "bad feedback",
         "customer feedback",
         "turn this into a skill",
+        "skill storage",
+        "add a skill",
+        "ingest skill",
+        "install skill",
+        "save this skill",
+        "github skill",
     ),
     "Routines": ("routine", "schedule", "cron", "plane beat", "watchdog beat"),
     "Watchdog": ("watchdog", "desk status", "what's seated", "seated vs unseated"),
@@ -217,10 +237,15 @@ class Detected:
                     "icon": role.icon if role else name[:1],
                 }
             )
+        skills = list(attached_skills(self.capabilities))
+        waves = wave_plan(self.capabilities) if self.spawn else ""
         return {
             "pattern": self.pattern,
             "why": self.why,
             "capabilities": caps,
+            "skills": skills,
+            "load_skill_now": bool(skills) and self.spawn,
+            "wave_plan": waves,
             "spawn": self.spawn,
             "verify": self.verify,
             "engine_path": self.engine_path,
@@ -247,7 +272,18 @@ def match_capabilities(text: str) -> tuple[str, ...]:
         cues = CUES.get(role.name, (role.name.lower(),))
         if _hit(text, cues):
             found.append(role.name)
+    if _skill_ingest_ask(text) and "Skills" not in found:
+        found.append("Skills")
     return tuple(found)
+
+
+def _skill_ingest_ask(text: str) -> bool:
+    """add impeccable skill / install X from github - verb plus the word skill."""
+    low = (text or "").lower()
+    if "skill" not in low:
+        return False
+    verbs = ("add", "ingest", "install", "save", "teach", "fetch", "find", "pull")
+    return any(v in low for v in verbs)
 
 
 def attached_skills(caps: tuple[str, ...]) -> tuple[str, ...]:
@@ -273,9 +309,10 @@ def plan(text: str) -> Detected:
     """
     raw = (text or "").strip()
     if not raw:
+        # Idle empty is not a detected single_agent job (R-0011).
         return Detected(
-            pattern="single_agent",
-            why="empty message",
+            pattern="idle",
+            why="idle empty. No user text.",
             capabilities=(),
             spawn=False,
             verify=False,
@@ -354,7 +391,12 @@ def render(detected: Detected) -> str:
     lines.append(f"capability templates that fit: {names}")
     skill_names = attached_skills(detected.capabilities)
     if skill_names:
-        lines.append("Default skills (auto-copied on spawn): " + ", ".join(skill_names))
+        listed = ", ".join(skill_names)
+        lines.append("Default skills (auto-copied on spawn): " + listed)
+        lines.append(
+            "Matching playbooks are inlined below. Follow them this turn. "
+            "load_skill only if a playbook is truncated or missing."
+        )
     lines.append(
         "Spawn job-named teammates with spawn_agent (name=<this-job>, "
         "capability=<template>, brief=...). Do not ask the user to pick a chip. "
@@ -367,3 +409,93 @@ def render(detected: Detected) -> str:
         )
     lines.append("Crew A2A is the graph. Do not start LangGraph.")
     return "\n".join(lines)
+
+
+_SLASH_SKILL = re.compile(r"^/([A-Za-z0-9][A-Za-z0-9._-]{0,63})(?:\s|$)")
+
+
+def slash_skill(text: str) -> str | None:
+    """Leading /name from the operator, grok-bot /menu shape, original parse.
+
+    Only the first token. Paths like /crew/health are not a skill name.
+    """
+    raw = (text or "").strip()
+    if not raw.startswith("/") or raw.startswith("//"):
+        return None
+    hit = _SLASH_SKILL.match(raw)
+    if hit is None:
+        return None
+    return hit.group(1)
+
+
+def wave_plan(capabilities: Sequence[str], *, max_parallel: int = 4) -> str:
+    """Plan-only fan-out for this turn. Spawns nothing.
+
+    DeepAgents launches independent subagents in one message. Crew already has
+    dispatch.plan; leaving it behind plan_waves meant a multi-capability detect
+    never used it. Independent templates land in wave 0 so the Manager can
+    spawn them together this turn.
+    """
+    names = [str(n).strip() for n in capabilities if str(n).strip()]
+    if len(names) < 2:
+        return ""
+    from CortexOS.crew import dispatch
+
+    items = []
+    for name in names:
+        role = roles.by_name(name)
+        items.append(
+            dispatch.WorkItem(
+                id=name,
+                description=(role.blurb if role is not None else name),
+            )
+        )
+    return dispatch.plan(items, max_parallel=max_parallel).render()
+
+
+PLAYBOOK_BODY_CHARS = 1600
+PLAYBOOK_MAX_SKILLS = 4
+PLAYBOOK_TOTAL_CHARS = 4800
+
+
+def playbooks(names: Sequence[str], folder: Path | None) -> str:
+    """Inline matching skill bodies so this turn uses them, not hopes for load_skill.
+
+    DeepAgents lists name+description and waits for a read. OpenWork searches then
+    executes. Crew already told the model to load_skill this turn; a lazy call
+    left the playbook unused. Cap each body and the block so a long skill cannot
+    eat the Manager's second system message.
+    """
+    wanted = [n for n in names if str(n).strip()]
+    if not wanted or folder is None:
+        return ""
+    from CortexOS.crew.board import read_skill
+
+    chunks: list[str] = []
+    used = 0
+    leftover: list[str] = []
+    for i, name in enumerate(wanted):
+        if len(chunks) >= PLAYBOOK_MAX_SKILLS:
+            leftover.extend(wanted[i:])
+            break
+        body = read_skill(folder, name).strip()
+        if not body:
+            leftover.append(name)
+            continue
+        if len(body) > PLAYBOOK_BODY_CHARS:
+            body = (
+                body[:PLAYBOOK_BODY_CHARS].rstrip()
+                + "\n(truncated; load_skill for the rest)"
+            )
+        chunk = f"[playbook: {name}]\n{body}"
+        if used + 2 + len(chunk) > PLAYBOOK_TOTAL_CHARS:
+            leftover.append(name)
+            continue
+        chunks.append(chunk)
+        used += 2 + len(chunk)
+    if not chunks and not leftover:
+        return ""
+    parts = ["\n\n".join(chunks)] if chunks else []
+    if leftover:
+        parts.append("Not inlined; load_skill: " + ", ".join(leftover))
+    return "\n".join(p for p in parts if p)

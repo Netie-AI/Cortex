@@ -6,19 +6,19 @@ import { setApiRoleKey } from "../lib/api";
 export const ROLES = {
   ANALYST: {
     id: "ANALYST",
-    label: "ANALYST (read-only)",
+    label: "Analyst",
     canApprove: false,
     isAdmin: false,
   },
   STEWARD: {
     id: "STEWARD",
-    label: "DATA STEWARD",
+    label: "Data steward",
     canApprove: true,
     isAdmin: false,
   },
   ADMIN: {
     id: "ADMIN",
-    label: "ADMIN",
+    label: "Admin",
     canApprove: true,
     isAdmin: true,
   },

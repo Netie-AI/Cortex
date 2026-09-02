@@ -60,14 +60,14 @@ def idle_stop_seconds() -> int:
 DEFAULT_SPECS: list[dict[str, Any]] = [
     {
         "name": "uacc",
-        "command": ["uv", "tool", "run", "--from", "uacc", "--with", "mcp", "uacc"],
+        "command": ["uv", "tool", "run", "--from", "uacc", "--with", "mcp<2", "uacc-mcp"],
         "cwd": None,
         "env": {"UACC_SAFE_MODE": "true", "UACC_HUMAN_MIMICRY": "false"},
         "armed": False,
     },
     {
         "name": "windows-mcp",
-        "command": ["uv", "tool", "run", "--from", "windows-mcp", "windows-mcp"],
+        "command": ["uv", "tool", "run", "--from", "windows-mcp", "windows-mcp", "serve"],
         "cwd": None,
         "env": {"ANONYMIZED_TELEMETRY": "false"},
         "armed": False,

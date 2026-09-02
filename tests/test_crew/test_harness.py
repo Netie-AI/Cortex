@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from CortexOS.crew.llm import LLMResult, ToolCall
+from CortexOS.crew.llm import LLMError, LLMResult, ToolCall
 from CortexOS.crew.store import CrewStore
 from CortexOS.crew.workspace import SpaceWorkspace, WorkspaceError
 
@@ -104,6 +104,9 @@ def test_belt_json_does_not_decide_work_shape(tmp_path: Path, monkeypatch) -> No
     assert body["plan_for_next"]["decides_work_shape"] is False
     assert body["converse"] is True
     assert body["tickets"]["items"][0]["number"] == "ANS-01"
+    assert body["wakes"] == []
+    assert body["confirms"] == []
+    assert body["queue"] == {}
 
 
 @pytest.mark.asyncio
@@ -175,6 +178,169 @@ async def test_load_skill_returns_body(rig) -> None:
     assert tools and "ASCII" in tools[0]["content"]
     answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "ASCII" in answer["content"]
+
+
+@pytest.mark.asyncio
+async def test_save_skill_lands_labeled_file_the_roster_can_load(rig) -> None:
+    space = rig.store.create_space("Ingest")
+    rig.llm.manager.extend(
+        [
+            LLMResult(
+                tool_calls=[
+                    _tc(
+                        "save_skill",
+                        name="impeccable",
+                        body="Design rules. Contrast first.",
+                        labels=["design-rules"],
+                        source="https://github.com/pbakaus/impeccable",
+                    )
+                ]
+            ),
+            LLMResult(text="Saved impeccable under design-rules."),
+        ]
+    )
+    await rig.runtime.on_user_message(space["id"], "Add impeccable skill into skill storage")
+    await wait_run_done(rig.runtime, space["id"])
+    tools = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"]
+    assert tools and "impeccable" in tools[0]["content"]
+    assert "design-rules" in tools[0]["content"]
+    path = rig.settings.data_dir / "skills" / "impeccable.md"
+    assert path.is_file()
+    body = path.read_text(encoding="utf-8")
+    assert "design-rules" in body
+    assert "pbakaus/impeccable" in body
+    answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
+    assert "impeccable" in answer["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_web_search_is_offered_and_returns_hits(rig, monkeypatch) -> None:
+    from CortexOS.crew import research
+
+    monkeypatch.setattr(
+        research,
+        "web_search",
+        lambda query, max_results=6: {
+            "ok": True,
+            "query": query,
+            "results": [
+                {
+                    "title": "pbakaus/impeccable",
+                    "url": "https://github.com/pbakaus/impeccable",
+                    "snippet": "Design rules skill",
+                }
+            ],
+        },
+    )
+    space = rig.store.create_space("Search")
+    manager = rig.runtime.ensure_manager(space["id"])
+    offered = {s["function"]["name"] for s in rig.runtime._toolspecs(True, manager)}
+    assert {
+        "web_search",
+        "web_fetch",
+        "github_search",
+        "save_skill",
+        "ingest_named_skill",
+        "analog_clone",
+    } <= offered
+    rig.llm.manager.extend(
+        [
+            LLMResult(tool_calls=[_tc("web_search", query="impeccable github skill")]),
+            LLMResult(text="Found pbakaus/impeccable on GitHub."),
+        ]
+    )
+    await rig.runtime.on_user_message(space["id"], "Add impeccable skill into skill storage")
+    await wait_run_done(rig.runtime, space["id"])
+    tools = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"]
+    assert tools and "pbakaus/impeccable" in tools[0]["content"]
+    answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
+    assert "impeccable" in answer["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ingest_fallback_saves_when_model_hop_dies(rig, monkeypatch) -> None:
+    from CortexOS.crew import research
+
+    monkeypatch.setattr(
+        research,
+        "github_search",
+        lambda query, limit=8: {
+            "ok": True,
+            "repos": [
+                {
+                    "name": "impeccable",
+                    "full_name": "pbakaus/impeccable",
+                    "url": "https://github.com/pbakaus/impeccable",
+                    "description": "Design rules",
+                }
+            ],
+            "web": [],
+        },
+    )
+    monkeypatch.setattr(research, "web_search", lambda query, max_results=6: {"ok": True, "results": []})
+    monkeypatch.setattr(
+        research,
+        "web_fetch",
+        lambda url, max_chars=8000: {"ok": True, "text": "Impeccable is a design skill."},
+    )
+
+    async def boom(*_a, **_k):
+        raise LLMError("OpenVault HTTP 500: Internal Server Error")
+
+    rig.runtime._llm = boom
+    space = rig.store.create_space("Fallback")
+    await rig.runtime.on_user_message(space["id"], "Add impeccable skill into skill storage")
+    await wait_run_done(rig.runtime, space["id"])
+    answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
+    assert "impeccable" in answer["content"].lower()
+    assert "design-rules" in answer["content"]
+    path = rig.settings.data_dir / "skills" / "impeccable.md"
+    assert path.is_file()
+    assert "pbakaus/impeccable" in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_analog_fallback_writes_when_model_hop_dies(rig, monkeypatch) -> None:
+    from CortexOS.crew import analog as analog_mod
+    from CortexOS.crew import research
+    from CortexOS.crew.llm import LLMError
+
+    monkeypatch.setattr(
+        research,
+        "web_fetch",
+        lambda url, max_chars=16000: {
+            "ok": True,
+            "url": url,
+            "title": "Igloo",
+            "text": "color: #1a1714; background: #0b0d10;",
+        },
+    )
+    monkeypatch.setattr(
+        research,
+        "github_search",
+        lambda query, limit=5: {"ok": True, "repos": [], "web": []},
+    )
+    monkeypatch.setattr(
+        research,
+        "web_search",
+        lambda query, max_results=5: {"ok": True, "results": []},
+    )
+    monkeypatch.setattr(analog_mod, "_open_local", lambda _p: False)
+
+    async def boom(*_a, **_k):
+        raise LLMError("OpenVault HTTP 500: Internal Server Error")
+
+    rig.runtime._llm = boom
+    space = rig.store.create_space("Clone")
+    await rig.runtime.on_user_message(space["id"], "clone https://www.igloo.inc/")
+    await wait_run_done(rig.runtime, space["id"])
+    answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
+    assert "analog_clone" in answer["content"]
+    html = rig.settings.data_dir / "spaces" / space["id"] / "ws" / "index.html"
+    assert html.is_file()
+    body = html.read_text(encoding="utf-8")
+    assert "Analog of www.igloo.inc" in body
+    assert "gsap" in body.lower()
 
 
 @pytest.mark.asyncio

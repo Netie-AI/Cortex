@@ -96,3 +96,10 @@ coverage.xml
 # DBOS local system DB
 data/dbos_agents.sqlite
 *.sqlite
+
+# Legal OSS clones for distill (do not commit trees)
+skill_distill/sources/oss/
+
+# Crew runtime state (regenerated)
+data/crew-scale-live/
+data/crew-scale-probe/

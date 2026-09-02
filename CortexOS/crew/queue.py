@@ -1,11 +1,10 @@
 """Durable work queue for crew work - an item survives a process restart.
 
-A crew run lives in memory: ``CortexOS.crew.runtime`` holds ``_runs`` and
-``_space_run``, so a process restart loses everything in flight and nobody is
-told what was lost. This module keeps the *queue* on disk instead. Work that
-was claimed by a worker which then died is reclaimable, and the retry is
-visible in the item's attempt count rather than being replayed silently as if
-it were the first try - a silent retry hides a crash loop.
+A crew run used to live only in memory: ``CortexOS.crew.runtime`` holds
+``_runs`` and ``_space_run``. ``DurableQueue`` now parks each run on disk so a
+restart can name what was in flight. The queue still does not decide work
+shape and does not run anything: ``dag_runner`` + manifest + ledger stay the
+decision layer.
 
 This queue stores and leases. It does not decide work shape and it does not
 run anything: ``dag_runner`` + manifest + ledger stay the decision layer, and
@@ -348,6 +347,53 @@ class DurableQueue:
             if reaped:
                 self._write(items)
         return reaped
+
+    def claim_item(
+        self, item_id: str, worker: str, *, lease_seconds: float | None = None
+    ) -> QueueItem:
+        """Lease one pending item by id. Other pending work is left untouched."""
+        lease = float(lease_seconds if lease_seconds is not None else self.lease_seconds)
+        now = self._clock()
+        with self._guard():
+            items, _reaped = self._expire(self._read(), now)
+            index, item = self._locate(items, item_id)
+            if item.status != PENDING:
+                raise LeaseLost(
+                    f"cannot claim {item.id}: it is {item.status}, not pending"
+                )
+            picked = replace(
+                item,
+                status=LEASED,
+                lease_owner=str(worker),
+                lease_expires_at=now + lease,
+                updated_at=now,
+            )
+            items[index] = picked
+            self._write(items)
+        return picked
+
+    def abandon_leases(self, reason: str = "process_restart") -> list[QueueItem]:
+        """Return every leased item to pending. A dead process must not keep a live lease."""
+        now = self._clock()
+        note = str(reason or "process_restart")
+        moved: list[QueueItem] = []
+        with self._guard():
+            items = self._read()
+            out: list[QueueItem] = []
+            for item in items:
+                if item.status != LEASED:
+                    out.append(item)
+                    continue
+                fresh = self._penalise(
+                    item,
+                    f"lease held by {item.lease_owner or 'an unnamed worker'} dropped ({note})",
+                    now,
+                )
+                out.append(fresh)
+                moved.append(fresh)
+            if moved:
+                self._write(out)
+        return moved
 
     def get(self, item_id: str) -> QueueItem | None:
         with self._guard():

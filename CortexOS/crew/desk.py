@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from CortexOS.crew import connectors, estate, github, inbox
@@ -9,11 +10,24 @@ from CortexOS.crew.openvault import cursor_key_status
 
 
 def snapshot(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> dict[str, Any]:
-    plugs = connectors.catalog(uacc_enabled=uacc_enabled, uacc_armed=uacc_armed)
-    prs = github.list_prs()
-    mail = inbox.status()
-    cursor = cursor_key_status()
-    estate_snap = estate.snapshot()
+    """PRs, IMAP, plugins, estate catalog. Live gh org list is estate_status, not this GET.
+
+    Peers run in parallel so hung gh cannot stack IMAP. GH_WAIT_S is 1.5s so
+    GET /crew/desk finishes inside the UI apiGet 2.5s cap.
+    """
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        plugs_f = pool.submit(
+            connectors.catalog, uacc_enabled=uacc_enabled, uacc_armed=uacc_armed
+        )
+        prs_f = pool.submit(github.list_prs)
+        mail_f = pool.submit(inbox.status)
+        cursor_f = pool.submit(cursor_key_status)
+        estate_f = pool.submit(estate.snapshot, live=False)
+        plugs = plugs_f.result()
+        prs = prs_f.result()
+        mail = mail_f.result()
+        cursor = cursor_f.result()
+        estate_snap = estate_f.result()
     return {
         "ok": True,
         "connectors": plugs,

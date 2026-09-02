@@ -133,6 +133,155 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
     return parsed.value
 
 
+_OBJECT_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("inventory", ("inventory", "sku", "stock", "warehouse")),
+    ("suppliers", ("supplier", "vendor")),
+    ("locations", ("location", "site", "bin")),
+    ("shipments", ("shipment", "consignment", "carrier")),
+    ("transactions", ("transaction", "txn", "movement")),
+    ("alerts", ("alert", "alarm")),
+)
+
+_DEFAULT_POINT: dict[str, str] = {
+    "inventory": "sku",
+    "suppliers": "supplier_id",
+    "locations": "location_id",
+    "shipments": "shipment_id",
+    "transactions": "txn_id",
+    "alerts": "alert_id",
+}
+
+_KIND_NOTE: dict[str, str] = {
+    "ingest": "Read operations into the graph.",
+    "connector": "First-party Cortex input. No n8n.",
+    "ontology": "Cortex ontology objects/links/actions.",
+    "insight": "Cite ontology + ledger.",
+    "foundry": "Compile a governed Cortex app from insights.",
+    "app": "Runnable output hosted inside Cortex.",
+    "agent": "AGENT_TASK loop. One bounded worker.",
+    "hypothesize": "Surface a testable claim.",
+    "improve": "Change a product from the claim.",
+    "audit": "Why this node exists. DETERMINISTIC_RULE, not a second EMIT.",
+    "tool_call": "F8 governed write. requires_confirm.",
+}
+
+
+def objects_in_prompt(prompt: str) -> list[str]:
+    low = (prompt or "").lower()
+    found: list[str] = []
+    for obj, words in _OBJECT_WORDS:
+        if any(w in low for w in words) and obj not in found:
+            found.append(obj)
+    return found
+
+
+def generate_constructor_graph(prompt: str) -> dict[str, Any]:
+    """Chat -> canvas. Deterministic Cortex compiler, not an n8n import."""
+    text = (prompt or "").strip()
+    if not text:
+        raise ConstructorGraphError("prompt is empty")
+    low = text.lower()
+    objects = objects_in_prompt(low)
+    assumed = False
+    if not objects:
+        objects = ["inventory"]
+        assumed = True
+    action = "export_pptx"
+    if "intake" in low:
+        action = "item.intake"
+    elif "agent.checked" in low or ("check" in low and "agent" in low):
+        action = "agent.checked"
+    verify = any(k in low for k in ("verify", "audit", "hypothes", "claim", "fact-check", "fact check"))
+    agentish = any(k in low for k in ("single agent", "one agent", "worker loop"))
+    foundryish = any(
+        k in low for k in ("foundry", "create app", "pptx", "export", "ontology", "insight", "app")
+    )
+    if verify and not foundryish:
+        pattern = "generator_verifier"
+        kinds = ["connector", "hypothesize", "audit"]
+    elif agentish and not foundryish:
+        pattern = "single_agent"
+        kinds = ["connector", "agent", "audit"]
+    else:
+        pattern = "orchestrator_subagent"
+        kinds = ["connector", "ontology", "insight", "foundry", "app", "tool_call"]
+    nodes: list[dict[str, Any]] = []
+    for i, kind in enumerate(kinds):
+        obj = objects[0]
+        if kind == "ontology" and len(objects) > 1:
+            obj = objects[1]
+        node: dict[str, Any] = {
+            "id": f"g{i + 1}",
+            "kind": kind,
+            "x": 32 + (i % 4) * 208,
+            "y": 48 + (i // 4) * 160,
+            "note": _KIND_NOTE.get(kind, kind),
+            "tier": "T0",
+            "stream": False,
+        }
+        if kind in ("connector", "ontology", "tool_call"):
+            node["object_type"] = obj
+            node["data_point"] = _DEFAULT_POINT.get(obj, "sku")
+            node["data_type"] = "string"
+            node["fetch_from"] = f"warehouse.{obj}"
+        if kind == "tool_call":
+            node["action_type"] = action
+        elif kind == "foundry":
+            node["action_type"] = action
+        elif kind == "app":
+            node["action_type"] = "emit"
+        nodes.append(node)
+    ids = [n["id"] for n in nodes]
+    edges = [{"from": ids[i], "to": ids[i + 1]} for i in range(len(ids) - 1)]
+    compile_constructor_graph({"nodes": nodes, "edges": edges})
+    summary = (
+        f"Compiled {len(nodes)} Cortex nodes ({pattern}). "
+        + ("Assumed inventory. " if assumed else f"Objects {', '.join(objects)}. ")
+        + f"Action {action}. Press a node for the decision layer."
+    )
+    return {
+        "ok": True,
+        "prompt": text,
+        "assumed_object": assumed,
+        "pattern": pattern,
+        "action": action,
+        "objects": objects,
+        "nodes": nodes,
+        "edges": edges,
+        "summary": summary,
+    }
+
+
+def describe_constructor_node(payload: dict[str, Any], node_id: str | None) -> dict[str, Any]:
+    """Cortex decision layer for one canvas node (compile truth, not a second engine)."""
+    program = compile_constructor_graph(payload)
+    raw_nodes = payload.get("nodes") or []
+    target = node_id or program.entry_node_id
+    raw = next((n for n in raw_nodes if isinstance(n, dict) and n.get("id") == target), None)
+    dsl = next((n for n in program.nodes if n.id == target), None)
+    if raw is None or dsl is None:
+        raise ConstructorGraphError(f"node {target!r} not on this graph")
+    kind = str(dsl.type.value if hasattr(dsl.type, "value") else dsl.type)
+    write = raw.get("kind") in ("tool_call", "app")
+    return {
+        "ok": True,
+        "node_id": target,
+        "constructor_kind": raw.get("kind"),
+        "cortex_kind": kind,
+        "is_emit": target == program.output_node_id,
+        "is_entry": target == program.entry_node_id,
+        "inputs": list(dsl.inputs or []),
+        "tier": str(raw.get("tier") or "T0"),
+        "requires_confirm": raw.get("kind") == "tool_call",
+        "would_write": write,
+        "tool_name": getattr(dsl, "tool_name", None),
+        "annotations": dsl.annotations or {},
+        "entry_node_id": program.entry_node_id,
+        "output_node_id": program.output_node_id,
+        "engine": "cortex",
+    }
+
+
 def recommend_extras(kinds: list[str]) -> dict[str, Any] | None:
     """Signals so Cortex ranks the foundry path as orchestrator-subagent."""
     kindset = {str(k) for k in kinds}

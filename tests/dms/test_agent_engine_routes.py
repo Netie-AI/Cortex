@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -10,7 +12,10 @@ from fastapi.testclient import TestClient
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    monkeypatch.delenv("DMS_LEDGER_DSN", raising=False)
     from CortexOS.execution import app_store, routine_scheduler, scoreboard, workflow_store
+    from CortexOS.execution.session_manifests import reset_session_registry_for_tests
 
     monkeypatch.setattr(scoreboard, "DB_PATH", tmp_path / "scoreboard.db")
     monkeypatch.setattr(routine_scheduler, "DB_PATH", tmp_path / "routines.db")
@@ -22,6 +27,7 @@ def client(monkeypatch, tmp_path):
     # G2.4: routine runs emit traces and teach the value table.
     monkeypatch.setattr(action_event, "DB_PATH", tmp_path / "action_events.db")
     monkeypatch.setattr(action_value, "DB_PATH", tmp_path / "action_value.db")
+    reset_session_registry_for_tests()
     from CortexOS.api.app import create_app
 
     return TestClient(create_app())
@@ -163,6 +169,51 @@ def test_activity_control_panel(client):
     assert "active" in activity["workflows"]
     assert "families" in activity["races"]
     assert "pending_drafts" in activity["apps"]
+    gov = activity["governance"]
+    assert "error" not in gov
+    assert "ledger" in gov
+    assert "manifests" in gov
+    assert "refusals" in gov
+    assert gov["manifests"]["bound"] == 0
+
+
+def test_activity_governance_strips_payloads(client):
+    from CortexOS.audit import resolve_ledger
+
+    secret = "hunter2-not-for-the-panel"
+    ledger = resolve_ledger()
+    ledger.append("engine", "action.tool_call_denied", {"secret": secret, "sql": "SELECT 1"})
+    ledger.append("dms", "ask", {"question": "how many widgets"})
+
+    activity = client.get("/api/engine/activity").json()
+    dumped = json.dumps(activity)
+
+    assert secret not in dumped
+    assert "how many widgets" not in dumped
+    gov = activity["governance"]
+    assert gov["ledger"]["registered"] is True
+    assert gov["ledger"]["tip_seq"] is not None
+    for row in gov["ledger"]["recent"] + gov["refusals"]["recent"]:
+        assert "payload" not in row
+        assert set(row) <= {"seq", "event_type", "actor"}
+    assert any(r["event_type"] == "action.tool_call_denied" for r in gov["refusals"]["recent"])
+
+
+def test_activity_governance_names_an_unregistered_ledger(client, monkeypatch):
+    from CortexOS.audit import LedgerNotRegistered
+
+    monkeypatch.setattr("CortexOS.audit.registered_ledger", lambda: None)
+
+    def _boom() -> None:
+        raise LedgerNotRegistered("test: no ledger")
+
+    monkeypatch.setattr("CortexOS.audit.resolve_ledger", _boom)
+
+    gov = client.get("/api/engine/activity").json()["governance"]
+    assert "error" not in gov
+    assert gov["ledger"]["registered"] is False
+    assert gov["ledger"]["recent"] == []
+    assert gov["refusals"]["recent"] == []
 
 
 def test_pause_all_and_resume_all_routes(client):

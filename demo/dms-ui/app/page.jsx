@@ -103,10 +103,10 @@ export default function QueryPage() {
               const isBlocked = ex.violations_blocked?.length > 0 && !ex.apiError;
               return (
                 <div key={i} className="cx-exchange">
-                  <div className="cx-exchange-label cx-label">QUERY</div>
+                  <div className="cx-exchange-label cx-label">You</div>
                   <div className="cx-exchange-text">{ex.question}</div>
                   <div className="cx-exchange-label cx-label" style={{ marginTop: 16 }}>
-                    CORTEX OS
+                    Cortex
                   </div>
                   {isBlocked ? (
                     <div className="cx-blocked-box">
@@ -152,8 +152,8 @@ export default function QueryPage() {
                 onKeyDown={(e) => e.key === "Enter" && send()}
                 placeholder="Ask about your data..."
               />
-              <button type="button" className="cx-query-send" onClick={() => send()}>
-                ⏎ SEND
+              <button type="button" className="cx-query-send" onClick={() => send()} aria-label="Send">
+                ^
               </button>
             </div>
             <PromptCategories onSelect={(p) => setInput(p)} />
@@ -174,10 +174,10 @@ export default function QueryPage() {
               {alerts && (
                 <div className="cx-alerts-card">
                   <Link href="/audit" className="cx-alert-critical">
-                    {alerts.critical} ACTIVE CRITICAL ALERTS
+                    {alerts.critical} critical alerts
                   </Link>
                   <Link href="/audit" className="cx-alert-high">
-                    {alerts.high} ACTIVE HIGH ALERTS
+                    {alerts.high} high alerts
                   </Link>
                 </div>
               )}
@@ -190,7 +190,7 @@ export default function QueryPage() {
                     onClick={() => setSqlOpen((o) => !o)}
                     style={{ width: "100%", background: "none", border: "none", padding: 0 }}
                   >
-                    <span className="cx-label">SQL EXECUTED</span>
+                    <span className="cx-label">SQL</span>
                     <span className="cx-section-toggle">{sqlOpen ? "−" : "+"}</span>
                   </button>
                   {sqlOpen && (
@@ -216,44 +216,44 @@ export default function QueryPage() {
               {plan && (
                 <div className="cx-result-section">
                   <div className="cx-label" style={{ marginBottom: 12 }}>
-                    AI PLAN
+                    Plan
                   </div>
                   <div className="cx-plan-card">
                     <div className="cx-plan-line">
-                      <span>INTENT</span>
+                      <span>Intent</span>
                       <strong>{plan.intent}</strong>
                     </div>
                     {(plan.layer || active?.layer) && (
                       <div className="cx-plan-line">
-                        <span>LAYER</span>
+                        <span>Layer</span>
                         <strong>{plan.layer || active.layer}</strong>
                       </div>
                     )}
                     {(plan.metric_id || active?.metric_id) && (
                       <div className="cx-plan-line">
-                        <span>METRIC</span>
+                        <span>Metric</span>
                         <strong>{plan.metric_id || active.metric_id}</strong>
                       </div>
                     )}
                     <div className="cx-plan-line">
-                      <span>CONFIDENCE</span>
+                      <span>Confidence</span>
                       <strong>{Math.round((plan.confidence || 0) * 100)}%</strong>
                     </div>
                     {plan.skill_score != null && (
                       <div className="cx-plan-line">
-                        <span>SKILL MATCH</span>
+                        <span>Skill match</span>
                         <strong>{Math.round(plan.skill_score * 100)}%</strong>
                       </div>
                     )}
                     {plan.limit && (
                       <div className="cx-plan-line">
-                        <span>LIMIT</span>
+                        <span>Limit</span>
                         <strong>{plan.limit}</strong>
                       </div>
                     )}
                     {plan.sort && (
                       <div className="cx-plan-line">
-                        <span>SORT</span>
+                        <span>Sort</span>
                         <strong>{plan.sort}</strong>
                       </div>
                     )}
@@ -278,7 +278,7 @@ export default function QueryPage() {
               {!blocked && active.chart_spec && (
                 <div className="cx-result-section">
                   <div className="cx-label" style={{ marginBottom: 12 }}>
-                    RESULT
+                    Result
                   </div>
                   <ResultChart spec={active.chart_spec} />
                   {active.chart_spec?.type === "bignum" && active.chart_spec?.data?.length > 0 && (
@@ -307,7 +307,7 @@ export default function QueryPage() {
 
               <div className="cx-result-section">
                 <div className="cx-label" style={{ marginBottom: 12 }}>
-                  AUDIT ENTRY
+                  Audit
                 </div>
                 <div className="cx-audit-line">
                   <span className="cx-audit-key">ID</span>

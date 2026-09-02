@@ -140,6 +140,9 @@ listed path.
 - [ ] Message-bus production A2A (topics, correlation ids, drop metrics) — **Condition:** event-driven pipeline demand — `distill: skill_distill/captures/2026-07-27_anthropic_multi-agent-coordination.md`
 - [ ] Shared-state multi-writer termination (budget / convergence / adjudicator) — **Condition:** collaborative research surface — `distill: skill_distill/captures/2026-07-27_anthropic_multi-agent-coordination.md`
 - [ ] Wire generator_verifier revise fan-back into workflow_runner (today: verify-once phases) — **Condition:** after GV helper proven on live fires — `distill: skill_distill/captures/2026-07-27_anthropic_multi-agent-coordination.md`
+- [x] AirGPT `agent_runtime.py` still budget-stops; adopt Cortex AGENT_TASK quality stop over HTTP rather than growing a second loop -- **Cortex LOOP-01/02 + EPIC-016 closed 2026-08-28** (`test_f20b_quality_loop.py` + `test_engine_agent_loop_http`). AirGPT consume stays AirGPT-tree. -- `distill: skill_distill/captures/2026-08-28_oss_openmanus-openworker-rakazo.md`
+- [ ] OpenWorker-style approval floors / reviewer model for write tools stay OpenVault+Cortex permission pipeline (P16) — **Condition:** after LOOP-01 — `distill: skill_distill/captures/2026-08-28_oss_openmanus-openworker-rakazo.md`
+- [ ] Rakazo persistent teammates / private computers are PRD-002 + F12 crew, not this engine loop — **Condition:** founder authors PRD-002 or amends Cortex F12 — `distill: skill_distill/captures/2026-08-28_oss_openmanus-openworker-rakazo.md`
 - [ ] GV production path: AGENT_TASK wrappers + `race_router.eval_predicates` fail-closed (predicate > judge); journal attempts; align with gen_cFSM REGENERATE — `distill: skill_distill/captures/2026-07-27_anthropic_multi-agent-when-and-how.md`
 - [ ] Refuse problem-centric planner/coder/tester role-swarm presets (Anthropic anti-pattern) — keep as standing rule — `distill: skill_distill/captures/2026-07-27_anthropic_multi-agent-when-and-how.md`
 - [ ] **Friday DMS P0** — lakehouse migrate+wire Q&A, provenance API/UI, paraphrase close, xlsx→ask smoke — `distill: skill_distill/captures/2026-07-29_cortex-honesty_dms-friday.md`
@@ -187,6 +190,23 @@ Still open before calling C4 "full":
 
 **Next ordered mins (packets only until started):** C5 → C8 → C7 → C11 → C9-full.
 OpenVault trust root (`30a8d9a`) already settled.
+
+---
+
+## P23 -- SPACE-01 unsigned Space grant (Cortex#42)
+
+`space_id` reaches `/dms/query`, `/mcp/call`, `/v1/contract/ask` but mints no grant.
+A turn with only `space_id` stays ungrounded (`grant_kind=none`). Do not close by
+minting an unsigned grant inside the engine (that is P0-DEMO-02 wearing a Space name).
+
+**Unlock (founder, all three):**
+1. What a Space grants -- documents, warehouse tables, or both (also EPIC-015 #34).
+2. Who may open one -- ACL with `Netie-AI/dms#2` ACL-01 / Cortex#11.
+3. Where the grant is signed -- Space-derived grant must be a `VerifiedManifest`
+   bound through the session registry so `resolve_product_grant` stays one authority.
+
+**Condition:** founder writes those three decisions. Then a ticket can mint a
+*signed* Space grant and assert on the POST `/dms/query` envelope.
 
 ---
 

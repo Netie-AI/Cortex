@@ -40,7 +40,43 @@ async def test_manager_reply_is_in_the_transcript(rig) -> None:
     head = rig.llm.calls[0]["messages"][0]
     assert head["content"].startswith("You are the Manager")
     assert head.get("cache_control") == {"type": "ephemeral"}
-    assert "Current crew:" in rig.llm.calls[0]["messages"][1]["content"]
+    roster = rig.llm.calls[0]["messages"][1]["content"]
+    assert "Current crew:" in roster
+    assert "Memory: none yet" in roster
+    assert "When detect inlines a playbook, follow it this turn" in head["content"]
+    assert "A leading /skillname invokes that playbook this turn" in head["content"]
+    assert "When detect inlines a [waves] plan" in head["content"]
+    assert "Finish the user's ask" in head["content"]
+
+
+async def test_spawn_worktree_skips_when_root_unset(rig, monkeypatch) -> None:
+    """Optional worktree. Spawn continues if CREW_WORKTREE_ROOT is unset."""
+    monkeypatch.delenv("CREW_WORKTREE_ROOT", raising=False)
+    monkeypatch.delenv("CREW_WORKTREE_FROM", raising=False)
+    space = rig.store.create_space("Build")
+    rig.llm.manager.extend(
+        [
+            LLMResult(
+                tool_calls=[
+                    _tc(
+                        "spawn_agent",
+                        name="Scout",
+                        brief="look around",
+                        worktree=True,
+                    )
+                ]
+            ),
+            LLMResult(text="Scout is up without a worktree."),
+        ]
+    )
+    rig.llm.teammate.append(LLMResult(text="looked"))
+    await rig.runtime.on_user_message(space["id"], "scout the repo")
+    await wait_run_done(rig.runtime, space["id"])
+    scout = rig.store.get_agent_by_name(space["id"], "Scout")
+    assert scout is not None
+    assert scout["worktree_path"] == ""
+    names = [a["name"] for a in rig.store.list_agents(space["id"])]
+    assert "Scout" in names
 
 
 async def test_spawn_specialist_fills_role_and_a2a_is_visible(rig) -> None:
@@ -72,6 +108,44 @@ async def test_spawn_specialist_fills_role_and_a2a_is_visible(rig) -> None:
     assert any("PRD: problem" in m["content"] for m in a2a)
     final = [m for m in msgs if m["role"] == "assistant"][-1]
     assert "PRD drafted" in final["content"]
+    teammate_calls = [
+        c
+        for c in rig.llm.calls
+        if str(c["messages"][0]["content"]).startswith("You are PRD")
+    ]
+    assert teammate_calls, "PRD teammate never ran"
+    catalog = teammate_calls[0]["messages"][1]["content"]
+    assert "Current crew:" in catalog
+    assert "load_skill(name) pulls one body" in catalog
+    assert "If a named skill matches the brief, load_skill" in teammate_calls[0]["messages"][0]["content"]
+
+
+async def test_two_spawns_in_one_step_both_land(rig) -> None:
+    space = rig.store.create_space("Pair")
+    rig.llm.manager.extend(
+        [
+            LLMResult(
+                tool_calls=[
+                    _tc("spawn_agent", name="Alpha", brief="task a"),
+                    _tc("spawn_agent", name="Beta", brief="task b"),
+                ]
+            ),
+            LLMResult(tool_calls=[_tc("wait_for_replies", timeout_seconds=3)]),
+            LLMResult(text="Alpha and Beta both reported."),
+        ]
+    )
+    rig.llm.teammate.extend(
+        [
+            LLMResult(text="alpha-done"),
+            LLMResult(text="beta-done"),
+        ]
+    )
+    await rig.runtime.on_user_message(space["id"], "run two jobs")
+    await wait_run_done(rig.runtime, space["id"])
+    names = {a["name"] for a in rig.store.list_agents(space["id"])}
+    assert {"Alpha", "Beta"} <= names
+    final = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
+    assert "Alpha and Beta" in final["content"]
 
 
 async def test_desk_status_lands_in_transcript(rig, monkeypatch) -> None:

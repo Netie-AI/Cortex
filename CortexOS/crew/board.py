@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -75,14 +76,88 @@ def _skill_slug(title: str) -> str:
 def list_skills(folder: Path) -> list[dict[str, str]]:
     if not folder.is_dir():
         return []
+    from CortexOS.crew.skill_index import index_for
+
+    index = index_for(folder)
     out: list[dict[str, str]] = []
-    for path in sorted(folder.glob("*.md")):
-        try:
-            first = path.read_text(encoding="utf-8").splitlines()[:1]
-        except OSError:
-            first = []
-        out.append({"title": path.stem, "path": path.name, "head": (first[0] if first else "")[:120]})
+    for entry in index.entries:
+        out.append(
+            {
+                "title": entry.name,
+                "path": entry.rel,
+                "head": (entry.description or "")[:120],
+                "labels": ",".join(entry.labels),
+            }
+        )
     return out
+
+
+def save_skill(
+    folder: Path,
+    title: str,
+    body: str,
+    *,
+    labels: Sequence[str] = (),
+    source: str = "",
+) -> dict[str, str]:
+    """Write one Teach skill. Local files win going forward; this slug overwrites."""
+    from CortexOS.crew.skill_index import clear_cache
+
+    folder.mkdir(parents=True, exist_ok=True)
+    slug = _skill_slug(title)
+    path = folder / f"{slug or 'skill'}.md"
+    tagged = _normalize_labels(labels)
+    text = _with_frontmatter(title, body or "", tagged, source or "")
+    path.write_text(text, encoding="utf-8")
+    clear_cache()
+    return {
+        "ok": "true",
+        "path": str(path),
+        "title": title.strip() or slug,
+        "slug": slug,
+        "labels": ",".join(tagged),
+        "source": (source or "").strip(),
+    }
+
+
+def _normalize_labels(labels: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in labels:
+        for part in str(raw).split(","):
+            slug = _skill_slug(part.strip().lower()).strip("-_")
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            out.append(slug)
+            if len(out) >= 8:
+                return out
+    return out
+
+
+def _with_frontmatter(title: str, body: str, labels: Sequence[str], source: str) -> str:
+    raw = (body or "").strip()
+    if raw.startswith("---"):
+        return raw + ("\n" if not raw.endswith("\n") else "")
+    desc = ""
+    for line in raw.splitlines():
+        stripped = line.strip().lstrip("#").strip()
+        if stripped:
+            desc = stripped[:140]
+            break
+    if not desc:
+        desc = (title or "skill").strip()[:140]
+    name = (title or "skill").strip()[:60]
+    lines = ["---", f"name: {name}", f"description: {desc}"]
+    if labels:
+        lines.append("labels: " + ", ".join(labels))
+    if source.strip():
+        lines.append("source: " + source.strip()[:300])
+    lines.append("---")
+    lines.append("")
+    lines.append(raw)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def read_skill(folder: Path, title: str) -> str:

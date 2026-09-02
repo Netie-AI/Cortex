@@ -3,28 +3,28 @@
 import { useState } from "react";
 
 const CATEGORIES = {
-  INVENTORY: [
+  Inventory: [
     "Which SKUs are below reorder level in WH-A?",
     "Show me all expired items",
     "What is the total stock value by category?",
     "Which items haven't been restocked in 30 days?",
     "Show CHEMICALS inventory across all warehouses",
   ],
-  LOGISTICS: [
+  Logistics: [
     "Which shipments are delayed?",
     "What is the average lead time by supplier?",
     "Show in-transit shipments arriving this week",
     "Which carrier has the most delayed shipments?",
     "Shipment cost breakdown by destination",
   ],
-  SUPPLIERS: [
+  Suppliers: [
     "Which suppliers have a risk score above 0.7?",
     "Show suppliers whose audit is overdue by 90+ days",
     "What is our total spend by country of origin?",
     "Which supplier has the longest lead time?",
     "List high-risk suppliers with pending shipments",
   ],
-  FACILITIES: [
+  Facilities: [
     "Show warehouse capacity utilisation",
     "Which warehouses are above 90% capacity?",
     "Which locations have cold storage?",

@@ -18,7 +18,12 @@ def test_catalog_includes_production_templates() -> None:
     sec = by_name("Security")
     assert sec is not None
     assert "SOC2" in sec.role
-    assert attached_skills(("Surface",)) == ("ship", "product-surface", "seo")
+    assert attached_skills(("Surface",)) == (
+        "ship",
+        "product-surface",
+        "seo",
+        "analog-surface",
+    )
 
 
 def test_estate_catalog_covers_netie_ai() -> None:

@@ -54,6 +54,11 @@ def test_default_mcp_catalog_includes_uacc_and_starts_disarmed(tmp_path: Path) -
     assert names == ["uacc", "windows-mcp", "computer-control-mcp"]
     assert all(s.armed is False for s in specs)
     assert {s["name"] for s in DEFAULT_SPECS} == set(names)
+    win = next(s for s in DEFAULT_SPECS if s["name"] == "windows-mcp")
+    assert "serve" in win["command"]
+    uacc = next(s for s in DEFAULT_SPECS if s["name"] == "uacc")
+    assert "uacc-mcp" in uacc["command"]
+    assert any("mcp<2" in str(c) for c in uacc["command"])
     mgr = MCPManager(path, master_on=False)
     status = mgr.status()
     assert all("CORTEX_COMPUTER_CONTROL" in row["status"] for row in status)

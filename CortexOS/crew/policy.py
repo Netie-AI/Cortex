@@ -68,6 +68,12 @@ INTERNAL_TOOLS = frozenset(
         "edit_file",
         "glob_files",
         "load_skill",
+        "web_search",
+        "web_fetch",
+        "github_search",
+        "save_skill",
+        "ingest_named_skill",
+        "analog_clone",
         "compact_conversation",
         # Durable per-space recall. Reads and writes inside the space jail only,
         # so ALLOW is the right verdict; none of these is a computer-control tool.

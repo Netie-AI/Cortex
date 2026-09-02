@@ -21,6 +21,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
         "GROQ_API_KEY",
         "GOOGLE_API_KEY",
         "CEREBRAS_API_KEY",
+        "NVIDIA_API_KEY",
         "MISTRAL_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -45,6 +46,22 @@ def test_no_keys_means_no_active_provider_and_says_so(clean_env: pytest.MonkeyPa
         "openai-compatible",
         "ollama",
     }
+
+
+def test_resolve_providers_does_not_ping_openvault(clean_env: pytest.MonkeyPatch) -> None:
+    """Live vault status is GET /crew/health. Chain listing must not healthz."""
+    clean_env.setenv("CREW_OPENVAULT", "1")
+
+    def boom(*_a, **_k):  # noqa: ANN001
+        raise AssertionError("resolve_providers must not call healthz")
+
+    monkeypatch = clean_env
+    monkeypatch.setattr("CortexOS.crew.openvault.healthz", boom)
+    chain = config.resolve_providers()
+    ov = next(p for p in chain if p.label == "openvault")
+    assert ov.configured is True
+    assert config.active_provider(chain) is not None
+    assert config.active_provider(chain).label == "openvault"
 
 
 def test_first_configured_key_wins_and_is_stamped(clean_env: pytest.MonkeyPatch) -> None:
@@ -82,6 +99,8 @@ def test_policy_master_switch_and_arming_fail_closed() -> None:
     assert decision == policy.ALLOW
 
     # mutating tools always take the confirm path, unknown tools included
+    decision, _ = policy.decide("Click", server="uacc", armed=True, master_on=True)
+    assert decision == policy.CONFIRM
     decision, _ = policy.decide("Type", server="windows-mcp", armed=True, master_on=True)
     assert decision == policy.CONFIRM
     decision, _ = policy.decide("BrandNewTool", server="windows-mcp", armed=True, master_on=True)
@@ -96,6 +115,12 @@ def test_policy_master_switch_and_arming_fail_closed() -> None:
     assert policy.decide("write_todos", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("read_file", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("load_skill", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("web_search", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("web_fetch", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("github_search", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("save_skill", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("ingest_named_skill", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("analog_clone", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("compact_conversation", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("rm_rf", server=None, armed=False, master_on=False)[0] == policy.DENY
     denied, reason = policy.decide(
@@ -130,4 +155,11 @@ def test_cursor_key_defaults_to_grok_46_not_fast(clean_env: pytest.MonkeyPatch) 
     assert active.label == "cursor"
     assert active.model == "openai/grok-4.6"
     assert "fast" not in active.model
+
+
+def test_default_engine_url_is_8011_not_constructor(clean_env: pytest.MonkeyPatch, tmp_path) -> None:
+    clean_env.setenv("CREW_DATA_DIR", str(tmp_path / "crew"))
+    clean_env.delenv("CREW_ENGINE_URL", raising=False)
+    settings = config.load_settings()
+    assert settings.engine_url == "http://127.0.0.1:8011"
 

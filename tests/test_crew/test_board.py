@@ -26,7 +26,14 @@ def test_list_skills_reads_markdown(tmp_path) -> None:
     folder.mkdir()
     (folder / "brief.md").write_text("Goal: Monday check.\n", encoding="utf-8")
     rows = list_skills(folder)
-    assert rows == [{"title": "brief", "path": "brief.md", "head": "Goal: Monday check."}]
+    assert rows == [
+        {
+            "title": "brief",
+            "path": "brief.md",
+            "head": "Goal: Monday check.",
+            "labels": "",
+        }
+    ]
 
 
 def test_default_tone_is_ascii_grok_bot(tmp_path) -> None:
@@ -56,6 +63,27 @@ def test_skill_packs_seed_without_overwrite(tmp_path) -> None:
     (folder / "outreach.md").write_text("LOCAL OVERRIDE\n", encoding="utf-8")
     ensure_skill_packs(folder)
     assert read_skill(folder, "outreach") == "LOCAL OVERRIDE\n"
+
+
+def test_save_skill_writes_labels_and_roster_sees_them(tmp_path) -> None:
+    from CortexOS.crew.board import list_skills, save_skill
+    from CortexOS.crew.skill_index import build_index
+
+    folder = tmp_path / "skills"
+    saved = save_skill(
+        folder,
+        "impeccable",
+        "Use these design rules before drawing UI.",
+        labels=["design-rules"],
+        source="https://github.com/pbakaus/impeccable",
+    )
+    assert saved["slug"] == "impeccable"
+    assert "design-rules" in saved["labels"]
+    rows = list_skills(folder)
+    hit = next(r for r in rows if r["title"] == "impeccable")
+    assert hit["labels"] == "design-rules"
+    block = build_index(folder).render()
+    assert "- impeccable [design-rules]:" in block
 
 
 def test_read_skill_falls_back_to_shipped_packs(tmp_path) -> None:

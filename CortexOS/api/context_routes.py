@@ -20,6 +20,9 @@ class AssembleRequest(BaseModel):
     state: str = ""
     messages: list[str] = Field(default_factory=list)
     token_budget: int = Field(default=4096, ge=256, le=128000)
+    valid_at: str | None = None
+    invalid_at: str | None = None
+    invalidated_layers: list[str] = Field(default_factory=list)
 
 
 class CompactRequest(BaseModel):
@@ -52,6 +55,9 @@ def context_assemble(
             state=req.state,
             messages=req.messages,
             token_budget=req.token_budget,
+            valid_at=req.valid_at,
+            invalid_at=req.invalid_at,
+            invalidated_layers=req.invalidated_layers,
         )
     )
     return {

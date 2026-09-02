@@ -42,21 +42,138 @@ def cursor_key_status() -> dict[str, Any]:
     }
 
 
+_VAULT_FLAGS: tuple[float, frozenset[str]] = (0.0, frozenset())
+
+
+def vaulted_provider_ids(timeout: float = 1.2) -> frozenset[str]:
+    """Configured OpenVault provider ids. Never returns secrets. Cached 60s."""
+    global _VAULT_FLAGS
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return frozenset()
+    ts, cached = _VAULT_FLAGS
+    import time as _time
+
+    if _time.monotonic() - ts < 60.0:
+        return cached
+    found: set[str] = set()
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(f"{base_url()}/api/keyvault/snapshot")
+        if resp.status_code == 200:
+            data = resp.json() if resp.content else {}
+            for row in data.get("providers") or []:
+                if isinstance(row, dict) and row.get("configured"):
+                    found.add(str(row.get("id") or "").lower())
+    except httpx.HTTPError:
+        found = set()
+    cached = frozenset(x for x in found if x)
+    _VAULT_FLAGS = (_time.monotonic(), cached)
+    return cached
+
+
+def anthropic_model() -> str:
+    return os.environ.get("CREW_ANTHROPIC_MODEL", "claude-sonnet-5").strip() or "claude-sonnet-5"
+
+
+def preferred_ov_model(*, probe_vault: bool = True) -> str:
+    """Cursor, then Claude, then FreeRoute auto. Never grok-fast.
+
+    GET /crew/providers passes probe_vault=False. Hung OpenVault must not
+    stall first paint; /crew/health already pings the vault.
+    """
+    override = os.environ.get("CREW_OPENVAULT_MODEL", "").strip()
+    if override:
+        return override
+    vaulted = vaulted_provider_ids() if probe_vault else frozenset()
+    if (
+        os.environ.get("CURSOR_API_KEY", "").strip()
+        or os.environ.get("XAI_API_KEY", "").strip()
+        or "cursor" in vaulted
+    ):
+        return cursor_model()
+    if os.environ.get("ANTHROPIC_API_KEY", "").strip() or "anthropic" in vaulted:
+        return anthropic_model()
+    return "auto"
+
+
 def resolve_ov_model(model: str) -> str:
     """Map crew model strings onto FreeRoute. Prefer grok-4.6 (high), never fast."""
     raw = (model or "").strip()
     if raw.startswith("openvault/"):
         raw = raw.split("/", 1)[1].strip()
     if raw in {"", "auto"}:
-        override = os.environ.get("CREW_OPENVAULT_MODEL", "").strip()
-        if override:
-            return override
-        if os.environ.get("CURSOR_API_KEY", "").strip() or os.environ.get("XAI_API_KEY", "").strip():
-            return cursor_model()
-        return "auto"
+        return preferred_ov_model()
     if "fast" in raw.lower() and "grok" in raw.lower():
         return cursor_model()
     return raw
+
+
+# Operator paste only. Crew never creates third-party accounts.
+REGISTER_WIZARD: tuple[dict[str, str], ...] = (
+    {
+        "id": "cursor",
+        "env_key": "CURSOR_API_KEY",
+        "label": "Cursor",
+        "signup": "https://cursor.com/dashboard",
+        "note": "Frontier hop. Paste the key. Do not auto-register.",
+    },
+    {
+        "id": "anthropic",
+        "env_key": "ANTHROPIC_API_KEY",
+        "label": "Anthropic / Claude",
+        "signup": "https://console.anthropic.com/settings/keys",
+        "note": "sk-ant-... Paste into OpenVault. Do not auto-register.",
+    },
+    {
+        "id": "groq",
+        "env_key": "GROQ_API_KEY",
+        "label": "Groq",
+        "signup": "https://console.groq.com/keys",
+        "note": "Free-tier fallback. Quality is inconsistent.",
+    },
+    {
+        "id": "openrouter",
+        "env_key": "OPENROUTER_API_KEY",
+        "label": "OpenRouter",
+        "signup": "https://openrouter.ai/keys",
+        "note": ":free suffix models. Marketplace, not OmniRoute.",
+    },
+    {
+        "id": "nvidia",
+        "env_key": "NVIDIA_API_KEY",
+        "label": "NVIDIA NIM",
+        "signup": "https://build.nvidia.com",
+        "note": "nvapi-... OpenAI-compat. Operator signup only.",
+    },
+    {
+        "id": "ollama",
+        "env_key": "OLLAMA_API_KEY",
+        "label": "Ollama",
+        "signup": "https://ollama.com",
+        "note": "Local is free. Cloud key is paste-only.",
+    },
+)
+
+
+def register_wizard(*, probe_vault: bool = True) -> list[dict[str, Any]]:
+    """Signup URLs + configured flags. Never returns secrets. Never opens accounts.
+
+    probe_vault=False uses process env only. First-paint providers skip the
+    live vault listing so a hung OpenVault cannot eat the UI apiGet 2.5s cap.
+    """
+    vaulted = vaulted_provider_ids() if probe_vault else frozenset()
+    rows: list[dict[str, Any]] = []
+    for item in REGISTER_WIZARD:
+        env_key = item["env_key"]
+        pid = item["id"]
+        rows.append(
+            {
+                **item,
+                "configured": bool(os.environ.get(env_key, "").strip()) or pid in vaulted,
+                "auto_register": False,
+            }
+        )
+    return rows
 
 
 def healthz(timeout: float = 1.5) -> dict[str, Any]:
@@ -137,6 +254,7 @@ _ENV_TO_PROVIDER: dict[str, str] = {
     "GOOGLE_API_KEY": "google",
     "CEREBRAS_API_KEY": "cerebras",
     "MISTRAL_API_KEY": "mistral",
+    "NVIDIA_API_KEY": "nvidia",
 }
 
 
@@ -303,5 +421,43 @@ def disable_seeded_cortex_primary() -> dict[str, Any]:
         if resp.status_code >= 400:
             return {"ok": False, "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
         return {"ok": True, "id": target.get("id"), "detail": "disabled"}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}"}
+
+
+def disable_unusable_custom_keys() -> dict[str, Any]:
+    """Drop custom hops FreeRoute cannot call (missing base_url). Do not invent accounts."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0"}
+    disabled: list[str] = []
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            listing = client.get(f"{base_url()}/api/keys")
+            if listing.status_code != 200:
+                return {"ok": False, "detail": f"list HTTP {listing.status_code}"}
+            rows = (listing.json() or {}).get("keys") or []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if not row.get("enabled"):
+                    continue
+                provider = str(row.get("provider") or "").lower()
+                err = str(row.get("last_error") or "").lower()
+                if provider != "custom" or "missing base_url" not in err:
+                    continue
+                key_id = str(row.get("id") or "")
+                if not key_id:
+                    continue
+                resp = client.patch(
+                    f"{base_url()}/api/keys/{key_id}",
+                    json={"enabled": False},
+                )
+                if resp.status_code < 400:
+                    disabled.append(str(row.get("label") or key_id))
+        return {
+            "ok": True,
+            "disabled": disabled,
+            "detail": "disabled unusable custom hops" if disabled else "none",
+        }
     except httpx.HTTPError as exc:
         return {"ok": False, "detail": f"{type(exc).__name__}"}

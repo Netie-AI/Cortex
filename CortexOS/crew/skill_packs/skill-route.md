@@ -11,6 +11,8 @@ Route:
 - mock HTML deck video -> proposal-artifact + computer-reach
 - send/click/Gemini/Flow -> computer-reach then decide
 - turn a lesson into a skill -> feedback-learn then distill ingest
+- named skill not on the roster / skill storage / GitHub skill pack -> skill-ingest (search, fetch, label, save_skill)
+- make a website / clone a public page / 3d page -> analog-surface, then skill-ingest for any missing named pack
 - which skill or MCP -> this pack, then Cortex find_skills
 
 No mcp-skill-storage. Crew spawn already inlines named packs. SkillMesh already retrieves SkillCards by intent.

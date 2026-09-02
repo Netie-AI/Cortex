@@ -4,26 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cortex Crew</title>
-  <link rel="stylesheet" href="/stolen.css" />
+  <link rel="stylesheet" href="/crew.css" />
 </head>
 <body>
   <div class="app">
-    <aside class="rail" id="rail">
+    <aside class="rail rail--pinned" id="rail">
       <div class="rail__brand">
         <button class="rail__tab" id="toggleRail" title="Hide rail" type="button">[</button>
-        <div class="rail__wordmark rail__hideable">Cortex Crew<small>from Guaca rail + Rakazo ink</small></div>
+        <div class="rail__wordmark rail__hideable">Cortex Crew<small>local chat</small></div>
       </div>
       <div class="rail__hideable" style="padding:0 0.75rem">
-        <div class="chip" id="providerChip">no provider</div>
+        <div class="chip empty" id="providerChip">providers unread</div>
         <button class="rail__search rail__hideable" id="openSearch" type="button">Search<span class="rail__key">Ctrl K</span></button>
         <button class="gear" id="openSettings">Providers / API keys</button>
         <button class="gear" id="openPlugins">Plugins</button>
         <button class="gear" id="openHost" type="button">This computer</button>
         <button class="gear" id="openTeach" type="button">Teach</button>
         <button class="gear" id="openVoice" type="button">Voice</button>
-        <p class="empty" style="margin:0.4rem 0 0">Drop chats or .eml here. No import button. Check PRs in chat.</p>
+        <p class="empty" id="importHint" style="margin:0.4rem 0 0">import unread. GET /crew/import not yet.</p>
       </div>
-      <div class="rail__body rail__hideable" id="spaces"></div>
+      <div class="rail__body rail__hideable empty" id="spaces">spaces unread. GET /crew/spaces not yet.</div>
       <div class="rail__hideable" style="padding:0 0.55rem 0.7rem">
         <button class="new-space" id="newSpace">+ New space</button>
       </div>
@@ -32,7 +32,8 @@
       <div class="pane__head">
         <h1 id="spaceTitle">Select a space</h1>
         <div class="top-actions">
-          <span class="conn" id="conn" title="Live event stream">live</span>
+          <span class="conn off" id="conn" title="Live event stream">unread</span>
+          <span class="conn off" id="engineChip" title="Cortex engine ping. Control does not start Cortex.">engine unread</span>
           <div class="status" id="runStatus"></div>
           <button class="ghost" id="uiSmaller" type="button" title="Smaller text">A-</button>
           <button class="ghost" id="uiBigger" type="button" title="Bigger text">A+</button>
@@ -42,61 +43,84 @@
       </div>
       <div class="focus-bar" id="focusBar" hidden></div>
       <div class="pane__wrap">
-        <div class="pane__scroll" id="log"></div>
+        <div class="pane__scroll empty" id="log"><div class="empty">transcript unread. GET messages not yet.</div></div>
         <button class="jump" id="jump" type="button" hidden>New below</button>
       </div>
       <div class="approvals" id="approvalBar" hidden></div>
       <div class="composer">
-        <div id="roles" class="role-chips"></div>
+        <div id="roles" class="role-chips empty">roles unread. GET /crew/roles not yet.</div>
         <div class="composer__row">
-          <textarea class="composer__input" id="input" rows="1" placeholder="Ask the Manager. Auto-detect who to spawn."></textarea>
-          <button class="composer__send" id="send" title="Send">^</button>
+          <textarea class="composer__input" id="input" rows="1" placeholder="Ask the Manager. /skillname invokes a skill. Click a specialist to brief them."></textarea>
+          <button class="composer__send" id="send" title="Send">Send</button>
         </div>
       </div>
     </main>
-    <aside class="inspector" id="insp">
+    <aside class="inspector inspector--pinned" id="insp">
       <div class="inspector__head">
         <h2 class="inspector__title">Desk</h2>
+        <div class="insp-tabs" id="inspTabs">
+          <button type="button" class="insp-tab is-on" data-tab="crew">Crew</button>
+          <button type="button" class="insp-tab" data-tab="work">Work</button>
+          <button type="button" class="insp-tab" data-tab="ops">Ops</button>
+        </div>
         <button class="inspector__tab" id="toggleInsp" title="Hide inspector" type="button">]</button>
       </div>
       <div class="inspector__body">
+        <div class="insp-pane" data-tab="crew">
         <div class="insp-block">
           <h2 class="inspector__title">Crew</h2>
-          <div id="agents" class="empty">No agents yet.</div>
+          <div id="agents" class="empty">agents unread. GET agents not yet.</div>
+        </div>
+        </div>
+        <div class="insp-pane" data-tab="work" hidden>
+        <div class="insp-block">
+          <h2 class="inspector__title">Plan</h2>
+          <div id="todos" class="empty">todos unread. GET todos not yet.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">Skills / tone</h2>
-          <div id="skills" class="empty">loading...</div>
+          <div id="skills" class="empty">skills unread. GET /crew/skills not yet.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">Activity</h2>
-          <div id="graph" class="graph"></div>
-          <div id="activity" class="empty">Agent-to-agent traffic lands here.</div>
+          <div id="graph" class="graph">graph none</div>
+          <div id="activity" class="empty">activity none. Agent-to-agent traffic lands here.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">Approvals</h2>
-          <div id="confirms" class="empty">None pending. Human is money and decision authority.</div>
+          <div id="confirms" class="empty">confirms unread. GET /crew/confirms not yet.</div>
         </div>
+        </div>
+        <div class="insp-pane" data-tab="ops" hidden>
         <div class="insp-block">
           <h2 class="inspector__title">Tickets</h2>
-          <div id="tickets" class="empty">loading...</div>
+          <div id="tickets" class="empty">tickets unread. GET /crew/tickets not yet.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">PRs / mail / keys</h2>
-          <div id="desk" class="empty">loading...</div>
+          <div id="desk" class="empty">desk unread. GET /crew/desk not yet.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">Routines</h2>
-          <div id="routines" class="empty">loading...</div>
+          <div id="routines" class="empty">routines unread. GET /crew/routines not yet.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">Computer control</h2>
-          <div id="mcpMaster" class="warn"></div>
-          <div id="mcp"></div>
+          <div id="mcpMaster" class="empty">mcp unread. GET /crew/mcp not yet.</div>
+          <div id="mcp" class="empty">mcp unread. GET /crew/mcp not yet.</div>
         </div>
         <div class="insp-block">
           <h2 class="inspector__title">Engine</h2>
-          <div id="engine" class="empty">checking...</div>
+          <div id="engine" class="empty">engine unread. GET /crew/health not yet.</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Wakes</h2>
+          <div id="wakes" class="empty">wakes unread. GET /crew/wakes not yet. Control does not POST wakes.</div>
+        </div>
+        <div class="insp-block">
+          <h2 class="inspector__title">Queue</h2>
+          <div id="queue" class="empty">queue unread. GET /crew/belt not yet. Crew owns leases. Control does not POST.</div>
+        </div>
         </div>
       </div>
     </aside>
@@ -120,7 +144,7 @@
       <div class="palette__query">
         <input class="palette__input" id="searchQ" placeholder="Search spaces, agents, messages" />
       </div>
-      <div id="searchHits" class="inspector__body"></div>
+      <div id="searchHits" class="inspector__body empty">Type two characters.</div>
     </div>
   </div>
   <div class="host" id="teach">
@@ -138,13 +162,14 @@
   <div class="host" id="voice">
     <div class="host__box">
       <h2>Voice</h2>
-      <p id="voiceStatus">checking...</p>
+      <p id="voiceStatus">voice unread. GET /crew/voice not yet.</p>
       <button class="ghost" id="closeVoice" type="button">Close</button>
     </div>
   </div>
   <div class="host" id="host">
     <div class="host__box">
       <h2>Where should bots run?</h2>
+      <p id="hostStatus" class="empty">computer unread. GET /crew/computer not yet.</p>
       <p>This PC uses UACC for mouse and keyboard. Mutating clicks still wait for human Approve. Docker/Grok Team Computer is not in this app. Do not turn this on for a shared server.</p>
       <button class="ok" id="hostThis" type="button">Use this computer</button>
       <button class="ghost" id="hostOff" type="button">Keep computer control disarmed</button>
@@ -157,14 +182,14 @@
         <button class="ghost" id="closePlugins" type="button">Close</button>
       </div>
       <input class="plugins__search" id="pluginSearch" placeholder="Search apps" />
-      <div id="pluginList" class="inspector__body"></div>
+      <div id="pluginList" class="empty">plugins unread. GET /crew/connectors not yet.</div>
     </div>
   </div>
   <div class="scrim" id="settings">
     <div class="dialog">
       <h2>Providers</h2>
-      <p class="empty">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
-      <form id="keysForm"></form>
+      <p class="empty">Paste a live key. Crew writes it to OpenVault. Values are never shown back. Crew does not create NVIDIA/Ollama/OmniRoute accounts for you.</p>
+      <form id="keysForm"><p class="empty">keys unread. GET /crew/keys not yet.</p></form>
       <div class="chain" id="providerChain"></div>
       <div class="dialog-foot">
         <button class="ghost" id="closeSettings" type="button">Close</button>
@@ -174,19 +199,48 @@
   </div>
   <script>
     const state = {
-      spaces: [], spaceId: null, messages: [], mounted: new Set(),
-      agents: [], confirms: [], mcp: [], plugins: [],
+      spaces: [], spaceId: null, messages: [], messagesUnread: true, mounted: new Set(),
+      agents: [], confirms: [], mcp: [], plugins: [], todos: [],
+      agentsUnread: true, confirmsUnread: true, spacesUnread: true,
       source: null, seq: 0, runId: null, draft: "", keyFields: [],
-      plan: null, skills: [], roles: [],
+      plan: null, planUnread: true, skills: [], roles: [], rolesUnread: true,
       activityOnly: false, focusAgent: null,
       stick: true, unread: 0, retry: null, live: false
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || r.statusText);
+      const data = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((data && data.detail) || r.statusText || "unread");
+      if (data == null) throw new Error("not JSON");
       return data;
     });
+    const apiGet = (path, ms) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), ms || 2500);
+      return fetch(path, { headers: { "Content-Type": "application/json" }, signal: ctrl.signal })
+        .then(async (r) => {
+          const data = await r.json().catch(() => null);
+          if (!r.ok) throw new Error((data && data.detail) || r.statusText || "unread");
+          if (data == null) throw new Error("not JSON");
+          return data;
+        })
+        .finally(() => clearTimeout(timer));
+    };
+    const apiSend = (path, body, ms) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), ms || 2500);
+      return fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      }).then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok) throw new Error((data && data.detail) || r.statusText || "unread");
+        if (data == null) throw new Error("not JSON");
+        return data;
+      }).finally(() => clearTimeout(timer));
+    };
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -330,14 +384,20 @@
       else { state.unread += 1; $("jump").hidden = false; $("jump").textContent = state.unread + " new below"; }
     }
     function renderLog() {
-      $("log").innerHTML = "";
+      const log = $("log");
+      log.innerHTML = "";
       state.mounted = new Set();
       state.unread = 0; $("jump").hidden = true;
       const rows = state.messages.filter(passesFilter);
-      if (!rows.length) {
-        $("log").innerHTML = `<div class="empty">Nothing here yet.</div>`;
+      if (state.messagesUnread) {
+        log.className = "pane__scroll empty";
+        log.innerHTML = '<div class="empty">transcript unread. GET messages failed.</div>';
+      } else if (!rows.length) {
+        log.className = "pane__scroll empty";
+        log.innerHTML = '<div class="empty">messages none.</div>';
       } else {
-        rows.forEach((m) => { state.mounted.add(m.id); $("log").appendChild(msgNode(m)); });
+        log.className = "pane__scroll";
+        rows.forEach((m) => { state.mounted.add(m.id); log.appendChild(msgNode(m)); });
       }
       paintDraft();
       toBottom();
@@ -345,9 +405,12 @@
     }
     function addMessage(m) {
       if (state.messages.some((x) => x.id === m.id)) return false;
+      const wasUnread = state.messagesUnread;
+      state.messagesUnread = false;
       state.messages.push(m);
       state.messages.sort((a, b) => (a.seq || 0) - (b.seq || 0));
       state.seq = Math.max(state.seq, m.seq || 0);
+      if (wasUnread) { renderLog(); return true; }
       // A message that sorts before the tail cannot simply be appended.
       if (state.messages[state.messages.length - 1].id === m.id) mount(m); else renderLog();
       return true;
@@ -367,7 +430,7 @@
               + `<b>${esc(from)} -&gt; ${esc(to)}</b> <i>${esc(w.kind || "message")}</i>`
               + `<div>${esc(String(m.content || "").slice(0, 240))}</div></div>`;
           }).join("")
-        : `<div class="empty">Agent-to-agent traffic lands here.</div>`;
+        : `<div class="empty">activity none. Agent-to-agent traffic lands here.</div>`;
       renderGraph(a2a);
     }
     // A live picture of who is actually talking to whom. The flat list could
@@ -375,7 +438,10 @@
     // agent had never been spoken to at all.
     function renderGraph(a2a) {
       const nodes = state.agents.slice(0, 8);
-      if (nodes.length < 2) { $("graph").innerHTML = ""; return; }
+      if (nodes.length < 2) {
+        $("graph").textContent = "graph none";
+        return;
+      }
       const W = 200, H = 150, cx = W / 2, cy = H / 2, r = 52;
       const at = {};
       nodes.forEach((a, i) => {
@@ -411,19 +477,46 @@
 
     // -- panels -------------------------------------------------------------
 
-    function setProvider(active, chain) {
+    function setProvider(active, chain, extra) {
+      if (extra && extra.unread === true) {
+        $("providerChip").className = "chip empty";
+        $("providerChip").textContent = "providers unread";
+        $("providerChain").innerHTML = '<p class="empty">providers unread. GET /crew/providers failed.</p>';
+        return;
+      }
+      $("providerChip").className = "chip";
       $("providerChip").textContent = active ? (active.label + " / " + active.model) : "no provider configured";
+      let html = "";
+      if (extra && extra.prefer) {
+        html += `<div class="on">FreeRoute prefer ${esc(extra.prefer)} - engine ${esc(extra.engine_url || "")}</div>`;
+      }
       if (chain) {
-        $("providerChain").innerHTML = chain.map((p) =>
+        html += chain.map((p) =>
           `<div class="${p.active ? "on" : ""}">${esc(p.label)} ${p.configured ? "ready" : "unset"} - ${esc(p.model)}</div>`
         ).join("");
       }
+      const rows = (extra && extra.register) || [];
+      if (rows.length) {
+        const vaultSkip = extra && extra.vault_listing === "skipped";
+        html += `<p class="empty">Paste keys. Crew does not create accounts.</p>` + rows.map((r) => {
+          const flag = r.configured ? (vaultSkip ? "env" : "vaulted") : (vaultSkip ? "vault unread" : "missing");
+          return `<div>${esc(r.label)} ${flag} - <a href="${esc(r.signup)}" target="_blank" rel="noopener">get key</a> ${esc(r.note)}</div>`;
+        }).join("");
+      }
+      $("providerChain").innerHTML = html;
     }
     function renderSpaces() {
-      $("spaces").innerHTML = state.spaces.map((s, i) =>
+      const node = $("spaces");
+      if (state.spacesUnread) {
+        node.className = "rail__body rail__hideable empty";
+        node.textContent = "spaces unread. GET /crew/spaces failed.";
+        return;
+      }
+      node.className = "rail__body rail__hideable";
+      node.innerHTML = state.spaces.map((s, i) =>
         `<button class="space${s.id === state.spaceId ? " active" : ""}" data-id="${s.id}"><span class="ord">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}</button>`
       ).join("");
-      $("spaces").querySelectorAll(".space").forEach((el) => el.onclick = () => selectSpace(el.dataset.id));
+      node.querySelectorAll(".space").forEach((el) => el.onclick = () => selectSpace(el.dataset.id));
     }
     function renderFocus() {
       const bar = $("focusBar");
@@ -435,8 +528,20 @@
       } else { bar.hidden = true; bar.innerHTML = ""; }
     }
     function renderAgents() {
-      if (!state.agents.length) { $("agents").innerHTML = `<div class="empty">No agents yet.</div>`; return; }
-      $("agents").innerHTML = state.agents.map((a) => {
+      const node = $("agents");
+      if (!node) return;
+      if (state.agentsUnread) {
+        node.className = "empty";
+        node.textContent = "agents unread. GET agents failed.";
+        return;
+      }
+      if (!state.agents.length) {
+        node.className = "empty";
+        node.textContent = "agents none.";
+        return;
+      }
+      node.className = "";
+      node.innerHTML = state.agents.map((a) => {
         const cap = a.capability ? " - " + a.capability : "";
         const model = a.model ? " - " + a.model : "";
         const deny = a.deny_tools ? " - deny " + a.deny_tools : "";
@@ -450,26 +555,101 @@
         renderAgents(); renderFocus(); renderLog();
       });
     }
-    function renderSkills(rows) {
-      const list = rows || state.skills || [];
-      if (!list.length) {
-        $("skills").innerHTML = `<div class="empty">None yet. Teach saves markdown. tone.md is ASCII grok-bot default.</div>`;
+    function renderTodos(rows) {
+      const node = $("todos");
+      if (!node) return;
+      if (rows && rows.unread === true) {
+        node.className = "empty";
+        node.textContent = "todos unread. GET todos failed.";
         return;
       }
-      $("skills").innerHTML = list.map((s) =>
-        `<div class="routines-row">${esc(s.title)}<small>${esc(s.head || s.path || "")}</small></div>`
+      const list = Array.isArray(rows) ? rows : (state.todos || []);
+      if (!list.length) {
+        node.className = "empty";
+        node.textContent = "todos none. Multi-step work writes a plan here.";
+        return;
+      }
+      node.className = "";
+      const mark = { pending: "[ ]", in_progress: "[>]", completed: "[x]" };
+      node.innerHTML = list.map((t) =>
+        `<div class="routines-row">${mark[t.status] || "[ ]"} ${esc(t.content)}</div>`
       ).join("");
     }
+    function renderSkills(rows) {
+      const node = $("skills");
+      if (!node) return;
+      if (!rows || rows.unread === true) {
+        node.className = "empty";
+        node.textContent = "skills unread. GET /crew/skills failed.";
+        return;
+      }
+      const list = Array.isArray(rows) ? rows : (state.skills || []);
+      if (!list.length) {
+        node.className = "";
+        node.textContent = "skills none. Teach saves markdown. tone.md is ASCII grok-bot default.";
+        return;
+      }
+      node.className = "";
+      node.innerHTML = list.map((s) =>
+        `<button type="button" class="routines-row" data-title="${esc(s.title)}">${esc(s.title)}<small>${esc(s.head || s.path || "")}</small></button>`
+      ).join("");
+      node.querySelectorAll("button[data-title]").forEach((el) => {
+        el.onclick = () => {
+          const box = $("input");
+          box.value = "/" + (el.dataset.title || "") + " ";
+          box.focus();
+          growInput();
+        };
+      });
+    }
     function renderRoles(roles) {
-      state.roles = roles || state.roles || [];
-      if (!state.roles.length) return;
+      const node = $("roles");
+      if (!node) return;
+      if (roles && roles.unread === true) {
+        state.rolesUnread = true;
+        state.roles = [];
+        node.className = "role-chips empty";
+        node.textContent = "roles unread. GET /crew/roles failed.";
+        return;
+      }
+      if (Array.isArray(roles)) {
+        state.rolesUnread = false;
+        state.roles = roles;
+      }
+      if (state.rolesUnread) {
+        node.className = "role-chips empty";
+        node.textContent = "roles unread. GET /crew/roles failed.";
+        return;
+      }
+      if (!state.roles.length) {
+        node.className = "role-chips empty";
+        node.textContent = "roles none. Templates, not a roster.";
+        return;
+      }
       const hits = new Set((state.plan && state.plan.capabilities || []).map((c) => c.name));
-      const pattern = state.plan && state.plan.pattern ? state.plan.pattern : "idle";
-      $("roles").innerHTML =
-        `<div class="empty">Auto-detect. Templates, not a roster. ${esc(pattern)}</div>` +
+      const loadNow = (state.plan && state.plan.skills) || [];
+      const loadBit = loadNow.length
+        ? " Load this turn: " + loadNow.join(", ") + "."
+        : "";
+      const waveBit = state.plan && state.plan.wave_plan ? " Waves inlined." : "";
+      const detectBit = (state.planUnread || !state.plan)
+        ? "detect unread. GET /crew/detect failed."
+        : `Auto-detect. Templates, not a roster. ${esc(state.plan.pattern || "idle")}.${esc(loadBit)}${esc(waveBit)} Click a name to brief them.`;
+      node.className = "role-chips";
+      node.innerHTML =
+        `<div class="empty">${detectBit}</div>` +
         state.roles.map((r) =>
-          `<span class="role-chip${hits.has(r.name) ? " role-chip--hit" : ""}" title="${esc(r.blurb)}">${esc(r.name)}</span>`
+          `<button type="button" class="role-chip${hits.has(r.name) ? " role-chip--hit" : ""}" data-name="${esc(r.name)}" title="${esc(r.blurb)}">${esc(r.name)}</button>`
         ).join("");
+      node.querySelectorAll(".role-chip").forEach((el) => {
+        el.onclick = () => {
+          const name = el.dataset.name || "";
+          const box = $("input");
+          box.value = name + ": ";
+          box.focus();
+          growInput();
+        };
+      });
     }
     // Approvals block a run. They used to live only in the inspector, which is
     // collapsible - so an operator with it closed saw a run that had simply
@@ -478,19 +658,29 @@
       const pending = state.confirms.filter((c) => c.status === "pending");
       const bar = $("approvalBar");
       const overlay = $("takeover");
-      if (!pending.length) {
-        $("confirms").innerHTML = `<div class="empty">None pending. Human is money and decision authority.</div>`;
+      const node = $("confirms");
+      if (state.confirmsUnread) {
+        node.className = "empty";
+        node.textContent = "confirms unread. GET /crew/confirms failed.";
         bar.hidden = true; bar.innerHTML = "";
         overlay.hidden = true;
         return;
       }
+      if (!pending.length) {
+        node.className = "empty";
+        node.textContent = "confirms none. Human is money and decision authority.";
+        bar.hidden = true; bar.innerHTML = "";
+        overlay.hidden = true;
+        return;
+      }
+      node.className = "";
       const html = pending.map((c) =>
         `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">${esc(JSON.stringify(redactArgs(c.args)))}</div></div>
          <button data-id="${c.id}" data-act="takeover">Take over</button>
          <button data-id="${c.id}" data-ok="1">Approve</button>
          <button class="deny" data-id="${c.id}" data-ok="0">Deny</button></div>`
       ).join("");
-      $("confirms").innerHTML = html;
+      node.innerHTML = html;
       bar.hidden = false;
       bar.innerHTML = `<div class="approvals__head">${pending.length} call${pending.length > 1 ? "s" : ""} waiting on you</div>` + html;
       const bind = (root) => root.querySelectorAll("button[data-id]").forEach((el) => {
@@ -508,57 +698,216 @@
         : "Agent is waiting. Take over if this is a login wall.";
       $("takeoverArgs").textContent = lead.tool + " " + JSON.stringify(redactArgs(lead.args));
     }
+    function paintImport(info) {
+      const node = $("importHint");
+      if (!node) return;
+      if (!info || info.unread === true || info.ok !== true) {
+        node.textContent = "import unread. GET /crew/import failed.";
+        return;
+      }
+      node.textContent = "Drop chats or .eml here. No import button. Check PRs in chat.";
+    }
+    function paintHost(info) {
+      const host = $("hostStatus");
+      if (!host) return;
+      host.className = "empty";
+      if (!info || info.unread === true || info.ok !== true) {
+        host.textContent = "computer unread. GET /crew/computer failed.";
+        return;
+      }
+      host.textContent = info.detail || "computer none. MCP catalog empty.";
+    }
+    async function refreshHost() {
+      try { paintHost(await apiGet("/crew/computer")); }
+      catch (err) { paintHost({ ok: false, unread: true }); }
+    }
     function renderMcp() {
-      const masterOn = state.mcp.some((s) => s.enabled);
-      $("mcpMaster").textContent = masterOn
+      const master = $("mcpMaster");
+      const node = $("mcp");
+      const rows = state.mcp;
+      if (!rows || rows.unread === true || !Array.isArray(rows)) {
+        master.className = "empty";
+        master.textContent = "mcp unread. GET /crew/mcp failed.";
+        node.className = "empty";
+        node.textContent = "mcp unread. GET /crew/mcp failed.";
+        return;
+      }
+      if (!rows.length) {
+        master.className = "empty";
+        master.textContent = "mcp none.";
+        node.className = "empty";
+        node.textContent = "mcp none.";
+        return;
+      }
+      const masterOn = rows.some((s) => s.enabled);
+      master.className = "warn";
+      master.textContent = masterOn
         ? "Master on. Arm a server, then mutating clicks still wait for human approve."
         : "Off. Set CORTEX_COMPUTER_CONTROL=1 and restart, then arm UACC or Windows-MCP here.";
-      $("mcp").innerHTML = state.mcp.map((s) =>
+      node.className = "";
+      node.innerHTML = rows.map((s) =>
         `<div class="mcp-row"><div>${esc(s.name)}<small>${esc(s.status)}</small></div>
          <label class="empty"><input type="checkbox" data-name="${esc(s.name)}" ${s.armed ? "checked" : ""} ${masterOn ? "" : "disabled"} /> arm</label></div>`
       ).join("");
-      $("mcp").querySelectorAll("input").forEach((el) => el.onchange = () => arm(el.dataset.name, el.checked));
+      node.querySelectorAll("input").forEach((el) => el.onchange = () => arm(el.dataset.name, el.checked));
     }
     function renderRoutines(rows) {
-      if (!rows || !rows.length) { $("routines").innerHTML = `<div class="empty">None.</div>`; return; }
-      $("routines").innerHTML = rows.map((r) =>
+      const node = $("routines");
+      if (!node) return;
+      if (!rows || rows.unread === true) {
+        node.className = "empty";
+        node.textContent = "routines unread. GET /crew/routines failed.";
+        return;
+      }
+      if (!rows.length) {
+        node.className = "";
+        node.textContent = "routines none.";
+        return;
+      }
+      node.className = "";
+      node.innerHTML = rows.map((r) =>
         `<div class="routines-row">${esc(r.name)}<small>${esc(r.when)} - ${esc(r.layer)}</small></div>`
       ).join("");
     }
     function renderPlugins() {
+      const node = $("pluginList");
+      if (!node) return;
+      const plugs = state.plugins;
+      if (!plugs || plugs.unread === true || !Array.isArray(plugs)) {
+        node.className = "empty";
+        node.textContent = "plugins unread. GET /crew/connectors failed.";
+        return;
+      }
       const q = ($("pluginSearch").value || "").toLowerCase();
-      const rows = state.plugins.filter((p) => !q || (p.name + p.slug + p.layer).toLowerCase().indexOf(q) >= 0);
-      $("pluginList").innerHTML = rows.map((p) =>
+      const rows = plugs.filter((p) => !q || (p.name + p.slug + p.layer).toLowerCase().indexOf(q) >= 0);
+      if (!rows.length) {
+        node.className = "empty";
+        node.textContent = q ? "plugins none matching search." : "plugins none.";
+        return;
+      }
+      node.className = "inspector__body";
+      node.innerHTML = rows.map((p) =>
         `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
          <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#7A7A80">${esc(p.slug)} - ${esc(p.layer)}</small></div>
          <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : "mapped"}</div></div>`
       ).join("");
     }
     function renderTickets(board) {
-      if (!board || !board.tickets || !board.tickets.length) {
-        $("tickets").innerHTML = `<div class="empty">${esc((board && board.law) || "No CLAIMS.json")}</div>`;
+      const node = $("tickets");
+      if (!node) return;
+      if (!board || board.unread === true) {
+        node.className = "empty";
+        node.textContent = "tickets unread. GET /crew/tickets failed.";
         return;
       }
-      $("tickets").innerHTML = `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>` +
+      if (!board.tickets || !board.tickets.length) {
+        node.className = "";
+        node.textContent = (board.law || "tickets none. No CLAIMS.json");
+        return;
+      }
+      node.className = "";
+      node.innerHTML = `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>` +
         board.tickets.slice(0, 12).map((t) =>
           `<div class="routines-row">${esc(t.ticket)}<small>${esc(t.role)} - write=${t.may_write}</small></div>`
         ).join("");
     }
     function renderDesk(desk) {
-      if (!desk) { $("desk").innerHTML = `<div class="empty">Desk unavailable.</div>`; return; }
+      const node = $("desk");
+      if (!node) return;
+      if (!desk || desk.unread === true) {
+        node.className = "empty";
+        node.textContent = "desk unread. GET /crew/desk failed.";
+        return;
+      }
       const prs = (desk.prs && desk.prs.prs) || [];
       const mail = desk.inbox || {};
       const cursor = desk.cursor || {};
       const prLines = prs.length
         ? prs.slice(0, 8).map((p) => `<div class="routines-row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
         : `<div class="empty">${esc((desk.prs && desk.prs.detail) || "No open PRs (or gh not in this folder). Ask in chat.")}</div>`;
-      $("desk").innerHTML =
+      node.className = "";
+      node.innerHTML =
         `<div class="empty">${esc(desk.law || "")}</div>` +
         `<div class="routines-row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
         `<div class="routines-row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
         prLines;
     }
+    function renderWakes(payload) {
+      const node = $("wakes");
+      if (!node) return;
+      if (!payload || payload.unread === true || payload.ok !== true) {
+        node.className = "empty";
+        node.textContent = "wakes unread. GET /crew/wakes failed. Control does not POST wakes.";
+        return;
+      }
+      const rows = payload.wakes || [];
+      if (!rows.length) {
+        node.className = "";
+        node.textContent = "wakes none. Crew owns the tick. Control does not POST wakes.";
+        return;
+      }
+      node.className = "";
+      node.innerHTML = rows.slice(0, 24).map((w) =>
+        `<div class="routines-row">${esc(w.kind)} ${esc(w.state)}<small>${esc(w.note || w.event_key || "")}</small></div>`
+      ).join("");
+    }
+    function renderEngine(health) {
+      const node = $("engine");
+      if (!node) return;
+      const chip = $("engineChip");
+      // Failed GET is unread, not "offline" / "master off" (R-0011).
+      if (!health || health.unread === true || health.ok !== true) {
+        node.className = "empty";
+        node.textContent = "engine unread. GET /crew/health failed.";
+        if (chip) {
+          chip.textContent = "engine unread";
+          chip.classList.add("off");
+        }
+        return;
+      }
+      const ov = health.openvault || {};
+      const eng = health.engine || {};
+      const bits = [
+        eng.ok ? ("engine " + (eng.url || "ok")) : ("engine offline" + (eng.detail ? (" (" + eng.detail + ")") : "")),
+        ov.ok ? ("vault " + (ov.url || "ok")) : ("vault down"),
+        health.computer_control ? "computer-control master on" : "computer-control master off",
+        "Control does not start Cortex."
+      ];
+      node.textContent = bits.join(" - ");
+      node.className = (eng.ok && ov.ok) ? "" : "empty";
+      if (chip) {
+        chip.textContent = eng.ok ? "engine" : "engine offline";
+        chip.classList.toggle("off", !eng.ok);
+      }
+    }
+    function renderQueue(belt) {
+      const node = $("queue");
+      if (!node) return;
+      if (!belt || belt.unread === true || belt.ok !== true) {
+        node.className = "empty";
+        node.textContent = "queue unread. GET /crew/belt failed. Crew owns leases. Control does not POST.";
+        return;
+      }
+      const q = belt.queue || {};
+      const keys = Object.keys(q);
+      const nHitl = (belt.confirms || []).length;
+      if (!keys.length && !nHitl) {
+        node.className = "";
+        node.textContent = "queue none. HITL 0. Crew owns leases. Control does not POST.";
+        return;
+      }
+      node.className = "";
+      node.innerHTML = keys.map((k) =>
+        `<div class="routines-row">${esc(k)} ${esc(q[k])}</div>`
+      ).join("") + (nHitl
+        ? `<div class="routines-row">HITL pending ${esc(nHitl)}<small>Decide here. Control does not approve.</small></div>`
+        : `<div class="routines-row">HITL 0<small>Decide here. Control does not approve.</small></div>`);
+    }
     function renderKeyForm(fields, status) {
+      if (!fields || !fields.length || (status && status.unread === true)) {
+        $("keysForm").innerHTML = '<p class="empty">keys unread. GET /crew/keys failed.</p>';
+        return;
+      }
       $("keysForm").innerHTML = fields.map((f) => {
         const on = status[f.key] && status[f.key].configured;
         return `<div class="field"><label>${esc(f.label)} ${on ? "(set)" : ""}</label>
@@ -570,6 +919,16 @@
       node.style.height = "auto";
       node.style.height = Math.min(node.scrollHeight, 192) + "px";
     }
+    function applySpaceBoard(agents, confirms, todos) {
+      state.agentsUnread = !Array.isArray(agents) || agents.unread === true;
+      state.agents = state.agentsUnread ? [] : agents;
+      state.confirmsUnread = !Array.isArray(confirms) || confirms.unread === true;
+      state.confirms = state.confirmsUnread ? [] : confirms;
+      if (Array.isArray(todos)) state.todos = todos;
+      renderAgents();
+      renderTodos(todos);
+      renderConfirms();
+    }
     function setConn(live) {
       state.live = live;
       $("conn").textContent = live ? "live" : "reconnecting";
@@ -579,37 +938,56 @@
     // -- boot and space switching -------------------------------------------
 
     async function boot() {
-      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills] = await Promise.all([
-        api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
-        api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
-        api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
-        api("/crew/tickets").catch(() => ({ tickets: [] })),
-        api("/crew/desk").catch(() => null),
-        api("/crew/skills").catch(() => [])
+      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, wakes, belt, imp, detected, computer] = await Promise.all([
+        apiGet("/crew/providers").catch(() => ({ unread: true })),
+        apiGet("/crew/spaces").catch(() => ({ unread: true })),
+        apiGet("/crew/mcp").catch(() => ({ unread: true })),
+        apiGet("/crew/health").catch(() => ({ ok: false, unread: true })),
+        apiGet("/crew/roles").catch(() => ({ unread: true })), apiGet("/crew/keys").catch(() => ({ unread: true })),
+        apiGet("/crew/connectors").catch(() => ({ unread: true })), apiGet("/crew/routines").catch(() => ({ unread: true })),
+        apiGet("/crew/tickets").catch(() => ({ unread: true })),
+        apiGet("/crew/desk").catch(() => ({ unread: true })),
+        apiGet("/crew/skills").catch(() => ({ unread: true })),
+        apiGet("/crew/wakes").catch(() => ({ ok: false, unread: true, detail: "unread" })),
+        apiGet("/crew/belt").catch(() => ({ ok: false, unread: true, detail: "unread" })),
+        apiGet("/crew/import").catch(() => ({ ok: false, unread: true })),
+        apiGet("/crew/detect").catch(() => ({ unread: true })),
+        apiGet("/crew/computer").catch(() => ({ ok: false, unread: true }))
       ]);
-      renderRoles(roles || []);
+      state.planUnread = !detected || detected.unread === true || !detected.pattern;
+      state.plan = state.planUnread ? null : detected;
+      renderRoles(roles);
       state.skills = skills || [];
       renderSkills(state.skills);
-      state.keyFields = keys.fields || [];
-      renderKeyForm(state.keyFields, keys.status || {});
-      setProvider(prov.active, prov.chain);
-      const ov = health.openvault || {};
-      const eng = health.engine || {};
-      $("engine").textContent = [
-        eng.ok ? ("engine " + (eng.url || "ok")) : ("engine offline"),
-        ov.ok ? ("vault " + (ov.url || "ok")) : ("vault down"),
-        health.computer_control ? "computer-control master on" : "computer-control master off"
-      ].join(" - ");
+      setProvider(prov.active, prov.chain, prov);
+      renderEngine(health);
       state.mcp = mcp;
       renderMcp();
+      paintHost(computer);
+      paintImport(imp);
       state.plugins = plugs || [];
       renderPlugins();
       renderRoutines(routines || []);
       renderTickets(tickets || {});
       renderDesk(desk);
-      state.spaces = spaces;
+      renderWakes(wakes);
+      renderQueue(belt);
+      state.spacesUnread = !Array.isArray(spaces) || spaces.unread === true;
+      state.spaces = state.spacesUnread ? [] : spaces;
+      if (keys && keys.unread === true) {
+        renderKeyForm([], { unread: true });
+      } else {
+        state.keyFields = keys.fields || [];
+        renderKeyForm(state.keyFields, keys.status || {});
+      }
+      if (state.spacesUnread) {
+        renderSpaces();
+        $("log").className = "pane__scroll empty";
+        $("log").innerHTML = '<div class="empty">spaces unread. GET /crew/spaces failed. Did not create General.</div>';
+        return;
+      }
       if (!state.spaces.length) {
-        const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title: "General" }) });
+        const created = await apiSend("/crew/spaces", { title: "General" });
         state.spaces = [created];
       }
       renderSpaces();
@@ -624,16 +1002,17 @@
       const space = state.spaces.find((s) => s.id === id);
       $("spaceTitle").textContent = space ? space.title : "Space";
       renderSpaces();
-      const [messages, agents, confirms] = await Promise.all([
-        api("/crew/spaces/" + id + "/messages"),
-        api("/crew/spaces/" + id + "/agents"),
-        api("/crew/confirms?space_id=" + id),
+      const [messages, agents, confirms, todos] = await Promise.all([
+        apiGet("/crew/spaces/" + id + "/messages").catch(() => ({ unread: true })),
+        apiGet("/crew/spaces/" + id + "/agents").catch(() => ({ unread: true })),
+        apiGet("/crew/confirms?space_id=" + id).catch(() => ({ unread: true })),
+        apiGet("/crew/spaces/" + id + "/todos").catch(() => ({ unread: true })),
       ]);
-      state.messages = messages;
-      state.seq = messages.reduce((n, m) => Math.max(n, m.seq || 0), 0);
-      state.agents = agents;
-      state.confirms = confirms;
-      renderFocus(); renderAgents(); renderConfirms(); renderLog();
+      state.messagesUnread = !Array.isArray(messages) || messages.unread === true;
+      state.messages = state.messagesUnread ? [] : messages;
+      state.seq = state.messages.reduce((n, m) => Math.max(n, m.seq || 0), 0);
+      applySpaceBoard(agents, confirms, todos);
+      renderFocus(); renderLog();
       listen(id);
     }
     // Refetch everything newer than what we hold. Used on reconnect and on the
@@ -641,21 +1020,32 @@
     // rendering a transcript with holes in it.
     async function catchUp(id) {
       try {
-        const rows = await api("/crew/spaces/" + id + "/messages?after=" + state.seq);
+        const rows = await apiGet("/crew/spaces/" + id + "/messages?after=" + state.seq);
+        if (!Array.isArray(rows)) throw new Error("transcript unread");
         let changed = false;
+        if (state.messagesUnread && !rows.length) {
+          state.messagesUnread = false;
+          renderLog();
+        }
         rows.forEach((m) => { if (addMessage(m)) changed = true; });
-        const [agents, confirms] = await Promise.all([
-          api("/crew/spaces/" + id + "/agents"),
-          api("/crew/confirms?space_id=" + id),
+        const [agents, confirms, todos, wakes, belt] = await Promise.all([
+          apiGet("/crew/spaces/" + id + "/agents").catch(() => ({ unread: true })),
+          apiGet("/crew/confirms?space_id=" + id).catch(() => ({ unread: true })),
+          apiGet("/crew/spaces/" + id + "/todos").catch(() => ({ unread: true })),
+          apiGet("/crew/wakes").catch(() => ({ ok: false, unread: true, detail: "unread" })),
+          apiGet("/crew/belt").catch(() => ({ ok: false, unread: true, detail: "unread" })),
         ]);
-        state.agents = agents; state.confirms = confirms;
-        renderAgents(); renderConfirms();
+        applySpaceBoard(agents, confirms, todos);
+        renderWakes(wakes);
+        renderQueue(belt);
         if (changed) renderWire();
       } catch (err) { toast("Could not catch up: " + err.message, "bad"); }
     }
     function listen(id) {
       if (state.retry) { clearTimeout(state.retry); state.retry = null; }
       if (state.source) { state.source.close(); state.source = null; }
+      // Closing the old stream must not leave the chip as live (R-0011).
+      if (state.live) setConn(false);
       const open = () => {
         if (state.spaceId !== id) return;
         // Reopen with the current seq rather than letting EventSource retry the
@@ -676,23 +1066,26 @@
             if (data.message.role === "agent") renderWire();
           }
           if (data.agent) {
+            state.agentsUnread = false;
             const i = state.agents.findIndex((a) => a.id === data.agent.id);
             if (i >= 0) state.agents[i] = data.agent; else state.agents.push(data.agent);
             renderAgents(); renderGraph(wireRows());
           }
           if (data.confirm) {
+            state.confirmsUnread = false;
             const i = state.confirms.findIndex((c) => c.id === data.confirm.id);
             if (i >= 0) state.confirms[i] = data.confirm; else state.confirms.push(data.confirm);
             renderConfirms();
           }
-          if (data.plan) { state.plan = data.plan; renderRoles(); }
+          if (data.todos) { state.todos = data.todos; renderTodos(data.todos); }
+          if (data.plan) { state.plan = data.plan; state.planUnread = false; renderRoles(); }
           if (data.status) {
             $("runStatus").textContent = data.status + (data.stats && data.stats.llm_calls ? " - " + data.stats.llm_calls + " calls" : "");
             $("cancelRun").hidden = data.status !== "running";
             if (data.status !== "running") { state.draft = ""; paintDraft(); }
           }
         };
-        ["message", "agent", "confirm", "run", "detect"].forEach((name) => src.addEventListener(name, apply));
+        ["message", "agent", "confirm", "run", "detect", "todos"].forEach((name) => src.addEventListener(name, apply));
         src.addEventListener("delta", (ev) => {
           const data = JSON.parse(ev.data);
           if (data.text) { state.draft += data.text; paintDraft(); }
@@ -730,17 +1123,15 @@
     }
     async function decide(id, approved, takeover) {
       try {
-        await api("/crew/confirms/" + id, {
-          method: "POST",
-          body: JSON.stringify({ approved: !!approved, takeover: !!takeover })
-        });
+        await apiSend("/crew/confirms/" + id, { approved: !!approved, takeover: !!takeover });
       } catch (err) { toast(err.message, "bad"); }
     }
     async function arm(name, armed) {
-      try { await api("/crew/mcp/" + encodeURIComponent(name) + "/arm", { method: "POST", body: JSON.stringify({ armed }) }); }
+      try { await apiSend("/crew/mcp/" + encodeURIComponent(name) + "/arm", { armed }); }
       catch (err) { toast(err.message, "bad"); }
-      state.mcp = await api("/crew/mcp");
+      state.mcp = await apiGet("/crew/mcp").catch(() => ({ unread: true }));
       renderMcp();
+      await refreshHost();
     }
     function setScale(delta) {
       const root = document.documentElement;
@@ -776,7 +1167,7 @@
       const title = prompt("Space name", "New space");
       if (!title) return;
       try {
-        const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title }) });
+        const created = await apiSend("/crew/spaces", { title });
         state.spaces.push(created);
         renderSpaces();
         await selectSpace(created.id);
@@ -789,7 +1180,7 @@
     };
     $("cancelRun").onclick = async () => {
       if (!state.runId) return;
-      try { await api("/crew/runs/" + state.runId + "/cancel", { method: "POST" }); }
+      try { await apiSend("/crew/runs/" + state.runId + "/cancel", {}); }
       catch (err) { toast(err.message, "bad"); }
     };
     $("toggleRail").onclick = () => {
@@ -810,6 +1201,15 @@
       insp.classList.toggle("inspector--closed");
       insp.classList.add("inspector--pinned");
     };
+    $("inspTabs").querySelectorAll(".insp-tab").forEach((btn) => {
+      btn.onclick = () => {
+        const tab = btn.dataset.tab;
+        $("inspTabs").querySelectorAll(".insp-tab").forEach((b) => b.classList.toggle("is-on", b === btn));
+        document.querySelectorAll(".insp-pane").forEach((pane) => {
+          pane.hidden = pane.dataset.tab !== tab;
+        });
+      };
+    });
     $("uiSmaller").onclick = () => setScale(-0.05);
     $("uiBigger").onclick = () => setScale(0.05);
     $("openSettings").onclick = () => $("settings").classList.add("open");
@@ -820,11 +1220,18 @@
     async function runSearch() {
       const q = $("searchQ").value.trim();
       let hits = [];
-      try { hits = q.length < 2 ? [] : await api("/crew/search?q=" + encodeURIComponent(q)); }
-      catch (err) { toast(err.message, "bad"); }
-      $("searchHits").innerHTML = hits.length
-        ? hits.map((h) => `<button class="palette__hit" data-space="${esc(h.space_id)}"><b>${esc(h.kind)}</b> ${esc(h.title)}<small>${esc(h.snippet)}</small></button>`).join("")
-        : `<div class="empty" style="padding:1rem">No results</div>`;
+      let unread = false;
+      try { hits = q.length < 2 ? [] : await apiGet("/crew/search?q=" + encodeURIComponent(q)); }
+      catch (err) { unread = true; toast(err.message, "bad"); }
+      if (unread) {
+        $("searchHits").className = "inspector__body empty";
+        $("searchHits").innerHTML = '<div class="empty" style="padding:1rem">search unread. GET /crew/search failed.</div>';
+      } else {
+        $("searchHits").className = hits.length ? "inspector__body" : "inspector__body empty";
+        $("searchHits").innerHTML = hits.length
+          ? hits.map((h) => `<button class="palette__hit" data-space="${esc(h.space_id)}"><b>${esc(h.kind)}</b> ${esc(h.title)}<small>${esc(h.snippet)}</small></button>`).join("")
+          : `<div class="empty" style="padding:1rem">${q.length < 2 ? "Type two characters." : "search none."}</div>`;
+      }
       $("searchHits").querySelectorAll(".palette__hit").forEach((el) => el.onclick = () => {
         $("palette").classList.remove("open");
         selectSpace(el.dataset.space);
@@ -846,12 +1253,12 @@
     $("closeTeach").onclick = () => $("teach").classList.remove("open");
     $("saveSkill").onclick = async () => {
       try {
-        await api("/crew/skills", { method: "POST", body: JSON.stringify({
+        await apiSend("/crew/skills", {
           title: $("skillName").value.trim() || "skill",
           body: $("skillBody").value.trim() || "Goal:\nSteps:\nDo not:\n",
-        }) });
+        });
         $("teach").classList.remove("open");
-        state.skills = await api("/crew/skills").catch(() => state.skills);
+        state.skills = await apiGet("/crew/skills").catch(() => state.skills);
         renderSkills(state.skills);
         toast("Skill saved.");
       } catch (err) { toast(err.message, "bad"); }
@@ -859,25 +1266,27 @@
     $("openVoice").onclick = async () => {
       $("voice").classList.add("open");
       try {
-        const v = await api("/crew/voice");
-        $("voiceStatus").textContent = v.reason || "Voice is not configured.";
-      } catch (err) { $("voiceStatus").textContent = err.message; }
+        const v = await apiGet("/crew/voice");
+        $("voiceStatus").textContent = v.reason || "voice none. Crew will not fake speech.";
+      } catch (err) { $("voiceStatus").textContent = "voice unread. GET /crew/voice failed."; }
     };
     $("closeVoice").onclick = () => $("voice").classList.remove("open");
     $("hostThis").onclick = async () => {
       try {
-        await api("/crew/computer", { method: "POST", body: JSON.stringify({ host: "this-pc" }) });
-        state.mcp = await api("/crew/mcp");
+        await apiSend("/crew/computer", { host: "this-pc" });
+        state.mcp = await apiGet("/crew/mcp").catch(() => ({ unread: true }));
         renderMcp();
+        await refreshHost();
         $("host").classList.remove("open");
       } catch (err) { toast(err.message, "bad"); }
     };
     $("hostOff").onclick = async () => {
-      try { await api("/crew/computer", { method: "POST", body: JSON.stringify({ host: "off" }) }); }
+      try { await apiSend("/crew/computer", { host: "off" }); }
       catch (err) { toast(err.message, "bad"); }
       $("host").classList.remove("open");
-      state.mcp = await api("/crew/mcp");
-      renderMcp();
+      try { state.mcp = await apiGet("/crew/mcp"); renderMcp(); }
+      catch (err) { state.mcp = { unread: true }; renderMcp(); }
+      await refreshHost();
     };
     $("saveKeys").onclick = async () => {
       const body = {};
@@ -885,7 +1294,7 @@
         if (el.value.trim()) body[el.name] = el.value.trim();
       });
       try {
-        const saved = await api("/crew/keys", { method: "POST", body: JSON.stringify({ keys: body }) });
+        const saved = await apiSend("/crew/keys", { keys: body }, 10000);
         setProvider(saved.active, saved.chain);
         renderKeyForm(state.keyFields, saved.status);
         $("keysForm").querySelectorAll("input").forEach((el) => { el.value = ""; });
@@ -900,7 +1309,7 @@
         const name = (file.name || "").toLowerCase();
         const mailish = name.endsWith(".eml") || /^from:\s/i.test(text) || /^subject:\s/i.test(text);
         const path = mailish ? "/crew/import/mail" : "/crew/import";
-        const imported = await api(path, { method: "POST", body: JSON.stringify({ title: file.name, text }) });
+        const imported = await apiSend(path, { title: file.name, text });
         if (imported.space) {
           state.spaces.push(imported.space);
           renderSpaces();

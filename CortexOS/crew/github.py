@@ -6,14 +6,17 @@ import json
 import os
 import subprocess
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from CortexOS.crew.board import snapshot as board_snapshot
 
 RunFn = Callable[..., subprocess.CompletedProcess[str]]
 
+GH_WAIT_S = 1.5
 
-def _run(argv: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
+
+def _run(argv: list[str], timeout: float = GH_WAIT_S) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
 
 
@@ -22,7 +25,7 @@ def available(*, runner: RunFn | None = None) -> bool:
         return False
     run = runner or _run
     try:
-        result = run(["gh", "auth", "status"], timeout=4)
+        result = run(["gh", "auth", "status"], timeout=GH_WAIT_S)
         return result.returncode == 0
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return False
@@ -62,9 +65,8 @@ def list_org_repos(org: str | None = None, *, runner: RunFn | None = None) -> di
         ]
         if not owners:
             owners = [os.environ.get("CREW_GH_ORG") or "Netie-AI"]
-    repos: list[dict[str, Any]] = []
-    errors: list[str] = []
-    for org_name in owners:
+
+    def _one(org_name: str) -> tuple[list[dict[str, Any]], str]:
         argv = [
             "gh",
             "repo",
@@ -76,26 +78,24 @@ def list_org_repos(org: str | None = None, *, runner: RunFn | None = None) -> di
             "name,description,isPrivate,url,updatedAt,primaryLanguage",
         ]
         try:
-            result = run(argv, timeout=20)
+            result = run(argv, timeout=GH_WAIT_S)
         except FileNotFoundError:
-            return {"ok": False, "detail": "gh not installed", "repos": [], "org": org_name, "owners": owners}
+            return [], "gh not installed"
         except (OSError, subprocess.TimeoutExpired) as exc:
-            errors.append(f"{org_name}:{type(exc).__name__}")
-            continue
+            return [], f"{org_name}:{type(exc).__name__}"
         if result.returncode != 0:
-            errors.append((result.stderr or result.stdout or "gh failed")[:200])
-            continue
+            return [], (result.stderr or result.stdout or "gh failed")[:200]
         try:
             rows = json.loads(result.stdout or "[]")
         except ValueError:
-            errors.append(f"{org_name}: invalid json")
-            continue
+            return [], f"{org_name}: invalid json"
+        chunk: list[dict[str, Any]] = []
         for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict):
                 continue
             lang = row.get("primaryLanguage") or {}
             lang_name = lang.get("name") if isinstance(lang, dict) else ""
-            repos.append(
+            chunk.append(
                 {
                     "name": row.get("name"),
                     "owner": org_name,
@@ -106,6 +106,23 @@ def list_org_repos(org: str | None = None, *, runner: RunFn | None = None) -> di
                     "language": lang_name or "",
                 }
             )
+        return chunk, ""
+
+    repos: list[dict[str, Any]] = []
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=max(len(owners), 1)) as pool:
+        for chunk, err in pool.map(_one, owners):
+            repos.extend(chunk)
+            if err == "gh not installed":
+                return {
+                    "ok": False,
+                    "detail": "gh not installed",
+                    "repos": [],
+                    "org": owners[0] if owners else "Netie-AI",
+                    "owners": owners,
+                }
+            if err:
+                errors.append(err)
     return {
         "ok": not errors or bool(repos),
         "detail": "; ".join(errors)[:400] if errors else "",
@@ -123,32 +140,29 @@ def list_prs(limit: int = 20, *, runner: RunFn | None = None) -> dict[str, Any]:
     run = runner or _run
     repos = _repos()
     fields = "number,title,url,headRefName,isDraft,reviewDecision,updatedAt"
-    prs: list[dict[str, Any]] = []
-    errors: list[str] = []
     targets = repos or [""]
-    for repo in targets:
+
+    def _one(repo: str) -> tuple[list[dict[str, Any]], str]:
         argv = ["gh", "pr", "list", "--limit", str(limit), "--json", fields]
         if repo:
             argv.extend(["--repo", repo])
         try:
-            result = run(argv, timeout=20)
+            result = run(argv, timeout=GH_WAIT_S)
         except FileNotFoundError:
-            return {"ok": False, "detail": "gh not installed", "prs": [], "repos": repos}
+            return [], "gh not installed"
         except (OSError, subprocess.TimeoutExpired) as exc:
-            errors.append(f"{repo or 'cwd'}:{type(exc).__name__}")
-            continue
+            return [], f"{repo or 'cwd'}:{type(exc).__name__}"
         if result.returncode != 0:
-            errors.append((result.stderr or result.stdout or "gh failed")[:200])
-            continue
+            return [], (result.stderr or result.stdout or "gh failed")[:200]
         try:
             rows = json.loads(result.stdout or "[]")
         except ValueError:
-            errors.append(f"{repo or 'cwd'}: invalid json")
-            continue
+            return [], f"{repo or 'cwd'}: invalid json"
+        chunk: list[dict[str, Any]] = []
         for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict):
                 continue
-            prs.append(
+            chunk.append(
                 {
                     "repo": repo or row.get("url", ""),
                     "number": row.get("number"),
@@ -160,10 +174,89 @@ def list_prs(limit: int = 20, *, runner: RunFn | None = None) -> dict[str, Any]:
                     "updated": row.get("updatedAt") or "",
                 }
             )
+        return chunk, ""
+
+    prs: list[dict[str, Any]] = []
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=max(len(targets), 1)) as pool:
+        for chunk, err in pool.map(_one, targets):
+            prs.extend(chunk)
+            if err == "gh not installed":
+                return {"ok": False, "detail": "gh not installed", "prs": [], "repos": repos}
+            if err:
+                errors.append(err)
     return {
         "ok": not errors or bool(prs),
         "detail": "; ".join(errors)[:400] if errors else "",
         "prs": prs[:80],
         "repos": repos,
         "law": "Report in chat. Do not auto-merge. Ticket Runner seats existing writers.",
+    }
+
+
+def search_public(
+    query: str, limit: int = 8, *, runner: RunFn | None = None
+) -> dict[str, Any]:
+    """Search public GitHub repos. Read only. Never clones."""
+    q = (query or "").strip()
+    if not q:
+        return {"ok": False, "detail": "query required", "query": "", "repos": []}
+    if runner is None and os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        return {
+            "ok": False,
+            "detail": "CREW_LIVE_PROBES=0",
+            "query": q,
+            "repos": [],
+        }
+    run = runner or _run
+    cap = max(1, min(int(limit or 8), 20))
+    argv = [
+        "gh",
+        "search",
+        "repos",
+        q,
+        "--limit",
+        str(cap),
+        "--json",
+        "name,url,description,fullName",
+    ]
+    try:
+        result = run(argv, timeout=GH_WAIT_S)
+    except FileNotFoundError:
+        return {"ok": False, "detail": "gh not installed", "query": q, "repos": []}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False,
+            "detail": type(exc).__name__,
+            "query": q,
+            "repos": [],
+        }
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "detail": (result.stderr or result.stdout or "gh failed")[:200],
+            "query": q,
+            "repos": [],
+        }
+    try:
+        rows = json.loads(result.stdout or "[]")
+    except ValueError:
+        return {"ok": False, "detail": "invalid json", "query": q, "repos": []}
+    repos: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        repos.append(
+            {
+                "name": row.get("name") or "",
+                "full_name": row.get("fullName") or "",
+                "url": row.get("url") or "",
+                "description": row.get("description") or "",
+            }
+        )
+    return {
+        "ok": bool(repos),
+        "query": q,
+        "repos": repos,
+        "law": "Search then fetch. Do not guess the owner. Do not clone every repo.",
     }

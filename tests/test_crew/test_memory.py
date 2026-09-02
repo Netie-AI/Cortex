@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from CortexOS.crew.memory import (
+    INDEX_PROMPT_MAX_CHARS,
     CrewMemory,
     CrewMemoryError,
     memory_for,
@@ -188,6 +189,26 @@ def test_the_index_file_tracks_remember_and_forget(mem: CrewMemory) -> None:
     # the index is rebuilt from the files, so a deleted index cannot desync
     (mem.root / "INDEX.md").unlink()
     assert "crew-port" in mem.index()
+
+
+def test_prompt_index_shows_names_not_bodies_and_wraps_them(mem: CrewMemory) -> None:
+    """The live roster must not dump stored bodies into the system prompt."""
+    empty = mem.prompt_index()
+    assert "Memory: none yet" in empty
+    assert BEGIN not in empty
+
+    mem.remember(
+        "deploy-window",
+        "when the ops team allows a deploy",
+        "SECRET-BODY-DO-NOT-PROMPT Tuesdays 09:00-11:00 MYT only.",
+    )
+    shown = mem.prompt_index()
+    assert is_wrapped(shown)
+    assert BEGIN in shown and END in shown
+    assert "deploy-window" in shown
+    assert "when the ops team allows a deploy" in shown
+    assert "SECRET-BODY-DO-NOT-PROMPT" not in shown
+    assert INDEX_PROMPT_MAX_CHARS >= 80
 
 
 def test_memory_for_mirrors_the_workspace_jail_layout(tmp_path: Path) -> None:

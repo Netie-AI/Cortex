@@ -4,11 +4,12 @@
   Cortex Crew as a desktop window (Edge --app), not a browser tab.
 
   Starts the crew server on :8020 if needed, then opens a frameless app window.
-  Computer control stays off. Model calls go through OpenVault on :5000.
+  Computer control ON (CORTEX_COMPUTER_CONTROL=1). Mutating tools still Confirm.
+  Model calls go through OpenVault on :5000. Engine default :8011.
 #>
 param(
     [int]$Port = 8020,
-    [string]$EngineUrl = "http://127.0.0.1:8010"
+    [string]$EngineUrl = "http://127.0.0.1:8011"
 )
 
 $ErrorActionPreference = "Continue"
@@ -27,16 +28,37 @@ function HttpOk([string]$Url) {
     } catch { return $false }
 }
 
+function PortHeld([int]$P) {
+    $c = $null
+    try {
+        $c = New-Object System.Net.Sockets.TcpClient
+        $iar = $c.BeginConnect("127.0.0.1", $P, $null, $null)
+        $ok = $iar.AsyncWaitHandle.WaitOne(400, $false)
+        if (-not $ok) { return $false }
+        $c.EndConnect($iar)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($c) { $c.Close() }
+    }
+}
+
 if (-not (HttpOk "http://127.0.0.1:$Port/crew/health")) {
-    $py = "D:\Cortex\.venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) { $py = "python" }
-    Start-Process -FilePath $py -ArgumentList @(
-        "-m", "uvicorn", "CortexOS.crew.server:create_app", "--factory",
-        "--host", "127.0.0.1", "--port", "$Port"
-    ) -WorkingDirectory $Root -WindowStyle Minimized
-    $until = (Get-Date).AddSeconds(20)
-    while (-not (HttpOk "http://127.0.0.1:$Port/crew/health") -and (Get-Date) -lt $until) {
-        Start-Sleep -Milliseconds 400
+    if (PortHeld $Port) {
+        Write-Host "Port $Port is held but /crew/health unread. Stop that process yourself (R-0015). Then re-run scripts\start_crew.ps1 from E:\Cortex." -ForegroundColor Yellow
+    } else {
+        $py = Join-Path $Root ".venv\Scripts\python.exe"
+        if (-not (Test-Path $py)) { $py = "D:\Cortex\.venv\Scripts\python.exe" }
+        if (-not (Test-Path $py)) { $py = "python" }
+        Start-Process -FilePath $py -ArgumentList @(
+            "-m", "uvicorn", "CortexOS.crew.server:create_app", "--factory",
+            "--host", "127.0.0.1", "--port", "$Port"
+        ) -WorkingDirectory $Root -WindowStyle Minimized
+        $until = (Get-Date).AddSeconds(20)
+        while (-not (HttpOk "http://127.0.0.1:$Port/crew/health") -and (Get-Date) -lt $until) {
+            Start-Sleep -Milliseconds 400
+        }
     }
 }
 

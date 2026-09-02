@@ -26,7 +26,7 @@ def test_normalize_preset_defaults():
 
 def test_catalog_has_moe_presets():
     ids = {p["id"] for p in catalog()}
-    assert {"dag", "sequential", "langgraph", "minimal", "rag", "memory", "computer_control"} <= ids
+    assert {"dag", "sequential", "langgraph", "minimal", "agent", "rag", "memory", "computer_control"} <= ids
 
 
 def test_resolve_runner_requires_openvault_gate():

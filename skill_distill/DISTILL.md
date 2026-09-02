@@ -7,7 +7,7 @@
 | Root | `skill_distill/` |
 | Policy | Capture → Normalize → Learn → Promote (rules/skills/subagents) → Parking-lot if deferred |
 | Owners | Netie engine (Cortex) builders |
-| Last process | 2026-08-27T14:41:30Z (1 capture(s) ingested) |
+| Last process | 2026-08-28T06:51:42Z (1 capture(s) ingested) |
 
 ---
 
@@ -117,6 +117,7 @@ Use this when starting a full distill sprint. Check boxes only after a capture e
 - [x] What to copy vs what to invert (governance-first)
 - [x] Parking-lot vs build-now
 - [x] Test / Playwright / stress gate required?
+- [x] Legal OSS agent stacks (OpenManus / OpenWorker / rakazo) _(2026-08-28 — `captures/2026-08-28_oss_openmanus-openworker-rakazo.md`)_
 
 ---
 

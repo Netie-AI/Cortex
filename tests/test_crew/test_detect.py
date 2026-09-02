@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from CortexOS.crew.detect import attached_skills, match_capabilities, plan, render
+from CortexOS.crew.detect import (
+    attached_skills,
+    match_capabilities,
+    plan,
+    playbooks,
+    render,
+    slash_skill,
+    wave_plan,
+)
 from CortexOS.crew.llm import LLMResult, ToolCall
 from CortexOS.crew.runtime import CrewRuntime
 from CortexOS.crew.store import CrewStore
@@ -72,6 +80,18 @@ def test_detect_fixtures_open_source_shapes(text, pattern, caps, spawn) -> None:
     assert match_capabilities(text) == got.capabilities or set(caps) <= set(got.capabilities)
 
 
+def test_empty_plan_is_idle_not_single_agent() -> None:
+    got = plan("")
+    assert got.pattern == "idle"
+    assert got.spawn is False
+    assert got.capabilities == ()
+    assert plan("   ").pattern == "idle"
+    blob = got.as_dict()
+    assert blob["pattern"] == "idle"
+    assert blob["spawn"] is False
+    assert blob["capabilities"] == []
+
+
 def test_linkedin_and_seo_detect() -> None:
     li = plan("help me go to linkedin connect a few people politely")
     assert "Marketing" in li.capabilities
@@ -89,6 +109,51 @@ def test_linkedin_and_seo_detect() -> None:
     text = render(got)
     assert "Default skills (auto-copied on spawn):" in text
     assert "outreach" in text
+    assert "Matching playbooks are inlined below" in text
+    payload = got.as_dict()
+    assert payload["load_skill_now"] is True
+    assert "outreach" in payload["skills"]
+
+
+def test_playbooks_inline_the_matching_body(tmp_path) -> None:
+    from CortexOS.crew.board import ensure_skill_packs
+
+    folder = tmp_path / "skills"
+    ensure_skill_packs(folder)
+    text = playbooks(("outreach",), folder)
+    assert "[playbook: outreach]" in text
+    assert "Jian Hong" in text
+    missing = playbooks(("no-such-skill",), folder)
+    assert "Not inlined; load_skill: no-such-skill" in missing
+
+
+def test_slash_skill_is_a_leading_name_not_a_path() -> None:
+    assert slash_skill("/outreach draft a factory note") == "outreach"
+    assert slash_skill("/tone") == "tone"
+    assert slash_skill("/crew/health") is None
+    assert slash_skill("//outreach") is None
+    assert slash_skill("please /outreach later") is None
+
+
+def test_wave_plan_inlines_independent_caps_together() -> None:
+    assert wave_plan(("PRD",)) == ""
+    text = wave_plan(("PRD", "Ticket", "Gate"))
+    assert "plan:" in text
+    assert "nothing was spawned" in text
+    assert "wave 0" in text
+    assert "PRD" in text and "Ticket" in text and "Gate" in text
+
+
+@pytest.mark.asyncio
+async def test_slash_invoke_inlines_that_playbook(rig) -> None:
+    space = rig.store.create_space("Slash")
+    rig.llm.manager.append(LLMResult(text="Following the tone playbook: ASCII only."))
+    await rig.runtime.on_user_message(space["id"], "/tone say hi")
+    await wait_run_done(rig.runtime, space["id"])
+    roster = str(rig.llm.calls[0]["messages"][1]["content"])
+    assert "Operator invoked /tone" in roster
+    assert "[playbook: tone]" in roster
+    assert "Grok-bot" in roster or "ASCII" in roster
 
 
 def test_feedback_and_auth_detect() -> None:
@@ -98,6 +163,35 @@ def test_feedback_and_auth_detect() -> None:
     auth = plan("who authorised the website modifications")
     assert "Email" in auth.capabilities
     assert "feedback-learn" in attached_skills(auth.capabilities)
+
+
+def test_add_named_skill_detects_ingest_without_the_word_design() -> None:
+    got = plan("Add impeccable skill into skill storage")
+    assert "Skills" in got.capabilities
+    assert got.spawn is True
+    skills = attached_skills(got.capabilities)
+    assert "skill-ingest" in skills
+    text = render(got)
+    assert "skill-ingest" in text
+
+
+def test_make_a_website_detects_surface_analog_without_saying_design() -> None:
+    got = plan("make a website like https://www.igloo.inc/")
+    assert "Surface" in got.capabilities
+    assert "analog-surface" in attached_skills(got.capabilities)
+    clone = plan("clone https://www.igloo.inc/")
+    assert "Surface" in clone.capabilities
+
+
+def test_3d_landing_promotes_surface_verify_not_boxes() -> None:
+    got = plan(
+        "generate a 3d asset website landing page to promote cortex-crew. "
+        "verify it is not boxes or pasted images."
+    )
+    assert "Surface" in got.capabilities
+    assert got.verify is True
+    assert got.pattern == "generator_verifier"
+    assert "analog-surface" in attached_skills(got.capabilities)
 
 
 @pytest.mark.asyncio
@@ -115,6 +209,20 @@ async def test_pong_does_not_spawn_teammate(rig) -> None:
     roster = rig.llm.calls[0]["messages"][1]["content"]
     assert "Do not call spawn_agent" in roster
     assert "Spawn the " not in roster
+
+
+@pytest.mark.asyncio
+async def test_multi_capability_turn_inlines_a_wave_plan(rig) -> None:
+    space = rig.store.create_space("Waves")
+    rig.llm.manager.append(LLMResult(text="PRD then tickets then gate, in that wave."))
+    await rig.runtime.on_user_message(
+        space["id"], "write the PRD then tickets then gate this against invariants"
+    )
+    await wait_run_done(rig.runtime, space["id"])
+    roster = str(rig.llm.calls[0]["messages"][1]["content"])
+    assert "[waves]" in roster
+    assert "wave 0" in roster
+    assert "nothing was spawned" in roster
 
 
 @pytest.mark.asyncio
@@ -184,6 +292,15 @@ async def test_marketing_spawn_copies_outreach_skill(rig) -> None:
     assert "outreach" in stored
     assert "chat-human" in stored
     assert "computer-reach" in stored
+    manager_prompt = "\n".join(
+        str(m.get("content") or "")
+        for c in rig.llm.calls
+        if str(c["messages"][0]["content"]).startswith("You are the Manager")
+        for m in c["messages"]
+    )
+    assert "[playbook: outreach]" in manager_prompt
+    assert "Jian Hong" in manager_prompt
+    assert "Matching playbooks are inlined below" in manager_prompt
 
 
 @pytest.mark.asyncio

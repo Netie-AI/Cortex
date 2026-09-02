@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from CortexOS.crew.config import CrewSettings, load_settings, resolve_providers
@@ -27,6 +27,8 @@ from CortexOS.crew.keys import status as keys_status
 from CortexOS.crew.mcp_client import MCPManager
 from CortexOS.crew.runtime import CrewRuntime
 from CortexOS.crew.store import CrewStore
+
+PEER_HEALTH_WAIT_S = 1.0
 
 SSE_KEEPALIVE_S = 25
 SSE_BREAK = '\n\n'
@@ -69,10 +71,16 @@ class CrewApp:
         self.runtime = CrewRuntime(
             self.store, self.bus, self.settings, self.mcp, self.bridge, llm_chat=llm_chat
         )
+        from CortexOS.crew.wakes import WakeStore
+
+        self.wakes = WakeStore(self.settings.data_dir / "wakes.json")
+        self.runtime.wakes = self.wakes
+        self._wake_task: asyncio.Task[None] | None = None
 
     async def startup(self) -> None:
         from CortexOS.crew.openvault import (
             disable_seeded_cortex_primary,
+            disable_unusable_custom_keys,
             ingest_cursor_from_files,
             push_env_keys,
         )
@@ -80,18 +88,185 @@ class CrewApp:
         ingest_cursor_from_files(self.settings.data_dir.parent.parent)
         push_env_keys()
         disable_seeded_cortex_primary()
+        disable_unusable_custom_keys()
         from CortexOS.crew.board import ensure_skill_packs
 
         ensure_skill_packs(self.settings.data_dir / "skills")
         await self.mcp.start_armed()
+        self.runtime.recover_stranded()
         # Armed servers do not stay resident. The reaper suspends one once it
         # goes quiet; the next approved tool call starts it again.
         self.mcp.start_reaper()
+        self._wake_task = asyncio.create_task(self._wake_loop())
+
+    async def _wake_loop(self) -> None:
+        """Fire due timer wakes as transcript turns. HITL floors still apply."""
+        while True:
+            await asyncio.sleep(5)
+            try:
+                await self.fire_due_wakes()
+                self.fire_stalls()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                continue
+
+    async def fire_due_wakes(self) -> list[dict[str, Any]]:
+        fired: list[dict[str, Any]] = []
+        for wake in self.wakes.due():
+            row = self.wakes.mark_fired(wake.id)
+            if row is None:
+                continue
+            fired.append(row.as_dict())
+            if self.store.get_space(wake.space_id) is None:
+                continue
+            note = "[wake] " + (wake.note or wake.kind)
+            await self.runtime.on_user_message(wake.space_id, note)
+        return fired
+
+    def fire_stalls(self) -> list[dict[str, Any]]:
+        """Seq-age stalls on teammates only. Idle mail is a wake, not a kill."""
+        from CortexOS.crew.stall import detect_stalls
+
+        cut: list[dict[str, Any]] = []
+        for hit in detect_stalls(self.store, after_s=self.settings.llm_timeout_s):
+            if self.runtime.cut_stalled_teammate(hit):
+                cut.append(hit)
+                self.wakes.fire_event("stall")
+                space_id = hit.get("space_id")
+                if space_id:
+                    self.wakes.fire_event("stall:" + str(space_id))
+        for space in self.store.list_spaces():
+            run_id = self.runtime._space_run.get(space["id"])
+            ctx = self.runtime._runs.get(run_id) if run_id else None
+            if ctx is None:
+                continue
+            for agent in self.store.list_agents(space["id"]):
+                if agent.get("name") == "Manager":
+                    continue
+                if agent.get("status") != "idle":
+                    continue
+                if self.runtime.switch.mailbox(agent["id"]).empty():
+                    continue
+                self.runtime._wake_if_idle(ctx, agent)
+        return cut
+
+    def belt_payload(self, cortex: dict[str, Any]) -> dict[str, Any]:
+        """Read-only conveyor. Control may GET this. Control must not POST converse."""
+        from CortexOS.crew.belt import snapshot as belt_snapshot
+
+        spaces = self.store.list_spaces()
+        agents: list[dict[str, Any]] = []
+        confirms: list[dict[str, Any]] = []
+        for space in spaces:
+            agents.extend(self.store.list_agents(space["id"]))
+            confirms.extend(self.store.pending_confirms(space["id"]))
+        return belt_snapshot(
+            cortex=cortex,
+            crew={
+                "spaces": [{"id": s["id"], "title": s["title"]} for s in spaces],
+                "agents": [
+                    {
+                        "id": a["id"],
+                        "name": a["name"],
+                        "space_id": a["space_id"],
+                        "status": a["status"],
+                    }
+                    for a in agents
+                ],
+                "wakes": [w.as_dict() for w in self.wakes.list()],
+                "confirms": confirms,
+                "queue": self.runtime.work_queue.counts(),
+            },
+        )
 
     async def shutdown(self) -> None:
+        if self._wake_task is not None:
+            self._wake_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._wake_task
+            self._wake_task = None
         await self.runtime.shutdown()
         await self.mcp.stop_all()
         self.store.close()
+
+
+async def _engine_health(crew: CrewApp, timeout: float = PEER_HEALTH_WAIT_S) -> dict[str, Any]:
+    """Fail-closed. Control's belt probe is 1.5s; this must return sooner."""
+    try:
+        engine = await asyncio.wait_for(crew.bridge.health(), timeout=timeout)
+        if isinstance(engine, dict):
+            return engine
+    except Exception as exc:
+        return {
+            "ok": False,
+            "url": getattr(crew.bridge, "base_url", ""),
+            "detail": type(exc).__name__,
+        }
+    return {"ok": False, "detail": "unread"}
+
+
+def _belt_now(crew: CrewApp) -> dict[str, Any]:
+    """Local conveyor. Control already probes /crew/health for engine_ok."""
+    return crew.belt_payload({"ok": False, "detail": "not probed"})
+
+
+def _drop_roots(crew: CrewApp) -> list:
+    return [
+        crew.settings.data_dir / "imports",
+        crew.settings.data_dir / "drops",
+    ]
+
+
+def _import_status(crew: CrewApp) -> dict[str, Any]:
+    """Drop-zone contract. Idle zero files is none, not unread."""
+    from CortexOS.crew.import_chats import discover_exports
+
+    waiting = discover_exports(_drop_roots(crew))
+    n = len(waiting)
+    return {
+        "ok": True,
+        "drop": "ready",
+        "files_waiting": n,
+        "mail": "POST /crew/import/mail",
+        "ingest": "POST /crew/imports/ingest",
+        "detail": "import none." if n == 0 else f"{n} waiting",
+        "law": "Drop chats or .eml. No import button.",
+    }
+
+
+def _computer_now(crew: CrewApp) -> dict[str, Any]:
+    """Host panel JSON. Failed GET is unread in the UI; this body is live."""
+    rows = crew.mcp.status()
+    if not rows:
+        return {
+            "ok": True,
+            "host": "off",
+            "master": False,
+            "armed": False,
+            "detail": "computer none. MCP catalog empty.",
+        }
+    master = any(bool(r.get("enabled")) for r in rows)
+    uacc = next((r for r in rows if r.get("name") == "uacc"), {})
+    armed = bool(uacc.get("armed")) and master
+    if not master:
+        detail = (
+            "computer disarmed. Master off until CORTEX_COMPUTER_CONTROL=1 restart."
+        )
+        host = "off"
+    elif armed:
+        detail = "computer armed. UACC on. Mutating clicks still wait for Approve."
+        host = "this-pc"
+    else:
+        detail = "computer master on. UACC disarmed."
+        host = "off"
+    return {
+        "ok": True,
+        "host": host,
+        "master": master,
+        "armed": armed,
+        "detail": detail,
+    }
 
 
 class SpacePatch(BaseModel):
@@ -120,6 +295,8 @@ class ComputerIn(BaseModel):
 class SkillIn(BaseModel):
     title: str
     body: str
+    labels: list[str] = []
+    source: str = ""
 
 
 class ImportIn(BaseModel):
@@ -129,6 +306,22 @@ class ImportIn(BaseModel):
 
 class KeysIn(BaseModel):
     keys: dict[str, str | None]
+
+
+class WakeIn(BaseModel):
+    space_id: str
+    fire_at: str
+    note: str = ""
+
+
+class EventWakeIn(BaseModel):
+    space_id: str
+    event_key: str
+    note: str = ""
+
+
+class FireEventIn(BaseModel):
+    event_key: str
 
 
 def build_router(crew: CrewApp) -> APIRouter:
@@ -141,24 +334,93 @@ def build_router(crew: CrewApp) -> APIRouter:
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
         mcp = crew.mcp.status()
+        engine_r, ov_r = await asyncio.gather(
+            _engine_health(crew),
+            asyncio.to_thread(healthz, PEER_HEALTH_WAIT_S),
+            return_exceptions=True,
+        )
+        engine = (
+            engine_r
+            if isinstance(engine_r, dict)
+            else {"ok": False, "detail": type(engine_r).__name__}
+        )
+        ov = (
+            ov_r
+            if isinstance(ov_r, dict)
+            else {"ok": False, "detail": type(ov_r).__name__}
+        )
         return {
             "ok": True,
             "provider": active.public() if active else None,
-            "engine": await crew.bridge.health(),
-            "openvault": healthz(),
+            "engine": engine,
+            "openvault": ov,
             "computer_control": crew.settings.master_computer_control,
             "grok_offloaded": True,
             "grok_autostart": False,
             "mcp": mcp,
+            "queue": crew.runtime.work_queue.counts(),
         }
+
+    @router.get("/belt")
+    async def belt() -> dict[str, Any]:
+        """Same snapshot as GET /v1/belt. Display only. No POST converse.
+
+        Do not ping Cortex here. Control already GETs /crew/health for
+        engine_ok. A hung engine must not make belt miss the 1.5s probe.
+        """
+        return _belt_now(crew)
+
+    @router.get("/wakes")
+    async def list_wakes() -> dict[str, Any]:
+        return {"ok": True, "wakes": [w.as_dict() for w in crew.wakes.list(include_fired=True)]}
+
+    @router.post("/wakes")
+    async def create_wake(body: WakeIn) -> dict[str, Any]:
+        from datetime import datetime, timezone
+
+        if crew.store.get_space(body.space_id) is None:
+            raise HTTPException(404, "unknown space")
+        try:
+            fire = datetime.fromisoformat(body.fire_at)
+        except ValueError as exc:
+            raise HTTPException(400, "fire_at must be ISO-8601") from exc
+        if fire.tzinfo is None:
+            fire = fire.replace(tzinfo=timezone.utc)
+        wake = crew.wakes.add_timer(body.space_id, fire, note=body.note)
+        return {"ok": True, "wake": wake.as_dict()}
+
+    @router.post("/wakes/event")
+    async def create_event_wake(body: EventWakeIn) -> dict[str, Any]:
+        if crew.store.get_space(body.space_id) is None:
+            raise HTTPException(404, "unknown space")
+        key = body.event_key.strip()
+        if not key:
+            raise HTTPException(400, "event_key required")
+        wake = crew.wakes.add_event(body.space_id, key, note=body.note)
+        return {"ok": True, "wake": wake.as_dict()}
+
+    @router.post("/wakes/fire")
+    async def fire_event_wake(body: FireEventIn) -> dict[str, Any]:
+        key = body.event_key.strip()
+        if not key:
+            raise HTTPException(400, "event_key required")
+        crew.wakes.fire_event(key)
+        fired = await crew.fire_due_wakes()
+        return {"ok": True, "fired": fired}
 
     @router.get("/providers")
     async def providers() -> dict[str, Any]:
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
+        from CortexOS.crew.openvault import preferred_ov_model, register_wizard
+
         return {
             "active": active.public() if active else None,
             "chain": [p.public() for p in chain],
+            "engine_url": crew.settings.engine_url,
+            "prefer": preferred_ov_model(probe_vault=False),
+            "register": register_wizard(probe_vault=False),
+            "vault_listing": "skipped",
         }
 
     @router.get("/spaces")
@@ -169,7 +431,7 @@ def build_router(crew: CrewApp) -> APIRouter:
     async def create_space(body: dict[str, Any] | None = None) -> dict[str, Any]:
         title = str((body or {}).get("title") or "New space")
         space = crew.store.create_space(title)
-        crew.runtime.ensure_manager(space["id"])
+        crew.runtime.ensure_roster(space["id"])
         return space
 
     @router.patch("/spaces/{space_id}")
@@ -199,6 +461,12 @@ def build_router(crew: CrewApp) -> APIRouter:
     @router.get("/spaces/{space_id}/agents")
     async def agents(space_id: str) -> list[dict[str, Any]]:
         return crew.store.list_agents(space_id)
+
+    @router.get("/spaces/{space_id}/todos")
+    async def todos(space_id: str) -> list[dict[str, Any]]:
+        if crew.store.get_space(space_id) is None:
+            raise HTTPException(404, "unknown space")
+        return crew.store.list_todos(space_id)
 
     @router.get("/spaces/{space_id}/events")
     async def events(space_id: str, after: int = -1) -> StreamingResponse:
@@ -280,6 +548,23 @@ def build_router(crew: CrewApp) -> APIRouter:
 
         return routine_catalog()
 
+    @router.get("/import")
+    @router.get("/import/mail")
+    async def import_status() -> dict[str, Any]:
+        return _import_status(crew)
+
+    @router.get("/imports")
+    async def import_list() -> dict[str, Any]:
+        from CortexOS.crew.import_chats import discover_exports
+
+        files = discover_exports(_drop_roots(crew))
+        return {
+            "ok": True,
+            "files": files,
+            "count": len(files),
+            "detail": "import none." if not files else f"{len(files)} waiting",
+        }
+
     @router.post("/import")
     async def import_chat(body: ImportIn) -> dict[str, Any]:
         from CortexOS.crew.import_chats import ingest
@@ -287,7 +572,7 @@ def build_router(crew: CrewApp) -> APIRouter:
         if not (body.text or "").strip():
             raise HTTPException(400, "paste exported chat text")
         result = ingest(crew.store, body.title, body.text)
-        crew.runtime.ensure_manager(result["space"]["id"])
+        crew.runtime.ensure_roster(result["space"]["id"])
         return result
 
     @router.post("/import/mail")
@@ -297,12 +582,16 @@ def build_router(crew: CrewApp) -> APIRouter:
         if not (body.text or "").strip():
             raise HTTPException(400, "paste an .eml or the email text")
         result = ingest_mail(crew.store, body.text, body.title)
-        crew.runtime.ensure_manager(result["space"]["id"])
+        crew.runtime.ensure_roster(result["space"]["id"])
         return result
 
     @router.get("/search")
     async def search(q: str = "") -> list[dict[str, Any]]:
         return crew.store.search(q)
+
+    @router.get("/computer")
+    async def computer_status() -> dict[str, Any]:
+        return _computer_now(crew)
 
     @router.post("/computer")
     async def computer_host(body: ComputerIn) -> dict[str, Any]:
@@ -326,12 +615,23 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.post("/skills")
     async def save_skill(body: SkillIn) -> dict[str, Any]:
+        from CortexOS.crew.board import save_skill as write_skill
+
         folder = crew.settings.data_dir / "skills"
-        folder.mkdir(parents=True, exist_ok=True)
-        slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in body.title.strip())[:60]
-        path = folder / f"{slug or 'skill'}.md"
-        path.write_text(body.body, encoding="utf-8")
-        return {"ok": True, "path": str(path), "title": body.title}
+        saved = write_skill(
+            folder,
+            body.title,
+            body.body,
+            labels=body.labels,
+            source=body.source,
+        )
+        return {
+            "ok": True,
+            "path": saved["path"],
+            "title": saved["title"],
+            "labels": saved.get("labels") or "",
+            "source": saved.get("source") or "",
+        }
 
     @router.get("/skills")
     async def get_skills() -> list[dict[str, str]]:
@@ -441,7 +741,11 @@ def create_app(
     app.include_router(build_router(crew))
 
     index = crew.settings.ui_dir / "index.html"
-    stolen = crew.settings.ui_dir / "stolen.css"
+    crew_css = crew.settings.ui_dir / "crew.css"
+
+    @app.get("/v1/belt")
+    async def v1_belt() -> dict[str, Any]:
+        return _belt_now(crew)
 
     @app.get("/")
     async def root() -> Any:
@@ -451,11 +755,25 @@ def create_app(
             {"ok": False, "detail": "UI file missing (CortexOS/crew/ui/index.html)"}, 503
         )
 
+    @app.get("/crew.css")
+    async def crew_sheet() -> Any:
+        if crew_css.is_file():
+            return FileResponse(crew_css, media_type="text/css")
+        return JSONResponse({"ok": False, "detail": "crew.css missing"}, 503)
+
+    @app.get("/favicon.ico")
+    async def favicon() -> Any:
+        return Response(status_code=204)
+
     @app.get("/stolen.css")
     async def stolen_css() -> Any:
-        if stolen.is_file():
-            return FileResponse(stolen, media_type="text/css")
-        return JSONResponse({"ok": False, "detail": "stolen.css missing"}, 503)
+        return JSONResponse(
+            {
+                "ok": False,
+                "detail": "replaced by /crew.css. Guaca leftover removed.",
+            },
+            410,
+        )
 
     return app
 

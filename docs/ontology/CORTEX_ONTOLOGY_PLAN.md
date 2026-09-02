@@ -1,6 +1,25 @@
-# Cortex Ontology Plan — mapping AIP/Foundry concepts onto this codebase
+# Cortex Ontology Plan -- mapping AIP/Foundry concepts onto this codebase
 
-**Status: PLAN ONLY. Nothing in this document is built. Do not present anything below as shipped.**
+**Status (2026-08-28 honesty, R-0011):** O1-O5 and O7 are shipped. STATUS.md
+gate table is SoT. This file is the original design record. Do not present
+O6, O8, or PARKING_LOT P1 (AIP parity) as shipped. Fixing this header is not
+a P1 unpark.
+
+| Phase | Disk truth |
+|---|---|
+| O1 | `packs/dms/ontology/*.yaml` + `registry.py` compile to ops DB `ontology_*` |
+| O2 | `scripts/build_codebase_ontology.py` + `packs/dms/ontology/query.py`. Compiled `data/codebase_ontology.db` is gitignored and rebuilt (tests use a tmp DB). |
+| O3 | F8 `TOOL_CALL` allowlist from `ontology_action_types` |
+| O4 | Canonical `CortexOS/agent_sdk`; DMS shim `packs/dms/agents/sdk.py` |
+| O5 | `/dms/sidecar/*` + AirGPT `dms_query`/`dms_action` |
+| O6 | Not shipped. `agent_sdk/evals.py` is the required gate before O6. No `builder.py`. |
+| O7 | `scripts/new_pack.py` + demo `packs/crm/` |
+| O8 | Not shipped. Parked with PARKING_LOT P6. |
+
+Later sections below still describe the *original proposal* (paths moved: Agent
+SDK is engine-side). Read STATUS.md before treating a "does not exist"
+sentence in this file as current.
+
 Companion doc: `docs/ontology/PALANTIR_AIP_RESEARCH.md` (external research + citations this plan draws from).
 
 Read first if you haven't: `ARCHITECTURE.md`, `CONTEXT.md`, `AGENTS.md`, `STATUS.md`, `PARKING_LOT.md`.

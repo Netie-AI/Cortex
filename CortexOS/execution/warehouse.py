@@ -20,7 +20,18 @@ _RO_CONNECTIONS: dict[str, Any] = {}
 
 
 def warehouse_path(db_path: Path | str | None = None) -> Path:
-    return Path(db_path or DEFAULT_DB)
+    """Resolve the serving warehouse. Re-reads ``DMS_WAREHOUSE_DB`` each call.
+
+    ``DEFAULT_DB`` is an import-time snapshot for callers that monkeypatch the
+    constant. Loaders must go through this function so a test (or a second
+    process) can point writes at a copy without colliding with a live engine.
+    """
+    if db_path is not None:
+        return Path(db_path)
+    env = os.environ.get("DMS_WAREHOUSE_DB")
+    if env:
+        return Path(env)
+    return Path(DEFAULT_DB)
 
 
 def read_only_queries_enabled() -> bool:

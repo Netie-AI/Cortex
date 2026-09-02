@@ -131,3 +131,28 @@ def test_status_reports_mode(lake_home, mode_env):
     assert st["lakehouse_mode"] == lakehouse_mode()
     assert st["time_travel"] == (lakehouse_mode() == "ducklake")
     assert "silver" in st["schemas"] and len(st["schemas"]["silver"]) == 6
+
+
+def test_warehouse_path_honors_env_after_import(tmp_path, monkeypatch):
+    """Live :8011 holds data/dms_demo.duckdb exclusive. Env must win post-import."""
+    from CortexOS.execution import warehouse as w
+
+    isolated = tmp_path / "iso.duckdb"
+    monkeypatch.setenv("DMS_WAREHOUSE_DB", str(isolated))
+    assert w.warehouse_path() == isolated
+    con = w.connect_write()
+    try:
+        con.execute("CREATE TABLE t (id INTEGER)")
+    finally:
+        con.close()
+    assert isolated.exists()
+
+
+def test_migrate_script_does_not_raw_connect():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "lakehouse_migrate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "connect_write" in src
+    assert "duckdb.connect" not in src

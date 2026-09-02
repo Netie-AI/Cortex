@@ -1,5 +1,8 @@
-# Gate F8 — Tool-Call Execution (Sandboxed Actions)
-**Date:** 2026-07-03 | **Branch:** dms-v2 | **Verdict:** not started — blocked on F5 gate + F6 + F7 remainder
+# Gate F8 -- Tool-Call Execution (Sandboxed Actions)
+**Date:** 2026-07-03 | **Branch:** dms-v2 | **Verdict:** not started -- blocked on F5 gate + F6 + F7 remainder
+
+Honesty (DOC-01 / 2026-08-26): there is no in-process WASM isolate. Tool calls
+go through an allowlisted host runner. Production WASM stays PARKING_LOT P2.
 
 ## Scope
 Wire `TOOL_CALL` DAG nodes through a governed execution path: wasm sandbox, compliance pre-check, security guards on params/outputs, actor-scoped output dirs, and F1 ledger audit. First concrete action: **PPT export** (demo-visible, small blast radius).
@@ -20,7 +23,7 @@ Optional **vertical slice** (demo only): stub PPT export behind steward role + l
 |---|---|---|
 | DAG runner (4 node kinds) | `CortexOS/execution/dag_runner.py` | `TOOL_CALL` → `UnsupportedDAGNodeKind` |
 | DSL `tool_name` field | `CortexOS/fabrication/dsl_parser.py` | No executor |
-| WASM sandbox | `CortexOS/execution/wasm_isolate.py` | Not called from DAG runner |
+| WASM sandbox | deleted (DOC-01); do not cite `wasm_isolate` | Not shipped. P2. Host runner only. |
 | Compliance engine | `CortexOS/compliance/engine.py` | Used for `deterministic_rule` + F5 gate only |
 | Security guards | `packs/dms/security/` (`injection_guard`, `pii`, `scam_guard`) | Inbound messages only — not tool params/outputs |
 | Skill capability model | `CortexOS/fabrication/skill_registry.py` | `required_tools`, `required_network` unused by executor |

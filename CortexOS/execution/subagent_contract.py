@@ -87,7 +87,16 @@ def finalize_subagent_output(raw: dict[str, Any] | str) -> dict[str, Any]:
         },
     }
     if isinstance(raw, dict):
-        for key in ("label", "purpose", "phase", "agent", "telemetry", "data"):
+        for key in (
+            "label",
+            "purpose",
+            "phase",
+            "agent",
+            "telemetry",
+            "data",
+            "stop_reason",
+            "quality_passed",
+        ):
             if key in raw:
                 out[key] = raw[key]
     return out

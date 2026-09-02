@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS agents (
     verify_criteria TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     skills TEXT NOT NULL DEFAULT '',
+    worktree_path TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     UNIQUE (space_id, name)
 );
@@ -87,6 +88,11 @@ CREATE TABLE IF NOT EXISTS todos (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_todos_space ON todos (space_id, ord);
+CREATE TABLE IF NOT EXISTS a2a_cursors (
+    agent_id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    last_seq INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -129,6 +135,7 @@ class CrewStore:
             self._db.executescript(_SCHEMA)
             self._migrate_agents()
             self._migrate_spaces()
+            self._migrate_cursors()
             self._db.commit()
 
     def _migrate_agents(self) -> None:
@@ -147,6 +154,7 @@ class CrewStore:
             ("verify_criteria", "TEXT NOT NULL DEFAULT ''"),
             ("model", "TEXT NOT NULL DEFAULT ''"),
             ("skills", "TEXT NOT NULL DEFAULT ''"),
+            ("worktree_path", "TEXT NOT NULL DEFAULT ''"),
         )
         for name, ddl in extras:
             if name not in cols:
@@ -159,6 +167,12 @@ class CrewStore:
             self._db.execute(
                 "ALTER TABLE spaces ADD COLUMN compact_seq INTEGER NOT NULL DEFAULT 0"
             )
+
+    def _migrate_cursors(self) -> None:
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS a2a_cursors ("
+            "agent_id TEXT PRIMARY KEY, space_id TEXT NOT NULL, last_seq INTEGER NOT NULL DEFAULT 0)"
+        )
 
     def close(self) -> None:
         with self._lock:
@@ -349,6 +363,14 @@ class CrewStore:
             self._db.commit()
         return self.get_agent(agent_id)
 
+    def set_worktree_path(self, agent_id: str, path: str) -> dict[str, Any] | None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE agents SET worktree_path = ? WHERE id = ?", (path, agent_id)
+            )
+            self._db.commit()
+        return self.get_agent(agent_id)
+
     # -- messages ----------------------------------------------------------
 
     def add_message(
@@ -366,6 +388,16 @@ class CrewStore:
                 "SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE space_id = ?", (space_id,)
             ).fetchone()
             msg_id = _new_id()
+            agent_name = role
+            if agent_id:
+                arow = self._db.execute(
+                    "SELECT name FROM agents WHERE id = ?", (agent_id,)
+                ).fetchone()
+                if arow is not None:
+                    agent_name = str(arow[0])
+            stamp = {"space": space_id, "role": role, "name": agent_name}
+            merged = dict(meta or {})
+            merged.update(stamp)
             self._db.execute(
                 "INSERT INTO messages (id, space_id, seq, role, agent_id, to_agent_id, content,"
                 " meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -377,7 +409,7 @@ class CrewStore:
                     agent_id,
                     to_agent_id,
                     content,
-                    json.dumps(meta) if meta else None,
+                    json.dumps(merged),
                     _now(),
                 ),
             )
@@ -421,6 +453,49 @@ class CrewStore:
                 "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE space_id = ?", (space_id,)
             ).fetchone()
         return int(row[0])
+
+    def get_a2a_cursor(self, agent_id: str) -> int:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT last_seq FROM a2a_cursors WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def set_a2a_cursor(self, agent_id: str, space_id: str, last_seq: int) -> None:
+        with self._lock:
+            self._db.execute(
+                """INSERT INTO a2a_cursors (agent_id, space_id, last_seq) VALUES (?, ?, ?)
+                   ON CONFLICT(agent_id) DO UPDATE SET
+                     last_seq = CASE WHEN excluded.last_seq > last_seq THEN excluded.last_seq ELSE last_seq END,
+                     space_id = excluded.space_id""",
+                (agent_id, space_id, int(last_seq)),
+            )
+            self._db.commit()
+
+    def inbox_since(self, space_id: str, agent_id: str, after_seq: int) -> list[dict[str, Any]]:
+        """A2A messages addressed to this agent after its consume cursor."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM messages WHERE space_id = ? AND to_agent_id = ? AND role = 'agent' "
+                "AND seq > ? ORDER BY seq ASC",
+                (space_id, agent_id, after_seq),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["meta"] = _loads(d.get("meta"))
+            out.append(d)
+        return out
+
+    def last_authored_at(self, space_id: str, agent_id: str) -> str | None:
+        """Latest transcript stamp this agent wrote (seq age for stall detect)."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT created_at FROM messages WHERE space_id = ? AND agent_id = ? "
+                "ORDER BY seq DESC LIMIT 1",
+                (space_id, agent_id),
+            ).fetchone()
+        return str(row[0]) if row else None
 
     def search(self, query: str, limit: int = 25) -> list[dict[str, Any]]:
         needle = (query or "").strip()
@@ -560,6 +635,19 @@ class CrewStore:
                 )
             self._db.commit()
         return self.get_run(run_id)
+
+    def list_running_runs(self) -> list[dict[str, Any]]:
+        """Rows left ``running`` after a process death. Empty when idle."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM runs WHERE status = 'running' ORDER BY started_at ASC"
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["stats"] = _loads(item.get("stats")) or {}
+            out.append(item)
+        return out
 
     # -- confirms ----------------------------------------------------------
 

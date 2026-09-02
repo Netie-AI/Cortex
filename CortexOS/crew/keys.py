@@ -23,6 +23,7 @@ KNOWN = (
     "GOOGLE_API_KEY",
     "CEREBRAS_API_KEY",
     "MISTRAL_API_KEY",
+    "NVIDIA_API_KEY",
     "CREW_MODEL",
     "CREW_OPENAI_BASE_URL",
     "CREW_CURSOR_BASE_URL",
@@ -118,6 +119,7 @@ def public_fields() -> list[dict[str, str]]:
         {"key": "GOOGLE_API_KEY", "label": "Google AI", "hint": "AIza..."},
         {"key": "CEREBRAS_API_KEY", "label": "Cerebras", "hint": "csk-..."},
         {"key": "MISTRAL_API_KEY", "label": "Mistral", "hint": "vaulted via OpenVault"},
+        {"key": "NVIDIA_API_KEY", "label": "NVIDIA NIM", "hint": "nvapi-... (paste only; OpenAI-compat)"},
         {"key": "XAI_API_KEY", "label": "xAI / Grok", "hint": "xai-..."},
         {"key": "CREW_MODEL", "label": "Explicit model override", "hint": "openrouter/deepseek/deepseek-chat"},
     ]

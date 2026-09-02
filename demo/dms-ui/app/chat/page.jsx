@@ -55,7 +55,7 @@ function VerdictBanner({ verdict, onAcknowledge, busy }) {
           disabled={busy}
           onClick={onAcknowledge}
         >
-          ACKNOWLEDGE &amp; PROCEED
+          Acknowledge and proceed
         </button>
       )}
     </div>
@@ -177,11 +177,11 @@ export default function ChatPage() {
     <AppShell loading={false}>
       <div className="cx-chat-layout">
         <section className="cx-chat-threads">
-          <div className="cx-label" style={{ marginBottom: 12 }}>THREADS</div>
+          <div className="cx-label" style={{ marginBottom: 12 }}>Threads</div>
           <div className="cx-chat-new">
             <input className="cx-input" placeholder="Customer label" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
             <input className="cx-input" placeholder="External ref (optional)" value={newRef} onChange={(e) => setNewRef(e.target.value)} />
-            <button type="button" className="cx-btn cx-btn-primary" disabled={busy} onClick={handleCreateThread}>NEW THREAD</button>
+            <button type="button" className="cx-btn cx-btn-primary" disabled={busy} onClick={handleCreateThread}>New thread</button>
           </div>
           <div className="cx-chat-thread-list">
             {threads.length === 0 ? (
@@ -202,7 +202,7 @@ export default function ChatPage() {
             <p className="cx-muted">Select a thread to view messages.</p>
           ) : (
             <>
-              <div className="cx-label" style={{ marginBottom: 8 }}>{threadLabel(selected).toUpperCase()}</div>
+              <div className="cx-label" style={{ marginBottom: 8 }}>{threadLabel(selected)}</div>
               <div className="cx-chat-messages">
                 {isLoading && messages.length === 0 ? (
                   <p className="cx-muted">Loading messages…</p>
@@ -224,7 +224,7 @@ export default function ChatPage() {
 
               {suggestions.length > 0 && (
                 <div style={{ marginTop: 16 }}>
-                  <div className="cx-label" style={{ marginBottom: 8 }}>SUGGESTED TASKS (F4)</div>
+                  <div className="cx-label" style={{ marginBottom: 8 }}>Suggested tasks</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {suggestions.map((s) => (
                       <button key={s.task_id} type="button" className="cx-btn" disabled={busy} onClick={() => handleChooseTask(s)}>
@@ -240,7 +240,7 @@ export default function ChatPage() {
               <div className="cx-chat-compose">
                 <input className="cx-input" placeholder="Sender" value={sender} onChange={(e) => setSender(e.target.value)} />
                 <textarea className="cx-input cx-chat-textarea" placeholder="Inbound message body" value={body} onChange={(e) => setBody(e.target.value)} rows={3} />
-                <button type="button" className="cx-btn cx-btn-primary" disabled={busy || !body.trim()} onClick={handleSend}>SEND INBOUND</button>
+                <button type="button" className="cx-btn cx-btn-primary" disabled={busy || !body.trim()} onClick={handleSend}>Send inbound</button>
               </div>
             </>
           )}

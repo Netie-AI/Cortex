@@ -131,34 +131,34 @@ export default function ResultGrid({
     <div className="cx-result-grid">
       <div className="cx-grid-source-bar">
         <span>
-          SOURCE <strong>{meta.name}</strong> · {meta.row_count?.toLocaleString()} rows ·{" "}
+          Source <strong>{meta.name}</strong> · {meta.row_count?.toLocaleString()} rows ·{" "}
           {meta.column_count || columns.length} columns ·{" "}
           {queryPlan?.sort ? `sorted by ${queryPlan.sort} · ` : ""}
         </span>
         <button type="button" className="cx-grid-link-btn" onClick={() => setExploreOpen(true)}>
-          EXPLORE →
+          Explore
         </button>
       </div>
 
       <div className="cx-grid-toolbar">
-        <span className="cx-label">RESULT GRID</span>
+        <span className="cx-label">Result grid</span>
         <div className="cx-grid-actions">
           <button
             type="button"
             className={`cx-grid-btn ${editMode ? "active" : ""}`}
             onClick={() => setEditMode((v) => !v)}
           >
-            EDIT ROWS
+            Edit rows
           </button>
           <button
             type="button"
             className={`cx-grid-btn ${pivot ? "active" : ""}`}
             onClick={() => setPivot((v) => !v)}
           >
-            PIVOT
+            Pivot
           </button>
           <button type="button" className="cx-grid-btn" onClick={() => downloadCsv(displayRows, columns, sourceTable)}>
-            DOWNLOAD SORTED CSV
+            Download CSV
           </button>
         </div>
       </div>
@@ -204,20 +204,20 @@ export default function ResultGrid({
 
       {editMode && role.canApprove && (
         <button type="button" className="cx-grid-propose" onClick={handlePropose}>
-          PROPOSE CHANGES →
+          Propose changes
         </button>
       )}
       {editMode && !role.canApprove && (
-        <div className="cx-grid-hint">DATA STEWARD+ required to propose changes.</div>
+        <div className="cx-grid-hint">Steward role required to propose changes.</div>
       )}
       {proposeMsg && <div className="cx-grid-hint">{proposeMsg}</div>}
 
       {exploreOpen && (
         <div className="cx-explore-panel">
           <div className="cx-explore-header">
-            <span className="cx-label">AVAILABLE TABLES</span>
+            <span className="cx-label">Available tables</span>
             <button type="button" className="cx-grid-link-btn" onClick={() => setExploreOpen(false)}>
-              CLOSE
+              Close
             </button>
           </div>
           <div className="cx-explore-list">
@@ -235,24 +235,24 @@ export default function ResultGrid({
                     setSelectedCols([]);
                   }}
                 >
-                  SELECT RANGE
+                  Select range
                 </button>
               </div>
             ))}
           </div>
           {rangeTable && (
             <div className="cx-explore-range">
-              <div className="cx-label">RANGE — {rangeTable}</div>
+              <div className="cx-label">Range — {rangeTable}</div>
               <label>
-                FROM ROW
+                From row
                 <input value={fromRow} onChange={(e) => setFromRow(e.target.value)} />
               </label>
               <label>
-                TO ROW
+                To row
                 <input value={toRow} onChange={(e) => setToRow(e.target.value)} />
               </label>
               <button type="button" className="cx-grid-propose" onClick={loadRange}>
-                LOAD THIS RANGE →
+                Load range
               </button>
             </div>
           )}

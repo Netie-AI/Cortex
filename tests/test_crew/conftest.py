@@ -40,6 +40,7 @@ def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GROQ_API_KEY",
         "GOOGLE_API_KEY",
         "CEREBRAS_API_KEY",
+        "NVIDIA_API_KEY",
         "MISTRAL_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)

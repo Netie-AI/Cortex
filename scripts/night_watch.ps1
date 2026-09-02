@@ -4,10 +4,11 @@
 param([switch]$SkipEstate)
 $ErrorActionPreference = "Continue"
 $Stamp = Get-Date -Format "yyyy-MM-dd HH:mm"
-$Wake = "D:\Cortex-crew\docs\NIGHT_WAKE.md"
-$CrewPy = "D:\Cortex\.venv\Scripts\python.exe"
-$CrewRoot = "D:\Cortex-crew"
-$OvHome = "D:\OpenVault\.openvault"
+$CrewRoot = if (Test-Path "E:\Cortex") { "E:\Cortex" } else { "D:\Cortex" }
+$CrewPy = Join-Path $CrewRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $CrewPy)) { $CrewPy = "python" }
+$Wake = Join-Path $CrewRoot "data\crew\NIGHT_WAKE.md"
+$OvHome = if (Test-Path "E:\OpenVault\.openvault") { "E:\OpenVault\.openvault" } else { "D:\OpenVault\.openvault" }
 $notes = @()
 
 function HttpOk([string]$Url) {
@@ -17,19 +18,40 @@ function HttpOk([string]$Url) {
     } catch { return $false }
 }
 
+function PortHeld([int]$Port) {
+    $c = $null
+    try {
+        $c = New-Object System.Net.Sockets.TcpClient
+        $iar = $c.BeginConnect("127.0.0.1", $Port, $null, $null)
+        $ok = $iar.AsyncWaitHandle.WaitOne(400, $false)
+        if (-not $ok) { return $false }
+        $c.EndConnect($iar)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($c) { $c.Close() }
+    }
+}
+
 $CrewRepos = "Netie-AI/Cortex,Netie-AI/OpenVault,Netie-AI/Pointer,Netie-AI/Space,Netie-AI/dms,jian-hong/AirGPT"
 if (-not (HttpOk "http://127.0.0.1:8020/crew/health")) {
-    $env:CREW_DATA_DIR = "$CrewRoot\data\crew"
-    Remove-Item Env:CORTEX_COMPUTER_CONTROL -ErrorAction SilentlyContinue
-    $env:CREW_ALLOW_OLLAMA = "0"
-    $env:CREW_CURSOR_MODEL = "grok-4.6"
-    $env:CREW_GH_REPOS = $CrewRepos
-    $env:PYTHONPATH = $CrewRoot
-    Start-Process -FilePath $CrewPy -ArgumentList @(
-        "-m", "uvicorn", "CortexOS.crew.server:create_app", "--factory",
-        "--host", "127.0.0.1", "--port", "8020"
-    ) -WorkingDirectory $CrewRoot -WindowStyle Minimized
-    $notes += "started Crew :8020"
+    if (PortHeld 8020) {
+        $notes += "Crew :8020 held but /crew/health unread. Will not start a second process. Founder rebind: YOU step 8."
+    } else {
+        $legacyData = if (Test-Path "E:\Cortex-crew\data\crew") { "E:\Cortex-crew\data\crew" } elseif (Test-Path "D:\Cortex-crew\data\crew") { "D:\Cortex-crew\data\crew" } else { "" }
+        $env:CREW_DATA_DIR = if ($legacyData) { $legacyData } else { Join-Path $CrewRoot "data\crew" }
+        Remove-Item Env:CORTEX_COMPUTER_CONTROL -ErrorAction SilentlyContinue
+        $env:CREW_ALLOW_OLLAMA = "0"
+        $env:CREW_CURSOR_MODEL = "grok-4.6"
+        $env:CREW_GH_REPOS = $CrewRepos
+        $env:PYTHONPATH = $CrewRoot
+        Start-Process -FilePath $CrewPy -ArgumentList @(
+            "-m", "uvicorn", "CortexOS.crew.server:create_app", "--factory",
+            "--host", "127.0.0.1", "--port", "8020"
+        ) -WorkingDirectory $CrewRoot -WindowStyle Minimized
+        $notes += "started Crew :8020"
+    }
 } else {
     $notes += "Crew up"
 }

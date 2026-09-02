@@ -17,7 +17,8 @@ from pathlib import Path
 
 from CortexOS.paths import data_path
 
-DEFAULT_PORT = 8020  # 8010 is the engine, 8765 is reserved for AirGPT.
+DEFAULT_PORT = 8020  # Constructor is :8010; the governed engine is :8011; AirGPT is :8765.
+DEFAULT_ENGINE_URL = "http://127.0.0.1:8011"
 
 
 @dataclass(frozen=True)
@@ -76,7 +77,7 @@ def load_settings() -> CrewSettings:
     apply_saved(data_dir)
     return CrewSettings(
         port=int(os.environ.get("CREW_PORT", str(DEFAULT_PORT))),
-        engine_url=os.environ.get("CREW_ENGINE_URL", "http://127.0.0.1:8010").rstrip("/"),
+        engine_url=os.environ.get("CREW_ENGINE_URL", DEFAULT_ENGINE_URL).rstrip("/"),
         # "demo" is the engine's bound demo session; unbound sessions abstain
         # by design (ANS work), and crew renders that abstention honestly.
         engine_session=os.environ.get("CREW_ENGINE_SESSION", "demo"),
@@ -126,11 +127,10 @@ def resolve_providers() -> list[Provider]:
             configured=bool(explicit),
         )
     )
-    ov_ok = False
-    if env.get("CREW_OPENVAULT", "1") != "0":
-        from CortexOS.crew.openvault import healthz
-
-        ov_ok = bool(healthz().get("ok"))
+    ov_ok = env.get("CREW_OPENVAULT", "1") != "0"
+    # Live vault up/down is GET /crew/health. Do not healthz here: health()
+    # already probes OV in the same request, and GET /providers would stack
+    # a second wait past the UI apiGet 2.5s cap.
     chain.append(
         Provider(
             label="openvault",

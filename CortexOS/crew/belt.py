@@ -12,7 +12,7 @@ from typing import Any
 from CortexOS.crew.board import snapshot as board_snapshot
 
 
-def snapshot(*, cortex: dict[str, Any] | None = None) -> dict[str, Any]:
+def snapshot(*, cortex: dict[str, Any] | None = None, crew: dict[str, Any] | None = None) -> dict[str, Any]:
     board = board_snapshot()
     items: list[dict[str, Any]] = []
     for row in board.get("tickets") or []:
@@ -28,7 +28,8 @@ def snapshot(*, cortex: dict[str, Any] | None = None) -> dict[str, Any]:
                 "url": row.get("owner_pr") or "",
             }
         )
-    return {
+    body: dict[str, Any] = {
+        "ok": True,
         "bus": "github-issues",
         "tickets": {"items": items, "unreachable": []},
         "handoffs": [],
@@ -42,3 +43,10 @@ def snapshot(*, cortex: dict[str, Any] | None = None) -> dict[str, Any]:
         "product": "cortex-crew",
         "law": board.get("law") or "",
     }
+    extra = crew or {}
+    body["spaces"] = extra.get("spaces") or []
+    body["agents"] = extra.get("agents") or []
+    body["wakes"] = extra.get("wakes") or []
+    body["confirms"] = extra.get("confirms") or []
+    body["queue"] = extra.get("queue") or {}
+    return body

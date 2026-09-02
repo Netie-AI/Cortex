@@ -163,3 +163,17 @@ def test_compile_coexists_with_ledger(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert row[0] == 1
+
+
+def test_ontology_plan_header_does_not_claim_nothing_is_built():
+    """R-0011: O1-O4 artifacts exist; the plan must not say the document is unbuilt."""
+    text = (ROOT / "docs" / "ontology" / "CORTEX_ONTOLOGY_PLAN.md").read_text(
+        encoding="utf-8"
+    )
+    head = "\n".join(text.splitlines()[:24])
+    assert "Nothing in this document is built" not in head
+    assert "PLAN ONLY" not in head
+    assert (PACK_DIR / "ontology" / "object_types.yaml").is_file()
+    assert (ROOT / "CortexOS" / "agent_sdk" / "sdk.py").is_file()
+    assert (ROOT / "scripts" / "build_codebase_ontology.py").is_file()
+    assert "O1" in head and "shipped" in head.lower()

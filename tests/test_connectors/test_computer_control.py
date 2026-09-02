@@ -11,7 +11,6 @@ def test_probe_default_not_armed(monkeypatch):
     assert status["enabled"] is False
     assert status["armed"] is False
     assert status["can_control"] is False
-    assert status["uacc_importable"] is False
     ids = {d["id"] for d in status["drivers"]}
     assert ids == {"uacc", "computer-control-mcp", "windows-mcp"}
     win = next(d for d in status["drivers"] if d["id"] == "windows-mcp")

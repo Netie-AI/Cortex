@@ -4,30 +4,36 @@ import { usePathname } from "next/navigation";
 import RoleSwitcher from "./RoleSwitcher";
 
 const PAGE_NAMES = {
-  "/": "QUERY",
-  "/warehouse": "WAREHOUSE",
-  "/data": "DATA",
-  "/audit": "AUDIT",
+  "/": "Query",
+  "/studio": "Studio",
+  "/warehouse": "Warehouse",
+  "/brain": "Brain",
+  "/chat": "Chat",
+  "/data": "Data",
+  "/skills": "Skills",
+  "/audit": "Activity",
 };
 
 export default function TopBar({ indexedRows = "—", apiOnline = true }) {
   const pathname = usePathname();
-  const pageName = PAGE_NAMES[pathname] || "QUERY";
+  const pageName = PAGE_NAMES[pathname] || "Query";
 
   return (
     <header className="cx-topbar">
-      <span className="cx-label">{pageName}</span>
+      <span className="cx-page-title">{pageName}</span>
       <div className="cx-topbar-status">
-        {apiOnline && (
+        {apiOnline ? (
           <>
             <span className="cx-status-connected">
               <span className="cx-status-dot" />
-              CONNECTED · dms_demo.duckdb
+              live · dms_demo.duckdb
             </span>
-            <span className="cx-status-sep">|</span>
-            <span className="cx-status-meta">{indexedRows} ROWS INDEXED</span>
-            <span className="cx-status-sep">|</span>
+            <span className="cx-status-sep">·</span>
+            <span className="cx-status-meta">{indexedRows} rows</span>
+            <span className="cx-status-sep">·</span>
           </>
+        ) : (
+          <span className="cx-status-meta">engine down</span>
         )}
         <RoleSwitcher />
       </div>

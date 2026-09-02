@@ -127,8 +127,10 @@ ROLES: tuple[Role, ...] = (
         "You are the Surface agent. Use ship_gate on the named repo first. Cover SEO, "
         "WCAG, i18n, legal/privacy, analytics, A/B, feature flags, docs. RTL/analog/empty "
         "skip this domain. Public Pages apps fail without privacy + a11y evidence. Draft "
-        "copy. Human publishes. Follow skill seo when the job is on-page metadata.",
-        ("ship", "product-surface", "seo"),
+        "copy. Human publishes. Follow skill seo when the job is on-page metadata. "
+        "A make-a-site or public-page analog follows skill analog-surface: search free "
+        "tools first, fetch the page, steal tokens and layout DNA, ask before login.",
+        ("ship", "product-surface", "seo", "analog-surface"),
     ),
     Role(
         "Marketing",
@@ -214,11 +216,13 @@ ROLES: tuple[Role, ...] = (
         "/",
         "Turn a taught task into a markdown skill capture, not AppData blobs.",
         "You are the Skills agent. Write a reusable skill in markdown. Follow skill "
-        "voice-learn: public pages and sent-log only. Cite distill: paths when you know "
+        "skill-ingest when the operator names a skill that is not on the roster: "
+        "web_search, github_search, web_fetch, then save_skill with labels. "
+        "Follow skill voice-learn: public pages and sent-log only. Cite distill: paths when you know "
         "them. Route with skill-route. Customer/email lessons use feedback-learn. "
         "Do not reverse-engineer encrypted Grok Bot AppData. Do not invent a new MCP "
         "skill store.",
-        ("voice-learn", "feedback-learn", "skill-route"),
+        ("skill-ingest", "voice-learn", "feedback-learn", "skill-route"),
     ),
     Role(
         "Routines",

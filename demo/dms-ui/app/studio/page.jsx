@@ -16,7 +16,11 @@ import {
   syncWarehouseFromSilver,
 } from "../../lib/api";
 
-const TABS = ["CATALOG", "INGEST", "PIPELINES"];
+const TABS = [
+  { id: "CATALOG", label: "Catalog" },
+  { id: "INGEST", label: "Ingest" },
+  { id: "PIPELINES", label: "Pipelines" },
+];
 
 export default function StudioPage() {
   const { role } = useRole();
@@ -151,7 +155,7 @@ export default function StudioPage() {
     <AppShell>
       <div style={{ padding: "1.25rem 1.5rem", maxWidth: 1200 }}>
         <header style={{ marginBottom: "1rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.4rem", letterSpacing: "0.04em" }}>DATA STUDIO</h1>
+          <h1 style={{ margin: 0, fontSize: "1.4rem" }}>Data studio</h1>
           <p style={{ margin: "0.35rem 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
             Medallion lakehouse — bronze (swamp) → silver → gold. Mode:{" "}
             <strong>{status?.lakehouse_mode || "…"}</strong>
@@ -162,38 +166,22 @@ export default function StudioPage() {
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
           {TABS.map((t) => (
             <button
-              key={t}
+              key={t.id}
               type="button"
-              onClick={() => setTab(t)}
-              style={{
-                padding: "0.4rem 0.85rem",
-                border: tab === t ? "1px solid #6efbcb" : "1px solid rgba(255,255,255,0.15)",
-                background: tab === t ? "rgba(110,251,203,0.12)" : "transparent",
-                color: "inherit",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                letterSpacing: "0.06em",
-                fontSize: "0.75rem",
-              }}
+              className={`cx-toggle-btn${tab === t.id ? " active" : ""}`}
+              onClick={() => setTab(t.id)}
             >
-              {t}
+              {t.label}
             </button>
           ))}
           <button
             type="button"
+            className="cx-entry-btn"
             onClick={onSyncWarehouse}
             disabled={busy}
-            style={{
-              marginLeft: "auto",
-              padding: "0.4rem 0.85rem",
-              border: "1px solid rgba(255,255,255,0.2)",
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-              fontSize: "0.75rem",
-            }}
+            style={{ marginLeft: "auto" }}
           >
-            SYNC → Q2 WAREHOUSE
+            Sync to Q2 warehouse
           </button>
         </div>
 
@@ -217,7 +205,7 @@ export default function StudioPage() {
         {tab === "CATALOG" && (
           <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: "1rem" }}>
             <div>
-              <label style={{ fontSize: "0.7rem", opacity: 0.7 }}>SCHEMA</label>
+              <label className="cx-label">Schema</label>
               <select
                 value={schema}
                 onChange={(e) => {
@@ -232,7 +220,7 @@ export default function StudioPage() {
                   </option>
                 ))}
               </select>
-              <div style={{ fontSize: "0.7rem", opacity: 0.7, marginBottom: "0.35rem" }}>TABLES</div>
+              <div className="cx-label" style={{ marginBottom: "0.35rem" }}>Tables</div>
               <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                 {schemaTables.map((name) => (
                   <li key={name}>
@@ -335,14 +323,14 @@ export default function StudioPage() {
         {tab === "PIPELINES" && (
           <div>
             <p style={{ fontSize: "0.85rem", opacity: 0.8 }}>
-              Promote bronze → silver. Then SYNC → Q2 WAREHOUSE so `/dms/query` sees silver.
+              Promote bronze → silver. Then sync to Q2 warehouse so `/dms/query` sees silver.
             </p>
             <ul style={{ listStyle: "none", padding: 0 }}>
               {pipelines.map((id) => (
                 <li key={id} style={{ marginBottom: "0.5rem" }}>
                   <code>{id}</code>{" "}
-                  <button type="button" disabled={busy} onClick={() => onRunPipeline(id)}>
-                    RUN
+                  <button type="button" className="cx-entry-btn" disabled={busy} onClick={() => onRunPipeline(id)}>
+                    Run
                   </button>
                 </li>
               ))}

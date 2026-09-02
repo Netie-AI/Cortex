@@ -49,6 +49,7 @@ class SkillEntry:
     description: str
     path: Path
     rel: str
+    labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,7 @@ class SkillIndex:
         if not self.entries:
             head = "Skills: none indexed."
             return _with_errors(head, self.parse_errors, limit)
-        lines = [f"- {e.name}: {e.description or '(no description)'}" for e in self.entries]
+        lines = [_roster_line(e) for e in self.entries]
         header = f"Skills ({len(lines)}) - load_skill(name) pulls one body:"
         kept: list[str] = []
         used = len(header)
@@ -147,7 +148,7 @@ def build_index(root: Path) -> SkillIndex:
     for path in _candidates(base):
         rel = path.relative_to(base).as_posix()
         try:
-            name, description = _parse(path, base)
+            name, description, labels = _parse(path, base)
         except _Malformed as exc:
             errors.append(f"{rel}: {exc}")
             continue
@@ -156,7 +157,9 @@ def build_index(root: Path) -> SkillIndex:
             errors.append(f"{rel}: duplicate skill name '{name}' (already from {seen[key]})")
             continue
         seen[key] = rel
-        entries.append(SkillEntry(name=name, description=description, path=path, rel=rel))
+        entries.append(
+            SkillEntry(name=name, description=description, path=path, rel=rel, labels=labels)
+        )
     entries.sort(key=lambda e: (_key(e.name), e.rel))
     return SkillIndex(root=base, entries=tuple(entries), parse_errors=tuple(errors))
 
@@ -212,7 +215,7 @@ def _candidates(base: Path) -> list[Path]:
     return found
 
 
-def _parse(path: Path, base: Path) -> tuple[str, str]:
+def _parse(path: Path, base: Path) -> tuple[str, str, tuple[str, ...]]:
     resolved = path.resolve()
     try:
         resolved.relative_to(base)
@@ -232,15 +235,17 @@ def _parse(path: Path, base: Path) -> tuple[str, str]:
         raise _Malformed("empty file")
     lines = text.splitlines()
     name = _default_name(path, base)
+    labels: tuple[str, ...] = ()
     if lines and lines[0].strip() == "---":
         meta, body = _frontmatter(lines)
         declared = _clean_name(meta.get("name", ""))
         if declared:
             name = declared
         description = _clean(meta.get("description", "")) or _lead(body)
+        labels = _parse_labels(meta.get("labels", ""))
     else:
         description = _lead(lines)
-    return name, description
+    return name, description, labels
 
 
 def _frontmatter(lines: list[str]) -> tuple[dict[str, str], list[str]]:
@@ -268,6 +273,26 @@ def _clean(value: str) -> str:
     if len(flat) > DESCRIPTION_MAX_CHARS:
         return flat[: DESCRIPTION_MAX_CHARS - 3].rstrip() + "..."
     return flat
+
+
+def _parse_labels(value: str) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in (value or "").replace(";", ",").split(","):
+        slug = " ".join(part.split()).strip().lower().replace(" ", "-")
+        slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in slug).strip("-_")
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        out.append(slug[:40])
+        if len(out) >= 8:
+            break
+    return tuple(out)
+
+
+def _roster_line(entry: SkillEntry) -> str:
+    tag = f" [{', '.join(entry.labels)}]" if entry.labels else ""
+    return f"- {entry.name}{tag}: {entry.description or '(no description)'}"
 
 
 def _clean_name(value: str) -> str:

@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
+from CortexOS.constructor_graph import (
+    ConstructorGraphError,
+    compile_constructor_graph,
+    describe_constructor_node,
+    generate_constructor_graph,
+)
 from packs.dms.security.rate_limit import reset_limiter
 
 SAMPLE = {
@@ -54,6 +59,34 @@ def test_compile_sample_has_exactly_one_emit():
 
     emits = [n for n in program.nodes if n.type == NodeType.EMIT]
     assert len(emits) == 1
+
+
+def test_generate_inventory_pptx_is_foundry_path():
+    graph = generate_constructor_graph("export inventory and suppliers as pptx")
+    assert graph["ok"] is True
+    assert graph["pattern"] == "orchestrator_subagent"
+    kinds = [n["kind"] for n in graph["nodes"]]
+    assert kinds[:5] == ["connector", "ontology", "insight", "foundry", "app"]
+    assert kinds[-1] == "tool_call"
+    assert graph["nodes"][0]["object_type"] == "inventory"
+    assert graph["nodes"][1]["object_type"] == "suppliers"
+    assert graph["edges"][0] == {"from": "g1", "to": "g2"}
+    compile_constructor_graph(graph)
+
+
+def test_generate_verify_is_generator_verifier():
+    graph = generate_constructor_graph("verify supplier risk")
+    assert graph["pattern"] == "generator_verifier"
+    assert [n["kind"] for n in graph["nodes"]] == ["connector", "hypothesize", "audit"]
+    assert graph["nodes"][0]["object_type"] == "suppliers"
+
+
+def test_describe_decision_layer_marks_emit():
+    graph = generate_constructor_graph("create a foundry app from inventory")
+    layer = describe_constructor_node(graph, "g5")
+    assert layer["is_emit"] is True
+    assert layer["cortex_kind"] == "EMIT"
+    assert layer["constructor_kind"] == "app"
 
 
 def test_compile_rejects_unknown_kind():
@@ -121,6 +154,8 @@ def test_login_open_constructor_redirects_without_key(dms_client):
     assert "OpenVault" in login.text
     assert "DMS_API_KEYS" in login.text
     assert "Generate OpenVault key" in login.text
+    assert "restart the openmw console" in login.text
+    assert "second listener" in login.text
     bare = dms_client.get("/cortex/constructor/", follow_redirects=False)
     assert bare.status_code == 303
     assert "/cortex/login" in bare.headers["location"]
@@ -169,6 +204,49 @@ def test_ghost_compiles_with_viewer_key(dms_client, api_keys_env):
     assert len(body["nodes"]) == 4
 
 
+def test_ghost_401_without_key(dms_client):
+    res = dms_client.post("/cortex/constructor/ghost", json=SAMPLE)
+    assert res.status_code == 401
+
+
+def test_ghost_does_not_call_run_dag_or_fetch(dms_client, api_keys_env, monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("ghost dry-run must not fetch or run_dag")
+
+    monkeypatch.setattr("packs.dms.constructor_fetch.fetch_slice", boom)
+    monkeypatch.setattr("netie.execution.dag_runner.run_dag", boom)
+    res = dms_client.post(
+        "/cortex/constructor/ghost",
+        json=SAMPLE,
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ghost"] is True
+    assert "fetches" not in body
+    assert "run_id" not in body
+
+
+def test_skin_ghost_honesty_does_not_claim_live_on_404():
+    from CortexOS.paths import constructor_skin_dir
+
+    skin = constructor_skin_dir()
+    engine = (skin / "engine.js").read_text(encoding="utf-8")
+    readme = (skin / "README.md").read_text(encoding="utf-8")
+    assert "if (!res.ok)" in engine
+    assert "status: res.status" in engine
+    assert "ok: false" in engine
+    assert "remote && remote.ok" in engine
+    assert "Cortex ghost compile ok" in engine
+    assert "Cortex ghost blocked" in engine
+    assert "No internal fallback" in engine
+    assert "not an n8n clone" in engine.lower()
+    assert "app.netie.ai/cortex" in readme
+    assert "404" in readme
+    assert "do not claim live" in readme.lower()
+    assert "do not clone n8n" in readme.lower()
+
+
 def test_recommend_returns_three_live_patterns(dms_client, api_keys_env):
     res = dms_client.post(
         "/cortex/constructor/recommend",
@@ -208,6 +286,33 @@ def test_compile_foundry_path_emits_the_app():
 
     emits = [n for n in program.nodes if n.type == NodeType.EMIT]
     assert [n.id for n in emits] == ["a1"]
+
+
+def test_generate_route_compiles_chat(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/constructor/generate",
+        json={"prompt": "export inventory as pptx"},
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert len(body["nodes"]) >= 5
+    assert body["edges"]
+
+
+def test_decision_route_exposes_cortex_layer(dms_client, api_keys_env):
+    graph = generate_constructor_graph("export inventory as pptx")
+    res = dms_client.post(
+        "/cortex/constructor/decision",
+        json={"node_id": "g5", "nodes": graph["nodes"], "edges": graph["edges"]},
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["is_emit"] is True
+    assert body["recommendation"]["pattern"]
 
 
 def test_recommend_foundry_picks_orchestrator(dms_client, api_keys_env):
@@ -321,8 +426,29 @@ def test_issue_key_503_tells_hyperlift_to_set_keys(dms_client, monkeypatch):
         "CortexOS.integrations.openvault_client.post_json",
         lambda *a, **k: None,
     )
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.ping",
+        lambda **k: False,
+    )
     res = dms_client.post("/cortex/constructor/issue-key", json={})
     assert res.status_code == 503
+    assert "DMS_API_KEYS" in res.text
+    assert "Restart the openmw console" not in res.text
+
+
+def test_issue_key_503_when_openvault_up_says_restart(dms_client, monkeypatch):
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.ping",
+        lambda **k: True,
+    )
+    res = dms_client.post("/cortex/constructor/issue-key", json={})
+    assert res.status_code == 503
+    assert "Restart the openmw console" in res.text
+    assert "second listener" in res.text
     assert "DMS_API_KEYS" in res.text
 
 

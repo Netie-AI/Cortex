@@ -5,7 +5,7 @@ Three **independent** version lines. Never assume any two are equal.
 | Line | Where | Current | Tracks |
 |------|--------|---------|--------|
 | **Engine** | `CortexOS.__version__`, root `pyproject.toml` | `2.5.0` | G-gates (G2.5 → 2.5.x) |
-| **Contract** | `packages/cortex_contract/version.py` + `packages/cortex_contract/pyproject.toml` | `1.1.0` | DMS↔engine wire (`contract/openapi-<ver>.json`) |
+| **Contract** | `packages/cortex_contract/version.py` + `packages/cortex_contract/pyproject.toml` | `1.2.0` | DMS↔engine wire (`contract/openapi-<ver>.json`) |
 | **Git tag / Docker** | `v*` tags → `cortex:${VERSION}-core` / `-full` | cut from engine when shipping | Release artifacts |
 
 `scripts/check_versions.py` asserts contract `version.py` matches the packaged contract version and scans for code that couples engine ↔ contract versions.

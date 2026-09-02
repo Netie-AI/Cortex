@@ -8,17 +8,17 @@ import { formatTimestamp } from "../../lib/profile";
 
 const ACCESS_POLICY = [
   {
-    role: "ANALYST",
+    role: "Analyst",
     access: "Query + View",
     note: "Read-only. No data modification.",
   },
   {
-    role: "DATA STEWARD",
+    role: "Data steward",
     access: "Query + View + Edit",
     note: "Can approve changes and new entries.",
   },
   {
-    role: "ADMIN",
+    role: "Admin",
     access: "Full Access",
     note: "jianhong@netie.ai",
   },
@@ -51,14 +51,14 @@ export default function AuditPage() {
     <AppShell loading={isLoading}>
       <div className="cx-result-section" style={{ marginBottom: 24 }}>
         <div className="cx-label" style={{ marginBottom: 12 }}>
-          DATA ACCESS POLICY
+          Access policy
         </div>
         <table className="cx-audit-table cx-policy-table">
           <thead>
             <tr>
-              <th>ROLE</th>
-              <th>ACCESS</th>
-              <th>NOTES</th>
+              <th>Role</th>
+              <th>Access</th>
+              <th>Notes</th>
             </tr>
           </thead>
           <tbody>
@@ -78,18 +78,18 @@ export default function AuditPage() {
 
       {entries.length === 0 && !isLoading ? (
         <div className="cx-empty-state">
-          <div className="cx-empty-title">NO QUERIES YET</div>
+          <div className="cx-empty-title">No queries yet</div>
           <div className="cx-empty-desc">Run a query from the Query page to begin.</div>
         </div>
       ) : (
         <table className="cx-audit-table">
           <thead>
             <tr>
-              <th>TIME</th>
-              <th>QUERY</th>
-              <th>TYPE</th>
-              <th>STATUS</th>
-              <th>ROWS</th>
+              <th>Time</th>
+              <th>Query</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Rows</th>
               <th>MS</th>
             </tr>
           </thead>
@@ -110,7 +110,7 @@ export default function AuditPage() {
                     <td>{truncate(entryQuery(e))}</td>
                     <td>{entryType(e)}</td>
                     <td className={e.passed ? "status-pass" : "status-blocked"}>
-                      {e.passed ? "PASS" : "BLOCKED"}
+                      {e.passed ? "Pass" : "Blocked"}
                     </td>
                     <td>{e.row_count ?? "—"}</td>
                     <td>—</td>
@@ -119,13 +119,13 @@ export default function AuditPage() {
                     <tr className="cx-audit-expand">
                       <td colSpan={6}>
                         <div className="cx-label" style={{ marginBottom: 8 }}>
-                          FULL SQL
+                          Full SQL
                         </div>
                         <pre>{e.original_sql || e.safe_sql || "—"}</pre>
                         {e.safe_sql && e.safe_sql !== e.original_sql && (
                           <>
                             <div className="cx-label" style={{ margin: "12px 0 8px" }}>
-                              SAFE SQL
+                              Safe SQL
                             </div>
                             <pre>{e.safe_sql}</pre>
                           </>
@@ -133,7 +133,7 @@ export default function AuditPage() {
                         {!e.passed && e.violations?.length > 0 && (
                           <>
                             <div className="cx-label" style={{ margin: "12px 0 8px" }}>
-                              VIOLATIONS
+                              Violations
                             </div>
                             <pre style={{ color: "var(--cx-red)" }}>
                               {e.violations.join(", ")}

@@ -18,10 +18,10 @@ export default function RoleSwitcher() {
 
   const display =
     role.id === "ANALYST"
-      ? "DEMO ANALYST"
+      ? "Analyst"
       : role.id === "STEWARD"
-        ? "DATA STEWARD"
-        : "ADMIN";
+        ? "Steward"
+        : "Admin";
 
   return (
     <div className="cx-role-switcher" ref={ref}>
@@ -30,7 +30,7 @@ export default function RoleSwitcher() {
         className="cx-role-trigger"
         onClick={() => setOpen((o) => !o)}
       >
-        [{display} ▾]
+        {display}
       </button>
       {open && (
         <div className="cx-role-menu">

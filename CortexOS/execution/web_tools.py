@@ -29,6 +29,11 @@ _WS = re.compile(r"[ \t\r\f\v]+")
 _BLANKS = re.compile(r"\n{3,}")
 _RESULT_A = re.compile(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
 _RESULT_SNIPPET = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.DOTALL)
+_LITE_A = re.compile(r"<a\b([^>]*)>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+_LITE_SNIPPET = re.compile(
+    r"class=['\"]result-snippet['\"][^>]*>(.*?)</td>",
+    re.IGNORECASE | re.DOTALL,
+)
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
@@ -56,11 +61,40 @@ def _unwrap_ddg(href: str) -> str:
     return urllib.parse.unquote(target[0]) if target else href
 
 
+def parse_lite_results(html: str, *, max_results: int = 6) -> list[dict[str, str]]:
+    """Parse duckduckgo.com/lite HTML. The /html endpoint now serves an empty shell."""
+    snippets = [_text_of(s)[:600] for s in _LITE_SNIPPET.findall(html or "")]
+    out: list[dict[str, str]] = []
+    idx = 0
+    for attrs, inner in _LITE_A.findall(html or ""):
+        if "result-link" not in attrs:
+            continue
+        href_m = re.search(r"href=['\"]([^'\"]+)['\"]", attrs, re.IGNORECASE)
+        if not href_m:
+            continue
+        href = unescape(href_m.group(1))
+        if href.startswith("//"):
+            href = "https:" + href
+        elif href.startswith("/"):
+            href = "https://lite.duckduckgo.com" + href
+        out.append(
+            {
+                "title": _text_of(inner)[:160],
+                "url": _unwrap_ddg(href),
+                "snippet": snippets[idx] if idx < len(snippets) else "",
+            }
+        )
+        idx += 1
+        if len(out) >= max_results:
+            break
+    return out
+
+
 def search(query: str, *, max_results: int = 6) -> dict[str, Any]:
     """Web search → ``{"ok", "query", "results": [{title, url, snippet}]}``.
 
     The Instant Answer API is tried first because it is stable and cheap, then
-    the HTML endpoint, which is what actually returns ranked links.
+    html.duckduckgo.com (often an empty shell now), then lite.duckduckgo.com.
     """
     q = (query or "").strip()
     if not q:
@@ -109,6 +143,17 @@ def search(query: str, *, max_results: int = 6) -> dict[str, Any]:
                         "snippet": snippets[idx] if idx < len(snippets) else "",
                     }
                 )
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+            pass
+
+    if len(results) < max_results:
+        try:
+            url = "https://lite.duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": q})
+            html = _get(url).decode("utf-8", errors="ignore")
+            for row in parse_lite_results(html, max_results=max_results):
+                if len(results) >= max_results:
+                    break
+                results.append(row)
         except (urllib.error.URLError, OSError, ValueError, TimeoutError):
             pass
 

@@ -43,7 +43,9 @@ function Test-EngineHealthy {
     # autostart try to double-bind the port.
     for ($i = 0; $i -lt $Attempts; $i++) {
         try {
-            $r = Invoke-WebRequest -Uri "$Url/health" -UseBasicParsing -TimeoutSec 5
+            # Constructor-only FastAPI also serves GET /health 200.
+            # The real engine is GET /api/engine/specs.
+            $r = Invoke-WebRequest -Uri "$Url/api/engine/specs" -UseBasicParsing -TimeoutSec 5
             if ($r.StatusCode -eq 200) { return $true }
         } catch {
             Start-Sleep -Milliseconds 500

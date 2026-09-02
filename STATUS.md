@@ -1,5 +1,27 @@
 # STATUS.md
-**Last updated:** 2026-08-27 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scale/settle (F40 class, contract 1.2.0, recon)
+**Last updated:** 2026-09-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** docs honesty; LOOP/SEC re-verified
+
+> **2026-09-03 (docs honesty + lakehouse env):** Re-ran LOOP-01/02 + SEC-01
+> (11 passed). Live `:8011` `/health` 200 (not hung); `/api/engine/specs`
+> 401 without viewer key. Recon #9 honesty gated. `warehouse_path` re-reads
+> `DMS_WAREHOUSE_DB` so L0 migrate does not exclusive-lock the live warehouse.
+
+> **2026-08-28 (SEC-01 closed):** Different-run 27 passed including
+> `test_sec01_dms_query_route_governed.py`. POST `/dms/query` envelope
+> PathNotAllowed. LOOP-01/02 + EPIC-016 already closed.
+
+
+> **2026-08-28 (LOOP-02 live):** Dummy OV bearer 401s. AGENT_TASK uses
+> `OpenVaultAdapter` + native tool_calls + DDG lite. Live POST `:8011`
+> `stop_reason=quality` after `web_search`. AirGPT `:8766` SSE same.
+
+> **2026-08-28 (LOOP-02 / #91):** POST `/api/engine/run` `architecture_preset=agent`
+> runs AGENT_TASK + independent verifier. AirGPT consumes it on agent run.
+
+> **2026-08-28 (F13 / AirGPT F53):** Legal OSS distill OpenManus+OpenWorker+rakazo
+> (P19). AGENT_TASK now stops on independent quality (`quality_criteria` +
+> `_quality_verify`) or names `max_steps`. Jailbreaks/leaks not ingested.
+> AirGPT `/api/agents/:id/run` now consumes this HTTP loop.
 
 > **2026-08-27 (recon rank + wave 1):** Claude Code `cortex-recon-decompose`
 > surveyed 70 items (43 startable); rank died on session limit and was filled
@@ -72,7 +94,8 @@
 > C2: `answer_engine` does not import `packs.dms.generative`; L2 goes through
 > `CortexOS.dms.l2_generation.attempt_l2`. `.importlinter` C2 KEPT.
 
-**Last updated:** 2026-07-29 (historical block below — the header at the top of this file is current) | **Then-active:** Pointer demo A0–A3 done · DMS Studio + lake→Q2 sync · `NEXT_LANES.md`
+## Historical log (2026-07-29 and earlier -- not current)
+**Then-active:** Pointer demo A0-A3 done · DMS Studio + lake->Q2 sync · `NEXT_LANES.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. **Always leave next prompts in `docs/dms/packets/NEXT_LANES.md`.**
 
 > **2026-07-29 (Pointer demo + DMS Excel-swamp week):**
@@ -500,21 +523,21 @@
 
 ## Test baseline
 ```
-pytest -q  (count lives in the last gate log, not this file; local RLS skips without DSN)
-python -m scripts.secrets_scan  → 0 findings
-CI: Test + Secrets Scan + RLS Proof → success
+pytest -q  baseline >=330 (count lives in the last gate log; RLS skips without DSN)
+python -m scripts.secrets_scan  -> 0 findings
+CI: Test + Secrets Scan + RLS Proof -> success
 ```
 
 ## Next three moves
-1. **Claude:** G2.3 open-set recognizer — paste from `docs/dms/packets/NEXT_LANES.md` / `CURSOR_TO_CLAUDE_G2_3_OSR_2026-07-27.md`
-2. **Cursor:** optional CDP Seek learning loop; app deep-link from `propose`
-3. After G2.3: G2.4 telemetry (held) or owner re-pick
+1. Other-branch recon (do not land here): p22 SDK `enforce_manifest`, adv-bench negatives, answer-path gates
+2. Other-repo: Netie-KB index date, Pointer #29 HUD, OpenVault #38/#39, DMS OpenAPI pin
+3. Founder-blocked stay parked: #12 #13 #17 #18 #42. PRs #4 #41 #43 #44 #70 #71 held
 
 ## Handoff
+- **Map:** `docs/ACTIVE.md`
 - **Final goal (north-star): `docs/strategy/CORTEX_FINAL_GOAL.md`**
 - **G2 enterprise loop plan: `docs/strategy/ENTERPRISE_GEN_CFSM_LOOP_PLAN.md`** (P21)
 - **Always-continue prompts: `docs/dms/packets/NEXT_LANES.md`**
-- **Claude build-now: `docs/dms/packets/CURSOR_TO_CLAUDE_G2_3_OSR_2026-07-27.md`**
 - Truth map: `docs/dms/TRUTH_GROUND_MAP.md`
 - Research: `docs/research/findings/P0_INDEX.md`
 - Context engineering: `docs/CONTEXT_ENGINEERING.md`

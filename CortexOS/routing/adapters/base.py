@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -9,6 +10,7 @@ class AdapterRequest:
     prompt: str
     max_tokens: int = 1000
     stream: bool = False
+    tools: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)

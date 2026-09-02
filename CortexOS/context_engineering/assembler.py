@@ -22,6 +22,9 @@ class ContextRequest:
     state: str = ""
     messages: Sequence[str] = field(default_factory=tuple)
     token_budget: int = 4096
+    valid_at: str | None = None
+    invalid_at: str | None = None
+    invalidated_layers: Sequence[str] = field(default_factory=tuple)
     system_altitude: str = (
         "Be specific enough to guide behavior; avoid brittle if-else rules and "
         "vague guidance that assumes unstated shared context."
@@ -42,6 +45,46 @@ class AssembledContext:
         return self.system, self.user_context
 
 
+_INFERRED_LAYER_IDS = frozenset({"memory", "retrieval"})
+
+
+def _as_of_live(as_of: str | None, invalid_at: str | None) -> bool:
+    """Graphiti analog: a fact is live at as_of when invalid_at is unset or later.
+
+    ISO-8601 Zulu strings compare lexicographically. No Neo4j. Ledger stays SoT.
+    """
+    if not invalid_at:
+        return True
+    if not as_of:
+        return False
+    return as_of < invalid_at
+
+
+def _invalidated_inferred(req: ContextRequest) -> set[str]:
+    explicit = {str(x).strip() for x in (req.invalidated_layers or ()) if str(x).strip()}
+    if explicit:
+        return {x for x in explicit if x in _INFERRED_LAYER_IDS}
+    if _as_of_live(req.valid_at, req.invalid_at):
+        return set()
+    dropped: set[str] = set()
+    if (req.memory or "").strip():
+        dropped.add("memory")
+    if (req.retrieval or "").strip():
+        dropped.add("retrieval")
+    return dropped
+
+
+def _episode_meta(req: ContextRequest, drop: set[str]) -> dict[str, Any]:
+    episode: dict[str, Any] = {}
+    if req.valid_at:
+        episode["valid_at"] = req.valid_at
+    if req.invalid_at:
+        episode["invalid_at"] = req.invalid_at
+    if drop:
+        episode["invalidated"] = sorted(drop)
+    return episode
+
+
 def assemble_context(req: ContextRequest) -> AssembledContext:
     """
     Build system + user context blocks under a shared token budget.
@@ -60,6 +103,10 @@ def assemble_context(req: ContextRequest) -> AssembledContext:
             truncated.append(lid.value)
         return fitted
 
+    drop = _invalidated_inferred(req)
+    memory_text = "" if "memory" in drop else req.memory
+    retrieval_text = "" if "retrieval" in drop else req.retrieval
+
     # Messages get compaction before hard trim.
     msg_blocks = [m for m in (req.messages or []) if (m or "").strip()]
     msg_budget = budgets.get(LayerId.MESSAGES, 0)
@@ -72,8 +119,8 @@ def assemble_context(req: ContextRequest) -> AssembledContext:
         ContextLayer(LayerId.TOOLS, _fit(LayerId.TOOLS, req.tools), priority=90),
         ContextLayer(LayerId.EXAMPLES, _fit(LayerId.EXAMPLES, req.examples), priority=70),
         ContextLayer(LayerId.STATE, _fit(LayerId.STATE, req.state), priority=60),
-        ContextLayer(LayerId.MEMORY, _fit(LayerId.MEMORY, req.memory), priority=50),
-        ContextLayer(LayerId.RETRIEVAL, _fit(LayerId.RETRIEVAL, req.retrieval), priority=40),
+        ContextLayer(LayerId.MEMORY, _fit(LayerId.MEMORY, memory_text), priority=50),
+        ContextLayer(LayerId.RETRIEVAL, _fit(LayerId.RETRIEVAL, retrieval_text), priority=40),
         ContextLayer(LayerId.MESSAGES, _fit(LayerId.MESSAGES, messages_text), priority=30),
     ]
 
@@ -91,6 +138,19 @@ def assemble_context(req: ContextRequest) -> AssembledContext:
 
     layer_map = {ly.id.value: ly.text for ly in layers if not ly.empty}
     total = estimate_tokens(system) + estimate_tokens(user_context)
+
+    extracted = {
+        LayerId.INSTRUCTIONS.value,
+        LayerId.TOOLS.value,
+        LayerId.EXAMPLES.value,
+        LayerId.STATE.value,
+        LayerId.MESSAGES.value,
+    }
+    inferred = {LayerId.MEMORY.value, LayerId.RETRIEVAL.value}
+    layer_confidence = {
+        lid: ("EXTRACTED" if lid in extracted else "INFERRED" if lid in inferred else "AMBIGUOUS")
+        for lid in layer_map
+    }
 
     # Final guard: if still over budget, reseed messages from summary.
     if total > req.token_budget and msg_blocks:
@@ -115,5 +175,7 @@ def assemble_context(req: ContextRequest) -> AssembledContext:
             "budget": req.token_budget,
             "layer_budgets": {k.value: v for k, v in budgets.items()},
             "render_order": [x.value for x in RENDER_ORDER],
+            "layer_confidence": layer_confidence,
+            "episode": _episode_meta(req, drop),
         },
     )

@@ -87,6 +87,22 @@ class SessionManifestRegistry:
             else:
                 self._by_session.pop(session_id, None)
 
+    def bound_summary(self, *, now: datetime | None = None) -> dict[str, int | list[dict[str, str]]]:
+        """Identifiers only. A GET must not leak manifest bytes or table lists."""
+        when = now or _now()
+        sessions: list[dict[str, str]] = []
+        with self._lock:
+            for session_id, binding in self._by_session.items():
+                if binding.expires_at <= when:
+                    continue
+                sessions.append(
+                    {
+                        "session_id": session_id,
+                        "expires_at": binding.expires_at.isoformat(),
+                    }
+                )
+        return {"bound": len(sessions), "sessions": sessions}
+
 
 _REGISTRY = SessionManifestRegistry()
 

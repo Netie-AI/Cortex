@@ -1,6 +1,7 @@
 from netie.routing.adapters.anthropic import AnthropicAdapter
 from netie.routing.adapters.base import AdapterRequest, AdapterResponse, LLMAdapter
 from netie.routing.adapters.openai import OpenAIAdapter
+from netie.routing.adapters.openvault import OpenVaultAdapter
 from netie.routing.adapters.vllm import SelfHostedAdapter
 
 __all__ = [
@@ -9,6 +10,7 @@ __all__ = [
     "LLMAdapter",
     "AnthropicAdapter",
     "OpenAIAdapter",
+    "OpenVaultAdapter",
     "SelfHostedAdapter",
 ]
 

@@ -162,7 +162,7 @@ export default function WarehousePage() {
     <AppShell title="WAREHOUSE">
       <div className="cx-warehouse-grid">
         <section className="cx-panel">
-          <p className="cx-label">LOCATION TREE</p>
+          <p className="cx-label">Location tree</p>
           {isLoading ? <p className="cx-muted">Loading…</p> : null}
           {!tree.length && !isLoading ? (
             <p className="cx-muted cx-mono">No locations — seed via API or FDE setup.</p>
@@ -178,7 +178,7 @@ export default function WarehousePage() {
         </section>
 
         <section className="cx-panel">
-          <p className="cx-label">BIN DETAIL</p>
+          <p className="cx-label">Bin detail</p>
           {selected ? (
             <>
               <div className="cx-mono cx-warehouse-meta">
@@ -190,7 +190,7 @@ export default function WarehousePage() {
                 rel="noreferrer"
                 className="cx-btn-secondary"
               >
-                PRINT QR LABEL (PNG)
+                Print QR label
               </a>
               <ul className="cx-warehouse-items">
                 {selectedItems.map((it) => (
@@ -204,7 +204,7 @@ export default function WarehousePage() {
               </ul>
               {spaceInfo ? (
                 <div className="cx-mono cx-warehouse-meta" style={{ marginTop: "12px" }}>
-                  CAP {spaceInfo.capacity_volume ?? "—"} · OCC {spaceInfo.occupied_volume} · FREE{" "}
+                  Cap {spaceInfo.capacity_volume ?? "—"} · occ {spaceInfo.occupied_volume} · free{" "}
                   {spaceInfo.free_volume ?? "—"} {spaceInfo.unit}
                 </div>
               ) : null}
@@ -215,7 +215,7 @@ export default function WarehousePage() {
         </section>
 
         <section className="cx-panel">
-          <p className="cx-label">INTAKE (PHOTO)</p>
+          <p className="cx-label">Intake (photo)</p>
           <form onSubmit={handleIntake} className="cx-warehouse-form">
             <input
               className="cx-input cx-mono"
@@ -245,14 +245,14 @@ export default function WarehousePage() {
               onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
             />
             <button type="submit" className="cx-btn-primary" disabled={busy}>
-              RECORD INTAKE
+              Record intake
             </button>
           </form>
 
           {pendingItem ? (
             <>
               <p className="cx-label" style={{ marginTop: "24px" }}>
-                CONFIRM DIMENSIONS — {pendingItem.sku}
+                Confirm dimensions — {pendingItem.sku}
               </p>
               <form onSubmit={handleConfirmDims} className="cx-warehouse-form">
                 <input
@@ -277,14 +277,14 @@ export default function WarehousePage() {
                   required
                 />
                 <button type="submit" className="cx-btn-secondary" disabled={busy}>
-                  CONFIRM AS FACT
+                  Confirm as fact
                 </button>
               </form>
             </>
           ) : null}
 
           <p className="cx-label" style={{ marginTop: "24px" }}>
-            SCAN TO MOVE
+            Scan to move
           </p>
           <form onSubmit={handleScanMove} className="cx-warehouse-form">
             <input
@@ -302,7 +302,7 @@ export default function WarehousePage() {
               required
             />
             <button type="submit" className="cx-btn-secondary" disabled={busy}>
-              RECORD MOVE
+              Record move
             </button>
           </form>
           {status ? <p className="cx-mono cx-warehouse-status">{status}</p> : null}

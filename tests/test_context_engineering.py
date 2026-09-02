@@ -40,6 +40,69 @@ def test_assemble_layers_and_tags():
     assert "<tool_guidance>" in out.system
     assert out.token_estimate > 0
     assert "memory" in out.layers or "state" in out.layers
+    assert out.meta["layer_confidence"]["instructions"] == "EXTRACTED"
+    assert out.meta["layer_confidence"]["memory"] == "INFERRED"
+    assert out.meta["layer_confidence"]["retrieval"] == "INFERRED"
+    assert out.meta["episode"] == {}
+
+
+def test_assemble_episode_valid_at():
+    out = assemble_context(
+        ContextRequest(
+            instructions="Stay inside the grant.",
+            memory="Tuesday count.",
+            token_budget=800,
+            valid_at="2026-08-28T11:54:00Z",
+        )
+    )
+    assert out.meta["episode"]["valid_at"] == "2026-08-28T11:54:00Z"
+    assert out.meta["layer_confidence"]["instructions"] == "EXTRACTED"
+    assert "memory" in out.layers
+    assert "invalidated" not in out.meta["episode"]
+
+
+def test_assemble_invalid_at_drops_inferred_after_close():
+    closed = assemble_context(
+        ContextRequest(
+            instructions="Stay inside the grant.",
+            memory="Tuesday count.",
+            retrieval="item_id=SKU-1",
+            token_budget=800,
+            valid_at="2026-08-28T12:00:00Z",
+            invalid_at="2026-08-28T11:00:00Z",
+        )
+    )
+    assert "memory" not in closed.layers
+    assert "retrieval" not in closed.layers
+    assert "Tuesday count" not in closed.user_context
+    assert closed.meta["episode"]["invalidated"] == ["memory", "retrieval"]
+    assert "instructions" in closed.layers
+
+    before = assemble_context(
+        ContextRequest(
+            instructions="Stay inside the grant.",
+            memory="Tuesday count.",
+            token_budget=800,
+            valid_at="2026-08-28T10:00:00Z",
+            invalid_at="2026-08-28T11:00:00Z",
+        )
+    )
+    assert "memory" in before.layers
+    assert "invalidated" not in before.meta["episode"]
+
+
+def test_assemble_invalidated_layers_cannot_drop_extracted():
+    out = assemble_context(
+        ContextRequest(
+            instructions="Stay inside the grant.",
+            memory="Tuesday count.",
+            token_budget=800,
+            invalidated_layers=("memory", "instructions"),
+        )
+    )
+    assert "memory" not in out.layers
+    assert "instructions" in out.layers
+    assert out.meta["episode"]["invalidated"] == ["memory"]
 
 
 def test_clear_stale_tool_results_keeps_tail():

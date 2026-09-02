@@ -61,6 +61,8 @@ class AgentTaskTelemetry:
     tier: str = ""
     cost_myr: float = 0.0
     error: str = ""
+    stop_reason: str = ""
+    quality_passed: bool | None = None
 
     @property
     def tokens(self) -> int:
@@ -84,6 +86,8 @@ class AgentTaskTelemetry:
             "tier": self.tier,
             "cost_myr": round(self.cost_myr, 6),
             "error": self.error,
+            "stop_reason": self.stop_reason,
+            "quality_passed": self.quality_passed,
         }
 
 
@@ -91,6 +95,12 @@ def default_broker(name: str, params: dict) -> dict:
     """Cortex's own tools. Web tools are built in; everything else goes through
     the governed F8 runner so an agent cannot reach an unregistered action."""
     from CortexOS.execution import web_tools
+
+    params = dict(params or {})
+    if name == "web_search" and not str(params.get("query") or "").strip():
+        params["query"] = str(params.pop("q", None) or params.pop("search", None) or params.pop("term", None) or "")
+    if name == "web_fetch" and not str(params.get("url") or "").strip():
+        params["url"] = str(params.pop("uri", None) or params.pop("link", None) or "")
 
     fn = web_tools.WEB_TOOLS.get(name)
     if fn is not None:
@@ -110,6 +120,52 @@ def default_broker(name: str, params: dict) -> dict:
         return {"ok": False, "error": str(exc), "verdict": exc.verdict}
 
 
+_OPENAI_TOOL_SPECS: dict[str, dict[str, Any]] = {
+    "web_search": {
+        "description": "Search the web. Returns ranked title, url, snippet.",
+        "properties": {
+            "query": {"type": "string"},
+            "max_results": {"type": "integer"},
+        },
+        "required": ["query"],
+    },
+    "web_fetch": {
+        "description": "Fetch one http(s) URL and return readable text.",
+        "properties": {
+            "url": {"type": "string"},
+            "max_chars": {"type": "integer"},
+        },
+        "required": ["url"],
+    },
+}
+
+
+def openai_tools(names: list[str]) -> list[dict[str, Any]]:
+    """OpenAI-style tool schemas for OpenVault / chat.completions."""
+    out: list[dict[str, Any]] = []
+    for name in names:
+        spec = _OPENAI_TOOL_SPECS.get(name) or {
+            "description": name,
+            "properties": {},
+            "required": [],
+        }
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": spec["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": spec["properties"],
+                        "required": spec["required"],
+                    },
+                },
+            }
+        )
+    return out
+
+
 def _tool_instructions(tools: list[str]) -> str:
     if not tools:
         return ""
@@ -121,11 +177,47 @@ def _tool_instructions(tools: list[str]) -> str:
         if schema["name"] in tools:
             lines.append(f"  {schema['name']}: {schema['description']} params={schema['params']}")
     lines.append(
-        'To call one, reply with ONLY this JSON: {"tool":"NAME","params":{...}}\n'
+        'Prefer a native tool call. Else reply with ONLY this JSON: {"tool":"NAME","params":{...}}\n'
         "You will get the result and may call another. When you are finished, "
         "reply with your answer as plain text and no JSON."
     )
     return "\n".join(lines)
+
+
+def _quality_criteria(ann: Mapping[str, Any]) -> list[str]:
+    raw = ann.get("quality_criteria")
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(c).strip() for c in raw if str(c).strip()]
+
+
+async def _independent_quality_check(
+    content: str,
+    criteria: list[str],
+    context: Any,
+    *,
+    step: int,
+):
+    """Grade a final answer with a verifier that is not the generator (R-0003 / F20b).
+
+    Callers bind ``context["_quality_verify"]``. No bound verifier is a fail-closed
+    refuse, never a rubber-stamp pass. The callable may be sync or async.
+    """
+    from CortexOS.execution.generator_verifier import parse_verifier_payload
+
+    verify = context.get("_quality_verify") if hasattr(context, "get") else None
+    if not callable(verify):
+        return parse_verifier_payload(
+            {
+                "passed": False,
+                "feedback": "no independent verifier bound; refusing rubber-stamp",
+            },
+            criteria=criteria,
+        )
+    raw = verify(content, criteria, step)
+    if hasattr(raw, "__await__"):
+        raw = await raw
+    return parse_verifier_payload(raw, criteria=criteria)
 
 
 def _parse_tool_call(text: str, allowed: list[str]) -> dict | None:
@@ -162,6 +254,37 @@ def _parse_tool_call(text: str, allowed: list[str]) -> dict | None:
                         return {"tool": tool, "params": params if isinstance(params, dict) else {}}
                     break
         start = text.find("{", start + 1)
+    return None
+
+
+def native_tool_call(raw: Any, allowed: list[str]) -> dict | None:
+    """First OpenAI-style tool_call on a chat.completions payload, if allowed."""
+    if not isinstance(raw, dict) or not allowed:
+        return None
+    choices = raw.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return None
+    message = choices[0].get("message") or {}
+    if not isinstance(message, dict):
+        return None
+    for tc in message.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name") or "")
+        if name not in allowed:
+            continue
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except json.JSONDecodeError:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        return {"tool": name, "params": args}
     return None
 
 
@@ -249,6 +372,10 @@ async def run_agent_task(
 
     transcript: list[str] = []
     content = ""
+    stop_reason = "max_steps"
+    quality_passed: bool | None = None
+    ended_on_tool = False
+    tool_fingerprints: list[str] = []
     wf_ceiling = (
         workflow_cost_ceiling_myr if math.isfinite(workflow_cost_ceiling_myr) else 1e9
     )
@@ -281,6 +408,7 @@ async def run_agent_task(
             system=system,
             prompt=prompt,
             max_tokens=node.max_tokens if node.max_tokens is not None else 1400,
+            tools=openai_tools(tools) if tools else None,
         )
         try:
             outcome = await invoke_routed_completion(
@@ -295,6 +423,7 @@ async def run_agent_task(
             )
         except Exception as exc:  # cost ceiling, adapter failure, provider down
             telemetry.error = str(exc)[:300]
+            stop_reason = "error"
             break
 
         resp = outcome.response
@@ -316,9 +445,41 @@ async def run_agent_task(
                 }
             )
 
-        call = _parse_tool_call(content, tools) if tools else None
+        call = None
+        if tools:
+            call = native_tool_call(resp.raw, tools) or _parse_tool_call(content, tools)
         if call is None:
-            break
+            ended_on_tool = False
+            criteria = _quality_criteria(ann)
+            if not criteria:
+                stop_reason = "final"
+                break
+            verdict = await _independent_quality_check(
+                content, criteria, context, step=telemetry.steps
+            )
+            if verdict.passed and not verdict.early_victory_risk:
+                stop_reason = "quality"
+                quality_passed = True
+                break
+            if telemetry.steps >= max_steps:
+                stop_reason = "max_steps"
+                quality_passed = False
+                break
+            transcript.append(
+                "Verifier rejected the answer (independent of the generator).\n"
+                f"Feedback:\n{verdict.feedback}\n"
+                "Revise: call more tools or try another approach, then answer again."
+            )
+            continue
+
+        fp = json.dumps({"tool": call["tool"], "params": call["params"]}, sort_keys=True)
+        if tool_fingerprints and tool_fingerprints[-1] == fp:
+            transcript.append(
+                "Stuck: that exact tool call already ran. Do not repeat it. "
+                "Answer from the results so far or try a different query or tool."
+            )
+            ended_on_tool = True
+            continue
 
         tool_started = time.monotonic()
         try:
@@ -347,8 +508,79 @@ async def run_agent_task(
         except (TypeError, ValueError):
             observation = str(result)[:6000]
         transcript.append(f"You called {call['tool']}({json.dumps(call['params'])[:400]}).\nResult:\n{observation}")
+        tool_fingerprints.append(fp)
+        ended_on_tool = True
+
+    if (
+        ended_on_tool
+        and stop_reason == "max_steps"
+        and not telemetry.error
+        and transcript
+    ):
+        # Native tool_calls leave content empty. One un-tooled answer after the last observation.
+        prompt = (
+            base_prompt
+            + "\n\n"
+            + "\n\n".join(transcript)
+            + "\n\nStop calling tools. Answer the user in plain text using the tool results."
+        )
+        adapter_req = AdapterRequest(
+            model="",
+            system=(node.system or "") + "\nAnswer in plain text. Do not call tools.",
+            prompt=prompt,
+            max_tokens=node.max_tokens if node.max_tokens is not None else 1400,
+            tools=None,
+        )
+        try:
+            outcome = await invoke_routed_completion(
+                router,
+                ledger,
+                run_id=context.run_id,
+                workflow_cost_ceiling_myr=workflow_cost_ceiling_myr,
+                node_id=node.id,
+                model_req=ModelRequest(
+                    request_type=str(ann.get("prompt_id") or node.id),
+                    prompt=prompt,
+                    default_tier=Tier(default_tier),
+                    max_tier=Tier(max_tier),
+                    cost_ceiling_myr=node.cost_ceiling_myr or wf_ceiling,
+                    provider=node.provider,
+                    metadata={
+                        "workflow": ann.get("workflow"),
+                        "phase": ann.get("phase"),
+                        "openvault_identity": ov_identity,
+                        "effort": effort,
+                    },
+                ),
+                adapter_req=adapter_req,
+                node_cost_ceiling_myr=node.cost_ceiling_myr,
+            )
+            resp = outcome.response
+            telemetry.prompt_tokens += int(resp.prompt_tokens or 0)
+            telemetry.completion_tokens += int(resp.completion_tokens or 0)
+            telemetry.cost_myr += float(outcome.cost_myr)
+            telemetry.model = outcome.model
+            telemetry.tier = outcome.tier
+            content = resp.content or content
+            criteria = _quality_criteria(ann)
+            if not criteria:
+                stop_reason = "final"
+            else:
+                verdict = await _independent_quality_check(
+                    content, criteria, context, step=telemetry.steps
+                )
+                if verdict.passed and not verdict.early_victory_risk:
+                    stop_reason = "quality"
+                    quality_passed = True
+                else:
+                    quality_passed = False
+        except Exception as exc:  # noqa: BLE001
+            telemetry.error = str(exc)[:300]
+            stop_reason = "error"
 
     telemetry.elapsed_ms = int((time.monotonic() - started) * 1000)
+    telemetry.stop_reason = stop_reason
+    telemetry.quality_passed = quality_passed
     # Local adapters sometimes omit usage — fall back to ~4 chars/token so the
     # panel still shows spend, flagged estimated by the runner/store.
     if not telemetry.prompt_tokens and not telemetry.completion_tokens and content:
@@ -367,6 +599,8 @@ async def run_agent_task(
         "agent": ann.get("agent"),
         "telemetry": telemetry.as_dict(),
         "spawn_depth": spawn_depth,
+        "stop_reason": stop_reason,
+        "quality_passed": quality_passed,
     }
     parsed = _try_json(content)
     if parsed is not None:

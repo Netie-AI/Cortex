@@ -59,6 +59,11 @@ class EngineRunIn(BaseModel):
     session_id: str | None = None
     action_id: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+    tools: list[str] | None = None
+    quality_criteria: list[str] | None = None
+    max_steps: int | None = None
+    prompt_id: str | None = None
+    max_tokens: int | None = None
 
 
 class JustWorksIn(BaseModel):

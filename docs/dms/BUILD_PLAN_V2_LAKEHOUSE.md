@@ -466,7 +466,7 @@ all results appended to lake.gold.benchmarks table; Studio BENCHMARKS tab reads 
 | Item | Disposition |
 |---|---|
 | P1 ontology | PARTIAL — O1–O3 via this plan (wave 3); O6+ still gated on paying client |
-| P2 WASM/Firecracker | GATED (unchanged) — F8 uses wasm_isolate scaffold as specced |
+| P2 WASM/Firecracker | GATED (unchanged) -- host runner only; wasm isolate deleted (DOC-01) |
 | P3 Temporal/durable | **ACTIVATED → S1 (DBOS verdict)** |
 | P4 respond.io endpoint | GATED — S1's draft+approve loop is its substrate; build on DMS partner |
 | P6 ingest pipeline | **ACTIVATED → L1+L2** |

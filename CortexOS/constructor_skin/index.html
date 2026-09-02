@@ -4,24 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Constructor — Netie</title>
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css?v=22" />
   </head>
-  <body>
+  <body class="chat-open chat-snap-right">
     <header class="top">
-      <div>
-        <div class="eyebrow">NETIE / CONSTRUCTOR</div>
-        <h1>Constructor</h1>
-        <p class="lede">
-          Chat builds a DAG. Ghost dry-runs it. Cortex is the only engine.
-          Path: connector -&gt; ontology -&gt; insight -&gt; foundry -&gt; app.
-        </p>
-        <p class="hint" id="power">Checking origin.</p>
+      <div class="brand">
+        <img class="brand-mark" src="favicon.svg" width="28" height="28" alt="" />
+        <div>
+          <div class="eyebrow">NETIE / CONSTRUCTOR</div>
+          <h1>Constructor</h1>
+          <p class="lede">Ingest rows. Model objects. Act. Ghost dry-run. Cortex is the only engine.</p>
+          <p class="hint" id="power">Checking origin.</p>
+          <p class="hint" id="ov-status">OpenVault: not bound.</p>
+        </div>
       </div>
       <div class="actions">
         <input id="cortex-key" type="password" autocomplete="off" placeholder="OpenVault key (ov_...)" />
+        <button type="button" id="issue-key" class="ghost">Issue ov_ key</button>
+        <button type="button" id="automate" class="ghost">Automate off</button>
         <button type="button" id="ghost-toggle" class="ghost">Ghost off</button>
         <button type="button" id="propose">Propose 3</button>
         <button type="button" id="maximize">Maximize</button>
+        <button type="button" id="chat-toggle" class="ghost">Chat</button>
         <button type="button" id="run-graph">Run</button>
         <button type="button" id="export-json">Export JSON</button>
         <button type="button" id="reset-graph" class="ghost">Reset sample</button>
@@ -30,31 +36,46 @@
 
     <div class="shell">
       <aside class="rail">
-        <div class="eyebrow">NODES</div>
-        <button type="button" data-add="ingest">Ingest</button>
-        <button type="button" data-add="connector">Connector</button>
-        <button type="button" data-add="ontology">Ontology</button>
-        <button type="button" data-add="insight">Insight</button>
-        <button type="button" data-add="foundry">Foundry</button>
-        <button type="button" data-add="app">App</button>
-        <button type="button" data-add="agent">Agent</button>
-        <button type="button" data-add="hypothesize">Hypothesize</button>
-        <button type="button" data-add="improve">Improve</button>
-        <button type="button" data-add="audit">Audit</button>
-        <button type="button" data-add="tool_call">Tool call</button>
+        <div class="eyebrow">BLOCKS</div>
+        <input id="rail-filter" type="search" autocomplete="off" placeholder="Search kinds, objects, actions" />
+        <div id="rail-hits" hidden></div>
+        <div class="eyebrow">SEEDS</div>
+        <div class="seed-row">
+          <button type="button" data-seed="warehouse">Warehouse</button>
+          <button type="button" data-seed="venue">Venue/CRM</button>
+          <button type="button" data-seed="suspect">Suspect desk</button>
+        </div>
+        <button type="button" data-add="ingest"></button>
+        <button type="button" data-add="connector"></button>
+        <button type="button" data-add="enhance"></button>
+        <button type="button" data-add="ontology"></button>
+        <button type="button" data-add="insight"></button>
+        <button type="button" data-add="foundry"></button>
+        <button type="button" data-add="app"></button>
+        <button type="button" data-add="agent"></button>
+        <button type="button" data-add="hypothesize"></button>
+        <button type="button" data-add="improve"></button>
+        <button type="button" data-add="audit"></button>
+        <button type="button" data-add="tool_call"></button>
         <p class="hint">
-          Drag. Port-to-port to wire. Chat can do the same.
+          Ingest is hop 0. Source: place, cloud, database, local model, or online API. Chat compiles the desk to App. Ctrl+/ opens chat. No stalk. No scrape.
         </p>
       </aside>
 
       <main class="stage" id="stage">
-        <svg id="wires" aria-hidden="true"></svg>
-        <div id="nodes"></div>
+        <div id="world">
+          <svg id="wires" aria-hidden="true"></svg>
+          <div id="nodes"></div>
+        </div>
       </main>
 
       <aside class="inspect" id="inspect">
-        <div class="eyebrow">AUDIT</div>
-        <p class="hint" id="inspect-empty">Select a node, or ghost-run the graph.</p>
+        <div class="eyebrow">BLOCK</div>
+        <p class="hint" id="inspect-empty">Select a block. Press to edit object, action, and persona.</p>
+        <div id="inspect-card" class="inspect-card" hidden></div>
+        <p id="inspect-confirm" class="confirm-banner" hidden>HITL: this tool_call requires_confirm before a live write.</p>
+        <pre id="inspect-decision" hidden></pre>
+        <p id="last-run" class="hint last-run" hidden></p>
         <form id="inspect-form" class="inspect-form" hidden></form>
         <pre id="inspect-json" hidden></pre>
         <div class="eyebrow">APPROACHES</div>
@@ -62,20 +83,59 @@
       </aside>
     </div>
 
-    <section class="chat" aria-label="ChatGPT-style Constructor control">
-      <div class="eyebrow">CHATGPT CONTROL</div>
+    <section id="chat-dock" class="chat-dock" aria-label="Constructor chat">
+      <header class="chat-dock-head">
+        <div>
+          <div class="eyebrow">CHAT</div>
+          <p class="hint chat-dock-kicker">Generate the whole desk. Snap bottom or right.</p>
+        </div>
+        <div class="chat-dock-tools">
+          <button type="button" id="chat-snap-bottom" class="ghost" data-snap="bottom">Bottom</button>
+          <button type="button" id="chat-snap-right" class="ghost" data-snap="right">Right</button>
+          <button type="button" id="chat-close" class="ghost">Close</button>
+        </div>
+      </header>
       <div id="chat-log" class="chat-log"></div>
       <form id="chat-form" class="chat-form">
         <textarea
           id="chat-input"
-          rows="2"
-          placeholder="set object inventory. set point sku. set action export_pptx. run all. bench."
+          rows="3"
+          placeholder="police suspect desk: owned images, local model enhance, match watchlist. Or: ingest warehouse inventory. Enter sends."
         ></textarea>
         <button type="submit">Send</button>
       </form>
+      <p class="hint chat-dock-hint">Ctrl+/ toggles. Esc closes. Ghost on Pages. Owned watchlist match is allowed. Stalk / sex-work / internet scrape stay refused.</p>
     </section>
 
-    <script src="app.js?v=3"></script>
-    <script src="engine.js?v=3"></script>
+    <button type="button" id="chat-fab" class="chat-fab" hidden aria-label="Open chat (Ctrl+/)">Chat</button>
+
+    <div id="cal-pop" class="cal-pop" hidden>
+      <form id="event-form" class="event-form">
+        <header class="event-head">
+          <span id="event-icon" class="ico ico-lg" aria-hidden="true"></span>
+          <div class="event-titles">
+            <h2 id="event-title">Block</h2>
+            <p id="event-persona" class="hint"></p>
+          </div>
+          <button type="button" id="event-close" class="ghost">Close</button>
+        </header>
+        <p id="ingest-help" class="ingest-help" hidden>
+          Ingest is hop 0. Pick the source kind (place table, cloud sign-in, database link, local model, or online API), pick the object those rows become, then wire onward. This block never writes.
+        </p>
+        <p id="enhance-help" class="ingest-help" hidden>
+          Enhance is Comfy-style. Bind a local model path or an online API. Ghost on Pages. Match against owned.watchlist. Distill Comfy, do not clone. No internet scrape.
+        </p>
+        <div id="event-fields"></div>
+        <p id="event-actions-hint" class="hint"></p>
+        <details id="event-compile">
+          <summary>Cortex compile</summary>
+          <pre id="decision-facts"></pre>
+          <pre id="decision-json"></pre>
+        </details>
+      </form>
+    </div>
+
+    <script src="app.js?v=22"></script>
+    <script src="engine.js?v=22"></script>
   </body>
 </html>

@@ -171,3 +171,100 @@ def test_discover_exports_skips_appdata(tmp_path) -> None:
     msgs = store.list_messages(result["spaces"][0]["id"])
     assert any("hey" in m["content"] for m in msgs)
     assert (skills / "chat.md").exists()
+
+
+def test_github_list_prs_fail_closes_hung_gh(monkeypatch) -> None:
+    import subprocess
+    import time
+
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+    monkeypatch.setenv("CREW_GH_REPOS", "acme/a,acme/b")
+    seen: list[float] = []
+
+    def boom(argv, timeout=20):  # noqa: ANN001, ARG001
+        seen.append(timeout)
+        raise subprocess.TimeoutExpired(cmd="gh", timeout=timeout)
+
+    t0 = time.perf_counter()
+    out = github_mod.list_prs(runner=boom)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0
+    assert seen
+    assert all(t == github_mod.GH_WAIT_S for t in seen)
+    assert github_mod.GH_WAIT_S <= 1.5
+    assert out["ok"] is False
+    assert out["prs"] == []
+    assert "TimeoutExpired" in (out.get("detail") or "")
+
+
+def test_github_list_org_repos_fail_closes_hung_gh_in_parallel(monkeypatch) -> None:
+    import subprocess
+    import time
+
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+    monkeypatch.setenv("CREW_GH_OWNERS", "acme,beta")
+
+    def boom(argv, timeout=20):  # noqa: ANN001, ARG001
+        time.sleep(0.35)
+        raise subprocess.TimeoutExpired(cmd="gh", timeout=timeout)
+
+    t0 = time.perf_counter()
+    out = github_mod.list_org_repos(runner=boom)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.6
+    assert github_mod.GH_WAIT_S <= 1.5
+    assert out["ok"] is False
+    assert out["repos"] == []
+    assert "TimeoutExpired" in (out.get("detail") or "")
+
+
+def test_desk_snapshot_uses_catalog_estate(monkeypatch) -> None:
+    from CortexOS.crew import desk as desk_mod
+
+    seen: dict[str, object] = {}
+
+    def estate_snap(*, live=None, org=None):  # noqa: ANN001, ARG001
+        seen["live"] = live
+        return {"n": 0, "org": "Netie-AI"}
+
+    monkeypatch.setattr(desk_mod.github, "list_prs", lambda: {"ok": True, "prs": [], "detail": ""})
+    monkeypatch.setattr(
+        desk_mod.inbox, "status", lambda: {"ok": True, "connected": False, "messages": [], "detail": "unset"}
+    )
+    monkeypatch.setattr(desk_mod.connectors, "catalog", lambda **_k: [])
+    monkeypatch.setattr(desk_mod, "cursor_key_status", lambda: {"configured": False})
+    monkeypatch.setattr(desk_mod.estate, "snapshot", estate_snap)
+    snap = desk_mod.snapshot()
+    assert seen["live"] is False
+    assert snap["ok"] is True
+
+
+def test_desk_snapshot_runs_peers_in_parallel(monkeypatch) -> None:
+    import time
+
+    from CortexOS.crew import desk as desk_mod
+
+    def slow_prs() -> dict:
+        time.sleep(0.35)
+        return {"ok": False, "prs": [], "detail": "unread"}
+
+    def slow_mail() -> dict:
+        time.sleep(0.35)
+        return {"ok": False, "connected": False, "messages": [], "detail": "unread"}
+
+    monkeypatch.setattr(desk_mod.github, "list_prs", slow_prs)
+    monkeypatch.setattr(desk_mod.inbox, "status", slow_mail)
+    monkeypatch.setattr(desk_mod.connectors, "catalog", lambda **_k: [])
+    monkeypatch.setattr(desk_mod, "cursor_key_status", lambda: {})
+    monkeypatch.setattr(desk_mod.estate, "snapshot", lambda **_k: {})
+    t0 = time.perf_counter()
+    snap = desk_mod.snapshot()
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.6
+    assert snap["ok"] is True
+    assert snap["prs"]["ok"] is False
+    assert "auto-merge" in snap["law"].lower() or "Do not auto-merge" in snap["law"]

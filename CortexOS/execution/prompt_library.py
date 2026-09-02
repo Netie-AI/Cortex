@@ -57,6 +57,33 @@ Return JSON only:
 catches that the others miss", "search_terms": ["...", "..."]}]}
 """
 
+_IDEA_TO_PAPER = """\
+You are Cortex Idea-to-Paper. OpenVault holds keys; you own the brain.
+Stage: {{stage}}
+User idea / message:
+{{topic}}
+
+Rules:
+- Never invent metrics, DOIs, hostnames, or pytest scores.
+- Cite only DOI (10.xxxx/...), arXiv id, or http(s) URL -- never a title-only string.
+- https://arxiv.org/abs/... classifies as arxiv; https://doi.org/... as doi; other http(s) as url.
+
+Stage research: JSON only {brief_md, claims:[{id,text,status,sources:[{tier,cite}]}]}.
+status is supported|inferred|unknown.
+
+Stage method: JSON only {phase_plan_md, success:{project,domain,default_gate,phases:[{id,name,gate,verifier,metrics}]}}.
+Verifier is pytest. Gate 80. Do not write implementation.
+
+Stage execute: first character { then JSON
+{"files": {"citegate.py": "...", "test_citegate.py": "..."}}
+stdlib only. classify -> arxiv|doi|url|other. resolve uses urllib.request.
+filter_claims -> {kept,dropped}. Tests monkeypatch the network. Include a drop case.
+
+Stage paper: IEEEtran LaTeX, first line \\documentclass[conference]{IEEEtran},
+last line \\end{document}. Sections: Introduction, Related Work, Method, Results,
+Limitations. Numbers only from facts the user pasted. No new metrics.
+"""
+
 _RESEARCH_SEARCH = """\
 You are a research subagent. Your single angle is:
 
@@ -414,6 +441,7 @@ _BUILTIN: tuple[Prompt, ...] = (
     Prompt("research.search", "Research — search one angle", _RESEARCH_SEARCH, "builtin"),
     Prompt("research.verify", "Research — refute a claim", _RESEARCH_VERIFY, "builtin"),
     Prompt("research.synthesize", "Research — synthesize", _RESEARCH_SYNTH, "builtin"),
+    Prompt("research.idea_to_paper", "Research — idea to paper", _IDEA_TO_PAPER, "builtin"),
     Prompt("document.plan", "Document — plan pages", _DOC_PLAN, "builtin"),
     Prompt("document.extract", "Document — extract page batch", _DOC_EXTRACT, "builtin"),
     Prompt("document.synthesize", "Document — final deduce", _DOC_SYNTH, "builtin"),

@@ -343,3 +343,27 @@ def test_queue_for_lives_beside_the_other_crew_data(tmp_path: Path) -> None:
     made = queue_for(tmp_path / "crew")
     assert made.path == tmp_path / "crew" / "queue" / "work.jsonl"
     assert made.path.parent.is_dir()
+
+
+def test_claim_item_leases_only_that_row(q: DurableQueue) -> None:
+    first = q.push("space-1", {"n": 1})
+    second = q.push("space-1", {"n": 2})
+    claimed = q.claim_item(second.id, "worker-b")
+    assert claimed.id == second.id
+    assert claimed.status == LEASED
+    assert q.get(first.id).status == PENDING  # type: ignore[union-attr]
+
+
+def test_abandon_leases_on_restart_does_not_wait_for_ttl(
+    q: DurableQueue, clock: FakeClock
+) -> None:
+    item = q.push("space-1", {"kind": "run", "run_id": "r1"})
+    q.claim("worker-dead")
+    clock.advance(1.0)
+    moved = q.abandon_leases("process_restart")
+    assert [m.id for m in moved] == [item.id]
+    back = q.get(item.id)
+    assert back is not None
+    assert back.status == PENDING
+    assert back.attempts == 1
+    assert "process_restart" in back.last_reason

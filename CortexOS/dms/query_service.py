@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
+from CortexOS.dms.sql_guardrail import audit_log, validate_sql
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
     get_connection,
@@ -896,20 +896,39 @@ def answer_question(
     abstain). Falls back to the legacy heuristic path only if the engine is
     unavailable, so behavior degrades safely rather than breaking.
 
-    Bridge: when the engine abstains but a ranked legacy SQL template still matches
-    (delayed shipments / sales / supplier ranking), serve the legacy path so
-    pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+    Every SQL path threads a VerifiedManifest. HTTP doors (require_grounding)
+    resolve the session registry or abstain. In-process callers mint a local
+    grant so enforce_manifest still runs.
     """
     try:
-        from CortexOS.dms.answer_engine import answer as _engine_answer
+        from CortexOS.dms.answer_engine import (
+            UngroundedSession,
+            _abstain_unbound,
+            answer as _engine_answer,
+            mint_local_verified,
+            resolve_product_grant,
+        )
         from CortexOS.execution.manifest import ManifestError
 
+        verified = None
+        if require_grounding:
+            try:
+                verified, _, _ = resolve_product_grant(session_id, None)
+            except UngroundedSession as exc:
+                return _abstain_unbound(
+                    question, str(uuid.uuid4()), reason=str(exc)
+                )
+        else:
+            verified = mint_local_verified(session_id=session_id)
+
         result = _engine_answer(
-            question, session_id=session_id, require_grounding=require_grounding
+            question,
+            session_id=session_id,
+            verified=verified,
+            require_grounding=require_grounding,
         )
         # A served turn that nothing grants must not fall through to the
-        # pre-Q2 ranked-SQL path. That bridge opens its own connection and
-        # would answer from the demo warehouse under the abstain.
+        # pre-Q2 ranked-SQL path.
         if result.get("grant_kind") == "none":
             return result
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
@@ -921,17 +940,43 @@ def answer_question(
             and re.search(r"\b(delayed|late)\b", q)
             and _try_generate_ranked_sql(question)
         ):
-            return _answer_question_legacy(question, session_id=session_id)
+            return _answer_question_legacy(
+                question, session_id=session_id, verified=verified
+            )
         return result
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.
         raise
     except Exception:  # noqa: BLE001 — engine failure must not take the API down
-        return _answer_question_legacy(question, session_id=session_id)
+        if require_grounding:
+            from CortexOS.dms.answer_engine import _abstain_unbound
+
+            return _abstain_unbound(
+                question,
+                str(uuid.uuid4()),
+                reason="engine failed closed; no ungoverned fallback",
+            )
+        from CortexOS.dms.answer_engine import mint_local_verified
+
+        return _answer_question_legacy(
+            question,
+            session_id=session_id,
+            verified=mint_local_verified(session_id=session_id),
+        )
 
 
-def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
+def _answer_question_legacy(
+    question: str,
+    *,
+    session_id: str | None = None,
+    verified: Any,
+) -> dict[str, Any]:
     del session_id
+    from CortexOS.execution.manifest import ManifestError, VerifiedManifest
+    from CortexOS.execution.submit import execute_sql
+
+    if not isinstance(verified, VerifiedManifest):
+        raise TypeError("legacy SQL path requires a VerifiedManifest")
     audit_id = str(uuid.uuid4())
     route = route_question(question)
     semantic = load_semantic_layer()
@@ -986,28 +1031,40 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     sql = generate_sql(question, semantic)
     query_plan = plan_query(question, sql)
-    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
-    try:
-        guard_result, rows, entry = guard_and_execute(sql, semantic, con)
-    finally:
-        con.close()
-
-    alerts_summary = get_alerts_summary()
-    show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))
-
-    if not guard_result.passed:
+    result = validate_sql(sql, semantic)
+    if not result.passed or not result.safe_sql:
         return {
             "answer": "That operation is not permitted.",
             "sql_used": sql,
             "chart_spec": None,
             "audit_id": audit_id,
-            "violations_blocked": guard_result.violations,
+            "violations_blocked": result.violations,
             "route": "sql",
             "rows": [],
             "source_table": _infer_source_table(sql),
-            "alerts_summary": alerts_summary if show_alerts else None,
             "query_plan": query_plan.to_dict(),
         }
+    try:
+        rows, _, _ = execute_sql(verified, result.safe_sql)
+    except ManifestError as exc:
+        name = type(exc).__name__
+        return {
+            "answer": f"I can't answer that ({name}: {exc}).",
+            "sql_used": None,
+            "chart_spec": None,
+            "audit_id": audit_id,
+            "violations_blocked": [name],
+            "route": "refused",
+            "rows": [],
+            "source_table": None,
+            "query_plan": query_plan.to_dict(),
+            "badge": "refused",
+            "layer": "refused",
+            "assumptions": f"{name}: {exc}",
+        }
+
+    alerts_summary = get_alerts_summary()
+    show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))
 
     answer = synthesize_answer(rows, question)
     chart = build_chart_spec(rows, question)
@@ -1027,7 +1084,7 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     return {
         "answer": answer,
-        "sql_used": guard_result.safe_sql,
+        "sql_used": result.safe_sql,
         "chart_spec": chart,
         "audit_id": audit_id,
         "violations_blocked": [],
@@ -1038,9 +1095,9 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
         "alerts_summary": alerts_summary if show_alerts else None,
         "query_plan": query_plan.to_dict(),
         "audit": {
-            "timestamp": entry.timestamp,
-            "passed": entry.passed,
-            "violations": entry.violations,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "passed": True,
+            "violations": [],
         },
     }
 

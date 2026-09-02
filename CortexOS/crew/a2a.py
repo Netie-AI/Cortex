@@ -106,6 +106,25 @@ class Envelope:
         }
 
 
+def envelope_from_stored(msg: dict[str, Any], names: dict[str, str]) -> Envelope:
+    """Rebuild an envelope from a transcript row so a restart can refill the mailbox."""
+    meta = (msg.get("meta") or {}).get("a2a") or {}
+    from_id = str(msg.get("agent_id") or "")
+    to_id = msg.get("to_agent_id")
+    to_key = str(to_id) if to_id else ""
+    return Envelope(
+        id=str(msg["id"]),
+        kind=str(meta.get("kind") or TELL),
+        from_id=from_id,
+        from_name=str(meta.get("from") or names.get(from_id, "agent")),
+        to_id=str(to_id) if to_id else None,
+        to_name=str(meta.get("to") or names.get(to_key, "space")),
+        text=str(msg.get("content") or ""),
+        seq=int(msg.get("seq") or 0),
+        reply_to=meta.get("reply_to"),
+    )
+
+
 class Mailbox:
     """One agent's delivery queue.
 

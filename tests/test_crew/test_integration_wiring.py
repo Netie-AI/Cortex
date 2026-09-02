@@ -92,6 +92,15 @@ async def test_a_fact_remembered_in_one_run_is_recalled_by_the_next(rig) -> None
     assert "Crew listens on 8020" in body
     assert "8020" in _answer(rig.store, space["id"])
 
+    rig.llm.manager.append(LLMResult(text="still 8020"))
+    await rig.runtime.on_user_message(space["id"], "remind me the port")
+    await wait_run_done(rig.runtime, space["id"])
+    later = str(rig.llm.calls[-1]["messages"][1]["content"])
+    assert "crew-port" in later
+    assert "which port the crew server listens on" in later
+    assert BEGIN in later
+    assert "Crew listens on 8020. The engine owns 8010." not in later
+
 
 async def test_recall_hands_the_model_notes_as_untrusted_data(rig) -> None:
     """A stored line is data. Unwrapped, a note becomes a prompt injection."""
@@ -393,6 +402,14 @@ async def test_crew_agents_are_offered_no_shell(rig) -> None:
     manager = rig.runtime.ensure_manager(space["id"])
     offered = {s["function"]["name"] for s in rig.runtime._toolspecs(True, manager)}
     assert not offered & {"run_command", "bash", "shell", "exec"}
+    assert {
+        "web_search",
+        "web_fetch",
+        "github_search",
+        "save_skill",
+        "ingest_named_skill",
+        "analog_clone",
+    } <= offered
     assert "run_command" not in policy.INTERNAL_TOOLS
 
     rig.llm.manager.extend(

@@ -46,7 +46,7 @@
 ┌───────────────────▼───────────────────────────┐
 │ CortexOS/ runtime                             │
 │  answer_engine · query_service · ponytail     │
-│  compliance · RAG (partial) · wasm (scaffold) │
+│  compliance · RAG (partial) · no WASM isolate │
 └───────────────────┬───────────────────────────┘
                     │
 ┌───────────────────▼───────────────────────────┐

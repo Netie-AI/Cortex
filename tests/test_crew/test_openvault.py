@@ -138,14 +138,104 @@ def test_disable_seeded_cortex_primary(monkeypatch) -> None:
     assert patched[0]["enabled"] is False
 
 
+def test_disable_unusable_custom_keys_skips_healthy_hops(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    patched: list[str] = []
+
+    class Client:
+        def __init__(self, *a, **k):  # noqa: ANN002, ANN003
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):  # noqa: ANN002
+            return False
+
+        def get(self, url: str) -> _FakeResp:
+            return _FakeResp(
+                200,
+                {
+                    "keys": [
+                        {
+                            "id": "sea",
+                            "label": "SEA_LION_API_KEY",
+                            "enabled": True,
+                            "provider": "custom",
+                            "last_error": "missing base_url for custom provider",
+                        },
+                        {
+                            "id": "groq",
+                            "label": "GROQ_API_KEY",
+                            "enabled": True,
+                            "provider": "groq",
+                            "last_error": None,
+                        },
+                    ]
+                },
+            )
+
+        def patch(self, url: str, json: dict) -> _FakeResp:
+            patched.append(url)
+            return _FakeResp(200, {"enabled": False})
+
+    monkeypatch.setattr(openvault.httpx, "Client", Client)
+    out = openvault.disable_unusable_custom_keys()
+    assert out["ok"] is True
+    assert out["disabled"] == ["SEA_LION_API_KEY"]
+    assert patched == ["http://127.0.0.1:5000/api/keys/sea"]
+
+
 def test_resolve_ov_model_prefers_grok_high_when_cursor_key(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "0")
     monkeypatch.setenv("CURSOR_API_KEY", "sk-test")
     monkeypatch.delenv("CREW_OPENVAULT_MODEL", raising=False)
     monkeypatch.delenv("CREW_CURSOR_MODEL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert openvault.resolve_ov_model("openvault/auto") == "grok-4.6"
     assert openvault.resolve_ov_model("grok-4.6-fast") == "grok-4.6"
     monkeypatch.setenv("CREW_OPENVAULT_MODEL", "groq/llama")
     assert openvault.resolve_ov_model("auto") == "groq/llama"
+
+
+def test_resolve_ov_model_prefers_claude_when_no_cursor(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "0")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("CREW_OPENVAULT_MODEL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-test")
+    monkeypatch.delenv("CREW_ANTHROPIC_MODEL", raising=False)
+    assert openvault.resolve_ov_model("auto") == "claude-sonnet-5"
+
+
+def test_register_wizard_never_auto_creates_accounts(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "0")
+    rows = openvault.register_wizard()
+    assert rows
+    assert all(r["auto_register"] is False for r in rows)
+    ids = {r["id"] for r in rows}
+    assert {"cursor", "anthropic", "nvidia", "ollama"} <= ids
+    assert all("signup" in r and r["signup"].startswith("http") for r in rows)
+
+
+def test_register_wizard_skips_vault_when_asked(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CREW_OPENVAULT_MODEL", raising=False)
+    n = {"n": 0}
+
+    def hang(timeout: float = 1.2) -> frozenset:
+        n["n"] += 1
+        raise AssertionError("first-paint providers must not list the vault")
+
+    monkeypatch.setattr(openvault, "vaulted_provider_ids", hang)
+    rows = openvault.register_wizard(probe_vault=False)
+    prefer = openvault.preferred_ov_model(probe_vault=False)
+    assert n["n"] == 0
+    assert prefer == "auto"
+    assert all(r["auto_register"] is False for r in rows)
 
 
 # Deliberately not shaped like a real key. scripts/secrets_scan.py matches

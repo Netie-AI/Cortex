@@ -14,6 +14,7 @@ ArchitecturePreset = Literal[
     "langgraph",
     "langchain",
     "minimal",
+    "agent",
     "rag",
     "memory",
     "computer_control",
@@ -28,6 +29,13 @@ PRESET_CATALOG: list[dict[str, Any]] = [
         "default": True,
         "blurb": "Single-node / short tool loop — cheapest default.",
         "runner": "dag_single",
+    },
+    {
+        "id": "agent",
+        "name": "Agent loop",
+        "default": False,
+        "blurb": "AGENT_TASK tool loop that stops on independent quality, not only max_steps.",
+        "runner": "agent_task",
     },
     {
         "id": "sequential",
@@ -87,6 +95,8 @@ def normalize_preset(value: str | None) -> ArchitecturePreset:
     v = (value or DEFAULT_PRESET).strip().lower().replace("-", "_")
     if v == "langgraph_style":
         v = "langgraph"
+    if v in {"agent_task", "agent_loop"}:
+        v = "agent"
     if v not in _VALID:
         return DEFAULT_PRESET
     return v  # type: ignore[return-value]

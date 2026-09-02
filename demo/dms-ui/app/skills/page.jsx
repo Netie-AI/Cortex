@@ -76,7 +76,7 @@ export default function SkillsPage() {
   return (
     <AppShell loading={isLoading || busy}>
       <div className="cx-label" style={{ marginBottom: 8 }}>
-        FIND SKILLS
+        Find skills
       </div>
       <p className="cx-empty-desc" style={{ marginBottom: 12 }}>
         Are there any good skills for [{goal || "GOAL"}]? Skills first from GitHub awesome-lists + local
@@ -103,14 +103,14 @@ export default function SkillsPage() {
           SkillOpt seed
         </label>
         <button data-testid="find-skills-submit" type="submit" className="cx-entry-btn">
-          FIND SKILLS
+          Find skills
         </button>
       </form>
 
       {best && (
         <div data-testid="find-skills-best" style={{ marginBottom: 20 }}>
           <div className="cx-label" style={{ marginBottom: 6 }}>
-            BEST MATCH
+            Best match
           </div>
           <p style={{ margin: "0 0 4px" }}>
             <strong>{best.name}</strong>{" "}
@@ -136,11 +136,11 @@ export default function SkillsPage() {
         <table className="cx-data-table" data-testid="find-skills-results" style={{ marginBottom: 28 }}>
           <thead>
             <tr>
-              <th>NAME</th>
-              <th>KIND</th>
-              <th>SCORE</th>
-              <th>SOURCE</th>
-              <th>INSTALL</th>
+              <th>Name</th>
+              <th>Kind</th>
+              <th>Score</th>
+              <th>Source</th>
+              <th>Install</th>
             </tr>
           </thead>
           <tbody>
@@ -160,7 +160,7 @@ export default function SkillsPage() {
       )}
 
       <div className="cx-label" style={{ marginBottom: 8 }}>
-        CAPTURED SKILLS (F6)
+        Captured skills
       </div>
       <p className="cx-empty-desc" style={{ marginBottom: 16 }}>
         Internal-only behaviour cards from successful gated task chains. Opt-in recording — never leaves the box.
@@ -175,7 +175,7 @@ export default function SkillsPage() {
         </span>
         {canManage && (
           <button type="button" className="cx-entry-btn" onClick={toggleCapture} style={{ marginLeft: 16 }}>
-            {captureOn ? "TURN OFF" : "ENABLE CAPTURE"}
+            {captureOn ? "Turn off" : "Enable capture"}
           </button>
         )}
       </div>
@@ -186,13 +186,13 @@ export default function SkillsPage() {
         <table className="cx-data-table">
           <thead>
             <tr>
-              <th>INTENT</th>
-              <th>TASK</th>
-              <th>TRIGGER</th>
-              <th>SUPPORT</th>
-              <th>SUCCESS</th>
-              <th>ACTIVE</th>
-              {canManage && <th>ACTION</th>}
+              <th>Intent</th>
+              <th>Task</th>
+              <th>Trigger</th>
+              <th>Support</th>
+              <th>Success</th>
+              <th>Active</th>
+              {canManage && <th>Action</th>}
             </tr>
           </thead>
           <tbody>
@@ -210,7 +210,7 @@ export default function SkillsPage() {
                   <td>
                     {sk.active && (
                       <button type="button" className="cx-approve-btn" onClick={() => onDeactivate(sk.id)}>
-                        DEACTIVATE
+                        Deactivate
                       </button>
                     )}
                   </td>

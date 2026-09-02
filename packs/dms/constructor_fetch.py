@@ -9,7 +9,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from CortexOS.dms.warehouse_db import KNOWN_TABLES, preview_table
+from CortexOS.dms.warehouse_db import (
+    KNOWN_TABLES,
+    close_cached_connections,
+    load_inventory_csv,
+    preview_table,
+)
 from CortexOS.ontology.registry import load_action_types, load_object_types
 from packs.dms.ontology.registry import PACK_DIR
 
@@ -114,7 +119,20 @@ def fetch_slice(
         try:
             rows, total, all_cols = preview_table(table, from_row=0, to_row=max(1, min(limit, 100)), cols=cols)
         except Exception as exc:  # noqa: BLE001 — surface warehouse miss to Constructor audit
-            error = str(exc)
+            err = str(exc)
+            seeded = False
+            if table in KNOWN_TABLES and "does not exist" in err.lower():
+                try:
+                    close_cached_connections()
+                    load_inventory_csv()
+                    rows, total, all_cols = preview_table(
+                        table, from_row=0, to_row=max(1, min(limit, 100)), cols=cols
+                    )
+                    seeded = True
+                except Exception as exc2:  # noqa: BLE001
+                    error = str(exc2)
+            if not seeded:
+                error = error or err
     streams = None
     if stream:
         from packs.dms.streams import registry

@@ -24,7 +24,9 @@ from packs.dms.security.api_auth import (
 
 COOKIE = "cortex_api_key"
 PREFIX = "/cortex"
-SKIN_NAMES = frozenset({"index.html", "app.js", "styles.css", "engine.js", "README.md"})
+SKIN_NAMES = frozenset(
+    {"index.html", "app.js", "styles.css", "engine.js", "README.md", "favicon.ico", "favicon.svg"}
+)
 
 router = APIRouter(tags=["constructor"])
 
@@ -42,6 +44,14 @@ class ConstructorRunBody(BaseModel):
 class IssueKeyBody(BaseModel):
     label: str = "constructor cortex viewer"
     tier: str = "free"
+
+
+class ConstructorGenerateBody(BaseModel):
+    prompt: str = Field(min_length=1)
+
+
+class ConstructorDecisionBody(ConstructorRunBody):
+    node_id: str | None = None
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
@@ -87,7 +97,7 @@ label,input,button{display:block;margin:.5rem 0}input{padding:.5rem;min-width:20
 button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}</style>
 </head><body>
 <h1>Cortex</h1>
-<p>Engine path. Paste an ov_ OpenVault key, or an operator key from DMS_API_KEYS. Demo keys are refused. Generate only works when OpenVault is on this machine.</p>
+<p>Engine path. Paste an ov_ OpenVault key, or an operator key from DMS_API_KEYS. Demo keys are refused. Generate only works when OpenVault is on this machine. If Generate returns 503 while http://127.0.0.1:5000 health is ok, restart the openmw console -- do not start a second listener.</p>
 <form id="login" method="post" action="/cortex/session">
 <label for="key">OpenVault key</label>
 <input id="key" name="key" type="password" autocomplete="off" required/>
@@ -121,7 +131,7 @@ document.getElementById("issue").onclick = async function () {
   });
   var j = await r.json();
   if (!j.token) {
-    once.textContent = r.status + " " + JSON.stringify(j);
+    once.textContent = (j.detail || j.error || (r.status + " " + JSON.stringify(j)));
     return;
   }
   document.getElementById("key").value = j.token;
@@ -141,22 +151,29 @@ def cortex_login() -> HTMLResponse:
 def constructor_issue_key(request: Request, body: IssueKeyBody = IssueKeyBody()) -> dict[str, Any]:
     """Loopback mint. OpenVault holds the secret. Cortex never stores it."""
     _require_loopback(request, "issue OpenVault key")
-    from CortexOS.integrations.openvault_client import post_json
+    from CortexOS.integrations.openvault_client import ping, post_json
 
     payload = {
         "label": body.label.strip() or "constructor cortex viewer",
         "tier": body.tier.strip() or "free",
     }
     out = post_json("/api/apikeys", payload, timeout=5.0)
-    token = str((out or {}).get("token") or (out or {}).get("token") or "").strip()
+    token = str((out or {}).get("token") or "").strip()
     if not out or not token:
-        raise HTTPException(
-            status_code=503,
-            detail=(
+        if ping():
+            detail = (
+                "OpenVault did not issue a key. OpenVault is up but mint returned no "
+                "token (often HTTP 500 after the vault insert). Restart the openmw "
+                "console on http://127.0.0.1:5000 -- do not start a second listener. "
+                "Paste an existing ov_ key to keep generate/run. On Hyperlift, set "
+                "DMS_API_KEYS in the manager and paste that key."
+            )
+        else:
+            detail = (
                 "OpenVault did not issue a key. Generate needs OpenVault on loopback. "
                 "On Hyperlift, set DMS_API_KEYS in the manager and paste that key."
-            ),
-        )
+            )
+        raise HTTPException(status_code=503, detail=detail)
     out = dict(out)
     out["token"] = token
     return out
@@ -309,6 +326,42 @@ def constructor_ghost(
             for n in program.nodes
         ],
     }
+
+
+@router.post("/cortex/constructor/generate")
+def constructor_generate(
+    body: ConstructorGenerateBody,
+    caller: Caller = Depends(require_constructor_viewer),
+) -> dict[str, Any]:
+    from CortexOS.constructor_graph import ConstructorGraphError, generate_constructor_graph
+
+    _ = caller
+    try:
+        return generate_constructor_graph(body.prompt)
+    except ConstructorGraphError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/cortex/constructor/decision")
+def constructor_decision(
+    body: ConstructorDecisionBody,
+    caller: Caller = Depends(require_constructor_viewer),
+) -> dict[str, Any]:
+    from CortexOS.constructor_graph import ConstructorGraphError, describe_constructor_node, recommend_extras
+    from CortexOS.execution import coordination_patterns
+
+    _ = caller
+    try:
+        layer = describe_constructor_node({"nodes": body.nodes, "edges": body.edges}, body.node_id)
+    except ConstructorGraphError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    kinds = [str(n.get("kind") or "") for n in body.nodes]
+    rec = coordination_patterns.recommend_from_prompt(
+        " ".join(kinds) or body.node_id or "constructor",
+        extras=recommend_extras(kinds),
+    )
+    layer["recommendation"] = rec.as_dict()
+    return layer
 
 
 @router.post("/cortex/constructor/recommend")
