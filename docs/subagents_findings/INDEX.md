@@ -2,7 +2,6 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
-| 2026-09-03 | crew-wakes-queue-wired | crew, wakes, queue, belt, 8020, control, 405 | Origin/main lacked belt/wakes HTTP. Wired thin wakes.py+queue.py onto store. Control GET only. No second mailbox. | `2026-09-03_crew-wakes-queue-wired.md` |
 | 2026-08-28 | cicd-multipr-gate-audit | cicd, billing, pr-85, dependabot, public-repo | Post-billing: #85/#84/#82/#70 PASS; Dependabot React19/Next16 FAIL. Unblock = billing OR make public. | `2026-08-28_cicd-multipr-gate-audit.md` |
 | 2026-08-28 | cicd-billing-gate-fail | cicd, billing, actions, email, python-spawn | Every Cortex CI email fail is org Actions billing (0 steps). Code vectors PASS. Harden bare python spawn to sys.executable. | `2026-08-28_cicd-billing-gate-fail.md` |
 | 2026-08-27 | control-crew-belt-proxy | control, crew, belt, conveyor, display-only, converse, 405 | Control proxies Crew GET /v1/belt as display-only JSON. Converse stays on Crew :8020. 405s unchanged. Goal open. | `2026-08-27_control-crew-belt-proxy.md` |

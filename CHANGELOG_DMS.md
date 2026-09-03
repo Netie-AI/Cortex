@@ -2,15 +2,6 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
-## Crew belt/wakes/queue GET surface (Cortex#97) — 2026-09-03
-
-Origin/main had store + A2A mailbox + `/crew/health` but no conveyor JSON.
-Control already GETs `/v1/belt`, `/crew/belt`, and `/crew/wakes`. Wired thin
-`CortexOS/crew/wakes.py` and `queue.py` onto the existing store. Not a second
-mailbox, not LangGraph, not Control. Belt does not HTTP-ping Cortex
-(`cortex.detail=not probed`). POST on those paths stays 405. Hung :8020
-untouched (R-0015). Mailbox cursors stay on `a2a.Mailbox.drain(after_seq)`.
-
 ## Engine capability: cost ledger + DAG parallel + T0 routing — 2026-08-28
 
 General Cortex engine (not DMS-specific):
