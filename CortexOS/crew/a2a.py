@@ -271,6 +271,13 @@ class Switchboard:
     def pending_count(self) -> int:
         return len(self._asks)
 
+    def any_waiting(self) -> bool:
+        """True when any mailbox still holds unread envelopes.
+
+        Derived look only. Does not allocate a second mailbox.
+        """
+        return any(not box.empty() for box in self._boxes.values())
+
 
 def lead_for(kind: str) -> str:
     """The word used to announce ``kind`` to a model. Shared by live delivery

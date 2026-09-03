@@ -1,5 +1,11 @@
 # STATUS.md
-**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** engine capability (cost ledger, DAG parallel, T0) + CI billing unblock**
+**Last updated:** 2026-09-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** Crew belt/wakes GET surface (Cortex#97)**
+
+> **2026-09-03 (crew conveyor):** `GET /v1/belt`, `GET /crew/belt`, `GET /crew/wakes`
+> on engine Crew. Control display-only. POST 405. No Cortex ping from belt.
+> Queue is Crew leases, not a second A2A mailbox. Branch
+> `cursor/crew-wakes-queue-wired-3fbd`. Do not merge from this writer. Do not
+> attach #4/#41/#42/#43/#44. Do not rebind :8020.
 
 > **2026-08-28 (engine wave 2):** Ledger row per DAG node (`ensure_node_record`);
 > Postgres merge on `GET /api/engine/runs/{id}/cost`; `POST /api/memory/assemble`;

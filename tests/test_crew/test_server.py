@@ -162,6 +162,33 @@ def test_computer_control_arm_is_refused(client) -> None:
     assert any(h["kind"] in {"space", "message"} for h in hits)
 
 
+def test_belt_and_wakes_are_get_only_and_skip_cortex_ping(client) -> None:
+    """Control probes these. POST stays 405. Belt does not ping Cortex."""
+    wakes = client.http.get("/crew/wakes").json()
+    assert wakes["ok"] is True
+    assert wakes["wakes"] == []
+    belt = client.http.get("/v1/belt").json()
+    alt = client.http.get("/crew/belt").json()
+    assert belt == alt
+    assert belt["bus"] == "github-issues"
+    assert belt["converse"] is True
+    assert belt["cortex"] == {"ok": False, "detail": "not probed"}
+    assert belt["plan_for_next"]["decides_work_shape"] is False
+    assert belt["wakes"] == []
+    assert belt["queue"] == {"pending": 0, "leased": 0, "done": 0, "dead": 0}
+    assert "tickets" in belt and "items" in belt["tickets"]
+    assert client.http.post("/crew/wakes", json={"kind": "timer"}).status_code == 405
+    assert client.http.post("/v1/belt", json={"wake": "x"}).status_code == 405
+    assert client.http.post("/crew/belt", json={"ticket": "x"}).status_code == 405
+    client.crew.wakes.arm("timer", "morning brief")
+    client.crew.queue.enqueue("ticket", {"ticket": "Cortex#97"})
+    armed = client.http.get("/crew/wakes").json()
+    assert armed["wakes"][0]["note"] == "morning brief"
+    live = client.http.get("/v1/belt").json()
+    assert live["wakes"][0]["note"] == "morning brief"
+    assert live["queue"]["pending"] == 1
+
+
 def test_tickets_skills_and_voice(client, tmp_path, monkeypatch) -> None:
     claims = tmp_path / "CLAIMS.json"
     claims.write_text(
