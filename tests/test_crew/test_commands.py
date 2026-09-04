@@ -32,6 +32,7 @@ def test_catalog_lists_desk_routines_and_skills(settings) -> None:
         "idle",
         "wait",
         "goal",
+        "done",
         "remember",
         "memory",
         "recall",
@@ -149,6 +150,61 @@ async def test_slash_spawn_kill_idle_wait_goal_without_a_run(rig) -> None:
     await rig.runtime.on_user_message(space["id"], "/kill Nobody")
     tool = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
     assert "DENIED" in tool["content"] and "Nobody" in tool["content"]
+    assert not rig.runtime._space_run.get(space["id"])
+
+
+@pytest.mark.asyncio
+async def test_slash_done_refuses_seated_and_hitl_closes_unseated(
+    rig, tmp_path, monkeypatch
+) -> None:
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    space = rig.store.create_space("HQ")
+    seated = await rig.runtime.on_user_message(space["id"], "/done Netie-AI/Cortex#128")
+    assert seated.get("run_id") is None
+    tool = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "SEATED" in tool["content"]
+    assert rig.store.pending_confirms(space["id"]) == []
+
+    claims.write_text('{"tickets":[]}', encoding="utf-8")
+    posted = await rig.runtime.on_user_message(
+        space["id"], "/done Netie-AI/Cortex#99 | verified on desk"
+    )
+    assert posted.get("run_id") is None
+    pending = rig.store.pending_confirms(space["id"])
+    assert len(pending) == 1
+    assert pending[0]["tool"] == "close_issue"
+    assert pending[0]["args"]["spec"] == "Netie-AI/Cortex#99"
+
+    closed: dict[str, str] = {}
+
+    def fake_close(spec, *, comment="", runner=None):  # noqa: ANN001, ARG001
+        closed["spec"] = spec
+        closed["comment"] = comment
+        return {
+            "ok": True,
+            "spec": spec,
+            "detail": "Closed",
+            "law": "Closed the issue. Did not merge a PR. Ticket Runner seats writers.",
+        }
+
+    monkeypatch.setattr(github_mod, "close_issue", fake_close)
+    row = rig.runtime.decide_confirm(pending[0]["id"], True)
+    assert row is not None and row["status"] == "approved"
+    assert closed["spec"] == "Netie-AI/Cortex#99"
+    assert "verified" in closed["comment"]
+    last = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "Closed" in last["content"]
+    denied = await rig.runtime.on_user_message(space["id"], "/done not-a-ticket")
+    assert denied.get("run_id") is None
+    bad = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "DENIED" in bad["content"]
     assert not rig.runtime._space_run.get(space["id"])
 
 

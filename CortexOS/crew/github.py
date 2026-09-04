@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from typing import Any
@@ -166,4 +167,93 @@ def list_prs(limit: int = 20, *, runner: RunFn | None = None) -> dict[str, Any]:
         "prs": prs[:80],
         "repos": repos,
         "law": "Report in chat. Do not auto-merge. Ticket Runner seats existing writers.",
+    }
+
+
+_ISSUE_SPEC = re.compile(
+    r"(?:https://github\.com/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)(?:#|/issues/)(\d+)\Z"
+)
+
+
+def parse_issue_spec(raw: str) -> tuple[str, str, int] | None:
+    text = (raw or "").strip()
+    matched = _ISSUE_SPEC.match(text)
+    if matched is None:
+        return None
+    return matched.group(1), matched.group(2), int(matched.group(3))
+
+
+def canonical_spec(raw: str) -> str:
+    parsed = parse_issue_spec(raw)
+    if parsed is None:
+        return (raw or "").strip()
+    owner, repo, number = parsed
+    return f"{owner}/{repo}#{number}"
+
+
+def seated_claim(raw: str) -> dict[str, Any] | None:
+    """Ticket Runner seat. Crew must not close this without a different writer."""
+    parsed = parse_issue_spec(raw)
+    if parsed is None:
+        return None
+    owner, repo, number = parsed
+    key = f"{owner}/{repo}#{number}"
+    for row in board_snapshot().get("tickets") or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("role") or "") != "SEATED":
+            continue
+        ticket = str(row.get("ticket") or "")
+        owner_pr = str(row.get("owner_pr") or "")
+        if ticket == key or owner_pr == key:
+            return row
+    return None
+
+
+def close_issue(
+    spec: str,
+    *,
+    comment: str = "",
+    runner: RunFn | None = None,
+) -> dict[str, Any]:
+    """Close one GitHub *issue*. Never merges a PR."""
+    parsed = parse_issue_spec(spec)
+    if parsed is None:
+        return {
+            "ok": False,
+            "detail": "DENIED: need owner/repo#n (issues only; Crew does not merge PRs)",
+        }
+    seated = seated_claim(spec)
+    if seated is not None:
+        return {
+            "ok": False,
+            "detail": (
+                f"DENIED: {seated.get('ticket')} is SEATED "
+                f"({seated.get('owner_pr')}). Ticket Runner owns the seat."
+            ),
+        }
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        return {"ok": False, "detail": "CREW_LIVE_PROBES=0"}
+    owner, repo, number = parsed
+    argv = ["gh", "issue", "close", str(number), "--repo", f"{owner}/{repo}"]
+    note = (comment or "").strip()[:500]
+    if note:
+        argv.extend(["--comment", note])
+    run = runner or _run
+    try:
+        result = run(argv, timeout=20)
+    except FileNotFoundError:
+        return {"ok": False, "detail": "gh not installed"}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": type(exc).__name__}
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "detail": (result.stderr or result.stdout or "gh issue close failed")[:400],
+        }
+    return {
+        "ok": True,
+        "spec": f"{owner}/{repo}#{number}",
+        "detail": (result.stdout or "").strip()[:400],
+        "law": "Closed the issue. Did not merge a PR. Ticket Runner seats writers.",
     }

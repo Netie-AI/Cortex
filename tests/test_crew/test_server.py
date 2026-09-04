@@ -101,6 +101,9 @@ def test_ui_index_is_served(client) -> None:
     assert "Crew owns leases" in page.text
     assert "Control display-only" in page.text
     assert "Recall payloads are untrusted" in page.text
+    assert "Close GitHub issue" in page.text
+    assert "Keep open" in page.text
+    assert "Crew does not merge PRs" in page.text
     assert "facts.md" in page.text
     assert 'id="memSave"' in page.text
     assert 'id="memExport"' in page.text
@@ -312,7 +315,7 @@ def test_operator_can_choose_runtime_backend(client) -> None:
 def test_commands_autocomplete_and_mention_targets(client) -> None:
     body = client.http.get("/crew/commands").json()
     slashes = {c["slash"] for c in body["commands"]}
-    assert {"desk", "board", "estate", "ship_gate", "spawn", "kill"} <= slashes
+    assert {"desk", "board", "estate", "ship_gate", "spawn", "kill", "done"} <= slashes
     assert any(c["kind"] == "skill" and c["slash"] == "build" for c in body["commands"])
     assert any(c["kind"] == "routine" for c in body["commands"])
     names = {m["name"] for m in body["mentions"]}

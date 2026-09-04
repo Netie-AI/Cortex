@@ -231,7 +231,12 @@ class CrewRuntime:
             and parsed.command.get("kind") == "life"
             and not parsed.mentions
         )
-        if desk_only or memory_only or life_only:
+        close_only = bool(
+            parsed.command
+            and parsed.command.get("action") == "close_issue"
+            and not parsed.mentions
+        )
+        if desk_only or memory_only or life_only or close_only:
             return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
 
         turn_provider = (provider or "").strip() or None
@@ -366,6 +371,38 @@ class CrewRuntime:
             repo = rest.strip() or "all"
             args = {"repo": repo}
             text = render_slug(repo)
+        elif action == "close_issue":
+            from CortexOS.crew import github as github_mod
+
+            bits = [p.strip() for p in rest.split("|")]
+            spec = bits[0] if bits else ""
+            comment = "|".join(bits[1:]).strip() if len(bits) > 1 else ""
+            args = {"spec": spec, "comment": comment}
+            parsed = github_mod.parse_issue_spec(spec)
+            seated = github_mod.seated_claim(spec) if parsed else None
+            if parsed is None:
+                text = "DENIED: /done owner/repo#n | comment"
+            elif seated is not None:
+                text = (
+                    f"DENIED: {seated.get('ticket')} is SEATED "
+                    f"({seated.get('owner_pr')}). Ticket Runner owns the seat. "
+                    "Crew does not steal it."
+                )
+            else:
+                canon = github_mod.canonical_spec(spec)
+                confirm = self.store.create_confirm(
+                    space_id,
+                    run_id=None,
+                    agent_id=manager["id"],
+                    tool="close_issue",
+                    args={"spec": canon, "comment": comment},
+                )
+                args = {"spec": canon, "comment": comment, "confirm_id": confirm["id"]}
+                self.bus.emit(space_id, "confirm", {"confirm": confirm})
+                text = (
+                    f"HITL pending {confirm['id']}: Approve to close {canon}. "
+                    "Crew does not merge PRs."
+                )
         else:
             text = f"Unknown desk action {action}"
         msg = self.store.add_message(
@@ -608,7 +645,38 @@ class CrewRuntime:
             event.set()
         if row is not None:
             self.bus.emit(row["space_id"], "confirm", {"confirm": row})
+            if (
+                approved
+                and not takeover
+                and str(row.get("tool") or "") == "close_issue"
+                and str(row.get("status") or "") == "approved"
+            ):
+                self._finish_close_issue(row)
         return row
+
+    def _finish_close_issue(self, confirm: dict[str, Any]) -> None:
+        from CortexOS.crew import github as github_mod
+
+        args = confirm.get("args") if isinstance(confirm.get("args"), dict) else {}
+        spec = str(args.get("spec") or "")
+        comment = str(args.get("comment") or "")
+        result = github_mod.close_issue(spec, comment=comment)
+        space_id = str(confirm.get("space_id") or "")
+        manager = self.ensure_manager(space_id)
+        text = result.get("detail") or ("closed " + spec if result.get("ok") else "close failed")
+        if result.get("ok"):
+            text = f"Closed {result.get('spec')}. {result.get('law')}"
+        else:
+            text = f"DENIED: {text}"
+        msg = self.store.add_message(
+            space_id,
+            "tool",
+            str(text)[:4000],
+            agent_id=manager["id"],
+            to_agent_id=manager["id"],
+            meta={"tool": "close_issue", "args": args, "slash": True},
+        )
+        self.bus.emit(space_id, "message", {"message": msg})
 
     def cancel_run(self, run_id: str) -> bool:
         ctx = self._runs.get(run_id)
