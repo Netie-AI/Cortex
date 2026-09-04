@@ -422,6 +422,7 @@ _SUBJECT_MEASURES = frozenset({
 _TABLE_SUBJECT_ALIASES: dict[str, tuple[str, ...]] = {
     "inventory": (
         "sku", "skus", "item", "items", "product", "products",
+        "seller", "sellers",
         "inventory", "stock", "category", "categories",
         "chemical", "chemicals",
     ),
@@ -548,7 +549,7 @@ def undefined_subject(question: str) -> str | None:
     return subject
 
 
-_SKU_SUBJECTS = frozenset({"sku", "skus", "item", "items", "product", "products"})
+_SKU_SUBJECTS = frozenset({"sku", "skus", "item", "items", "product", "products", "seller", "sellers"})
 
 
 def _subject_allows_sales_rank(q: str) -> bool:
@@ -563,7 +564,7 @@ def _wants_sales_rank(q: str, q_raw: str) -> bool:
     if not _subject_allows_sales_rank(q):
         return False
     if re.search(r"\b(top|best|highest|most)\b", q) and re.search(
-        r"\b(sell|sold|revenue|sales|sku|skus|revnue)\b", q
+        r"\b(sell(?:ing|ers)?|sold|revenue|sales|sku|skus|revnue)\b", q
     ):
         return True
     if re.search(r"\btop\s+\d+\b", q):
@@ -703,6 +704,40 @@ def _shape_refusal(question: str) -> str | None:
     )
 
 
+def _param_is_required(spec: dict[str, Any]) -> bool:
+    return bool(spec.get("required") or (spec.get("kind") == "value" and not spec.get("optional")))
+
+
+def _plan_from_declared_synonyms(q: str, q_raw: str) -> MetricPlan | None:
+    """Longest metrics.yaml synonym that is a contiguous phrase in ``q``.
+
+    The regex cascade still wins. Skip one-word / short fragments and metrics
+    that need a required slot the synonym does not carry.
+    """
+    from packs.dms.semantic.loader import load_all
+
+    best: tuple[int, str] | None = None
+    for metric in load_all().metrics.values():
+        if any(_param_is_required(spec) for spec in (metric.params or {}).values()):
+            continue
+        for syn in metric.synonyms or []:
+            phrase = " ".join(str(syn).lower().split())
+            if " " not in phrase or len(phrase) < 16:
+                continue
+            if phrase not in q:
+                continue
+            n = len(phrase)
+            if best is None or n > best[0]:
+                best = (n, metric.id)
+    if best is None:
+        return None
+    metric_id = best[1]
+    slots: dict[str, Any] = {}
+    if metric_id in ("sales_by_value", "sales_by_volume"):
+        slots = _sales_rank_slots(q_raw)
+    return _metric_plan(metric_id, slots, f"declared synonym → {metric_id}")
+
+
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
 def route_to_metric(question: str) -> MetricPlan | None:
     """Pick a governed metric + its slots.
@@ -733,6 +768,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
         and (
             re.search(r"\b(how many|number of|count of|count)\b", q)
             or re.search(r"\bberapa\b.{0,24}\b(banyak|sku)", q)
+            or re.search(r"\bdistinct skus?\b", q)
         )
         and not re.search(r"\b(category|per|by)\b", q)
     ):
@@ -750,7 +786,8 @@ def route_to_metric(question: str) -> MetricPlan | None:
     if "delayed" in q and re.search(r"\bcarrier", q):
         return _metric_plan("count_by_carrier", {"status": "DELAYED"}, "delayed shipments grouped by carrier")
     if re.search(r"\b(per|by|each)\b", q) and re.search(r"\b(warehouse|destination|location)\b", q) \
-            and ("delayed" in q or "incoming" in q or "shipment" in q):
+            and ("delayed" in q or "incoming" in q or "shipment" in q) \
+            and not re.search(r"\b(cost|spend|price)\b", q):
         status = "DELAYED" if "delayed" in q else "IN_TRANSIT"
         return _metric_plan("count_by_destination", {"status": status}, f"{status} shipments grouped by destination")
 
@@ -758,6 +795,15 @@ def route_to_metric(question: str) -> MetricPlan | None:
     if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":
         return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
     if re.search(r"\b(revenue|sales|sold)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
+        return _metric_plan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
+    # metrics.yaml revenue_windowed synonyms ("recent revenue", "revenue last")
+    if (
+        re.search(r"\b(revenue|sales|sold)\b", q)
+        and re.search(r"\b(recent|last|past|within|previous)\b", q)
+        and _calendar_month(q) is None
+        and _RANKING.search(_DISCOURSE_LEADIN.sub("", q)) is None
+        and not re.search(r"\b(top|best|highest|most|sku|skus|rank|per|by|each)\b", q)
+    ):
         return _metric_plan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
     # G6 — bare total revenue (no month/window); must not fall through to abstain.
     # A ranking that happens to say "total revenue" as its sort key is not this.
@@ -849,7 +895,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
     if re.search(r"\b(sales|revenue)\b", q) and _calendar_month(q) == "last":
         return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
 
-    return None
+    return _plan_from_declared_synonyms(q, q_raw)
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────

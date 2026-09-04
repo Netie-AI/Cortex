@@ -72,6 +72,33 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
     assert str(n) in text
 
 
+@pytest.mark.parametrize(
+    "question,metric_id",
+    [
+        ("distinct skus", "sku_count"),
+        ("top selling", "sales_by_value"),
+        ("best sellers", "sales_by_value"),
+        ("stock value by category", "stock_value_by_category"),
+        ("sku count by category", "sku_count_by_category"),
+        ("recent revenue", "revenue_windowed"),
+        ("high risk suppliers", "suppliers_by_risk"),
+        ("shipment cost by destination", "cost_by_destination"),
+    ],
+)
+def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
+    """metrics.yaml phrases must select that metric, not an adjacent one."""
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    plan = route_to_metric(question)
+    assert plan is not None, question
+    assert plan.metric_id == metric_id, (question, plan.metric_id)
+    r = answer(question)
+    assert r["badge"] != "abstain", r.get("answer")
+    assert r.get("rows"), r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+
+
 def test_certified_sales_synonym_hits_l0():
     cq = match_certified("Top 5 SKUs by revenue")
     assert cq is not None
