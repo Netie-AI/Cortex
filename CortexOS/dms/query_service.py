@@ -890,6 +890,7 @@ def answer_question(
     question: str,
     *,
     session_id: str | None = None,
+    space_id: str | None = None,
     require_grounding: bool = False,
 ) -> dict[str, Any]:
     """Q2 — route through the layered answer engine (certified → governed metric →
@@ -905,7 +906,10 @@ def answer_question(
         from CortexOS.execution.manifest import ManifestError
 
         result = _engine_answer(
-            question, session_id=session_id, require_grounding=require_grounding
+            question,
+            session_id=session_id,
+            space_id=space_id,
+            require_grounding=require_grounding,
         )
         # A served turn that nothing grants must not fall through to the
         # pre-Q2 ranked-SQL path. That bridge opens its own connection and

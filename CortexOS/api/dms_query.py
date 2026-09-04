@@ -18,6 +18,7 @@ CHANGELOG_PATH = SAMPLES / "inventory_changelog.jsonl"
 class DMSQueryRequest(BaseModel):
     question: str
     session_id: str = Field(default="demo")
+    space_id: str | None = None
 
 
 class DMSQueryResponse(BaseModel):
@@ -99,6 +100,7 @@ def register_dms_routes(app: Any) -> None:
         out = answer_question(
             body.question,
             session_id=body.session_id,
+            space_id=body.space_id,
             require_grounding=True,
         )
         # Mark when warehouse tables were synced from lake.silver (medallion path).

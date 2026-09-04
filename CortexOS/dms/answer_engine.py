@@ -40,6 +40,7 @@ from CortexOS.execution.manifest import ManifestError, VerifiedManifest
 from CortexOS.execution.session_manifests import (
     SessionExpired,
     SessionUnbound,
+    SpaceUnbound,
     get_session_registry,
 )
 
@@ -954,6 +955,7 @@ def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
 def resolve_product_grant(
     session_id: str | None,
     verified: VerifiedManifest | None,
+    space_id: str | None = None,
 ) -> tuple[VerifiedManifest, str, list[str]]:
     """Grant for a served door. Never mints. Self-issued is not a binding.
 
@@ -961,14 +963,23 @@ def resolve_product_grant(
     table, so a table-intersect against that grant never fired. Unbound must
     fail closed *before* that grant is used as permission to answer.
     """
+    named = (space_id or "").strip() or None
     candidate = verified
     if candidate is None:
         try:
-            candidate = get_session_registry().resolve(session_id)
+            candidate = get_session_registry().resolve(session_id, space_id=named)
         except SessionExpired as exc:
             raise UngroundedSession("the session grant expired") from exc
+        except SpaceUnbound as exc:
+            raise UngroundedSession(str(exc)) from exc
         except SessionUnbound as exc:
             raise UngroundedSession("no session grant is bound") from exc
+    if named:
+        bound = (candidate.manifest.space_id or "").strip()
+        if bound != named:
+            raise UngroundedSession(
+                f"grant is bound to Space '{bound}', not '{named}'"
+            )
     if (candidate.issuer_kid or "").strip() == LOCAL_ISSUER_KID:
         raise UngroundedSession("self-issued grant is not a session binding")
     sources = sorted({str(name).lower() for name in candidate.row_predicates})
@@ -992,16 +1003,33 @@ def _stamp_grant(
     return result
 
 
-def _abstain_unbound(question: str, audit_id: str, *, reason: str) -> dict[str, Any]:
+def _abstain_unbound(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+    space_id: str | None = None,
+) -> dict[str, Any]:
     """Refuse a served turn that nothing grants. Do not offer demo questions."""
+    del question
+    named = (space_id or "").strip()
+    if named:
+        answer = (
+            f"I can't answer that yet - nothing grants Space '{named}' for this "
+            f"session ({reason}). Select a Space you are entitled to (which binds "
+            "its signed grant), then ask again. Until then I have nothing to read "
+            "and would be guessing."
+        )
+    else:
+        answer = (
+            "I can't answer that yet - nothing is grounding this session "
+            f"({reason}). Bind a session grant naming the sources you want me "
+            "to read, then ask again. Until then I have nothing to read and "
+            "would be guessing."
+        )
     return _stamp_grant(
         {
-            "answer": (
-                "I can't answer that yet - nothing is grounding this session "
-                f"({reason}). Bind a session grant naming the sources you want me "
-                "to read, then ask again. Until then I have nothing to read and "
-                "would be guessing."
-            ),
+            "answer": answer,
             "sql_used": None,
             "chart_spec": None,
             "audit_id": audit_id,
@@ -1357,10 +1385,12 @@ def answer(
     if require_grounding:
         try:
             verified, grant_kind, granted_sources = resolve_product_grant(
-                session_id, verified
+                session_id, verified, space_id=space_id
             )
         except UngroundedSession as exc:
-            return _abstain_unbound(question, audit_id, reason=str(exc))
+            return _abstain_unbound(
+                question, audit_id, reason=str(exc), space_id=space_id
+            )
 
     def _done(result: dict[str, Any]) -> dict[str, Any]:
         if require_grounding and "grant_kind" not in result:
