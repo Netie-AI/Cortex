@@ -21,7 +21,22 @@ from tests.test_crew.conftest import wait_run_done
 def test_catalog_lists_desk_routines_and_skills(settings) -> None:
     rows = catalog(settings.data_dir / "skills")
     slashes = {r["slash"] for r in rows}
-    assert {"desk", "board", "estate", "ship_gate", "remember", "memory", "recall", "forget"} <= slashes
+    assert {
+        "desk",
+        "board",
+        "estate",
+        "ship_gate",
+        "spawn",
+        "kill",
+        "stop",
+        "idle",
+        "wait",
+        "goal",
+        "remember",
+        "memory",
+        "recall",
+        "forget",
+    } <= slashes
     assert "pr-check" in slashes
     assert "build" in slashes
     desk = match_command("desk_status", settings.data_dir / "skills")
@@ -37,6 +52,10 @@ def test_parse_slash_and_mentions() -> None:
     hit = parse("/ship_gate Cortex")
     assert hit.command is not None and hit.command["action"] == "ship_gate"
     assert hit.rest == "Cortex"
+    spawn = parse("/spawn Scout | watch")
+    assert spawn.command is not None and spawn.command["action"] == "spawn"
+    assert spawn.command["kind"] == "life"
+    assert spawn.rest == "Scout | watch"
     names = parse_mentions("@PRD check the brief with @Gate")
     assert names == ("PRD", "Gate")
     resolved = resolve_mentions(names)
@@ -94,6 +113,43 @@ async def test_slash_remember_writes_facts_md_without_a_run(rig) -> None:
     assert "8020" in facts.read_text(encoding="utf-8")
     rig.runtime.clear_chat(space["id"])
     assert "8020" in facts.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_slash_spawn_kill_idle_wait_goal_without_a_run(rig) -> None:
+    from CortexOS.crew import life
+
+    space = rig.store.create_space("HQ")
+    posted = await rig.runtime.on_user_message(
+        space["id"], "/spawn Scout | watch the belt | hold the line"
+    )
+    assert posted.get("run_id") is None
+    assert posted.get("command") == "spawn"
+    scout = rig.store.get_agent_by_name(space["id"], "Scout")
+    assert scout is not None
+    assert scout["mode"] == life.MODE_GOAL
+    assert scout["goal_text"] == "hold the line"
+    parked = await rig.runtime.on_user_message(space["id"], "/idle Scout")
+    assert parked.get("run_id") is None
+    idle = rig.store.get_agent(scout["id"])
+    assert idle is not None and idle["status"] in {life.STATUS_IDLE, life.STATUS_GOAL}
+    waiting = await rig.runtime.on_user_message(space["id"], "/wait Scout")
+    assert waiting.get("run_id") is None
+    wait_row = rig.store.get_agent(scout["id"])
+    assert wait_row is not None and wait_row["status"] == life.STATUS_WAITING
+    goaled = await rig.runtime.on_user_message(space["id"], "/goal Scout | keep watching")
+    assert goaled.get("run_id") is None
+    again = rig.store.get_agent(scout["id"])
+    assert again is not None and again["mode"] == life.MODE_GOAL
+    assert again["goal_text"] == "keep watching"
+    killed = await rig.runtime.on_user_message(space["id"], "/kill Scout | test done")
+    assert killed.get("run_id") is None
+    dead = rig.store.get_agent(scout["id"])
+    assert dead is not None and dead["status"] == life.STATUS_STOPPED
+    await rig.runtime.on_user_message(space["id"], "/kill Nobody")
+    tool = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "DENIED" in tool["content"] and "Nobody" in tool["content"]
+    assert not rig.runtime._space_run.get(space["id"])
 
 
 @pytest.mark.asyncio
