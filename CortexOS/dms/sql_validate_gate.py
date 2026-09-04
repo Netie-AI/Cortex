@@ -1,8 +1,9 @@
-"""C7-min — EXPLAIN dry-run + bounded retry before execute.
+"""C7 — sqlglot + optional manifest enforce + EXPLAIN + bounded retry.
 
-Assembles existing sqlglot guardrail + DuckDB EXPLAIN. Does not weaken
-manifest refusals. L2 generation hooks call this gate; without a model the
-answer engine still abstains.
+A grounded session runs ``enforce_manifest`` before EXPLAIN so the dry-run
+never sees pre-enforce SQL (C7-02). Manifest refusals are not retried for
+the same SQL. This module does not narrow ``CortexOS.execution.manifest``
+refusals.
 """
 
 from __future__ import annotations
@@ -12,6 +13,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from CortexOS.dms.sql_guardrail import GuardrailResult, validate_sql
+from CortexOS.execution.manifest import VerifiedManifest
+
+#: Violation token when enforce_manifest refuses a candidate (C7-02).
+MANIFEST_VIOLATION_PREFIX = "MANIFEST:"
 
 
 @dataclass(slots=True)
@@ -22,14 +27,23 @@ class ValidateGateResult:
     explain_ok: bool = False
     attempts: int = 0
     explain_error: str | None = None
+    manifest_refused: bool = False
+    source_sql: str | None = None
 
 
 class SqlGateAbstain(Exception):
     """Raised when validation/EXPLAIN retries are exhausted — caller must abstain."""
 
-    def __init__(self, message: str, *, violations: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        violations: list[str] | None = None,
+        manifest_refused: bool = False,
+    ) -> None:
         super().__init__(message)
         self.violations = list(violations or [])
+        self.manifest_refused = manifest_refused
 
     def __str__(self) -> str:
         # FF-03 / dms#59 — callers interpolate `{exc}` into the envelope reason.
@@ -60,8 +74,14 @@ def run_gate(
     semantic: dict[str, Any],
     *,
     con: Any | None = None,
+    verified: VerifiedManifest | None = None,
 ) -> ValidateGateResult:
-    """sqlglot allowlist + optional EXPLAIN dry-run."""
+    """sqlglot allowlist, then enforce_manifest (if bound), then EXPLAIN.
+
+    EXPLAIN sees only post-enforce SQL. ``source_sql`` is the pre-enforce
+    candidate so ``execute_sql`` can enforce once. A ManifestError fails the
+    candidate without EXPLAIN.
+    """
     guard = validate_sql(sql, semantic)
     if not guard.passed or not guard.safe_sql:
         return ValidateGateResult(
@@ -72,31 +92,51 @@ def run_gate(
             attempts=1,
         )
 
+    source = guard.safe_sql
+    safe_sql = source
+    if verified is not None:
+        from CortexOS.execution.manifest import ManifestError, enforce_manifest
+
+        try:
+            safe_sql = enforce_manifest(source, verified)
+        except ManifestError as exc:
+            return ValidateGateResult(
+                passed=False,
+                violations=[f"{MANIFEST_VIOLATION_PREFIX}{type(exc).__name__}:{exc.code}"],
+                safe_sql=None,
+                explain_ok=False,
+                attempts=1,
+                manifest_refused=True,
+            )
+
     if con is None:
         return ValidateGateResult(
             passed=True,
             violations=[],
-            safe_sql=guard.safe_sql,
-            explain_ok=True,  # no connection — parse-only pass
+            safe_sql=safe_sql,
+            explain_ok=True,
             attempts=1,
+            source_sql=source,
         )
 
-    ok, detail = explain_dry_run(con, guard.safe_sql)
+    ok, detail = explain_dry_run(con, safe_sql)
     if not ok:
         return ValidateGateResult(
             passed=False,
             violations=[f"EXPLAIN_FAILED:{detail}"],
-            safe_sql=guard.safe_sql,
+            safe_sql=safe_sql,
             explain_ok=False,
             attempts=1,
             explain_error=detail,
+            source_sql=source,
         )
     return ValidateGateResult(
         passed=True,
         violations=[],
-        safe_sql=guard.safe_sql,
+        safe_sql=safe_sql,
         explain_ok=True,
         attempts=1,
+        source_sql=source,
     )
 
 
@@ -106,14 +146,19 @@ def gate_with_retry(
     semantic: dict[str, Any],
     *,
     con: Any | None = None,
+    verified: VerifiedManifest | None = None,
     max_retries: int = 2,
 ) -> ValidateGateResult:
     """Call generate_fn up to max_retries+1 times, feeding prior violations back.
 
     ``generate_fn(prior_violations) -> sql | None``. Exhaustion raises SqlGateAbstain.
+    ManifestError aborts that candidate (no EXPLAIN, no second try of the same
+    SQL). A later generate_fn result may still pass.
     """
     prior: list[str] = []
     last = ValidateGateResult(passed=False, attempts=0)
+    saw_manifest = False
+    refused_sql: set[str] = set()
     for attempt in range(1, max_retries + 2):
         sql = generate_fn(prior)
         if not sql:
@@ -121,16 +166,27 @@ def gate_with_retry(
                 passed=False,
                 violations=prior + ["NO_CANDIDATE"],
                 attempts=attempt,
+                manifest_refused=saw_manifest,
             )
             break
-        last = run_gate(sql, semantic, con=con)
+        last = run_gate(sql, semantic, con=con, verified=verified)
         last.attempts = attempt
+        if last.manifest_refused:
+            saw_manifest = True
+            if sql in refused_sql:
+                raise SqlGateAbstain(
+                    "SQL validation gate exhausted retries",
+                    violations=last.violations,
+                    manifest_refused=True,
+                )
+            refused_sql.add(sql)
         if last.passed and last.safe_sql:
             return last
         prior = list(last.violations)
     raise SqlGateAbstain(
         "SQL validation gate exhausted retries",
         violations=last.violations,
+        manifest_refused=saw_manifest or last.manifest_refused,
     )
 
 
@@ -143,6 +199,7 @@ def guard_result_from_gate(gate: ValidateGateResult) -> GuardrailResult:
 
 
 __all__ = [
+    "MANIFEST_VIOLATION_PREFIX",
     "SqlGateAbstain",
     "ValidateGateResult",
     "explain_dry_run",

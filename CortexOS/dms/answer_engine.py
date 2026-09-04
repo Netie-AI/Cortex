@@ -1568,7 +1568,7 @@ def answer(
         # L2 lives on the engine port module, not here. This file must not
         # import pack generation code (C2). L2 (when enabled) stays ahead of
         # the space-scoped document stub; keyword RAG never runs first.
-        from CortexOS.dms.l2_generation import attempt_l2
+        from CortexOS.dms.l2_generation import L2_MANIFEST_REASON_PREFIX, attempt_l2
 
         l2_out = attempt_l2(question, verified=verified)
         if l2_out is not None and l2_out.sql:
@@ -1576,6 +1576,13 @@ def answer(
             layer, badge = l2_out.layer, l2_out.badge
             assumptions = l2_out.assumptions
         else:
+            if l2_out is not None and not l2_out.sql:
+                if l2_out.refused or (l2_out.reason or "").startswith(
+                    L2_MANIFEST_REASON_PREFIX
+                ):
+                    refused = _abstain_refused(question, audit_id, reason=l2_out.reason)
+                    refused["violations_blocked"] = list(l2_out.violations or [])
+                    return _done(refused)
             doc = _space_doc_rag()
             if doc is not None:
                 return _done(doc)
