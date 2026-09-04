@@ -238,6 +238,25 @@ def test_l2_disabled_by_default(monkeypatch):
     assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
 
 
+def test_l1_chooser_is_still_the_cascade_until_c7_06_gates(monkeypatch):
+    """C7-06: answer() uses choose_governed_metric; default is still route_to_metric."""
+    from CortexOS.dms.answer_engine import choose_governed_metric, route_to_metric
+    from CortexOS.dms.c7_cutover import cutover_flags
+
+    monkeypatch.delenv("DMS_C7_RETIRE_CASCADE", raising=False)
+    monkeypatch.delenv("DMS_C7_CUTOVER_REPORT", raising=False)
+    flags = cutover_flags()
+    assert flags["cascade_retired"] is False
+    assert flags["cutover"] is False
+    q = "Which suppliers have a risk score above 0.7?"
+    plan = choose_governed_metric(q)
+    assert plan is not None
+    assert plan == route_to_metric(q)
+    r = answer_question(q)
+    assert r["layer"] == "governed_metric"
+    assert r.get("rows")
+
+
 def _assert_exclusion_visible(r: dict, excluded: list[str], *, n: int = 5) -> None:
     """Customer-visible exclusion: non-empty ranking rows, text lists them, omitted SKUs stay out."""
     rows = r.get("rows") or []
