@@ -16,3 +16,7 @@ D:\Cortex\.venv\Scripts\python.exe -m pytest tests/dms/test_c7_heldout.py -q --t
 ```
 
 Does not prove: live FreeRoute quality, G-sh >= 500 shadow lines, or L2-on-miss serve.
+
+## Live L1 baseline (2026-09-04, DMS_L2_ENABLED=0)
+
+`python -m bench.heldout --engine` after warehouse load: 28 items, 1 correct / 16 abstained / 11 incorrect. G-env true. G-abs false until the Nestle 10-K utilisation leak was refused as an external filing. G-err false (10+ SQL incorrect). G-sh 0 lines. G-man: `pytest tests/test_execution` 228 passed.

@@ -463,15 +463,30 @@ def score_engine(
     requires G-abs/G-err/G-env/G-man/G-sh on a real report.
     """
     rows = items if items is not None else load_heldout()
-    if ask is None:
+    live_ask = ask is None
+    if live_ask:
+        from bench.accuracy import _ensure_db_loaded
         from CortexOS.dms.answer_engine import answer as ask
+
+        _ensure_db_loaded()
     prev = os.environ.get("DMS_L2_ENABLED")
     if enable_l2:
         os.environ["DMS_L2_ENABLED"] = "1"
     results: list[HeldoutResult] = []
     try:
         for item in rows:
-            env = ask(item.question)
+            try:
+                env = ask(item.question)
+            except Exception as exc:  # noqa: BLE001 — one item must not abort the report
+                results.append(
+                    HeldoutResult(
+                        item.id,
+                        item.split,
+                        "incorrect",
+                        detail=f"ask raised {type(exc).__name__}: {exc}",
+                    )
+                )
+                continue
             if not isinstance(env, dict):
                 env = {}
             results.append(score_envelope(item, env))

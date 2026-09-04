@@ -236,3 +236,25 @@ def test_score_engine_does_not_claim_cutover_when_g4_empty_success():
     assert report["totals"]["incorrect"] == 1
     assert report["gates"]["g_env"] is False
     assert report["cutover"] is False
+
+
+def test_score_engine_records_ask_crash_as_incorrect():
+    from bench.heldout import score_engine
+
+    item = HeldoutItem(
+        id="crash",
+        split="sql",
+        provenance="bird_style",
+        question="how many skus",
+        expect="correct_rows",
+        key_columns=["n"],
+        expected_rows=[{"n": 4}],
+    )
+
+    def ask(question: str) -> dict:
+        del question
+        raise RuntimeError("warehouse missing")
+
+    report = score_engine([item], ask=ask, count_shadow=False)
+    assert report["totals"]["incorrect"] == 1
+    assert "RuntimeError" in report["results"][0]["detail"]

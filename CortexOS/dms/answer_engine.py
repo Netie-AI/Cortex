@@ -639,9 +639,25 @@ def _grouped_ranking_unanswerable(question: str) -> str | None:
     )
 
 
+def _external_filing_quote(question: str) -> str | None:
+    """Must-abstain class: quote/compare against an SEC filing this warehouse does not hold."""
+    q = (question or "").lower()
+    if not re.search(r"\b(10-k|10k|sec filing)\b", q):
+        return None
+    if not re.search(r"\b(quote|footnote|disclosed|compare)\b", q):
+        return None
+    return (
+        "question asks to quote an external filing this warehouse does not hold"
+    )
+
+
 def _shape_refusal(question: str) -> str | None:
     """Plan-shape mismatch the router must not paper over with an adjacent metric."""
-    return _aggregate_over_ranking(question) or _grouped_ranking_unanswerable(question)
+    return (
+        _aggregate_over_ranking(question)
+        or _grouped_ranking_unanswerable(question)
+        or _external_filing_quote(question)
+    )
 
 
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
