@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
+from CortexOS.constructor_graph import (
+    ConstructorGraphError,
+    FOUNDRY_KINDS,
+    NAMED_GENERATE,
+    compile_constructor_graph,
+    generate_constructor_graph,
+)
 from packs.dms.security.rate_limit import reset_limiter
 
 SAMPLE = {
@@ -156,6 +162,9 @@ def test_vendored_skin_is_served_without_laptop_path(dms_client, api_keys_env):
     skin = constructor_skin_dir()
     assert (skin / "index.html").is_file()
     assert (skin / "engine.js").is_file()
+    engine = (skin / "engine.js").read_text(encoding="utf-8")
+    assert "if (!cortexOrigin()) return null" in engine
+    assert "/cortex/constructor/generate" in engine
     res = dms_client.get(
         "/cortex/constructor/engine.js",
         headers={"X-API-Key": api_keys_env["viewer"]},
@@ -417,3 +426,74 @@ def test_ov_token_accepts_flat_valid_true(monkeypatch):
     caller = resolve_caller("ov_flat")
     assert caller is not None
     assert caller.actor == "ov_flat1"
+
+
+def test_generate_named_seeds_include_foundry_kinds():
+    for prompt in NAMED_GENERATE:
+        graph = generate_constructor_graph(prompt)
+        assert graph["ok"] is True, prompt
+        assert graph["ghost"] is True, prompt
+        kinds = {n["kind"] for n in graph["nodes"]}
+        assert FOUNDRY_KINDS <= kinds, prompt
+        assert graph["pattern"] == "orchestrator_subagent"
+        compile_constructor_graph({"nodes": graph["nodes"], "edges": graph["edges"]})
+
+
+def test_generate_govern_agents_keeps_agent_and_foundry():
+    graph = generate_constructor_graph("govern agents")
+    kinds = {n["kind"] for n in graph["nodes"]}
+    assert "agent" in kinds
+    assert FOUNDRY_KINDS <= kinds
+    assert graph["action"] == "agent.checked"
+
+
+def test_generate_inventory_pptx_is_foundry_path():
+    graph = generate_constructor_graph("export inventory pptx")
+    kinds = {n["kind"] for n in graph["nodes"]}
+    assert FOUNDRY_KINDS <= kinds
+    assert graph["pattern"] == "orchestrator_subagent"
+    assert graph["action"] == "export_pptx"
+    assert "inventory" in graph["objects"]
+
+
+def test_generate_object_types_stay_on_semantic_layer_tables():
+    from pathlib import Path
+
+    import yaml
+
+    sem = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "packs" / "dms" / "semantic_layer.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    tables = set(sem["tables"])
+    for prompt in (*NAMED_GENERATE, "export inventory pptx", "intake suppliers"):
+        graph = generate_constructor_graph(prompt)
+        used = {n.get("object_type") for n in graph["nodes"] if n.get("object_type")}
+        assert used <= tables, prompt
+
+
+def test_generate_refuses_stalk_without_a_graph():
+    graph = generate_constructor_graph("stalk suppliers on public webcams")
+    assert graph["ok"] is False
+    assert graph["refused"] is True
+    assert graph["nodes"] == []
+
+
+def test_generate_endpoint_is_ghost_and_key_gated(dms_client, api_keys_env):
+    denied = dms_client.post("/cortex/constructor/generate", json={"prompt": "define data"})
+    assert denied.status_code == 401
+    res = dms_client.post(
+        "/cortex/constructor/generate",
+        json={"prompt": "understand this company"},
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["ghost"] is True
+    assert "fetches" not in body
+    kinds = {n["kind"] for n in body["nodes"]}
+    assert FOUNDRY_KINDS <= kinds
+    assert "run" not in body
+

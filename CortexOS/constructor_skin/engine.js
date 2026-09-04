@@ -446,6 +446,36 @@ async function handleChat(raw) {
     applyWinner(ranked[0].id);
     return "Applied " + ranked[0].name + ". Graph compiled toward " + ranked[0].cortex_path + ".";
   }
+  if (
+    /understand this company/.test(t) ||
+    /define data/.test(t) ||
+    /govern agents/.test(t) ||
+    /business insights/.test(t)
+  ) {
+    C.setGhost(true);
+    if (cortexOrigin()) {
+      const remote = await cortexPost("/cortex/constructor/generate", { prompt: text });
+      if (remote && remote.ok && Array.isArray(remote.nodes) && C.replaceGraph) {
+        C.replaceGraph(remote.nodes, remote.edges);
+        const ranked = await rankApproaches();
+        return (
+          (remote.summary || "Generated foundry path.") +
+          " Winner: " +
+          ranked[0].name +
+          ". Ghost on. Live run stays POST /cortex/constructor/run."
+        );
+      }
+    }
+    C.loadFoundryPath();
+    if (/govern agents/.test(t)) C.ensureKinds(["agent"]);
+    if (/define data/.test(t)) C.ensureKinds(["ingest"]);
+    const ranked = await rankApproaches();
+    return (
+      "Loaded ontology -> insight -> foundry -> app. Pages never fetch. Winner: " +
+      ranked[0].name +
+      "."
+    );
+  }
   if (/foundry|ontology path|create app/.test(t)) {
     C.loadFoundryPath();
     C.setGhost(true);
