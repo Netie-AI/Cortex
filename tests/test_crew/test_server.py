@@ -115,7 +115,10 @@ def test_ui_index_is_served(client) -> None:
     assert "Tickets" in page.text
     assert "Auto-detect" in page.text
     assert "Spawn the " not in page.text
-    assert "Ask the Manager. Auto-detect who to spawn." in page.text
+    assert "Ask the Manager. Type / for commands, @ for a teammate." in page.text
+    assert 'id="suggest"' in page.text
+    assert "/crew/commands" in page.text
+    assert "composer__suggest" in page.text
     assert "Login or 2FA. Take over this computer." in page.text
     assert "Done, I logged in" in page.text
     assert "class=\"takeover\"" in page.text or 'class="takeover"' in page.text
@@ -137,6 +140,7 @@ def test_ui_index_is_served(client) -> None:
     assert b"drop-veil" in css.content
     assert b".orb" in css.content
     assert b"scope-chip" in css.content
+    assert b"composer__suggest" in css.content
     assert b"--rail-ground" not in css.content
     assert b"--rk-page" not in css.content
     desk = client.http.get("/crew/desk").json()
@@ -287,3 +291,34 @@ def test_operator_can_choose_runtime_backend(client) -> None:
     bad = client.http.post("/crew/runtime", json={"backend": "firecracker"})
     assert bad.status_code == 400
 
+
+def test_commands_autocomplete_and_mention_targets(client) -> None:
+    body = client.http.get("/crew/commands").json()
+    slashes = {c["slash"] for c in body["commands"]}
+    assert {"desk", "board", "estate", "ship_gate"} <= slashes
+    assert any(c["kind"] == "skill" and c["slash"] == "build" for c in body["commands"])
+    assert any(c["kind"] == "routine" for c in body["commands"])
+    names = {m["name"] for m in body["mentions"]}
+    assert "Manager" in names
+    assert "PRD" in names
+    desk = client.http.get("/crew/commands", params={"q": "/desk"}).json()
+    assert desk["commands"][0]["action"] == "desk_status"
+    space = client.http.post("/crew/spaces", json={"title": "Mentions"}).json()
+    posted = client.http.post(
+        f"/crew/spaces/{space['id']}/messages", json={"text": "/desk"}
+    ).json()
+    assert posted.get("run_id") is None
+    assert posted.get("command") == "desk"
+    msgs = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
+    assert [m["role"] for m in msgs] == ["user", "tool"]
+    assert msgs[0]["meta"]["a2a"]["from"] == "operator"
+    assert msgs[0]["meta"]["a2a"]["to"] == "Manager"
+    assert msgs[1]["meta"]["tool"] == "desk_status"
+    role_hit = client.http.post(
+        f"/crew/spaces/{space['id']}/messages", json={"text": "@PRD draft it"}
+    ).json()
+    assert "run_id" in role_hit
+    lined = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
+    users = [m for m in lined if m["role"] == "user"]
+    assert users[-1]["meta"]["a2a"]["to"] == "PRD"
+    assert users[-1]["meta"]["mentions"][0]["kind"] == "role"

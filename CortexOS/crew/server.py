@@ -339,6 +339,28 @@ def build_router(crew: CrewApp) -> APIRouter:
 
         return catalog()
 
+    @router.get("/commands")
+    async def list_commands(q: str = "", space_id: str = "") -> dict[str, Any]:
+        """Slash catalog plus @ targets. Autocomplete source for the composer."""
+        from CortexOS.crew.commands import (
+            catalog,
+            filter_commands,
+            filter_mentions,
+            mention_targets,
+        )
+
+        skills_dir = crew.settings.data_dir / "skills"
+        cmds = catalog(skills_dir)
+        agents = crew.store.list_agents(space_id) if space_id else []
+        mentions = mention_targets(agents)
+        needle = (q or "").strip()
+        if needle.startswith("@"):
+            mentions = filter_mentions(mentions, needle)
+            cmds = filter_commands(cmds, "")
+        elif needle:
+            cmds = filter_commands(cmds, needle)
+        return {"commands": cmds, "mentions": mentions}
+
     @router.get("/detect")
     async def detect_plan(q: str = "") -> dict[str, Any]:
         from CortexOS.crew.detect import plan

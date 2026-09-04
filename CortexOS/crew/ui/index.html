@@ -57,9 +57,10 @@
       </div>
       <div class="composer">
         <div id="roles" class="role-chips"></div>
+        <div class="composer__suggest" id="suggest" hidden role="listbox" aria-label="Command and mention autocomplete"></div>
         <div class="composer__row">
           <select class="route-pick" id="routePick" title="Provider for this turn"></select>
-          <textarea class="composer__input" id="input" rows="1" placeholder="Ask the Manager. Auto-detect who to spawn."></textarea>
+          <textarea class="composer__input" id="input" rows="1" placeholder="Ask the Manager. Type / for commands, @ for a teammate."></textarea>
           <button class="composer__send" id="send" title="Send">^</button>
         </div>
       </div>
@@ -227,6 +228,7 @@
       agents: [], confirms: [], mcp: [], plugins: [],
       source: null, seq: 0, runId: null, draft: "", keyFields: [],
       plan: null, skills: [], roles: [],
+      commands: [], mentions: [], suggest: [], suggestAt: -1, suggestKind: null,
       activityOnly: false, focusAgent: null,
       stick: true, unread: 0, retry: null, live: false,
       belt: null, memScope: "space", claimBusy: null,
@@ -390,7 +392,11 @@
     function whoLine(m) {
       const t = clock(m.created_at);
       const time = t ? `<span class="stamp">${esc(t)}</span>` : "";
-      if (m.role === "user") return `<span>You</span>${time}`;
+      if (m.role === "user") {
+        const wire = (m.meta && m.meta.a2a) || {};
+        const to = wire.to || nameOf(m.to_agent_id) || "Manager";
+        return `<span>You -&gt; ${esc(to)}</span>${time}`;
+      }
       if (m.role === "assistant") return `<span>Manager</span>${time}`;
       if (m.role === "agent") {
         const wire = (m.meta && m.meta.a2a) || {};
@@ -890,15 +896,18 @@
     }
 
     async function boot() {
-      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt] = await Promise.all([
+      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt, composer] = await Promise.all([
         api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
         api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
         api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
         api("/crew/tickets").catch(() => ({ tickets: [] })),
         api("/crew/desk").catch(() => null),
         api("/crew/skills").catch(() => []),
-        api("/v1/belt").catch(() => api("/crew/belt").catch(() => null))
+        api("/v1/belt").catch(() => api("/crew/belt").catch(() => null)),
+        api("/crew/commands").catch(() => ({ commands: [], mentions: [] }))
       ]);
+      state.commands = composer.commands || [];
+      state.mentions = composer.mentions || [];
       renderRoles(roles || []);
       state.skills = skills || [];
       renderSkills(state.skills);
@@ -956,6 +965,7 @@
       state.agents = agents;
       state.confirms = confirms;
       renderFocus(); renderAgents(); renderConfirms(); renderLog(); renderMemory();
+      loadComposer(id);
       listen(id);
     }
     async function catchUp(id) {
@@ -996,6 +1006,7 @@
             const i = state.agents.findIndex((a) => a.id === data.agent.id);
             if (i >= 0) state.agents[i] = data.agent; else state.agents.push(data.agent);
             renderAgents(); renderGraph(wireRows());
+            loadComposer(id);
           }
           if (data.confirm) {
             const i = state.confirms.findIndex((c) => c.id === data.confirm.id);
@@ -1028,7 +1039,87 @@
       open();
     }
 
+    async function loadComposer(spaceId) {
+      const q = spaceId ? ("?space_id=" + encodeURIComponent(spaceId)) : "";
+      try {
+        const body = await api("/crew/commands" + q);
+        state.commands = body.commands || state.commands || [];
+        state.mentions = body.mentions || state.mentions || [];
+      } catch (err) { /* catalog is optional for a send */ }
+    }
+    function tokenAtCaret(value, caret) {
+      const head = value.slice(0, caret);
+      const slash = head.match(/(^|\s)(\/[A-Za-z0-9_-]*)$/);
+      if (slash) return { kind: "slash", prefix: slash[2].slice(1), start: caret - slash[2].length, token: slash[2] };
+      const at = head.match(/(^|\s)(@[A-Za-z0-9_-]*)$/);
+      if (at) return { kind: "at", prefix: at[2].slice(1), start: caret - at[2].length, token: at[2] };
+      return null;
+    }
+    function matchSuggest(kind, prefix) {
+      const needle = (prefix || "").toLowerCase();
+      if (kind === "slash") {
+        return (state.commands || []).filter((c) => {
+          const aliases = (c.aliases || []).join(" ");
+          const blob = (c.slash + " " + (c.title || "") + " " + aliases).toLowerCase();
+          return !needle || c.slash.toLowerCase().startsWith(needle) || blob.indexOf(needle) >= 0;
+        }).slice(0, 12);
+      }
+      return (state.mentions || []).filter((m) => {
+        const blob = (m.name + " " + (m.hint || "")).toLowerCase();
+        return !needle || m.name.toLowerCase().startsWith(needle) || blob.indexOf(needle) >= 0;
+      }).slice(0, 12);
+    }
+    function hideSuggest() {
+      state.suggest = [];
+      state.suggestAt = -1;
+      state.suggestKind = null;
+      const box = $("suggest");
+      box.hidden = true;
+      box.innerHTML = "";
+    }
+    function renderSuggest() {
+      const box = $("suggest");
+      if (!state.suggest.length) { hideSuggest(); return; }
+      box.hidden = false;
+      box.innerHTML = state.suggest.map((row, i) => {
+        const on = i === state.suggestAt ? " on" : "";
+        if (state.suggestKind === "slash") {
+          return `<button class="palette__hit${on}" type="button" role="option" data-i="${i}"><b>/${esc(row.slash)}</b> ${esc(row.title)}<small>${esc(row.kind)} - ${esc(row.hint || "")}</small></button>`;
+        }
+        return `<button class="palette__hit${on}" type="button" role="option" data-i="${i}"><b>@${esc(row.name)}</b> ${esc(row.kind)}<small>${esc(row.hint || "")}</small></button>`;
+      }).join("");
+      box.querySelectorAll("[data-i]").forEach((el) => {
+        el.onmousedown = (e) => { e.preventDefault(); applySuggest(Number(el.dataset.i)); };
+      });
+    }
+    function refreshSuggest() {
+      const node = $("input");
+      const tok = tokenAtCaret(node.value, node.selectionStart || 0);
+      if (!tok) { hideSuggest(); return; }
+      state.suggestKind = tok.kind;
+      state.suggest = matchSuggest(tok.kind, tok.prefix);
+      if (!state.suggest.length) { hideSuggest(); return; }
+      if (state.suggestAt < 0 || state.suggestAt >= state.suggest.length) state.suggestAt = 0;
+      renderSuggest();
+    }
+    function applySuggest(i) {
+      const row = state.suggest[i];
+      if (!row) return;
+      const node = $("input");
+      const caret = node.selectionStart || 0;
+      const tok = tokenAtCaret(node.value, caret);
+      if (!tok) { hideSuggest(); return; }
+      const insert = state.suggestKind === "slash" ? ("/" + row.slash + " ") : ("@" + row.name + " ");
+      node.value = node.value.slice(0, tok.start) + insert + node.value.slice(caret);
+      const next = tok.start + insert.length;
+      node.setSelectionRange(next, next);
+      hideSuggest();
+      growInput();
+      node.focus();
+    }
+
     async function send() {
+      hideSuggest();
       const text = $("input").value.trim();
       if (!text || !state.spaceId) return;
       $("input").value = ""; growInput();
@@ -1110,8 +1201,14 @@
       const id = $("takeover").dataset.id;
       if (id) decide(id, false, false);
     };
-    $("input").addEventListener("input", growInput);
+    $("input").addEventListener("input", () => { growInput(); refreshSuggest(); });
     $("input").addEventListener("keydown", (e) => {
+      if (! $("suggest").hidden && state.suggest.length) {
+        if (e.key === "ArrowDown") { e.preventDefault(); state.suggestAt = (state.suggestAt + 1) % state.suggest.length; renderSuggest(); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); state.suggestAt = (state.suggestAt - 1 + state.suggest.length) % state.suggest.length; renderSuggest(); return; }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); applySuggest(state.suggestAt < 0 ? 0 : state.suggestAt); return; }
+        if (e.key === "Escape") { e.preventDefault(); hideSuggest(); return; }
+      }
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     });
     $("log").addEventListener("scroll", () => {
