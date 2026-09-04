@@ -2,7 +2,7 @@
 
 - Date: 2026-09-04
 - Keywords: metrics.yaml, synonyms, route_to_metric, sellers, cost_by_destination, C7-05, G-lat
-- Main idea: After the regex cascade, L1 takes the longest `metrics.yaml` synonym (space, >=16 chars, leftover filler only, no required slot). Nested `high risk suppliers` is not the pending-shipment ask. Grouped SKU count beats the warehouse-wide scalar. `selling`/`sellers` count as sales-rank.
+- Main idea: After the regex cascade, L1 takes the longest `metrics.yaml` synonym (space, >=16 chars, leftover filler only, no required slot). Nested `high risk suppliers` is not the pending-shipment ask. Grouped SKU count beats the warehouse-wide scalar. Freight/shipping cost by destination is `cost_by_destination`, not a shipment count. `selling`/`sellers` count as sales-rank.
 
 ## PREFLIGHT
 
