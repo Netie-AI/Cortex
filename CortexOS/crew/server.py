@@ -75,6 +75,7 @@ class CrewApp:
         self.shell = CrewShell(self.settings)
         self.wakes = WakeBoard()
         self.queue = JobQueue()
+        self._fetch_warm: asyncio.Task[None] | None = None
 
     def mailbox_nonempty(self) -> bool:
         """True when any A2A mailbox still holds unread envelopes.
@@ -115,6 +116,7 @@ class CrewApp:
             self.queue,
             mailbox_nonempty=self.mailbox_nonempty(),
             assignments=assignment_public(self.settings.data_dir),
+            data_dir=self.settings.data_dir,
         )
 
     async def startup(self) -> None:
@@ -134,8 +136,18 @@ class CrewApp:
         # Armed servers do not stay resident. The reaper suspends one once it
         # goes quiet; the next approved tool call starts it again.
         self.mcp.start_reaper()
+        from CortexOS.crew import github as github_mod
+
+        # Off the GET /v1/belt path so Control's 1.5s proxy does not wait on gh.
+        self._fetch_warm = asyncio.create_task(
+            asyncio.to_thread(github_mod.warm_fetched, self.settings.data_dir)
+        )
 
     async def shutdown(self) -> None:
+        if self._fetch_warm is not None:
+            self._fetch_warm.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._fetch_warm
         await self.runtime.shutdown()
         await self.mcp.stop_all()
         self.store.close()
@@ -660,6 +672,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             if isinstance(row, dict)
         )
         fetched = github_mod.list_open_issues()
+        github_mod.remember_fetched(crew.settings.data_dir, fetched)
         issues = []
         for row in fetched.get("issues") or []:
             if not isinstance(row, dict):

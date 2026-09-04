@@ -426,6 +426,7 @@ class CrewRuntime:
             from CortexOS.crew import github as github_mod
 
             fetched = github_mod.list_open_issues()
+            github_mod.remember_fetched(self.settings.data_dir, fetched)
             lines = [
                 f"{len(fetched.get('issues') or [])} open issues. {fetched.get('law')}"
             ]

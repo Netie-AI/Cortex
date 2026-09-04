@@ -7,11 +7,15 @@ import os
 import re
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from CortexOS.crew.board import snapshot as board_snapshot
 
 RunFn = Callable[..., subprocess.CompletedProcess[str]]
+
+_FETCH_FILE = "fetched_issues.json"
+_FETCH_CAP = 80
 
 
 def _run(argv: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
@@ -444,6 +448,43 @@ def list_open_issues(limit: int = 20, *, runner: RunFn | None = None) -> dict[st
         "repos": repos,
         "law": law,
     }
+
+
+def remember_fetched(data_dir: Path, payload: dict[str, Any]) -> None:
+    """Cache /fetch results so GET /v1/belt stays off the gh path (Control 1.5s)."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    issues = [
+        row for row in (payload.get("issues") or []) if isinstance(row, dict)
+    ][:_FETCH_CAP]
+    blob = {
+        "issues": issues,
+        "detail": str(payload.get("detail") or "")[:400],
+        "ok": bool(payload.get("ok")),
+    }
+    (data_dir / _FETCH_FILE).write_text(
+        json.dumps(blob, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def remembered_issues(data_dir: Path) -> list[dict[str, Any]]:
+    path = data_dir / _FETCH_FILE
+    if not path.is_file():
+        return []
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    rows = blob.get("issues") if isinstance(blob, dict) else blob
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        if isinstance(row, dict) and str(row.get("spec") or "").strip():
+            out.append(row)
+    return out[:_FETCH_CAP]
+
+
+def warm_fetched(data_dir: Path) -> None:
+    """Fill the belt cache once. Belt GETs stay off gh."""
+    remember_fetched(data_dir, list_open_issues())
 
 
 def close_issue(

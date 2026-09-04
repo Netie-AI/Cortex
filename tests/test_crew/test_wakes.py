@@ -78,3 +78,81 @@ def test_conveyor_skips_cortex_ping_and_does_not_decide_shape(tmp_path, monkeypa
     assert body["assignments"] == []
     assert "Control does not assign" in body["assign_owner"]
     assert "dag_runner" not in body
+
+
+def test_conveyor_adds_cached_unseated_issues(tmp_path, monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED","repo":"Netie-AI/Cortex"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    monkeypatch.setenv("CREW_RUNTIME", str(tmp_path / "missing-runtime.md"))
+    data_dir = tmp_path / "crew"
+    github_mod.remember_fetched(
+        data_dir,
+        {
+            "ok": True,
+            "issues": [
+                {
+                    "spec": "Netie-AI/Cortex#128",
+                    "repo": "Netie-AI/Cortex",
+                    "number": 128,
+                    "title": "seated",
+                    "seated": True,
+                },
+                {
+                    "spec": "Netie-AI/Cortex#173",
+                    "repo": "Netie-AI/Cortex",
+                    "number": 173,
+                    "title": "request_close",
+                    "seated": False,
+                },
+            ],
+        },
+    )
+    store = CrewStore(tmp_path / "crew.db")
+    body = conveyor(store, WakeBoard(), JobQueue(), data_dir=data_dir)
+    ready = [row for row in body["tickets"]["items"] if row.get("ready")]
+    assert ready == [
+        {
+            "repo": "Netie-AI/Cortex",
+            "number": 173,
+            "title": "request_close",
+            "ready": True,
+            "url": "",
+            "spec": "Netie-AI/Cortex#173",
+        }
+    ]
+    store.close()
+
+
+def test_warm_fetched_writes_cache_for_belt(tmp_path, monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_CLAIMS", str(tmp_path / "missing-claims.json"))
+    monkeypatch.setenv("CREW_RUNTIME", str(tmp_path / "missing-runtime.md"))
+    monkeypatch.setattr(
+        github_mod,
+        "list_open_issues",
+        lambda **_k: {
+            "ok": True,
+            "issues": [
+                {
+                    "spec": "Netie-AI/Cortex#175",
+                    "repo": "Netie-AI/Cortex",
+                    "number": 175,
+                    "title": "belt cache",
+                    "seated": False,
+                }
+            ],
+        },
+    )
+    github_mod.warm_fetched(tmp_path / "crew")
+    store = CrewStore(tmp_path / "crew.db")
+    body = conveyor(store, WakeBoard(), JobQueue(), data_dir=tmp_path / "crew")
+    ready = [row for row in body["tickets"]["items"] if row.get("ready")]
+    assert ready[0]["spec"] == "Netie-AI/Cortex#175"
+    store.close()
