@@ -27,6 +27,7 @@ from CortexOS.crew.keys import status as keys_status
 from CortexOS.crew.mcp_client import MCPManager
 from CortexOS.crew.queue import JobQueue
 from CortexOS.crew.runtime import CrewRuntime
+from CortexOS.crew.shell import CrewShell
 from CortexOS.crew.store import CrewStore
 from CortexOS.crew.wakes import WakeBoard, conveyor
 
@@ -71,6 +72,7 @@ class CrewApp:
         self.runtime = CrewRuntime(
             self.store, self.bus, self.settings, self.mcp, self.bridge, llm_chat=llm_chat
         )
+        self.shell = CrewShell(self.settings)
         self.wakes = WakeBoard()
         self.queue = JobQueue()
 
@@ -139,6 +141,10 @@ class ComputerIn(BaseModel):
     host: str  # this-pc | off
 
 
+class RuntimeIn(BaseModel):
+    backend: str  # laptop | cloudflare-computer
+
+
 class SkillIn(BaseModel):
     title: str
     body: str
@@ -179,6 +185,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "engine": await crew.bridge.health(),
             "openvault": healthz(),
             "computer_control": crew.settings.master_computer_control,
+            "runtime": crew.shell.public(),
             "grok_offloaded": True,
             "grok_autostart": False,
             "mcp": mcp,
@@ -355,6 +362,19 @@ def build_router(crew: CrewApp) -> APIRouter:
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
         return {"ok": True, "host": "this-pc", "mcp": crew.mcp.status()}
+
+    @router.get("/runtime")
+    async def runtime_status() -> dict[str, Any]:
+        """Dual-path exec plane. Isolate is PREVIEW only; never returns secrets."""
+        return crew.shell.public()
+
+    @router.post("/runtime")
+    async def runtime_choose(body: RuntimeIn) -> dict[str, Any]:
+        try:
+            status = crew.shell.set_backend(body.backend)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True, **status}
 
     @router.post("/skills")
     async def save_skill(body: SkillIn) -> dict[str, Any]:

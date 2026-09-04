@@ -39,6 +39,27 @@ class Provider:
         }
 
 
+def _flag(name: str, default: str = "") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Operator-chosen exec plane. Distinct from CREW_RUNTIME (path to RUNTIME.md).
+BACKEND_LAPTOP = "laptop"
+BACKEND_CF_COMPUTER = "cloudflare-computer"
+RUNTIME_BACKENDS = frozenset({BACKEND_LAPTOP, BACKEND_CF_COMPUTER})
+# Isolate path is PREVIEW-only (https://github.com/cloudflare/computer). Off by default.
+FLAG_CF_COMPUTER = "CREW_CF_COMPUTER"
+
+
+def parse_runtime_backend(raw: str | None) -> str:
+    value = (raw or "").strip().lower().replace("_", "-")
+    if value in {"cf", "cf-computer", "cloudflare", "isolate", "computer"}:
+        value = BACKEND_CF_COMPUTER
+    if value in RUNTIME_BACKENDS:
+        return value
+    return BACKEND_LAPTOP
+
+
 @dataclass
 class CrewSettings:
     port: int
@@ -52,6 +73,11 @@ class CrewSettings:
     max_steps_per_agent: int = 12
     confirm_timeout_s: int = 300
     llm_timeout_s: int = 180
+    runtime_backend: str = BACKEND_LAPTOP
+    cf_computer_enabled: bool = False
+    cf_computer_url: str = ""
+    cf_computer_token: str = ""
+    cf_computer_forward_host_env: bool = False
 
     @property
     def db_path(self) -> Path:
@@ -75,8 +101,12 @@ def load_settings() -> CrewSettings:
         # by design (ANS work), and crew renders that abstention honestly.
         engine_session=os.environ.get("CREW_ENGINE_SESSION", "demo"),
         data_dir=data_dir,
-        master_computer_control=os.environ.get("CORTEX_COMPUTER_CONTROL", "").strip()
-        in {"1", "true", "TRUE", "yes", "on"},
+        master_computer_control=_flag("CORTEX_COMPUTER_CONTROL"),
+        runtime_backend=parse_runtime_backend(os.environ.get("CREW_RUNTIME_BACKEND")),
+        cf_computer_enabled=_flag(FLAG_CF_COMPUTER),
+        cf_computer_url=os.environ.get("CREW_CF_COMPUTER_URL", "").strip(),
+        cf_computer_token=os.environ.get("CREW_CF_COMPUTER_TOKEN", "").strip(),
+        cf_computer_forward_host_env=_flag("CREW_CF_COMPUTER_FORWARD_HOST_ENV"),
     )
 
 

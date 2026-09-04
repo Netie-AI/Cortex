@@ -239,3 +239,26 @@ def test_tickets_skills_and_voice(client, tmp_path, monkeypatch) -> None:
     voice = client.http.get("/crew/voice").json()
     assert voice["available"] is False
     assert "fake speech" in voice["reason"]
+
+
+def test_operator_can_choose_runtime_backend(client) -> None:
+    health = client.http.get("/crew/health").json()
+    runtime = health["runtime"]
+    assert runtime["backend"] == "laptop"
+    assert runtime["flag"] == "CREW_CF_COMPUTER"
+    assert runtime["cf_computer"] is False
+    assert runtime["production"] is False
+    assert runtime["preview"] is True
+    assert "token" not in runtime
+    listed = client.http.get("/crew/runtime").json()
+    assert listed == runtime
+    switched = client.http.post("/crew/runtime", json={"backend": "cloudflare-computer"}).json()
+    assert switched["ok"] is True
+    assert switched["backend"] == "cloudflare-computer"
+    assert switched["production"] is False
+    assert client.http.get("/crew/runtime").json()["backend"] == "cloudflare-computer"
+    back = client.http.post("/crew/runtime", json={"backend": "laptop"}).json()
+    assert back["backend"] == "laptop"
+    bad = client.http.post("/crew/runtime", json={"backend": "firecracker"})
+    assert bad.status_code == 400
+
