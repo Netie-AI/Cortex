@@ -1561,12 +1561,18 @@ def answer(
     if sql is None:
         # L2 lives on the engine port module, not here. This file must not
         # import pack generation code (C2).
-        from CortexOS.dms.l2_generation import attempt_l2
+        from CortexOS.dms.l2_generation import L2_MANIFEST_REASON_PREFIX, attempt_l2
 
         l2_out = attempt_l2(question, verified=verified)
         if l2_out is None:
             return _abs("no governed metric or certified query matched")
         if not l2_out.sql:
+            if l2_out.refused or (l2_out.reason or "").startswith(
+                L2_MANIFEST_REASON_PREFIX
+            ):
+                refused = _abstain_refused(question, audit_id, reason=l2_out.reason)
+                refused["violations_blocked"] = list(l2_out.violations or [])
+                return _done(refused)
             return _abs(l2_out.reason)
         sql = l2_out.sql
         layer, badge = l2_out.layer, l2_out.badge

@@ -78,6 +78,10 @@ def _load_active_pack() -> None:
         return
 
 
+#: Stable prefix so answer() can emit refused, not coverage abstain (C7-02).
+L2_MANIFEST_REASON_PREFIX = "L2_MANIFEST:"
+
+
 @dataclass(slots=True)
 class L2Attempt:
     """Outcome of the L2 path. ``sql`` set means the gate passed."""
@@ -88,10 +92,29 @@ class L2Attempt:
     badge: str = "L2_VALIDATED"
     assumptions: str = ""
     violations: list[str] | None = None
+    refused: bool = False
+    retrieved_tables: tuple[str, ...] = ()
 
 
 def _env_on(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes")
+
+
+def _manifest_l2_attempt(violations: list[str]) -> L2Attempt:
+    from CortexOS.dms.sql_validate_gate import MANIFEST_VIOLATION_PREFIX
+
+    code = "manifest_error"
+    for item in violations:
+        if item.startswith(MANIFEST_VIOLATION_PREFIX):
+            code = item[len(MANIFEST_VIOLATION_PREFIX) :]
+            break
+    return L2Attempt(
+        reason=f"{L2_MANIFEST_REASON_PREFIX}{code}",
+        layer="refused",
+        badge="refused",
+        violations=list(violations),
+        refused=True,
+    )
 
 
 def attempt_l2(
@@ -129,28 +152,41 @@ def attempt_l2(
     semantic_early = load_semantic_layer()
     reduced = l2.retrieve_schema(question)
 
+    leftover: list[str] = []
+
     def _gen(prior: list[str]) -> str | None:
-        cands = l2.generate_candidates(
-            question,
-            reduced,
-            prior_violations=prior,
+        if leftover:
+            return leftover.pop(0)
+        cands = list(
+            l2.generate_candidates(
+                question,
+                reduced,
+                prior_violations=prior,
+            )
+            or []
         )
-        return cands[0] if cands else None
+        if not cands:
+            return None
+        leftover.extend(cands[1:])
+        return cands[0]
 
     con_explain = None
     try:
-        if verified is None:
-            con_explain = get_connection(
-                DEFAULT_DB, read_only=read_only_queries_enabled()
-            )
+        # EXPLAIN must run on post-enforce SQL even when a session is bound.
+        con_explain = get_connection(
+            DEFAULT_DB, read_only=read_only_queries_enabled()
+        )
         gate = gate_with_retry(
             _gen,
             question,
             semantic_early,
             con=con_explain,
+            verified=verified,
             max_retries=2,
         )
     except SqlGateAbstain as exc:
+        if exc.manifest_refused:
+            return _manifest_l2_attempt(list(exc.violations))
         return L2Attempt(
             reason=f"L2 generation failed validation gate: {exc}",
             violations=list(exc.violations),
@@ -160,6 +196,8 @@ def attempt_l2(
             con_explain.close()
 
     if not gate.passed or not gate.safe_sql:
+        if gate.manifest_refused:
+            return _manifest_l2_attempt(list(gate.violations))
         return L2Attempt(
             reason="L2 generation failed validation gate",
             violations=list(gate.violations),
@@ -171,10 +209,11 @@ def attempt_l2(
             l2.record_validated(question, sql)
         except Exception:  # noqa: BLE001 — promotion signal must not block answers
             pass
-    tables = list((reduced.get("tables") or {}).keys())
+    tables = tuple((reduced.get("tables") or {}).keys())
     return L2Attempt(
         sql=sql,
-        assumptions=f"L2 FreeRoute SQL over reduced schema tables={tables}",
+        assumptions=f"L2 FreeRoute SQL over reduced schema tables={list(tables)}",
+        retrieved_tables=tables,
     )
 
 
@@ -306,6 +345,7 @@ __all__ = [
     "L2Attempt",
     "L2GenerationPort",
     "L2NotRegistered",
+    "L2_MANIFEST_REASON_PREFIX",
     "attempt_l2",
     "clear_l2_generation",
     "maybe_record_l2_shadow",
