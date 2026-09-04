@@ -123,6 +123,17 @@ def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str)
     assert text.strip()
 
 
+def test_null_expiry_count_does_not_compile_as_sku_count():
+    """Bare 'inventory items' is sku_count; a NULL-expiry filter is not."""
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "How many inventory items have no expiry date?"
+    plan = route_to_metric(q)
+    assert plan is None or plan.metric_id != "sku_count"
+    r = answer(q)
+    assert r["badge"] == "abstain", r.get("answer")
+
+
 def test_pending_high_risk_is_not_a_bare_risk_listing():
     """Nested 'high risk suppliers' must not steal the pending-shipment metric."""
     from CortexOS.dms.answer_engine import answer, route_to_metric

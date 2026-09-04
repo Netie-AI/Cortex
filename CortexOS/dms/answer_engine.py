@@ -851,7 +851,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
             or re.search(r"\bberapa\b.{0,24}\b(banyak|sku)", q)
             or re.search(r"\bdistinct skus?\b", q)
         )
-        and not re.search(r"\b(category|per|by|expired|delayed)\b", q)
+        and not re.search(r"\b(category|per|by|expired|expiry|delayed)\b", q)
     ):
         return _metric_plan("sku_count", {}, "distinct SKU count")
     if (
