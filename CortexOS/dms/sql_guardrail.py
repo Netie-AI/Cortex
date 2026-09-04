@@ -84,6 +84,10 @@ def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
         violations.append("DDL_ATTEMPT")
         return GuardrailResult(False, violations, None)
 
+    if not any(True for _ in stmt.find_all(exp.Table)):
+        violations.append("MISSING_FROM")
+        return GuardrailResult(False, violations, None)
+
     for node in stmt.walk():
         if isinstance(node, FORBIDDEN):
             violations.append("DDL_ATTEMPT")
