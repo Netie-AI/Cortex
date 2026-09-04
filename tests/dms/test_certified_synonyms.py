@@ -96,6 +96,17 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
         ("what chemical products do we hold", "items_by_category"),
         ("rank our vendors on risk and lead time together", "supplier_ranking"),
         ("risky suppliers who still owe us shipments", "high_risk_pending"),
+        ("count our inventory items", "sku_count"),
+        ("how many products are we stocking", "sku_count"),
+        ("warehouse A stockouts risk", "low_stock"),
+        ("items with no restock in 30 days", "stale_restock"),
+        ("our five biggest earners by sales value", "sales_by_value"),
+        ("which SKUs bring in the most money, top 5", "sales_by_value"),
+        ("how much did we sell in the past 30 days", "revenue_windowed"),
+        ("what is our inventory worth per category", "stock_value_by_category"),
+        ("value of stock held broken down by category", "stock_value_by_category"),
+        ("show me our riskiest vendors above 0.7", "suppliers_by_risk"),
+        ("mean days to deliver by country", "avg_lead_time_by_country"),
     ],
 )
 def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
