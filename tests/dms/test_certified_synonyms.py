@@ -45,6 +45,33 @@ def test_certified_synonym_hits_l0():
     assert int(rows[0]["sku_count"]) > 0
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "number of skus",
+        "sku count",
+        "count skus",
+    ],
+)
+def test_sku_count_metric_synonyms_hit_l1(question: str):
+    """metrics.yaml sku_count synonyms must answer, not only 'how many skus'."""
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    plan = route_to_metric(question)
+    assert plan is not None, question
+    assert plan.metric_id == "sku_count"
+    r = answer(question)
+    assert r["layer"] == "governed_metric"
+    rows = r.get("rows") or []
+    assert rows, f"{question!r} returned no rows: {r.get('answer')!r}"
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert any(ch.isdigit() for ch in text)
+    n = int(rows[0]["sku_count"])
+    assert n > 0
+    assert str(n) in text
+
+
 def test_certified_sales_synonym_hits_l0():
     cq = match_certified("Top 5 SKUs by revenue")
     assert cq is not None
