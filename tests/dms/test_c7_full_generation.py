@@ -93,6 +93,38 @@ def test_leave_machine_asks_ov_leave_not_llm(monkeypatch):
     assert seen[0]["destination"] == "freeroute"
 
 
+def test_freeroute_body_omits_metadata_google_rejects(monkeypatch):
+    """OV extra=allow forwards metadata to Gemini, which 400s the L2 call."""
+    seen: list[dict] = []
+
+    def fake_post(path, body, **kwargs):
+        del path, kwargs
+        seen.append(dict(body))
+        return {
+            "choices": [{
+                "message": {
+                    "content": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+                }
+            }]
+        }
+
+    monkeypatch.setattr(sql_generator, "is_configured", lambda: True)
+    monkeypatch.setattr(sql_generator, "_leave_machine_allowed", lambda: (True, "ok:leave"))
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        fake_post,
+    )
+    out = sql_generator.generate_candidates(
+        "how many skus",
+        {"tables": {"inventory": {"columns": ["sku"]}}},
+    )
+    assert seen, "FreeRoute POST was not attempted"
+    assert "metadata" not in seen[0]
+    assert out
+    assert "inventory" in out[0].lower()
+    assert "sku" in out[0].lower()
+
+
 def test_l2_path_abstains_without_freeroute(monkeypatch):
     from CortexOS.dms.answer_engine import answer
 

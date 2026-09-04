@@ -15,6 +15,7 @@ HIT. reuse: `docs/subagents_findings/2026-09-04_c7-05-engine-scorer.md`, `docs/s
 3. `and whose` / `and also have|appear` abstain BIRD stacks. `ignore SKU-X and also show the top 5` is ANS-01 and must stay L1.
 4. G-sh needs real `maybe_record_l2_shadow` lines plus L1-only-correct vs L2-only-correct. Dummy JSONL and all-refusal padding do not unlock C7-05 serve.
 5. `cutover` stays false. Do not set `DMS_L2_ENABLED` as the process default.
+6. Do not put OpenAI `metadata` on `/v1/chat/completions`. OpenVault `extra=allow` forwards it to Gemini, which 400s; Cortex then records `NO_CANDIDATE`.
 
 ## Verify
 

@@ -95,9 +95,10 @@ def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | N
         ],
         "temperature": 0.0,
         "max_tokens": 600,
-        "metadata": {"identity": identity, "tier": "sql_generation"},
     }
-    # Prefer OpenVault proxy; fall back to direct path variants.
+    # Do not send OpenAI ``metadata``: OpenVault extra=allow forwards it to
+    # Google AI Studio, which 400s (non_retryable) and Cortex sees NO_CANDIDATE.
+    _ = identity
     data = post_json("/v1/chat/completions", body, timeout=45.0, base=openvault_base_url())
     if not data:
         return None
