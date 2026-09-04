@@ -1,0 +1,143 @@
+# Tiny canned envelopes for tests/dms/test_c7_heldout.py.
+# Not the frozen split. No live engine. No L2.
+
+items:
+  - id: fx_match
+    split: sql
+    provenance: bird_style
+    question: "nested category-mean outbound example"
+    expect: correct_rows
+    match: resultset
+    key_columns: [sku]
+    expected_rows:
+      - sku: SKU-ALPHA
+        kg: 12
+
+  - id: fx_scalar
+    split: sql
+    provenance: spider_style
+    question: "scalar nested count example"
+    expect: correct_rows
+    match: scalar
+    key_columns: [sku_count]
+    expected_rows:
+      - sku_count: 4
+
+  - id: fx_empty_success
+    split: sql
+    provenance: bird_style
+    question: "empty success G4 example"
+    expect: correct_rows
+    match: resultset
+    key_columns: [sku]
+    expected_rows:
+      - sku: SKU-ALPHA
+
+  - id: fx_empty_gold
+    split: sql
+    provenance: bird_style
+    question: "empty gold must not pass"
+    expect: correct_rows
+    match: resultset
+    key_columns: [sku]
+    expected_rows: []
+
+  - id: fx_blank_text
+    split: sql
+    provenance: spider_style
+    question: "rows without answer text"
+    expect: correct_rows
+    match: resultset
+    key_columns: [sku]
+    expected_rows:
+      - sku: SKU-ALPHA
+
+  - id: fx_sql_only
+    split: sql
+    provenance: bird_style
+    question: "sql_used must not certify a miss"
+    expect: correct_rows
+    match: resultset
+    key_columns: [sku]
+    expected_rows:
+      - sku: SKU-ALPHA
+
+  - id: fx_abstain_ok
+    split: must_abstain
+    provenance: different_model_abstain
+    question: "false-premise Berlin 1997 class"
+    expect: abstain
+
+  - id: fx_abstain_leaked
+    split: must_abstain
+    provenance: different_model_abstain
+    question: "must-abstain that served rows"
+    expect: abstain
+
+  - id: fx_answerable_abstain
+    split: sql
+    provenance: spider_style
+    question: "answerable that the system refused"
+    expect: correct_rows
+    match: scalar
+    key_columns: [sku_count]
+    expected_rows:
+      - sku_count: 4
+
+envelopes:
+  fx_match:
+    answer: "SKU-ALPHA moved 12 kg."
+    rows:
+      - sku: SKU-ALPHA
+        kg: 12
+    badge: governed_metric
+    route: sql
+  fx_scalar:
+    answer: "The nested count is 4."
+    rows:
+      - sku_count: 4
+    badge: certified
+    route: sql
+  fx_empty_success:
+    answer: "No matching SKUs."
+    rows: []
+    badge: governed_metric
+    route: sql
+    sql_used: "SELECT sku FROM transactions WHERE sku NOT IN ('SKU-BETA')"
+  fx_empty_gold:
+    answer: "Nothing matched."
+    rows: []
+    badge: governed_metric
+    route: sql
+  fx_blank_text:
+    answer: "   "
+    rows:
+      - sku: SKU-ALPHA
+    badge: governed_metric
+    route: sql
+  fx_sql_only:
+    answer: "Here are the rows."
+    rows:
+      - sku: SKU-WRONG
+    badge: L2_VALIDATED
+    route: sql
+    sql_used: "SELECT sku FROM inventory WHERE sku = 'SKU-ALPHA'"
+  fx_abstain_ok:
+    answer: "I cannot answer that from the warehouse."
+    rows: []
+    badge: abstain
+    route: needs_clarification
+    abstained: true
+  fx_abstain_leaked:
+    answer: "EBITDA was 12.4 million."
+    rows:
+      - ebitda: 12.4
+    badge: L2_VALIDATED
+    route: sql
+    abstained: false
+  fx_answerable_abstain:
+    answer: "No governed metric matched."
+    rows: []
+    badge: abstain
+    route: needs_clarification
+    abstained: true
