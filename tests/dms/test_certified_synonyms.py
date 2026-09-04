@@ -88,6 +88,10 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
         ("shipment cost by destination", "cost_by_destination"),
         ("freight spend per destination", "cost_by_destination"),
         ("what does shipping cost us by drop-off point", "cost_by_destination"),
+        ("how much do we spend in each supplier country", "spend_by_country"),
+        ("procurement spend broken down by country", "spend_by_country"),
+        ("which vendors are due for an audit", "audit_overdue"),
+        ("camera feed for warehouse A", "cctv_by_location"),
     ],
 )
 def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
@@ -161,6 +165,45 @@ def test_freight_spend_per_destination_is_cost_not_count():
     assert "shipment_count" not in rows[0]
     assert str(rows[0]["location_code"]) in text
     assert str(int(float(rows[0]["total_cost_myr"]))) in text.replace(",", "")
+
+
+def test_spend_by_country_paraphrase_is_grouped_spend():
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "how much do we spend in each supplier country"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "spend_by_country"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert "country" in rows[0]
+    assert "total_spend_myr" in rows[0]
+    assert str(rows[0]["country"]) in text
+    assert str(int(float(rows[0]["total_spend_myr"]))) in text.replace(",", "")
+
+
+def test_cctv_warehouse_a_returns_camera_id():
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "camera feed for warehouse A"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "cctv_by_location"
+    assert plan.slots.get("location") == "WH-A"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert rows[0].get("location_code") == "WH-A"
+    assert rows[0].get("cctv_camera_id")
+    assert "WH-A" in text
+    assert str(rows[0]["cctv_camera_id"]) in text
 
 
 def test_certified_sales_synonym_hits_l0():

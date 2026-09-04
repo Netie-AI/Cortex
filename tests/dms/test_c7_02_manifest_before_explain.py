@@ -275,3 +275,26 @@ def test_same_grant_l1_revenue_still_answers(dms_http, monkeypatch: pytest.Monke
     crows = cbody.get("rows") or []
     assert crows
     assert cbody.get("answer")
+
+
+def test_contract_ask_sku_count_on_inventory_grant(dms_http):
+    """POST /v1/contract/ask: L1 sku_count under a bound inventory grant."""
+    dms_http.bind_session(SESSION, {"inventory": "TRUE"})
+    contract = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "how many skus", "session_id": SESSION},
+    )
+    assert contract.status_code == 200, contract.text
+    cbody = contract.json()
+    assert _badge(cbody).lower() not in {"abstain", "refused", "blocked"}
+    crows = cbody.get("rows") or []
+    assert crows, cbody.get("answer")
+    assert "sku_count" in crows[0]
+    n = int(crows[0]["sku_count"])
+    assert n > 0
+    text = cbody.get("answer") or ""
+    assert text.strip()
+    assert str(n) in text.replace(",", "")
+    assert cbody.get("sql_used")
+    assert "inventory" in str(cbody.get("sql_used")).lower()
+    assert cbody.get("audit_id") or (cbody.get("provenance") or {}).get("audit_id")

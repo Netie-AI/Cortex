@@ -862,6 +862,13 @@ def route_to_metric(question: str) -> MetricPlan | None:
         and re.search(r"\b(destination|warehouse|location)\b", q)
     ):
         return _metric_plan("cost_by_destination", {}, "shipment cost grouped by destination")
+    if (
+        re.search(r"\bspend\b", q)
+        and re.search(r"\b(country|countries)\b", q)
+        and re.search(r"\b(per|by|each)\b", q)
+        and not re.search(r"\b(destination|warehouse)\b", q)
+    ):
+        return _metric_plan("spend_by_country", {}, "inventory spend grouped by supplier country")
 
     # revenue — calendar month before rolling-day window; bare total before ranked "top sales"
     if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":
@@ -900,6 +907,15 @@ def route_to_metric(question: str) -> MetricPlan | None:
             "high_risk_pending",
             {"threshold": _threshold(q_raw)},
             "high-risk suppliers with pending/in-transit shipments",
+        )
+    if "audit" in q and re.search(r"\b(overdue|due|lapsed)\b", q):
+        return _metric_plan("audit_overdue", {}, "suppliers with an overdue audit")
+    loc = _location(q_raw)
+    if loc and re.search(r"\b(cctv|camera)\b", q):
+        return _metric_plan(
+            "cctv_by_location",
+            {"location": loc},
+            f"CCTV camera for {loc}",
         )
     # supplier risk threshold
     if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
