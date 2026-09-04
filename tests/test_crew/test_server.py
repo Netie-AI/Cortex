@@ -115,6 +115,7 @@ def test_ui_index_is_served(client) -> None:
     assert "Claim" in page.text
     assert "Release" in page.text
     assert "Control does not assign" in page.text
+    assert "open GitHub" in page.text
     assert 'id="tabWork"' in page.text
     assert 'data-scope="space"' in page.text
     assert 'data-scope="user"' in page.text
@@ -282,6 +283,8 @@ def test_tickets_skills_and_voice(client, tmp_path, monkeypatch) -> None:
     assert board["unseated"] == 1
     assert board["tickets"][0]["ticket"] == "FF-03"
     assert board["assignments"] == []
+    assert board["issues"] == []
+    assert board["issues_ok"] is False
     assert "cloud agent" in board["law"]
     saved = client.http.post(
         "/crew/skills", json={"title": "monday-briefing", "body": "Goal:\nDo not spawn a cloud swarm.\n"}
@@ -349,6 +352,47 @@ def test_ticket_claim_is_local_assign_and_refuses_seated(
     ).json()
     assert dropped["ok"] is True
     assert client.http.get("/crew/tickets").json()["assignments"] == []
+
+
+def test_tickets_lists_fetched_github_issues_minus_claims(
+    client, tmp_path, monkeypatch
+) -> None:
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    monkeypatch.setattr(
+        github_mod,
+        "list_open_issues",
+        lambda **_k: {
+            "ok": True,
+            "detail": "",
+            "issues": [
+                {
+                    "spec": "Netie-AI/Cortex#128",
+                    "title": "seated",
+                    "seated": True,
+                    "ready": False,
+                },
+                {
+                    "spec": "Netie-AI/Cortex#164",
+                    "title": "fetch hud",
+                    "seated": False,
+                    "ready": True,
+                },
+            ],
+        },
+    )
+    board = client.http.get("/crew/tickets").json()
+    specs = [row["spec"] for row in board["issues"]]
+    assert "Netie-AI/Cortex#128" not in specs
+    assert board["issues"][0]["spec"] == "Netie-AI/Cortex#164"
+    assert board["issues"][0]["ready"] is True
+    assert board["issues_ok"] is True
 
 
 def test_operator_can_choose_runtime_backend(client) -> None:

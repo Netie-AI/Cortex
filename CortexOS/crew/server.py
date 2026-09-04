@@ -643,11 +643,34 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.get("/tickets")
     async def list_tickets() -> dict[str, Any]:
+        from CortexOS.crew import github as github_mod
         from CortexOS.crew.assign import public as assignment_public
         from CortexOS.crew.board import snapshot
 
         body = snapshot()
         body["assignments"] = assignment_public(crew.settings.data_dir)
+        claimed = {
+            str(row.get("ticket") or "")
+            for row in (body.get("tickets") or [])
+            if isinstance(row, dict)
+        }
+        claimed.update(
+            str(row.get("owner_pr") or "")
+            for row in (body.get("tickets") or [])
+            if isinstance(row, dict)
+        )
+        fetched = github_mod.list_open_issues()
+        issues = []
+        for row in fetched.get("issues") or []:
+            if not isinstance(row, dict):
+                continue
+            spec = str(row.get("spec") or "")
+            if spec and spec in claimed:
+                continue
+            issues.append(row)
+        body["issues"] = issues
+        body["issues_detail"] = fetched.get("detail") or ""
+        body["issues_ok"] = bool(fetched.get("ok"))
         return body
 
     @router.post("/tickets/claim")
