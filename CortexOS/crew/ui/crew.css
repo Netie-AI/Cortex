@@ -349,8 +349,16 @@ button { cursor: pointer; }
   border: 1px solid var(--line);
   background: var(--pane);
   flex: none;
+  position: relative;
 }
 .composer:focus-within { border-color: var(--live); }
+.composer__suggest {
+  border-bottom: 1px solid var(--line);
+  max-height: 12rem;
+  overflow: auto;
+  background: var(--well);
+}
+.composer__suggest .palette__hit.on { background: var(--pane); color: var(--live); }
 .composer__row {
   display: flex;
   align-items: flex-end;

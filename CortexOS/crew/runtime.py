@@ -166,12 +166,49 @@ class CrewRuntime:
         provider: str | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
-        msg = self.store.add_message(space_id, "user", text)
-        self.bus.emit(space_id, "message", {"message": msg})
+        from CortexOS.crew.commands import parse
 
         space = self.store.get_space(space_id)
         if space is None:
             return {"error": "unknown space"}
+
+        manager = self.ensure_manager(space_id)
+        agents = self.store.list_agents(space_id)
+        skills_dir = self.settings.data_dir / "skills"
+        parsed = parse(text, skills_dir=skills_dir, agents=agents)
+
+        to_name, to_id = self._mention_target(parsed.mentions, manager)
+        meta: dict[str, Any] = {
+            "a2a": {"kind": a2a.USER, "from": "operator", "to": to_name},
+        }
+        if parsed.mentions:
+            meta["mentions"] = [m.public() for m in parsed.mentions]
+        if parsed.command:
+            meta["command"] = {
+                "slash": parsed.command.get("slash"),
+                "kind": parsed.command.get("kind"),
+                "action": parsed.command.get("action"),
+            }
+
+        msg = self.store.add_message(
+            space_id, "user", text, to_agent_id=to_id, meta=meta
+        )
+        self.bus.emit(space_id, "message", {"message": msg})
+
+        if parsed.command and parsed.command.get("kind") == "desk":
+            self._run_slash_desk(space_id, manager, parsed.command, parsed.rest)
+        elif parsed.command and parsed.command.get("kind") in {"skill", "routine"}:
+            self._load_slash_pack(space_id, parsed.command, parsed.rest)
+
+        desk_only = bool(
+            parsed.command
+            and parsed.command.get("kind") == "desk"
+            and not parsed.rest.strip()
+            and not parsed.mentions
+        )
+        if desk_only:
+            return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
+
         turn_provider = (provider or "").strip() or None
         turn_model = (model or "").strip() or None
         if turn_provider or turn_model:
@@ -191,29 +228,167 @@ class CrewRuntime:
             self.bus.emit(space_id, "message", {"message": sysmsg})
             return {"error": note}
 
+        env = a2a.Envelope(
+            id=msg["id"],
+            kind=a2a.USER,
+            from_id="operator",
+            from_name="operator",
+            to_id=to_id,
+            to_name=to_name,
+            text=text,
+            seq=int(msg["seq"]),
+        )
         active_run = self._space_run.get(space_id)
         if active_run:
-            manager = self.ensure_manager(space_id)
-            self.switch.mailbox(manager["id"]).put(
-                a2a.Envelope(
-                    id=msg["id"],
-                    kind=a2a.USER,
-                    from_id="operator",
-                    from_name="operator",
-                    to_id=manager["id"],
-                    to_name="Manager",
-                    text=text,
-                    seq=int(msg["seq"]),
-                )
-            )
+            self._route_operator(space_id, manager, env, to_id)
             return {"run_id": active_run, "queued": True}
 
-        manager = self.ensure_manager(space_id)
-        return {
-            "run_id": self._start_run(
-                space_id, manager, provider=turn_provider, model=turn_model
+        run_id = self._start_run(
+            space_id, manager, provider=turn_provider, model=turn_model
+        )
+        if to_id != manager["id"]:
+            self._route_operator(space_id, manager, env, to_id, notify_manager=False)
+        return {"run_id": run_id, "command": (parsed.command or {}).get("slash")}
+
+    def _mention_target(
+        self,
+        mentions: tuple[Any, ...],
+        manager: dict[str, Any],
+    ) -> tuple[str, str]:
+        """Primary recipient for an operator line. Teammate wins; role stamps name."""
+        for hit in mentions:
+            if getattr(hit, "kind", "") == "teammate" and getattr(hit, "agent_id", None):
+                name = str(hit.name)
+                if name.lower() == "manager":
+                    return manager["name"], manager["id"]
+                return name, str(hit.agent_id)
+        for hit in mentions:
+            if getattr(hit, "kind", "") == "role":
+                return str(hit.name), manager["id"]
+        return manager["name"], manager["id"]
+
+    def _route_operator(
+        self,
+        space_id: str,
+        manager: dict[str, Any],
+        env: a2a.Envelope,
+        to_id: str,
+        *,
+        notify_manager: bool = True,
+    ) -> None:
+        """Put the operator line on the Switchboard. No second inbox."""
+        self.switch.deliver(env)
+        if notify_manager and to_id != manager["id"]:
+            self.switch.deliver(
+                a2a.Envelope(
+                    id=env.id,
+                    kind=a2a.USER,
+                    from_id=env.from_id,
+                    from_name=env.from_name,
+                    to_id=manager["id"],
+                    to_name=manager["name"],
+                    text=env.text,
+                    seq=env.seq,
+                )
             )
-        }
+        target = self.store.get_agent(to_id)
+        run_id = self._space_run.get(space_id)
+        ctx = self._runs.get(run_id) if run_id else None
+        if ctx is not None and target is not None and target["id"] != manager["id"]:
+            self._wake_if_idle(ctx, target)
+
+    def _run_slash_desk(
+        self,
+        space_id: str,
+        manager: dict[str, Any],
+        command: dict[str, Any],
+        rest: str,
+    ) -> None:
+        action = str(command.get("action") or "")
+        text = ""
+        args: dict[str, Any] = {}
+        if action == "desk_status":
+            from CortexOS.crew.desk import render, snapshot
+
+            mcp_rows = self.mcp.status()
+            uacc = next((row for row in mcp_rows if row.get("name") == "uacc"), {})
+            text = render(
+                snapshot(
+                    uacc_enabled=bool(uacc.get("enabled")),
+                    uacc_armed=bool(uacc.get("armed")),
+                )
+            )
+        elif action == "netie_board":
+            from CortexOS.crew.board import snapshot
+
+            board = snapshot()
+            lines = [
+                f"{len(board['tickets'])} tickets, seated={board['seated']} unseated={board['unseated']}. {board['law']}"
+            ]
+            for item in board["tickets"][:30]:
+                lines.append(
+                    f"- {item.get('ticket')} {item.get('role')} write={item.get('may_write')} pr={item.get('owner_pr')}"
+                )
+            text = "\n".join(lines)
+        elif action == "estate_status":
+            from CortexOS.crew.estate import render as estate_render
+            from CortexOS.crew.estate import snapshot as estate_snapshot
+
+            text = estate_render(estate_snapshot())
+        elif action == "ship_gate":
+            from CortexOS.crew.ship_gate import render_slug
+
+            repo = rest.strip() or "all"
+            args = {"repo": repo}
+            text = render_slug(repo)
+        else:
+            text = f"Unknown desk action {action}"
+        msg = self.store.add_message(
+            space_id,
+            "tool",
+            text[:4000],
+            agent_id=manager["id"],
+            to_agent_id=manager["id"],
+            meta={
+                "tool": action,
+                "args": args,
+                "slash": True,
+                "a2a": {"kind": a2a.USER, "from": "operator", "to": manager["name"]},
+            },
+        )
+        self.bus.emit(space_id, "message", {"message": msg})
+
+    def _load_slash_pack(
+        self, space_id: str, command: dict[str, Any], rest: str
+    ) -> None:
+        kind = str(command.get("kind") or "")
+        action = str(command.get("action") or "")
+        slash = str(command.get("slash") or "")
+        body = ""
+        if kind == "skill":
+            from CortexOS.crew.board import read_skill
+
+            body = read_skill(self.settings.data_dir / "skills", action).strip()
+        elif kind == "routine":
+            from CortexOS.crew.routines import catalog as routine_catalog
+
+            hit = next((r for r in routine_catalog() if r.get("name") == action), None)
+            if hit:
+                body = (
+                    f"{hit.get('name')}: {hit.get('instruction')}\n"
+                    f"when={hit.get('when')} layer={hit.get('layer')}"
+                )
+        head = f"Skill /{slash} loaded." if kind == "skill" else f"Routine /{slash} loaded."
+        if rest:
+            head += f" Brief: {rest}"
+        content = head if not body else f"{head}\n\n{body[:4000]}"
+        msg = self.store.add_message(
+            space_id,
+            "system",
+            content,
+            meta={"slash": True, "command": {"slash": slash, "kind": kind, "action": action}},
+        )
+        self.bus.emit(space_id, "message", {"message": msg})
 
     def _start_run(
         self,
@@ -1321,9 +1496,16 @@ class CrewRuntime:
         out: list[dict[str, Any]] = []
         for m in rows:
             if m["role"] == "user":
-                out.append({"role": "user", "content": m["content"]})
+                wire = (m.get("meta") or {}).get("a2a") or {}
+                to = wire.get("to")
+                body = str(m["content"] or "")
+                if to and to != "Manager":
+                    body = f"[operator -> {to}] {body}"
+                out.append({"role": "user", "content": body})
             elif m["role"] == "assistant":
                 out.append({"role": "assistant", "content": m["content"]})
+            elif m["role"] in {"tool", "system"} and (m.get("meta") or {}).get("slash"):
+                out.append({"role": "user", "content": str(m["content"] or "")[:4000]})
             elif m["role"] == "agent":
                 frm = agents.get(m["agent_id"], "agent")
                 to = agents.get(m["to_agent_id"], "space")
@@ -1351,7 +1533,14 @@ class CrewRuntime:
         owed: dict[str, str] = {}
         for m in self.store.list_messages(space_id, limit=10_000):
             meta = m.get("meta") or {}
-            if m["role"] == "agent":
+            if m["role"] == "user" and m.get("to_agent_id") == me:
+                out.append(
+                    {
+                        "role": "user",
+                        "content": f"[operator to {row['name']}] {m['content']}",
+                    }
+                )
+            elif m["role"] == "agent":
                 if m["to_agent_id"] == me:
                     kind = (meta.get("a2a") or {}).get("kind") or a2a.TELL
                     frm = agents.get(m["agent_id"], "someone")
