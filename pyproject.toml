@@ -144,3 +144,6 @@ files = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "corpus_expanded: full paraphrase expansion (slow; set CORPUS_EXPANDED=1)",
+]
