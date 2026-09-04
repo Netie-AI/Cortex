@@ -524,6 +524,14 @@ def collect_dev_questions(root: Path | None = None) -> list[str]:
                     if isinstance(row, dict):
                         _add_dev_question(row.get("question"), seen, out)
 
+    personas = yaml.safe_load((base / "bench/live_personas.yaml").read_text(encoding="utf-8")) or {}
+    for persona in (personas.get("personas") or {}).values():
+        if not isinstance(persona, dict):
+            continue
+        for probe in persona.get("probes") or []:
+            if isinstance(probe, dict):
+                _add_dev_question(probe.get("raw_question"), seen, out)
+
     return out
 
 

@@ -318,6 +318,15 @@ def test_collect_dev_questions_are_operator_phrases():
     lowered = {q.lower() for q in qs}
     assert "sku_count" not in lowered
     assert any("how many" in q.lower() for q in qs)
+    assert any("berapa banyak sku" in q.lower() for q in qs)
+
+
+def test_malay_berapa_banyak_sku_routes_to_sku_count():
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    plan = route_to_metric("boss, berapa banyak SKU kita ada sekarang?")
+    assert plan is not None
+    assert plan.metric_id == "sku_count"
 
 
 def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):

@@ -730,7 +730,10 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # metrics.yaml sku_count synonyms, not only "how many skus"
     if (
         re.search(r"\bskus?\b", q)
-        and re.search(r"\b(how many|number of|count of|count)\b", q)
+        and (
+            re.search(r"\b(how many|number of|count of|count)\b", q)
+            or re.search(r"\bberapa\b.{0,24}\b(banyak|sku)", q)
+        )
         and not re.search(r"\b(category|per|by)\b", q)
     ):
         return _metric_plan("sku_count", {}, "distinct SKU count")
