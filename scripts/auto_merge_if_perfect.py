@@ -20,7 +20,7 @@ REQUIRED = (
 )
 IGNORE_NAMES = frozenset({"auto-merge"})
 IGNORE_CONCLUSIONS = frozenset({"CANCELLED", "SKIPPED", "NEUTRAL"})
-ALLOWED_BASES = frozenset({"main", "dms-integrated-engine", "dms-v2"})
+ALLOWED_BASES = frozenset({"main"})
 
 
 _ALIASES = {
