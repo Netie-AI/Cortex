@@ -485,11 +485,15 @@ class CrewRuntime:
         if agent_name.lower() == "manager":
             return "DENIED: assign a teammate, not Manager", args
         canon = github_mod.canonical_spec(spec)
-        title = github_mod.issue_title(canon)
+        shown = github_mod.show_issue(canon)
+        title = str(shown.get("title") or canon).strip()
+        body = str(shown.get("body") or "").strip()
         goal = (
             f"{canon}: {title}. Execute this issue. Close with /done after verify. "
             "Do not steal SEATED seats. Do not merge PRs."
         )
+        if body:
+            goal = f"{goal}\n\n{body[:2000]}"
         row = self.store.get_agent_by_name(space_id, agent_name)
         if row is None:
             spawned = await self.operator_spawn(
@@ -1309,6 +1313,14 @@ class CrewRuntime:
                 ["repo"],
             ),
             spec(
+                "show_issue",
+                "Read a GitHub issue title and body (owner/repo#n). Read only. "
+                "If SEATED, report that and do not implement; Ticket Runner owns the seat. "
+                "Do not merge PRs. Do not set assignees.",
+                {"spec": {"type": "string", "description": "owner/repo#n"}},
+                ["spec"],
+            ),
+            spec(
                 "cortex_ask",
                 "Ask the governed Cortex engine a data question. Returns the answer with its"
                 " badge, sources and audit id. The engine may abstain; report that honestly.",
@@ -1617,6 +1629,25 @@ class CrewRuntime:
             repo = str(args.get("repo", "")).strip() or "all"
             text = render_slug(repo)
             self._persist_tool(ctx, row, "ship_gate", {"repo": repo}, text)
+            return text
+
+        if name == "show_issue":
+            from CortexOS.crew import github as github_mod
+
+            shown = github_mod.show_issue(str(args.get("spec") or ""))
+            mark = "SEATED" if shown.get("seated") else "ready"
+            lines = [
+                f"{shown.get('spec')} {shown.get('state') or ''} {mark}".strip(),
+                str(shown.get("title") or ""),
+            ]
+            if shown.get("detail"):
+                lines.append(str(shown["detail"]))
+            if shown.get("body"):
+                lines.append(str(shown["body"]))
+            elif not shown.get("ok"):
+                lines.append(str(shown.get("detail") or "unread"))
+            text = "\n".join(p for p in lines if p)
+            self._persist_tool(ctx, row, "show_issue", {"spec": shown.get("spec")}, text)
             return text
 
         if name == "cortex_ask":

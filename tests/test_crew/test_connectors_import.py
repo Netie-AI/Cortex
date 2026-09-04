@@ -218,6 +218,50 @@ def test_github_list_open_issues_marks_seated(tmp_path, monkeypatch) -> None:
     assert "does not assign" in body["law"].lower() or "Control does not assign" in body["law"]
 
 
+def test_github_show_issue_is_read_only_and_marks_seated(tmp_path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+    monkeypatch.setenv("CREW_GH_WAIT_S", "1.5")
+
+    def runner(argv, timeout=1.5):  # noqa: ANN001, ARG001
+        assert timeout <= 8.0
+        assert argv[:3] == ["gh", "issue", "view"]
+        assert "--json" in argv and "title,body,state" in argv
+        payload = '{"title":"seated work","body":"Do C7-06.","state":"OPEN"}'
+        return SimpleNamespace(returncode=0, stdout=payload, stderr="")
+
+    seated = github_mod.show_issue("Netie-AI/Cortex#128", runner=runner)
+    assert seated["ok"] is True
+    assert seated["seated"] is True
+    assert seated["ready"] is False
+    assert "Do C7-06." in seated["body"]
+    assert "SEATED" in seated["detail"]
+    assert "assignees" in seated["law"].lower()
+
+    def runner_ready(argv, timeout=1.5):  # noqa: ANN001, ARG001
+        payload = '{"title":"assign slice","body":"Bind then execute.","state":"OPEN"}'
+        return SimpleNamespace(returncode=0, stdout=payload, stderr="")
+
+    ready = github_mod.show_issue("Netie-AI/Cortex#160", runner=runner_ready)
+    assert ready["ok"] is True
+    assert ready["ready"] is True
+    assert ready["seated"] is False
+    assert "Bind then execute." in ready["body"]
+    monkeypatch.setenv("CREW_LIVE_PROBES", "0")
+    dark = github_mod.show_issue("Netie-AI/Cortex#160", runner=runner_ready)
+    assert dark["ok"] is False
+    assert dark["detail"] == "CREW_LIVE_PROBES=0"
+
+
 def test_inbox_without_creds_tells_operator_to_drop(monkeypatch) -> None:
     from CortexOS.crew import inbox as inbox_mod
 
