@@ -99,6 +99,7 @@ def test_policy_master_switch_and_arming_fail_closed() -> None:
     assert policy.decide("estate_status", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("ship_gate", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("show_issue", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("request_close", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("ws_ls", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("ws_write", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("rm_rf", server=None, armed=False, master_on=False)[0] == policy.DENY

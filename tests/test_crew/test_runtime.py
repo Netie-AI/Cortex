@@ -331,6 +331,121 @@ async def test_show_issue_tool_paints_body_in_transcript(rig, monkeypatch) -> No
     assert "Issue body is Bind then execute." in painted
 
 
+async def test_request_close_refuses_seated_and_hitl_closes_unseated(
+    rig, tmp_path, monkeypatch
+) -> None:
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    closed: dict[str, str] = {}
+
+    def fake_close(spec, *, comment="", runner=None):  # noqa: ANN001, ARG001
+        closed["spec"] = spec
+        closed["comment"] = comment
+        return {
+            "ok": True,
+            "spec": spec,
+            "detail": "Closed",
+            "law": "Closed the issue. Did not merge a PR. Ticket Runner seats writers.",
+        }
+
+    monkeypatch.setattr(github_mod, "close_issue", fake_close)
+    space = rig.store.create_space("HQ")
+    rig.llm.manager.extend(
+        [
+            LLMResult(
+                tool_calls=[_tc("request_close", spec="Netie-AI/Cortex#128", comment="no")]
+            ),
+            LLMResult(text="Left the seated ticket alone."),
+        ]
+    )
+    await rig.runtime.on_user_message(space["id"], "close 128")
+    await wait_run_done(rig.runtime, space["id"])
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "SEATED" in painted
+    assert "Left the seated ticket alone." in painted
+    assert closed == {}
+    assert rig.store.pending_confirms(space["id"]) == []
+
+    claims.write_text('{"tickets":[]}', encoding="utf-8")
+    rig.llm.manager.extend(
+        [
+            LLMResult(
+                tool_calls=[
+                    _tc(
+                        "request_close",
+                        spec="Netie-AI/Cortex#99",
+                        comment="verified on desk",
+                    )
+                ]
+            ),
+            LLMResult(text="Issue closed after you approved."),
+        ]
+    )
+
+    async def auto_approve() -> None:
+        for _ in range(200):
+            pending = rig.store.pending_confirms(space["id"])
+            if pending:
+                rig.runtime.decide_confirm(pending[0]["id"], True)
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("confirm never appeared")
+
+    waiter = asyncio.create_task(auto_approve())
+    await rig.runtime.on_user_message(space["id"], "close 99")
+    await wait_run_done(rig.runtime, space["id"])
+    await waiter
+    assert closed["spec"] == "Netie-AI/Cortex#99"
+    assert "verified" in closed["comment"]
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "Closed" in painted
+    assert "Issue closed after you approved." in painted
+    assert "Did not merge" in painted
+
+
+async def test_request_close_deny_keeps_issue_open(rig, monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    called: list[str] = []
+
+    def fake_close(spec, *, comment="", runner=None):  # noqa: ANN001, ARG001
+        called.append(spec)
+        return {"ok": True, "spec": spec, "detail": "Closed", "law": "no"}
+
+    monkeypatch.setattr(github_mod, "close_issue", fake_close)
+    space = rig.store.create_space("HQ")
+    rig.llm.manager.extend(
+        [
+            LLMResult(tool_calls=[_tc("request_close", spec="Netie-AI/Cortex#99")]),
+            LLMResult(text="Kept it open."),
+        ]
+    )
+
+    async def auto_deny() -> None:
+        for _ in range(200):
+            pending = rig.store.pending_confirms(space["id"])
+            if pending:
+                rig.runtime.decide_confirm(pending[0]["id"], False)
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("confirm never appeared")
+
+    waiter = asyncio.create_task(auto_deny())
+    await rig.runtime.on_user_message(space["id"], "close 99")
+    await wait_run_done(rig.runtime, space["id"])
+    await waiter
+    assert called == []
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "DENIED" in painted
+    assert "Kept it open." in painted
+
+
 async def test_ws_write_then_read_paints_in_transcript(rig) -> None:
     space = rig.store.create_space("HQ")
     rig.llm.manager.append(
