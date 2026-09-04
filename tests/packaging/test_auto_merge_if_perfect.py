@@ -8,6 +8,10 @@ def test_draft_is_skip():
     assert verdict({"isDraft": True, "baseRefName": "main"}) == "skip"
 
 
+def test_dms_v2_base_is_skip():
+    assert verdict({"isDraft": False, "baseRefName": "dms-v2"}) == "skip"
+
+
 def test_green_mergeable_is_merge():
     checks = [
         {"name": n, "conclusion": "SUCCESS", "status": "COMPLETED"}
