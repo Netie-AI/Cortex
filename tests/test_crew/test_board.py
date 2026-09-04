@@ -50,6 +50,9 @@ def test_skill_packs_seed_without_overwrite(tmp_path) -> None:
     assert "chat-human.md" in names
     assert "ship.md" in names
     assert "security.md" in names
+    assert "ontology-foundry.md" in names
+    assert "skill-route.md" in names
+    assert "build.md" in names
     assert (folder / "tone.md").exists()
     body = read_skill(folder, "outreach")
     assert "Jian Hong" in body
@@ -64,3 +67,25 @@ def test_read_skill_falls_back_to_shipped_packs(tmp_path) -> None:
     empty = tmp_path / "missing-skills"
     body = read_skill(empty, "decide")
     assert "Human is money" in body
+
+
+def test_ontology_foundry_pack_is_netie_and_routes_before_build() -> None:
+    from CortexOS.crew.board import PACKS_DIR, read_skill
+
+    foundry = read_skill(PACKS_DIR, "ontology-foundry")
+    route = read_skill(PACKS_DIR, "skill-route")
+    build = read_skill(PACKS_DIR, "build")
+    assert "Palantir-shaped" in foundry
+    assert "PARKING_LOT P1" in foundry
+    assert "Approvals stay manual" in foundry
+    assert "Do not auto-approve" in foundry
+    assert ":8020" in foundry
+    assert "LangGraph" in foundry
+    assert "mybot" not in foundry.lower()
+    assert "myclaude-code" not in foundry.lower()
+    assert "guaca" not in foundry.lower()
+    assert "You are a helpful assistant" not in foundry
+    assert "ontology-foundry then build" in route
+    foundry_at = build.lower().find("ontology-foundry")
+    this_pack_at = build.lower().find("then this pack")
+    assert foundry_at != -1 and this_pack_at != -1 and foundry_at < this_pack_at

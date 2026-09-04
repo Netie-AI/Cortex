@@ -11,6 +11,7 @@ Route:
 - mock HTML deck video -> proposal-artifact + computer-reach
 - send/click/Gemini/Flow -> computer-reach then decide
 - turn a lesson into a skill -> feedback-learn then distill ingest
+- company ontology / foundry / object-link-action types / Constructor foundry path -> ontology-foundry then build
 - which skill or MCP -> this pack, then Cortex find_skills
 
 No mcp-skill-storage. Crew spawn already inlines named packs. SkillMesh already retrieves SkillCards by intent.
