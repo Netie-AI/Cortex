@@ -55,6 +55,14 @@ _DESK: tuple[dict[str, Any], ...] = (
         "title": "Ship-gate",
         "hint": "Deterministic production gate. Arg: repo slug or all.",
     },
+    {
+        "slash": "done",
+        "aliases": ("close_issue",),
+        "kind": "desk",
+        "action": "close_issue",
+        "title": "Close issue (HITL)",
+        "hint": "/done owner/repo#n | comment. Refuses SEATED claims. Never merges.",
+    },
 )
 
 _LIFE: tuple[dict[str, Any], ...] = (
