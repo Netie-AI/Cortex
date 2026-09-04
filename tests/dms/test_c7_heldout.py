@@ -310,6 +310,18 @@ def test_summarize_shadow_reports_l1_only_vs_l2_only(tmp_path: Path):
     assert out["l2_only_correct"] == 1
 
 
+def test_shadow_target_honors_env_path(tmp_path: Path, monkeypatch):
+    from bench.heldout import _shadow_target, summarize_shadow
+
+    dest = tmp_path / "gsh.jsonl"
+    dest.write_text('{"question": "how many skus in inventory now", "l2_sql": "SELECT 1"}\n', encoding="utf-8")
+    monkeypatch.setenv("DMS_L2_SHADOW_PATH", str(dest))
+    assert _shadow_target() == dest
+    out = summarize_shadow()
+    assert out["n_lines"] == 1
+    assert out["n_l2_sql"] == 1
+
+
 def test_collect_dev_questions_are_operator_phrases():
     from bench.heldout import collect_dev_questions
 
@@ -318,6 +330,15 @@ def test_collect_dev_questions_are_operator_phrases():
     lowered = {q.lower() for q in qs}
     assert "sku_count" not in lowered
     assert any("how many" in q.lower() for q in qs)
+    assert any("berapa banyak sku" in q.lower() for q in qs)
+
+
+def test_malay_berapa_banyak_sku_routes_to_sku_count():
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    plan = route_to_metric("boss, berapa banyak SKU kita ada sekarang?")
+    assert plan is not None
+    assert plan.metric_id == "sku_count"
 
 
 def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):
@@ -326,6 +347,8 @@ def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):
     from bench.heldout import replay_shadow
 
     monkeypatch.setenv("DMS_L2_ENABLED", "0")
+    monkeypatch.delenv("DMS_L2_SHADOW", raising=False)
+    monkeypatch.delenv("DMS_L2_SHADOW_PATH", raising=False)
     path = tmp_path / "shadow.jsonl"
     seen: list[str] = []
 
@@ -351,3 +374,8 @@ def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):
     assert os.environ.get("DMS_L2_SHADOW") is None
     assert out["n_lines"] == 1
     assert out["replayed"] == 1
+
+    skipped = replay_shadow(
+        ["first", "second"], shadow_path=path, ask=ask, offset=1, limit=1
+    )
+    assert skipped["replayed"] == 1

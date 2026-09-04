@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,75 @@ def test_leave_machine_asks_ov_leave_not_llm(monkeypatch):
     assert len(seen) == 1
     assert seen[0]["action"] == "leave"
     assert seen[0]["destination"] == "freeroute"
+
+
+def test_extract_sql_keeps_from_outside_the_fence():
+    text = (
+        "```sql\nSELECT i.sku, i.sku_name\n```\n"
+        "FROM inventory i WHERE i.quantity_kg > 0"
+    )
+    sql = sql_generator._extract_sql(text)
+    assert sql is not None
+    assert re.search(r"\bfrom\b", sql, re.I)
+    assert "inventory" in sql.lower()
+
+
+def test_extract_sql_rejects_select_list_with_no_from():
+    assert sql_generator._extract_sql("SELECT i.sku, i.sku_name") is None
+
+
+def test_guardrail_rejects_select_without_from():
+    from CortexOS.dms.sql_guardrail import validate_sql
+
+    semantic = {"tables": {"inventory": {"columns": ["sku", "sku_name"]}}}
+    out = validate_sql("SELECT i.sku, i.sku_name", semantic)
+    assert out.passed is False
+    assert "MISSING_FROM" in out.violations
+
+
+def test_guardrail_allows_literal_select_without_from():
+    """ANS-02 session follow-up SQL is a CAST literal, not a warehouse FROM."""
+    from CortexOS.dms.sql_guardrail import validate_sql
+
+    semantic = {"tables": {"inventory": {"columns": ["sku"]}}}
+    out = validate_sql(
+        "SELECT CAST(12.5 AS DOUBLE) AS sum_sales_value_myr",
+        semantic,
+    )
+    assert out.passed is True, out.violations
+    assert out.safe_sql
+
+
+def test_freeroute_body_omits_metadata_google_rejects(monkeypatch):
+    """OV extra=allow forwards metadata to Gemini, which 400s the L2 call."""
+    seen: list[dict] = []
+
+    def fake_post(path, body, **kwargs):
+        del path, kwargs
+        seen.append(dict(body))
+        return {
+            "choices": [{
+                "message": {
+                    "content": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+                }
+            }]
+        }
+
+    monkeypatch.setattr(sql_generator, "is_configured", lambda: True)
+    monkeypatch.setattr(sql_generator, "_leave_machine_allowed", lambda: (True, "ok:leave"))
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_client.post_json",
+        fake_post,
+    )
+    out = sql_generator.generate_candidates(
+        "how many skus",
+        {"tables": {"inventory": {"columns": ["sku"]}}},
+    )
+    assert seen, "FreeRoute POST was not attempted"
+    assert "metadata" not in seen[0]
+    assert out
+    assert "inventory" in out[0].lower()
+    assert "sku" in out[0].lower()
 
 
 def test_l2_path_abstains_without_freeroute(monkeypatch):

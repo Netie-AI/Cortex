@@ -15,6 +15,7 @@ HIT. reuse: `docs/subagents_findings/2026-09-04_c7-05-engine-scorer.md`, `docs/s
 3. `and whose` / `and also have|appear` abstain BIRD stacks. `ignore SKU-X and also show the top 5` is ANS-01 and must stay L1.
 4. G-sh needs real `maybe_record_l2_shadow` lines plus L1-only-correct vs L2-only-correct. Dummy JSONL and all-refusal padding do not unlock C7-05 serve.
 5. `cutover` stays false. Do not set `DMS_L2_ENABLED` as the process default.
+6. Do not put OpenAI `metadata` on `/v1/chat/completions`. OpenVault `extra=allow` forwards it to Gemini, which 400s; Cortex then records `NO_CANDIDATE`.
 
 ## Verify
 
@@ -24,3 +25,9 @@ python -m bench.heldout --shadow-replay --limit 3 --shadow-path .tmp/l2_shadow_p
 ```
 
 Does not prove: G-sh >= 500 live lines, L2-on-miss serve, or p95 vs SHADOW-off.
+
+## After PR 126 squash (2026-09-04)
+
+`#126` merged the live scorer + leave-gate. It did **not** take metadata-off, `MISSING_FROM` / fenced-FROM extract, sku_count synonyms, or Malay `berapa`. Those live on `cursor/c7-05-l2-sql-main` vs current `main`.
+
+G-sh snapshot (local `.tmp/l2_shadow_gsh.jsonl`, gitignored): **512 lines / 500 unique / 197 `l2_sql`**. Gate `shadow_lines >= 500` is the line count. `l1_only_correct` / `l2_only_correct` stay 0 until `summarize_shadow(..., items=heldout)`. Do not close Cortex `#104`. `MISSING_FROM` must not refuse session literal `SELECT CAST(n AS DOUBLE) AS sum_…`.

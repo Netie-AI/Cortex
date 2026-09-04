@@ -432,11 +432,14 @@ def summarize(results: list[HeldoutResult]) -> dict[str, Any]:
 
 
 def _shadow_target(path: Path | str | None = None) -> Path:
-    if path is None:
-        from CortexOS.paths import data_path
+    if path is not None:
+        return Path(path)
+    env = (os.environ.get("DMS_L2_SHADOW_PATH") or "").strip()
+    if env:
+        return Path(env)
+    from CortexOS.paths import data_path
 
-        return data_path("engine", "l2_shadow.jsonl")
-    return Path(path)
+    return data_path("engine", "l2_shadow.jsonl")
 
 
 def shadow_line_count(path: Path | str | None = None) -> int:
@@ -523,6 +526,14 @@ def collect_dev_questions(root: Path | None = None) -> list[str]:
                 for row in group or []:
                     if isinstance(row, dict):
                         _add_dev_question(row.get("question"), seen, out)
+
+    personas = yaml.safe_load((base / "bench/live_personas.yaml").read_text(encoding="utf-8")) or {}
+    for persona in (personas.get("personas") or {}).values():
+        if not isinstance(persona, dict):
+            continue
+        for probe in persona.get("probes") or []:
+            if isinstance(probe, dict):
+                _add_dev_question(probe.get("raw_question"), seen, out)
 
     return out
 
@@ -648,10 +659,13 @@ def replay_shadow(
     *,
     shadow_path: Path | str | None = None,
     limit: int | None = None,
+    offset: int = 0,
     ask: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Call answer() with SHADOW on and L2 serve off. Restores env."""
     qs = list(questions if questions is not None else collect_dev_questions())
+    start = max(0, int(offset))
+    qs = qs[start:]
     if limit is not None:
         qs = qs[: max(0, int(limit))]
     target = _shadow_target(shadow_path)
@@ -818,10 +832,13 @@ def main() -> None:
     )
     parser.add_argument("--shadow-path", default=None, help="JSONL path for shadow replay/report")
     parser.add_argument("--limit", type=int, default=None, help="cap --shadow-replay questions")
+    parser.add_argument("--offset", type=int, default=0, help="skip first N questions on --shadow-replay")
     parser.add_argument("--json", default=None, help="write report JSON")
     args = parser.parse_args()
     if args.shadow_replay:
-        report = replay_shadow(shadow_path=args.shadow_path, limit=args.limit)
+        report = replay_shadow(
+            shadow_path=args.shadow_path, limit=args.limit, offset=args.offset
+        )
         print(json.dumps({
             "n_lines": report["n_lines"],
             "n_unique": report["n_unique"],

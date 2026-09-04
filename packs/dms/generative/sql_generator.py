@@ -17,6 +17,7 @@ from packs.dms.generative.schema_retrieval import retrieve, schema_prompt_block
 
 _SQL_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.I | re.S)
 _SELECT = re.compile(r"(SELECT\b.+)", re.I | re.S)
+_FROM = re.compile(r"\bfrom\b", re.I)
 
 
 def is_configured() -> bool:
@@ -57,21 +58,37 @@ def _leave_machine_allowed() -> tuple[bool, str]:
         return False, f"gate error: {exc}"[:240]
 
 
-def _extract_sql(text: str) -> str | None:
-    if not text:
-        return None
-    m = _SQL_FENCE.search(text)
-    body = (m.group(1) if m else text).strip()
+def _one_select(body: str) -> str | None:
     m2 = _SELECT.search(body)
     if not m2:
         return None
     sql = m2.group(1).strip().rstrip(";")
-    # Single statement only
     if ";" in sql:
         sql = sql.split(";", 1)[0].strip()
     if not sql.upper().startswith("SELECT"):
         return None
     return sql
+
+
+def _extract_sql(text: str) -> str | None:
+    """Take one SELECT. Prefer a statement that still has FROM.
+
+    Models often fence only the SELECT list and leave ``FROM t i`` outside
+    the fence. That parsed as ``SELECT i.sku LIMIT 1000`` and EXPLAIN died
+    on alias ``i``. No FROM → None (caller retries / abstains).
+    """
+    if not text:
+        return None
+    blobs: list[str] = []
+    for m in _SQL_FENCE.finditer(text):
+        blobs.append(m.group(1).strip())
+    blobs.append(_SQL_FENCE.sub(" ", text).strip())
+    blobs.append(text.strip())
+    for body in blobs:
+        sql = _one_select(body)
+        if sql and _FROM.search(sql):
+            return sql
+    return None
 
 
 def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | None:
@@ -95,9 +112,10 @@ def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | N
         ],
         "temperature": 0.0,
         "max_tokens": 600,
-        "metadata": {"identity": identity, "tier": "sql_generation"},
     }
-    # Prefer OpenVault proxy; fall back to direct path variants.
+    # Do not send OpenAI ``metadata``: OpenVault extra=allow forwards it to
+    # Google AI Studio, which 400s (non_retryable) and Cortex sees NO_CANDIDATE.
+    _ = identity
     data = post_json("/v1/chat/completions", body, timeout=45.0, base=openvault_base_url())
     if not data:
         return None

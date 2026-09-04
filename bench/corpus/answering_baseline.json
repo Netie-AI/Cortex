@@ -23,6 +23,7 @@
     "ms_cold_storage",
     "ms_delayed_count",
     "ms_exclude_beta",
+    "ms_sku_count",
     "ms_top5_revenue",
     "ns_expired_count",
     "ns_expired_list",

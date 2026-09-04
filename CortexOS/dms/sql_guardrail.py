@@ -84,6 +84,15 @@ def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
         violations.append("DDL_ATTEMPT")
         return GuardrailResult(False, violations, None)
 
+    # Column without a relation is the fenced-SELECT-list bug (`SELECT i.sku`).
+    # Session follow-ups emit `SELECT CAST(n AS DOUBLE) AS sum_…` with no FROM;
+    # that is a literal, not an unbound alias.
+    has_table = any(True for _ in stmt.find_all(exp.Table))
+    has_column = any(True for _ in stmt.find_all(exp.Column))
+    if has_column and not has_table:
+        violations.append("MISSING_FROM")
+        return GuardrailResult(False, violations, None)
+
     for node in stmt.walk():
         if isinstance(node, FORBIDDEN):
             violations.append("DDL_ATTEMPT")
