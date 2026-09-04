@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,30 @@ def test_leave_machine_asks_ov_leave_not_llm(monkeypatch):
     assert len(seen) == 1
     assert seen[0]["action"] == "leave"
     assert seen[0]["destination"] == "freeroute"
+
+
+def test_extract_sql_keeps_from_outside_the_fence():
+    text = (
+        "```sql\nSELECT i.sku, i.sku_name\n```\n"
+        "FROM inventory i WHERE i.quantity_kg > 0"
+    )
+    sql = sql_generator._extract_sql(text)
+    assert sql is not None
+    assert re.search(r"\bfrom\b", sql, re.I)
+    assert "inventory" in sql.lower()
+
+
+def test_extract_sql_rejects_select_list_with_no_from():
+    assert sql_generator._extract_sql("SELECT i.sku, i.sku_name") is None
+
+
+def test_guardrail_rejects_select_without_from():
+    from CortexOS.dms.sql_guardrail import validate_sql
+
+    semantic = {"tables": {"inventory": {"columns": ["sku", "sku_name"]}}}
+    out = validate_sql("SELECT i.sku, i.sku_name", semantic)
+    assert out.passed is False
+    assert "MISSING_FROM" in out.violations
 
 
 def test_freeroute_body_omits_metadata_google_rejects(monkeypatch):
