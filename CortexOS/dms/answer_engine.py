@@ -1423,15 +1423,21 @@ def answer(
             "assumptions": "destructive operation refused", "total_count": 0,
             "query_plan": _honest_plan(question, None, layer="blocked", assumptions="destructive"),
         })
-    if route == "rag":
+
+    def _space_doc_rag() -> dict[str, Any] | None:
+        # Keyword RAG must not skip L0/L1/L2. Space-scoped stub only, after miss.
+        if not space_id:
+            return None
         ans, sources = rag_answer(question)
-        return _done({
+        if not ans or not sources:
+            return None
+        return {
             "answer": ans, "sql_used": None, "chart_spec": None, "audit_id": audit_id,
             "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
             "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
             "total_count": 0,
             "query_plan": _honest_plan(question, None, layer="rag"),
-        })
+        }
 
     layer = badge = ""
     sql: str | None = None
@@ -1560,17 +1566,22 @@ def answer(
 
     if sql is None:
         # L2 lives on the engine port module, not here. This file must not
-        # import pack generation code (C2).
+        # import pack generation code (C2). L2 (when enabled) stays ahead of
+        # the space-scoped document stub; keyword RAG never runs first.
         from CortexOS.dms.l2_generation import attempt_l2
 
         l2_out = attempt_l2(question, verified=verified)
-        if l2_out is None:
+        if l2_out is not None and l2_out.sql:
+            sql = l2_out.sql
+            layer, badge = l2_out.layer, l2_out.badge
+            assumptions = l2_out.assumptions
+        else:
+            doc = _space_doc_rag()
+            if doc is not None:
+                return _done(doc)
+            if l2_out is not None and not l2_out.sql:
+                return _abs(l2_out.reason)
             return _abs("no governed metric or certified query matched")
-        if not l2_out.sql:
-            return _abs(l2_out.reason)
-        sql = l2_out.sql
-        layer, badge = l2_out.layer, l2_out.badge
-        assumptions = l2_out.assumptions
 
     if sql is None:
         return _abs("no governed metric or certified query matched")
