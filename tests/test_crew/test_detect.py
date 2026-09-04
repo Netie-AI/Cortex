@@ -91,6 +91,20 @@ def test_linkedin_and_seo_detect() -> None:
     assert "outreach" in text
 
 
+def test_company_ontology_foundry_loads_foundry_then_build() -> None:
+    got = plan("map the company ontology and foundry object types for this warehouse")
+    assert "Foundry" in got.capabilities
+    assert got.spawn is True
+    skills = attached_skills(got.capabilities)
+    assert skills[:2] == ("ontology-foundry", "build")
+    text = render(got)
+    assert "ontology-foundry" in text
+    assert text.index("ontology-foundry") < text.index("build")
+    mixed = plan("draft a pr for the company ontology foundry path")
+    assert "Foundry" in mixed.capabilities
+    assert attached_skills(mixed.capabilities)[:2] == ("ontology-foundry", "build")
+
+
 def test_feedback_and_auth_detect() -> None:
     got = plan("learn from this bad feedback in the Gmail thread")
     assert "Skills" in got.capabilities
@@ -184,6 +198,45 @@ async def test_marketing_spawn_copies_outreach_skill(rig) -> None:
     assert "outreach" in stored
     assert "chat-human" in stored
     assert "computer-reach" in stored
+
+
+@pytest.mark.asyncio
+async def test_foundry_spawn_copies_ontology_then_build(rig) -> None:
+    space = rig.store.create_space("Ontology")
+    rig.llm.manager.extend(
+        [
+            LLMResult(
+                tool_calls=[
+                    _tc(
+                        "spawn_agent",
+                        name="warehouse-ontology",
+                        capability="Foundry",
+                        brief="sketch objects then smallest build",
+                    )
+                ]
+            ),
+            LLMResult(tool_calls=[_tc("wait_for_replies", timeout_seconds=2)]),
+            LLMResult(text="warehouse-ontology sketched objects. Human confirms writes."),
+        ]
+    )
+    rig.llm.teammate.append(LLMResult(text="Sketch ready. Approvals stay manual."))
+    await rig.runtime.on_user_message(
+        space["id"], "map the company ontology and foundry object types"
+    )
+    await wait_run_done(rig.runtime, space["id"])
+    agent = rig.store.get_agent_by_name(space["id"], "warehouse-ontology")
+    assert agent is not None
+    prompt = agent["role_prompt"] or ""
+    assert "Skill ontology-foundry" in prompt
+    assert "Skill build" in prompt
+    assert prompt.index("Skill ontology-foundry") < prompt.index("Skill build")
+    assert "Do not auto-approve" in prompt
+    assert "PARKING_LOT P1" in prompt
+    stored = str(agent.get("skills") or "")
+    assert stored.index("ontology-foundry") < stored.index("build")
+    roster = rig.llm.calls[0]["messages"][1]["content"]
+    assert "ontology-foundry" in roster
+    assert "Default skills (auto-copied on spawn):" in roster
 
 
 @pytest.mark.asyncio
