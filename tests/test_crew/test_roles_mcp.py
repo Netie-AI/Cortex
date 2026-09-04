@@ -24,6 +24,7 @@ def test_catalog_names_the_specialists() -> None:
         "Reliability",
         "Infra",
         "Architecture",
+        "Foundry",
         "Observability",
         "Surface",
     }
@@ -53,6 +54,11 @@ def test_catalog_names_the_specialists() -> None:
     text = charter_block()
     assert "exact name" not in text.lower()
     assert "prompt templates" in text.lower()
+    foundry = by_name("Foundry")
+    assert foundry is not None
+    assert foundry.skills == ("ontology-foundry", "build")
+    assert "auto-approve" in foundry.role
+    assert "PARKING_LOT P1" in foundry.role
 
 
 def test_default_mcp_catalog_includes_uacc_and_windows() -> None:
