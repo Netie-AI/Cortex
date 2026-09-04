@@ -8,6 +8,12 @@
    - Harness chips as capability templates, not a roster (deepagents harness; no LangGraph UI)
    - Collection + scope wording (mem0 user/session/agent; mempalace rooms as wording only)
 
+   - Needs-you strip + HITL card dialect + strictness badge
+   - Belt Work tab (ready/seated/held) + stall chips; never force-kill Manager
+   - Memory scope chips (space|user|agent|run); recall untrusted
+   - Standing-approval ladder in settings (revocable, circuit-breaker)
+   - Claim/Release on Work-Tickets (409 = someone else, no silent retry)
+
    Control GET /v1/belt display JSON is unchanged. GET /stolen.css is 410.
 */
 
@@ -261,18 +267,50 @@ button { cursor: pointer; }
 .fold { border: 1px solid var(--line); padding: 0.3rem 0.45rem; }
 .fold__body { margin-top: 0.35rem; }
 
-.hitl-dock {
+.stamp, .id, .status, .vocab { font-family: var(--mono); }
+.vocab { color: var(--dim); font-size: 0.55rem; letter-spacing: 0.04em; }
+.id { color: var(--dim); font-size: 0.58rem; }
+
+.needs-you {
   margin: 0 0.7rem 0.35rem;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
   flex: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--hitl-bg);
+  border: 1px solid var(--hitl);
+  padding: 0.35rem 0.5rem;
 }
-.hitl-dock__head {
+.needs-you[hidden] { display: none; }
+.needs-you__pin {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
   font: 0.62rem var(--mono);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--hitl);
+}
+.preview {
+  margin: 0.25rem 0 0;
+  max-height: 4.2rem;
+  overflow: auto;
+  font: 0.62rem/1.35 var(--mono);
+  color: var(--mute);
+  background: var(--well);
+  padding: 0.3rem 0.4rem;
+}
+.strict {
+  display: inline-block;
+  font: 0.55rem var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--lease);
+  color: var(--lease);
+  padding: 0 0.28rem;
 }
 .confirm {
   border: 1px solid var(--hitl);
@@ -452,20 +490,23 @@ button { cursor: pointer; }
   padding: 0.28rem 0;
 }
 .agent--on { background: var(--pane); }
-.mark {
-  width: 1.45rem;
-  height: 1.45rem;
+.orb, .mark {
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 50%;
   display: grid;
   place-items: center;
   font: 0.58rem/1 var(--mono);
   color: var(--well);
   flex: none;
   position: relative;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
 }
-.mark.thinking::after {
+.orb.thinking::after, .mark.thinking::after {
   content: "";
   position: absolute;
   inset: -3px;
+  border-radius: 50%;
   border: 1px solid var(--live);
   animation: beat 1.1s ease-out infinite;
 }
@@ -732,6 +773,60 @@ button { cursor: pointer; }
   pointer-events: none;
 }
 .drop-veil.on { display: grid; }
+
+.belt__tabs { display: flex; gap: 0.25rem; padding: 0.35rem 0 0.15rem; }
+.scope-row { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-bottom: 0.3rem; }
+.scope-chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--mute);
+  padding: 0.12rem 0.35rem;
+  font: 0.55rem var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.scope-chip.on { border-color: var(--lease); color: var(--lease); }
+.work-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font: 0.62rem var(--mono);
+  color: var(--mute);
+  margin-bottom: 0.3rem;
+}
+.work-stats b { color: var(--ink); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.2rem; margin: 0.2rem 0; }
+.chip-mini {
+  font: 0.52rem var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--mute);
+  padding: 0.08rem 0.28rem;
+}
+.chip-mini.stall { border-color: var(--hitl); color: var(--hitl); }
+.empty--orb {
+  padding: 0.7rem 0.2rem;
+  text-align: left;
+}
+.empty--orb::before {
+  content: "";
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--line);
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+.row-actions { display: flex; gap: 0.25rem; margin-top: 0.2rem; }
+.ladder {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.7rem;
+}
+.ladder h3 { margin: 0 0 0.3rem; font-size: 0.85rem; }
+.ladder label { display: block; font: 0.72rem var(--mono); color: var(--mute); margin: 0.2rem 0; }
 
 @media (max-width: 900px) {
   .spaces:not(.spaces--pinned) { width: 2.4rem; }

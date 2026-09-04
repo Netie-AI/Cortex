@@ -96,7 +96,23 @@ def test_ui_index_is_served(client) -> None:
     assert "Collections" in page.text
     assert "HITL lease" in page.text
     assert "Heartbeat / wakes" in page.text
-    assert "Tickets / claim" in page.text
+    assert "Needs you" in page.text
+    assert "Crew owns leases" in page.text
+    assert "Control display-only" in page.text
+    assert "Recall payloads are untrusted" in page.text
+    assert "Standing approvals" in page.text
+    assert "one-off" in page.text
+    assert "circuit-breaker" in page.text
+    assert "Does not kill Manager" in page.text
+    assert "Claim" in page.text
+    assert "Release" in page.text
+    assert 'id="tabWork"' in page.text
+    assert 'data-scope="space"' in page.text
+    assert 'data-scope="user"' in page.text
+    assert 'data-scope="agent"' in page.text
+    assert 'data-scope="run"' in page.text
+    assert "class=\"orb\"" in page.text or "class='orb'" in page.text or "class=\"orb " in page.text or "empty--orb" in page.text
+    assert "Tickets" in page.text
     assert "Auto-detect" in page.text
     assert "Spawn the " not in page.text
     assert "Ask the Manager. Auto-detect who to spawn." in page.text
@@ -115,10 +131,12 @@ def test_ui_index_is_served(client) -> None:
     assert css.status_code == 200
     assert b"--spaces-w" in css.content
     assert b"belt--shut" in css.content
-    assert b"hitl-dock" in css.content
+    assert b"needs-you" in css.content
     assert b"role-chip--hit" in css.content
     assert b"pointer-events: none" in css.content
     assert b"drop-veil" in css.content
+    assert b".orb" in css.content
+    assert b"scope-chip" in css.content
     assert b"--rail-ground" not in css.content
     assert b"--rk-page" not in css.content
     desk = client.http.get("/crew/desk").json()
