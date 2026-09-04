@@ -334,6 +334,31 @@ def constructor_recommend(
     return {"ok": True, "recommendation": rec.as_dict(), "approaches": approaches}
 
 
+@router.post("/cortex/constructor/generate")
+async def constructor_generate(
+    request: Request,
+    caller: Caller = Depends(require_constructor_viewer),
+) -> dict[str, Any]:
+    """Compile a prompt onto a canvas. Ghost only. No DuckDB fetch. No run_dag."""
+    from CortexOS.constructor_graph import ConstructorGraphError, generate_constructor_graph
+
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Send JSON {prompt: ...}") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Send JSON {prompt: ...}")
+    prompt = str(payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt required")
+    try:
+        out = generate_constructor_graph(prompt)
+    except ConstructorGraphError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _ = caller
+    return out
+
+
 @router.post("/cortex/constructor/run")
 async def constructor_run(
     request: Request,

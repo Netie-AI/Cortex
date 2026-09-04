@@ -475,6 +475,16 @@ function loadFoundryPath() {
   render();
 }
 
+function replaceGraph(nodes, edges) {
+  if (!Array.isArray(nodes) || !nodes.length) return false;
+  state.nodes = nodes;
+  state.edges = Array.isArray(edges) ? edges : [];
+  selectedId = state.nodes[0].id;
+  save();
+  render();
+  return true;
+}
+
 function ensureKinds(kinds) {
   for (const kind of kinds) {
     if (!state.nodes.some((n) => n.kind === kind)) addNode(kind);
@@ -508,6 +518,7 @@ window.Constructor = {
   showAudit,
   markGhostWalk,
   loadFoundryPath,
+  replaceGraph,
   ensureKinds,
   patchSelected,
   replaceCatalog,

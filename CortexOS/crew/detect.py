@@ -85,6 +85,18 @@ CUES: dict[str, tuple[str, ...]] = {
         "background jobs",
         "sharding",
     ),
+    "Foundry": (
+        "ontology",
+        "foundry",
+        "object type",
+        "object types",
+        "link types",
+        "action types",
+        "company ontology",
+        "ontology-foundry",
+        "digital twin",
+        "aip parity",
+    ),
     "Observability": (
         "distributed tracing",
         "real user monitoring",
@@ -253,15 +265,24 @@ def match_capabilities(text: str) -> tuple[str, ...]:
 def attached_skills(caps: tuple[str, ...]) -> tuple[str, ...]:
     out: list[str] = []
     seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        out.append(name)
+
+    # Company ontology/foundry jobs: ontology-foundry then build, even if PR
+    # or Gate also matched and would otherwise copy build first.
+    if "Foundry" in caps:
+        _add("ontology-foundry")
+        _add("build")
     for cap in caps:
         role = roles.by_name(cap)
         if role is None:
             continue
         for name in role.skills:
-            if name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
+            _add(name)
     return tuple(out)
 
 
