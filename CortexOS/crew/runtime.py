@@ -489,7 +489,8 @@ class CrewRuntime:
         title = str(shown.get("title") or canon).strip()
         body = str(shown.get("body") or "").strip()
         goal = (
-            f"{canon}: {title}. Execute this issue. Close with /done after verify. "
+            f"{canon}: {title}. Execute this issue. "
+            "Close with request_close (HITL) or /done after verify. "
             "Do not steal SEATED seats. Do not merge PRs."
         )
         if body:
@@ -768,6 +769,15 @@ class CrewRuntime:
         self, confirm_id: str, approved: bool, *, takeover: bool = False
     ) -> dict[str, Any] | None:
         row = self.store.decide_confirm(confirm_id, approved, takeover=takeover)
+        if row is not None:
+            self.bus.emit(row["space_id"], "confirm", {"confirm": row})
+            if (
+                approved
+                and not takeover
+                and str(row.get("tool") or "") == "close_issue"
+                and str(row.get("status") or "") == "approved"
+            ):
+                self._finish_close_issue(row)
         pair = self._confirms.get(confirm_id)
         if pair is not None:
             event, holder = pair
@@ -778,15 +788,6 @@ class CrewRuntime:
                 holder["verdict"] = "approved" if approved else "denied"
                 holder["approved"] = approved
             event.set()
-        if row is not None:
-            self.bus.emit(row["space_id"], "confirm", {"confirm": row})
-            if (
-                approved
-                and not takeover
-                and str(row.get("tool") or "") == "close_issue"
-                and str(row.get("status") or "") == "approved"
-            ):
-                self._finish_close_issue(row)
         return row
 
     def _finish_close_issue(self, confirm: dict[str, Any]) -> None:
@@ -798,6 +799,7 @@ class CrewRuntime:
         result = github_mod.close_issue(spec, comment=comment)
         space_id = str(confirm.get("space_id") or "")
         manager = self.ensure_manager(space_id)
+        agent_id = str(confirm.get("agent_id") or manager["id"])
         text = result.get("detail") or ("closed " + spec if result.get("ok") else "close failed")
         if result.get("ok"):
             text = f"Closed {result.get('spec')}. {result.get('law')}"
@@ -810,9 +812,13 @@ class CrewRuntime:
             space_id,
             "tool",
             str(text)[:4000],
-            agent_id=manager["id"],
+            agent_id=agent_id,
             to_agent_id=manager["id"],
-            meta={"tool": "close_issue", "args": args, "slash": True},
+            meta={
+                "tool": "close_issue",
+                "args": args,
+                "slash": confirm.get("run_id") is None,
+            },
         )
         self.bus.emit(space_id, "message", {"message": msg})
 
@@ -1321,6 +1327,17 @@ class CrewRuntime:
                 ["spec"],
             ),
             spec(
+                "request_close",
+                "Ask the operator to close a GitHub issue (owner/repo#n) after verify. "
+                "Parks the same HITL as /done. Refuses SEATED claims. Never merges PRs. "
+                "Never sets GitHub assignees. Do not call this on Ticket Runner seats.",
+                {
+                    "spec": {"type": "string", "description": "owner/repo#n"},
+                    "comment": {"type": "string", "description": "close comment"},
+                },
+                ["spec"],
+            ),
+            spec(
                 "ws_ls",
                 "List files in this space's jailed workspace. Paths cannot escape the jail. "
                 "Use this to keep ticket notes and patches. Do not write the Cortex engine tree.",
@@ -1688,6 +1705,44 @@ class CrewRuntime:
                 lines.append(str(shown.get("detail") or "unread"))
             text = "\n".join(p for p in lines if p)
             self._persist_tool(ctx, row, "show_issue", {"spec": shown.get("spec")}, text)
+            return text
+
+        if name == "request_close":
+            from CortexOS.crew import github as github_mod
+
+            spec = str(args.get("spec") or "")
+            comment = str(args.get("comment") or "")
+            parsed = github_mod.parse_issue_spec(spec)
+            seated = github_mod.seated_claim(spec) if parsed else None
+            if parsed is None:
+                text = "DENIED: request_close owner/repo#n. Crew does not merge PRs."
+                self._persist_tool(ctx, row, "request_close", args, text)
+                return text
+            if seated is not None:
+                text = (
+                    f"DENIED: {seated.get('ticket')} is SEATED "
+                    f"({seated.get('owner_pr')}). Ticket Runner owns the seat. "
+                    "Crew does not steal it."
+                )
+                self._persist_tool(ctx, row, "request_close", args, text)
+                return text
+            canon = github_mod.canonical_spec(spec)
+            payload = {"spec": canon, "comment": comment}
+            verdict = await self._await_confirm(ctx, row, "close_issue", payload)
+            if verdict != "approved":
+                text = (
+                    "DENIED: operator kept the issue open (or approval timed out). "
+                    "Crew does not merge PRs."
+                )
+                self._persist_tool(ctx, row, "request_close", payload, text)
+                return text
+            closed = [
+                m
+                for m in self.store.list_messages(ctx.space_id)
+                if m.get("role") == "tool"
+                and (m.get("meta") or {}).get("tool") == "close_issue"
+            ]
+            text = str(closed[-1]["content"]) if closed else f"Closed {canon}."
             return text
 
         if name in {"ws_ls", "ws_read", "ws_write", "ws_edit", "ws_glob"}:

@@ -67,6 +67,7 @@ INTERNAL_TOOLS = frozenset(
         "kill_agent",
         "set_agent_mode",
         "show_issue",
+        "request_close",
         "ws_ls",
         "ws_read",
         "ws_write",
