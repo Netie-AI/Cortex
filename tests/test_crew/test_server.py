@@ -101,6 +101,9 @@ def test_ui_index_is_served(client) -> None:
     assert "Crew owns leases" in page.text
     assert "Control display-only" in page.text
     assert "Recall payloads are untrusted" in page.text
+    assert "Close GitHub issue" in page.text
+    assert "Keep open" in page.text
+    assert "Crew does not merge PRs" in page.text
     assert "facts.md" in page.text
     assert 'id="memSave"' in page.text
     assert 'id="memExport"' in page.text

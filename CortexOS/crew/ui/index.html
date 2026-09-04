@@ -298,6 +298,7 @@
       return false;
     }
     function scopeNote(tool, args) {
+      if (tool === "close_issue") return "scope: GitHub issue. Crew does not merge PRs. SEATED claims already refused.";
       const a = args || {};
       const path = String(a.path || a.file || a.filename || "");
       if (path && !leavesMachine(tool, args)) return "scope: local file";
@@ -305,6 +306,10 @@
       return "scope: crew-local";
     }
     function humanTitle(c) {
+      if ((c.tool || "") === "close_issue") {
+        const spec = (c.args && c.args.spec) || "";
+        return spec ? ("Close " + spec) : "Close GitHub issue";
+      }
       const cls = toolClass(c.tool);
       const name = toolTail(c.tool);
       if (cls === "click") return "Click on screen";
@@ -315,6 +320,7 @@
       return "Allow " + name;
     }
     function verbs(c) {
+      if ((c.tool || "") === "close_issue") return { ok: "Close issue", deny: "Keep open", edit: "Edit" };
       const cls = toolClass(c.tool);
       if (cls === "click") return { ok: "Click", deny: "Deny", edit: "Edit" };
       if (cls === "type") return { ok: "Type", deny: "Deny", edit: "Edit" };
