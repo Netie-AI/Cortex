@@ -206,8 +206,11 @@ class CrewRuntime:
         )
         self.bus.emit(space_id, "message", {"message": msg})
 
+        desk_run_id: str | None = None
         if parsed.command and parsed.command.get("kind") == "desk":
-            await self._run_slash_desk(space_id, manager, parsed.command, parsed.rest)
+            desk_run_id = await self._run_slash_desk(
+                space_id, manager, parsed.command, parsed.rest
+            )
         elif parsed.command and parsed.command.get("kind") == "memory":
             self._run_slash_memory(space_id, manager, parsed.command, parsed.rest)
         elif parsed.command and parsed.command.get("kind") == "life":
@@ -246,8 +249,14 @@ class CrewRuntime:
             and parsed.command.get("action") == "assign_issue"
             and not parsed.mentions
         )
-        if desk_only or memory_only or life_only or close_only or fetch_only or assign_only:
+        if desk_only or memory_only or life_only or close_only or fetch_only:
             return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
+        if assign_only:
+            return {
+                "ok": True,
+                "command": parsed.command.get("slash"),
+                "run_id": desk_run_id,
+            }
 
         turn_provider = (provider or "").strip() or None
         turn_model = (model or "").strip() or None
@@ -343,7 +352,7 @@ class CrewRuntime:
         manager: dict[str, Any],
         command: dict[str, Any],
         rest: str,
-    ) -> None:
+    ) -> str | None:
         action = str(command.get("action") or "")
         text = ""
         args: dict[str, Any] = {}
@@ -447,6 +456,10 @@ class CrewRuntime:
             },
         )
         self.bus.emit(space_id, "message", {"message": msg})
+        if action == "assign_issue" and text.startswith("Assigned"):
+            rid = args.get("run_id")
+            return str(rid) if rid else None
+        return None
 
     async def _assign_issue_slash(
         self, space_id: str, rest: str
@@ -515,10 +528,28 @@ class CrewRuntime:
         }
         if not bound.get("ok"):
             return str(bound.get("detail") or "DENIED: assign failed"), args
+        run_id = self._execute_assigned(space_id, row, goal)
+        args["run_id"] = run_id
         return (
             f"Assigned {canon} to {row.get('name')} mode=goal. {bound.get('law')}",
             args,
         )
+
+    def _execute_assigned(
+        self, space_id: str, row: dict[str, Any], goal: str
+    ) -> str | None:
+        """Operator /assign is spend consent. Brief the teammate and start a run."""
+        agent_id = str(row.get("id") or "")
+        if not agent_id:
+            return None
+        manager = self.ensure_manager(space_id)
+        ctx_id = self._space_run.get(space_id)
+        if ctx_id is None or self._runs.get(ctx_id) is None:
+            ctx_id = self._start_run(space_id, manager)
+        accepted = self.accept_task(agent_id, brief=goal)
+        if isinstance(accepted, dict) and accepted.get("error"):
+            return ctx_id
+        return ctx_id
 
     def _run_slash_memory(
         self,

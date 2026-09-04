@@ -687,6 +687,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "ok": True,
             "detail": text,
             "args": args,
+            "run_id": args.get("run_id"),
             "law": "Local bind. Did not write CLAIMS.json. Did not set a GitHub assignee.",
         }
 

@@ -77,7 +77,7 @@ _DESK: tuple[dict[str, Any], ...] = (
         "kind": "desk",
         "action": "assign_issue",
         "title": "Assign teammate (local)",
-        "hint": "/assign owner/repo#n | Name. Local goal bind. Refuses SEATED. No GitHub assignee.",
+        "hint": "/assign owner/repo#n | Name. Local bind then teammate run. Refuses SEATED. No GitHub assignee.",
     },
 )
 

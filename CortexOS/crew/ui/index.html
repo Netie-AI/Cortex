@@ -926,6 +926,12 @@
           toast((data.detail || ("claim " + resp.status)) + " - no silent retry.", "bad");
           return;
         }
+        toast(
+          act === "claim"
+            ? ((data.detail || "Assigned.") + (data.run_id ? (" run " + data.run_id) : " run none"))
+            : (data.detail || "Released."),
+          "ok"
+        );
         const board = await api("/crew/tickets").catch(() => null);
         if (board) renderTickets(board);
         const belt = await api("/v1/belt").catch(() => api("/crew/belt").catch(() => null));
