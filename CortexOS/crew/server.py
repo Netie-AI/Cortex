@@ -25,8 +25,10 @@ from CortexOS.crew.keys import public_fields
 from CortexOS.crew.keys import save as save_keys
 from CortexOS.crew.keys import status as keys_status
 from CortexOS.crew.mcp_client import MCPManager
+from CortexOS.crew.queue import JobQueue
 from CortexOS.crew.runtime import CrewRuntime
 from CortexOS.crew.store import CrewStore
+from CortexOS.crew.wakes import WakeBoard, conveyor
 
 SSE_KEEPALIVE_S = 25
 SSE_BREAK = '\n\n'
@@ -68,6 +70,26 @@ class CrewApp:
         )
         self.runtime = CrewRuntime(
             self.store, self.bus, self.settings, self.mcp, self.bridge, llm_chat=llm_chat
+        )
+        self.wakes = WakeBoard()
+        self.queue = JobQueue()
+
+    def mailbox_nonempty(self) -> bool:
+        """True when any A2A mailbox still holds unread envelopes.
+
+        Derived flag only. Does not allocate a second mailbox.
+        """
+        switch = getattr(self.runtime, "switch", None)
+        if switch is None:
+            return False
+        return bool(switch.any_waiting())
+
+    def belt(self) -> dict[str, Any]:
+        return conveyor(
+            self.store,
+            self.wakes,
+            self.queue,
+            mailbox_nonempty=self.mailbox_nonempty(),
         )
 
     async def startup(self) -> None:
@@ -133,6 +155,16 @@ class KeysIn(BaseModel):
 
 def build_router(crew: CrewApp) -> APIRouter:
     router = APIRouter(prefix="/crew")
+
+    @router.get("/wakes")
+    async def wakes() -> dict[str, Any]:
+        """Talk liveness. Control GETs this; Control never POSTs wakes."""
+        return crew.wakes.snapshot()
+
+    @router.get("/belt")
+    async def crew_belt() -> dict[str, Any]:
+        """Conveyor JSON. Fallback when /v1/belt is unreachable."""
+        return crew.belt()
 
     @router.get("/health")
     async def health() -> dict[str, Any]:
@@ -439,6 +471,11 @@ def create_app(
         allow_headers=["*"],
     )
     app.include_router(build_router(crew))
+
+    @app.get("/v1/belt")
+    async def v1_belt() -> dict[str, Any]:
+        """Preferred Control probe. Display JSON only. No Cortex HTTP ping."""
+        return crew.belt()
 
     index = crew.settings.ui_dir / "index.html"
     stolen = crew.settings.ui_dir / "stolen.css"
