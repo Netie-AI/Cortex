@@ -160,6 +160,12 @@ class ConfirmIn(BaseModel):
     takeover: bool = False
 
 
+class MemoryIn(BaseModel):
+    name: str
+    description: str
+    body: str = ""
+
+
 class ArmIn(BaseModel):
     armed: bool
 
@@ -398,6 +404,41 @@ def build_router(crew: CrewApp) -> APIRouter:
         if isinstance(accepted, dict) and accepted.get("error"):
             raise HTTPException(400, str(accepted["error"]))
         return {"ok": True, "agent": accepted}
+
+    @router.get("/spaces/{space_id}/memory")
+    async def list_memory(space_id: str, q: str = "") -> dict[str, Any]:
+        if crew.store.get_space(space_id) is None:
+            raise HTTPException(404, "unknown space")
+        mem = crew.runtime._mem(space_id)
+        query = q.strip()
+        facts = mem.search(query) if query else mem.list_facts()
+        return {
+            "facts": [
+                {"name": f.name, "description": f.description, "body": f.body}
+                for f in facts
+            ],
+            "file": "facts.md",
+        }
+
+    @router.post("/spaces/{space_id}/memory")
+    async def save_memory(space_id: str, body: MemoryIn) -> dict[str, Any]:
+        if crew.store.get_space(space_id) is None:
+            raise HTTPException(404, "unknown space")
+        from CortexOS.crew.memory import CrewMemoryError
+
+        mem = crew.runtime._mem(space_id)
+        try:
+            detail = mem.remember(body.name, body.description, body.body)
+        except CrewMemoryError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True, "detail": detail, "facts": mem.public_facts()}
+
+    @router.get("/spaces/{space_id}/memory/export")
+    async def export_memory(space_id: str) -> dict[str, Any]:
+        if crew.store.get_space(space_id) is None:
+            raise HTTPException(404, "unknown space")
+        mem = crew.runtime._mem(space_id)
+        return {"filename": "facts.md", "markdown": mem.export_markdown()}
 
     @router.post("/spaces/{space_id}/clear")
     async def clear_chat(space_id: str) -> dict[str, Any]:

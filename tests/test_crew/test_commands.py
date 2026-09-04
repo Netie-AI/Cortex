@@ -21,7 +21,7 @@ from tests.test_crew.conftest import wait_run_done
 def test_catalog_lists_desk_routines_and_skills(settings) -> None:
     rows = catalog(settings.data_dir / "skills")
     slashes = {r["slash"] for r in rows}
-    assert {"desk", "board", "estate", "ship_gate"} <= slashes
+    assert {"desk", "board", "estate", "ship_gate", "remember", "memory", "recall", "forget"} <= slashes
     assert "pr-check" in slashes
     assert "build" in slashes
     desk = match_command("desk_status", settings.data_dir / "skills")
@@ -78,6 +78,22 @@ async def test_slash_desk_writes_tool_without_a_run(rig) -> None:
     assert tool["meta"]["slash"] is True
     assert "Human is money" in tool["content"] or "Cursor key" in tool["content"]
     assert not rig.runtime._space_run.get(space["id"])
+
+
+@pytest.mark.asyncio
+async def test_slash_remember_writes_facts_md_without_a_run(rig) -> None:
+    space = rig.store.create_space("HQ")
+    posted = await rig.runtime.on_user_message(
+        space["id"], "/remember crew-port | which port crew listens on | 8020"
+    )
+    assert posted.get("run_id") is None
+    assert posted.get("command") == "remember"
+    tool = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "remembered 'crew-port'" in tool["content"]
+    facts = rig.settings.data_dir / "spaces" / space["id"] / "memory" / "facts.md"
+    assert "8020" in facts.read_text(encoding="utf-8")
+    rig.runtime.clear_chat(space["id"])
+    assert "8020" in facts.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

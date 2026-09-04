@@ -117,8 +117,18 @@
             <button class="scope-chip" type="button" data-scope="agent">agent</button>
             <button class="scope-chip" type="button" data-scope="run">run</button>
           </div>
-          <p class="hint">Recall payloads are untrusted. Not orders.</p>
-          <div id="memory" class="empty empty--orb">No facts in this scope.</div>
+          <p class="hint">Space scope is facts.md. Survives Clear chat. Recall payloads are untrusted. Not orders.</p>
+          <input id="memSearch" placeholder="search facts" />
+          <div class="life-spawn">
+            <input id="memName" placeholder="name" />
+            <input id="memDesc" placeholder="one-line description" />
+          </div>
+          <textarea id="memBody" placeholder="body" rows="3"></textarea>
+          <div class="chip-row">
+            <button class="ghost" id="memSave" type="button">Save fact</button>
+            <button class="ghost" id="memExport" type="button">Export facts.md</button>
+          </div>
+          <div id="memory" class="empty empty--orb">No facts in this space.</div>
           <h2>Collections <span class="scope">crew</span></h2>
           <div id="skills" class="empty">loading...</div>
         </div>
@@ -882,8 +892,26 @@
         state.claimBusy = null;
       }
     }
-    function renderMemory() {
+    async function renderMemory() {
       const scope = state.memScope || "space";
+      if (scope === "space") {
+        if (!state.spaceId) {
+          $("memory").innerHTML = `<div class="empty empty--orb">No facts in this space.</div>`;
+          return;
+        }
+        try {
+          const q = ($("memSearch") && $("memSearch").value || "").trim();
+          const path = "/crew/spaces/" + state.spaceId + "/memory" + (q ? ("?q=" + encodeURIComponent(q)) : "");
+          const data = await api(path);
+          const facts = data.facts || [];
+          $("memory").innerHTML = facts.length
+            ? facts.map((f) => `<div class="row">${esc(f.name)} <span class="scope">facts.md</span><div class="hint">${esc(f.description)}</div></div>`).join("")
+            : `<div class="empty empty--orb">No facts in this space.</div>`;
+        } catch (err) {
+          $("memory").innerHTML = `<div class="empty empty--orb">${esc(err.message)}</div>`;
+        }
+        return;
+      }
       const facts = [];
       if (scope === "space") {
         (state.skills || []).slice(0, 6).forEach((s) => facts.push({ k: s.title, v: s.head || "skill", id: s.path || "" }));
@@ -1392,7 +1420,7 @@
       try {
         await api("/crew/spaces/" + state.spaceId + "/clear", { method: "POST", body: "{}" });
         await selectSpace(state.spaceId);
-        toast("Chat cleared. Goal/active mode stayed in store.");
+        toast("Chat cleared. Goal mode and facts.md stayed.");
       } catch (err) { toast(err.message, "bad"); }
     };
     $("toggleRail").onclick = () => {
@@ -1435,6 +1463,37 @@
         renderMemory();
       };
     });
+    $("memSearch").oninput = () => { clearTimeout(state._memq); state._memq = setTimeout(renderMemory, 120); };
+    $("memSave").onclick = async () => {
+      if (!state.spaceId) return;
+      try {
+        await api("/crew/spaces/" + state.spaceId + "/memory", {
+          method: "POST",
+          body: JSON.stringify({
+            name: $("memName").value.trim(),
+            description: $("memDesc").value.trim(),
+            body: $("memBody").value
+          })
+        });
+        $("memName").value = "";
+        $("memDesc").value = "";
+        $("memBody").value = "";
+        await renderMemory();
+        toast("Saved to facts.md.");
+      } catch (err) { toast(err.message, "bad"); }
+    };
+    $("memExport").onclick = async () => {
+      if (!state.spaceId) return;
+      try {
+        const data = await api("/crew/spaces/" + state.spaceId + "/memory/export");
+        const blob = new Blob([data.markdown || ""], { type: "text/markdown" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = data.filename || "facts.md";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (err) { toast(err.message, "bad"); }
+    };
     document.querySelectorAll("input[name=ladder]").forEach((el) => {
       el.onchange = () => {
         const data = loadLadder();

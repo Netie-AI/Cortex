@@ -57,6 +57,41 @@ _DESK: tuple[dict[str, Any], ...] = (
     },
 )
 
+_MEMORY: tuple[dict[str, Any], ...] = (
+    {
+        "slash": "memory",
+        "aliases": ("facts",),
+        "kind": "memory",
+        "action": "list",
+        "title": "List facts.md",
+        "hint": "Durable markdown facts for this space. Survives Clear chat.",
+    },
+    {
+        "slash": "remember",
+        "aliases": (),
+        "kind": "memory",
+        "action": "remember",
+        "title": "Save a fact",
+        "hint": "/remember name | description | body",
+    },
+    {
+        "slash": "recall",
+        "aliases": (),
+        "kind": "memory",
+        "action": "recall",
+        "title": "Search facts",
+        "hint": "/recall keyword",
+    },
+    {
+        "slash": "forget",
+        "aliases": (),
+        "kind": "memory",
+        "action": "forget",
+        "title": "Delete a fact",
+        "hint": "/forget name",
+    },
+)
+
 
 def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:60] or "cmd"
@@ -102,6 +137,22 @@ def catalog(skills_dir: Path | None = None) -> list[dict[str, Any]]:
             _public_cmd(
                 slash=slash,
                 kind="desk",
+                action=str(row["action"]),
+                title=str(row["title"]),
+                hint=str(row["hint"]),
+                aliases=aliases,
+            )
+        )
+
+    for row in _MEMORY:
+        slash = str(row["slash"])
+        if not take(slash):
+            continue
+        aliases = tuple(a for a in row["aliases"] if take(a))
+        out.append(
+            _public_cmd(
+                slash=slash,
+                kind="memory",
                 action=str(row["action"]),
                 title=str(row["title"]),
                 hint=str(row["hint"]),

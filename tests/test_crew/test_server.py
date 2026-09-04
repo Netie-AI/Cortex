@@ -101,6 +101,10 @@ def test_ui_index_is_served(client) -> None:
     assert "Crew owns leases" in page.text
     assert "Control display-only" in page.text
     assert "Recall payloads are untrusted" in page.text
+    assert "facts.md" in page.text
+    assert 'id="memSave"' in page.text
+    assert 'id="memExport"' in page.text
+    assert "/crew/spaces/" in page.text
     assert "Standing approvals" in page.text
     assert "one-off" in page.text
     assert "circuit-breaker" in page.text
@@ -371,6 +375,38 @@ def test_operator_life_routes_spawn_kill_clear(client) -> None:
     assert keeper["mode"] == "goal"
     assert keeper["goal_text"] == "hold the line"
     assert keeper["status"] == "goal"
+
+    saved = client.http.post(
+        f"/crew/spaces/{space['id']}/memory",
+        json={
+            "name": "crew-port",
+            "description": "which port crew listens on",
+            "body": "8020",
+        },
+    ).json()
+    assert saved["ok"] is True
+    listed_mem = client.http.get(f"/crew/spaces/{space['id']}/memory").json()
+    assert listed_mem["file"] == "facts.md"
+    assert listed_mem["facts"][0]["name"] == "crew-port"
+    client.http.post(
+        f"/crew/spaces/{space['id']}/messages",
+        json={"text": "throw away"},
+    )
+    deadline = time.time() + 5
+    while client.crew.runtime._space_run.get(space["id"]):
+        if time.time() > deadline:
+            break
+        time.sleep(0.02)
+    client.http.post(f"/crew/spaces/{space['id']}/clear")
+    after_clear = client.http.get(f"/crew/spaces/{space['id']}/memory").json()
+    assert after_clear["facts"][0]["body"] == "8020"
+    exported = client.http.get(f"/crew/spaces/{space['id']}/memory/export").json()
+    assert exported["filename"] == "facts.md"
+    assert "# Crew facts" in exported["markdown"]
+    assert "8020" in exported["markdown"]
+    page = client.http.get("/")
+    assert "facts.md" in page.text
+    assert 'id="memory"' in page.text
 
     killed = client.http.post(
         f"/crew/spaces/{space['id']}/agents/{scout['id']}/kill",
