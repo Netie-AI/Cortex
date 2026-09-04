@@ -118,6 +118,19 @@ def test_guardrail_rejects_select_without_from():
     assert "MISSING_FROM" in out.violations
 
 
+def test_guardrail_allows_literal_select_without_from():
+    """ANS-02 session follow-up SQL is a CAST literal, not a warehouse FROM."""
+    from CortexOS.dms.sql_guardrail import validate_sql
+
+    semantic = {"tables": {"inventory": {"columns": ["sku"]}}}
+    out = validate_sql(
+        "SELECT CAST(12.5 AS DOUBLE) AS sum_sales_value_myr",
+        semantic,
+    )
+    assert out.passed is True, out.violations
+    assert out.safe_sql
+
+
 def test_freeroute_body_omits_metadata_google_rejects(monkeypatch):
     """OV extra=allow forwards metadata to Gemini, which 400s the L2 call."""
     seen: list[dict] = []

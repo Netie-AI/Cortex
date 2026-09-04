@@ -30,4 +30,4 @@ Does not prove: G-sh >= 500 live lines, L2-on-miss serve, or p95 vs SHADOW-off.
 
 `#126` merged the live scorer + leave-gate. It did **not** take metadata-off, `MISSING_FROM` / fenced-FROM extract, sku_count synonyms, or Malay `berapa`. Those live on `cursor/c7-05-l2-sql-main` vs current `main`.
 
-G-sh snapshot (local `.tmp/l2_shadow_gsh.jsonl`, gitignored): **237 unique / 96 `l2_sql`**. Histogram still includes pre-FROM-fix `NO_CANDIDATE` and leftover alias EXPLAIN rows. Continue `--offset 237`. Do not close Cortex `#104`.
+G-sh snapshot (local `.tmp/l2_shadow_gsh.jsonl`, gitignored): **512 lines / 500 unique / 197 `l2_sql`**. Gate `shadow_lines >= 500` is the line count. `l1_only_correct` / `l2_only_correct` stay 0 until `summarize_shadow(..., items=heldout)`. Do not close Cortex `#104`. `MISSING_FROM` must not refuse session literal `SELECT CAST(n AS DOUBLE) AS sum_…`.
