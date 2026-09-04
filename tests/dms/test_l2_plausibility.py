@@ -106,20 +106,15 @@ def test_pass_does_not_rewrite_sql():
 
 
 def test_l2_empty_success_customer_envelope(monkeypatch):
-    from datetime import datetime, timedelta, timezone
-
-    from cortex_contract.execution import Manifest
-
     from CortexOS.dms import l2_generation
     from CortexOS.dms.answer_engine import answer
-    from CortexOS.dms.warehouse_db import KNOWN_TABLES
-    from CortexOS.execution.manifest import VerifiedManifest
 
     class _Port:
         def is_configured(self) -> bool:
             return True
 
         def retrieve_schema(self, question: str) -> dict:
+            del question
             return {"tables": {"suppliers": {}}}
 
         def generate_candidates(self, question, schema, *, prior_violations=None):
@@ -143,47 +138,25 @@ def test_l2_empty_success_customer_envelope(monkeypatch):
     monkeypatch.setattr(
         "packs.dms.semantic.catalog_answer.is_catalog_intent", lambda q: False
     )
-    when = datetime.now(timezone.utc)
-    manifest = Manifest(
-        session_id="c7-03",
-        org_id="acme",
-        pool_id="default",
-        issuer_key_id="int-1",
-        allowed_paths=["/**"],
-        row_predicates={name: "TRUE" for name in KNOWN_TABLES},
-        issued_at=when.isoformat(),
-        expires_at=(when + timedelta(minutes=5)).isoformat(),
-        signature="not-checked-here",
-    )
-    verified = VerifiedManifest(
-        manifest=manifest, issuer_kid="int-1", verified_at=when
-    )
-    r = answer(
-        "which suppliers have a risk score above 9.5?",
-        verified=verified,
-    )
+    r = answer("which suppliers have a risk score above 9.5?")
     assert r["badge"] == "abstain"
     assert r["route"] != "sql"
     assert r["rows"] == []
     assert "empty-success" in (r.get("assumptions") or "")
+    assert "empty-success" in (r.get("answer") or "")
     assert r.get("sql_used") is None
 
 
 def test_l2_retrieval_miss_customer_envelope(monkeypatch):
-    from datetime import datetime, timedelta, timezone
-
-    from cortex_contract.execution import Manifest
-
     from CortexOS.dms import l2_generation
     from CortexOS.dms.answer_engine import answer
-    from CortexOS.dms.warehouse_db import KNOWN_TABLES
-    from CortexOS.execution.manifest import VerifiedManifest
 
     class _Port:
         def is_configured(self) -> bool:
             return True
 
         def retrieve_schema(self, question: str) -> dict:
+            del question
             return {"tables": {"suppliers": {}}}
 
         def generate_candidates(self, question, schema, *, prior_violations=None):
@@ -207,26 +180,9 @@ def test_l2_retrieval_miss_customer_envelope(monkeypatch):
     monkeypatch.setattr(
         "packs.dms.semantic.catalog_answer.is_catalog_intent", lambda q: False
     )
-    when = datetime.now(timezone.utc)
-    manifest = Manifest(
-        session_id="c7-03-miss",
-        org_id="acme",
-        pool_id="default",
-        issuer_key_id="int-1",
-        allowed_paths=["/**"],
-        row_predicates={name: "TRUE" for name in KNOWN_TABLES},
-        issued_at=when.isoformat(),
-        expires_at=(when + timedelta(minutes=5)).isoformat(),
-        signature="not-checked-here",
-    )
-    verified = VerifiedManifest(
-        manifest=manifest, issuer_kid="int-1", verified_at=when
-    )
-    r = answer(
-        "which suppliers have a risk score above 0.7?",
-        verified=verified,
-    )
+    r = answer("which suppliers have a risk score above 0.7?")
     assert r["badge"] == "abstain"
     assert r["rows"] == []
     assert "retrieval miss" in (r.get("assumptions") or "")
+    assert "retrieval miss" in (r.get("answer") or "")
     assert r.get("sql_used") is None
