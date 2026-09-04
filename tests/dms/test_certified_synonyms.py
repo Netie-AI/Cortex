@@ -87,3 +87,28 @@ def test_value_norm_lookup_hits_certified_canonical(monkeypatch):
     hit = ae.match_certified("stock of BETA")
     assert hit is not None
     assert hit.id == "cq_beta"
+
+
+def test_categoty_typo_hits_certified_top3_category_sales():
+    """VQ-01: curated synonym, not product-intent regex. Envelope on answer()."""
+    cq = match_certified("show top 3 categoty sales")
+    assert cq is not None
+    assert cq.id == "cq_top3_category_sales"
+
+    from CortexOS.dms.answer_engine import answer
+
+    r = answer("show top 3 categoty sales")
+    assert r["layer"] == "certified", r.get("answer")
+    assert r["badge"] == "certified"
+    assert r["route"] == "sql"
+    rows = r.get("rows") or []
+    assert len(rows) == 3, f"expected 3 category rows, got {len(rows)}: {r.get('answer')!r}"
+    text = r.get("answer") or ""
+    assert text.strip()
+    prev = None
+    for row in rows:
+        cat = str(row["category"])
+        val = float(row["sales_value_myr"])
+        assert cat in text
+        assert prev is None or val <= prev
+        prev = val
