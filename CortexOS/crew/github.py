@@ -18,6 +18,14 @@ def _run(argv: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess[
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
 
 
+def _gh_wait_s() -> float:
+    raw = os.environ.get("CREW_GH_WAIT_S", "1.5")
+    try:
+        return max(0.4, min(8.0, float(raw)))
+    except ValueError:
+        return 1.5
+
+
 def available(*, runner: RunFn | None = None) -> bool:
     if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
         return False
@@ -208,6 +216,135 @@ def seated_claim(raw: str) -> dict[str, Any] | None:
         if ticket == key or owner_pr == key:
             return row
     return None
+
+
+def issue_spec(repo: str, number: Any, url: str = "") -> str:
+    if repo and number is not None:
+        try:
+            return f"{repo}#{int(number)}"
+        except (TypeError, ValueError):
+            pass
+    parsed = parse_issue_spec((url or "").strip())
+    if parsed is None:
+        return ""
+    owner, name, n = parsed
+    return f"{owner}/{name}#{n}"
+
+
+def issue_title(spec: str, *, runner: RunFn | None = None) -> str:
+    """Read-only title. Empty string when gh cannot answer."""
+    parsed = parse_issue_spec(spec)
+    if parsed is None:
+        return ""
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        return canonical_spec(spec)
+    owner, repo, number = parsed
+    run = runner or _run
+    argv = [
+        "gh",
+        "issue",
+        "view",
+        str(number),
+        "--repo",
+        f"{owner}/{repo}",
+        "--json",
+        "title",
+    ]
+    try:
+        result = run(argv, timeout=_gh_wait_s())
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return canonical_spec(spec)
+    if result.returncode != 0:
+        return canonical_spec(spec)
+    try:
+        blob = json.loads(result.stdout or "{}")
+    except ValueError:
+        return canonical_spec(spec)
+    title = str(blob.get("title") or "").strip() if isinstance(blob, dict) else ""
+    return title or canonical_spec(spec)
+
+
+def list_open_issues(limit: int = 20, *, runner: RunFn | None = None) -> dict[str, Any]:
+    """Open GitHub *issues* for CLAIMS repos. Marks SEATED. Never assigns on GitHub."""
+    law = (
+        "Crew /assign binds a teammate locally. Ticket Runner seats CLAIMS. "
+        "Control does not assign. Crew does not set GitHub assignees."
+    )
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        return {
+            "ok": False,
+            "detail": "CREW_LIVE_PROBES=0",
+            "issues": [],
+            "repos": [],
+            "law": law,
+        }
+    run = runner or _run
+    repos = _repos()
+    issues: list[dict[str, Any]] = []
+    errors: list[str] = []
+    wait = _gh_wait_s()
+    targets = repos or [""]
+    for repo in targets:
+        argv = [
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            str(limit),
+            "--json",
+            "number,title,url,updatedAt",
+        ]
+        if repo:
+            argv.extend(["--repo", repo])
+        try:
+            result = run(argv, timeout=wait)
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "detail": "gh not installed",
+                "issues": [],
+                "repos": repos,
+                "law": law,
+            }
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(f"{repo or 'cwd'}:{type(exc).__name__}")
+            continue
+        if result.returncode != 0:
+            errors.append((result.stderr or result.stdout or "gh failed")[:200])
+            continue
+        try:
+            rows = json.loads(result.stdout or "[]")
+        except ValueError:
+            errors.append(f"{repo or 'cwd'}: invalid json")
+            continue
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            spec = issue_spec(str(repo or ""), row.get("number"), str(row.get("url") or ""))
+            if not spec:
+                continue
+            seated = seated_claim(spec)
+            issues.append(
+                {
+                    "spec": spec,
+                    "repo": repo or spec.rsplit("#", 1)[0],
+                    "number": row.get("number"),
+                    "title": row.get("title") or "",
+                    "url": row.get("url") or "",
+                    "updated": row.get("updatedAt") or "",
+                    "seated": seated is not None,
+                    "ready": seated is None,
+                }
+            )
+    return {
+        "ok": not errors or bool(issues),
+        "detail": "; ".join(errors)[:400] if errors else "",
+        "issues": issues[:80],
+        "repos": repos,
+        "law": law,
+    }
 
 
 def close_issue(

@@ -33,6 +33,8 @@ def test_catalog_lists_desk_routines_and_skills(settings) -> None:
         "wait",
         "goal",
         "done",
+        "fetch",
+        "assign",
         "remember",
         "memory",
         "recall",
@@ -205,6 +207,92 @@ async def test_slash_done_refuses_seated_and_hitl_closes_unseated(
     assert denied.get("run_id") is None
     bad = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
     assert "DENIED" in bad["content"]
+    assert not rig.runtime._space_run.get(space["id"])
+
+
+@pytest.mark.asyncio
+async def test_slash_fetch_and_assign_refuse_seated_and_bind_ready(
+    rig, tmp_path, monkeypatch
+) -> None:
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    monkeypatch.setattr(
+        github_mod,
+        "list_open_issues",
+        lambda **_k: {
+            "ok": True,
+            "detail": "",
+            "repos": ["Netie-AI/Cortex"],
+            "law": "Crew /assign binds a teammate locally.",
+            "issues": [
+                {
+                    "spec": "Netie-AI/Cortex#128",
+                    "title": "seated",
+                    "seated": True,
+                    "ready": False,
+                },
+                {
+                    "spec": "Netie-AI/Cortex#160",
+                    "title": "assign slice",
+                    "seated": False,
+                    "ready": True,
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(github_mod, "issue_title", lambda spec, **_k: spec)
+    space = rig.store.create_space("HQ")
+    fetched = await rig.runtime.on_user_message(space["id"], "/fetch")
+    assert fetched.get("run_id") is None
+    tool = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "Netie-AI/Cortex#160" in tool["content"]
+    assert "SEATED" in tool["content"]
+    seated = await rig.runtime.on_user_message(
+        space["id"], "/assign Netie-AI/Cortex#128 | Scout"
+    )
+    assert seated.get("run_id") is None
+    deny = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "SEATED" in deny["content"]
+    assert rig.store.get_agent_by_name(space["id"], "Scout") is None
+    posted = await rig.runtime.on_user_message(
+        space["id"], "/assign Netie-AI/Cortex#160 | Scout"
+    )
+    assert posted.get("run_id") is None
+    scout = rig.store.get_agent_by_name(space["id"], "Scout")
+    assert scout is not None
+    assert "Netie-AI/Cortex#160" in (scout.get("goal_text") or "")
+    ok = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
+    assert "Assigned" in ok["content"] and "Scout" in ok["content"]
+    from CortexOS.crew.assign import public as assignment_public
+
+    rows = assignment_public(rig.settings.data_dir)
+    assert rows[0]["spec"] == "Netie-AI/Cortex#160"
+    assert rows[0]["agent"] == "Scout"
+    pending_done = await rig.runtime.on_user_message(
+        space["id"], "/done Netie-AI/Cortex#160 | verified on desk"
+    )
+    assert pending_done.get("run_id") is None
+    confirms = rig.store.pending_confirms(space["id"])
+    assert confirms[0]["tool"] == "close_issue"
+
+    def fake_close(spec, *, comment="", runner=None):  # noqa: ANN001, ARG001
+        return {
+            "ok": True,
+            "spec": spec,
+            "detail": "Closed",
+            "law": "Closed the issue. Did not merge a PR. Ticket Runner seats writers.",
+        }
+
+    monkeypatch.setattr(github_mod, "close_issue", fake_close)
+    row = rig.runtime.decide_confirm(confirms[0]["id"], True)
+    assert row is not None and row["status"] == "approved"
+    assert assignment_public(rig.settings.data_dir) == []
     assert not rig.runtime._space_run.get(space["id"])
 
 
