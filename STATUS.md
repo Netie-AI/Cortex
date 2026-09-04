@@ -1,5 +1,16 @@
 # STATUS.md
-**Last updated:** 2026-08-28 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** engine capability (cost ledger, DAG parallel, T0) + CI billing unblock**
+**Last updated:** 2026-09-04 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY
+
+> **2026-09-04 (wave1 land + honesty):** Auto-merge is live on public `main`
+> (`ALLOWED_BASES={main}`). Landed: Crew belt/wakes PR #98; C7-01 shadow PR #106
+> (#100 closed, epic #17 and #101-#105 remain); EVAL-01 seeds gate PR #108
+> (56/50/0/6, #7 #15 closed); CI hygiene PR #111 (supersedes #2; `dms-ui-build`
+> not added); SPACE-01 PR #107 (#42 closed); cortex-contract 1.2.0 GitHub
+> Release (#16 closed). Stale PR #4 closed as superseded.
+> **EPIC-015 / #34 stays OPEN.** 2026-08-25 STATUS over-claimed RAG-02/03 closed.
+> Adversary: RAG-02 PARTIAL (modules exist, served path is `rag_answer` file
+> scan); RAG-03 NOT MET (`RAG_KEYWORDS` before L0/L1/L2; miss serves first
+> `CONTRACTS_DIR` txt). #32 and #33 reopened. GOLD-01 (#13 #18) is founder TTY.
 
 > **2026-08-28 (engine wave 2):** Ledger row per DAG node (`ensure_node_record`);
 > Postgres merge on `GET /api/engine/runs/{id}/cost`; `POST /api/memory/assemble`;
@@ -42,11 +53,11 @@
 > the gate's refusal list. Isolated from draft PR #41 (conflicting).
 > **VQ-01 / dms#39:** tree was clean (R-0006). Certified queries match declared
 > synonyms; BETA → SKU-BETA on L0 lookup; certified SQL runs value-norm.
-> **EPIC-015 / #34:** RAG-02 retrieve and RAG-03 route-then-doc-RAG are closed
-> in this tree (`CortexOS/rag/*`, `RAG_KEYWORDS` → `rag_answer`). Re-slice:
-> RAG-01 remainder is live Qdrant in the demo, not "PARTIAL retrieve". DMS
-> RAG-04/05 stay closed. GitHub issues API is 403 here so boxes are sliced in
-> ARCHITECTURE.md / this file, not closed on the epic.
+> **EPIC-015 / #34 (corrected 2026-09-04):** Do not read the 2026-08-25 close
+> claim. RAG-02 is PARTIAL (`CortexOS/rag/*` exists; served path is still
+> `query_service.rag_answer`). RAG-03 is NOT MET (keyword RAG before L0/L1/L2;
+> first-file fallback). Issues #32 #33 #34 stay open. DMS RAG-04/05 and
+> envelope/scope chip stay DMS-side.
 > **ledger.verify:** append fails closed if the returned id+hash is not on the
 > chain (`list_entries`). No get-entry port. Verify fails closed past the tip
 > and on seq gaps. DMS PR #92 can keep calling whole-chain verify.

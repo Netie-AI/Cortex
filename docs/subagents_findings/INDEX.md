@@ -2,6 +2,12 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-04 | wave1-ticket-closeout | SPACE-01, EVAL-01, C7-01, CI, EPIC-002, EPIC-015, auto-merge, INDEX | Engine tickets that could land without founder TTY are on github/main. RAG-02/03 were false-closed; reopened. | `2026-09-04_wave1-ticket-closeout.md` |
+| 2026-09-04 | epic-015-verify | EPIC-015, RAG-02, RAG-03, rag_answer, RAG_KEYWORDS | STATUS over-claims RAG-02/03 closed. Served RAG is a CONTRACTS_DIR file scan before L0/L1/L2; miss serves the first .txt. | `2026-09-04_epic-015-verify.md` |
+| 2026-09-04 | space-01-space-grant | SPACE-01, space_id, SessionManifestRegistry, SpaceUnbound | Named Space uses only its signed (session, space) binding. No session-wide fallback. Engine does not mint a grant. | `2026-09-04_space-01-space-grant.md` |
+| 2026-09-04 | eval-01-corpus-gate-on-main | EVAL-01, EVAL-02, corpus, seeds-only, DMS_ASK_URL, R-0007 | Seeds-only gate on main: 56/50/0/6. wrong>0 and regression>0 fail CI. No D:\DMS sys.path hack. | `2026-09-04_eval-01-corpus-gate-on-main.md` |
+| 2026-09-04 | c7-design-and-shadow-mode | C7, EPIC-006, route_to_metric, DMS_L2_SHADOW | L1 is 27 re.search / 25 MetricPlan. C7-01 shadows L2 after serve. Do not swap serve. Manifest before EXPLAIN is C7-02. | `2026-09-04_c7-design-and-shadow-mode.md` |
+| 2026-09-04 | ci-hygiene-dmsui-build-gate | ci, main-only, dms-ui, next14, dependabot, auto-merge | Workflows and auto-merge listen only to main. dms-ui-build not added (local Next 14 EISDIR). Dependabot majors not merged. | `2026-09-04_ci-hygiene-dmsui-build-gate.md` |
 | 2026-08-28 | cicd-multipr-gate-audit | cicd, billing, pr-85, dependabot, public-repo | Post-billing: #85/#84/#82/#70 PASS; Dependabot React19/Next16 FAIL. Unblock = billing OR make public. | `2026-08-28_cicd-multipr-gate-audit.md` |
 | 2026-08-28 | cicd-billing-gate-fail | cicd, billing, actions, email, python-spawn | Every Cortex CI email fail is org Actions billing (0 steps). Code vectors PASS. Harden bare python spawn to sys.executable. | `2026-08-28_cicd-billing-gate-fail.md` |
 | 2026-08-27 | control-crew-belt-proxy | control, crew, belt, conveyor, display-only, converse, 405 | Control proxies Crew GET /v1/belt as display-only JSON. Converse stays on Crew :8020. 405s unchanged. Goal open. | `2026-08-27_control-crew-belt-proxy.md` |
