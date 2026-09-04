@@ -80,8 +80,11 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
         ("best sellers", "sales_by_value"),
         ("stock value by category", "stock_value_by_category"),
         ("sku count by category", "sku_count_by_category"),
+        ("how many SKUs per category", "sku_count_by_category"),
+        ("number of products in each category", "sku_count_by_category"),
         ("recent revenue", "revenue_windowed"),
         ("high risk suppliers", "suppliers_by_risk"),
+        ("pending deliveries from high risk vendors", "high_risk_pending"),
         ("shipment cost by destination", "cost_by_destination"),
     ],
 )
@@ -97,6 +100,45 @@ def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str)
     assert r.get("rows"), r.get("answer")
     text = r.get("answer") or ""
     assert text.strip()
+
+
+def test_pending_high_risk_is_not_a_bare_risk_listing():
+    """Nested 'high risk suppliers' must not steal the pending-shipment metric."""
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "pending deliveries from high risk vendors"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "high_risk_pending"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert "supplier_name" in rows[0]
+    assert "shipment_id" in rows[0]
+    assert str(rows[0]["supplier_name"]) in text
+    assert str(rows[0]["shipment_id"]) in text
+
+
+def test_sku_count_per_category_is_grouped_not_scalar():
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "how many SKUs per category"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "sku_count_by_category"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert "category" in rows[0]
+    assert "sku_count" in rows[0]
+    assert str(rows[0]["category"]) in text
+    assert str(rows[0]["sku_count"]) in text.replace(",", "")
 
 
 def test_certified_sales_synonym_hits_l0():

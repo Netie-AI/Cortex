@@ -708,11 +708,68 @@ def _param_is_required(spec: dict[str, Any]) -> bool:
     return bool(spec.get("required") or (spec.get("kind") == "value" and not spec.get("optional")))
 
 
+#: Leftover tokens allowed around a yaml synonym. Content leftover means the
+#: phrase is nested in a different question ("pending … high risk suppliers"
+#: is not the bare risk listing).
+_SYNONYM_FILLER = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "me",
+        "my",
+        "our",
+        "your",
+        "please",
+        "show",
+        "tell",
+        "what",
+        "is",
+        "are",
+        "of",
+        "for",
+        "in",
+        "on",
+        "to",
+        "from",
+        "with",
+        "and",
+        "or",
+        "do",
+        "we",
+        "i",
+        "you",
+        "which",
+        "list",
+        "get",
+        "give",
+        "us",
+        "all",
+        "any",
+        "some",
+        "just",
+        "now",
+        "today",
+        "currently",
+        "current",
+        "about",
+        "at",
+    }
+)
+
+
+def _synonym_leftover_is_filler(q: str, phrase: str) -> bool:
+    rest = q.replace(phrase, " ", 1)
+    tokens = [t for t in re.split(r"\W+", rest) if t]
+    return all(t in _SYNONYM_FILLER for t in tokens)
+
+
 def _plan_from_declared_synonyms(q: str, q_raw: str) -> MetricPlan | None:
     """Longest metrics.yaml synonym that is a contiguous phrase in ``q``.
 
     The regex cascade still wins. Skip one-word / short fragments and metrics
-    that need a required slot the synonym does not carry.
+    that need a required slot the synonym does not carry. A nested phrase
+    with leftover content words is a different question, not a match.
     """
     from packs.dms.semantic.loader import load_all
 
@@ -725,6 +782,8 @@ def _plan_from_declared_synonyms(q: str, q_raw: str) -> MetricPlan | None:
             if " " not in phrase or len(phrase) < 16:
                 continue
             if phrase not in q:
+                continue
+            if not _synonym_leftover_is_filler(q, phrase):
                 continue
             n = len(phrase)
             if best is None or n > best[0]:
@@ -762,6 +821,14 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # scalars first — "how many X" must not fall through to a listing
     if re.search(r"\b(how many|number of|count of|count)\b", q) and "cold storage" in q:
         return _metric_plan("cold_storage_count", {}, "count of cold-storage locations")
+    # grouped SKU count before the warehouse-wide scalar
+    if (
+        re.search(r"\b(how many|number of|count of|count)\b", q)
+        and re.search(r"\b(sku|skus|product|products|items?)\b", q)
+        and re.search(r"\b(per|by|each)\b", q)
+        and "category" in q
+    ):
+        return _metric_plan("sku_count_by_category", {}, "SKU count grouped by category")
     # metrics.yaml sku_count synonyms, not only "how many skus"
     if (
         re.search(r"\bskus?\b", q)
@@ -818,6 +885,17 @@ def route_to_metric(question: str) -> MetricPlan | None:
     ):
         return _metric_plan("revenue_total", {}, "total outbound revenue")
 
+    # pending/in-transit from high-risk suppliers — before a bare risk listing
+    if (
+        re.search(r"\b(high[- ]?risk|risky)\b", q)
+        and re.search(r"\b(pending|in transit|in_transit|deliver(?:y|ies)?)\b", q)
+        and re.search(r"\b(suppliers?|shipments?)\b", q)
+    ):
+        return _metric_plan(
+            "high_risk_pending",
+            {"threshold": _threshold(q_raw)},
+            "high-risk suppliers with pending/in-transit shipments",
+        )
     # supplier risk threshold
     if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
         return _metric_plan("suppliers_by_risk",
