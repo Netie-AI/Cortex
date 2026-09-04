@@ -326,6 +326,8 @@ def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):
     from bench.heldout import replay_shadow
 
     monkeypatch.setenv("DMS_L2_ENABLED", "0")
+    monkeypatch.delenv("DMS_L2_SHADOW", raising=False)
+    monkeypatch.delenv("DMS_L2_SHADOW_PATH", raising=False)
     path = tmp_path / "shadow.jsonl"
     seen: list[str] = []
 
@@ -351,3 +353,8 @@ def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):
     assert os.environ.get("DMS_L2_SHADOW") is None
     assert out["n_lines"] == 1
     assert out["replayed"] == 1
+
+    skipped = replay_shadow(
+        ["first", "second"], shadow_path=path, ask=ask, offset=1, limit=1
+    )
+    assert skipped["replayed"] == 1

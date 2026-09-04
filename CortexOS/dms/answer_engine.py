@@ -727,7 +727,12 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # scalars first — "how many X" must not fall through to a listing
     if re.search(r"\b(how many|number of|count of|count)\b", q) and "cold storage" in q:
         return _metric_plan("cold_storage_count", {}, "count of cold-storage locations")
-    if re.search(r"\bhow many\b", q) and re.search(r"\bskus?\b", q) and not re.search(r"\b(category|per|by)\b", q):
+    # metrics.yaml sku_count synonyms, not only "how many skus"
+    if (
+        re.search(r"\bskus?\b", q)
+        and re.search(r"\b(how many|number of|count of|count)\b", q)
+        and not re.search(r"\b(category|per|by)\b", q)
+    ):
         return _metric_plan("sku_count", {}, "distinct SKU count")
     # "how many delayed" / Malay "berapa ... delayed" must not return the listing.
     if (
