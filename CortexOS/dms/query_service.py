@@ -868,21 +868,37 @@ def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
         con.close()
 
 
+# Function words in the first tokens of "what does the SOP-DOC-ZZ9 …" used to
+# substring-match any English .txt. Empty match must not invent a hit.
+_RAG_STOP = frozenset({
+    "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with",
+    "from", "per", "under", "about", "what", "which", "how", "does", "do",
+    "did", "is", "are", "was", "were", "our", "my", "your", "this", "that",
+    "say", "says", "state", "states", "according", "explain",
+})
+
+
+def _rag_content_tokens(question: str) -> list[str]:
+    return [
+        tok
+        for tok in re.findall(r"[a-z0-9][a-z0-9_-]*", question.lower())
+        if tok not in _RAG_STOP and len(tok) >= 4
+    ]
+
+
 def rag_answer(question: str) -> tuple[str, list[str]]:
+    """Stub file scan. Empty match returns no sources so the caller abstains."""
+    tokens = _rag_content_tokens(question)
     sources: list[str] = []
     snippets: list[str] = []
-    if CONTRACTS_DIR.is_dir():
+    if tokens and CONTRACTS_DIR.is_dir():
         for path in sorted(CONTRACTS_DIR.glob("*.txt")):
             text = path.read_text(encoding="utf-8")
-            sources.append(path.name)
-            if any(w in text.lower() for w in question.lower().split()[:3]):
+            lowered = text.lower()
+            if any(tok in lowered for tok in tokens):
                 snippets.append(text[:400])
-    if not snippets and CONTRACTS_DIR.is_dir():
-        for path in sorted(CONTRACTS_DIR.glob("*.txt")):
-            snippets.append(path.read_text(encoding="utf-8")[:300])
-            sources.append(path.name)
-            break
-    answer = snippets[0][:500] if snippets else "No supplier contract documents indexed."
+                sources.append(path.name)
+    answer = snippets[0][:500] if snippets else ""
     return answer, sources
 
 
