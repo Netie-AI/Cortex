@@ -58,6 +58,7 @@ _RULES: tuple[tuple[str, str], ...] = (
     # ── suppliers ──────────────────────────────────────────────────────────
     (r"\bvendors?\b", "suppliers"),
     (r"\bprocurement\s+spend\b", "total spend"),
+    (r"\b(?:still\s+)?owe us\b", "pending"),
 
     # ── inventory ──────────────────────────────────────────────────────────
     (r"\b(?:running low|needs? replenishment|need(?:s|ing)? reordering|"
