@@ -151,7 +151,14 @@ async def test_abandon_unblocks_an_ask_on_a_dead_target() -> None:
     switch = a2a.Switchboard()
     future = switch.open_ask("mgr", "ghost", "q1")
     freed = switch.abandon("ghost", "Ghost stopped running")
-    assert freed == ["mgr"]
+    assert freed == [
+        {
+            "asker_id": "mgr",
+            "target_id": "ghost",
+            "question_id": "q1",
+            "reason": "Ghost stopped running",
+        }
+    ]
     kind, text = await asyncio.wait_for(future, 1)
     assert kind == a2a.NO_ANSWER
     assert "Ghost stopped running" in text
@@ -234,6 +241,47 @@ async def test_ask_agent_reports_a_failed_target_instead_of_hanging(rig2) -> Non
     assert any("provider exploded" in m["content"] for m in agent_msgs)
     answers = [t for t in _tool_results(rig2, "Manager") if "answered:" in t]
     assert answers and "provider exploded" in answers[-1]
+
+
+async def test_dead_target_fail_loud_on_switchboard_hud(rig2) -> None:
+    """Kill mid-ask must stamp a dead closer, not burn the timeout (R-0011)."""
+    space = rig2.store.create_space("GhostKill")
+    rig2.llm.script(
+        "Manager",
+        LLMResult(tool_calls=[_tc("spawn_agent", name="Ghost", brief="go look")]),
+        LLMResult(tool_calls=[_tc("ask_agent", name="Ghost", question="well?", timeout_seconds=30)]),
+        LLMResult(text="Ghost died mid-ask; I am not inventing its answer."),
+    )
+    rig2.llm.script("Ghost", 8.0, LLMResult(text="too late"))
+
+    await rig2.runtime.on_user_message(space["id"], "ask ghost")
+    deadline = asyncio.get_running_loop().time() + 5
+    while rig2.runtime.switch.pending_count() == 0:
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("ask never armed")
+        await asyncio.sleep(0.02)
+
+    ghost = rig2.store.get_agent_by_name(space["id"], "Ghost")
+    assert ghost is not None
+    killed = rig2.runtime.kill_agent(ghost["id"], reason="operator killed")
+    assert killed is not None and killed.get("status") == "stopped"
+    await wait_run_done(rig2.runtime, space["id"])
+
+    closers = [
+        m
+        for m in rig2.store.list_messages(space["id"])
+        if (m.get("meta") or {}).get("a2a", {}).get("status") == a2a.DEAD
+    ]
+    assert closers, "dead-target ask must fail-loud on the HUD bus"
+    assert "stopped running" in closers[0]["content"]
+    assert closers[0]["meta"]["a2a"]["kind"] == a2a.NO_ANSWER
+    assert closers[0]["meta"]["a2a"]["reply_to"]
+    hud = a2a.hud(rig2.store.list_messages(space["id"]))
+    dead = [t for t in hud["threads"] if t["status"] == a2a.DEAD]
+    assert dead, "operator HUD must show the dead ask thread"
+    assert any(h.get("status") == a2a.DEAD for h in dead[0]["hops"])
+    results = _tool_results(rig2, "Manager")
+    assert any("no answer" in t for t in results)
 
 
 async def test_a_restarted_teammate_still_knows_its_own_history(rig2) -> None:
@@ -424,3 +472,84 @@ async def test_spawn_then_message_does_not_start_the_teammate_twice(rig2) -> Non
         if (m["meta"] or {}).get("a2a", {}).get("kind") == a2a.REPORT
     ]
     assert len(reports) == 1, f"Scout ran more than once: {[m['content'] for m in reports]}"
+
+
+def test_hud_threads_correlate_ask_reply_and_pending() -> None:
+    """The operator HUD groups on reply_to; pending overlay is live wait."""
+    ask = {
+        "id": "q1",
+        "role": "agent",
+        "seq": 1,
+        "content": "what did you find?",
+        "meta": {"a2a": {"kind": a2a.ASK, "from": "Manager", "to": "Scout", "reply_to": None}},
+    }
+    reply = {
+        "id": "r1",
+        "role": "agent",
+        "seq": 2,
+        "content": "SCOUT-FINDING",
+        "meta": {"a2a": {"kind": a2a.REPLY, "from": "Scout", "to": "Manager", "reply_to": "q1"}},
+    }
+    grouped = a2a.hud_threads([ask, reply])
+    assert len(grouped) == 1
+    assert grouped[0]["id"] == "q1"
+    assert grouped[0]["status"] == a2a.ANSWERED
+    assert grouped[0]["hops"][0]["text"] == "SCOUT-FINDING"
+
+    waiting = a2a.hud(
+        [ask],
+        [{"asker_id": "m", "target_id": "s", "question_id": "q1", "from": "Manager", "to": "Scout"}],
+    )
+    assert waiting["bus"] == "switchboard"
+    assert waiting["pending"] == 1
+    assert waiting["threads"][0]["status"] == a2a.WAITING
+
+
+def test_hud_includes_cmd_operator_stamps_on_the_same_bus() -> None:
+    """CMD #139 stamps meta.a2a on POST /spaces/messages; do not fork a second inbox."""
+    user = {
+        "id": "u1",
+        "role": "user",
+        "seq": 1,
+        "content": "@Scout ping",
+        "meta": {"a2a": {"kind": a2a.USER, "from": "operator", "to": "Scout", "reply_to": None}},
+    }
+    tell = {
+        "id": "t1",
+        "role": "agent",
+        "seq": 2,
+        "content": "pong",
+        "meta": {"a2a": {"kind": a2a.TELL, "from": "Scout", "to": "operator", "reply_to": None}},
+    }
+    threads = a2a.hud_threads([user, tell])
+    assert [t["kind"] for t in threads] == [a2a.USER, a2a.TELL]
+    assert threads[0]["from"] == "operator"
+    assert threads[0]["to"] == "Scout"
+
+
+def test_hud_marks_dead_closer_on_the_ask_thread() -> None:
+    ask = {
+        "id": "q1",
+        "role": "agent",
+        "seq": 1,
+        "content": "well?",
+        "meta": {"a2a": {"kind": a2a.ASK, "from": "Manager", "to": "Ghost", "reply_to": None}},
+    }
+    closer = {
+        "id": "c1",
+        "role": "system",
+        "seq": 2,
+        "content": "Manager was waiting on Ghost, which stopped running.",
+        "meta": {
+            "a2a": {
+                "kind": a2a.NO_ANSWER,
+                "from": "Ghost",
+                "to": "Manager",
+                "reply_to": "q1",
+                "status": a2a.DEAD,
+            }
+        },
+    }
+    threads = a2a.hud_threads([ask, closer])
+    assert threads[0]["status"] == a2a.DEAD
+    assert threads[0]["hops"][0]["status"] == a2a.DEAD

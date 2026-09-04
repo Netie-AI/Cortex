@@ -86,6 +86,26 @@ class CrewApp:
             return False
         return bool(switch.any_waiting())
 
+    def threads(self, space_id: str) -> dict[str, Any] | None:
+        """HUD view over the Switchboard. Same bus as ``/spaces/messages``."""
+        from CortexOS.crew import a2a
+
+        if self.store.get_space(space_id) is None:
+            return None
+        names = {a["id"]: a["name"] for a in self.store.list_agents(space_id)}
+        pending: list[dict[str, Any]] = []
+        switch = getattr(self.runtime, "switch", None)
+        if switch is not None:
+            for row in switch.pending_asks():
+                pending.append(
+                    {
+                        **row,
+                        "from": names.get(row["asker_id"], row["asker_id"]),
+                        "to": names.get(row["target_id"], row["target_id"]),
+                    }
+                )
+        return a2a.hud(self.store.list_messages(space_id), pending)
+
     def belt(self) -> dict[str, Any]:
         return conveyor(
             self.store,
@@ -288,6 +308,18 @@ def build_router(crew: CrewApp) -> APIRouter:
     @router.get("/spaces/{space_id}/messages")
     async def messages(space_id: str, after: int = 0) -> list[dict[str, Any]]:
         return crew.store.list_messages(space_id, after=after)
+
+    @router.get("/spaces/{space_id}/threads")
+    async def threads(space_id: str) -> dict[str, Any]:
+        """Correlated ask/reply HUD. Reads the message bus + live pending asks.
+
+        Not a second inbox. CMD ``@`` stamps on ``POST /spaces/messages``
+        already carry ``meta.a2a``; this view groups those rows.
+        """
+        body = crew.threads(space_id)
+        if body is None:
+            raise HTTPException(404, "unknown space")
+        return body
 
     @router.post("/spaces/{space_id}/messages")
     async def post_message(space_id: str, body: MessageIn) -> dict[str, Any]:

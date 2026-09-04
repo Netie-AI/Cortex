@@ -131,6 +131,12 @@ def test_ui_index_is_served(client) -> None:
     assert "Voice" in page.text
     assert "matchMedia" in page.text
     assert "/v1/belt" in page.text
+    assert "/crew/spaces/" in page.text
+    assert "/threads" in page.text
+    assert "switchboard" in page.text
+    assert "thread--dead" in page.text
+    assert "thread--waiting" in page.text
+    assert 'id="a2aPending"' in page.text
     stolen = client.http.get("/stolen.css")
     assert stolen.status_code == 410
     css = client.http.get("/crew.css")
@@ -144,6 +150,9 @@ def test_ui_index_is_served(client) -> None:
     assert b".orb" in css.content
     assert b"scope-chip" in css.content
     assert b"composer__suggest" in css.content
+    assert b".thread" in css.content
+    assert b"thread--dead" in css.content
+    assert b"thread--waiting" in css.content
     assert b"--rail-ground" not in css.content
     assert b"--rk-page" not in css.content
     desk = client.http.get("/crew/desk").json()
@@ -375,3 +384,55 @@ def test_operator_life_routes_spawn_kill_clear(client) -> None:
     )
     assert refuse.status_code == 400
     assert "DENIED" in refuse.json()["detail"]
+
+
+def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:
+    """GET /spaces/{id}/threads is a view over messages + live asks, not a second bus."""
+    from CortexOS.crew import a2a
+
+    space = client.http.post("/crew/spaces", json={"title": "Wire"}).json()
+    missing = client.http.get("/crew/spaces/no-such-space/threads")
+    assert missing.status_code == 404
+    crew = client.crew
+    mgr = crew.runtime.ensure_manager(space["id"])
+    scout = crew.store.upsert_agent(space["id"], "Scout", role_prompt="scout the brief.")
+    ask = crew.store.add_message(
+        space["id"],
+        "agent",
+        "what did you find?",
+        agent_id=mgr["id"],
+        to_agent_id=scout["id"],
+        meta={"a2a": {"kind": a2a.ASK, "from": "Manager", "to": "Scout", "reply_to": None}},
+    )
+    crew.runtime.switch.open_ask(mgr["id"], scout["id"], ask["id"])
+    body = client.http.get(f"/crew/spaces/{space['id']}/threads").json()
+    assert body["bus"] == "switchboard"
+    assert body["pending"] == 1
+    assert body["threads"][0]["id"] == ask["id"]
+    assert body["threads"][0]["status"] == a2a.WAITING
+    assert body["asks"][0]["from"] == "Manager"
+    assert body["asks"][0]["to"] == "Scout"
+
+    crew.store.add_message(
+        space["id"],
+        "system",
+        "Manager was waiting on Scout, which stopped running.",
+        agent_id=scout["id"],
+        to_agent_id=mgr["id"],
+        meta={
+            "a2a": {
+                "kind": a2a.NO_ANSWER,
+                "from": "Scout",
+                "to": "Manager",
+                "reply_to": ask["id"],
+                "status": a2a.DEAD,
+            }
+        },
+    )
+    crew.runtime.switch.abandon(scout["id"], "Scout stopped running")
+    dead = client.http.get(f"/crew/spaces/{space['id']}/threads").json()
+    assert dead["pending"] == 0
+    assert dead["threads"][0]["status"] == a2a.DEAD
+    tape = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
+    assert tape[0]["meta"]["a2a"]["kind"] == a2a.ASK
+    assert tape[-1]["meta"]["a2a"]["status"] == a2a.DEAD

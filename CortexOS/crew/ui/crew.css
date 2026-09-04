@@ -552,6 +552,24 @@ button { cursor: pointer; }
   max-height: 7rem;
   overflow: auto;
 }
+.thread {
+  font: 0.72rem/1.35 var(--mono);
+  color: var(--claim);
+  padding: 0.28rem 0 0.28rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid var(--line);
+  margin-bottom: 0.2rem;
+}
+.thread--waiting { border-left-color: var(--live); }
+.thread--dead, .thread--timeout { border-left-color: var(--dead); color: var(--dead); }
+.thread .hop {
+  margin: 0.15rem 0 0 0.55rem;
+  padding-left: 0.35rem;
+  border-left: 1px solid var(--line);
+  color: var(--mute);
+}
+.msg--reply { margin-left: 0.55rem; }
+.msg--dead .bubble { border-color: var(--dead); color: var(--dead); }
 .graph { margin-bottom: 0.3rem; }
 .gnode { font-size: 7px; fill: var(--mute); }
 
