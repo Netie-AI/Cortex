@@ -1,5 +1,13 @@
 # STATUS.md
-**Last updated:** 2026-09-04 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY
+**Last updated:** 2026-09-04 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-06 draft #128 (gated chooser); EPIC-015 RAG served-path; GOLD-01 founder TTY
+
+> **2026-09-04 (C7-06):** `choose_governed_metric` is the L1 serve chooser.
+> Default still calls `route_to_metric`. Cascade is skipped only when
+> `DMS_C7_RETIRE_CASCADE=1` and a cutover report shows L2-as-L1-replacement
+> beating L1 on G-err with G-abs holding (`cascade_skipped` true). A C7-05
+> L2-on-miss `score_engine` report cannot retire. `cutover` stays false. Did
+> not delete the 25 `_metric_plan` branches. C7-05 landed (#126 #143).
+> Stay draft until that replacement report exists. Cortex#105.
 
 > **2026-09-04 (wave1 land + honesty):** Auto-merge is live on public `main`
 > (`ALLOWED_BASES={main}`). Landed: Crew belt/wakes PR #98; C7-01 shadow PR #106

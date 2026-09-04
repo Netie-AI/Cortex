@@ -5,10 +5,13 @@ abstains rather than guess. This is the "adaptive, fail-then-escalate" core:
 
   L0 CERTIFIED   exact (normalized) match against the verified-query repo →
                  deterministic replay. Highest trust, zero LLM.
-  L1 METRIC      rule-based intent+slot routing → compile a governed metric
-                 template (Q1) → guardrail-verified SQL. Deterministic.
-  L2 FREEFORM    (flag DMS_L2_ENABLED, default OFF) sampled LLM SQL →
-                 parse+allowlist+execute+vote+rails. Not wired until a model is.
+  L1 METRIC      choose_governed_metric → compile a governed metric template
+                 (Q1) → guardrail-verified SQL. Default chooser is the
+                 keyword cascade. C7-06 skips it only when L2-as-L1
+                 replacement beats L1 on G-err and G-abs still holds.
+  L2 FREEFORM    (flag DMS_L2_ENABLED, default OFF) schema retrieval →
+                 generate → sqlglot → enforce_manifest → EXPLAIN → retry →
+                 plausibility. Serve default stays off until C7-05 gates.
   L3 ABSTAIN     no trustworthy layer fired → clarify + suggest nearest
                  answerable questions. Never the old confident-wrong fallback.
 
@@ -24,6 +27,7 @@ from typing import Any
 
 import sqlglot
 
+from CortexOS.dms.c7_cutover import cascade_retired
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
@@ -1045,6 +1049,18 @@ def route_to_metric(question: str) -> MetricPlan | None:
     return _plan_from_declared_synonyms(q, q_raw)
 
 
+def choose_governed_metric(question: str) -> MetricPlan | None:
+    """Serve chooser for L1. Not ``route_to_metric`` once C7-06 gates pass.
+
+    Slot extractors (``_days``, ``_explicit_limit``, ``_sales_rank_slots``)
+    stay on this module for L0 / query-skill. The cascade classifier remains
+    callable for tests; ``answer()`` must not use it as chooser when retired.
+    """
+    if cascade_retired():
+        return None
+    return route_to_metric(question)
+
+
 # ── truncation-honest total ──────────────────────────────────────────────────
 def _true_count(
     sql: str,
@@ -1771,7 +1787,7 @@ def answer(
                     f"the question names '{unknown}', which the semantic layer does "
                     f"not define; it can answer about {named}"
                 )
-            plan = route_to_metric(question)
+            plan = choose_governed_metric(question)
             if plan is not None:
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
