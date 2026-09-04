@@ -85,6 +85,7 @@ def conveyor(
     queue: JobQueue,
     *,
     mailbox_nonempty: bool = False,
+    assignments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Display JSON for ``GET /v1/belt`` and ``GET /crew/belt``.
 
@@ -119,5 +120,10 @@ def conveyor(
         "confirms": [{"id": c["id"]} for c in confirms],
         "spaces": [{"id": s["id"]} for s in spaces],
         "agents": [{"id": a["id"], "name": a["name"]} for a in agents],
+        "assignments": list(assignments or []),
+        "assign_owner": (
+            "Crew /assign (local bind). CLAIMS seating is Ticket Runner. "
+            "Control does not assign."
+        ),
         "converse": True,
     }

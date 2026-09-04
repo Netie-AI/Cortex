@@ -107,11 +107,14 @@ class CrewApp:
         return a2a.hud(self.store.list_messages(space_id), pending)
 
     def belt(self) -> dict[str, Any]:
+        from CortexOS.crew.assign import public as assignment_public
+
         return conveyor(
             self.store,
             self.wakes,
             self.queue,
             mailbox_nonempty=self.mailbox_nonempty(),
+            assignments=assignment_public(self.settings.data_dir),
         )
 
     async def startup(self) -> None:

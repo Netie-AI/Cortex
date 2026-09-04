@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-04 | crew-assign-fetch | crew, assign, fetch, belt, seated, f-0030, issue-160 | Crew /fetch lists open GH issues; /assign binds unseated to a teammate goal. Control display-only. No CLAIMS/GitHub assignee write. | `2026-09-04_crew-assign-fetch.md` |
 | 2026-09-04 | crew-facts-md-hud | crew, facts.md, memory, epic-116, hud, clear-chat | EPIC-CREW-01 leftover was facts.md not on main. Landed durable markdown memory on cursor/crew-facts-md-116. | `2026-09-04_crew-facts-md-hud.md` |
 | 2026-09-04 | c7-l1-yaml-synonyms | metrics.yaml, synonyms, sellers, cost_by_destination, G-lat, leftover-filler | Longest declared synonym is L1 fallback after the regex cascade. Nested phrases with leftover content are skipped. Freight/shipping cost by destination is cost, not count. | `2026-09-04_c7-l1-yaml-synonyms.md` |
 | 2026-09-04 | c7-05-gsh-and-leave-gate | C7-05, G-sh, DMS_L2_SHADOW, leave, GateCheckBody, ANS-01 | OV gate action is `leave` not `llm`. Shadow report compares L1-only vs L2-only. `and also show` stays L1. | `2026-09-04_c7-05-gsh-and-leave-gate.md` |

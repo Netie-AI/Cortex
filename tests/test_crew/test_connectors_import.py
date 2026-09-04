@@ -184,6 +184,40 @@ def test_github_close_issue_refuses_seated_claim(tmp_path, monkeypatch) -> None:
     assert called["n"] == 0
 
 
+def test_github_list_open_issues_marks_seated(tmp_path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+    monkeypatch.setenv("CREW_GH_REPOS", "Netie-AI/Cortex")
+    monkeypatch.setenv("CREW_GH_WAIT_S", "1.5")
+
+    def runner(argv, timeout=1.5):  # noqa: ANN001, ARG001
+        assert timeout <= 8.0
+        assert argv[:3] == ["gh", "issue", "list"]
+        payload = (
+            '[{"number":128,"title":"seated","url":'
+            '"https://github.com/Netie-AI/Cortex/issues/128"},'
+            '{"number":160,"title":"assign","url":'
+            '"https://github.com/Netie-AI/Cortex/issues/160"}]'
+        )
+        return SimpleNamespace(returncode=0, stdout=payload, stderr="")
+
+    body = github_mod.list_open_issues(runner=runner)
+    assert body["ok"] is True
+    by_spec = {row["spec"]: row for row in body["issues"]}
+    assert by_spec["Netie-AI/Cortex#128"]["seated"] is True
+    assert by_spec["Netie-AI/Cortex#160"]["ready"] is True
+    assert "does not assign" in body["law"].lower() or "Control does not assign" in body["law"]
+
+
 def test_inbox_without_creds_tells_operator_to_drop(monkeypatch) -> None:
     from CortexOS.crew import inbox as inbox_mod
 

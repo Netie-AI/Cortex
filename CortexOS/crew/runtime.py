@@ -207,7 +207,7 @@ class CrewRuntime:
         self.bus.emit(space_id, "message", {"message": msg})
 
         if parsed.command and parsed.command.get("kind") == "desk":
-            self._run_slash_desk(space_id, manager, parsed.command, parsed.rest)
+            await self._run_slash_desk(space_id, manager, parsed.command, parsed.rest)
         elif parsed.command and parsed.command.get("kind") == "memory":
             self._run_slash_memory(space_id, manager, parsed.command, parsed.rest)
         elif parsed.command and parsed.command.get("kind") == "life":
@@ -236,7 +236,17 @@ class CrewRuntime:
             and parsed.command.get("action") == "close_issue"
             and not parsed.mentions
         )
-        if desk_only or memory_only or life_only or close_only:
+        fetch_only = bool(
+            parsed.command
+            and parsed.command.get("action") == "fetch_issues"
+            and not parsed.mentions
+        )
+        assign_only = bool(
+            parsed.command
+            and parsed.command.get("action") == "assign_issue"
+            and not parsed.mentions
+        )
+        if desk_only or memory_only or life_only or close_only or fetch_only or assign_only:
             return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
 
         turn_provider = (provider or "").strip() or None
@@ -327,7 +337,7 @@ class CrewRuntime:
         if ctx is not None and target is not None and target["id"] != manager["id"]:
             self._wake_if_idle(ctx, target)
 
-    def _run_slash_desk(
+    async def _run_slash_desk(
         self,
         space_id: str,
         manager: dict[str, Any],
@@ -403,6 +413,24 @@ class CrewRuntime:
                     f"HITL pending {confirm['id']}: Approve to close {canon}. "
                     "Crew does not merge PRs."
                 )
+        elif action == "fetch_issues":
+            from CortexOS.crew import github as github_mod
+
+            fetched = github_mod.list_open_issues()
+            lines = [
+                f"{len(fetched.get('issues') or [])} open issues. {fetched.get('law')}"
+            ]
+            if fetched.get("detail"):
+                lines.append(str(fetched["detail"]))
+            for item in (fetched.get("issues") or [])[:30]:
+                mark = "SEATED" if item.get("seated") else "ready"
+                lines.append(
+                    f"- {item.get('spec')} {mark} {item.get('title')}"
+                )
+            text = "\n".join(lines)
+            args = {"repos": fetched.get("repos") or []}
+        elif action == "assign_issue":
+            text, args = await self._assign_issue_slash(space_id, rest)
         else:
             text = f"Unknown desk action {action}"
         msg = self.store.add_message(
@@ -419,6 +447,78 @@ class CrewRuntime:
             },
         )
         self.bus.emit(space_id, "message", {"message": msg})
+
+    async def _assign_issue_slash(
+        self, space_id: str, rest: str
+    ) -> tuple[str, dict[str, Any]]:
+        from CortexOS.crew import assign as assign_mod
+        from CortexOS.crew import github as github_mod
+
+        bits = [p.strip() for p in rest.split("|")]
+        spec = bits[0] if bits else ""
+        agent_name = bits[1] if len(bits) > 1 else ""
+        args: dict[str, Any] = {"spec": spec, "name": agent_name}
+        parsed = github_mod.parse_issue_spec(spec)
+        if parsed is None or not agent_name:
+            return "DENIED: /assign owner/repo#n | Name", args
+        seated = github_mod.seated_claim(spec)
+        if seated is not None:
+            return (
+                f"DENIED: {seated.get('ticket')} is SEATED "
+                f"({seated.get('owner_pr')}). Ticket Runner owns the seat. "
+                "Crew does not steal it.",
+                args,
+            )
+        if agent_name.lower() == "manager":
+            return "DENIED: assign a teammate, not Manager", args
+        canon = github_mod.canonical_spec(spec)
+        title = github_mod.issue_title(canon)
+        goal = (
+            f"{canon}: {title}. Execute this issue. Close with /done after verify. "
+            "Do not steal SEATED seats. Do not merge PRs."
+        )
+        row = self.store.get_agent_by_name(space_id, agent_name)
+        if row is None:
+            spawned = await self.operator_spawn(
+                space_id,
+                {
+                    "name": agent_name,
+                    "mode": life.MODE_GOAL,
+                    "goal": goal,
+                    "brief": canon,
+                },
+            )
+            if spawned.get("error"):
+                return str(spawned["error"]), args
+            row = spawned.get("agent")
+        elif row.get("name") == "Manager":
+            return "DENIED: assign a teammate, not Manager", args
+        elif not life.can_accept(row):
+            return f"DENIED: {life.dead_reason(row)}", args
+        else:
+            updated = self.set_agent_mode(row["id"], life.MODE_GOAL, goal_text=goal)
+            row = updated or row
+        if not isinstance(row, dict) or not row.get("id"):
+            return "DENIED: spawn failed", args
+        bound = assign_mod.bind(
+            self.settings.data_dir,
+            space_id=space_id,
+            spec=canon,
+            agent_id=str(row["id"]),
+            agent_name=str(row.get("name") or agent_name),
+            title=title or canon,
+        )
+        args = {
+            "spec": canon,
+            "name": row.get("name"),
+            "agent_id": row.get("id"),
+        }
+        if not bound.get("ok"):
+            return str(bound.get("detail") or "DENIED: assign failed"), args
+        return (
+            f"Assigned {canon} to {row.get('name')} mode=goal. {bound.get('law')}",
+            args,
+        )
 
     def _run_slash_memory(
         self,
@@ -666,6 +766,9 @@ class CrewRuntime:
         text = result.get("detail") or ("closed " + spec if result.get("ok") else "close failed")
         if result.get("ok"):
             text = f"Closed {result.get('spec')}. {result.get('law')}"
+            from CortexOS.crew.assign import release as release_bind
+
+            release_bind(self.settings.data_dir, spec)
         else:
             text = f"DENIED: {text}"
         msg = self.store.add_message(

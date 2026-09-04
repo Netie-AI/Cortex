@@ -254,6 +254,8 @@ def test_belt_and_wakes_are_get_only_and_skip_cortex_ping(client) -> None:
     assert belt["wakes"] == []
     assert belt["queue"] == {"pending": 0, "leased": 0, "done": 0, "dead": 0}
     assert "tickets" in belt and "items" in belt["tickets"]
+    assert belt["assignments"] == []
+    assert "Control does not assign" in belt["assign_owner"]
     assert client.http.post("/crew/wakes", json={"kind": "timer"}).status_code == 405
     assert client.http.post("/v1/belt", json={"wake": "x"}).status_code == 405
     assert client.http.post("/crew/belt", json={"ticket": "x"}).status_code == 405

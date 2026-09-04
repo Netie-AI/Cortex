@@ -63,6 +63,22 @@ _DESK: tuple[dict[str, Any], ...] = (
         "title": "Close issue (HITL)",
         "hint": "/done owner/repo#n | comment. Refuses SEATED claims. Never merges.",
     },
+    {
+        "slash": "fetch",
+        "aliases": ("issues",),
+        "kind": "desk",
+        "action": "fetch_issues",
+        "title": "Fetch open issues",
+        "hint": "Open GitHub issues for CLAIMS repos. Marks SEATED. Control does not assign.",
+    },
+    {
+        "slash": "assign",
+        "aliases": ("give",),
+        "kind": "desk",
+        "action": "assign_issue",
+        "title": "Assign teammate (local)",
+        "hint": "/assign owner/repo#n | Name. Local goal bind. Refuses SEATED. No GitHub assignee.",
+    },
 )
 
 _LIFE: tuple[dict[str, Any], ...] = (
