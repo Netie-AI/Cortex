@@ -170,3 +170,21 @@ certified:
     verified_by: seed
     verified_at: "2026-07-20"
     tags: [suppliers, time]
+
+  - id: cq_top3_category_sales
+    question: "show top 3 category sales"
+    synonyms:
+      - "show top 3 categoty sales"
+      - "top 3 category sales"
+    sql: >
+      SELECT i.category,
+             ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
+      FROM transactions t
+      JOIN inventory i ON t.sku = i.sku
+      WHERE t.txn_type = 'OUT'
+      GROUP BY i.category
+      ORDER BY sales_value_myr DESC, i.category ASC
+      LIMIT 3
+    verified_by: seed
+    verified_at: "2026-09-04"
+    tags: [sales, rank]

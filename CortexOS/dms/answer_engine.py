@@ -1491,27 +1491,25 @@ def answer(
         refused = _shape_refusal(question)
         if refused:
             return _abs(refused)
-        unknown = undefined_subject(question)
-        if unknown:
-            named = ", ".join(_answerable_entities())
-            return _abs(
-                f"the question names '{unknown}', which the semantic layer does "
-                f"not define; it can answer about {named}"
-            )
         cq = match_certified(question)
         if cq is not None:
             sql, layer, badge = cq.sql, "certified", "certified"
             assumptions = f"certified query {cq.id}"
             metric_id = cq.id
             planned_tables = tuple(cq.tables)
-            # VQ-01 — certified SQL is a trusted asset; literals still must
-            # match the column encoding (BETA → SKU-BETA). Unresolved → abstain.
             from packs.dms.semantic.loader import normalize_certified_sql
 
             sql, violations = normalize_certified_sql(cq)
             if violations:
                 return _abs(f"certified query {cq.id} unresolved literal {violations}")
-        else:
+        if sql is None:
+            unknown = undefined_subject(question)
+            if unknown:
+                named = ", ".join(_answerable_entities())
+                return _abs(
+                    f"the question names '{unknown}', which the semantic layer does "
+                    f"not define; it can answer about {named}"
+                )
             plan = route_to_metric(question)
             if plan is not None:
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
