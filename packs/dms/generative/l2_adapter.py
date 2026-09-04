@@ -35,3 +35,11 @@ class DmsL2Generation:
         from packs.dms.generative import promotion
 
         return promotion.record_validated(question, sql)
+
+    def leftover_literals(self, sql: str) -> list[str]:
+        from packs.dms.generative.literal_normalize import normalize_sql_literals
+
+        result = normalize_sql_literals(sql)
+        if not result.ok:
+            return list(result.violations)
+        return [f"{col}:{old}->{new}" for col, old, new in result.replacements]

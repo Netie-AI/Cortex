@@ -203,7 +203,9 @@ def attempt_l2(
             violations=list(gate.violations),
         )
 
-    sql = gate.safe_sql
+    # Serve pre-enforce SQL so execute_sql / enforce_manifest runs once.
+    # Post-enforce SQL re-submitted as a candidate collides local bind + grant.
+    sql = gate.source_sql or gate.safe_sql
     if promote:
         try:
             l2.record_validated(question, sql)
