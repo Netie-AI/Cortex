@@ -18,7 +18,6 @@ from CortexOS.execution.manifest import (
     ManifestMalformed,
     ManifestVerifier,
     VerifiedManifest,
-    enforce_manifest,
 )
 from CortexOS.execution.pool import PoolSaturated, get_read_pool
 from CortexOS.execution.session_manifests import get_session_registry
@@ -189,9 +188,14 @@ def execute_sql(
     """
     import os
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, explain_dry_run
+    from CortexOS.dms.sql_validate_gate import (
+        SqlGateAbstain,
+        explain_dry_run,
+        sql_for_explain,
+    )
 
-    safe_sql = enforce_manifest(sql, verified)
+    # C7-02: EXPLAIN must see only this rewritten SQL, never the pre-enforce text.
+    safe_sql = sql_for_explain(sql, verified=verified)
     use_explain = (
         explain_gate
         if explain_gate is not None

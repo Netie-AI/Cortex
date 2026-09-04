@@ -197,6 +197,38 @@ def test_submit_sql_and_count_apply_predicate(
     assert "tenant_id" in rewritten.lower()
 
 
+def test_execute_sql_explain_sees_only_post_enforce_sql(
+    verifier: ManifestVerifier, issuer: Ed25519PrivateKey, tmp_path: Path, monkeypatch
+) -> None:
+    """C7-02: submit EXPLAIN is invoked on rewritten SQL, never the pre-enforce text."""
+    import duckdb
+
+    db = tmp_path / "t.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("CREATE TABLE orders (id INTEGER, tenant_id VARCHAR)")
+    con.execute("INSERT INTO orders VALUES (1, 'acme'), (2, 'other')")
+    con.close()
+
+    m = _signed(issuer, predicates={"orders": "tenant_id = 'acme'"})
+    verified = verify_and_check_pool(m, "pool-a")
+    get_session_registry().bind(verified)
+
+    original = "SELECT id, tenant_id FROM orders"
+    rewritten = enforce_manifest(original, verified)
+    assert "tenant_id" in rewritten.lower()
+    seen: list[str] = []
+
+    def spy(con, sql, params=None):
+        seen.append(sql)
+        return True, "ok"
+
+    monkeypatch.setattr("CortexOS.dms.sql_validate_gate.explain_dry_run", spy)
+    rows, _, _ = execute_sql(verified, original, db_path=db)
+    assert seen == [rewritten]
+    assert original not in seen
+    assert {r["tenant_id"] for r in rows} == {"acme"}
+
+
 def test_tampered_signature_fails_submit(verifier: ManifestVerifier, issuer: Ed25519PrivateKey) -> None:
     m = _signed(issuer)
     m.signature = _b64u(b"\x00" * 64)

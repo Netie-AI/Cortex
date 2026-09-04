@@ -69,6 +69,19 @@ def explain_dry_run(
         return False, str(exc)[:400]
 
 
+def sql_for_explain(sql: str, *, verified: VerifiedManifest | None = None) -> str:
+    """SQL that EXPLAIN (and fetch) may see.
+
+    Grounded sessions return ``enforce_manifest`` output (C7-02) and raise
+    ``ManifestError``. Ungrounded sessions return ``sql`` unchanged.
+    """
+    if verified is None:
+        return sql
+    from CortexOS.execution.manifest import enforce_manifest
+
+    return enforce_manifest(sql, verified)
+
+
 def run_gate(
     sql: str,
     semantic: dict[str, Any],
@@ -92,22 +105,20 @@ def run_gate(
             attempts=1,
         )
 
-    source = guard.safe_sql
-    safe_sql = source
-    if verified is not None:
-        from CortexOS.execution.manifest import ManifestError, enforce_manifest
+    from CortexOS.execution.manifest import ManifestError
 
-        try:
-            safe_sql = enforce_manifest(source, verified)
-        except ManifestError as exc:
-            return ValidateGateResult(
-                passed=False,
-                violations=[f"{MANIFEST_VIOLATION_PREFIX}{type(exc).__name__}:{exc.code}"],
-                safe_sql=None,
-                explain_ok=False,
-                attempts=1,
-                manifest_refused=True,
-            )
+    source = guard.safe_sql
+    try:
+        safe_sql = sql_for_explain(source, verified=verified)
+    except ManifestError as exc:
+        return ValidateGateResult(
+            passed=False,
+            violations=[f"{MANIFEST_VIOLATION_PREFIX}{type(exc).__name__}:{exc.code}"],
+            safe_sql=None,
+            explain_ok=False,
+            attempts=1,
+            manifest_refused=True,
+        )
 
     if con is None:
         return ValidateGateResult(
@@ -206,4 +217,5 @@ __all__ = [
     "gate_with_retry",
     "guard_result_from_gate",
     "run_gate",
+    "sql_for_explain",
 ]
