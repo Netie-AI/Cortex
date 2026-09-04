@@ -67,6 +67,7 @@ def _http_for_submit_status(status: str) -> int:
     if status in {
         "session_unbound",
         "session_expired",
+        "space_unbound",
         "drillthrough_session_mismatch",
     }:
         return 409
@@ -242,11 +243,19 @@ async def contract_ask(body: AskRequest) -> Answer:
     from CortexOS.execution.session_manifests import (
         SessionExpired,
         SessionUnbound,
+        SpaceUnbound,
         get_session_registry,
     )
 
     try:
-        verified = get_session_registry().resolve(body.session_id)
+        verified = get_session_registry().resolve(
+            body.session_id, space_id=body.space_id
+        )
+    except SpaceUnbound as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except SessionUnbound as exc:
         raise HTTPException(
             status_code=409,

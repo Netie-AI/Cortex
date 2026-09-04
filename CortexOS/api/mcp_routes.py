@@ -30,6 +30,7 @@ def _tool_catalog() -> list[dict[str, Any]]:
                 "properties": {
                     "question": {"type": "string"},
                     "session_id": {"type": "string"},
+                    "space_id": {"type": "string"},
                 },
                 "required": ["question"],
             },
@@ -205,13 +206,33 @@ async def mcp_call_tool(
         question = str(args.get("question") or "").strip()
         if not question:
             raise HTTPException(status_code=400, detail={"ok": False, "error": "question required"})
+        from CortexOS.dms.answer_engine import UngroundedSession
         from CortexOS.dms.answer_engine import answer as answer_fn
-
-        result = answer_fn(
-            question,
-            session_id=args.get("session_id"),
-            require_grounding=True,
+        from CortexOS.execution.session_manifests import (
+            SessionExpired,
+            SessionUnbound,
+            SpaceUnbound,
         )
+
+        space_raw = args.get("space_id")
+        space_id = str(space_raw).strip() if space_raw else None
+        try:
+            result = answer_fn(
+                question,
+                session_id=args.get("session_id"),
+                space_id=space_id,
+                require_grounding=True,
+            )
+        except (UngroundedSession, SpaceUnbound, SessionUnbound, SessionExpired) as exc:
+            result = {
+                "answer": str(exc),
+                "sql_used": None,
+                "badge": "abstain",
+                "route": "needs_clarification",
+                "rows": [],
+                "grant_kind": "none",
+                "granted_sources": [],
+            }
         return {"ok": True, "name": name, "result": result}
 
     if name == "lakehouse.tables":
