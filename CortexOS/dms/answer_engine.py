@@ -669,6 +669,14 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return _metric_plan("cold_storage_count", {}, "count of cold-storage locations")
     if re.search(r"\bhow many\b", q) and re.search(r"\bskus?\b", q) and not re.search(r"\b(category|per|by)\b", q):
         return _metric_plan("sku_count", {}, "distinct SKU count")
+    # "how many delayed" / Malay "berapa ... delayed" must not return the listing.
+    if (
+        ("delayed" in q)
+        and re.search(r"\bshipments?\b", q)
+        and (_wants_aggregate(q) or "berapa" in q)
+        and not re.search(r"\b(carrier|per|by|each|warehouse|destination)\b", q)
+    ):
+        return _metric_plan("delayed_count", {}, "count of delayed shipments")
 
     # per-warehouse / per-carrier breakdowns of shipments (before the status listing)
     if "delayed" in q and re.search(r"\bcarrier", q):
@@ -1056,13 +1064,29 @@ def _session_key(session_id: str | None, space_id: str | None = None) -> str:
     return f"{sid}::space:{sp}" if sp else sid
 
 
+def _is_derived_scalar(turn: dict[str, Any]) -> bool:
+    """A single number computed from the turn before it (sum / avg / count)."""
+    if turn.get("layer") != "session":
+        return False
+    rows = turn.get("rows") or []
+    if len(rows) != 1:
+        return False
+    return all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) for v in rows[0].values()
+    )
+
+
 def _remember(
     session_id: str | None,
     turn: dict[str, Any],
     *,
     space_id: str | None = None,
 ) -> None:
-    _SESSION[_session_key(session_id, space_id)] = turn
+    # A derived scalar must not become what "them" points at (dc86689).
+    key = _session_key(session_id, space_id)
+    if _is_derived_scalar(turn) and key in _SESSION:
+        return
+    _SESSION[key] = turn
 
 
 def clear_session(session_id: str | None = None, *, space_id: str | None = None) -> None:
@@ -1171,12 +1195,28 @@ def _low_stock_over_prior(rows: list[dict[str, Any]]) -> tuple[str, list[dict[st
     return sql, []  # rows filled by execute
 
 
+def _reslice_prior(prior_sql: str, question: str) -> tuple[str, list[dict[str, Any]]]:
+    """Rewrite LIMIT/OFFSET on the prior ranking. Subjectless 'number 2-6'."""
+    window = _rank_window(question)
+    if window is None:
+        raise ValueError("not a window follow-up")
+    start, end = window
+    offset, limit = start - 1, end - start + 1
+    if offset < 0 or limit < 1 or limit > MAX_LIMIT:
+        raise ValueError("window out of range")
+    tree = sqlglot.parse_one(prior_sql, read="duckdb")
+    tree.set("limit", sqlglot.exp.Limit(expression=sqlglot.exp.Literal.number(limit)))
+    tree.set("offset", sqlglot.exp.Offset(expression=sqlglot.exp.Literal.number(offset)))
+    return tree.sql(dialect="duckdb"), []
+
+
 def _aggregate_prior(
     prior_sql: str,
     question: str,
     rows: list[dict[str, Any]],
     *,
     total_count: int | None = None,
+    shown_count: int | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Follow-up aggregate / scale over the prior result.
 
@@ -1250,12 +1290,17 @@ def _aggregate_prior(
             return sql, [{col: total}]
 
     tree = sqlglot.parse_one(prior_sql, read="duckdb")
-    tree.set("limit", None)
+    # Keep LIMIT so "how many of them?" after top-5 is 5, not the warehouse.
+    # Replay total_count only when the prior listing hit the page cap.
+    # Session memory stores rows[:50], so use shown_count, not len(rows).
+    shown = shown_count if shown_count is not None else len(rows)
+    page_capped = total_count is not None and shown >= MAX_LIMIT
+    if page_capped:
+        tree.set("limit", None)
     tree.set("order", None)
     inner = tree.sql(dialect="duckdb")
     sql = f"SELECT COUNT(*) AS followup_count FROM ({inner}) _prior"
-    if total_count is not None and not wants_avg:
-        # Prefer honest total when prior listing was truncated
+    if page_capped and not wants_avg:
         return sql, [{"followup_count": int(total_count)}]
     return sql, []  # rows filled by execute
 
@@ -1365,11 +1410,19 @@ def answer(
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
 
-    # Session anaphora — "average of them" / "which of those are low stock"
+    # Session anaphora — "average of them" / subjectless "number 2-6"
     session_rows: list[dict[str, Any]] | None = None
-    if prior and prior.get("sql") and _is_anaphora(q_low):
+    window_followup = bool(
+        prior
+        and prior.get("sql")
+        and _rank_window(q_low)
+        and not _wants_sales_rank(q_low, q_low)
+    )
+    if prior and prior.get("sql") and (_is_anaphora(q_low) or window_followup):
         try:
-            if re.search(r"\b(low stock|below reorder|below\s+reorder)\b", q_low):
+            if window_followup:
+                sql, session_rows = _reslice_prior(prior["sql"], question)
+            elif re.search(r"\b(low stock|below reorder|below\s+reorder)\b", q_low):
                 sql, session_rows = _low_stock_over_prior(prior.get("rows") or [])
             else:
                 sql, session_rows = _aggregate_prior(
@@ -1377,6 +1430,7 @@ def answer(
                     question,
                     prior.get("rows") or [],
                     total_count=prior.get("total_count"),
+                    shown_count=prior.get("shown_count"),
                 )
             layer, badge = "session", "session"
             assumptions = f"follow-up over prior turn ({prior.get('metric_id') or prior.get('layer')})"
@@ -1592,6 +1646,7 @@ def answer(
             "metric_id": metric_id,
             "layer": layer,
             "rows": rows[:50],
+            "shown_count": len(rows),
             "total_count": total_count if total_count is not None else len(rows),
             "source_table": _infer_source_table(sql),
             "space_id": (space_id or "").strip() or None,

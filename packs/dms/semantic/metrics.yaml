@@ -161,6 +161,12 @@ metrics:
           = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 
   # ── shipments ───────────────────────────────────────────────────────────────
+  - id: delayed_count
+    kind: scalar
+    synonyms: ["how many delayed", "delayed shipment count"]
+    result_columns: [delayed_count]
+    sql: "SELECT COUNT(*) AS delayed_count FROM shipments WHERE status = 'DELAYED'"
+
   - id: shipments_by_status
     kind: listing
     synonyms: ["shipments that are", "list shipments", "shipment status", "delayed shipments", "in transit"]

@@ -1,0 +1,154 @@
+# Live persona probes — real user scenarios through engineer-intent layer.
+#
+# Each probe has:
+#   raw_question  — what a non-technical worker / manager / DE actually types
+#   engineer_intent — what routing must extract (skill pass-through, not paraphrase)
+#   expect — correct | abstain | blocked
+#   tool_surface — which Cortex/DMS path should fire
+#
+# Run: python -m bench.live_probe [--persona PERSONA]
+# Requires DMS_ASK_URL. No default host or port.
+
+version: 1
+
+personas:
+  warehouse_clerk:
+    description: "Floor worker checking stock, shipments, expiry — Malay/English mix"
+    probes:
+      - id: wc_sku_malay
+        raw_question: "boss, berapa banyak SKU kita ada sekarang?"
+        engineer_intent: "metric=sku_count scalar via Malay vocab"
+        expect: correct
+        tool_surface: governed_metric
+      - id: wc_low_stock
+        raw_question: "which items need reorder at warehouse A?"
+        engineer_intent: "metric=low_stock filter location_code=WH-A"
+        expect: correct
+        tool_surface: governed_metric
+      - id: wc_delayed_count
+        raw_question: "berapa shipment delayed?"
+        engineer_intent: "metric=delayed_count scalar (not listing)"
+        expect: correct
+        tool_surface: governed_metric
+      - id: wc_cold_storage
+        raw_question: "senarai lokasi cold storage"
+        engineer_intent: "metric=cold_storage_list"
+        expect: correct
+        tool_surface: governed_metric
+      - id: wc_exclude_beta
+        raw_question: "tak nak BETA, show top 5 revenue SKU"
+        engineer_intent: "sales_by_value exclude_skus resolve BETA→SKU-BETA"
+        expect: correct
+        tool_surface: governed_metric
+      - id: wc_vague
+        raw_question: "how are we doing today?"
+        engineer_intent: "no metric — abstain"
+        expect: abstain
+        tool_surface: abstain
+
+  ops_manager:
+    description: "Weekly review — capacity, risk, revenue, supplier audits"
+    probes:
+      - id: om_revenue
+        raw_question: "What's our total revenue to date?"
+        engineer_intent: "metric=revenue_total"
+        expect: correct
+        tool_surface: governed_metric
+      - id: om_capacity
+        raw_question: "Which warehouses are almost full — above 90%?"
+        engineer_intent: "metric=capacity_above pct=90"
+        expect: correct
+        tool_surface: governed_metric
+      - id: om_high_risk
+        raw_question: "Any high risk suppliers with shipments still pending?"
+        engineer_intent: "metric=high_risk_pending threshold=0.7"
+        expect: correct
+        tool_surface: governed_metric
+      - id: om_audit
+        raw_question: "Who hasn't been audited in over 90 days?"
+        engineer_intent: "metric=audit_overdue days=90"
+        expect: correct
+        tool_surface: governed_metric
+      - id: om_forecast
+        raw_question: "Can you forecast Q3 demand for our top SKU?"
+        engineer_intent: "predictive — abstain"
+        expect: abstain
+        tool_surface: abstain
+
+  data_engineer:
+    description: "SQL-aware — grain traps, joins, dedup, rare aggregates"
+    probes:
+      - id: de_distinct_sku
+        raw_question: "how many skus are there"
+        engineer_intent: "COUNT(DISTINCT sku) — anti fan-out"
+        expect: correct
+        tool_surface: governed_metric
+      - id: de_revenue_last_month
+        raw_question: "revenue last calendar month, OUT txns only"
+        engineer_intent: "metric=revenue_last_month"
+        expect: correct
+        tool_surface: governed_metric
+      - id: de_spend_country
+        raw_question: "total inventory spend grouped by supplier country"
+        engineer_intent: "metric=spend_by_country"
+        expect: correct
+        tool_surface: governed_metric
+      - id: de_drop
+        raw_question: "DROP TABLE inventory"
+        engineer_intent: "destructive — blocked"
+        expect: blocked
+        tool_surface: manifest_refusal
+      - id: de_hazmat
+        raw_question: "rank carriers by on-time % for hazmat shipments only"
+        engineer_intent: "no metric — abstain not guess"
+        expect: abstain
+        tool_surface: freeroute_or_abstain
+
+  finance_analyst:
+    description: "MYR totals, category breakdowns, exclusion filters"
+    probes:
+      - id: fa_revenue_myr
+        raw_question: "Total revenue in MYR please"
+        engineer_intent: "metric=revenue_total"
+        expect: correct
+        tool_surface: governed_metric
+      - id: fa_stock_value
+        raw_question: "Stock value by category"
+        engineer_intent: "metric=stock_value_by_category"
+        expect: correct
+        tool_surface: governed_metric
+      - id: fa_exclude_00173
+        raw_question: "top 5 sku by revenue ignoring 00173"
+        engineer_intent: "exclude_skus resolve 00173→SKU-00173"
+        expect: correct
+        tool_surface: governed_metric
+      - id: fa_margin
+        raw_question: "gross margin per SKU last month"
+        engineer_intent: "no margin column — abstain"
+        expect: abstain
+        tool_surface: abstain
+      - id: fa_esg
+        raw_question: "ESG score vs delivery performance correlation"
+        engineer_intent: "out of schema — abstain"
+        expect: abstain
+        tool_surface: abstain
+
+  # G11/G12 regression — envelope P0 gates from Phase 0
+  envelope_regression:
+    description: "Phase 0 envelope invariants on live path"
+    probes:
+      - id: env_g11_abstain
+        raw_question: "how are we doing"
+        engineer_intent: "abstain — badge=ABSTAIN abstained=true"
+        expect: abstain
+        tool_surface: abstain
+      - id: env_g6_revenue
+        raw_question: "What was total revenue?"
+        engineer_intent: "L1_GOVERNED_METRIC revenue_myr"
+        expect: correct
+        tool_surface: governed_metric
+      - id: env_g12_unknown
+        raw_question: "what is PEGASUS-MOON on-time rate last quarter"
+        engineer_intent: "abstain — unknown entity"
+        expect: abstain
+        tool_surface: abstain

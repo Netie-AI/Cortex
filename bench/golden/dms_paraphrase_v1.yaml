@@ -91,8 +91,6 @@ paraphrases:
     - "what is running late"
     - "show me the late deliveries"
     - "which consignments are behind schedule"
-    - "count of delayed shipments"
-    - "how many shipments are delayed"
 
   in_transit:
     - "what is on the road right now"
