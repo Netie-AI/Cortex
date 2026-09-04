@@ -47,6 +47,8 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\bdelay\b(?!ed)", "delayed"),
     (r"\bfreight\s+compan(?:y|ies)\b", "carrier"),
     (r"\blogistics\s+providers?\b", "carrier"),
+    (r"\bfreight spend\b", "shipment cost"),
+    (r"\bshipping cost\b", "shipment cost"),
     (r"\b(?:on the road|currently moving|in motion)\b", "in transit shipments"),
     (r"\b(?:lands|arrives|arrive)\s+this\s+week\b", "arriving this week"),
     (r"\bdue\s+in\s+the\s+next\s+seven\s+days\b", "arriving in 7 days"),

@@ -857,6 +857,11 @@ def route_to_metric(question: str) -> MetricPlan | None:
             and not re.search(r"\b(cost|spend|price)\b", q):
         status = "DELAYED" if "delayed" in q else "IN_TRANSIT"
         return _metric_plan("count_by_destination", {"status": status}, f"{status} shipments grouped by destination")
+    if (
+        re.search(r"\b(shipment cost|delivery cost)\b", q)
+        and re.search(r"\b(destination|warehouse|location)\b", q)
+    ):
+        return _metric_plan("cost_by_destination", {}, "shipment cost grouped by destination")
 
     # revenue — calendar month before rolling-day window; bare total before ranked "top sales"
     if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":

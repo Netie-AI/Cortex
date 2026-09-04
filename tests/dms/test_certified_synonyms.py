@@ -86,6 +86,8 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
         ("high risk suppliers", "suppliers_by_risk"),
         ("pending deliveries from high risk vendors", "high_risk_pending"),
         ("shipment cost by destination", "cost_by_destination"),
+        ("freight spend per destination", "cost_by_destination"),
+        ("what does shipping cost us by drop-off point", "cost_by_destination"),
     ],
 )
 def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
@@ -139,6 +141,26 @@ def test_sku_count_per_category_is_grouped_not_scalar():
     assert "sku_count" in rows[0]
     assert str(rows[0]["category"]) in text
     assert str(rows[0]["sku_count"]) in text.replace(",", "")
+
+
+def test_freight_spend_per_destination_is_cost_not_count():
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "freight spend per destination"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "cost_by_destination"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert "location_code" in rows[0]
+    assert "total_cost_myr" in rows[0]
+    assert "shipment_count" not in rows[0]
+    assert str(rows[0]["location_code"]) in text
+    assert str(int(float(rows[0]["total_cost_myr"]))) in text.replace(",", "")
 
 
 def test_certified_sales_synonym_hits_l0():
