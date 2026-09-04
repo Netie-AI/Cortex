@@ -8,13 +8,17 @@ even if gold SQL also returned nothing.
 
 The frozen split is ``bench/heldout/c7_heldout_v1.yaml``. CI invokes
 ``score_fixture`` on a tiny canned envelope set so the gate can go red
-without serving L2 or calling the answer engine.
+without serving L2 or calling the answer engine. ``score_engine`` is the
+C7-05 live path: it scores ``answer()`` envelopes and reports G-abs /
+G-err / G-env. It does not set ``DMS_L2_ENABLED`` as a process default.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -397,15 +401,97 @@ def summarize(results: list[HeldoutResult]) -> dict[str, Any]:
     must = by_split.get("must_abstain") or {"total": 0, "abstained": 0}
     must_n = int(must["total"])
     must_ok = int(must.get("abstained") or 0)
+    g_abs_recall = (must_ok / must_n) if must_n else 1.0
+    incorrect_rate = (
+        totals["incorrect"] / totals["total"] if totals["total"] else 0.0
+    )
+    g_env_hits = [
+        r.to_dict()
+        for r in results
+        if r.outcome == "incorrect"
+        and (
+            "G-env" in r.detail
+            or "SKU-BETA" in r.detail
+            or r.detail.startswith("empty rows on an answerable")
+            or r.detail.startswith("refusal badge with served rows")
+        )
+    ]
     return {
         "totals": totals,
         "by_split": by_split,
-        "g_abs_recall": (must_ok / must_n) if must_n else 1.0,
-        "incorrect_rate": (
-            totals["incorrect"] / totals["total"] if totals["total"] else 0.0
-        ),
+        "g_abs_recall": g_abs_recall,
+        "incorrect_rate": incorrect_rate,
+        "g_env_violations": len(g_env_hits),
+        "gates": {
+            "g_abs": g_abs_recall >= 1.0 and must_n > 0,
+            "g_err": incorrect_rate < 0.02,
+            "g_env": len(g_env_hits) == 0,
+        },
         "results": [r.to_dict() for r in results],
     }
+
+
+def shadow_line_count(path: Path | str | None = None) -> int:
+    """G-sh input. Missing file is 0 lines, not a hidden pass."""
+    if path is None:
+        from CortexOS.paths import data_path
+
+        target = data_path("engine", "l2_shadow.jsonl")
+    else:
+        target = Path(path)
+    if not target.is_file():
+        return 0
+    n = 0
+    with target.open(encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                n += 1
+    return n
+
+
+def score_engine(
+    items: list[HeldoutItem] | None = None,
+    *,
+    ask: Callable[..., dict[str, Any]] | None = None,
+    enable_l2: bool = False,
+    count_shadow: bool = True,
+) -> dict[str, Any]:
+    """Score frozen items against ``answer()``. Does not persist L2-on.
+
+    ``enable_l2=True`` sets ``DMS_L2_ENABLED=1`` for this call only so L2 can
+    run on L0/L1 miss. The previous env value is restored. Cutover still
+    requires G-abs/G-err/G-env/G-man/G-sh on a real report.
+    """
+    rows = items if items is not None else load_heldout()
+    if ask is None:
+        from CortexOS.dms.answer_engine import answer as ask
+    prev = os.environ.get("DMS_L2_ENABLED")
+    if enable_l2:
+        os.environ["DMS_L2_ENABLED"] = "1"
+    results: list[HeldoutResult] = []
+    try:
+        for item in rows:
+            env = ask(item.question)
+            if not isinstance(env, dict):
+                env = {}
+            results.append(score_envelope(item, env))
+    finally:
+        if enable_l2:
+            if prev is None:
+                os.environ.pop("DMS_L2_ENABLED", None)
+            else:
+                os.environ["DMS_L2_ENABLED"] = prev
+    report = summarize(results)
+    report["engine"] = True
+    report["l2_enabled_for_run"] = enable_l2
+    if count_shadow:
+        report["shadow_lines"] = shadow_line_count()
+    else:
+        report["shadow_lines"] = 0
+    report["gates"]["g_sh"] = report["shadow_lines"] >= 500
+    report["gates"]["g_man"] = None  # pytest tests/test_execution, not this harness
+    report["cutover"] = False
+    return report
 
 
 def load_fixture(path: Path | str) -> tuple[list[HeldoutItem], dict[str, dict[str, Any]]]:
@@ -444,14 +530,31 @@ def main() -> None:
         default=None,
         help="YAML with items + envelopes (CI path; no live serve)",
     )
+    parser.add_argument(
+        "--engine",
+        action="store_true",
+        help="score frozen items via answer(); does not persist DMS_L2_ENABLED",
+    )
+    parser.add_argument(
+        "--enable-l2",
+        action="store_true",
+        help="with --engine, set DMS_L2_ENABLED=1 for this process run only",
+    )
     parser.add_argument("--json", default=None, help="write report JSON")
     args = parser.parse_args()
-    if not args.fixture:
-        parser.error(
-            "pass --fixture PATH; live engine scoring is C7-05, not this harness default"
-        )
-    report = score_fixture(args.fixture)
-    print(json.dumps(report["totals"]))
+    if args.engine:
+        report = score_engine(enable_l2=args.enable_l2)
+        print(json.dumps({
+            "totals": report["totals"],
+            "gates": report["gates"],
+            "cutover": report["cutover"],
+            "shadow_lines": report["shadow_lines"],
+        }))
+    elif args.fixture:
+        report = score_fixture(args.fixture)
+        print(json.dumps(report["totals"]))
+    else:
+        parser.error("pass --fixture PATH or --engine")
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
