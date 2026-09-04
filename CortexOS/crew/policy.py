@@ -12,6 +12,8 @@ refuses silently would read as a hang (KB R-0011).
 
 from __future__ import annotations
 
+from CortexOS.crew.config import BACKEND_CF_COMPUTER, BACKEND_LAPTOP, FLAG_CF_COMPUTER
+
 # Windows-MCP capture/timing tools that observe but do not act. Everything not
 # listed here is treated as mutating - fail closed on unknown tools.
 READ_ONLY_TOOLS = frozenset(
@@ -69,6 +71,31 @@ CONFIRM = "confirm"
 DENY = "deny"
 TAKEOVER = "takeover"
 
+# Existing approved local exec (github.py / estate gh). Unknown binaries fail closed.
+LOCAL_SHELL_ALLOWLIST = frozenset({"gh"})
+# gh verbs that change remote state. list/view/status stay allow after argv[0] match.
+MUTATING_GH_VERBS = frozenset(
+    {
+        "create",
+        "close",
+        "merge",
+        "delete",
+        "edit",
+        "ready",
+        "review",
+        "comment",
+        "release",
+        "workflow",
+        "api",
+        "gist",
+        "secret",
+        "auth",
+        "login",
+    }
+)
+# `gh auth status` is a probe, not a login. Allow that exact shape.
+GH_AUTH_STATUS = ("gh", "auth", "status")
+
 # Arg keys / tool names that mean the operator should type, not the agent.
 _AUTH_KEYS = frozenset({"password", "passwd", "pass", "secret", "token", "otp", "totp", "pin"})
 _AUTH_HINTS = ("password", "passwd", "login", "signin", "sign-in", "otp", "2fa", "totp", "auth")
@@ -123,3 +150,47 @@ def decide(
     if tool in READ_ONLY_TOOLS:
         return ALLOW, "read-only capture tool on an armed server"
     return CONFIRM, "mutating computer-control tool needs operator approval"
+
+
+def _argv0(argv: list[str]) -> str:
+    if not argv:
+        return ""
+    name = argv[0].replace("\\", "/").rsplit("/", 1)[-1]
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    return name.lower()
+
+
+def decide_runtime(
+    argv: list[str],
+    *,
+    backend: str,
+    isolate_enabled: bool,
+    approved: bool = False,
+) -> tuple[str, str]:
+    """Gate one dual-path exec. Laptop uses the existing gh allowlist; isolate
+    additionally requires CREW_CF_COMPUTER=1. Unknown binaries never run."""
+    if not argv or not str(argv[0]).strip():
+        return DENY, "empty argv"
+    backend = (backend or "").strip().lower().replace("_", "-")
+    if backend not in {BACKEND_LAPTOP, BACKEND_CF_COMPUTER}:
+        return DENY, f"unknown runtime backend '{backend}'"
+    if backend == BACKEND_CF_COMPUTER and not isolate_enabled:
+        return DENY, (
+            f"cloudflare-computer isolate is off: set {FLAG_CF_COMPUTER}=1 "
+            "(PREVIEW only, not production)"
+        )
+    binary = _argv0(argv)
+    if binary not in LOCAL_SHELL_ALLOWLIST:
+        return DENY, f"local tool '{binary or argv[0]}' is not on the approved allowlist"
+    tokens = [str(p).lower() for p in argv]
+    mutating = [t for t in tokens[1:] if t in MUTATING_GH_VERBS]
+    if tuple(tokens[:3]) == GH_AUTH_STATUS:
+        mutating = [t for t in mutating if t != "auth"]
+    if mutating:
+        if approved:
+            return ALLOW, "operator approved mutating local tool"
+        return CONFIRM, (
+            "mutating local tool needs operator approval: " + ", ".join(dict.fromkeys(mutating))
+        )
+    return ALLOW, f"approved local tool on {backend}"
