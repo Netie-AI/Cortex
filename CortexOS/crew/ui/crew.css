@@ -849,7 +849,23 @@ button { cursor: pointer; }
   margin-right: 0.35rem;
   vertical-align: middle;
 }
-.row-actions { display: flex; gap: 0.25rem; margin-top: 0.2rem; }
+.row-actions { display: flex; gap: 0.25rem; margin-top: 0.2rem; flex-wrap: wrap; }
+.life-spawn {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.28rem;
+  margin: 0.35rem 0 0.55rem;
+}
+.life-spawn input, .life-spawn select {
+  width: 100%;
+  background: var(--well);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font: 0.72rem var(--mono);
+  padding: 0.28rem 0.4rem;
+}
+.life-spawn button { grid-column: 1 / -1; }
+.agent-card { border-bottom: 1px solid var(--line); padding-bottom: 0.25rem; margin-bottom: 0.2rem; }
 .ladder {
   margin-top: 0.85rem;
   border-top: 1px solid var(--line);

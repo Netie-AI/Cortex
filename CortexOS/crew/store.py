@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS agents (
     verify_criteria TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     skills TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'active',
+    goal_text TEXT NOT NULL DEFAULT '',
+    stop_reason TEXT NOT NULL DEFAULT '',
+    alive INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     UNIQUE (space_id, name)
 );
@@ -130,6 +134,10 @@ class CrewStore:
             ("verify_criteria", "TEXT NOT NULL DEFAULT ''"),
             ("model", "TEXT NOT NULL DEFAULT ''"),
             ("skills", "TEXT NOT NULL DEFAULT ''"),
+            ("mode", "TEXT NOT NULL DEFAULT 'active'"),
+            ("goal_text", "TEXT NOT NULL DEFAULT ''"),
+            ("stop_reason", "TEXT NOT NULL DEFAULT ''"),
+            ("alive", "INTEGER NOT NULL DEFAULT 1"),
         )
         for name, ddl in extras:
             if name not in cols:
@@ -202,6 +210,8 @@ class CrewStore:
         verify_criteria: Any = "",
         model: str = "",
         skills: Any = "",
+        mode: str = "",
+        goal_text: str = "",
     ) -> dict[str, Any]:
         allow_s = _dumps(allow_tools)
         deny_s = _dumps(deny_tools)
@@ -211,6 +221,10 @@ class CrewStore:
         if "grok" in model_s.lower() and "fast" in model_s.lower():
             model_s = "openai/grok-4.6"
         verify_i = 1 if verify else 0
+        from CortexOS.crew.life import canonical_mode
+
+        mode_s = canonical_mode(mode) if (mode or "").strip() else ""
+        goal_s = (goal_text or "").strip()
         existing = self.get_agent_by_name(space_id, name)
         if existing is not None:
             patch: dict[str, Any] = {}
@@ -230,6 +244,10 @@ class CrewStore:
                 patch["model"] = model_s
             if skills_s and skills_s != (existing.get("skills") or ""):
                 patch["skills"] = skills_s
+            if mode_s and mode_s != (existing.get("mode") or "active"):
+                patch["mode"] = mode_s
+            if goal_s and goal_s != (existing.get("goal_text") or ""):
+                patch["goal_text"] = goal_s
             if patch:
                 sets = ", ".join(f"{k} = ?" for k in patch)
                 with self._lock:
@@ -245,7 +263,8 @@ class CrewStore:
             self._db.execute(
                 "INSERT INTO agents (id, space_id, name, icon, color, role_prompt, spawned_by,"
                 " allow_tools, deny_tools, capability, verify, verify_criteria, model, skills,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " mode, goal_text, created_at) VALUES"
+                " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     agent_id,
                     space_id,
@@ -261,6 +280,8 @@ class CrewStore:
                     crit_s,
                     model_s,
                     skills_s,
+                    mode_s or "active",
+                    goal_s,
                     _now(),
                 ),
             )
@@ -303,11 +324,90 @@ class CrewStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def set_agent_status(self, agent_id: str, status: str) -> dict[str, Any] | None:
+    def mark_agent_failed(self, agent_id: str, reason: str) -> dict[str, Any] | None:
+        if self.get_agent(agent_id) is None:
+            return None
+        why = (reason or "").strip() or "failed"
         with self._lock:
-            self._db.execute("UPDATE agents SET status = ? WHERE id = ?", (status, agent_id))
+            self._db.execute(
+                "UPDATE agents SET status = 'failed', stop_reason = ? WHERE id = ?",
+                (why, agent_id),
+            )
             self._db.commit()
         return self.get_agent(agent_id)
+
+    def set_agent_status(self, agent_id: str, status: str) -> dict[str, Any] | None:
+        from CortexOS.crew.life import canonical_status, park_status
+
+        row = self.get_agent(agent_id)
+        if row is None:
+            return None
+        wanted = canonical_status(status)
+        if wanted == "idle":
+            wanted = park_status(row)
+        with self._lock:
+            self._db.execute("UPDATE agents SET status = ? WHERE id = ?", (wanted, agent_id))
+            self._db.commit()
+        return self.get_agent(agent_id)
+
+    def set_agent_mode(
+        self, agent_id: str, mode: str, goal_text: str | None = None
+    ) -> dict[str, Any] | None:
+        from CortexOS.crew.life import canonical_mode, park_status
+
+        row = self.get_agent(agent_id)
+        if row is None:
+            return None
+        mode_s = canonical_mode(mode)
+        patch: dict[str, Any] = {"mode": mode_s}
+        if goal_text is not None:
+            patch["goal_text"] = (goal_text or "").strip()
+        status = str(row.get("status") or "idle")
+        if status in {"idle", "goal", "done"}:
+            merged = dict(row)
+            merged["mode"] = mode_s
+            patch["status"] = park_status(merged)
+        sets = ", ".join(f"{k} = ?" for k in patch)
+        with self._lock:
+            self._db.execute(
+                f"UPDATE agents SET {sets} WHERE id = ?", (*patch.values(), agent_id)
+            )
+            self._db.commit()
+        return self.get_agent(agent_id)
+
+    def kill_agent(self, agent_id: str, reason: str) -> dict[str, Any] | None:
+        if self.get_agent(agent_id) is None:
+            return None
+        why = (reason or "").strip() or "operator killed"
+        with self._lock:
+            self._db.execute(
+                "UPDATE agents SET alive = 0, status = 'stopped', stop_reason = ? WHERE id = ?",
+                (why, agent_id),
+            )
+            self._db.commit()
+        return self.get_agent(agent_id)
+
+    def clear_messages(self, space_id: str) -> None:
+        """Drop the transcript. Agent rows (mode/goal) stay; that is crew memory."""
+        with self._lock:
+            self._db.execute("DELETE FROM messages WHERE space_id = ?", (space_id,))
+            self._db.commit()
+
+    def reset_life_after_clear(self, space_id: str) -> list[dict[str, Any]]:
+        """After chat clear: goal mode stays goal, everyone else parks idle.
+
+        Stopped/failed rows keep their reason. Manager stays in the roster.
+        """
+        from CortexOS.crew.life import is_alive, park_status
+
+        out: list[dict[str, Any]] = []
+        for row in self.list_agents(space_id):
+            if not is_alive(row):
+                out.append(row)
+                continue
+            parked = self.set_agent_status(row["id"], park_status(row))
+            out.append(parked or row)
+        return out
 
     # -- messages ----------------------------------------------------------
 

@@ -136,10 +136,15 @@ class Mailbox:
         self._ready.clear()
         return out
 
-    async def get(self, timeout: float) -> Envelope | None:
+    async def get(self, timeout: float | None = None) -> Envelope | None:
+        """Take the next envelope. ``timeout is None`` waits until one arrives
+        or the waiter is cancelled - that is smart-idle, not a second loop."""
         if not self._items:
             try:
-                await asyncio.wait_for(self._ready.wait(), timeout=timeout)
+                if timeout is None:
+                    await self._ready.wait()
+                else:
+                    await asyncio.wait_for(self._ready.wait(), timeout=timeout)
             except (TimeoutError, asyncio.TimeoutError):
                 return None
         if not self._items:
@@ -148,6 +153,11 @@ class Mailbox:
         if not self._items:
             self._ready.clear()
         return env
+
+    def unget(self, env: Envelope) -> None:
+        """Put ``env`` back at the front so a parked waiter can re-drain it."""
+        self._items.appendleft(env)
+        self._ready.set()
 
     def empty(self) -> bool:
         return not self._items

@@ -63,6 +63,9 @@ INTERNAL_TOOLS = frozenset(
         "estate_status",
         "ship_gate",
         "rename_agent",
+        "stop_agent",
+        "kill_agent",
+        "set_agent_mode",
     }
 )
 

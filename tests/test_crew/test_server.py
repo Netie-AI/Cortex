@@ -115,6 +115,9 @@ def test_ui_index_is_served(client) -> None:
     assert "Tickets" in page.text
     assert "Auto-detect" in page.text
     assert "Spawn the " not in page.text
+    assert "Spawn teammate" in page.text
+    assert "Clear chat" in page.text
+    assert "active / idle / waiting / goal" in page.text
     assert "Ask the Manager. Type / for commands, @ for a teammate." in page.text
     assert 'id="suggest"' in page.text
     assert "/crew/commands" in page.text
@@ -322,3 +325,53 @@ def test_commands_autocomplete_and_mention_targets(client) -> None:
     users = [m for m in lined if m["role"] == "user"]
     assert users[-1]["meta"]["a2a"]["to"] == "PRD"
     assert users[-1]["meta"]["mentions"][0]["kind"] == "role"
+
+
+def test_operator_life_routes_spawn_kill_clear(client) -> None:
+    space = client.http.post("/crew/spaces", json={"title": "Life"}).json()
+    spawned = client.http.post(
+        f"/crew/spaces/{space['id']}/agents",
+        json={"name": "Scout", "brief": "hold the line", "mode": "goal", "goal": "hold the line"},
+    ).json()
+    assert spawned["ok"] is True
+    scout = spawned["agent"]
+    assert scout["mode"] == "goal"
+    assert scout["status"] == "goal"
+    assert scout["goal_text"] == "hold the line"
+    listed = client.http.get(f"/crew/spaces/{space['id']}/agents").json()
+    assert any(a["name"] == "Scout" and a["status"] == "goal" for a in listed)
+
+    client.http.post(
+        f"/crew/spaces/{space['id']}/messages",
+        json={"text": "throw away"},
+    )
+    # The scripted model is empty; wait until the space is idle so clear
+    # does not race a finishing run.
+    deadline = time.time() + 5
+    while client.crew.runtime._space_run.get(space["id"]):
+        if time.time() > deadline:
+            break
+        time.sleep(0.02)
+    cleared = client.http.post(f"/crew/spaces/{space['id']}/clear").json()
+    assert cleared["ok"] is True
+    msgs = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
+    assert not any(m["role"] == "user" for m in msgs)
+    after = client.http.get(f"/crew/spaces/{space['id']}/agents").json()
+    keeper = next(a for a in after if a["name"] == "Scout")
+    assert keeper["mode"] == "goal"
+    assert keeper["goal_text"] == "hold the line"
+    assert keeper["status"] == "goal"
+
+    killed = client.http.post(
+        f"/crew/spaces/{space['id']}/agents/{scout['id']}/kill",
+        json={"reason": "operator killed"},
+    ).json()
+    assert killed["ok"] is True
+    assert killed["agent"]["status"] == "stopped"
+    assert "operator killed" in killed["agent"]["stop_reason"]
+    refuse = client.http.post(
+        f"/crew/spaces/{space['id']}/agents/{scout['id']}/accept",
+        json={"brief": "nope"},
+    )
+    assert refuse.status_code == 400
+    assert "DENIED" in refuse.json()["detail"]

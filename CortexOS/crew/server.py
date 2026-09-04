@@ -157,6 +157,28 @@ class SkillIn(BaseModel):
     body: str
 
 
+class AgentSpawnIn(BaseModel):
+    name: str
+    brief: str = ""
+    role: str = ""
+    capability: str = ""
+    mode: str = "active"
+    goal: str = ""
+
+
+class AgentModeIn(BaseModel):
+    mode: str
+    goal: str = ""
+
+
+class AgentKillIn(BaseModel):
+    reason: str = "operator killed"
+
+
+class AgentAcceptIn(BaseModel):
+    brief: str = ""
+
+
 class ImportIn(BaseModel):
     title: str = "Imported chat"
     text: str = ""
@@ -281,6 +303,75 @@ def build_router(crew: CrewApp) -> APIRouter:
     @router.get("/spaces/{space_id}/agents")
     async def agents(space_id: str) -> list[dict[str, Any]]:
         return crew.store.list_agents(space_id)
+
+    @router.post("/spaces/{space_id}/agents")
+    async def spawn_agent(space_id: str, body: AgentSpawnIn) -> dict[str, Any]:
+        if crew.store.get_space(space_id) is None:
+            raise HTTPException(404, "unknown space")
+        result = await crew.runtime.operator_spawn(
+            space_id,
+            {
+                "name": body.name,
+                "brief": body.brief,
+                "role": body.role,
+                "capability": body.capability,
+                "mode": body.mode,
+                "goal": body.goal,
+            },
+        )
+        if result.get("error"):
+            raise HTTPException(400, str(result["error"]))
+        return result
+
+    @router.post("/spaces/{space_id}/agents/{agent_id}/stop")
+    async def stop_agent(space_id: str, agent_id: str) -> dict[str, Any]:
+        row = crew.store.get_agent(agent_id)
+        if row is None or row.get("space_id") != space_id:
+            raise HTTPException(404, "unknown agent")
+        stopped = crew.runtime.stop_agent(agent_id)
+        if isinstance(stopped, dict) and stopped.get("error"):
+            raise HTTPException(400, str(stopped["error"]))
+        return {"ok": True, "agent": stopped}
+
+    @router.post("/spaces/{space_id}/agents/{agent_id}/kill")
+    async def kill_agent(space_id: str, agent_id: str, body: AgentKillIn | None = None) -> dict[str, Any]:
+        row = crew.store.get_agent(agent_id)
+        if row is None or row.get("space_id") != space_id:
+            raise HTTPException(404, "unknown agent")
+        killed = crew.runtime.kill_agent(
+            agent_id, reason=(body.reason if body is not None else "operator killed")
+        )
+        if isinstance(killed, dict) and killed.get("error"):
+            raise HTTPException(400, str(killed["error"]))
+        return {"ok": True, "agent": killed}
+
+    @router.post("/spaces/{space_id}/agents/{agent_id}/mode")
+    async def set_agent_mode(space_id: str, agent_id: str, body: AgentModeIn) -> dict[str, Any]:
+        row = crew.store.get_agent(agent_id)
+        if row is None or row.get("space_id") != space_id:
+            raise HTTPException(404, "unknown agent")
+        updated = crew.runtime.set_agent_mode(agent_id, body.mode, goal_text=body.goal)
+        if updated is None:
+            raise HTTPException(404, "unknown agent")
+        return {"ok": True, "agent": updated}
+
+    @router.post("/spaces/{space_id}/agents/{agent_id}/accept")
+    async def accept_task(space_id: str, agent_id: str, body: AgentAcceptIn | None = None) -> dict[str, Any]:
+        row = crew.store.get_agent(agent_id)
+        if row is None or row.get("space_id") != space_id:
+            raise HTTPException(404, "unknown agent")
+        accepted = crew.runtime.accept_task(
+            agent_id, brief=(body.brief if body is not None else "")
+        )
+        if isinstance(accepted, dict) and accepted.get("error"):
+            raise HTTPException(400, str(accepted["error"]))
+        return {"ok": True, "agent": accepted}
+
+    @router.post("/spaces/{space_id}/clear")
+    async def clear_chat(space_id: str) -> dict[str, Any]:
+        if crew.store.get_space(space_id) is None:
+            raise HTTPException(404, "unknown space")
+        return crew.runtime.clear_chat(space_id)
 
     @router.get("/spaces/{space_id}/events")
     async def events(space_id: str, after: int = -1) -> StreamingResponse:
