@@ -80,9 +80,10 @@ def test_ui_index_is_served(client) -> None:
     assert page.status_code == 200
     assert "Cortex Crew" in page.text
     assert "Providers / API keys" in page.text
-    assert "stolen.css" in page.text
-    assert "Hide rail" in page.text
-    assert "Hide inspector" in page.text
+    assert "/crew.css" in page.text
+    assert 'href="/stolen.css"' not in page.text
+    assert "Hide spaces" in page.text
+    assert "Hide belt" in page.text
     assert "Plugins" in page.text
     assert "Drop chats" in page.text
     assert "drop-veil" in page.text
@@ -92,7 +93,26 @@ def test_ui_index_is_served(client) -> None:
     assert "Where should bots run?" in page.text
     assert "This computer" in page.text
     assert "Teach" in page.text
-    assert "Skills / tone" in page.text
+    assert "Collections" in page.text
+    assert "HITL lease" in page.text
+    assert "Heartbeat / wakes" in page.text
+    assert "Needs you" in page.text
+    assert "Crew owns leases" in page.text
+    assert "Control display-only" in page.text
+    assert "Recall payloads are untrusted" in page.text
+    assert "Standing approvals" in page.text
+    assert "one-off" in page.text
+    assert "circuit-breaker" in page.text
+    assert "Does not kill Manager" in page.text
+    assert "Claim" in page.text
+    assert "Release" in page.text
+    assert 'id="tabWork"' in page.text
+    assert 'data-scope="space"' in page.text
+    assert 'data-scope="user"' in page.text
+    assert 'data-scope="agent"' in page.text
+    assert 'data-scope="run"' in page.text
+    assert "class=\"orb\"" in page.text or "class='orb'" in page.text or "class=\"orb " in page.text or "empty--orb" in page.text
+    assert "Tickets" in page.text
     assert "Auto-detect" in page.text
     assert "Spawn the " not in page.text
     assert "Ask the Manager. Auto-detect who to spawn." in page.text
@@ -104,13 +124,21 @@ def test_ui_index_is_served(client) -> None:
     assert "Tickets" in page.text
     assert "Voice" in page.text
     assert "matchMedia" in page.text
-    css = client.http.get("/stolen.css")
+    assert "/v1/belt" in page.text
+    stolen = client.http.get("/stolen.css")
+    assert stolen.status_code == 410
+    css = client.http.get("/crew.css")
     assert css.status_code == 200
-    assert b"--rail-w" in css.content
-    assert b"inspector--closed" in css.content
+    assert b"--spaces-w" in css.content
+    assert b"belt--shut" in css.content
+    assert b"needs-you" in css.content
     assert b"role-chip--hit" in css.content
     assert b"pointer-events: none" in css.content
     assert b"drop-veil" in css.content
+    assert b".orb" in css.content
+    assert b"scope-chip" in css.content
+    assert b"--rail-ground" not in css.content
+    assert b"--rk-page" not in css.content
     desk = client.http.get("/crew/desk").json()
     assert desk["ok"] is True
     assert "auto-merge" in desk["law"]

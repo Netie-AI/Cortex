@@ -4,48 +4,56 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cortex Crew</title>
-  <link rel="stylesheet" href="/stolen.css" />
+  <link rel="stylesheet" href="/crew.css" />
 </head>
 <body>
-  <div class="app">
-    <aside class="rail" id="rail">
-      <div class="rail__brand">
-        <button class="rail__tab" id="toggleRail" title="Hide rail" type="button">[</button>
-        <div class="rail__wordmark rail__hideable">Cortex Crew<small>from Guaca rail + Rakazo ink</small></div>
+  <div class="desk">
+    <aside class="spaces" id="rail">
+      <div class="spaces__brand">
+        <button class="spaces__fold" id="toggleRail" title="Hide spaces" type="button">[</button>
+        <div class="spaces__mark spaces__hide">Netie Crew<small>operator desk</small></div>
       </div>
-      <div class="rail__hideable" style="padding:0 0.75rem">
+      <div class="spaces__tools spaces__hide">
         <div class="chip" id="providerChip">no provider</div>
-        <button class="rail__search rail__hideable" id="openSearch" type="button">Search<span class="rail__key">Ctrl K</span></button>
-        <button class="gear" id="openSettings">Providers / API keys</button>
-        <button class="gear" id="openPlugins">Plugins</button>
-        <button class="gear" id="openHost" type="button">This computer</button>
-        <button class="gear" id="openTeach" type="button">Teach</button>
-        <button class="gear" id="openVoice" type="button">Voice</button>
-        <p class="empty" style="margin:0.4rem 0 0">Drop chats or .eml here. No import button. Check PRs in chat.</p>
+        <button class="spaces__search" id="openSearch" type="button">Search<span class="spaces__key">Ctrl K</span></button>
+        <button class="tool" id="openSettings">Providers / API keys</button>
+        <button class="tool" id="openPlugins">Plugins</button>
+        <button class="tool" id="openHost" type="button">This computer</button>
+        <button class="tool" id="openTeach" type="button">Teach</button>
+        <button class="tool" id="openVoice" type="button">Voice</button>
+        <p class="hint">Drop chats or .eml here. No import button. Check PRs in chat.</p>
       </div>
-      <div class="rail__body rail__hideable" id="spaces"></div>
-      <div class="rail__hideable" style="padding:0 0.55rem 0.7rem">
+      <div class="spaces__list spaces__hide" id="spaces"></div>
+      <div class="spaces__hide">
         <button class="new-space" id="newSpace">+ New space</button>
       </div>
     </aside>
-    <main>
-      <div class="pane__head">
+    <main class="converse">
+      <div class="converse__head">
         <h1 id="spaceTitle">Select a space</h1>
-        <div class="top-actions">
-          <span class="conn" id="conn" title="Live event stream">live</span>
+        <div class="head-actions">
+          <span class="heartbeat" id="conn" title="Live event stream">heartbeat</span>
           <div class="status" id="runStatus"></div>
+          <span class="vocab" title="Status vocab once">live / stall / HITL / claim</span>
           <button class="ghost" id="uiSmaller" type="button" title="Smaller text">A-</button>
           <button class="ghost" id="uiBigger" type="button" title="Bigger text">A+</button>
           <button class="ghost" id="toggleActivity" title="Show only agent-to-agent traffic">Activity</button>
-          <button class="ghost danger" id="cancelRun" hidden>Cancel</button>
+          <button class="ghost danger" id="cancelRun" hidden title="Stops this run. Does not kill Manager.">Cancel</button>
         </div>
       </div>
       <div class="focus-bar" id="focusBar" hidden></div>
-      <div class="pane__wrap">
-        <div class="pane__scroll" id="log"></div>
+      <div class="converse__body">
+        <div class="log" id="log"></div>
         <button class="jump" id="jump" type="button" hidden>New below</button>
       </div>
-      <div class="approvals" id="approvalBar" hidden></div>
+      <div class="needs-you" id="approvalBar" hidden>
+        <div class="needs-you__pin">
+          <b>Needs you</b>
+          <span class="id" id="hitlCount"></span>
+          <span class="id" id="hitlAge"></span>
+        </div>
+        <div id="approvalCards"></div>
+      </div>
       <div class="composer">
         <div id="roles" class="role-chips"></div>
         <div class="composer__row">
@@ -54,48 +62,77 @@
         </div>
       </div>
     </main>
-    <aside class="inspector" id="insp">
-      <div class="inspector__head">
-        <h2 class="inspector__title">Desk</h2>
-        <button class="inspector__tab" id="toggleInsp" title="Hide inspector" type="button">]</button>
+    <aside class="belt" id="insp">
+      <div class="belt__head">
+        <h2 class="belt__title">Belt</h2>
+        <button class="belt__fold" id="toggleInsp" title="Hide belt" type="button">]</button>
       </div>
-      <div class="inspector__body">
-        <div class="insp-block">
-          <h2 class="inspector__title">Crew</h2>
-          <div id="agents" class="empty">No agents yet.</div>
+      <div class="belt__body">
+        <div class="belt__tabs">
+          <button class="ghost on" id="tabWork" type="button">Work</button>
+          <button class="ghost" id="tabTickets" type="button">Tickets</button>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Skills / tone</h2>
+        <div id="workPane">
+          <div class="block">
+            <h2>Work / leases</h2>
+            <p class="hint">Crew owns leases - Control display-only</p>
+            <div class="queue" id="queueCells"></div>
+            <div id="workWidget" class="empty">loading...</div>
+            <div id="stalls"></div>
+          </div>
+          <div class="block">
+            <h2>Heartbeat / wakes</h2>
+            <div id="wakes" class="empty">No wakes. Control GET /v1/belt is display-only.</div>
+          </div>
+        </div>
+        <div id="ticketPane" hidden>
+          <div class="block">
+            <h2>Work - Tickets</h2>
+            <div id="tickets" class="empty">loading...</div>
+          </div>
+        </div>
+        <div class="block">
+          <h2>Crew</h2>
+          <div id="agents" class="empty empty--orb">No agents yet.</div>
+        </div>
+        <div class="block">
+          <h2>Memory</h2>
+          <div class="scope-row" id="memScopes">
+            <button class="scope-chip on" type="button" data-scope="space">space</button>
+            <button class="scope-chip" type="button" data-scope="user">user</button>
+            <button class="scope-chip" type="button" data-scope="agent">agent</button>
+            <button class="scope-chip" type="button" data-scope="run">run</button>
+          </div>
+          <p class="hint">Recall payloads are untrusted. Not orders.</p>
+          <div id="memory" class="empty empty--orb">No facts in this scope.</div>
+          <h2>Collections <span class="scope">crew</span></h2>
           <div id="skills" class="empty">loading...</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Activity</h2>
+        <div class="block">
+          <h2>Activity</h2>
           <div id="graph" class="graph"></div>
-          <div id="activity" class="empty">Agent-to-agent traffic lands here.</div>
+          <div class="chip-row" id="activityChips"></div>
+          <div id="activity" class="empty empty--orb">Agent-to-agent traffic lands here.</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Approvals</h2>
+        <div class="block">
+          <h2>HITL lease</h2>
           <div id="confirms" class="empty">None pending. Human is money and decision authority.</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Tickets</h2>
-          <div id="tickets" class="empty">loading...</div>
-        </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">PRs / mail / keys</h2>
+        <div class="block">
+          <h2>PRs / mail / keys</h2>
           <div id="desk" class="empty">loading...</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Routines</h2>
+        <div class="block">
+          <h2>Routines</h2>
           <div id="routines" class="empty">loading...</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Computer control</h2>
+        <div class="block">
+          <h2>Computer control</h2>
           <div id="mcpMaster" class="warn"></div>
           <div id="mcp"></div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Engine</h2>
+        <div class="block">
+          <h2>Engine</h2>
           <div id="engine" class="empty">checking...</div>
         </div>
       </div>
@@ -104,7 +141,7 @@
   <div class="toasts" id="toasts"></div>
   <div class="takeover" id="takeover" hidden>
     <div class="takeover__box" role="dialog" aria-modal="true" aria-labelledby="takeoverTitle">
-      <p class="takeover__kicker">Needs you</p>
+      <p class="takeover__kicker">HITL lease</p>
       <h2 id="takeoverTitle">Login or 2FA. Take over this computer.</h2>
       <p class="empty" id="takeoverBody">The agent stopped before typing secrets. Finish Chrome yourself. This stays up until you click Done, Let the agent click, or Deny.</p>
       <pre class="takeover__args" id="takeoverArgs"></pre>
@@ -120,13 +157,13 @@
       <div class="palette__query">
         <input class="palette__input" id="searchQ" placeholder="Search spaces, agents, messages" />
       </div>
-      <div id="searchHits" class="inspector__body"></div>
+      <div id="searchHits" class="belt__body"></div>
     </div>
   </div>
   <div class="host" id="teach">
     <div class="skill-card">
       <h2>Draft skill</h2>
-      <p class="empty">Write the task as markdown. Saved under data/crew/skills. Not Grok AppData.</p>
+      <p class="hint">Write the task as markdown. Saved under data/crew/skills. Collection scope: crew.</p>
       <label>Name</label>
       <input id="skillName" placeholder="monday-briefing" />
       <label>Playbook</label>
@@ -157,15 +194,25 @@
         <button class="ghost" id="closePlugins" type="button">Close</button>
       </div>
       <input class="plugins__search" id="pluginSearch" placeholder="Search apps" />
-      <div id="pluginList" class="inspector__body"></div>
+      <div id="pluginList" class="belt__body"></div>
     </div>
   </div>
   <div class="scrim" id="settings">
     <div class="dialog">
       <h2>Providers</h2>
-      <p class="empty">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
+      <p class="hint">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
       <form id="keysForm"></form>
       <div class="chain" id="providerChain"></div>
+      <div class="ladder">
+        <h3>Standing approvals</h3>
+        <p class="hint">Ladder: one-off, then session, then standing allowlist. Revocable. Repeated deny trips the circuit-breaker. Per-agent grants only tighten crew policy.</p>
+        <label><input type="radio" name="ladder" value="one-off" checked /> one-off</label>
+        <label><input type="radio" name="ladder" value="session" /> session</label>
+        <label><input type="radio" name="ladder" value="standing" /> standing allowlist</label>
+        <div id="allowList" class="empty">No standing tools.</div>
+        <button class="ghost" id="revokeStanding" type="button">Revoke standing</button>
+        <div id="circuitNote" class="warn"></div>
+      </div>
       <div class="dialog-foot">
         <button class="ghost" id="closeSettings" type="button">Close</button>
         <button class="ok" id="saveKeys" type="button">Save keys</button>
@@ -179,7 +226,9 @@
       source: null, seq: 0, runId: null, draft: "", keyFields: [],
       plan: null, skills: [], roles: [],
       activityOnly: false, focusAgent: null,
-      stick: true, unread: 0, retry: null, live: false
+      stick: true, unread: 0, retry: null, live: false,
+      belt: null, memScope: "space", claimBusy: null,
+      sessionAllow: {}, denyStreak: {}, runStarted: 0
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
@@ -203,9 +252,101 @@
       const blob = (c.tool || "") + " " + Object.keys(c.args || {}).join(" ");
       return AUTH_KEYS.test(blob) || /login|signin|sign-in|auth/i.test(blob);
     }
-    // Escape first, then re-introduce a small closed set of markup. Agents emit
-    // fenced code and tool dumps constantly, and a flat escaped blob made those
-    // unreadable - which is why answers were being scrolled straight past.
+    function toolTail(tool) {
+      const s = String(tool || "");
+      return s.indexOf(".") >= 0 ? s.split(".").pop() : s;
+    }
+    function toolClass(tool) {
+      const t = toolTail(tool).toLowerCase();
+      if (/click|mouse|button/.test(t)) return "click";
+      if (/type|key|hotkey|press/.test(t)) return "type";
+      if (/write|save|edit|patch|delete|unlink/.test(t)) return "file";
+      if (/shell|exec|command|bash|run/.test(t)) return "shell";
+      if (/screenshot|snapshot|scrape|read|get_|list_/.test(t)) return "read";
+      return "generic";
+    }
+    function leavesMachine(tool, args) {
+      const blob = (tool || "") + " " + JSON.stringify(args || {});
+      if (/https?:\/\//i.test(blob) || /uacc|windows-mcp|click|type|screenshot/i.test(blob)) return true;
+      return false;
+    }
+    function scopeNote(tool, args) {
+      const a = args || {};
+      const path = String(a.path || a.file || a.filename || "");
+      if (path && !leavesMachine(tool, args)) return "scope: local file";
+      if (leavesMachine(tool, args)) return "scope: leaves this machine";
+      return "scope: crew-local";
+    }
+    function humanTitle(c) {
+      const cls = toolClass(c.tool);
+      const name = toolTail(c.tool);
+      if (cls === "click") return "Click on screen";
+      if (cls === "type") return "Type into a window";
+      if (cls === "file") return "Change a local file";
+      if (cls === "shell") return "Run a command";
+      if (cls === "read") return "Read from this computer";
+      return "Allow " + name;
+    }
+    function verbs(c) {
+      const cls = toolClass(c.tool);
+      if (cls === "click") return { ok: "Click", deny: "Deny", edit: "Edit" };
+      if (cls === "type") return { ok: "Type", deny: "Deny", edit: "Edit" };
+      if (cls === "file") return { ok: "Allow write", deny: "Deny", edit: "Edit" };
+      if (cls === "shell") return { ok: "Run", deny: "Deny", edit: "Edit" };
+      return { ok: "Approve", deny: "Deny", edit: "Edit" };
+    }
+    function clampPreview(args) {
+      const red = redactArgs(args);
+      let s = JSON.stringify(red);
+      if (s.length > 180) s = s.slice(0, 177) + "...";
+      return s;
+    }
+    function ageLabel(iso) {
+      if (!iso) return "";
+      const t = new Date(iso).getTime();
+      if (isNaN(t)) return "";
+      const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+      if (sec < 60) return sec + "s oldest";
+      if (sec < 3600) return Math.floor(sec / 60) + "m oldest";
+      return Math.floor(sec / 3600) + "h oldest";
+    }
+    function parseGrant(raw) {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw.map(String);
+      try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : [String(raw)]; }
+      catch (e) { return String(raw).split(/[\s,]+/).filter(Boolean); }
+    }
+    function strictness(c) {
+      const agent = agentOf(c.agent_id);
+      const deny = parseGrant(agent && agent.deny_tools);
+      const allow = parseGrant(agent && agent.allow_tools);
+      const names = [c.tool, toolTail(c.tool)];
+      if (deny.some((d) => names.indexOf(d) >= 0)) return { gate: "agent grant", note: "per-agent policy only tightens" };
+      if (allow.length && !allow.some((a) => names.indexOf(a) >= 0)) return { gate: "agent grant", note: "per-agent policy only tightens" };
+      return { gate: "crew policy", note: "mutating tool needs operator approval" };
+    }
+    function loadLadder() {
+      try { return JSON.parse(localStorage.getItem("crew.ladder") || "{}"); }
+      catch (e) { return {}; }
+    }
+    function saveLadder(data) {
+      try { localStorage.setItem("crew.ladder", JSON.stringify(data)); } catch (e) { /* private mode */ }
+    }
+    function renderLadder() {
+      const data = loadLadder();
+      const mode = data.mode || "one-off";
+      document.querySelectorAll("input[name=ladder]").forEach((el) => { el.checked = el.value === mode; });
+      const allow = data.allow || {};
+      const keys = Object.keys(allow);
+      $("allowList").innerHTML = keys.length
+        ? keys.map((k) => `<div class="row"><span class="id">${esc(k)}</span> <span class="scope">${esc(allow[k])}</span></div>`).join("")
+        : `<div class="empty">No standing tools.</div>`;
+      const broken = data.circuit || {};
+      const trips = Object.keys(broken);
+      $("circuitNote").textContent = trips.length
+        ? "Circuit-breaker: " + trips.map((k) => k + " x" + broken[k]).join(", ")
+        : "";
+    }
     function fmt(text) {
       const chunks = String(text ?? "").split("```");
       let out = "";
@@ -236,12 +377,7 @@
     }
     function agentOf(id) { return state.agents.find((x) => x.id === id) || null; }
     function nameOf(id) { const a = agentOf(id); return a ? a.name : null; }
-    function colorOf(id) { const a = agentOf(id); return (a && a.color) || "#8b949e"; }
-
-    // -- transcript, mounted one node at a time ----------------------------
-    // The old renderer rewrote the whole log on every streamed token: it threw
-    // away the reader's text selection, fought their scroll, and got slower the
-    // longer the conversation ran.
+    function colorOf(id) { const a = agentOf(id); return (a && a.color) || "#8b91a3"; }
 
     function passesFilter(m) {
       if (state.focusAgent) return m.agent_id === state.focusAgent || m.to_agent_id === state.focusAgent;
@@ -278,8 +414,6 @@
       el.dataset.id = m.id;
       const body = String(m.content || "");
       if (m.role === "tool" || (m.role === "agent" && body.length > 420)) {
-        // Long tool dumps and long wire messages collapse. They are evidence,
-        // not the answer, and at full length they buried the answer.
         const head = body.split("\n")[0].slice(0, 110);
         el.innerHTML = `<div class="who">${whoLine(m)}${badgeOf(m)}</div>`
           + `<details class="bubble fold"><summary>${esc(head)}${body.length > head.length ? " ..." : ""}</summary>`
@@ -335,7 +469,7 @@
       state.unread = 0; $("jump").hidden = true;
       const rows = state.messages.filter(passesFilter);
       if (!rows.length) {
-        $("log").innerHTML = `<div class="empty">Nothing here yet.</div>`;
+        $("log").innerHTML = `<div class="empty empty--orb">Nothing here yet.</div>`;
       } else {
         rows.forEach((m) => { state.mounted.add(m.id); $("log").appendChild(msgNode(m)); });
       }
@@ -348,12 +482,9 @@
       state.messages.push(m);
       state.messages.sort((a, b) => (a.seq || 0) - (b.seq || 0));
       state.seq = Math.max(state.seq, m.seq || 0);
-      // A message that sorts before the tail cannot simply be appended.
       if (state.messages[state.messages.length - 1].id === m.id) mount(m); else renderLog();
       return true;
     }
-
-    // -- the agent-to-agent panel ------------------------------------------
 
     function wireRows() { return state.messages.filter((m) => m.role === "agent"); }
     function renderWire() {
@@ -370,9 +501,6 @@
         : `<div class="empty">Agent-to-agent traffic lands here.</div>`;
       renderGraph(a2a);
     }
-    // A live picture of who is actually talking to whom. The flat list could
-    // not show that one teammate was carrying every edge, or that a spawned
-    // agent had never been spoken to at all.
     function renderGraph(a2a) {
       const nodes = state.agents.slice(0, 8);
       if (nodes.length < 2) { $("graph").innerHTML = ""; return; }
@@ -395,21 +523,19 @@
         const p = at[ends[0]], q = at[ends[1]];
         const hot = k === lastKey;
         return `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${q.x.toFixed(1)}" y2="${q.y.toFixed(1)}"`
-          + ` stroke="${hot ? "#4fc48c" : esc(p.a.color || "#8b949e")}" stroke-width="${Math.min(4, 0.8 + edges[k] * 0.5).toFixed(1)}"`
+          + ` stroke="${hot ? "#5ec4c9" : esc(p.a.color || "#8b91a3")}" stroke-width="${Math.min(4, 0.8 + edges[k] * 0.5).toFixed(1)}"`
           + ` opacity="${hot ? 0.95 : 0.45}" />`;
       }).join("");
       const dots = nodes.map((a) => {
         const p = at[a.id];
         const busy = a.status === "thinking" || a.status === "acting";
         return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${busy ? 8 : 6}"`
-          + ` fill="${esc(a.color || "#8b949e")}" stroke="${busy ? "#4fc48c" : "none"}" stroke-width="1.5">`
+          + ` fill="${esc(a.color || "#8b91a3")}" stroke="${busy ? "#5ec4c9" : "none"}" stroke-width="1.5">`
           + `<title>${esc(a.name)} (${esc(a.status)})</title></circle>`
           + `<text x="${p.x.toFixed(1)}" y="${(p.y + 17).toFixed(1)}" text-anchor="middle" class="gnode">${esc(a.name.slice(0, 9))}</text>`;
       }).join("");
       $("graph").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="agent to agent traffic">${lines}${dots}</svg>`;
     }
-
-    // -- panels -------------------------------------------------------------
 
     function setProvider(active, chain) {
       $("providerChip").textContent = active ? (active.label + " / " + active.model) : "no provider configured";
@@ -421,29 +547,48 @@
     }
     function renderSpaces() {
       $("spaces").innerHTML = state.spaces.map((s, i) =>
-        `<button class="space${s.id === state.spaceId ? " active" : ""}" data-id="${s.id}"><span class="ord">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}</button>`
+        `<button class="space${s.id === state.spaceId ? " on" : ""}" data-id="${s.id}"><span class="ord">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}</button>`
       ).join("");
       $("spaces").querySelectorAll(".space").forEach((el) => el.onclick = () => selectSpace(el.dataset.id));
     }
     function renderFocus() {
       const bar = $("focusBar");
+      const a2a = wireRows();
+      const kinds = {};
+      a2a.forEach((m) => {
+        const k = ((m.meta && m.meta.a2a) || {}).kind || "message";
+        kinds[k] = (kinds[k] || 0) + 1;
+      });
+      const chips = [];
+      if (state.agents.length) chips.push(`<span class="chip-mini">subagent ${state.agents.length}</span>`);
+      if (state.confirms.some((c) => c.status === "pending")) chips.push(`<span class="chip-mini stall">interrupt HITL</span>`);
+      if (kinds.ask || kinds.broadcast) chips.push(`<span class="chip-mini">offload</span>`);
+      Object.keys(kinds).slice(0, 3).forEach((k) => {
+        chips.push(`<span class="chip-mini">${esc(k)}</span>`);
+      });
+      $("activityChips").innerHTML = chips.join("");
       if (state.focusAgent) {
         const a = agentOf(state.focusAgent);
         bar.hidden = false;
-        bar.innerHTML = `Showing only traffic touching <b>${esc(a ? a.name : "agent")}</b> <button class="ghost" id="clearFocus" type="button">Show all</button>`;
+        bar.innerHTML = `Showing only traffic touching <b>${esc(a ? a.name : "agent")}</b> `
+          + chips.join(" ")
+          + ` <button class="ghost" id="clearFocus" type="button">Show all</button>`;
         $("clearFocus").onclick = () => { state.focusAgent = null; renderAgents(); renderFocus(); renderLog(); };
+      } else if (chips.length) {
+        bar.hidden = false;
+        bar.innerHTML = chips.join(" ");
       } else { bar.hidden = true; bar.innerHTML = ""; }
     }
     function renderAgents() {
-      if (!state.agents.length) { $("agents").innerHTML = `<div class="empty">No agents yet.</div>`; return; }
+      if (!state.agents.length) { $("agents").innerHTML = `<div class="empty empty--orb">No agents yet.</div>`; return; }
       $("agents").innerHTML = state.agents.map((a) => {
         const cap = a.capability ? " - " + a.capability : "";
         const model = a.model ? " - " + a.model : "";
         const deny = a.deny_tools ? " - deny " + a.deny_tools : "";
         const busy = a.status === "thinking" || a.status === "acting";
         return `<button class="agent${state.focusAgent === a.id ? " agent--on" : ""}" data-id="${esc(a.id)}" type="button" title="Show only this agent's traffic">`
-          + `<div class="orb ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#a8c95f")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
-          + `<div>${esc(a.name)}<small>${esc(a.status)}${esc(cap)}${esc(model)}${esc(deny)}</small></div></button>`;
+          + `<div class="orb ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#7ea0d4")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
+          + `<div>${esc(a.name)}<small><span class="id">${esc(a.id || "")}</span> ${esc(a.status)}${esc(cap)}${esc(model)}${esc(deny)}</small></div></button>`;
       }).join("");
       $("agents").querySelectorAll(".agent").forEach((el) => el.onclick = () => {
         state.focusAgent = state.focusAgent === el.dataset.id ? null : el.dataset.id;
@@ -453,11 +598,11 @@
     function renderSkills(rows) {
       const list = rows || state.skills || [];
       if (!list.length) {
-        $("skills").innerHTML = `<div class="empty">None yet. Teach saves markdown. tone.md is ASCII grok-bot default.</div>`;
+        $("skills").innerHTML = `<div class="empty">None yet. Teach saves markdown. Scope: crew collection.</div>`;
         return;
       }
       $("skills").innerHTML = list.map((s) =>
-        `<div class="routines-row">${esc(s.title)}<small>${esc(s.head || s.path || "")}</small></div>`
+        `<div class="row">${esc(s.title)} <span class="scope">crew</span><small>${esc(s.head || s.path || "")}</small></div>`
       ).join("");
     }
     function renderRoles(roles) {
@@ -471,42 +616,69 @@
           `<span class="role-chip${hits.has(r.name) ? " role-chip--hit" : ""}" title="${esc(r.blurb)}">${esc(r.name)}</span>`
         ).join("");
     }
-    // Approvals block a run. They used to live only in the inspector, which is
-    // collapsible - so an operator with it closed saw a run that had simply
-    // stopped, with nothing saying it was waiting on them.
+    function confirmCard(c) {
+      const v = verbs(c);
+      const gate = strictness(c);
+      const standing = (loadLadder().allow || {})[c.tool] || state.sessionAllow[c.tool];
+      const broken = (loadLadder().circuit || {})[c.tool];
+      return `<div class="confirm">`
+        + `<div><b>${esc(humanTitle(c))}</b>`
+        + `<div class="hint">${esc(scopeNote(c.tool, c.args))}</div>`
+        + `<pre class="preview">${esc(clampPreview(c.args))}</pre>`
+        + `<div class="hint"><span class="strict">${esc(gate.gate)}</span> ${esc(gate.note)}`
+        + ` <span class="id">${esc(c.id || "")}</span>`
+        + (standing && !broken ? ` <span class="scope">${esc(standing)}</span>` : "")
+        + (broken ? ` <span class="claim stranded">circuit-breaker</span>` : "")
+        + `</div></div>`
+        + `<button data-id="${c.id}" data-ok="1">${esc(v.ok)}</button>`
+        + `<button class="deny" data-id="${c.id}" data-ok="0">${esc(v.deny)}</button>`
+        + `<button class="ghost" data-id="${c.id}" data-act="edit">${esc(v.edit)}</button>`
+        + (isAuthConfirm(c) ? `<button data-id="${c.id}" data-act="takeover">Take over</button>` : "")
+        + `</div>`;
+    }
     function renderConfirms() {
       const pending = state.confirms.filter((c) => c.status === "pending");
       const bar = $("approvalBar");
       const overlay = $("takeover");
+      const cards = $("approvalCards");
       if (!pending.length) {
         $("confirms").innerHTML = `<div class="empty">None pending. Human is money and decision authority.</div>`;
-        bar.hidden = true; bar.innerHTML = "";
+        bar.hidden = true; if (cards) cards.innerHTML = "";
         overlay.hidden = true;
+        renderFocus();
         return;
       }
-      const html = pending.map((c) =>
-        `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">${esc(JSON.stringify(redactArgs(c.args)))}</div></div>
-         <button data-id="${c.id}" data-act="takeover">Take over</button>
-         <button data-id="${c.id}" data-ok="1">Approve</button>
-         <button class="deny" data-id="${c.id}" data-ok="0">Deny</button></div>`
-      ).join("");
+      const html = pending.map(confirmCard).join("");
       $("confirms").innerHTML = html;
       bar.hidden = false;
-      bar.innerHTML = `<div class="approvals__head">${pending.length} call${pending.length > 1 ? "s" : ""} waiting on you</div>` + html;
-      const bind = (root) => root.querySelectorAll("button[data-id]").forEach((el) => {
+      $("hitlCount").textContent = pending.length + " HITL";
+      $("hitlAge").textContent = ageLabel(pending[0].created_at);
+      cards.innerHTML = html;
+      const bind = (root) => root && root.querySelectorAll("button[data-id]").forEach((el) => {
         el.onclick = () => {
           if (el.dataset.act === "takeover") decide(el.dataset.id, false, true);
+          else if (el.dataset.act === "edit") editConfirm(el.dataset.id);
           else decide(el.dataset.id, el.dataset.ok === "1", false);
         };
       });
-      bind($("confirms")); bind(bar);
-      const lead = pending.find(isAuthConfirm) || pending[0];
-      overlay.hidden = false;
-      overlay.dataset.id = lead.id;
-      $("takeoverTitle").textContent = isAuthConfirm(lead)
-        ? "Login or 2FA. Take over this computer."
-        : "Agent is waiting. Take over if this is a login wall.";
-      $("takeoverArgs").textContent = lead.tool + " " + JSON.stringify(redactArgs(lead.args));
+      bind($("confirms")); bind(cards);
+      const lead = pending.find(isAuthConfirm);
+      if (lead) {
+        overlay.hidden = false;
+        overlay.dataset.id = lead.id;
+        $("takeoverTitle").textContent = "Login or 2FA. Take over this computer.";
+        $("takeoverArgs").textContent = lead.tool + " " + JSON.stringify(redactArgs(lead.args));
+      } else {
+        overlay.hidden = true;
+      }
+      renderFocus();
+    }
+    function editConfirm(id) {
+      const c = state.confirms.find((x) => x.id === id);
+      if (!c) return;
+      $("input").value = "Edit " + (c.tool || "tool") + " " + clampPreview(c.args);
+      growInput();
+      $("input").focus();
     }
     function renderMcp() {
       const masterOn = state.mcp.some((s) => s.enabled);
@@ -522,7 +694,7 @@
     function renderRoutines(rows) {
       if (!rows || !rows.length) { $("routines").innerHTML = `<div class="empty">None.</div>`; return; }
       $("routines").innerHTML = rows.map((r) =>
-        `<div class="routines-row">${esc(r.name)}<small>${esc(r.when)} - ${esc(r.layer)}</small></div>`
+        `<div class="row">${esc(r.name)}<small>${esc(r.when)} - ${esc(r.layer)}</small></div>`
       ).join("");
     }
     function renderPlugins() {
@@ -530,19 +702,75 @@
       const rows = state.plugins.filter((p) => !q || (p.name + p.slug + p.layer).toLowerCase().indexOf(q) >= 0);
       $("pluginList").innerHTML = rows.map((p) =>
         `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
-         <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#7A7A80">${esc(p.slug)} - ${esc(p.layer)}</small></div>
+         <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#8b91a3">${esc(p.slug)} - ${esc(p.layer)}</small></div>
          <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : "mapped"}</div></div>`
       ).join("");
     }
     function renderTickets(board) {
       if (!board || !board.tickets || !board.tickets.length) {
-        $("tickets").innerHTML = `<div class="empty">${esc((board && board.law) || "No CLAIMS.json")}</div>`;
+        $("tickets").innerHTML = `<div class="empty empty--orb">${esc((board && board.law) || "No CLAIMS.json")}</div>`;
         return;
       }
       $("tickets").innerHTML = `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>` +
-        board.tickets.slice(0, 12).map((t) =>
-          `<div class="routines-row">${esc(t.ticket)}<small>${esc(t.role)} - write=${t.may_write}</small></div>`
-        ).join("");
+        board.tickets.slice(0, 12).map((t) => {
+          const seated = t.role === "SEATED";
+          const label = seated ? "claimed" : "unclaimed";
+          const key = String(t.ticket || "");
+          return `<div class="row">${esc(key)} <span class="claim ${seated ? "" : "unclaimed"}">${label}</span>`
+            + `<small><span class="id">${esc(t.owner_pr || "")}</span> ${esc(t.role)} - write=${t.may_write}</small>`
+            + `<div class="row-actions">`
+            + `<button class="ghost" type="button" data-claim="${esc(key)}" ${seated ? "disabled" : ""}>Claim</button>`
+            + `<button class="ghost" type="button" data-release="${esc(key)}" ${seated ? "" : "disabled"}>Release</button>`
+            + `</div></div>`;
+        }).join("");
+      $("tickets").querySelectorAll("[data-claim]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.claim, "claim"));
+      $("tickets").querySelectorAll("[data-release]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.release, "release"));
+    }
+    async function checkoutTicket(ticket, act) {
+      if (state.claimBusy) {
+        toast("Claim in flight. No silent retry.", "warn");
+        return;
+      }
+      state.claimBusy = ticket + ":" + act;
+      try {
+        const resp = await fetch("/crew/tickets/" + encodeURIComponent(ticket) + "/" + act, { method: "POST" });
+        if (resp.status === 409) {
+          toast("Someone else holds this claim.", "bad");
+          return;
+        }
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          toast((data.detail || ("claim " + resp.status)) + " - no silent retry.", "bad");
+          return;
+        }
+        const board = await api("/crew/tickets").catch(() => null);
+        if (board) renderTickets(board);
+      } catch (err) {
+        toast(err.message + " - no silent retry.", "bad");
+      } finally {
+        state.claimBusy = null;
+      }
+    }
+    function renderMemory() {
+      const scope = state.memScope || "space";
+      const facts = [];
+      if (scope === "space") {
+        (state.skills || []).slice(0, 6).forEach((s) => facts.push({ k: s.title, v: s.head || "skill", id: s.path || "" }));
+        const space = state.spaces.find((s) => s.id === state.spaceId);
+        if (space) facts.push({ k: "space", v: space.title, id: space.id });
+      } else if (scope === "user") {
+        state.messages.filter((m) => m.role === "user").slice(-4).forEach((m) =>
+          facts.push({ k: "you", v: String(m.content || "").slice(0, 80), id: m.id }));
+      } else if (scope === "agent") {
+        state.agents.slice(0, 6).forEach((a) => facts.push({ k: a.name, v: a.status + (a.capability ? " " + a.capability : ""), id: a.id }));
+      } else if (scope === "run") {
+        facts.push({ k: "run", v: $("runStatus").textContent || "idle", id: state.runId || "" });
+        facts.push({ k: "seq", v: String(state.seq || 0), id: "seq" });
+      }
+      const capped = facts.slice(0, 8);
+      $("memory").innerHTML = capped.length
+        ? capped.map((f) => `<div class="row">${esc(f.k)} <span class="scope">${esc(scope)}</span><small class="id">${esc(f.id)}</small><div class="hint">${esc(f.v)}</div></div>`).join("")
+        : `<div class="empty empty--orb">No facts in this scope.</div>`;
     }
     function renderDesk(desk) {
       if (!desk) { $("desk").innerHTML = `<div class="empty">Desk unavailable.</div>`; return; }
@@ -550,13 +778,59 @@
       const mail = desk.inbox || {};
       const cursor = desk.cursor || {};
       const prLines = prs.length
-        ? prs.slice(0, 8).map((p) => `<div class="routines-row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
+        ? prs.slice(0, 8).map((p) => `<div class="row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
         : `<div class="empty">${esc((desk.prs && desk.prs.detail) || "No open PRs (or gh not in this folder). Ask in chat.")}</div>`;
       $("desk").innerHTML =
         `<div class="empty">${esc(desk.law || "")}</div>` +
-        `<div class="routines-row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
-        `<div class="routines-row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
+        `<div class="row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
+        `<div class="row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
         prLines;
+    }
+    function renderBelt(belt) {
+      state.belt = belt || state.belt;
+      const b = state.belt || {};
+      const q = b.queue || { pending: 0, leased: 0, done: 0, dead: 0 };
+      $("queueCells").innerHTML =
+        `<div class="queue__cell"><b>${q.pending || 0}</b><span>pending</span></div>`
+        + `<div class="queue__cell leased"><b>${q.leased || 0}</b><span>leased</span></div>`
+        + `<div class="queue__cell done"><b>${q.done || 0}</b><span>done</span></div>`
+        + `<div class="queue__cell dead"><b>${q.dead || 0}</b><span>dead</span></div>`;
+      const items = (b.tickets && b.tickets.items) || [];
+      const ready = items.filter((t) => t.ready).length;
+      const seated = items.filter((t) => !t.ready).length;
+      const held = q.leased || 0;
+      const hitl = (b.confirms || []).length;
+      $("workWidget").innerHTML =
+        `<div class="work-stats">`
+        + `<span>ready <b>${ready}</b></span>`
+        + `<span>seated <b>${seated}</b></span>`
+        + `<span>held <b>${held}</b></span>`
+        + `<span>HITL pending <b>${hitl}</b></span>`
+        + `</div>`;
+      const stalls = [];
+      const strandedReady = items.filter((t) => t.ready && !t.repo && !t.title);
+      if (ready && seated === 0) stalls.push("ready work, no assignee");
+      items.forEach((t) => {
+        if (t.ready && !(t.number || t.title)) stalls.push("stranded ticket");
+      });
+      if (!state.live) stalls.push("heartbeat stall");
+      if ((q.dead || 0) > 0) stalls.push("dead lease");
+      if (state.runStarted && Date.now() - state.runStarted > 120000 && $("runStatus").textContent === "streaming") {
+        stalls.push("stream stall");
+      }
+      $("stalls").innerHTML = stalls.length
+        ? stalls.map((s) => `<span class="chip-mini stall">${esc(s)}</span>`).join(" ")
+          + `<div class="hint">Stall chips only. Cancel stops this run. Does not kill Manager.</div>`
+        : `<div class="hint">No stalls. Cancel never force-kills Manager.</div>`;
+      const wakes = b.wakes || [];
+      const keepalive = state.live ? "keepalive" : "stranded";
+      const head = `<div class="row">${esc(keepalive)} <span class="claim ${state.live ? "" : "stranded"}">${esc(keepalive)}</span>`
+        + `<small>converse=${b.converse ? "yes" : "no"} bus=${esc(b.bus || "")} needs_human=${b.plan_for_next && b.plan_for_next.needs_human ? "yes" : "no"}</small></div>`;
+      const wakeRows = wakes.length
+        ? wakes.map((w) => `<div class="wake">${esc(w.kind)} <span class="claim">${esc(w.state || "")}</span><small>${esc(w.note || "")}</small></div>`).join("")
+        : `<div class="empty">No wakes. Control GET /v1/belt is display-only.</div>`;
+      $("wakes").innerHTML = head + wakeRows;
+      renderMemory();
     }
     function renderKeyForm(fields, status) {
       $("keysForm").innerHTML = fields.map((f) => {
@@ -572,20 +846,20 @@
     }
     function setConn(live) {
       state.live = live;
-      $("conn").textContent = live ? "live" : "reconnecting";
+      $("conn").textContent = live ? "heartbeat" : "stranded";
       $("conn").classList.toggle("off", !live);
+      if (state.belt) renderBelt(state.belt);
     }
 
-    // -- boot and space switching -------------------------------------------
-
     async function boot() {
-      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills] = await Promise.all([
+      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt] = await Promise.all([
         api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
         api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
         api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
         api("/crew/tickets").catch(() => ({ tickets: [] })),
         api("/crew/desk").catch(() => null),
-        api("/crew/skills").catch(() => [])
+        api("/crew/skills").catch(() => []),
+        api("/v1/belt").catch(() => api("/crew/belt").catch(() => null))
       ]);
       renderRoles(roles || []);
       state.skills = skills || [];
@@ -607,6 +881,8 @@
       renderRoutines(routines || []);
       renderTickets(tickets || {});
       renderDesk(desk);
+      renderBelt(belt);
+      renderLadder();
       state.spaces = spaces;
       if (!state.spaces.length) {
         const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title: "General" }) });
@@ -614,6 +890,13 @@
       }
       renderSpaces();
       await selectSpace(state.spaces[0].id);
+      setInterval(refreshBelt, 4000);
+    }
+    async function refreshBelt() {
+      try {
+        const belt = await api("/v1/belt");
+        renderBelt(belt);
+      } catch (err) { /* display-only; converse stays on this page */ }
     }
     async function selectSpace(id) {
       state.spaceId = id;
@@ -633,12 +916,9 @@
       state.seq = messages.reduce((n, m) => Math.max(n, m.seq || 0), 0);
       state.agents = agents;
       state.confirms = confirms;
-      renderFocus(); renderAgents(); renderConfirms(); renderLog();
+      renderFocus(); renderAgents(); renderConfirms(); renderLog(); renderMemory();
       listen(id);
     }
-    // Refetch everything newer than what we hold. Used on reconnect and on the
-    // server's resync signal, which is how a client that fell behind stops
-    // rendering a transcript with holes in it.
     async function catchUp(id) {
       try {
         const rows = await api("/crew/spaces/" + id + "/messages?after=" + state.seq);
@@ -658,8 +938,6 @@
       if (state.source) { state.source.close(); state.source = null; }
       const open = () => {
         if (state.spaceId !== id) return;
-        // Reopen with the current seq rather than letting EventSource retry the
-        // original URL, whose `after` would be frozen at first-connect time.
         const src = new EventSource("/crew/spaces/" + id + "/events?after=" + state.seq);
         state.source = src;
         src.onopen = () => setConn(true);
@@ -687,8 +965,10 @@
           }
           if (data.plan) { state.plan = data.plan; renderRoles(); }
           if (data.status) {
-            $("runStatus").textContent = data.status + (data.stats && data.stats.llm_calls ? " - " + data.stats.llm_calls + " calls" : "");
+            const calls = data.stats && data.stats.llm_calls ? data.stats.llm_calls : 0;
+            $("runStatus").textContent = data.status + (calls ? " " + calls + " calls" : "");
             $("cancelRun").hidden = data.status !== "running";
+            if (data.status === "running") state.runStarted = Date.now();
             if (data.status !== "running") { state.draft = ""; paintDraft(); }
           }
         };
@@ -708,17 +988,12 @@
       open();
     }
 
-    // -- actions -------------------------------------------------------------
-
     async function send() {
       const text = $("input").value.trim();
       if (!text || !state.spaceId) return;
       $("input").value = ""; growInput();
       state.stick = true;
       try {
-        // A run in flight is not a reason to refuse input: the server queues
-        // the message into the Manager's mailbox, which is how the operator
-        // steers a run that is already going.
         const posted = await api("/crew/spaces/" + state.spaceId + "/messages", { method: "POST", body: JSON.stringify({ text }) });
         if (posted.queued) toast("Queued for the running crew.");
         state.runId = posted.run_id || state.runId;
@@ -729,11 +1004,38 @@
       }
     }
     async function decide(id, approved, takeover) {
+      const c = state.confirms.find((x) => x.id === id);
+      const tool = c && c.tool;
       try {
         await api("/crew/confirms/" + id, {
           method: "POST",
           body: JSON.stringify({ approved: !!approved, takeover: !!takeover })
         });
+        if (tool && approved) {
+          const mode = (document.querySelector("input[name=ladder]:checked") || {}).value || "one-off";
+          if (mode === "session") state.sessionAllow[tool] = "session";
+          if (mode === "standing") {
+            const data = loadLadder();
+            data.allow = data.allow || {};
+            data.allow[tool] = "standing";
+            saveLadder(data);
+            renderLadder();
+          }
+        }
+        if (tool && !approved && !takeover) {
+          state.denyStreak[tool] = (state.denyStreak[tool] || 0) + 1;
+          if (state.denyStreak[tool] >= 3) {
+            const data = loadLadder();
+            data.circuit = data.circuit || {};
+            data.circuit[tool] = state.denyStreak[tool];
+            if (data.allow) delete data.allow[tool];
+            data.mode = "one-off";
+            saveLadder(data);
+            delete state.sessionAllow[tool];
+            renderLadder();
+            toast("Circuit-breaker: standing revoked for " + tool, "warn");
+          }
+        }
       } catch (err) { toast(err.message, "bad"); }
     }
     async function arm(name, armed) {
@@ -795,28 +1097,60 @@
     $("toggleRail").onclick = () => {
       const rail = $("rail");
       const autoHidden = window.matchMedia("(max-width: 900px)").matches
-        && !rail.classList.contains("rail--pinned")
-        && !rail.classList.contains("rail--closed");
-      if (autoHidden) { rail.classList.add("rail--pinned"); return; }
-      rail.classList.toggle("rail--closed");
-      rail.classList.add("rail--pinned");
+        && !rail.classList.contains("spaces--pinned")
+        && !rail.classList.contains("spaces--shut");
+      if (autoHidden) { rail.classList.add("spaces--pinned"); return; }
+      rail.classList.toggle("spaces--shut");
+      rail.classList.add("spaces--pinned");
     };
     $("toggleInsp").onclick = () => {
       const insp = $("insp");
       const autoHidden = window.matchMedia("(max-width: 900px)").matches
-        && !insp.classList.contains("inspector--pinned")
-        && !insp.classList.contains("inspector--closed");
-      if (autoHidden) { insp.classList.add("inspector--pinned"); return; }
-      insp.classList.toggle("inspector--closed");
-      insp.classList.add("inspector--pinned");
+        && !insp.classList.contains("belt--pinned")
+        && !insp.classList.contains("belt--shut");
+      if (autoHidden) { insp.classList.add("belt--pinned"); return; }
+      insp.classList.toggle("belt--shut");
+      insp.classList.add("belt--pinned");
     };
     $("uiSmaller").onclick = () => setScale(-0.05);
     $("uiBigger").onclick = () => setScale(0.05);
-    $("openSettings").onclick = () => $("settings").classList.add("open");
+    $("openSettings").onclick = () => { renderLadder(); $("settings").classList.add("open"); };
     $("closeSettings").onclick = () => $("settings").classList.remove("open");
     $("openPlugins").onclick = () => $("plugins").classList.add("open");
     $("closePlugins").onclick = () => $("plugins").classList.remove("open");
     $("pluginSearch").oninput = renderPlugins;
+    $("tabWork").onclick = () => {
+      $("workPane").hidden = false; $("ticketPane").hidden = true;
+      $("tabWork").classList.add("on"); $("tabTickets").classList.remove("on");
+    };
+    $("tabTickets").onclick = () => {
+      $("workPane").hidden = true; $("ticketPane").hidden = false;
+      $("tabTickets").classList.add("on"); $("tabWork").classList.remove("on");
+    };
+    $("memScopes").querySelectorAll(".scope-chip").forEach((el) => {
+      el.onclick = () => {
+        state.memScope = el.dataset.scope;
+        $("memScopes").querySelectorAll(".scope-chip").forEach((x) => x.classList.toggle("on", x === el));
+        renderMemory();
+      };
+    });
+    document.querySelectorAll("input[name=ladder]").forEach((el) => {
+      el.onchange = () => {
+        const data = loadLadder();
+        data.mode = el.value;
+        saveLadder(data);
+        renderLadder();
+      };
+    });
+    $("revokeStanding").onclick = () => {
+      const data = loadLadder();
+      data.allow = {};
+      data.mode = "one-off";
+      saveLadder(data);
+      state.sessionAllow = {};
+      renderLadder();
+      toast("Standing allowlist revoked.");
+    };
     async function runSearch() {
       const q = $("searchQ").value.trim();
       let hits = [];
@@ -920,7 +1254,7 @@
       return !!dt && Array.from(dt.types || []).indexOf("Files") >= 0;
     };
     document.addEventListener("dragenter", (e) => {
-      if (!hasFiles(e)) return;   // dragging a text selection used to raise the veil too
+      if (!hasFiles(e)) return;
       e.preventDefault();
       dragDepth += 1;
       veil.classList.add("on");
