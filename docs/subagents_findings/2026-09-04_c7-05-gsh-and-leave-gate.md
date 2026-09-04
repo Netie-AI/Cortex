@@ -25,3 +25,9 @@ python -m bench.heldout --shadow-replay --limit 3 --shadow-path .tmp/l2_shadow_p
 ```
 
 Does not prove: G-sh >= 500 live lines, L2-on-miss serve, or p95 vs SHADOW-off.
+
+## After PR 126 squash (2026-09-04)
+
+`#126` merged the live scorer + leave-gate. It did **not** take metadata-off, `MISSING_FROM` / fenced-FROM extract, sku_count synonyms, or Malay `berapa`. Those live on `cursor/c7-05-l2-sql-main` vs current `main`.
+
+G-sh snapshot (local `.tmp/l2_shadow_gsh.jsonl`, gitignored): **237 unique / 96 `l2_sql`**. Histogram still includes pre-FROM-fix `NO_CANDIDATE` and leftover alias EXPLAIN rows. Continue `--offset 237`. Do not close Cortex `#104`.
