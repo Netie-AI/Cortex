@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -404,7 +405,11 @@ def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:
         to_agent_id=scout["id"],
         meta={"a2a": {"kind": a2a.ASK, "from": "Manager", "to": "Scout", "reply_to": None}},
     )
-    crew.runtime.switch.open_ask(mgr["id"], scout["id"], ask["id"])
+
+    async def _arm() -> None:
+        crew.runtime.switch.open_ask(mgr["id"], scout["id"], ask["id"])
+
+    asyncio.run(_arm())
     body = client.http.get(f"/crew/spaces/{space['id']}/threads").json()
     assert body["bus"] == "switchboard"
     assert body["pending"] == 1

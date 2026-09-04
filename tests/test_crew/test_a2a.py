@@ -474,7 +474,7 @@ async def test_spawn_then_message_does_not_start_the_teammate_twice(rig2) -> Non
     assert len(reports) == 1, f"Scout ran more than once: {[m['content'] for m in reports]}"
 
 
-def test_hud_threads_correlate_ask_reply_and_pending() -> None:
+async def test_hud_threads_correlate_ask_reply_and_pending() -> None:
     """The operator HUD groups on reply_to; pending overlay is live wait."""
     ask = {
         "id": "q1",
@@ -505,7 +505,7 @@ def test_hud_threads_correlate_ask_reply_and_pending() -> None:
     assert waiting["threads"][0]["status"] == a2a.WAITING
 
 
-def test_hud_includes_cmd_operator_stamps_on_the_same_bus() -> None:
+async def test_hud_includes_cmd_operator_stamps_on_the_same_bus() -> None:
     """CMD #139 stamps meta.a2a on POST /spaces/messages; do not fork a second inbox."""
     user = {
         "id": "u1",
@@ -527,7 +527,7 @@ def test_hud_includes_cmd_operator_stamps_on_the_same_bus() -> None:
     assert threads[0]["to"] == "Scout"
 
 
-def test_hud_marks_dead_closer_on_the_ask_thread() -> None:
+async def test_hud_marks_dead_closer_on_the_ask_thread() -> None:
     ask = {
         "id": "q1",
         "role": "agent",
