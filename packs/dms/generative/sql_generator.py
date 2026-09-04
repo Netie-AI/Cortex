@@ -21,8 +21,10 @@ _SELECT = re.compile(r"(SELECT\b.+)", re.I | re.S)
 
 
 def is_configured() -> bool:
-    """True when L2 is enabled and OpenVault answers (FreeRoute path exists)."""
-    if os.environ.get("DMS_L2_ENABLED", "").lower() not in ("1", "true", "yes"):
+    """True when L2 is enabled or shadowed, and OpenVault answers."""
+    enabled = os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes")
+    shadow = os.environ.get("DMS_L2_SHADOW", "").lower() in ("1", "true", "yes")
+    if not (enabled or shadow):
         return False
     try:
         from CortexOS.integrations.openvault_client import ping

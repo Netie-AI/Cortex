@@ -1318,10 +1318,14 @@ def answer(
             return _abstain_unbound(question, audit_id, reason=str(exc))
 
     def _done(result: dict[str, Any]) -> dict[str, Any]:
-        if not require_grounding:
-            return result
-        if "grant_kind" not in result:
-            return _stamp_grant(result, kind=grant_kind, sources=granted_sources)
+        if require_grounding and "grant_kind" not in result:
+            result = _stamp_grant(result, kind=grant_kind, sources=granted_sources)
+        try:
+            from CortexOS.dms.l2_generation import maybe_record_l2_shadow
+
+            maybe_record_l2_shadow(question, result, verified=verified)
+        except Exception:  # noqa: BLE001 — shadow must never affect served
+            pass
         return result
 
     def _abs(reason: str) -> dict[str, Any]:

@@ -68,6 +68,7 @@ def test_promotion_surfaces_after_five(tmp_path: Path):
 
 def test_generator_unconfigured_without_l2_flag(monkeypatch):
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
+    monkeypatch.delenv("DMS_L2_SHADOW", raising=False)
     assert sql_generator.is_configured() is False
     assert sql_generator.generate_candidates("top skus", {}) == []
 
