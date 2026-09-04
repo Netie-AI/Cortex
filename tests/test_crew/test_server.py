@@ -327,6 +327,8 @@ def test_ticket_claim_is_local_assign_and_refuses_seated(
     )
     assert blocked.status_code == 409
     claims.write_text('{"tickets":[]}', encoding="utf-8")
+    client.llm.manager.append(LLMResult(text="Scout is on the ticket."))
+    client.llm.teammate.append(LLMResult(text="Working Netie-AI/Cortex#162."))
     ok = client.http.post(
         "/crew/tickets/claim",
         json={
@@ -336,7 +338,18 @@ def test_ticket_claim_is_local_assign_and_refuses_seated(
         },
     ).json()
     assert ok["ok"] is True
+    assert ok.get("run_id")
     assert "CLAIMS" in ok["law"]
+    deadline = time.time() + 20
+    while client.crew.runtime._space_run.get(space["id"]):
+        if time.time() > deadline:
+            raise AssertionError("assign run did not finish")
+        time.sleep(0.05)
+    painted = " ".join(
+        str(m.get("content") or "")
+        for m in client.http.get(f"/crew/spaces/{space['id']}/messages").json()
+    )
+    assert "Working Netie-AI/Cortex#162." in painted
     board = client.http.get("/crew/tickets").json()
     assert board["assignments"][0]["spec"] == "Netie-AI/Cortex#162"
     assert board["assignments"][0]["agent"] == "Scout"

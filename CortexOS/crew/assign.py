@@ -1,7 +1,7 @@
 """Crew-local ticket binds. Not CLAIMS seating. Not GitHub assignees.
 
-Control GET-displays these on the belt. Crew executes via /assign -> teammate
-goal. Ticket Runner still owns CLAIMS.json.
+Control GET-displays these on the belt. Crew executes via /assign: local bind,
+then A2A brief + a run. Ticket Runner still owns CLAIMS.json.
 """
 
 from __future__ import annotations

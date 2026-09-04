@@ -260,15 +260,27 @@ async def test_slash_fetch_and_assign_refuse_seated_and_bind_ready(
     deny = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
     assert "SEATED" in deny["content"]
     assert rig.store.get_agent_by_name(space["id"], "Scout") is None
+    rig.llm.manager.append(LLMResult(text="Scout is on the ticket."))
+    rig.llm.teammate.append(LLMResult(text="Working Netie-AI/Cortex#160."))
     posted = await rig.runtime.on_user_message(
         space["id"], "/assign Netie-AI/Cortex#160 | Scout"
     )
-    assert posted.get("run_id") is None
+    assert posted.get("run_id")
+    await wait_run_done(rig.runtime, space["id"])
     scout = rig.store.get_agent_by_name(space["id"], "Scout")
     assert scout is not None
     assert "Netie-AI/Cortex#160" in (scout.get("goal_text") or "")
     ok = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
     assert "Assigned" in ok["content"] and "Scout" in ok["content"]
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "Working Netie-AI/Cortex#160." in painted
+    briefs = [
+        m
+        for m in rig.store.list_messages(space["id"])
+        if (m.get("meta") or {}).get("a2a", {}).get("kind") == "brief"
+        and m.get("to_agent_id") == scout["id"]
+    ]
+    assert briefs
     from CortexOS.crew.assign import public as assignment_public
 
     rows = assignment_public(rig.settings.data_dir)
