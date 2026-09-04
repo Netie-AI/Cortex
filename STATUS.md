@@ -1,5 +1,12 @@
 # STATUS.md
-**Last updated:** 2026-09-07 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-INSIGHTS**
+**Last updated:** 2026-09-09 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-06 draft #128 (gated chooser); EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-INSIGHTS**
+
+> **2026-09-09 (C7-06 rebase):** `choose_governed_metric` is the L1 serve chooser.
+> Default still calls `route_to_metric`. Cascade is skipped only when
+> `DMS_C7_RETIRE_CASCADE=1` and a cutover report shows L2-as-L1-replacement
+> beating L1 on G-err with G-abs holding (`cascade_skipped` true). A C7-05
+> L2-on-miss `score_engine` report cannot retire. `cutover` stays false. Did
+> not delete the 25 `_metric_plan` branches. Stay draft. Cortex#105.
 
 > **2026-09-07 (CREW-INSIGHTS):** Cortex #196 ask+ontology spine. Intent retrieves
 > ontology **where** (object/table locations) and **importance** (ranked metrics /

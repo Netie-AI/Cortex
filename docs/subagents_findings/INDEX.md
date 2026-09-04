@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-04 | c7-06-retire-cascade | C7-06, route_to_metric, choose_governed_metric, cutover, G-err, G-abs | Serve chooser is `choose_governed_metric`. Cascade stays until L2-as-L1-replacement beats L1 on G-err with G-abs holding. Flag alone cannot retire. cutover stays false. | `2026-09-04_c7-06-retire-cascade.md` |
 | 2026-09-07 | crew-insights | crew, insights, ontology, where, importance, certify, refuse, #196 | Intent then ontology where+importance then constrained DMS ask. CERTIFIED envelopes carry include/exclude/unsure. | `2026-09-07_crew-insights.md` |
 | 2026-09-06 | cortex-appshell | appshell, crew, control, f-0030, apps, audit, cmd-k | Operator shell wraps Crew: nav + Apps launcher + Control/Audit GET deep-links. No Control spawn. Honest RSF statuses. | `2026-09-06_cortex-appshell.md` |
 | 2026-09-06 | crew-assign-router | crew, assign, destinations, openvault, unarmed, human_stop, airgpt, epic-116 | Assign router POST /crew/assign. OpenVault-only creds. Unarmed refuse. Control display-only map. Preview != live SSH/cloud. | `2026-09-06_crew-assign-router.md` |

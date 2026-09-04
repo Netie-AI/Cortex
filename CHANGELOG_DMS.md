@@ -139,6 +139,15 @@ add `leases` / `lease_owner`. Chrome Claim/Release calls those POSTs; 409/403 to
 with no silent retry. Does not write CLAIMS.json. Local `tests/test_crew` 208 passed.
 Does not prove live `:8020` until restart.
 
+## C7-06: retire route_to_metric as serve chooser (gated) — 2026-09-04
+
+`answer()` now picks L1 via `choose_governed_metric`, not `route_to_metric`
+directly. The keyword cascade still serves until a held-out report shows
+L2-as-L1-replacement beating L1 on G-err with G-abs still holding, **and**
+`DMS_C7_RETIRE_CASCADE=1`. A flag, `DMS_L2_ENABLED`, or JSON `cutover: true`
+cannot invent that. Slot extractors stay. The 25 `_metric_plan` branches are
+not deleted (no held-out numbers yet). `cutover` stays false. Cortex#105.
+
 ## Engine capability: cost ledger + DAG parallel + T0 routing — 2026-08-28
 
 General Cortex engine (not DMS-specific):
