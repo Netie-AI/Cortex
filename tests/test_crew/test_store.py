@@ -81,3 +81,36 @@ def test_confirm_lifecycle(tmp_path: Path) -> None:
     took = store.decide_confirm(wall["id"], approved=False, takeover=True)
     assert took is not None and took["status"] == "takeover"
     assert store.pending_confirms(space["id"]) == []
+
+
+def test_mode_and_goal_survive_chat_clear(tmp_path: Path) -> None:
+    store = CrewStore(tmp_path / "crew.db")
+    space = store.create_space("Life")
+    scout = store.upsert_agent(
+        space["id"], "Scout", mode="goal", goal_text="keep the brief"
+    )
+    store.add_message(space["id"], "user", "hello")
+    store.add_message(space["id"], "assistant", "hi")
+    store.set_agent_status(scout["id"], "active")
+    store.clear_messages(space["id"])
+    store.reset_life_after_clear(space["id"])
+    assert store.list_messages(space["id"]) == []
+    again = store.get_agent(scout["id"])
+    assert again is not None
+    assert again["mode"] == "goal"
+    assert again["goal_text"] == "keep the brief"
+    assert again["status"] == "goal"
+
+
+def test_kill_sets_stopped_reason_and_active_parks_idle(tmp_path: Path) -> None:
+    store = CrewStore(tmp_path / "crew.db")
+    space = store.create_space("Life")
+    worker = store.upsert_agent(space["id"], "Worker", mode="active")
+    store.set_agent_status(worker["id"], "active")
+    parked = store.set_agent_status(worker["id"], "idle")
+    assert parked is not None and parked["status"] == "idle"
+    dead = store.kill_agent(worker["id"], "operator killed")
+    assert dead is not None
+    assert dead["status"] == "stopped"
+    assert int(dead["alive"]) == 0
+    assert dead["stop_reason"] == "operator killed"

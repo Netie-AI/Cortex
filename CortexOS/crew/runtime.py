@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from CortexOS.crew import a2a, detect, policy, roles
+from CortexOS.crew import a2a, detect, life, policy, roles
 from CortexOS.crew import llm as llm_mod
 from CortexOS.crew.config import CrewSettings, active_provider
 from CortexOS.crew.engine_bridge import EngineBridge
@@ -46,7 +46,10 @@ Never invent numbers the engine did not return.
 them for THIS job (not a fixed roster). Copy a capability template when one \
 fits; its default skills are copied into the teammate automatically. Restrict \
 shared tools with allow_tools / deny_tools. Rename with \
-rename_agent. For quality-critical work set verify=true with explicit \
+rename_agent. Stop with stop_agent (they park idle/goal and can accept another \
+task). Kill with kill_agent (they refuse later work with a visible reason). \
+Set mode=goal so the assignment survives chat clear; mode=active is the \
+session default. For quality-critical work set verify=true with explicit \
 verify_criteria; skip verify rather than rubber-stamp. \
 Crew A2A is the graph. Do not start LangGraph. Engine gen_cfsm stays on the \
 answer plane. OpenVault holds keys.
@@ -89,10 +92,15 @@ class _AgentFinished(Exception):
 @dataclass
 class AgentHandle:
     """Per-agent bookkeeping. The mailbox lives on the Switchboard, not here,
-    so a restarted agent keeps whatever was queued for it."""
+    so a restarted agent keeps whatever was queued for it.
+
+    ``parked`` is smart-idle: the same task is blocked on the mailbox, not a
+    second daemon. ``wait_for_replies`` must not treat that as still working.
+    """
 
     row: dict[str, Any]
     task: asyncio.Task[None] | None = None
+    parked: bool = False
 
 
 @dataclass
@@ -438,6 +446,145 @@ class CrewRuntime:
             task.cancel()
         return True
 
+    def stop_agent(self, agent_id: str) -> dict[str, Any] | None:
+        """Halt work; park idle/goal so they can accept another task."""
+        row = self.store.get_agent(agent_id)
+        if row is None:
+            return None
+        if row["name"] == "Manager":
+            return {"error": "DENIED: Manager cannot be stopped; cancel the run"}
+        handle = self._handles.get(agent_id)
+        if handle is not None and handle.task is not None and not handle.task.done():
+            handle.task.cancel()
+        else:
+            self._park_life(row)
+        parked = self.store.get_agent(agent_id) or row
+        self.bus.emit(parked["space_id"], "agent", {"agent": parked})
+        return parked
+
+    def kill_agent(self, agent_id: str, *, reason: str = "operator killed") -> dict[str, Any] | None:
+        row = self.store.get_agent(agent_id)
+        if row is None:
+            return None
+        if row["name"] == "Manager":
+            return {"error": "DENIED: Manager cannot be killed"}
+        why = (reason or "").strip() or "operator killed"
+        killed = self.store.kill_agent(agent_id, why)
+        handle = self._handles.get(agent_id)
+        if handle is not None and handle.task is not None and not handle.task.done():
+            handle.task.cancel()
+        else:
+            for asker_id in self.switch.abandon(agent_id, life.dead_reason(killed or row)):
+                ctx_id = self._space_run.get(row["space_id"])
+                ctx = self._runs.get(ctx_id) if ctx_id else None
+                if ctx is not None:
+                    self._note_abandoned(ctx, asker_id, row["name"])
+            self.switch.forget(agent_id)
+        if killed is not None:
+            note = self.store.add_message(
+                killed["space_id"], "system", f"DENIED: {life.dead_reason(killed)}"
+            )
+            self.bus.emit(killed["space_id"], "message", {"message": note})
+            self.bus.emit(killed["space_id"], "agent", {"agent": killed})
+        return killed
+
+    def set_agent_mode(
+        self, agent_id: str, mode: str, *, goal_text: str = ""
+    ) -> dict[str, Any] | None:
+        row = self.store.set_agent_mode(agent_id, mode, goal_text)
+        if row is None:
+            return None
+        if life.can_accept(row) and row.get("status") not in life.WORKING:
+            self._park_life(row)
+            row = self.store.get_agent(agent_id) or row
+        self.bus.emit(row["space_id"], "agent", {"agent": row})
+        return row
+
+    def accept_task(self, agent_id: str, brief: str = "") -> dict[str, Any] | None:
+        """Wake a parked teammate. Same run task if it is still parked."""
+        row = self.store.get_agent(agent_id)
+        if row is None:
+            return {"error": "unknown agent"}
+        if not life.can_accept(row):
+            return {"error": f"DENIED: {life.dead_reason(row)}"}
+        ctx_id = self._space_run.get(row["space_id"])
+        ctx = self._runs.get(ctx_id) if ctx_id else None
+        manager = self.ensure_manager(row["space_id"])
+        if ctx is None:
+            self._park_life(row)
+            parked = self.store.get_agent(agent_id) or row
+            return parked
+        if brief.strip():
+            self._deliver_a2a(ctx, manager, row["name"], brief.strip(), kind=a2a.BRIEF)
+        else:
+            self._wake_if_idle(ctx, row)
+        return self.store.get_agent(agent_id) or row
+
+    def clear_chat(self, space_id: str) -> dict[str, Any]:
+        """Drop the transcript. Goal/active mode stays on the agent row."""
+        ctx_id = self._space_run.get(space_id)
+        if ctx_id:
+            self.cancel_run(ctx_id)
+        self.store.clear_messages(space_id)
+        agents = self.store.reset_life_after_clear(space_id)
+        for row in agents:
+            self.bus.emit(space_id, "agent", {"agent": row})
+        note = self.store.add_message(
+            space_id,
+            "system",
+            "Chat cleared. Goal/active mode persisted on teammates.",
+        )
+        self.bus.emit(space_id, "message", {"message": note})
+        return {"ok": True, "agents": agents, "cleared": True}
+
+    async def operator_spawn(self, space_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """HUD spawn. Uses the live run when one exists; otherwise persists idle/goal."""
+        manager = self.ensure_manager(space_id)
+        ctx_id = self._space_run.get(space_id)
+        ctx = self._runs.get(ctx_id) if ctx_id else None
+        if ctx is not None:
+            text = await self._spawn(ctx, manager, args)
+            name = _sanitize(str(args.get("name", "")).strip())
+            row = self.store.get_agent_by_name(space_id, name)
+            if row is None:
+                return {"error": text}
+            if text.startswith("DENIED"):
+                return {"error": text, "agent": row}
+            return {"ok": True, "agent": row, "detail": text}
+        live = [
+            a
+            for a in self.store.list_agents(space_id)
+            if life.can_accept(a) or a["name"] == "Manager"
+        ]
+        if len(live) >= self.settings.max_agents_per_space:
+            return {"error": f"DENIED: agent cap reached ({self.settings.max_agents_per_space})"}
+        name = _sanitize(str(args.get("name", "")).strip() or f"agent-{len(live)}")
+        mode = life.canonical_mode(str(args.get("mode") or ""))
+        brief = str(args.get("brief") or "").strip()
+        goal_text = str(args.get("goal") or args.get("goal_text") or "").strip()
+        if mode == life.MODE_GOAL and not goal_text:
+            goal_text = brief
+        cap_name = str(args.get("capability") or "").strip()
+        preset = roles.by_name(cap_name) or roles.by_name(name)
+        role = str(args.get("role") or "").strip()
+        if preset is not None and not role:
+            role = preset.role
+        teammate = self.store.upsert_agent(
+            space_id,
+            name,
+            role_prompt=role,
+            icon=(preset.icon if preset is not None else (name[:1] or "A").upper()),
+            color=AGENT_COLORS[len(live) % len(AGENT_COLORS)],
+            spawned_by=manager["id"],
+            capability=(preset.name if preset is not None else cap_name),
+            mode=mode,
+            goal_text=goal_text,
+        )
+        self._park_life(teammate)
+        teammate = self.store.get_agent(teammate["id"]) or teammate
+        self.bus.emit(space_id, "agent", {"agent": teammate})
+        return {"ok": True, "agent": teammate}
+
     async def shutdown(self) -> None:
         for ctx in list(self._runs.values()):
             for task in list(ctx.tasks):
@@ -466,11 +613,19 @@ class CrewRuntime:
             leftovers = [
                 t for t in list(ctx.tasks) if t is not asyncio.current_task() and not t.done()
             ]
-            if leftovers:
+            parked = [t for t in leftovers if self._task_is_parked(t)]
+            working = [t for t in leftovers if t not in parked]
+            if parked:
+                # Smart-idle waiters are the same run task, not a daemon.
+                # Persist idle/goal via CancelledError and do not grace-wait.
+                for task in parked:
+                    task.cancel()
+                await asyncio.gather(*parked, return_exceptions=True)
+            if working:
                 if status in {"cancelled", "failed"}:
-                    for task in leftovers:
+                    for task in working:
                         task.cancel()
-                    await asyncio.gather(*leftovers, return_exceptions=True)
+                    await asyncio.gather(*working, return_exceptions=True)
                 else:
                     # The Manager already wrote the user-facing answer; teammates
                     # get a beat to land their report in the transcript. Anything
@@ -479,7 +634,7 @@ class CrewRuntime:
                     # run's stats, could no longer be cancelled, and survived
                     # shutdown - all of it invisible to the operator.
                     _done, straggling = await asyncio.wait(
-                        leftovers, timeout=min(30, self.settings.llm_timeout_s)
+                        working, timeout=min(30, self.settings.llm_timeout_s)
                     )
                     if straggling:
                         stuck = self._busy_names(space_id, manager["id"])
@@ -493,6 +648,13 @@ class CrewRuntime:
                         )
                         cut = self.store.add_message(space_id, "system", note)
                         self.bus.emit(space_id, "message", {"message": cut})
+            still = [
+                t for t in list(ctx.tasks) if t is not asyncio.current_task() and not t.done()
+            ]
+            if still:
+                for task in still:
+                    task.cancel()
+                await asyncio.gather(*still, return_exceptions=True)
             ctx.closed = True
             self._space_run.pop(space_id, None)
             run = self.store.update_run(ctx.id, status=status, stats=ctx.stats)
@@ -510,27 +672,48 @@ class CrewRuntime:
 
     async def _teammate_run(self, ctx: RunContext, row: dict[str, Any], brief: str) -> None:
         name = row["name"]
+        handle = self._handle(row)
         try:
-            await self._agent_loop(ctx, row, is_manager=False, brief=brief)
+            first = True
+            while True:
+                handle.parked = False
+                await self._agent_loop(
+                    ctx, row, is_manager=False, brief=(brief if first else "")
+                )
+                first = False
+                fresh = self.store.get_agent(row["id"]) or row
+                if not life.is_alive(fresh):
+                    return
+                if ctx.closed:
+                    self._park_life(fresh)
+                    return
+                # Smart-idle: same task waits on the mailbox. No second loop.
+                handle.parked = True
+                self._park_life(fresh)
+                env = await self.switch.mailbox(row["id"]).get(timeout=None)
+                if env is None:
+                    return
+                self.switch.mailbox(row["id"]).unget(env)
         except asyncio.CancelledError:
-            self._set_status(row["id"], "idle")
+            fresh = self.store.get_agent(row["id"]) or row
+            if life.is_alive(fresh):
+                self._park_life(fresh)
         except LLMError as exc:
-            self._set_status(row["id"], "failed")
+            self._fail_agent(row["id"], str(exc))
             self._deliver_a2a(ctx, row, "Manager", f"I failed: {exc}", kind=a2a.REPORT)
         except Exception as exc:  # noqa: BLE001
-            self._set_status(row["id"], "failed")
+            self._fail_agent(row["id"], f"{type(exc).__name__}: {exc}")
             self._deliver_a2a(
                 ctx, row, "Manager", f"I crashed: {type(exc).__name__}: {exc}", kind=a2a.REPORT
             )
         finally:
-            # Anyone blocked in ask_agent on this teammate is told it stopped,
-            # instead of burning the whole timeout on a task that will never
-            # answer (KB R-0011: a silent stall is a lie).
-            for asker_id in self.switch.abandon(row["id"], f"{name} stopped running"):
-                self._note_abandoned(ctx, asker_id, name)
-            # Backstop for anything delivered after the loop's last drain: a
-            # queued message with nobody left to read it is silently lost work.
-            if not self.switch.mailbox(row["id"]).empty():
+            handle.parked = False
+            fresh = self.store.get_agent(row["id"]) or row
+            if not life.is_alive(fresh) or (fresh.get("status") == life.STATUS_FAILED):
+                why = life.dead_reason(fresh, name=name)
+                for asker_id in self.switch.abandon(row["id"], why):
+                    self._note_abandoned(ctx, asker_id, name)
+            elif not self.switch.mailbox(row["id"]).empty() and not ctx.closed:
                 self._handle(row).task = None
                 self._wake_if_idle(ctx, self.store.get_agent(row["id"]) or row)
 
@@ -546,7 +729,7 @@ class CrewRuntime:
     ) -> None:
         space = self.store.get_space(ctx.space_id) or {}
         model, api_base, label = self._provider(ctx, space, row)
-        self._set_status(row["id"], "thinking")
+        self._set_status(row["id"], life.STATUS_ACTIVE)
         last_user = ""
         for m in reversed(self.store.list_messages(ctx.space_id, limit=10_000)):
             if m["role"] == "user":
@@ -634,7 +817,7 @@ class CrewRuntime:
             self._bump_stats(ctx, result)
 
             if result.tool_calls:
-                self._set_status(row["id"], "acting")
+                self._set_status(row["id"], life.STATUS_ACTIVE)
                 messages.append(_assistant_tool_msg(result))
                 finished: str | None = None
                 for tc in result.tool_calls:
@@ -649,7 +832,7 @@ class CrewRuntime:
                 if finished is not None:
                     final_text = finished
                     break
-                self._set_status(row["id"], "thinking")
+                self._set_status(row["id"], life.STATUS_ACTIVE)
                 continue
 
             text = result.text.strip()
@@ -689,13 +872,13 @@ class CrewRuntime:
                 },
             )
             self.bus.emit(ctx.space_id, "message", {"message": msg})
-            self._set_status(row["id"], "idle")
+            self._park_life(row)
         else:
             from CortexOS.execution.subagent_contract import sanitize_subagent_final
 
             final_text = sanitize_subagent_final(final_text)["content"]
             self._deliver_a2a(ctx, row, "Manager", final_text, kind=a2a.REPORT)
-            self._set_status(row["id"], "done")
+            self._park_life(row)
             if int(row.get("verify") or 0) and str(row.get("verify_criteria") or "").strip():
                 await self._spawn_verifier(ctx, row, final_text)
 
@@ -841,6 +1024,14 @@ class CrewRuntime:
                             "type": "string",
                             "description": "optional OpenVault/FreeRoute model for this teammate; grok-fast is rewritten to grok-4.6",
                         },
+                        "mode": {
+                            "type": "string",
+                            "description": "active (session) or goal (survives chat clear)",
+                        },
+                        "goal": {
+                            "type": "string",
+                            "description": "assignment text stored with mode=goal",
+                        },
                     },
                     ["name", "brief"],
                 )
@@ -851,6 +1042,40 @@ class CrewRuntime:
                     "Rename a teammate in this space. Manager cannot be renamed.",
                     {"old_name": {"type": "string"}, "new_name": {"type": "string"}},
                     ["old_name", "new_name"],
+                )
+            )
+            specs.append(
+                spec(
+                    "stop_agent",
+                    "Stop a teammate. They park idle (or goal) and can accept another task."
+                    " Manager cannot be stopped this way - cancel the run instead.",
+                    {"name": {"type": "string"}},
+                    ["name"],
+                )
+            )
+            specs.append(
+                spec(
+                    "kill_agent",
+                    "Kill a teammate. Later send/ask is refused with this reason."
+                    " Manager cannot be killed.",
+                    {
+                        "name": {"type": "string"},
+                        "reason": {"type": "string", "description": "visible stop reason"},
+                    },
+                    ["name"],
+                )
+            )
+            specs.append(
+                spec(
+                    "set_agent_mode",
+                    "Set a teammate's persistence mode. goal survives chat clear;"
+                    " active is the session default. Optional goal text is stored.",
+                    {
+                        "name": {"type": "string"},
+                        "mode": {"type": "string", "description": "active or goal"},
+                        "goal": {"type": "string", "description": "assignment that survives clear"},
+                    },
+                    ["name", "mode"],
                 )
             )
         else:
@@ -1026,6 +1251,46 @@ class CrewRuntime:
             self.bus.emit(ctx.space_id, "agent", {"agent": renamed})
             return f"renamed {old} -> {renamed['name']}"
 
+        if name == "stop_agent":
+            target_name = str(args.get("name", "")).strip()
+            target = self.store.get_agent_by_name(ctx.space_id, target_name)
+            if target is None:
+                return f"no agent named '{target_name}' here"
+            stopped = self.stop_agent(target["id"])
+            if isinstance(stopped, dict) and stopped.get("error"):
+                return str(stopped["error"])
+            fresh = self.store.get_agent(target["id"]) or target
+            return f"stopped {target_name}; they are {fresh.get('status')} and can accept a task"
+
+        if name == "kill_agent":
+            target_name = str(args.get("name", "")).strip()
+            target = self.store.get_agent_by_name(ctx.space_id, target_name)
+            if target is None:
+                return f"no agent named '{target_name}' here"
+            killed = self.kill_agent(
+                target["id"], reason=str(args.get("reason") or "operator killed")
+            )
+            if isinstance(killed, dict) and killed.get("error"):
+                return str(killed["error"])
+            return f"killed {target_name}: {life.dead_reason(self.store.get_agent(target['id']) or target)}"
+
+        if name == "set_agent_mode":
+            target_name = str(args.get("name", "")).strip()
+            target = self.store.get_agent_by_name(ctx.space_id, target_name)
+            if target is None:
+                return f"no agent named '{target_name}' here"
+            updated = self.set_agent_mode(
+                target["id"],
+                str(args.get("mode") or ""),
+                goal_text=str(args.get("goal") or ""),
+            )
+            if updated is None:
+                return f"DENIED: could not set mode on '{target_name}'"
+            return (
+                f"{updated['name']} mode={updated.get('mode')} status={updated.get('status')}"
+                + (f" goal={updated.get('goal_text')}" if updated.get("goal_text") else "")
+            )
+
         if name == "send_to_agent":
             target_name = str(args.get("name", "")).strip()
             message = str(args.get("message", ""))
@@ -1035,6 +1300,9 @@ class CrewRuntime:
             if target is None:
                 known = ", ".join(a["name"] for a in self.store.list_agents(ctx.space_id))
                 return f"no agent named '{target_name}' here (known: {known})"
+            refused = self._refuse_dead(ctx, target)
+            if refused:
+                return refused
             self._deliver_a2a(ctx, row, target_name, message, kind=a2a.TELL)
             fresh = self.store.get_agent(target["id"]) or target
             return f"delivered to {target_name} (they are {fresh.get('status')})"
@@ -1056,7 +1324,10 @@ class CrewRuntime:
                         "nothing is waiting for you and no teammate is still working."
                         " Do not wait again - act on what you already have."
                     )
+                prev = row.get("status")
+                self._set_status(row["id"], life.STATUS_WAITING)
                 env = await mailbox.get(timeout)
+                self._set_status(row["id"], prev or life.STATUS_ACTIVE)
                 if env is None:
                     return (
                         f"nothing arrived within {timeout}s; still working:"
@@ -1071,10 +1342,14 @@ class CrewRuntime:
         return f"DENIED: unknown tool '{name}'"
 
     async def _spawn(self, ctx: RunContext, row: dict[str, Any], args: dict[str, Any]) -> str:
-        agents = self.store.list_agents(ctx.space_id)
-        if len(agents) >= self.settings.max_agents_per_space:
+        live = [
+            a
+            for a in self.store.list_agents(ctx.space_id)
+            if life.can_accept(a) or a["name"] == "Manager"
+        ]
+        if len(live) >= self.settings.max_agents_per_space:
             return f"DENIED: agent cap reached ({self.settings.max_agents_per_space})"
-        name = _sanitize(str(args.get("name", "")).strip() or f"agent-{len(agents)}")
+        name = _sanitize(str(args.get("name", "")).strip() or f"agent-{len(live)}")
         role = str(args.get("role", "")).strip()
         brief = str(args.get("brief", "")).strip()
         cap_name = str(args.get("capability", "")).strip()
@@ -1099,7 +1374,12 @@ class CrewRuntime:
             if bits:
                 role = (role + "\n\n" if role else "") + "\n\n".join(bits)
         model = str(args.get("model") or "").strip()
-        color = AGENT_COLORS[len(agents) % len(AGENT_COLORS)]
+        mode = life.canonical_mode(str(args.get("mode") or ""))
+        if mode == life.MODE_GOAL:
+            goal_text = str(args.get("goal") or args.get("goal_text") or brief).strip()
+        else:
+            goal_text = str(args.get("goal") or args.get("goal_text") or "").strip()
+        color = AGENT_COLORS[len(live) % len(AGENT_COLORS)]
         teammate = self.store.upsert_agent(
             ctx.space_id,
             name,
@@ -1114,7 +1394,11 @@ class CrewRuntime:
             verify_criteria=criteria,
             model=model,
             skills=skill_names,
+            mode=mode,
+            goal_text=goal_text,
         )
+        self._set_status(teammate["id"], life.STATUS_ACTIVE)
+        teammate = self.store.get_agent(teammate["id"]) or teammate
         self.bus.emit(ctx.space_id, "agent", {"agent": teammate})
         self._deliver_a2a(ctx, row, name, brief, kind=a2a.BRIEF, wake=False)
         task = asyncio.create_task(self._teammate_run(ctx, teammate, brief))
@@ -1122,7 +1406,9 @@ class CrewRuntime:
         # run yet still reads as status 'idle' in the store, so without this
         # a send_to_agent on the very next step would start a second copy of
         # the same teammate.
-        self._handle(teammate).task = task
+        handle = self._handle(teammate)
+        handle.parked = False
+        handle.task = task
         ctx.tasks.add(task)
         task.add_done_callback(ctx.tasks.discard)
         extra = ""
@@ -1130,6 +1416,8 @@ class CrewRuntime:
             extra = "; verifier will run after they finish"
         elif bool(args.get("verify")) and not criteria:
             extra = "; verify skipped (no explicit criteria; refusing rubber-stamp)"
+        if mode == life.MODE_GOAL:
+            extra += "; mode=goal (survives chat clear)"
         return f"spawned {name}; they are working the brief and will report back{extra}"
 
     async def _spawn_verifier(
@@ -1228,10 +1516,36 @@ class CrewRuntime:
             self._handles[row["id"]] = handle
         return handle
 
+    def _task_is_parked(self, task: asyncio.Task[None]) -> bool:
+        return any(h.task is task and h.parked for h in self._handles.values())
+
     def _set_status(self, agent_id: str, status: str) -> None:
         row = self.store.set_agent_status(agent_id, status)
         if row is not None:
             self.bus.emit(row["space_id"], "agent", {"agent": row})
+
+    def _park_life(self, row: dict[str, Any]) -> None:
+        if not life.is_alive(row):
+            return
+        self._set_status(row["id"], life.park_status(row))
+
+    def _fail_agent(self, agent_id: str, reason: str) -> None:
+        row = self.store.mark_agent_failed(agent_id, reason)
+        if row is not None:
+            self.bus.emit(row["space_id"], "agent", {"agent": row})
+
+    def _refuse_dead(self, ctx: RunContext, target: dict[str, Any]) -> str:
+        """Visible refusal when a silent-dead teammate would otherwise hang (R-0011)."""
+        if life.can_accept(target):
+            return ""
+        why = life.dead_reason(target)
+        msg = self.store.add_message(
+            ctx.space_id,
+            "system",
+            f"DENIED: {why}",
+        )
+        self.bus.emit(ctx.space_id, "message", {"message": msg})
+        return f"DENIED: {why}"
 
     def _note_questions(self, agent_id: str, envs: list[a2a.Envelope]) -> list[a2a.Envelope]:
         """Record which questions this agent now owes an answer to.
@@ -1259,8 +1573,13 @@ class CrewRuntime:
             if a["id"] == me:
                 continue
             handle = self._handles.get(a["id"])
-            running = handle is not None and handle.task is not None and not handle.task.done()
-            if running or a["status"] in {"thinking", "acting"}:
+            running = (
+                handle is not None
+                and handle.task is not None
+                and not handle.task.done()
+                and not handle.parked
+            )
+            if running or a["status"] in life.WORKING:
                 out.append(a["name"])
         return out
 
@@ -1294,6 +1613,9 @@ class CrewRuntime:
         if target is None:
             known = ", ".join(a["name"] for a in self.store.list_agents(ctx.space_id))
             return f"no agent named '{target_name}' here (known: {known})"
+        refused = self._refuse_dead(ctx, target)
+        if refused:
+            return refused
         if target["id"] == row["id"]:
             return "DENIED: you cannot ask yourself"
         if self.switch.would_deadlock(row["id"], target["id"]):
@@ -1311,14 +1633,18 @@ class CrewRuntime:
             # matched to this question rather than merely to its sender.
             self.switch.rekey_ask(row["id"], target["id"], str(msg["id"]))
         try:
+            prev = row.get("status")
+            self._set_status(row["id"], life.STATUS_WAITING)
             kind, answer = await asyncio.wait_for(future, timeout=timeout)
         except (TimeoutError, asyncio.TimeoutError):
             self.switch.close_ask(row["id"], target["id"])
+            self._set_status(row["id"], prev or life.STATUS_ACTIVE)
             fresh = self.store.get_agent(target["id"]) or target
             return (
                 f"{target_name} did not answer within {timeout}s"
                 f" (they are {fresh.get('status')}). Proceed without them, or ask again."
             )
+        self._set_status(row["id"], prev or life.STATUS_ACTIVE)
         if kind == a2a.NO_ANSWER:
             return f"{target_name} {answer}"
         # REPORT is an answering kind on the switchboard (keyed by asker+target,
@@ -1410,11 +1736,15 @@ class CrewRuntime:
         """
         if target["name"] == "Manager":
             return  # the manager is driven by the run loop, never restarted here
+        if not life.can_accept(target):
+            return
         handle = self._handle(target)
         if handle.task is not None and not handle.task.done():
             return
         fresh = self.store.get_agent(target["id"]) or target
-        if fresh["status"] in {"thinking", "acting"}:
+        if not life.can_accept(fresh):
+            return
+        if fresh["status"] in life.WORKING:
             return
         task = asyncio.create_task(self._teammate_run(ctx, fresh, ""))
         handle.task = task
@@ -1560,7 +1890,8 @@ class CrewRuntime:
             self._open_questions.setdefault(me, {}).update(owed)
         tail = _openable(out[-limit:])
         if not tail:
-            tail = [{"role": "user", "content": brief or "Report in."}]
+            stored_goal = str(row.get("goal_text") or "").strip()
+            tail = [{"role": "user", "content": brief or stored_goal or "Report in."}]
         return tail
 
 

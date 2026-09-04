@@ -40,6 +40,7 @@
           <button class="ghost" id="uiBigger" type="button" title="Bigger text">A+</button>
           <button class="ghost" id="toggleActivity" title="Show only agent-to-agent traffic">Activity</button>
           <button class="ghost danger" id="cancelRun" hidden title="Stops this run. Does not kill Manager.">Cancel</button>
+          <button class="ghost" id="clearChat" type="button" title="Clears chat. Goal/active mode stays in crew store.">Clear chat</button>
         </div>
       </div>
       <div class="focus-bar" id="focusBar" hidden></div>
@@ -96,6 +97,16 @@
         </div>
         <div class="block">
           <h2>Crew</h2>
+          <p class="hint">Status: active / idle / waiting / goal. Stop parks. Kill refuses with a reason.</p>
+          <div class="life-spawn">
+            <input id="spawnName" placeholder="name" />
+            <input id="spawnBrief" placeholder="brief" />
+            <select id="spawnMode">
+              <option value="active">active</option>
+              <option value="goal">goal</option>
+            </select>
+            <button class="ghost" id="spawnTeammate" type="button">Spawn teammate</button>
+          </div>
           <div id="agents" class="empty empty--orb">No agents yet.</div>
         </div>
         <div class="block">
@@ -537,7 +548,7 @@
       }).join("");
       const dots = nodes.map((a) => {
         const p = at[a.id];
-        const busy = a.status === "thinking" || a.status === "acting";
+        const busy = lifeBusy(a);
         return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${busy ? 8 : 6}"`
           + ` fill="${esc(a.color || "#8b91a3")}" stroke="${busy ? "#5ec4c9" : "none"}" stroke-width="1.5">`
           + `<title>${esc(a.name)} (${esc(a.status)})</title></circle>`
@@ -621,20 +632,45 @@
         bar.innerHTML = chips.join(" ");
       } else { bar.hidden = true; bar.innerHTML = ""; }
     }
+    function lifeBusy(a) {
+      return a.status === "active" || a.status === "waiting" || a.status === "thinking" || a.status === "acting";
+    }
     function renderAgents() {
       if (!state.agents.length) { $("agents").innerHTML = `<div class="empty empty--orb">No agents yet.</div>`; return; }
       $("agents").innerHTML = state.agents.map((a) => {
         const cap = a.capability ? " - " + a.capability : "";
         const model = a.model ? " - " + a.model : "";
         const deny = a.deny_tools ? " - deny " + a.deny_tools : "";
-        const busy = a.status === "thinking" || a.status === "acting";
-        return `<button class="agent${state.focusAgent === a.id ? " agent--on" : ""}" data-id="${esc(a.id)}" type="button" title="Show only this agent's traffic">`
+        const busy = lifeBusy(a);
+        const mode = a.mode || "active";
+        const goal = a.goal_text ? esc(String(a.goal_text).slice(0, 80)) : "";
+        const reason = a.stop_reason ? `<div class="hint">DENIED: ${esc(a.stop_reason)}</div>` : "";
+        const manager = a.name === "Manager";
+        const actions = manager
+          ? `<div class="row-actions"><span class="hint">Cancel stops the run. Does not kill Manager.</span></div>`
+          : `<div class="row-actions">`
+            + `<button class="ghost" data-act="stop" data-id="${esc(a.id)}" type="button">Stop</button>`
+            + `<button class="ghost deny" data-act="kill" data-id="${esc(a.id)}" type="button">Kill</button>`
+            + `<button class="ghost" data-act="mode" data-id="${esc(a.id)}" data-mode="${mode === "goal" ? "active" : "goal"}" type="button">${mode === "goal" ? "to active" : "to goal"}</button>`
+            + `<button class="ghost" data-act="accept" data-id="${esc(a.id)}" type="button">Accept task</button>`
+            + `</div>`;
+        return `<div class="agent-card">`
+          + `<button class="agent${state.focusAgent === a.id ? " agent--on" : ""}" data-id="${esc(a.id)}" type="button" title="Show only this agent's traffic">`
           + `<div class="orb ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#7ea0d4")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
-          + `<div>${esc(a.name)}<small><span class="id">${esc(a.id || "")}</span> ${esc(a.status)}${esc(cap)}${esc(model)}${esc(deny)}</small></div></button>`;
+          + `<div>${esc(a.name)}<small><span class="id">${esc(a.id || "")}</span>`
+          + ` <span class="claim">${esc(a.status || "idle")}</span>`
+          + ` <span class="scope">${esc(mode)}</span>`
+          + `${esc(cap)}${esc(model)}${esc(deny)}</small>`
+          + (goal ? `<small>goal: ${goal}</small>` : "")
+          + reason
+          + `</div></button>${actions}</div>`;
       }).join("");
       $("agents").querySelectorAll(".agent").forEach((el) => el.onclick = () => {
         state.focusAgent = state.focusAgent === el.dataset.id ? null : el.dataset.id;
         renderAgents(); renderFocus(); renderLog();
+      });
+      $("agents").querySelectorAll("button[data-act]").forEach((el) => {
+        el.onclick = (ev) => { ev.stopPropagation(); lifeAct(el.dataset.act, el.dataset.id, el.dataset.mode); };
       });
     }
     function renderSkills(rows) {
@@ -804,7 +840,11 @@
         state.messages.filter((m) => m.role === "user").slice(-4).forEach((m) =>
           facts.push({ k: "you", v: String(m.content || "").slice(0, 80), id: m.id }));
       } else if (scope === "agent") {
-        state.agents.slice(0, 6).forEach((a) => facts.push({ k: a.name, v: a.status + (a.capability ? " " + a.capability : ""), id: a.id }));
+        state.agents.slice(0, 8).forEach((a) => facts.push({
+          k: a.name,
+          v: (a.mode || "active") + " / " + (a.status || "idle") + (a.goal_text ? " goal=" + a.goal_text : "") + (a.stop_reason ? " DENIED: " + a.stop_reason : ""),
+          id: a.id
+        }));
       } else if (scope === "run") {
         facts.push({ k: "run", v: $("runStatus").textContent || "idle", id: state.runId || "" });
         facts.push({ k: "seq", v: String(state.seq || 0), id: "seq" });
@@ -1235,6 +1275,51 @@
       if (!state.runId) return;
       try { await api("/crew/runs/" + state.runId + "/cancel", { method: "POST" }); }
       catch (err) { toast(err.message, "bad"); }
+    };
+    async function refreshAgents() {
+      if (!state.spaceId) return;
+      state.agents = await api("/crew/spaces/" + state.spaceId + "/agents");
+      renderAgents();
+      renderMemory();
+    }
+    async function lifeAct(act, id, mode) {
+      if (!state.spaceId || !id) return;
+      const base = "/crew/spaces/" + state.spaceId + "/agents/" + id;
+      try {
+        if (act === "stop") await api(base + "/stop", { method: "POST", body: "{}" });
+        else if (act === "kill") await api(base + "/kill", { method: "POST", body: JSON.stringify({ reason: "operator killed" }) });
+        else if (act === "mode") await api(base + "/mode", { method: "POST", body: JSON.stringify({ mode: mode || "goal", goal: "" }) });
+        else if (act === "accept") await api(base + "/accept", { method: "POST", body: JSON.stringify({ brief: "" }) });
+        await refreshAgents();
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    $("spawnTeammate").onclick = async () => {
+      if (!state.spaceId) return;
+      const name = $("spawnName").value.trim();
+      if (!name) { toast("Name the teammate.", "bad"); return; }
+      try {
+        await api("/crew/spaces/" + state.spaceId + "/agents", {
+          method: "POST",
+          body: JSON.stringify({
+            name: name,
+            brief: $("spawnBrief").value.trim(),
+            mode: $("spawnMode").value || "active",
+            goal: $("spawnMode").value === "goal" ? $("spawnBrief").value.trim() : ""
+          })
+        });
+        $("spawnName").value = "";
+        $("spawnBrief").value = "";
+        await refreshAgents();
+        toast("Spawned " + name + ".");
+      } catch (err) { toast(err.message, "bad"); }
+    };
+    $("clearChat").onclick = async () => {
+      if (!state.spaceId) return;
+      try {
+        await api("/crew/spaces/" + state.spaceId + "/clear", { method: "POST", body: "{}" });
+        await selectSpace(state.spaceId);
+        toast("Chat cleared. Goal/active mode stayed in store.");
+      } catch (err) { toast(err.message, "bad"); }
     };
     $("toggleRail").onclick = () => {
       const rail = $("rail");
