@@ -669,7 +669,11 @@ def _l1_cannot_compose(question: str) -> str | None:
         q,
     ):
         return "nested comparison to a group aggregate has no governed metric"
-    if re.search(r"\band (also|whose)\b", q):
+    # "and whose" / "and also have|appear" are BIRD stacked facts.
+    # Do not match "ignore SKU-X and also show the top 5" (ANS-01 exclusion).
+    if re.search(r"\band whose\b", q):
+        return "stacked predicates have no single governed metric"
+    if re.search(r"\band also (have|appear|contain|carry|hold)\b", q):
         return "stacked predicates have no single governed metric"
     if re.search(
         r"\bthan the (number of distinct|kilograms currently)\b|\bmore inbound shipments than\b",

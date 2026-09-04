@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-04 | c7-05-gsh-and-leave-gate | C7-05, G-sh, DMS_L2_SHADOW, leave, GateCheckBody, ANS-01 | OV gate action is `leave` not `llm`. Shadow report compares L1-only vs L2-only. `and also show` stays L1. | `2026-09-04_c7-05-gsh-and-leave-gate.md` |
 | 2026-09-04 | c7-05-engine-scorer | C7-05, held-out, score_engine, G-abs, G-err, G-env, DMS_L2_ENABLED | Live engine scorer on frozen items; L2 env is process-local; cutover stays false until G-man/G-sh too. | `2026-09-04_c7-05-engine-scorer.md` |
 | 2026-09-04 | c7-03-plausibility | C7-03, plausibility, empty-success, implausible_shape, retrieval miss, L2_VALIDATED | After L2 execute, `l2_plausibility.assess_plausibility` abstains (badge=abstain, empty rows) on empty-success, scalar-vs-listing, retrieval-miss, leftover literals, or score below 0.55. Does not rewrite SQL or call the enforcer. | `2026-09-04_c7-03-plausibility.md` |
 | 2026-09-04 | c7-04-heldout-harness | C7-04, held-out, BIRD, Spider, must-abstain, envelope, SKU-BETA, metrics.yaml, EPIC-006 | Frozen BIRD/Spider split plus different-model abstain; harness scores envelope classes; empty rows never correct; CI fixture not live L2. | `2026-09-04_c7-04-heldout-harness.md` |

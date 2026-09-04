@@ -73,6 +73,26 @@ def test_generator_unconfigured_without_l2_flag(monkeypatch):
     assert sql_generator.generate_candidates("top skus", {}) == []
 
 
+def test_leave_machine_asks_ov_leave_not_llm(monkeypatch):
+    """Live OV 422s action=llm; FreeRoute must check action=leave only."""
+    seen: list[dict] = []
+
+    def fake_check(**kwargs):
+        seen.append(kwargs)
+        return {"ok": True, "allowed": False, "reasons": ["vault is sealed"]}
+
+    monkeypatch.setattr(
+        "CortexOS.integrations.openvault_gate.check_gate",
+        fake_check,
+    )
+    ok, reason = sql_generator._leave_machine_allowed()
+    assert ok is False
+    assert "sealed" in reason.lower()
+    assert len(seen) == 1
+    assert seen[0]["action"] == "leave"
+    assert seen[0]["destination"] == "freeroute"
+
+
 def test_l2_path_abstains_without_freeroute(monkeypatch):
     from CortexOS.dms.answer_engine import answer
 
@@ -105,7 +125,7 @@ def test_l2_mock_generation_returns_rows_and_answer(monkeypatch):
     assert isinstance(r.get("answer") or "", str)
     if r.get("layer") == "generated":
         assert r.get("badge") == "L2_VALIDATED"
-        assert len((r.get("answer") or "")) > 0
+        assert len(r.get("answer") or "") > 0
 
 
 def test_answer_engine_does_not_import_pack_generative() -> None:
