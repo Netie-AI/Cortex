@@ -144,6 +144,13 @@ def test_ui_index_is_served(client) -> None:
     assert "auto-merge" in desk["law"]
     assert desk["cursor"]["model"] == "grok-4.6"
     assert desk["prs"]["prs"] == []
+    assert "usage" in desk
+    assert desk["usage"]["llm_calls"] == 0
+    assert "id=\"usageChip\"" in page.text
+    assert "id=\"routePick\"" in page.text
+    usage = client.http.get("/crew/usage").json()
+    assert usage["llm_calls"] == 0
+    assert "tokens" in usage
 
 
 def test_keys_get_never_returns_secrets(client) -> None:
@@ -172,6 +179,24 @@ def test_keys_post_activates_provider(client) -> None:
     active = next(p for p in config.resolve_providers() if p.active)
     assert active.label == "openrouter"
     save(client.crew.settings.data_dir, {k: "" for k in KNOWN})
+
+
+def test_pin_and_per_turn_refuse_without_fallback(client) -> None:
+    pinned = client.http.post("/crew/providers", json={"provider": "anthropic"}).json()
+    assert pinned["ok"] is False
+    assert pinned["refused"]
+    assert "no silent fallback" in pinned["refused"]
+    space = client.http.post("/crew/spaces", json={"title": "HQ"}).json()
+    posted = client.http.post(
+        f"/crew/spaces/{space['id']}/messages",
+        json={"text": "hello", "provider": "anthropic"},
+    ).json()
+    assert "error" in posted
+    assert "no silent fallback" in posted["error"]
+    msgs = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
+    assert msgs[-1]["role"] == "system"
+    assert "anthropic" in msgs[-1]["content"]
+    client.http.post("/crew/providers", json={"provider": ""})
 
 
 def test_computer_control_arm_is_refused(client) -> None:

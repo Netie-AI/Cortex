@@ -108,8 +108,11 @@ class RunContext:
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "cost_usd": 0.0,
+            "by_route": {},
         }
     )
+    turn_provider: str | None = None
+    turn_model: str | None = None
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
 
@@ -155,14 +158,31 @@ class CrewRuntime:
             color=MANAGER_COLOR,
         )
 
-    async def on_user_message(self, space_id: str, text: str) -> dict[str, Any]:
+    async def on_user_message(
+        self,
+        space_id: str,
+        text: str,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
         msg = self.store.add_message(space_id, "user", text)
         self.bus.emit(space_id, "message", {"message": msg})
 
         space = self.store.get_space(space_id)
         if space is None:
             return {"error": "unknown space"}
-        if active_provider() is None and not (space.get("model") or "").strip():
+        turn_provider = (provider or "").strip() or None
+        turn_model = (model or "").strip() or None
+        if turn_provider or turn_model:
+            try:
+                llm_mod.resolve_route(provider=turn_provider, model=turn_model)
+            except LLMError as exc:
+                note = str(exc)
+                sysmsg = self.store.add_message(space_id, "system", note)
+                self.bus.emit(space_id, "message", {"message": sysmsg})
+                return {"error": note}
+        elif active_provider() is None and not (space.get("model") or "").strip():
             note = (
                 "No model provider is configured. Start OpenVault on :5000 (keys stay there),"
                 " paste a key in Providers, or set CREW_MODEL / an *_API_KEY, then retry."
@@ -189,11 +209,27 @@ class CrewRuntime:
             return {"run_id": active_run, "queued": True}
 
         manager = self.ensure_manager(space_id)
-        return {"run_id": self._start_run(space_id, manager)}
+        return {
+            "run_id": self._start_run(
+                space_id, manager, provider=turn_provider, model=turn_model
+            )
+        }
 
-    def _start_run(self, space_id: str, manager: dict[str, Any]) -> str:
+    def _start_run(
+        self,
+        space_id: str,
+        manager: dict[str, Any],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> str:
         run = self.store.create_run(space_id)
-        ctx = RunContext(id=run["id"], space_id=space_id)
+        ctx = RunContext(
+            id=run["id"],
+            space_id=space_id,
+            turn_provider=provider,
+            turn_model=model,
+        )
         self._runs[run["id"]] = ctx
         self._space_run[space_id] = run["id"]
         task = asyncio.create_task(self._manager_run(ctx, manager))
@@ -334,7 +370,7 @@ class CrewRuntime:
         brief: str | None = None,
     ) -> None:
         space = self.store.get_space(ctx.space_id) or {}
-        model, api_base, label = self._provider(space, row)
+        model, api_base, label = self._provider(ctx, space, row)
         self._set_status(row["id"], "thinking")
         last_user = ""
         for m in reversed(self.store.list_messages(ctx.space_id, limit=10_000)):
@@ -472,6 +508,9 @@ class CrewRuntime:
                     "provider": label,
                     "run_id": ctx.id,
                     "cost_usd": ctx.stats.get("cost_usd"),
+                    "prompt_tokens": ctx.stats.get("prompt_tokens"),
+                    "completion_tokens": ctx.stats.get("completion_tokens"),
+                    "llm_calls": ctx.stats.get("llm_calls"),
                 },
             )
             self.bus.emit(ctx.space_id, "message", {"message": msg})
@@ -983,23 +1022,29 @@ class CrewRuntime:
     # -- helpers -----------------------------------------------------------
 
     def _provider(
-        self, space: dict[str, Any], row: dict[str, Any] | None = None
+        self,
+        ctx: RunContext,
+        space: dict[str, Any],
+        row: dict[str, Any] | None = None,
     ) -> tuple[str, str | None, str]:
         agent_model = str((row or {}).get("model") or "").strip()
         if agent_model:
             if "grok" in agent_model.lower() and "fast" in agent_model.lower():
                 agent_model = "openai/grok-4.6"
             return agent_model, None, "agent-override"
+        turn_p = (ctx.turn_provider or "").strip()
+        turn_m = (ctx.turn_model or "").strip()
+        if turn_p or turn_m:
+            route = llm_mod.resolve_route(provider=turn_p or None, model=turn_m or None)
+            return route.model, route.api_base, route.label
         override = (space.get("model") or "").strip()
         if override:
+            if override.startswith("openvault/"):
+                route = llm_mod.resolve_route(provider="openvault", model=override)
+                return route.model, route.api_base, route.label
             return override, None, "space-override"
-        provider = active_provider()
-        if provider is None:
-            raise LLMError(
-                "no model provider configured (set ANTHROPIC_API_KEY, OPENROUTER_API_KEY,"
-                " DEEPSEEK_API_KEY, OPENAI_API_KEY, or run Ollama)"
-            )
-        return provider.model, provider.api_base, provider.label
+        route = llm_mod.resolve_route()
+        return route.model, route.api_base, route.label
 
     def _handle(self, row: dict[str, Any]) -> AgentHandle:
         handle = self._handles.get(row["id"])
@@ -1225,6 +1270,17 @@ class CrewRuntime:
         ctx.stats["prompt_tokens"] += result.prompt_tokens or 0
         ctx.stats["completion_tokens"] += result.completion_tokens or 0
         ctx.stats["cost_usd"] = round(ctx.stats["cost_usd"] + (result.cost_usd or 0.0), 6)
+        route_name = (result.model or "").strip() or "unknown"
+        routes = ctx.stats.setdefault("by_route", {})
+        slot = routes.setdefault(
+            route_name,
+            {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0},
+        )
+        slot["llm_calls"] += 1
+        slot["prompt_tokens"] += result.prompt_tokens or 0
+        slot["completion_tokens"] += result.completion_tokens or 0
+        slot["cost_usd"] = round(float(slot["cost_usd"] or 0.0) + float(result.cost_usd or 0.0), 6)
+        llm_mod.record_usage(result, route=route_name)
         self.store.update_run(ctx.id, stats=ctx.stats)
         self.bus.emit(
             ctx.space_id, "run", {"run_id": ctx.id, "status": "running", "stats": ctx.stats}

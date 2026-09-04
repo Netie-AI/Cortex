@@ -22,6 +22,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
         "GOOGLE_API_KEY",
         "CEREBRAS_API_KEY",
         "MISTRAL_API_KEY",
+        "CREW_PROVIDER",
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("CREW_ALLOW_OLLAMA", "0")
@@ -43,6 +44,10 @@ def test_no_keys_means_no_active_provider_and_says_so(clean_env: pytest.MonkeyPa
         "xai",
         "deepseek",
         "openai-compatible",
+        "groq",
+        "google",
+        "cerebras",
+        "mistral",
         "ollama",
     }
 
@@ -126,4 +131,18 @@ def test_cursor_key_defaults_to_grok_46_not_fast(clean_env: pytest.MonkeyPatch) 
     assert active.label == "cursor"
     assert active.model == "openai/grok-4.6"
     assert "fast" not in active.model
+
+
+def test_provider_pin_does_not_fall_through(clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("DEEPSEEK_API_KEY", "x")
+    clean_env.setenv("OPENAI_API_KEY", "y")
+    clean_env.setenv("CREW_PROVIDER", "openai")
+    active = config.active_provider()
+    assert active is not None
+    assert active.label == "openai-compatible"
+
+    clean_env.setenv("CREW_PROVIDER", "anthropic")
+    chain = config.resolve_providers()
+    assert config.active_provider(chain) is None
+    assert all(not p.active for p in chain)
 

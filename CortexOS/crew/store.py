@@ -473,6 +473,50 @@ class CrewStore:
             self._db.commit()
         return self.get_run(run_id)
 
+    def usage_totals(self) -> dict[str, Any]:
+        """Sum run stats for the HUD. Missing JSON is zero, never a crash."""
+        with self._lock:
+            rows = self._db.execute("SELECT stats FROM runs").fetchall()
+        totals: dict[str, Any] = {
+            "llm_calls": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cost_usd": 0.0,
+            "by_route": {},
+        }
+        routes: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            stats = _loads(row[0]) or {}
+            if not isinstance(stats, dict):
+                continue
+            totals["llm_calls"] += int(stats.get("llm_calls") or 0)
+            totals["prompt_tokens"] += int(stats.get("prompt_tokens") or 0)
+            totals["completion_tokens"] += int(stats.get("completion_tokens") or 0)
+            try:
+                totals["cost_usd"] = round(
+                    float(totals["cost_usd"]) + float(stats.get("cost_usd") or 0.0), 6
+                )
+            except (TypeError, ValueError):
+                pass
+            by_route = stats.get("by_route") or {}
+            if isinstance(by_route, dict):
+                for name, slot in by_route.items():
+                    if not isinstance(slot, dict):
+                        continue
+                    acc = routes.setdefault(
+                        str(name),
+                        {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0},
+                    )
+                    acc["llm_calls"] += int(slot.get("llm_calls") or 0)
+                    acc["prompt_tokens"] += int(slot.get("prompt_tokens") or 0)
+                    acc["completion_tokens"] += int(slot.get("completion_tokens") or 0)
+                    acc["cost_usd"] = round(
+                        float(acc["cost_usd"]) + float(slot.get("cost_usd") or 0.0), 6
+                    )
+        totals["by_route"] = routes
+        totals["tokens"] = int(totals["prompt_tokens"]) + int(totals["completion_tokens"])
+        return totals
+
     # -- confirms ----------------------------------------------------------
 
     def create_confirm(

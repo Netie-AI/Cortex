@@ -126,6 +126,13 @@ class SpacePatch(BaseModel):
 
 class MessageIn(BaseModel):
     text: str
+    provider: str | None = None
+    model: str | None = None
+
+
+class ProviderPin(BaseModel):
+    provider: str | None = None
+    model: str | None = None
 
 
 class ConfirmIn(BaseModel):
@@ -179,6 +186,8 @@ def build_router(crew: CrewApp) -> APIRouter:
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
         mcp = crew.mcp.status()
+        from CortexOS.crew.llm import usage_view
+
         return {
             "ok": True,
             "provider": active.public() if active else None,
@@ -189,6 +198,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "grok_offloaded": True,
             "grok_autostart": False,
             "mcp": mcp,
+            "usage": usage_view(crew.store.usage_totals()),
         }
 
     @router.get("/providers")
@@ -199,6 +209,34 @@ def build_router(crew: CrewApp) -> APIRouter:
             "active": active.public() if active else None,
             "chain": [p.public() for p in chain],
         }
+
+    @router.post("/providers")
+    async def pin_provider(body: ProviderPin) -> dict[str, Any]:
+        from CortexOS.crew.keys import pin_provider as save_pin
+        from CortexOS.crew.llm import LLMError as RouteError
+        from CortexOS.crew.llm import resolve_route
+
+        save_pin(crew.settings.data_dir, body.provider, body.model)
+        chain = resolve_providers()
+        active = next((p for p in chain if p.active), None)
+        refused: str | None = None
+        if (body.provider or "").strip() or (body.model or "").strip():
+            try:
+                resolve_route(provider=body.provider, model=body.model)
+            except RouteError as exc:
+                refused = str(exc)
+        return {
+            "ok": refused is None,
+            "active": active.public() if active else None,
+            "chain": [p.public() for p in chain],
+            "refused": refused,
+        }
+
+    @router.get("/usage")
+    async def usage() -> dict[str, Any]:
+        from CortexOS.crew.llm import usage_view
+
+        return usage_view(crew.store.usage_totals())
 
     @router.get("/spaces")
     async def list_spaces() -> list[dict[str, Any]]:
@@ -233,7 +271,12 @@ def build_router(crew: CrewApp) -> APIRouter:
     async def post_message(space_id: str, body: MessageIn) -> dict[str, Any]:
         if crew.store.get_space(space_id) is None:
             raise HTTPException(404, "unknown space")
-        return await crew.runtime.on_user_message(space_id, body.text)
+        return await crew.runtime.on_user_message(
+            space_id,
+            body.text,
+            provider=body.provider,
+            model=body.model,
+        )
 
     @router.get("/spaces/{space_id}/agents")
     async def agents(space_id: str) -> list[dict[str, Any]]:
@@ -418,6 +461,7 @@ def build_router(crew: CrewApp) -> APIRouter:
         return desk_snapshot(
             uacc_enabled=bool(uacc.get("enabled")),
             uacc_armed=bool(uacc.get("armed")),
+            usage=crew.store.usage_totals(),
         )
 
     @router.get("/voice")

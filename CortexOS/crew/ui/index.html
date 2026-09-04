@@ -15,6 +15,7 @@
       </div>
       <div class="spaces__tools spaces__hide">
         <div class="chip" id="providerChip">no provider</div>
+        <div class="chip" id="usageChip">usage 0</div>
         <button class="spaces__search" id="openSearch" type="button">Search<span class="spaces__key">Ctrl K</span></button>
         <button class="tool" id="openSettings">Providers / API keys</button>
         <button class="tool" id="openPlugins">Plugins</button>
@@ -57,6 +58,7 @@
       <div class="composer">
         <div id="roles" class="role-chips"></div>
         <div class="composer__row">
+          <select class="route-pick" id="routePick" title="Provider for this turn"></select>
           <textarea class="composer__input" id="input" rows="1" placeholder="Ask the Manager. Auto-detect who to spawn."></textarea>
           <button class="composer__send" id="send" title="Send">^</button>
         </div>
@@ -228,7 +230,8 @@
       activityOnly: false, focusAgent: null,
       stick: true, unread: 0, retry: null, live: false,
       belt: null, memScope: "space", claimBusy: null,
-      sessionAllow: {}, denyStreak: {}, runStarted: 0
+      sessionAllow: {}, denyStreak: {}, runStarted: 0,
+      routeProvider: "", usage: null
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
@@ -537,13 +540,46 @@
       $("graph").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="agent to agent traffic">${lines}${dots}</svg>`;
     }
 
+    function paintUsage(usage) {
+      if (usage) state.usage = usage;
+      const u = state.usage || {};
+      const calls = u.llm_calls || 0;
+      const tokens = u.tokens || ((u.prompt_tokens || 0) + (u.completion_tokens || 0));
+      const cost = u.cost_usd || 0;
+      const chip = $("usageChip");
+      if (!chip) return;
+      chip.textContent = "usage " + calls + " calls / " + tokens + " tok / $" + Number(cost).toFixed(4);
+    }
     function setProvider(active, chain) {
       $("providerChip").textContent = active ? (active.label + " / " + active.model) : "no provider configured";
+      const pick = $("routePick");
+      const rows = chain || [];
+      if (pick) {
+        const current = state.routeProvider || (active && active.label) || "";
+        pick.innerHTML = `<option value="">default</option>` + rows.map((p) =>
+          `<option value="${esc(p.label)}" ${p.label === current ? "selected" : ""} ${p.configured ? "" : "disabled"}>${esc(p.label)}${p.configured ? "" : " (unset)"}</option>`
+        ).join("");
+        if (current) pick.value = current;
+        pick.onchange = () => { state.routeProvider = pick.value || ""; };
+      }
       if (chain) {
         $("providerChain").innerHTML = chain.map((p) =>
-          `<div class="${p.active ? "on" : ""}">${esc(p.label)} ${p.configured ? "ready" : "unset"} - ${esc(p.model)}</div>`
+          `<button type="button" class="chain-pick${p.active ? " on" : ""}" data-label="${esc(p.label)}" ${p.configured ? "" : "disabled"}>`
+          + `${esc(p.label)} ${p.configured ? "ready" : "unset"} - ${esc(p.model)}</button>`
         ).join("");
+        $("providerChain").querySelectorAll(".chain-pick").forEach((el) => {
+          el.onclick = () => pinProvider(el.dataset.label);
+        });
       }
+    }
+    async function pinProvider(label) {
+      try {
+        const saved = await api("/crew/providers", { method: "POST", body: JSON.stringify({ provider: label }) });
+        setProvider(saved.active, saved.chain);
+        state.routeProvider = label;
+        if (saved.refused) toast(saved.refused, "bad");
+        else toast("Route pinned: " + label + ". No silent fallback.");
+      } catch (err) { toast(err.message, "bad"); }
     }
     function renderSpaces() {
       $("spaces").innerHTML = state.spaces.map((s, i) =>
@@ -703,7 +739,7 @@
       $("pluginList").innerHTML = rows.map((p) =>
         `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
          <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#8b91a3">${esc(p.slug)} - ${esc(p.layer)}</small></div>
-         <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : "mapped"}</div></div>`
+         <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : esc(p.detail || "mapped")}</div></div>`
       ).join("");
     }
     function renderTickets(board) {
@@ -777,11 +813,13 @@
       const prs = (desk.prs && desk.prs.prs) || [];
       const mail = desk.inbox || {};
       const cursor = desk.cursor || {};
+      const usage = desk.usage || {};
       const prLines = prs.length
         ? prs.slice(0, 8).map((p) => `<div class="row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
         : `<div class="empty">${esc((desk.prs && desk.prs.detail) || "No open PRs (or gh not in this folder). Ask in chat.")}</div>`;
       $("desk").innerHTML =
         `<div class="empty">${esc(desk.law || "")}</div>` +
+        `<div class="row">Usage <small>${esc(usage.llm_calls || 0)} calls / ${esc(usage.tokens || 0)} tok / $${esc(Number(usage.cost_usd || 0).toFixed(4))}</small></div>` +
         `<div class="row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
         `<div class="row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
         prLines;
@@ -867,6 +905,7 @@
       state.keyFields = keys.fields || [];
       renderKeyForm(state.keyFields, keys.status || {});
       setProvider(prov.active, prov.chain);
+      paintUsage((health && health.usage) || (desk && desk.usage));
       const ov = health.openvault || {};
       const eng = health.engine || {};
       $("engine").textContent = [
@@ -970,6 +1009,7 @@
             $("cancelRun").hidden = data.status !== "running";
             if (data.status === "running") state.runStarted = Date.now();
             if (data.status !== "running") { state.draft = ""; paintDraft(); }
+            if (data.stats) paintUsage(data.stats);
           }
         };
         ["message", "agent", "confirm", "run", "detect"].forEach((name) => src.addEventListener(name, apply));
@@ -994,7 +1034,12 @@
       $("input").value = ""; growInput();
       state.stick = true;
       try {
-        const posted = await api("/crew/spaces/" + state.spaceId + "/messages", { method: "POST", body: JSON.stringify({ text }) });
+        const pick = $("routePick");
+        const provider = pick && pick.value ? pick.value : "";
+        const posted = await api("/crew/spaces/" + state.spaceId + "/messages", {
+          method: "POST",
+          body: JSON.stringify({ text, provider: provider || undefined })
+        });
         if (posted.queued) toast("Queued for the running crew.");
         state.runId = posted.run_id || state.runId;
         $("cancelRun").hidden = !state.runId;

@@ -41,12 +41,16 @@ def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GOOGLE_API_KEY",
         "CEREBRAS_API_KEY",
         "MISTRAL_API_KEY",
+        "CREW_PROVIDER",
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("CREW_MODEL", "test/fake-model")
     monkeypatch.setenv("CREW_ALLOW_OLLAMA", "0")
     monkeypatch.setenv("CREW_OPENVAULT", "0")
     monkeypatch.setenv("CREW_LIVE_PROBES", "0")
+    from CortexOS.crew.llm import reset_usage
+
+    reset_usage()
 
 
 @pytest.fixture()

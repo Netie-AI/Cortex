@@ -24,6 +24,7 @@ KNOWN = (
     "CEREBRAS_API_KEY",
     "MISTRAL_API_KEY",
     "CREW_MODEL",
+    "CREW_PROVIDER",
     "CREW_OPENAI_BASE_URL",
     "CREW_CURSOR_BASE_URL",
     "CREW_ANTHROPIC_MODEL",
@@ -119,5 +120,18 @@ def public_fields() -> list[dict[str, str]]:
         {"key": "CEREBRAS_API_KEY", "label": "Cerebras", "hint": "csk-..."},
         {"key": "MISTRAL_API_KEY", "label": "Mistral", "hint": "vaulted via OpenVault"},
         {"key": "XAI_API_KEY", "label": "xAI / Grok", "hint": "xai-..."},
+        {"key": "CREW_PROVIDER", "label": "Pinned provider", "hint": "openvault | anthropic | groq | openrouter | ..."},
         {"key": "CREW_MODEL", "label": "Explicit model override", "hint": "openrouter/deepseek/deepseek-chat"},
     ]
+
+
+def pin_provider(
+    data_dir: Path, provider: str | None, model: str | None = None
+) -> dict[str, Any]:
+    """Persist the operator's host pick. Empty unpins. Never stores secrets."""
+    updates: dict[str, str | None] = {}
+    if provider is not None:
+        updates["CREW_PROVIDER"] = (provider or "").strip() or None
+    if model is not None:
+        updates["CREW_MODEL"] = (model or "").strip() or None
+    return save(data_dir, updates)

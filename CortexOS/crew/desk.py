@@ -8,12 +8,20 @@ from CortexOS.crew import connectors, estate, github, inbox
 from CortexOS.crew.openvault import cursor_key_status
 
 
-def snapshot(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> dict[str, Any]:
+def snapshot(
+    *,
+    uacc_enabled: bool = False,
+    uacc_armed: bool = False,
+    usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from CortexOS.crew.llm import usage_view
+
     plugs = connectors.catalog(uacc_enabled=uacc_enabled, uacc_armed=uacc_armed)
     prs = github.list_prs()
     mail = inbox.status()
     cursor = cursor_key_status()
     estate_snap = estate.snapshot()
+    usage_payload = usage_view(usage)
     return {
         "ok": True,
         "connectors": plugs,
@@ -22,6 +30,7 @@ def snapshot(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> dict[st
         "inbox": mail,
         "cursor": cursor,
         "estate": estate_snap,
+        "usage": usage_payload,
         "law": (
             "Ask in chat to check PRs or mail. Drop files to import. "
             "Human is money and decision authority. Do not auto-merge or auto-send. "
@@ -39,6 +48,11 @@ def render(snap: dict[str, Any] | None = None) -> str:
         f"Cursor key: {'set' if cursor.get('configured') else 'missing'} "
         f"model={cursor.get('model') or 'grok-4.6'} chars={cursor.get('chars') or 0}"
     )
+    usage = data.get("usage") or {}
+    lines.append(
+        f"Usage: calls={usage.get('llm_calls') or 0} "
+        f"tokens={usage.get('tokens') or 0} cost_usd={usage.get('cost_usd') or 0}"
+    )
     prs = (data.get("prs") or {}).get("prs") or []
     detail = (data.get("prs") or {}).get("detail") or ""
     lines.append(f"PRs: {len(prs)}" + (f" ({detail})" if detail else ""))
@@ -54,7 +68,10 @@ def render(snap: dict[str, Any] | None = None) -> str:
     lines.append("Connectors:")
     for plug in data.get("connectors") or []:
         state = "connected" if plug.get("connected") else "mapped"
-        lines.append(f"- {plug.get('slug')}: {state} ({plug.get('layer')})")
+        extra = ""
+        if not plug.get("connected") and plug.get("detail"):
+            extra = f" refused: {plug.get('detail')}"
+        lines.append(f"- {plug.get('slug')}: {state} ({plug.get('layer')}){extra}")
     estate_snap = data.get("estate") or {}
     n_estate = estate_snap.get("n") or 0
     lines.append(

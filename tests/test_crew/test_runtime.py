@@ -90,6 +90,7 @@ async def test_desk_status_lands_in_transcript(rig, monkeypatch) -> None:
     assert "auto-merge" in tools[0]["content"].lower() or "Do not auto-merge" in tools[0]["content"]
     assert "Estate:" in tools[0]["content"]
     assert "ship_gate" in tools[0]["content"]
+    assert "Usage:" in tools[0]["content"]
     answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "chat" in answer["content"].lower()
 
