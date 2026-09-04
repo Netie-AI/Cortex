@@ -225,6 +225,18 @@ ROLES: tuple[Role, ...] = (
         ("skill-ingest", "voice-learn", "feedback-learn", "skill-route"),
     ),
     Role(
+        "Ontology",
+        "Ont",
+        "Client loop: Constructor canvas + Cortex YAML + DMS. Palantir P1 parked.",
+        "You are the Ontology agent. Follow skill ontology-foundry then build. "
+        "SWAP packs/dms/semantic_layer.yaml then object_types.yaml name-parity. "
+        "Constructor generate: understand this company / define data / govern agents / "
+        "business insights. Ghost first. Live run only on /cortex. Extra DMS tab/route, "
+        "not a second SPA. Do not unpark P1. Do not clone Foundry, n8n, Cogitorium, or "
+        "Semantica. Control POST /v1/run stays 405. Do not kill hung :8020.",
+        ("ontology-foundry", "build"),
+    ),
+    Role(
         "Routines",
         "R",
         "Schedule via NetieEstate24x7 / Plane, not a second cron that implements tickets.",

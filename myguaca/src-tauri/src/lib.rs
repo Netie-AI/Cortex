@@ -1,0 +1,20 @@
+pub mod app;
+pub mod cdp;
+pub mod commands;
+pub mod config;
+pub mod db;
+pub mod domain;
+pub mod e2b;
+pub mod eval;
+pub mod files;
+pub mod kernel;
+pub mod llm;
+pub mod menubar;
+pub mod proxy;
+pub mod runtime;
+pub mod subscription;
+pub mod trajectory;
+pub mod tray;
+pub mod workspace;
+
+pub use app::run;

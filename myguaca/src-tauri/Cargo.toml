@@ -1,0 +1,89 @@
+[package]
+name = "guac"
+version = "0.1.0"
+description = "Guac: a local, no-auth chat surface where you and your agents talk to each other."
+authors = ["madebywelch"]
+edition = "2021"
+# The floor the dependency tree already imposes, written down rather than
+# guessed at. Several crates in the lockfile pin 1.88 themselves and a large
+# number more are edition 2024, so an out-of-date toolchain gives up partway
+# through a download with an error about somebody else's crate. Declaring it
+# here moves that failure to the first line cargo reads, and keeps
+# `cargo update` inside the range that still builds.
+rust-version = "1.88"
+
+[lib]
+name = "guac_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `tray-icon` is the menu bar presence. The image is decoded by
+# `include_image!` at compile time, so no runtime image feature goes with it.
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net", "io-util"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "stream",
+  "rustls-tls",
+] }
+
+# The computer viewer proxies to E2B over TLS and has to relay a WebSocket
+# upgrade, which reqwest cannot do; this is the smallest thing that can.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "0.26"
+
+# A browser is driven over the DevTools protocol, which is JSON-RPC on a
+# WebSocket, and this is the client end of it. Not hand-rolled like the Connect
+# framing in `e2b.rs`: that is a length prefix and a byte, whereas this is
+# masking, fragmentation, continuation and control frames, on the connection
+# that carries an agent's logged-in browser. A protocol bug there is a hang or a
+# truncated page rather than an error, so it is worth one maintained dependency.
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
+  "connect",
+  "handshake",
+  "rustls-tls-webpki-roots",
+] }
+
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# A routine that repeats "every weekday" or "every month" cannot be a gap in
+# seconds: a day is 23 or 25 hours twice a year and a month is four lengths, so
+# a stored gap wanders off the hour it was set for. std has no calendar and no
+# local zone; this is the smallest thing that has both.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+sha2 = "0.10"
+parking_lot = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tauri-plugin-notification = "2.3.3"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "test-util"] }
+axum = "0.7"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

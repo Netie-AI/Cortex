@@ -1,19 +1,20 @@
 # Cortex Crew night companion -- launch only.
-# Restarts Crew and OpenVault API if they died. Does not implement tickets.
-# Does not touch D:\Cortex (ANS) or kind-euclid. Does not kill processes.
+# Restarts engine Crew :8023 and OpenVault API if they died. Does not implement tickets.
+# Hung converse :8020 is founder YOU. Does not kill processes (R-0015).
+# Does not grow D:\Cortex-crew.
 param([switch]$SkipEstate)
 $ErrorActionPreference = "Continue"
 $Stamp = Get-Date -Format "yyyy-MM-dd HH:mm"
-$CrewRoot = if (Test-Path "E:\Cortex") { "E:\Cortex" } else { "D:\Cortex" }
+$CrewRoot = if (Test-Path "D:\Cortex\CortexOS\crew") { "D:\Cortex" } elseif (Test-Path "E:\Cortex\CortexOS\crew") { "E:\Cortex" } else { "D:\Cortex" }
 $CrewPy = Join-Path $CrewRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $CrewPy)) { $CrewPy = "python" }
 $Wake = Join-Path $CrewRoot "data\crew\NIGHT_WAKE.md"
-$OvHome = if (Test-Path "E:\OpenVault\.openvault") { "E:\OpenVault\.openvault" } else { "D:\OpenVault\.openvault" }
+$OvHome = if (Test-Path "D:\OpenVault\.openvault") { "D:\OpenVault\.openvault" } elseif (Test-Path "E:\OpenVault\.openvault") { "E:\OpenVault\.openvault" } else { "D:\OpenVault\.openvault" }
 $notes = @()
 
-function HttpOk([string]$Url) {
+function HttpOk([string]$Url, [int]$Sec = 12) {
     try {
-        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 12
+        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $Sec
         return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)
     } catch { return $false }
 }
@@ -35,7 +36,7 @@ function PortHeld([int]$Port) {
 }
 
 $CrewRepos = "Netie-AI/Cortex,Netie-AI/OpenVault,Netie-AI/Pointer,Netie-AI/Space,Netie-AI/dms,jian-hong/AirGPT"
-if (-not (HttpOk "http://127.0.0.1:8020/crew/health")) {
+if (-not (HttpOk "http://127.0.0.1:8020/crew/health" 2)) {
     if (PortHeld 8020) {
         $notes += "Crew :8020 held but /crew/health unread. Will not start a second process. Founder rebind: YOU step 8."
     } else {
@@ -53,11 +54,29 @@ if (-not (HttpOk "http://127.0.0.1:8020/crew/health")) {
         $notes += "started Crew :8020"
     }
 } else {
-    $notes += "Crew up"
+    $notes += "Crew converse :8020 health ok"
 }
 
-if (-not (HttpOk "http://127.0.0.1:8010/api/engine/activity")) {
-    $notes += "ENGINE DOWN (will not start from this script; ANS checkout owns :8010)"
+if (-not (HttpOk "http://127.0.0.1:8023/crew/health" 3)) {
+    if (PortHeld 8023) {
+        $notes += "Crew sidecar :8023 held but /crew/health unread. Will not start a second process."
+    } else {
+        $env:PYTHONPATH = $CrewRoot
+        Remove-Item Env:CORTEX_COMPUTER_CONTROL -ErrorAction SilentlyContinue
+        $env:CREW_ALLOW_OLLAMA = "0"
+        Start-Process -FilePath $CrewPy -ArgumentList @(
+            "-m", "CortexOS.crew",
+            "--host", "127.0.0.1",
+            "--port", "8023"
+        ) -WorkingDirectory $CrewRoot -WindowStyle Minimized
+        $notes += "started Crew sidecar :8023"
+    }
+} else {
+    $notes += "Crew sidecar :8023 up"
+}
+
+if (-not ((HttpOk "http://127.0.0.1:8011/health" 3) -or (HttpOk "http://127.0.0.1:8010/health" 3))) {
+    $notes += "ENGINE DOWN (will not start from this script; ANS checkout owns the engine)"
 } else {
     $notes += "engine up"
 }

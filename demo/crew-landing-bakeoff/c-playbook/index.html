@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cortex Crew -- analog-surface CSS 3D</title>
+  <style>
+    :root { --bg:#10130e; --ink:#f3f0e4; --lime:#d6ff6b; --line:#2e3326; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; min-height:100%; background:var(--bg); color:var(--ink); font-family:Georgia, "Times New Roman", serif; }
+    body { overflow:hidden; }
+    .stage { height:100vh; perspective:1100px; display:grid; place-items:center; }
+    .world { width:min(92vw, 980px); height:70vh; transform-style:preserve-3d; transition:transform 0.08s linear; }
+    .node { position:absolute; width:7.2rem; height:7.2rem; border:1px solid var(--line); background:rgba(18,22,14,0.92); transform-style:preserve-3d; display:flex; align-items:flex-end; padding:0.7rem; font:12px/1.2 ui-sans-serif, system-ui, sans-serif; }
+    .node b { font-size:0.95rem; }
+    .core { position:absolute; left:50%; top:50%; width:9rem; height:9rem; margin:-4.5rem; transform:translateZ(40px) rotateX(18deg) rotateY(24deg); background:var(--lime); color:#12140c; display:grid; place-items:center; text-align:center; font:700 1.05rem/1.1 ui-sans-serif, system-ui, sans-serif; }
+    header, footer { position:fixed; left:1.5rem; right:1.5rem; z-index:2; pointer-events:none; }
+    header { top:1.3rem; }
+    footer { bottom:1.3rem; display:flex; gap:0.6rem; pointer-events:auto; }
+    h1 { margin:0; font-size:clamp(2rem, 5vw, 3.4rem); letter-spacing:-0.04em; }
+    p { max-width:34rem; color:#c9cbb8; font-family:ui-sans-serif, system-ui, sans-serif; }
+    .meta { font:0.72rem/1 ui-sans-serif, system-ui, sans-serif; letter-spacing:0.14em; text-transform:uppercase; color:#8d9278; }
+    a { pointer-events:auto; color:#10130e; background:var(--lime); text-decoration:none; padding:0.65rem 0.9rem; font-family:ui-sans-serif, system-ui, sans-serif; font-weight:650; }
+    a.ghost { background:transparent; color:var(--lime); border:1px solid var(--line); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="meta">Lane C -- analog-surface playbook -- CSS 3D, no screenshot</div>
+    <h1>Steal rhythm, not assets.</h1>
+    <p>Crew analog-surface: tokens and motion DNA. Move the pointer. The desk tilts. Boxes-only heroes fail this playbook.</p>
+  </header>
+  <div class="stage">
+    <div class="world" id="world">
+      <div class="core">Manager<br>one answer</div>
+    </div>
+  </div>
+  <footer>
+    <a href="http://127.0.0.1:8020/">Open Crew</a>
+    <a class="ghost" href="../index.html">Votes</a>
+  </footer>
+  <script>
+    const world = document.getElementById("world");
+    const labels = ["Surface", "Gate", "Ticket", "PRD", "Skills", "Watchdog"];
+    labels.forEach((name, i) => {
+      const el = document.createElement("div");
+      el.className = "node";
+      el.innerHTML = "<b>" + name + "</b>";
+      const a = (i / labels.length) * Math.PI * 2;
+      const x = Math.cos(a) * 220;
+      const z = Math.sin(a) * 180;
+      el.style.transform = `translate3d(calc(50% + ${x}px), calc(50% + ${Math.sin(a * 2) * 40}px), ${z}px) rotateY(${a * 40}deg)`;
+      world.appendChild(el);
+    });
+    addEventListener("pointermove", (e) => {
+      const nx = (e.clientX / innerWidth) * 2 - 1;
+      const ny = (e.clientY / innerHeight) * 2 - 1;
+      world.style.transform = `rotateX(${(-ny * 18).toFixed(2)}deg) rotateY(${(nx * 26).toFixed(2)}deg)`;
+    });
+  </script>
+</body>
+</html>

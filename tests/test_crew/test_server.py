@@ -94,6 +94,7 @@ def test_health_and_roles_and_spaces(client) -> None:
     assert health["grok_offloaded"] is True
     assert health["grok_autostart"] is False
     assert health["openvault"]["ok"] is False
+    assert isinstance(health.get("wake_tick_at"), (int, float))
     roles = client.http.get("/crew/roles").json()
     names = {r["name"] for r in roles}
     assert {"Ticket", "PRD", "Epic", "Gate", "Watchdog"} <= names
@@ -175,6 +176,13 @@ def test_belt_and_timer_wake(client) -> None:
         json={"space_id": space["id"], "fire_at": future, "note": "morning brief"},
     )
     assert created.status_code == 200, created.text
+    catalog = client.http.post(
+        "/crew/wakes",
+        json={"space_id": space["id"], "fire_at": future, "note": "catalog"},
+    )
+    assert catalog.status_code == 200, catalog.text
+    assert "cortex_ask" in catalog.json()["wake"]["note"]
+    assert "metrics" in catalog.json()["wake"]["note"]
     confirm = client.crew.store.create_confirm(
         space["id"], run_id=None, agent_id=None, tool="win.Type", args={"text": "hi"}
     )

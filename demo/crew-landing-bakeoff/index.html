@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cortex Crew landing bakeoff</title>
+  <style>
+    :root { --bg:#0c0d0b; --ink:#e8eadf; --muted:#8b8f7a; --line:#2a2c22; --accent:#c6f25a; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.4 ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+    header { padding:1.2rem 1.4rem 0.6rem; border-bottom:1px solid var(--line); }
+    h1 { margin:0; font-size:1.15rem; letter-spacing:-0.02em; }
+    p { margin:0.35rem 0 0; color:var(--muted); max-width:62rem; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:0.7rem; padding:0.7rem; }
+    article { border:1px solid var(--line); background:#12140f; min-height:22rem; display:flex; flex-direction:column; }
+    iframe { flex:1; width:100%; border:0; background:#000; min-height:18rem; }
+    footer { display:flex; gap:0.4rem; align-items:center; padding:0.45rem 0.6rem; border-top:1px solid var(--line); }
+    button { background:#1a1c16; color:var(--ink); border:1px solid var(--line); padding:0.25rem 0.55rem; cursor:pointer; }
+    button.on { border-color:var(--accent); color:var(--accent); }
+    a { color:var(--accent); }
+    @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Vote the 3D Cortex Crew landing</h1>
+    <p>Fail = boxes, pasted image, or a still that cannot tilt. A = this Cursor one-shot. B = live OpenVault auto (usually Groq). C = analog-surface CSS 3D playbook. D = detect + verify orchestration shown on the page. <a href="SCORECARD.md">SCORECARD.md</a></p>
+  </header>
+  <div class="grid" id="grid"></div>
+  <script>
+    const lanes = [
+      { id: "a", title: "A oneshot (Cursor chat)", src: "a-oneshot/index.html" },
+      { id: "b", title: "B FreeRoute auto", src: "b-freeroute-auto/index.html" },
+      { id: "c", title: "C analog-surface playbook", src: "c-playbook/index.html" },
+      { id: "d", title: "D detect + verify orchestrated", src: "d-orchestrated/index.html" }
+    ];
+    const votes = JSON.parse(localStorage.getItem("crew-bakeoff-votes") || "{}");
+    const grid = document.getElementById("grid");
+    function paint() {
+      grid.innerHTML = lanes.map((l) => `<article>
+        <iframe src="${l.src}" title="${l.title}"></iframe>
+        <footer>
+          <strong>${l.title}</strong>
+          <a href="${l.src}" target="_blank" rel="noopener">open</a>
+          <button data-id="${l.id}" class="${votes[l.id] ? "on" : ""}">${votes[l.id] ? "voted" : "vote"}</button>
+        </footer>
+      </article>`).join("");
+      grid.querySelectorAll("button").forEach((btn) => {
+        btn.onclick = () => {
+          votes[btn.dataset.id] = !votes[btn.dataset.id];
+          localStorage.setItem("crew-bakeoff-votes", JSON.stringify(votes));
+          paint();
+        };
+      });
+    }
+    paint();
+  </script>
+</body>
+</html>

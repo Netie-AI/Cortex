@@ -48,3 +48,18 @@ def test_memory_context_provider_returns_vector_hits_and_optional_context():
     assert context["chat_turns"] == [{"content": "chat:s-1"}]
     assert context["notes"] == ["saved note"]
     assert context["text_blob"] == "relevant fact\nchat:s-1\nsaved note"
+
+
+def test_memory_context_provider_collection_scopes_like_a_wing():
+    """MemPalace analog: collection is wing/room. No second store."""
+    store = InMemoryStore()
+    store.upsert(
+        [
+            MemoryRecord(id="wing-a", text="aisle 3", vector=[1.0, 0.0], collection="warehouse"),
+            MemoryRecord(id="wing-b", text="other site", vector=[1.0, 0.0], collection="office"),
+        ]
+    )
+    context = MemoryContextProvider(store).assemble([1.0, 0.0], collection="warehouse")
+    assert [hit.id for hit in context["vector_hits"]] == ["wing-a"]
+    assert "aisle 3" in context["text_blob"]
+    assert "other site" not in context["text_blob"]

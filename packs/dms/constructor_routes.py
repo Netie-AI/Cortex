@@ -183,7 +183,11 @@ def constructor_issue_key(request: Request, body: IssueKeyBody = IssueKeyBody())
 async def cortex_session(request: Request) -> RedirectResponse:
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
-        body = SessionBody.model_validate(await request.json())
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Send JSON {key: ...}") from exc
+        body = SessionBody.model_validate(payload)
         key = body.key.strip()
     else:
         try:
@@ -262,6 +266,15 @@ def constructor_ontology(caller: Caller = Depends(require_constructor_viewer)) -
 
     _ = caller
     return {"ok": True, **catalog()}
+
+
+@router.get("/cortex/constructor/catalog")
+def constructor_catalog(caller: Caller = Depends(require_constructor_viewer)) -> dict[str, Any]:
+    """Governed semantic-layer catalog. Viewer read. No invented rows."""
+    from packs.dms.semantic.catalog_answer import build_catalog_answer
+
+    _ = caller
+    return {"ok": True, **build_catalog_answer()}
 
 
 @router.get("/cortex/constructor/{name}", response_model=None)
@@ -409,7 +422,7 @@ async def constructor_run(
 
     from packs.dms.constructor_fetch import fetch_slice
 
-    seed: dict[str, Any] = {"actor": caller.actor}
+    seed: dict[str, Any] = {"actor": caller.actor, "confirmed": True}
     fetches: dict[str, Any] = {}
     for node in program.nodes:
         ann = node.annotations if isinstance(node.annotations, dict) else {}
@@ -438,7 +451,14 @@ async def constructor_run(
 
     ctx = ExecutionContext(body.run_id, seed)
     try:
-        dag_result = await run_dag(program, ctx, router_m, ledger)
+        import asyncio
+
+        dag_result = await asyncio.wait_for(run_dag(program, ctx, router_m, ledger), timeout=45)
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="run_dag timed out after 45s. Ghost still compiles. Slim the tool_call payload or retry ingest->app.",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     serialized: dict[str, Any] = {}

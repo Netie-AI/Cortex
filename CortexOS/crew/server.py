@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -76,6 +77,7 @@ class CrewApp:
         self.wakes = WakeStore(self.settings.data_dir / "wakes.json")
         self.runtime.wakes = self.wakes
         self._wake_task: asyncio.Task[None] | None = None
+        self._wake_tick_at: float = 0.0
 
     async def startup(self) -> None:
         from CortexOS.crew.openvault import (
@@ -102,6 +104,7 @@ class CrewApp:
     async def _wake_loop(self) -> None:
         """Fire due timer wakes as transcript turns. HITL floors still apply."""
         while True:
+            self._wake_tick_at = time.time()
             await asyncio.sleep(5)
             try:
                 await self.fire_due_wakes()
@@ -359,6 +362,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "grok_autostart": False,
             "mcp": mcp,
             "queue": crew.runtime.work_queue.counts(),
+            "wake_tick_at": crew._wake_tick_at,
         }
 
     @router.get("/belt")
@@ -378,6 +382,8 @@ def build_router(crew: CrewApp) -> APIRouter:
     async def create_wake(body: WakeIn) -> dict[str, Any]:
         from datetime import datetime, timezone
 
+        from CortexOS.crew.wakes import expand_wake_note
+
         if crew.store.get_space(body.space_id) is None:
             raise HTTPException(404, "unknown space")
         try:
@@ -386,7 +392,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             raise HTTPException(400, "fire_at must be ISO-8601") from exc
         if fire.tzinfo is None:
             fire = fire.replace(tzinfo=timezone.utc)
-        wake = crew.wakes.add_timer(body.space_id, fire, note=body.note)
+        wake = crew.wakes.add_timer(body.space_id, fire, note=expand_wake_note(body.note))
         return {"ok": True, "wake": wake.as_dict()}
 
     @router.post("/wakes/event")
@@ -790,6 +796,7 @@ def main() -> None:
 
     settings = load_settings()
     port = args.port or settings.port
+    print(f"Cortex Crew binding {args.host}:{port} data={settings.data_dir}", flush=True)
     uvicorn.run(create_app(settings), host=args.host, port=port, log_level="info")
 
 

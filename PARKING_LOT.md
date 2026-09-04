@@ -3,8 +3,8 @@
 
 ---
 
-## P1 — Full Palantir ontology + AIP parity
-Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened.
+## P1 — Cortex ontology + Constructor compile parity
+Governed semantic objects, lineage, actions. **Condition:** 1+ paying clients, F1–F7 production-hardened. Not a second ontology product.
 
 ## P2 — WASM / Firecracker production hardening
 **Condition:** First enterprise client conversation. *(Not shipped. DOC-01 deleted the unused `wasm_isolate` scaffold; do not cite that path.)*

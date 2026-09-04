@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cortex Crew -- local agents, one answer</title>
+  <style>
+    html, body { margin:0; height:100%; background:#070806; color:#eef2d8; font-family:ui-sans-serif, system-ui, sans-serif; overflow:hidden; }
+    canvas { display:block; }
+    .hud { position:fixed; inset:0; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between; padding:2.2rem 2.4rem; }
+    h1 { margin:0; font-size:clamp(2.2rem, 6vw, 4.6rem); letter-spacing:-0.06em; line-height:0.92; max-width:14ch; }
+    h1 em { font-style:normal; color:#c6f25a; }
+    .lede { margin-top:1rem; max-width:36rem; color:#b7bb9e; font-size:1.05rem; line-height:1.45; pointer-events:auto; }
+    nav { display:flex; gap:0.7rem; pointer-events:auto; }
+    a { color:#070806; background:#c6f25a; text-decoration:none; padding:0.7rem 1rem; font-weight:650; }
+    a.ghost { background:transparent; color:#c6f25a; border:1px solid #3d4228; }
+    .meta { font-size:0.75rem; letter-spacing:0.16em; text-transform:uppercase; color:#8d9274; }
+    .hint { position:fixed; right:1.4rem; bottom:1.2rem; color:#6f735c; font-size:0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div>
+      <div class="meta">Lane A -- oneshot -- WebGL scene you can orbit</div>
+      <h1>A crew that <em>finishes</em> the page.</h1>
+      <p class="lede">Cortex Crew is local chat over the governed engine. Manager, specialists, OpenVault keys. No pasted screenshot. Drag to orbit the constellation.</p>
+    </div>
+    <nav>
+      <a href="http://127.0.0.1:8020/">Open Crew :8020</a>
+      <a class="ghost" href="../index.html">Back to votes</a>
+    </nav>
+  </div>
+  <div class="hint">drag to orbit -- scroll to dock</div>
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x070806, 0.035);
+    const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 80);
+    camera.position.set(0, 1.4, 8.4);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setClearColor(0x070806, 1);
+    document.body.prepend(renderer.domElement);
+
+    const group = new THREE.Group();
+    scene.add(group);
+    const geo = new THREE.IcosahedronGeometry(0.22, 0);
+    const roles = [0xc6f25a, 0x7ad0ff, 0xf2a65a, 0xe07a9a, 0xd4d0ff, 0x9ae3b0];
+    for (let i = 0; i < 42; i++) {
+      const mat = new THREE.MeshStandardMaterial({
+        color: roles[i % roles.length],
+        roughness: 0.35,
+        metalness: 0.2,
+        emissive: roles[i % roles.length],
+        emissiveIntensity: 0.18
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      const phi = Math.acos(1 - 2 * (i + 0.5) / 42);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      const r = 2.6 + (i % 5) * 0.12;
+      mesh.position.set(
+        r * Math.sin(phi) * Math.cos(theta),
+        r * Math.cos(phi) * 0.7,
+        r * Math.sin(phi) * Math.sin(theta)
+      );
+      group.add(mesh);
+    }
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.55, 0),
+      new THREE.MeshStandardMaterial({ color: 0xc6f25a, emissive: 0x6a8a20, emissiveIntensity: 0.6, roughness: 0.2 })
+    );
+    group.add(core);
+    scene.add(new THREE.AmbientLight(0x9aa080, 0.45));
+    const key = new THREE.DirectionalLight(0xf4f1c8, 1.15);
+    key.position.set(4, 6, 3);
+    scene.add(key);
+
+    let dragging = false, lx = 0, ly = 0, rotY = 0.4, rotX = 0.18, targetZ = 8.4;
+    addEventListener("pointerdown", (e) => { dragging = true; lx = e.clientX; ly = e.clientY; });
+    addEventListener("pointerup", () => { dragging = false; });
+    addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      rotY += (e.clientX - lx) * 0.005;
+      rotX += (e.clientY - ly) * 0.004;
+      rotX = Math.max(-0.8, Math.min(0.8, rotX));
+      lx = e.clientX; ly = e.clientY;
+    });
+    addEventListener("wheel", (e) => { targetZ = Math.max(5, Math.min(14, targetZ + e.deltaY * 0.01)); }, { passive: true });
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+    const tick = () => {
+      group.rotation.y = rotY;
+      group.rotation.x = rotX;
+      core.rotation.y += 0.01;
+      camera.position.z += (targetZ - camera.position.z) * 0.06;
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  </script>
+</body>
+</html>

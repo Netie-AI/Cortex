@@ -19,6 +19,7 @@ _KINDS = frozenset(
         "agent",
         "hypothesize",
         "improve",
+        "enhance",
         "audit",
         "tool_call",
     }
@@ -34,6 +35,7 @@ _KIND_TO_TYPE = {
     "agent": NodeType.AGENT_TASK,
     "hypothesize": NodeType.DOCUMENT_REF,
     "improve": NodeType.DOCUMENT_REF,
+    "enhance": NodeType.DOCUMENT_REF,
     "audit": NodeType.DOCUMENT_REF,
     "tool_call": NodeType.TOOL_CALL,
 }
@@ -134,12 +136,17 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
 
 
 _OBJECT_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("places", ("maps", "nearby", "geo", "latitude", "longitude", "place")),
+    ("venues", ("club", "clubs", "venue", "venues", "nightlife", "restaurant")),
+    ("contacts", ("contact", "contacts")),
+    ("leads", ("customer", "customers", "lead", "leads", "prospect")),
     ("inventory", ("inventory", "sku", "stock", "warehouse")),
     ("suppliers", ("supplier", "vendor")),
     ("locations", ("location", "site", "bin")),
     ("shipments", ("shipment", "consignment", "carrier")),
     ("transactions", ("transaction", "txn", "movement")),
     ("alerts", ("alert", "alarm")),
+    ("incidents", ("incident", "case desk", "case file", "ops desk")),
 )
 
 _DEFAULT_POINT: dict[str, str] = {
@@ -149,11 +156,38 @@ _DEFAULT_POINT: dict[str, str] = {
     "shipments": "shipment_id",
     "transactions": "txn_id",
     "alerts": "alert_id",
+    "places": "place_id",
+    "venues": "venue_id",
+    "contacts": "contact_id",
+    "leads": "lead_id",
+    "incidents": "incident_id",
 }
+
+_FETCH_PLACE: dict[str, str] = {
+    "places": "maps.places",
+    "venues": "maps.venues",
+    "contacts": "crm.contacts",
+    "leads": "crm.leads",
+    "incidents": "db.incidents",
+}
+
+_REFUSE_HITS: tuple[str, ...] = (
+    "prostitut",
+    "escort",
+    "brothel",
+    "sex work",
+    "sexworker",
+    "stalk",
+    "doxx",
+    "scrape the internet",
+    "scrape internet",
+    "public webcam",
+    "scrape camera",
+)
 
 _KIND_NOTE: dict[str, str] = {
     "ingest": "Read operations into the graph.",
-    "connector": "First-party Cortex input. No n8n.",
+    "connector": "First-party Cortex input.",
     "ontology": "Cortex ontology objects/links/actions.",
     "insight": "Cite ontology + ledger.",
     "foundry": "Compile a governed Cortex app from insights.",
@@ -172,58 +206,141 @@ def objects_in_prompt(prompt: str) -> list[str]:
     for obj, words in _OBJECT_WORDS:
         if any(w in low for w in words) and obj not in found:
             found.append(obj)
+    if "venues" in found and "places" not in found:
+        found.insert(0, "places")
     return found
 
 
+def fetch_place_for(obj: str) -> str:
+    return _FETCH_PLACE.get(obj, f"warehouse.{obj}")
+
+
 def generate_constructor_graph(prompt: str) -> dict[str, Any]:
-    """Chat -> canvas. Deterministic Cortex compiler, not an n8n import."""
+    """Chat -> canvas. Deterministic Cortex compiler."""
     text = (prompt or "").strip()
     if not text:
         raise ConstructorGraphError("prompt is empty")
     low = text.lower()
+    if any(hit in low for hit in _REFUSE_HITS):
+        raise ConstructorGraphError(
+            "Refused. Constructor will not compile internet stalking, doxxing, "
+            "public-webcam scrape, or sex-work targeting."
+        )
     objects = objects_in_prompt(low)
     assumed = False
     if not objects:
         objects = ["inventory"]
         assumed = True
+    venueish = any(obj in {"places", "venues", "contacts", "leads"} for obj in objects)
     action = "export_pptx"
-    if "intake" in low:
+    if "intake" in low and "client" not in low:
         action = "item.intake"
     elif "agent.checked" in low or ("check" in low and "agent" in low):
         action = "agent.checked"
+    elif any(
+        k in low
+        for k in ("govern agent", "govern agents", "agent governance")
+    ):
+        action = "agent.checked"
     verify = any(k in low for k in ("verify", "audit", "hypothes", "claim", "fact-check", "fact check"))
     agentish = any(k in low for k in ("single agent", "one agent", "worker loop"))
-    foundryish = any(
-        k in low for k in ("foundry", "create app", "pptx", "export", "ontology", "insight", "app")
+    governish = any(
+        k in low for k in ("govern agent", "govern agents", "agent governance")
     )
-    if verify and not foundryish:
+    clientish = ("understand" in low and "company" in low) or any(
+        k in low
+        for k in (
+            "client company",
+            "onboard client",
+            "client intake",
+            "semantic layer",
+        )
+    )
+    foundryish = venueish or clientish or any(
+        k in low
+        for k in (
+            "foundry",
+            "create app",
+            "pptx",
+            "export",
+            "ontology",
+            "insight",
+            "app",
+            "maps",
+            "club",
+            "venue",
+            "contact",
+            "customer",
+            "define data",
+        )
+    )
+    if verify and not foundryish and not governish:
         pattern = "generator_verifier"
         kinds = ["connector", "hypothesize", "audit"]
+    elif governish and not foundryish:
+        # Govern agents is Cortex agent.checked + audit. Ontology stays Cortex.
+        pattern = "generator_verifier"
+        kinds = ["ingest", "connector", "ontology", "agent", "audit"]
     elif agentish and not foundryish:
         pattern = "single_agent"
-        kinds = ["connector", "agent", "audit"]
+        kinds = ["ingest", "agent", "audit"]
+    elif venueish:
+        pattern = "orchestrator_subagent"
+        kinds = ["ingest", "connector", "ontology", "insight", "foundry", "app", "tool_call"]
+    elif clientish:
+        # Client intake is Palantir-lite on live YAML, not a Foundry product.
+        pattern = "orchestrator_subagent"
+        kinds = ["ingest", "connector", "ontology", "insight", "foundry", "app", "tool_call"]
     else:
         pattern = "orchestrator_subagent"
-        kinds = ["connector", "ontology", "insight", "foundry", "app", "tool_call"]
+        kinds = ["ingest", "connector", "ontology", "insight", "foundry", "app", "tool_call"]
     nodes: list[dict[str, Any]] = []
     for i, kind in enumerate(kinds):
         obj = objects[0]
         if kind == "ontology" and len(objects) > 1:
             obj = objects[1]
+        if venueish and kind == "insight" and len(objects) > 2:
+            obj = objects[2]
+        if venueish and kind == "tool_call":
+            obj = objects[-1]
+        note = _KIND_NOTE.get(kind, kind)
+        if venueish and kind == "connector":
+            note = "Bind Place/Venue fields to Cortex objects. Ghost on Pages. No live scrape."
+        elif venueish and kind == "ontology":
+            note = (
+                f"Object types {', '.join(objects)}. "
+                "Links venue_at_place, contact_at_venue, lead_of_contact."
+            )
+        elif venueish and kind == "insight":
+            note = (
+                "Cite nearby venues by Place lat/lng, contacts at those venues, "
+                "leads from contacts."
+            )
+        elif clientish and kind == "ingest":
+            note = "Read customer terms into glossary rows. Ghost. No invented DuckDB."
+        elif clientish and kind == "ontology":
+            note = (
+                "SWAP packs/dms/semantic_layer.yaml then object_types.yaml name-parity. "
+                "P1 parked."
+            )
+        elif clientish and kind == "insight":
+            note = "Cite catalog_answer + ledger. Crew wakes keep 24/7 meaning."
+        elif clientish and kind == "foundry":
+            note = "Compile a DMS shell app from ontology insights. Extra tab/route, not a second SPA."
         node: dict[str, Any] = {
             "id": f"g{i + 1}",
             "kind": kind,
             "x": 32 + (i % 4) * 208,
             "y": 48 + (i // 4) * 160,
-            "note": _KIND_NOTE.get(kind, kind),
+            "note": note,
             "tier": "T0",
             "stream": False,
         }
-        if kind in ("connector", "ontology", "tool_call"):
+        if kind in ("ingest", "connector", "ontology", "insight", "tool_call"):
             node["object_type"] = obj
             node["data_point"] = _DEFAULT_POINT.get(obj, "sku")
             node["data_type"] = "string"
-            node["fetch_from"] = f"warehouse.{obj}"
+            node["fetch_from"] = fetch_place_for(obj)
         if kind == "tool_call":
             node["action_type"] = action
         elif kind == "foundry":

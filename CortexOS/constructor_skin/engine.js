@@ -248,19 +248,51 @@ function localGhostWalk() {
     });
   }
   C.markGhostWalk(order);
+  const task = C.intendedTask ? C.intendedTask(state) : { ok: true, missing: [], hops: [] };
   C.showAudit({
     mode: C.ghost ? "ghost" : "live-local",
     engine: cortexOrigin() ? "cortex-origin" : "pages-sketch",
+    compile: "local_template",
+    intended_task: task,
     steps: log,
   });
+  const taskLine = task.ok
+    ? " Intended task PASS. Mock rows reach emit."
+    : " Intended task FAIL: " + (task.missing || []).join("; ") + ". Redo compile.";
   return (
     (C.ghost ? "Ghost run (no writes). " : "Local walk. Tool/app nodes would write. ") +
     log.length +
-    " steps. Audit panel has the ledger."
+    " steps. Local template, not an LLM." +
+    taskLine
+  );
+}
+
+function approachHtml(row, win) {
+  return (
+    '<article class="approach' +
+    (win ? " winner" : "") +
+    '"><h3>' +
+    row.name +
+    "</h3><p class=\"hint\">" +
+    (row.score != null ? "score " + row.score : row.cortex_status || "") +
+    "</p></article>"
   );
 }
 
 async function rankApproaches() {
+  const box = document.getElementById("approaches");
+  const sum = document.getElementById("approaches-summary");
+  function paint(ranked, recId) {
+    if (!box) return ranked;
+    box.innerHTML = ranked
+      .map(function (row, i) {
+        const win = recId ? row.id === recId : i === 0;
+        return approachHtml(row, win);
+      })
+      .join("");
+    if (sum && ranked[0]) sum.textContent = ranked[0].name;
+    return ranked;
+  }
   if (cortexOrigin()) {
     const remote = await cortexPost("/cortex/constructor/recommend", {
       nodes: window.Constructor.getState().nodes,
@@ -268,33 +300,12 @@ async function rankApproaches() {
     });
     if (remote && remote.ok && Array.isArray(remote.approaches)) {
       const recId = remote.recommendation && remote.recommendation.pattern;
-      const box = document.getElementById("approaches");
-      box.innerHTML = remote.approaches
-        .map((row) => {
-          const win = row.id === recId;
-          return (
-            '<article class="approach' +
-            (win ? " winner" : "") +
-            '"><div class="eyebrow">' +
-            (win ? "WINNER" : "ALT") +
-            " / " +
-            String(row.cortex_status || "").toUpperCase() +
-            "</div><h3>" +
-            row.name +
-            "</h3><p>" +
-            row.blurb +
-            '</p><p class="hint">' +
-            row.cortex_path +
-            "</p></article>"
-          );
-        })
-        .join("");
       const ranked = remote.approaches.map((row) =>
         Object.assign({}, row, { score: row.id === recId ? 99 : 0 })
       );
       ranked.sort((a, b) => b.score - a.score);
       window.Constructor.lastRanking = ranked;
-      return ranked;
+      return paint(ranked, recId);
     }
   }
   const kinds = new Set(window.Constructor.getState().nodes.map((n) => n.kind));
@@ -306,30 +317,8 @@ async function rankApproaches() {
     if (verify && row.id === "generator_verifier") score += 20;
     return Object.assign({}, row, { score: score });
   }).sort((a, b) => b.score - a.score);
-  const box = document.getElementById("approaches");
-  box.innerHTML = ranked
-    .map((row, i) => {
-      return (
-        '<article class="approach' +
-        (i === 0 ? " winner" : "") +
-        '"><div class="eyebrow">' +
-        (i === 0 ? "WINNER" : "ALT") +
-        " / " +
-        row.cortex_status.toUpperCase() +
-        '</div><h3>' +
-        row.name +
-        "</h3><p>" +
-        row.blurb +
-        '</p><p class="hint">score ' +
-        row.score +
-        " · " +
-        row.cortex_path +
-        "</p></article>"
-      );
-    })
-    .join("");
   window.Constructor.lastRanking = ranked;
-  return ranked;
+  return paint(ranked);
 }
 
 function applyWinner(id) {
@@ -338,7 +327,7 @@ function applyWinner(id) {
   if (id === "generator_verifier") {
     C.ensureKinds(["hypothesize", "audit"]);
   } else if (id === "orchestrator_subagent") {
-    C.loadFoundryPath();
+    C.loadCompilePath();
   } else {
     C.ensureKinds(["agent", "audit"]);
   }
@@ -397,7 +386,9 @@ async function cortexGet(path) {
 
 function setOvStatus(text) {
   const el = document.getElementById("ov-status");
-  if (el) el.textContent = text;
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text;
 }
 
 async function bindSession(key) {
@@ -520,12 +511,27 @@ async function handleChat(raw) {
   const C = window.Constructor;
   if (!t) return "Say the object, point, action, or run all.";
   if (t === "help") {
-    return "Chat a whole desk: warehouse, venue/CRM, case rows, or a police suspect desk (owned images -> enhance local model or online API -> match owned.watchlist -> app). Or: seed warehouse|venue|suspect. issue key. set object images|suspects|matches|inventory. set action suspect.match|image.enhance|export_pptx. ghost on/off. propose 3. maximize. run all. why. add <kind>. Ctrl+/ toggles chat.";
+    return "Chat a whole desk: warehouse, venue/CRM, define data, govern agents, business insights, client company, or a police suspect desk. Pages compile is a local template (no LLM). Cortex generate needs /cortex + ov_ key. Chat catalog after issue key. Or: seed warehouse|venue|suspect|define|govern|insights|understand. issue key. ghost on/off. propose 3. maximize. run all. why. add <kind>. Ctrl+/ toggles chat.";
   }
-  const seed = t.match(/^seed (warehouse|venue|suspect|foundry)$/);
+  const seed = t.match(/^seed (warehouse|venue|suspect|foundry|define|govern|insights|understand)$/);
   if (seed && C.applySeed) {
-    C.applySeed(seed[1] === "foundry" ? "warehouse" : seed[1]);
+    const id = seed[1] === "foundry" ? "warehouse" : seed[1];
+    C.applySeed(id);
     return "Loaded " + seed[1] + " seed. Ghost on. Propose 3 still ranks approaches.";
+  }
+  if (t === "catalog" || t === "browse the catalog") {
+    if (!cortexOrigin()) {
+      return "Catalog is Cortex. Open " + cortexLocalHint() + " then: issue key. catalog.";
+    }
+    const remote = await cortexGet("/cortex/constructor/catalog");
+    if (!remote || remote.ok === false) {
+      return (
+        "Catalog unread (" +
+        ((remote && (remote.detail || remote.status || remote.error)) || "offline") +
+        "). Issue key first."
+      );
+    }
+    return remote.answer || "Catalog empty.";
   }
   if (/^issue( key)?$/.test(t) || /generate key|openvault key/.test(t)) {
     return await issueOpenVaultKey();
@@ -616,7 +622,7 @@ async function handleChat(raw) {
     return "Applied " + ranked[0].name + ". Graph compiled toward " + ranked[0].cortex_path + ".";
   }
   if (/^foundry( path)?$/.test(t) || /ontology path/.test(t) || /^create app$/.test(t)) {
-    C.loadFoundryPath();
+    C.loadCompilePath();
     C.setGhost(true);
     const ranked = await rankApproaches();
     return (
@@ -815,8 +821,10 @@ function generateLocal(prompt) {
     assumed = false;
   }
   let action = "export_pptx";
-  if (low.indexOf("intake") >= 0) action = "item.intake";
+  if (low.indexOf("intake") >= 0 && low.indexOf("client") < 0) action = "item.intake";
   else if (low.indexOf("agent.checked") >= 0 || (low.indexOf("check") >= 0 && low.indexOf("agent") >= 0)) {
+    action = "agent.checked";
+  } else if (/govern agents?|agent governance/.test(low)) {
     action = "agent.checked";
   } else if (suspectish || /suspect\.match/.test(low)) {
     action = "suspect.match";
@@ -825,9 +833,18 @@ function generateLocal(prompt) {
   }
   const verify = /verify|audit|hypothes|claim|fact-?check/.test(low);
   const agentish = /single agent|one agent|worker loop/.test(low);
-  const foundryish = /foundry|create app|whole (app|workflow|desk)|generate whole|pptx|export|ontology|insight|\bapp\b|maps|club|venue|contact|customer|incident|case desk|suspect|face|cctv|enhance|comfy|police|watchlist/.test(
+  const clientish =
+    (low.indexOf("understand") >= 0 && low.indexOf("company") >= 0) ||
+    /client company|onboard client|client intake|semantic layer/.test(low);
+  const foundryish =
+    clientish ||
+    /foundry|create app|whole (app|workflow|desk)|generate whole|pptx|export|ontology|insight|define data|\bapp\b|maps|club|venue|contact|customer|incident|case desk|suspect|face|cctv|enhance|comfy|police|watchlist/.test(
     low
   );
+  const governish = /govern agents?|agent governance/.test(low);
+  const venueish = objects.some(function (o) {
+    return o === "places" || o === "venues" || o === "contacts" || o === "leads";
+  });
   let pattern = "orchestrator_subagent";
   let kinds = ["ingest", "connector", "ontology", "insight", "foundry", "app", "tool_call"];
   let enhanceBind = "local_model";
@@ -836,16 +853,16 @@ function generateLocal(prompt) {
     kinds = ["ingest", "enhance", "ontology", "insight", "foundry", "app", "tool_call"];
     if (sourceKind === "local_model" || sourceKind === "online_api") enhanceBind = sourceKind;
     sourceKind = "database";
-  } else if (verify && !foundryish) {
+  } else if (verify && !foundryish && !governish) {
     pattern = "generator_verifier";
     kinds = ["ingest", "hypothesize", "audit"];
+  } else if (governish && !foundryish) {
+    pattern = "generator_verifier";
+    kinds = ["ingest", "connector", "ontology", "agent", "audit"];
   } else if (agentish && !foundryish) {
     pattern = "single_agent";
     kinds = ["ingest", "agent", "audit"];
   }
-  const venueish = objects.some(function (o) {
-    return o === "places" || o === "venues" || o === "contacts" || o === "leads";
-  });
   const firstObj = objects[0];
   const sourcePlace =
     sourceKind === "cloud"
@@ -858,6 +875,8 @@ function generateLocal(prompt) {
   const doing = {
     ingest: suspectish
       ? "Hop 0. Load owned images from owned.images (station archive or operator upload). Ghost on Pages. No write. No internet scrape."
+      : clientish
+        ? "Read customer terms into glossary rows. Ghost. No invented DuckDB."
       : "Hop 0. Load " +
         objects.join("/") +
         " rows from " +
@@ -883,6 +902,8 @@ function generateLocal(prompt) {
         ? "Object types " +
           objects.join(", ") +
           ". Links venue_at_place, contact_at_venue, lead_of_contact."
+        : clientish
+          ? "SWAP packs/dms/semantic_layer.yaml then object_types.yaml name-parity. P1 parked."
         : objects.indexOf("incidents") >= 0
           ? "Object types " + objects.join(", ") + ". Link incident_at_location. Owned rows."
           : "Cortex ontology objects/links/actions. Not a custom type picker.",
@@ -890,10 +911,14 @@ function generateLocal(prompt) {
       ? "Cite enhanced image vs owned.watchlist. Score is a claim, steward reviews. Not a conviction."
       : venueish
         ? "Cite nearby venues by Place lat/lng, contacts at those venues, leads from contacts."
+        : clientish
+          ? "Cite catalog_answer + ledger. Crew wakes keep 24/7 meaning."
         : objects.indexOf("incidents") >= 0
           ? "Cite incident rows + location links. What you may claim from the owned ledger."
           : "Cite ontology + ledger. What you may claim from those objects.",
-    foundry: "Compile insights into a governed Cortex app. Not an n8n clone.",
+    foundry: clientish
+      ? "Compile a DMS shell app from ontology insights. Extra tab/route, not a second SPA."
+      : "Compile insights into a governed Cortex app.",
     app: "Runnable output. Hosted inside Cortex at /cortex/constructor/.",
     tool_call: suspectish
       ? "F8 governed write. requires_confirm. Action suspect.match against owned.watchlist."
@@ -947,6 +972,7 @@ function generateLocal(prompt) {
     assumed_object: assumed,
     objects: objects,
     action: action,
+    engine: "local_template",
     nodes: nodes,
     edges: edges,
     summary:
@@ -960,9 +986,12 @@ function generateLocal(prompt) {
       action +
       ". Source " +
       sourceKind +
-      ". Click a node: doing / action / app / code / response.",
+      ". Engine local_template (no LLM).",
   };
 }
+
+window.Constructor = window.Constructor || {};
+window.Constructor.generateLocal = generateLocal;
 
 async function generateFromChat(text) {
   const C = window.Constructor;
@@ -970,21 +999,43 @@ async function generateFromChat(text) {
     return generateLocal(text).summary;
   }
   let graph = null;
+  let via = "local_template";
   if (cortexOrigin()) {
     const remote = await cortexPost("/cortex/constructor/generate", { prompt: text });
     if (remote && remote.ok && Array.isArray(remote.nodes) && remote.nodes.length) {
       const localObjs = objectsInPrompt(text);
       if (remote.assumed_object && localObjs.length) graph = null;
-      else graph = remote;
+      else {
+        graph = remote;
+        via = "cortex_generate";
+      }
     }
   }
-  if (!graph) graph = generateLocal(text);
+  if (!graph) {
+    graph = generateLocal(text);
+    via = "local_template";
+  }
   if (!graph.ok) return graph.summary;
   C.replaceGraph(graph.nodes, graph.edges);
+  let task = C.intendedTask ? C.intendedTask(C.getState()) : { ok: true, missing: [] };
+  if (!task.ok && via === "local_template" && /define data|business insights/.test(text.toLowerCase())) {
+    graph = generateLocal("ingest warehouse inventory then " + text);
+    via = "local_template";
+    C.replaceGraph(graph.nodes, graph.edges);
+    task = C.intendedTask ? C.intendedTask(C.getState()) : task;
+  }
   await rankApproaches();
   const first = C.getState().nodes[0];
-  if (first) C.showDecision({ node: first, response: graph.summary });
-  return graph.summary || "Compiled the graph. Click a node for doing / action / app / code / response.";
+  const prefix =
+    via === "cortex_generate"
+      ? "Cortex generate. "
+      : "Local template (no LLM). Cortex generate needs /cortex + ov_ key. ";
+  const taskLine = task.ok
+    ? " Intended task PASS."
+    : " Intended task FAIL: " + (task.missing || []).join("; ") + ". Redo compile.";
+  const summary = prefix + (graph.summary || "Compiled the graph.") + taskLine;
+  if (first) C.showDecision({ node: first, response: summary });
+  return summary;
 }
 
 async function pressNode() {
@@ -1135,10 +1186,7 @@ function bindChat() {
       await loadOntology();
     });
   }
-  chatSay(
-    "assistant",
-    "Chat warehouse, venue/CRM, case desk, or a police suspect desk. Owned images -> enhance (local model or online API) -> match owned.watchlist -> app. Ctrl+/ toggles. I will not compile stalking, doxxing, public-webcam scrape, or sex-work graphs. Type help."
-  );
+  chatSay("assistant", "Type a desk. Ctrl+/ chat.");
   window.Constructor.pressNode = pressNode;
   loadOntology();
   rankApproaches();

@@ -10,7 +10,7 @@ import pytest
 from CortexOS.crew.llm import LLMResult
 from CortexOS.crew.runtime import RunContext
 from CortexOS.crew.server import create_app
-from CortexOS.crew.wakes import KIND_EVENT, KIND_TIMER, STATE_DUE, STATE_FIRED, WakeStore
+from CortexOS.crew.wakes import KIND_EVENT, KIND_TIMER, STATE_DUE, STATE_FIRED, WakeStore, expand_wake_note
 from tests.test_crew.conftest import FakeLLM, wait_run_done
 
 
@@ -27,6 +27,15 @@ def test_timer_wake_becomes_due(tmp_path: Path) -> None:
     assert store.due() == []
     again = WakeStore(tmp_path / "wakes.json")
     assert again.list(include_fired=True)[0].state == STATE_FIRED
+
+
+def test_catalog_shorthand_expands_to_cortex_ask_catalog() -> None:
+    from CortexOS.crew.wakes import SEMANTIC_LAYER_WAKE_NOTE
+
+    assert expand_wake_note("catalog") == SEMANTIC_LAYER_WAKE_NOTE
+    assert expand_wake_note("24/7") == SEMANTIC_LAYER_WAKE_NOTE
+    assert "cortex_ask" in expand_wake_note("insight automation")
+    assert expand_wake_note("call me") == "call me"
 
 
 def test_completion_wake_marks_due(tmp_path: Path) -> None:

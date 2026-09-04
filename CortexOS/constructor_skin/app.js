@@ -1,5 +1,5 @@
 const STORAGE_KEY = "netie.constructor.v4";
-const CHAT_DOCK_KEY = "netie.constructor.chatdock.v1";
+const CHAT_DOCK_KEY = "netie.constructor.chatdock.v2";
 const SOURCE_KINDS = ["place", "cloud", "database", "local_model", "online_api"];
 
 function ico(paths) {
@@ -24,7 +24,7 @@ const KINDS = {
     label: "Connector",
     persona: "source",
     color: "#9ad7c2",
-    note: "First-party Cortex input bound to an object. No n8n.",
+    note: "First-party Cortex input bound to an object.",
     icon: ico('<path d="M8 7v10"/><path d="M16 7v10"/><path d="M8 12h8"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="17" r="2"/>'),
   },
   ontology: {
@@ -42,7 +42,7 @@ const KINDS = {
     icon: ico('<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
   },
   foundry: {
-    label: "Foundry",
+    label: "Compile",
     persona: "compiler",
     color: "#e8a07a",
     note: "Compile insights into a governed Cortex app.",
@@ -259,6 +259,264 @@ const FETCH_PLACES = [
   "api.enhance",
 ];
 const TIERS = ["T0", "T1"];
+const MOCK_ROWS = {
+  inventory: [
+    { sku: "RM-110", sku_name: "Palm olein", supplier_id: "SUP-02", location_id: "WH-JB", quantity_kg: 840 },
+    { sku: "RM-204", sku_name: "Sugar", supplier_id: "SUP-01", location_id: "WH-KL", quantity_kg: 120 },
+    { sku: "PK-018", sku_name: "Carton 12", supplier_id: "SUP-03", location_id: "WH-JB", quantity_kg: 40 },
+  ],
+  suppliers: [
+    { supplier_id: "SUP-02", supplier_name: "Sawit Co", country: "MY", risk_score: 0.31 },
+    { supplier_id: "SUP-01", supplier_name: "Gula Sdn Bhd", country: "MY", risk_score: 0.22 },
+  ],
+  locations: [
+    { location_id: "WH-JB", location_name: "Johor warehouse", city: "Johor Bahru" },
+    { location_id: "WH-KL", location_name: "KL warehouse", city: "Kuala Lumpur" },
+  ],
+  places: [
+    { place_id: "PL-01", name: "Owned lot A", locality: "Petaling Jaya", latitude: 3.1, longitude: 101.6 },
+  ],
+  venues: [
+    { venue_id: "VN-01", name: "Owned venue desk", category: "office", place_id: "PL-01" },
+  ],
+  contacts: [
+    { contact_id: "CT-01", name: "Ops lead", role: "buyer", venue_id: "VN-01" },
+  ],
+  leads: [
+    { lead_id: "LD-01", account: "Owned account", status: "open", contact_id: "CT-01" },
+  ],
+  incidents: [
+    { incident_id: "IN-01", status: "open", location_id: "WH-JB", summary: "Owned case row" },
+  ],
+  images: [
+    { image_id: "IMG-01", location_id: "WH-JB", quality: 0.41, asset_uri: "owned.images/IMG-01" },
+  ],
+  suspects: [
+    { suspect_id: "S-01", name: "owned watchlist row", watchlist: "owned.watchlist", image_id: "IMG-01" },
+  ],
+  matches: [
+    { match_id: "M-01", image_id: "IMG-01", suspect_id: "S-01", score: 0.81, reviewed: false },
+  ],
+};
+
+function mockRowsForObject(obj) {
+  return MOCK_ROWS[obj] || MOCK_ROWS.inventory;
+}
+
+function mockHop(node) {
+  const obj = node && node.object_type && MOCK_ROWS[node.object_type] ? node.object_type : "inventory";
+  const rows = mockRowsForObject(obj);
+  const kind = (node && node.kind) || "ingest";
+  if (kind === "insight") {
+    return {
+      title: "Claims from " + obj,
+      rows: rows.slice(0, 3).map(function (row, i) {
+        const key = row.sku || row.image_id || row.place_id || row.contact_id || String(i);
+        return { claim: key + " is on the owned ledger", cite: node.fetch_from || "ledger" };
+      }),
+    };
+  }
+  if (kind === "foundry") {
+    return {
+      title: "Compile to Cortex app",
+      rows: [{ object: obj, action: node.action_type || "export_pptx", count: rows.length }],
+    };
+  }
+  if (kind === "app") {
+    return {
+      title: "Emit (ghost)",
+      rows: [{ emit: "/cortex/constructor/", object: obj, count: rows.length }],
+    };
+  }
+  if (kind === "tool_call") {
+    return {
+      title: "Would-write " + (node.action_type || "export_pptx"),
+      rows: [{ ghost: true, requires_confirm: true, count: rows.length }],
+    };
+  }
+  if (kind === "enhance") {
+    return {
+      title: "Enhance owned images",
+      rows: rows.map(function (row) {
+        return {
+          image_id: row.image_id,
+          quality_in: row.quality,
+          quality_out: Math.min(0.99, (row.quality || 0.4) + 0.35),
+          bind: node.source_link || node.fetch_from || "local.model",
+        };
+      }),
+    };
+  }
+  if (kind === "ontology") {
+    return { title: "Object " + obj, rows: rows, links: linksFor(obj) };
+  }
+  if (kind === "audit" || kind === "hypothesize" || kind === "agent" || kind === "improve") {
+    return {
+      title: kind,
+      rows: [{ doing: node.doing || node.note || kind, object: obj }],
+    };
+  }
+  return { title: "Source " + (node.fetch_from || obj), rows: rows };
+}
+
+function mockWalk(graphState) {
+  const nodes = (graphState && graphState.nodes) || state.nodes;
+  return nodes.map(function (node) {
+    return { id: node.id, kind: node.kind, hop: mockHop(node) };
+  });
+}
+
+function intendedTask(graphState) {
+  const nodes = (graphState && graphState.nodes) || state.nodes;
+  const byKind = {};
+  for (let i = 0; i < nodes.length; i++) byKind[nodes[i].kind] = nodes[i];
+  const missing = [];
+  const source = byKind.ingest || byKind.connector;
+  const hops = mockWalk({ nodes: nodes });
+  const hasRows = hops.some(function (hop) {
+    return hop.hop && hop.hop.rows && hop.hop.rows.length;
+  });
+  if (!hasRows) missing.push("mock rows for the bound object");
+  if (byKind.agent && byKind.audit && !byKind.foundry && !byKind.app) {
+    if (!source) missing.push("ingest or connector (source hop 0)");
+    if (!byKind.ontology) missing.push("ontology (object types)");
+    if (source && !source.fetch_from && !source.source_link && source.source_kind !== "cloud") {
+      missing.push("source place on connector");
+    }
+    return { ok: missing.length === 0, missing: missing, hops: hops, shape: "govern" };
+  }
+  if (byKind.hypothesize && byKind.audit && !byKind.app) {
+    if (!source) missing.push("ingest or connector (source hop 0)");
+    return { ok: missing.length === 0, missing: missing, hops: hops, shape: "verify" };
+  }
+  if (!source) missing.push("ingest or connector (source hop 0)");
+  if (!byKind.ontology) missing.push("ontology (object types)");
+  if (!byKind.app && !byKind.foundry) missing.push("foundry or app (emit)");
+  if (source && !source.fetch_from && !source.source_link && source.source_kind !== "cloud") {
+    missing.push("source place on connector");
+  }
+  const writer = byKind.tool_call || byKind.foundry;
+  if (writer && !writer.action_type) missing.push("action on foundry/tool_call");
+  return { ok: missing.length === 0, missing: missing, hops: hops, shape: "desk" };
+}
+
+function previewTableHtml(hop) {
+  const rows = (hop && hop.rows) || [];
+  if (!rows.length) return '<p class="hint">No mock rows for this object.</p>';
+  const keys = Object.keys(rows[0]);
+  let html =
+    "<p class=\"hint\">" +
+    escapeAttr((hop && hop.title) || "Preview") +
+    "</p><table class=\"preview-table\"><thead><tr>" +
+    keys
+      .map(function (key) {
+        return "<th>" + escapeAttr(key) + "</th>";
+      })
+      .join("") +
+    "</tr></thead><tbody>";
+  for (let i = 0; i < rows.length; i++) {
+    html +=
+      "<tr>" +
+      keys
+        .map(function (key) {
+          return "<td>" + escapeAttr(rows[i][key]) + "</td>";
+        })
+        .join("") +
+      "</tr>";
+  }
+  html += "</tbody></table>";
+  if (hop.links && hop.links.length) {
+    html += '<p class="hint">Links: ' + escapeAttr(hop.links.join("; ")) + "</p>";
+  }
+  return html;
+}
+
+function pageEl() {
+  return document.getElementById("node-page") || document.getElementById("cal-pop");
+}
+
+function defaultPageTab(kind) {
+  if (kind === "ingest" || kind === "connector" || kind === "enhance") return "source";
+  if (kind === "ontology" || kind === "insight") return "object";
+  return "action";
+}
+
+function setPageTab(tab) {
+  const page = pageEl();
+  if (!page) return;
+  const next = tab === "object" || tab === "action" ? tab : "source";
+  page.setAttribute("data-page-tab", next);
+  const panes = page.querySelectorAll("[data-page-pane]");
+  for (let i = 0; i < panes.length; i++) {
+    panes[i].hidden = panes[i].getAttribute("data-page-pane") !== next;
+  }
+  const tabs = page.querySelectorAll("[data-page-tab]");
+  for (let j = 0; j < tabs.length; j++) {
+    tabs[j].classList.toggle("on", tabs[j].getAttribute("data-page-tab") === next);
+  }
+}
+
+function paintPreview(node) {
+  const box = document.getElementById("preview-table");
+  const taskEl = document.getElementById("preview-task");
+  const engineEl = document.getElementById("preview-engine");
+  if (engineEl) {
+    engineEl.textContent = cortexOrigin() ? "Mock rows." : "Mock rows.";
+  }
+  const hop = mockHop(node);
+  if (box) box.innerHTML = previewTableHtml(hop);
+  const task = intendedTask(state);
+  if (taskEl) {
+    taskEl.className = "hint " + (task.ok ? "task-pass" : "task-fail");
+    taskEl.textContent = task.ok
+      ? "Intended task PASS. Mock rows reach foundry/app."
+      : "Intended task FAIL: " + task.missing.join("; ") + ". Redo compile or bind a source.";
+  }
+}
+
+function bindDesk(name) {
+  const node = state.nodes.find(function (n) {
+    return n.id === selectedId;
+  });
+  if (!node) return false;
+  if (name === "warehouse") {
+    node.object_type = "inventory";
+    node.data_point = "sku";
+    node.data_type = "string";
+    node.source_kind = "place";
+    node.fetch_from = "warehouse.inventory";
+    node.source_link = "";
+  } else if (name === "venue") {
+    node.object_type = node.kind === "ingest" ? "places" : "venues";
+    node.data_point = node.object_type === "places" ? "place_id" : "venue_id";
+    node.data_type = "string";
+    node.source_kind = "place";
+    node.fetch_from = node.object_type === "places" ? "maps.places" : "crm.contacts";
+    node.source_link = "";
+  } else if (name === "suspect") {
+    node.object_type = "images";
+    node.data_point = "image_id";
+    node.data_type = "string";
+    node.source_kind = "place";
+    node.fetch_from = "owned.images";
+    node.source_link = "";
+  } else {
+    return false;
+  }
+  if (node.kind === "ingest") {
+    node.doing =
+      "Hop 0. Load " + node.object_type + " rows from " + node.fetch_from + ". No write.";
+    node.note = node.doing;
+  }
+  if (node.kind === "connector") {
+    node.doing = "Bind " + name + " first-party source to " + node.object_type + ".";
+    node.note = node.doing;
+  }
+  save();
+  render();
+  if (calOpen) openCalPop(node, { response: "bound " + name });
+  return true;
+}
 
 const state = load() || sample();
 let selectedId = state.nodes[0] ? state.nodes[0].id : null;
@@ -364,7 +622,7 @@ function foundrySample() {
         persona: "source",
         tier: "T0",
         stream: false,
-        note: "First-party Cortex input. No n8n. WhatsApp stays a draft, not a send.",
+        note: "First-party Cortex input. WhatsApp stays a draft, not a send.",
       },
       {
         id: "o1",
@@ -456,7 +714,7 @@ function venueSample() {
   o1.object_type = "contacts";
   o1.data_point = "contact_id";
   o1.fetch_from = "crm.contacts";
-  o1.note = "Place-Venue-Contact-Lead. Distill Palantir objects, do not clone Foundry.";
+  o1.note = "Place-Venue-Contact-Lead. Cortex objects. Ontology stays Cortex.";
   const t1 = g.nodes[g.nodes.length - 1];
   t1.object_type = "leads";
   t1.data_point = "lead_id";
@@ -556,6 +814,25 @@ function suspectSample() {
 }
 
 function applySeed(id) {
+  const palantir = {
+    define: "define data for inventory",
+    govern: "govern agents on inventory",
+    insights: "business insights on inventory",
+    understand: "understand this company",
+  };
+  const prompt = palantir[id];
+  if (prompt) {
+    const box = document.getElementById("chat-input");
+    if (box) box.value = prompt;
+    const gen = window.Constructor && window.Constructor.generateLocal;
+    if (typeof gen === "function") {
+      const graph = gen(prompt);
+      if (graph && graph.ok && Array.isArray(graph.nodes)) {
+        replaceGraph(graph.nodes, graph.edges || []);
+      }
+    }
+    return id;
+  }
   const graph = id === "venue" ? venueSample() : id === "suspect" ? suspectSample() : foundrySample();
   replaceGraph(graph.nodes, graph.edges);
   return id;
@@ -588,6 +865,10 @@ function filterRail(q) {
     const blob = (kind + " " + (meta.label || "") + " " + (meta.note || "") + " " + (meta.persona || "")).toLowerCase();
     btn.classList.toggle("rail-hide", !!(query && blob.indexOf(query) < 0));
     btn.hidden = !!(query && blob.indexOf(query) < 0);
+  });
+  document.querySelectorAll("details.quiet").forEach(function (panel) {
+    if (!query) return;
+    panel.open = !!panel.querySelector("[data-add]:not(.rail-hide)");
   });
   if (!hitsEl) return;
   if (!query) {
@@ -683,9 +964,9 @@ function render() {
       (meta.icon || "") +
       "</span>" +
       '<div class="kind">' +
-      node.kind.toUpperCase() +
+      (meta.label || node.kind).toUpperCase() +
       "</div>" +
-      '<button type="button" class="node-edit" data-edit="1" aria-label="edit node">+</button>' +
+      '<button type="button" class="node-edit" data-edit="1">Edit</button>' +
       "</div><h2>" +
       meta.label +
       "</h2>" +
@@ -814,25 +1095,29 @@ function showDecision(layer) {
 
 function closeCalPop() {
   calOpen = false;
-  const pop = document.getElementById("cal-pop");
+  document.body.classList.remove("node-page-open");
+  const pop = pageEl();
   if (pop) pop.hidden = true;
   for (const n of nodesEl.querySelectorAll(".node")) n.classList.remove("pressed");
 }
 
 function openCalPop(node, extra) {
-  const pop = document.getElementById("cal-pop");
+  const pop = pageEl();
   if (!pop || !node) return;
   calOpen = true;
   extra = extra || {};
   const meta = KINDS[node.kind] || { label: node.kind, icon: "", persona: "", color: "#888" };
   pop.style.setProperty("--kind", meta.color);
+  document.body.classList.add("node-page-open");
   const icon = document.getElementById("event-icon");
   const title = document.getElementById("event-title");
+  const kindLabel = document.getElementById("event-kind-label");
   const personaEl = document.getElementById("event-persona");
   const help = document.getElementById("ingest-help");
   const hint = document.getElementById("event-actions-hint");
   const fields = document.getElementById("event-fields");
   if (icon) icon.innerHTML = meta.icon || "";
+  if (kindLabel) kindLabel.textContent = (meta.label || node.kind).toUpperCase();
   if (title) title.textContent = meta.label;
   if (personaEl) {
     personaEl.textContent =
@@ -841,6 +1126,8 @@ function openCalPop(node, extra) {
   if (help) help.hidden = node.kind !== "ingest";
   const enhanceHelp = document.getElementById("enhance-help");
   if (enhanceHelp) enhanceHelp.hidden = node.kind !== "enhance";
+  const connectorHelp = document.getElementById("connector-help");
+  if (connectorHelp) connectorHelp.hidden = node.kind !== "connector";
   const obj = node.object_type && OBJECTS[node.object_type] ? node.object_type : Object.keys(OBJECTS)[0];
   const allowed = actionsForObject(obj);
   if (hint) {
@@ -850,18 +1137,12 @@ function openCalPop(node, extra) {
         : "Actions on " + obj + ": " + allowed.join(", ") + ".";
   }
   if (fields) fields.innerHTML = eventFieldsHtml(node);
+  setPageTab(defaultPageTab(node.kind));
+  paintPreview(node);
   const facts = document.getElementById("decision-facts");
   const js = document.getElementById("decision-json");
   if (facts) facts.textContent = extra.cortex_kind ? decisionText(node, extra) : "";
   if (js) js.textContent = extra.raw ? JSON.stringify(extra.raw, null, 2) : "";
-  const nodeEl = nodesEl.querySelector('[data-id="' + node.id + '"]');
-  const r = nodeEl ? nodeEl.getBoundingClientRect() : { right: 200, top: 120, left: 32 };
-  let left = r.right + 12;
-  let top = r.top;
-  if (left + 360 > window.innerWidth) left = Math.max(8, r.left - 364);
-  if (top + 420 > window.innerHeight) top = Math.max(8, window.innerHeight - 428);
-  pop.style.left = left + "px";
-  pop.style.top = top + "px";
   pop.hidden = false;
 }
 
@@ -892,36 +1173,69 @@ function eventFieldsHtml(node) {
   const sourceLabel = node.kind === "ingest" ? "Source place (hop 0)" : "Fetch / place";
   const objectLabel = node.kind === "ingest" ? "Becomes object" : "Object (ontology)";
   const bindSource = node.kind === "ingest" || node.kind === "connector" || node.kind === "enhance";
-  let html =
-    fieldSelect("persona", "Persona", PERSONAS, persona) +
-    fieldSelect("object_type", objectLabel, Object.keys(OBJECTS), obj) +
-    fieldSelect("data_point", "Data point", Object.keys(points), point) +
-    fieldSelect("data_type", "Data type", ["string", "number", "integer", "boolean", "date"], dtype);
+  let sourceHtml =
+    "<h3>Source</h3>" +
+    '<p class="hint">Pick Warehouse, Venue/CRM, or Suspect, or a place.</p>' +
+    '<div class="bind-row">' +
+    '<button type="button" data-bind-desk="warehouse"' +
+    (node.fetch_from === "warehouse.inventory" ? ' class="on"' : "") +
+    ">Warehouse</button>" +
+    '<button type="button" data-bind-desk="venue"' +
+    (String(node.fetch_from || "").indexOf("maps.") === 0 || String(node.fetch_from || "").indexOf("crm.") === 0
+      ? ' class="on"'
+      : "") +
+    ">Venue/CRM</button>" +
+    '<button type="button" data-bind-desk="suspect"' +
+    (String(node.fetch_from || "").indexOf("owned.") === 0 ? ' class="on"' : "") +
+    ">Suspect desk</button></div>";
   if (bindSource) {
-    html += fieldSelect("source_kind", "Source kind", SOURCE_KINDS, sourceKind);
+    sourceHtml += fieldSelect("source_kind", "Source kind", SOURCE_KINDS, sourceKind);
     if (sourceKind === "cloud") {
-      html +=
+      sourceHtml +=
         '<p class="hint">Ghost cloud sign-in. No OAuth. No fetch on Pages.</p>' +
         '<button type="button" id="cloud-signin">Sign in (ghost)</button>';
     } else if (sourceKind === "database") {
-      html += fieldInput("source_link", "Database link", node.source_link || "db.link", "owned.images or db.incidents");
+      sourceHtml += fieldInput("source_link", "Database link", node.source_link || "db.link", "owned.images or db.incidents");
     } else if (sourceKind === "local_model") {
-      html += fieldInput("source_link", "Local model", node.source_link || "local://enhance", "local://enhance or a model path");
+      sourceHtml += fieldInput("source_link", "Local model", node.source_link || "local://enhance", "local://enhance or a model path");
     } else if (sourceKind === "online_api") {
-      html += fieldInput("source_link", "Online API", node.source_link || "api.enhance", "api.enhance (ghost, no fetch on Pages)");
+      sourceHtml += fieldInput("source_link", "Online API", node.source_link || "api.enhance", "api.enhance (ghost, no fetch on Pages)");
     } else {
-      html += fieldSelect("fetch_from", sourceLabel, FETCH_PLACES, node.fetch_from || "warehouse.inventory");
+      sourceHtml += fieldSelect("fetch_from", sourceLabel, FETCH_PLACES, node.fetch_from || "warehouse.inventory");
     }
   } else {
-    html += fieldSelect("fetch_from", sourceLabel, FETCH_PLACES, node.fetch_from || "warehouse.inventory");
+    sourceHtml += fieldSelect("fetch_from", sourceLabel, FETCH_PLACES, node.fetch_from || "warehouse.inventory");
   }
+  const objectHtml =
+    "<h3>Object</h3>" +
+    fieldSelect("object_type", objectLabel, Object.keys(OBJECTS), obj) +
+    fieldSelect("data_point", "Data point", Object.keys(points), point) +
+    fieldSelect("data_type", "Data type", ["string", "number", "integer", "boolean", "date"], dtype) +
+    '<p class="hint">Links: ' +
+    escapeAttr(linksFor(obj).join("; ") || "none") +
+    "</p>";
+  let actionHtml =
+    "<h3>Action</h3>" +
+    fieldSelect("persona", "Persona", PERSONAS, persona);
   if (node.kind !== "ingest") {
-    html += fieldSelect("action_type", "Action", allowed, action);
+    actionHtml += fieldSelect("action_type", "Action", allowed, action);
+  } else {
+    actionHtml += '<p class="hint">Ingest never writes. Actions live on Compile / tool_call.</p>';
   }
-  html +=
+  actionHtml +=
     fieldSelect("tier", "Router tier", TIERS, TIERS.indexOf(node.tier) >= 0 ? node.tier : "T0") +
     fieldSelect("stream", "Stream", ["false", "true"], node.stream ? "true" : "false");
-  return html;
+  return (
+    '<section class="page-pane" data-page-pane="source">' +
+    sourceHtml +
+    "</section>" +
+    '<section class="page-pane" data-page-pane="object">' +
+    objectHtml +
+    "</section>" +
+    '<section class="page-pane" data-page-pane="action">' +
+    actionHtml +
+    "</section>"
+  );
 }
 
 function provenanceStamp(node) {
@@ -962,39 +1276,23 @@ function showInspect() {
   inspectEmpty.hidden = true;
   inspectForm.hidden = true;
   const meta = KINDS[node.kind] || { label: node.kind, icon: "", persona: "", color: "#888", note: "" };
-  const persona = node.persona || meta.persona;
   const obj = node.object_type || "-";
-  const allowed = actionsForObject(node.object_type);
   if (inspectCard) {
     inspectCard.hidden = false;
     inspectCard.style.setProperty("--kind", meta.color);
     inspectCard.innerHTML =
       '<div class="inspect-card-head"><span class="ico">' +
       (meta.icon || "") +
-      "</span><div><div class=\"eyebrow\">" +
-      escapeAttr(persona) +
-      "</div><h3>" +
+      "</span><h3>" +
       meta.label +
-      "</h3></div></div>" +
-      '<p class="doing">' +
-      escapeAttr(node.doing || node.note || meta.note) +
-      "</p>" +
-      '<p class="hint">Provenance ' +
-      provenanceStamp(node) +
-      " (EXTRACTED = explicit source, INFERRED = ghost/deduced, AMBIGUOUS = no place). Ledger stays SoT. Not a Palantir KG.</p>" +
-      '<p class="hint">Object ' +
+      "</h3></div>" +
+      '<p class="hint">' +
       escapeAttr(obj) +
-      (node.source_kind ? " · " + escapeAttr(node.source_kind) : "") +
       (node.fetch_from ? " · " + escapeAttr(node.fetch_from) : "") +
-      (node.source_link ? " · " + escapeAttr(node.source_link) : "") +
-      (node.kind === "ingest"
-        ? ". Hop 0: rows in, no write."
-        : ". Actions: " + allowed.join(", ") + ".") +
+      (node.kind === "ingest" ? " · hop 0" : "") +
       "</p>" +
-      (node.kind === "tool_call"
-        ? '<p class="confirm-banner">HITL: requires_confirm. Live write waits on operator confirm.</p>'
-        : "") +
-      '<button type="button" id="press-decision">Edit node</button>';
+      (node.kind === "tool_call" ? '<p class="confirm-banner">Needs confirm before a live write.</p>' : "") +
+      '<button type="button" id="press-decision">Edit</button>';
     const press = document.getElementById("press-decision");
     if (press) {
       press.addEventListener("click", function (event) {
@@ -1003,7 +1301,7 @@ function showInspect() {
       });
     }
   }
-  showDecision({ node: node, response: "local preview. Press to edit." });
+  showDecision({ node: node, response: "preview" });
 }
 
 function fieldSelect(name, label, values, current) {
@@ -1121,6 +1419,12 @@ if (eventForm) {
     patchSelected(el.name, el.value);
   });
   eventForm.addEventListener("click", function (event) {
+    const bind = event.target && event.target.closest && event.target.closest("[data-bind-desk]");
+    if (bind) {
+      event.preventDefault();
+      bindDesk(bind.getAttribute("data-bind-desk"));
+      return;
+    }
     if (!event.target || event.target.id !== "cloud-signin") return;
     event.preventDefault();
     const node = state.nodes.find((n) => n.id === selectedId);
@@ -1140,15 +1444,16 @@ if (eventForm) {
 }
 const eventClose = document.getElementById("event-close");
 if (eventClose) eventClose.addEventListener("click", closeCalPop);
-document.addEventListener("pointerdown", function (event) {
-  const pop = document.getElementById("cal-pop");
-  if (!calOpen || !pop || pop.hidden) return;
-  if (pop.contains(event.target)) return;
-  if (event.target.closest && (event.target.closest(".node-edit") || event.target.closest("#press-decision"))) {
-    return;
-  }
-  closeCalPop();
-});
+const eventBack = document.getElementById("event-back");
+if (eventBack) eventBack.addEventListener("click", closeCalPop);
+const pageTabs = document.getElementById("node-page-tabs");
+if (pageTabs) {
+  pageTabs.addEventListener("click", function (event) {
+    const tab = event.target && event.target.closest && event.target.closest("[data-page-tab]");
+    if (!tab) return;
+    setPageTab(tab.getAttribute("data-page-tab"));
+  });
+}
 
 document.querySelectorAll("[data-add]").forEach((btn) => {
   const kind = btn.getAttribute("data-add");
@@ -1394,7 +1699,7 @@ function markGhostWalk(ids) {
   }
 }
 
-function loadFoundryPath() {
+function loadCompilePath() {
   const next = foundrySample();
   state.nodes = next.nodes;
   state.edges = next.edges;
@@ -1444,7 +1749,7 @@ function loadChatDock() {
       return { open: !!raw.open, snap: raw.snap };
     }
   } catch (err) {}
-  return { open: true, snap: "right" };
+  return { open: false, snap: "right" };
 }
 
 const chatDock = loadChatDock();
@@ -1535,10 +1840,14 @@ window.Constructor = {
   showAudit,
   showDecision,
   decisionText,
+  mockWalk,
+  mockHop,
+  intendedTask,
+  bindDesk,
   openCalPop,
   closeCalPop,
   markGhostWalk,
-  loadFoundryPath,
+  loadCompilePath,
   replaceGraph,
   ensureKinds,
   patchSelected,
@@ -1556,8 +1865,8 @@ window.Constructor = {
 const power = document.getElementById("power");
 if (power) {
   power.textContent = cortexOrigin()
-    ? "Powered by Cortex. Paste or issue an OpenVault ov_ key, then fetch / run all. Ghost is dry-run."
-    : "Sketch (no fetch). Live run needs " + cortexLocalHint() + " with OpenVault on :5000.";
+    ? "Cortex. Key is under More."
+    : "Sketch. Ghost only.";
 }
 const keyBox = document.getElementById("cortex-key");
 if (keyBox && !cortexOrigin()) keyBox.hidden = true;

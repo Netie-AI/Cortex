@@ -235,6 +235,7 @@ def test_shipped_skill_packs_index_without_a_single_parse_error() -> None:
     assert index.parse_errors == ()
     assert "security" in index.names
     assert "skill-route" in index.names
+    assert "ontology-foundry" in index.names
     block = index.render()
     assert len(block) <= 2400
     assert all(e.description for e in index.entries)

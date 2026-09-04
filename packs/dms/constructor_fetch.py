@@ -27,6 +27,15 @@ _FETCH_ALIAS = {
     "warehouse.alerts": "alerts",
 }
 
+# Place-Venue-Contact-Lead compile places. No DuckDB table. Ghost only.
+_GHOST_PLACES: tuple[str, ...] = (
+    "maps.places",
+    "maps.venues",
+    "crm.contacts",
+    "crm.leads",
+    "db.incidents",
+)
+
 _CHAT_ACTIONS = frozenset({"export_pptx", "item.intake", "agent.checked"})
 
 
@@ -67,7 +76,7 @@ def catalog() -> dict[str, Any]:
         "actions": [row["id"] for row in actions],
         "action_meta": actions,
         "tiers": ["T0", "T1"],
-        "fetch_places": sorted(_FETCH_ALIAS.keys()),
+        "fetch_places": sorted(set(_FETCH_ALIAS) | set(_GHOST_PLACES)),
     }
 
 
@@ -115,6 +124,8 @@ def fetch_slice(
     total = 0
     all_cols: list[str] = []
     error: str | None = None
+    if table is None and fetch_from:
+        error = f"ghost place {fetch_from}: no warehouse table"
     if table:
         try:
             rows, total, all_cols = preview_table(table, from_row=0, to_row=max(1, min(limit, 100)), cols=cols)

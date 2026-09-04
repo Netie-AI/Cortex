@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+RAKAZO_HOME="${HOME:-/home/rakazo}"
+PROFILE="$RAKAZO_HOME/.browser-profiles/chromium"
+mkdir -p "$PROFILE"
+BIN="$(command -v chromium || command -v chromium-browser || true)"
+if [ -z "$BIN" ]; then
+  echo "chromium is not installed" >&2
+  exit 1
+fi
+exec "$BIN" \
+  --no-sandbox \
+  --disable-dev-shm-usage \
+  --disable-gpu \
+  --disable-software-rasterizer \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-session-crashed-bubble \
+  --password-store=basic \
+  --user-data-dir="$PROFILE" \
+  --start-maximized \
+  "$@"

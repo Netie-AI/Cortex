@@ -31,14 +31,17 @@ class MemoryContextProvider:
         scope: Scope | None = None,
         session_scope: frozenset[str] | None = None,
         session_id: str | None = None,
+        collection: str | None = None,
     ) -> dict[str, object]:
         """Return memory hits and optional text context for a query.
 
         When ``session_scope`` is set, the store applies ``entry_scope ⊆ session_scope``
         in its storage query (C6) — not after ranking.
+        ``collection`` is the MemPalace-shaped wing/room scope (same column as /query).
         """
         vector_hits = self.store.query(
-            query_vector, k=k, scope=scope, session_scope=session_scope
+            query_vector, k=k, scope=scope, session_scope=session_scope,
+            collection=collection,
         )
         chat_turns = self._load(
             self.chat_loader,
@@ -47,6 +50,7 @@ class MemoryContextProvider:
             scope=scope,
             session_scope=session_scope,
             session_id=session_id,
+            collection=collection,
         )
         notes = self._load(
             self.notes_loader,
@@ -55,6 +59,7 @@ class MemoryContextProvider:
             scope=scope,
             session_scope=session_scope,
             session_id=session_id,
+            collection=collection,
         )
         text_blob = "\n".join(
             text

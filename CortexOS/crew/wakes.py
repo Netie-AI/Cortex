@@ -24,6 +24,27 @@ STATE_PENDING = "pending"
 STATE_DUE = "due"
 STATE_FIRED = "fired"
 
+SEMANTIC_LAYER_ALIASES = frozenset(
+    {
+        "catalog",
+        "semantic-layer",
+        "semantic layer",
+        "24/7",
+        "insight automation",
+    }
+)
+SEMANTIC_LAYER_WAKE_NOTE = (
+    "browse the catalog. Use cortex_ask: what metrics are available in the data."
+)
+
+
+def expand_wake_note(note: str) -> str:
+    """Map operator shorthand onto a catalog cortex_ask turn. Other notes pass through."""
+    low = (note or "").strip().lower()
+    if low in SEMANTIC_LAYER_ALIASES:
+        return SEMANTIC_LAYER_WAKE_NOTE
+    return (note or "").strip()
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)

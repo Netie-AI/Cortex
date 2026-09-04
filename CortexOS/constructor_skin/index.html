@@ -6,60 +6,72 @@
     <title>Constructor — Netie</title>
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=22" />
+    <link rel="stylesheet" href="styles.css?v=26" />
   </head>
-  <body class="chat-open chat-snap-right">
+  <body class="chat-snap-right">
     <header class="top">
       <div class="brand">
         <img class="brand-mark" src="favicon.svg" width="28" height="28" alt="" />
         <div>
-          <div class="eyebrow">NETIE / CONSTRUCTOR</div>
           <h1>Constructor</h1>
-          <p class="lede">Ingest rows. Model objects. Act. Ghost dry-run. Cortex is the only engine.</p>
           <p class="hint" id="power">Checking origin.</p>
-          <p class="hint" id="ov-status">OpenVault: not bound.</p>
+          <p class="hint" id="ov-status" hidden></p>
         </div>
       </div>
       <div class="actions">
-        <input id="cortex-key" type="password" autocomplete="off" placeholder="OpenVault key (ov_...)" />
-        <button type="button" id="issue-key" class="ghost">Issue ov_ key</button>
-        <button type="button" id="automate" class="ghost">Automate off</button>
-        <button type="button" id="ghost-toggle" class="ghost">Ghost off</button>
-        <button type="button" id="propose">Propose 3</button>
-        <button type="button" id="maximize">Maximize</button>
-        <button type="button" id="chat-toggle" class="ghost">Chat</button>
+        <button type="button" id="ghost-toggle" class="ghost">Ghost on</button>
         <button type="button" id="run-graph">Run</button>
-        <button type="button" id="export-json">Export JSON</button>
-        <button type="button" id="reset-graph" class="ghost">Reset sample</button>
+        <button type="button" id="chat-toggle" class="ghost">Chat</button>
+        <details class="more-menu">
+          <summary>More</summary>
+          <div class="more-menu-list">
+            <input id="cortex-key" type="password" autocomplete="off" placeholder="ov_ key" />
+            <button type="button" id="issue-key" class="ghost">Issue key</button>
+            <button type="button" id="automate" class="ghost">Automate off</button>
+            <button type="button" id="propose" class="ghost">Propose 3</button>
+            <button type="button" id="maximize" class="ghost">Maximize</button>
+            <button type="button" id="export-json" class="ghost">Export JSON</button>
+            <button type="button" id="reset-graph" class="ghost">Reset sample</button>
+          </div>
+        </details>
       </div>
     </header>
 
     <div class="shell">
       <aside class="rail">
         <div class="eyebrow">BLOCKS</div>
-        <input id="rail-filter" type="search" autocomplete="off" placeholder="Search kinds, objects, actions" />
+        <input id="rail-filter" type="search" autocomplete="off" placeholder="Search" />
         <div id="rail-hits" hidden></div>
         <div class="eyebrow">SEEDS</div>
         <div class="seed-row">
           <button type="button" data-seed="warehouse">Warehouse</button>
           <button type="button" data-seed="venue">Venue/CRM</button>
-          <button type="button" data-seed="suspect">Suspect desk</button>
+          <button type="button" data-seed="suspect">Suspect</button>
         </div>
+        <details class="quiet">
+          <summary>More seeds</summary>
+          <div class="seed-row">
+            <button type="button" data-seed="define">Define data</button>
+            <button type="button" data-seed="govern">Govern agents</button>
+            <button type="button" data-seed="insights">Insights</button>
+            <button type="button" data-seed="understand">Client company</button>
+          </div>
+        </details>
         <button type="button" data-add="ingest"></button>
         <button type="button" data-add="connector"></button>
-        <button type="button" data-add="enhance"></button>
         <button type="button" data-add="ontology"></button>
         <button type="button" data-add="insight"></button>
         <button type="button" data-add="foundry"></button>
         <button type="button" data-add="app"></button>
-        <button type="button" data-add="agent"></button>
-        <button type="button" data-add="hypothesize"></button>
-        <button type="button" data-add="improve"></button>
-        <button type="button" data-add="audit"></button>
         <button type="button" data-add="tool_call"></button>
-        <p class="hint">
-          Ingest is hop 0. Source: place, cloud, database, local model, or online API. Chat compiles the desk to App. Ctrl+/ opens chat. No stalk. No scrape.
-        </p>
+        <details class="quiet">
+          <summary>More blocks</summary>
+          <button type="button" data-add="enhance"></button>
+          <button type="button" data-add="agent"></button>
+          <button type="button" data-add="hypothesize"></button>
+          <button type="button" data-add="improve"></button>
+          <button type="button" data-add="audit"></button>
+        </details>
       </aside>
 
       <main class="stage" id="stage">
@@ -71,15 +83,17 @@
 
       <aside class="inspect" id="inspect">
         <div class="eyebrow">BLOCK</div>
-        <p class="hint" id="inspect-empty">Select a block. Press to edit object, action, and persona.</p>
+        <p class="hint" id="inspect-empty">Click a block, then Edit.</p>
         <div id="inspect-card" class="inspect-card" hidden></div>
-        <p id="inspect-confirm" class="confirm-banner" hidden>HITL: this tool_call requires_confirm before a live write.</p>
+        <p id="inspect-confirm" class="confirm-banner" hidden>Needs confirm before a live write.</p>
         <pre id="inspect-decision" hidden></pre>
         <p id="last-run" class="hint last-run" hidden></p>
         <form id="inspect-form" class="inspect-form" hidden></form>
         <pre id="inspect-json" hidden></pre>
-        <div class="eyebrow">APPROACHES</div>
-        <div id="approaches" class="approaches"></div>
+        <details class="quiet" id="approaches-wrap">
+          <summary id="approaches-summary">Approaches</summary>
+          <div id="approaches" class="approaches"></div>
+        </details>
       </aside>
     </div>
 
@@ -87,7 +101,7 @@
       <header class="chat-dock-head">
         <div>
           <div class="eyebrow">CHAT</div>
-          <p class="hint chat-dock-kicker">Generate the whole desk. Snap bottom or right.</p>
+          <p class="hint chat-dock-kicker">Compile a desk.</p>
         </div>
         <div class="chat-dock-tools">
           <button type="button" id="chat-snap-bottom" class="ghost" data-snap="bottom">Bottom</button>
@@ -100,42 +114,62 @@
         <textarea
           id="chat-input"
           rows="3"
-          placeholder="police suspect desk: owned images, local model enhance, match watchlist. Or: ingest warehouse inventory. Enter sends."
+          placeholder="warehouse inventory, then export pptx"
         ></textarea>
         <button type="submit">Send</button>
       </form>
-      <p class="hint chat-dock-hint">Ctrl+/ toggles. Esc closes. Ghost on Pages. Owned watchlist match is allowed. Stalk / sex-work / internet scrape stay refused.</p>
+      <p class="hint chat-dock-hint">Ctrl+/ chat. Esc closes.</p>
     </section>
 
     <button type="button" id="chat-fab" class="chat-fab" hidden aria-label="Open chat (Ctrl+/)">Chat</button>
 
-    <div id="cal-pop" class="cal-pop" hidden>
-      <form id="event-form" class="event-form">
-        <header class="event-head">
+    <div id="node-page" class="node-page" hidden>
+      <form id="event-form" class="event-form node-page-form">
+        <header class="event-head node-page-head">
+          <button type="button" id="event-back" class="ghost">Back to canvas</button>
           <span id="event-icon" class="ico ico-lg" aria-hidden="true"></span>
           <div class="event-titles">
+            <p class="eyebrow" id="event-kind-label">BLOCK</p>
             <h2 id="event-title">Block</h2>
             <p id="event-persona" class="hint"></p>
           </div>
           <button type="button" id="event-close" class="ghost">Close</button>
         </header>
-        <p id="ingest-help" class="ingest-help" hidden>
-          Ingest is hop 0. Pick the source kind (place table, cloud sign-in, database link, local model, or online API), pick the object those rows become, then wire onward. This block never writes.
-        </p>
-        <p id="enhance-help" class="ingest-help" hidden>
-          Enhance is Comfy-style. Bind a local model path or an online API. Ghost on Pages. Match against owned.watchlist. Distill Comfy, do not clone. No internet scrape.
-        </p>
-        <div id="event-fields"></div>
-        <p id="event-actions-hint" class="hint"></p>
-        <details id="event-compile">
-          <summary>Cortex compile</summary>
-          <pre id="decision-facts"></pre>
-          <pre id="decision-json"></pre>
-        </details>
+        <nav class="node-page-tabs" id="node-page-tabs" aria-label="Edit node sections">
+          <button type="button" data-page-tab="source">Source</button>
+          <button type="button" data-page-tab="object">Object</button>
+          <button type="button" data-page-tab="action">Action</button>
+        </nav>
+        <div class="node-page-body">
+          <div class="node-page-edit">
+            <p id="ingest-help" class="ingest-help" hidden>
+              Hop 0. Bind a source, pick the object. This block does not write.
+            </p>
+            <p id="enhance-help" class="ingest-help" hidden>
+              Bind a local model or online API. Owned watchlist only.
+            </p>
+            <p id="connector-help" class="ingest-help" hidden>
+              Bind Warehouse, Venue/CRM, or Suspect to an object.
+            </p>
+            <div id="event-fields"></div>
+            <p id="event-actions-hint" class="hint"></p>
+            <details id="event-compile">
+              <summary>Cortex compile</summary>
+              <pre id="decision-facts"></pre>
+              <pre id="decision-json"></pre>
+            </details>
+          </div>
+          <aside class="node-page-preview" id="node-page-preview">
+            <div class="eyebrow">PREVIEW</div>
+            <p class="hint" id="preview-engine">Mock rows. LLM needs /cortex + ov_.</p>
+            <p class="hint" id="preview-task"></p>
+            <div id="preview-table"></div>
+          </aside>
+        </div>
       </form>
     </div>
 
-    <script src="app.js?v=22"></script>
-    <script src="engine.js?v=22"></script>
+    <script src="app.js?v=26"></script>
+    <script src="engine.js?v=26"></script>
   </body>
 </html>

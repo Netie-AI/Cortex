@@ -124,8 +124,10 @@ def create_app() -> Any:
         register_agent_routes(app)
         register_action_routes(app)
         from packs.dms.constructor_routes import register_constructor_routes
+        from packs.dms.ontology_routes import register_ontology_routes
 
         register_constructor_routes(app)
+        register_ontology_routes(app)
         try:
             from CortexOS.api.a2a_routes import register_a2a_routes
 

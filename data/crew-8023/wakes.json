@@ -1,0 +1,15 @@
+{
+  "wakes": [
+    {
+      "id": "2fc9a9176550",
+      "space_id": "29f8051a8ce8",
+      "kind": "timer",
+      "state": "pending",
+      "fire_at": "2026-09-03T12:19:48.072245+00:00",
+      "job_id": null,
+      "event_key": null,
+      "note": "browse the catalog. Use cortex_ask: what metrics are available in the data.",
+      "created_at": "2026-09-03T10:19:48+00:00"
+    }
+  ]
+}

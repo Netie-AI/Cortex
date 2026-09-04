@@ -1,0 +1,52 @@
+[
+  {
+    "name": "uacc",
+    "command": [
+      "uv",
+      "tool",
+      "run",
+      "--from",
+      "uacc",
+      "--with",
+      "mcp<2",
+      "uacc-mcp"
+    ],
+    "cwd": null,
+    "env": {
+      "UACC_SAFE_MODE": "true",
+      "UACC_HUMAN_MIMICRY": "false"
+    },
+    "armed": false
+  },
+  {
+    "name": "windows-mcp",
+    "command": [
+      "uv",
+      "tool",
+      "run",
+      "--from",
+      "windows-mcp",
+      "windows-mcp",
+      "serve"
+    ],
+    "cwd": null,
+    "env": {
+      "ANONYMIZED_TELEMETRY": "false"
+    },
+    "armed": false
+  },
+  {
+    "name": "computer-control-mcp",
+    "command": [
+      "uv",
+      "tool",
+      "run",
+      "--from",
+      "computer-control-mcp",
+      "computer-control-mcp"
+    ],
+    "cwd": null,
+    "env": {},
+    "armed": false
+  }
+]

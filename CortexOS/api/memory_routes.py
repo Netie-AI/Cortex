@@ -61,6 +61,7 @@ class AssembleIn(BaseModel):
     scope: str | None = None
     session_scope: list[str] | None = None
     session_id: str | None = None
+    collection: str | None = None
 
 
 @router.post("/upsert")
@@ -119,6 +120,7 @@ async def memory_assemble(
 
     Zep analog: session_id is a thread key. Graphiti analog: hit.meta may carry
     valid_at; Cortex /api/context/assemble owns episode stamps. No second graph DB.
+    MemPalace analog: collection is wing/room. Do not vendor Chroma.
     """
     _ = caller
     from netie.memory.context_provider import MemoryContextProvider
@@ -135,6 +137,7 @@ async def memory_assemble(
         scope=scope,
         session_scope=sess,
         session_id=body.session_id,
+        collection=body.collection,
     )
     vector_hits = assembled.get("vector_hits") or []
     return {

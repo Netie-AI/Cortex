@@ -74,6 +74,82 @@ def test_generate_inventory_pptx_is_foundry_path():
     compile_constructor_graph(graph)
 
 
+def test_generate_venue_crm_is_place_venue_contact_lead():
+    """Skin Place-Venue-Contact-Lead must compile on the engine, not only locally."""
+    graph = generate_constructor_graph("nearby clubs and customer contacts")
+    assert graph["ok"] is True
+    assert graph["pattern"] == "orchestrator_subagent"
+    assert graph["objects"][:4] == ["places", "venues", "contacts", "leads"]
+    kinds = [n["kind"] for n in graph["nodes"]]
+    assert kinds[0] == "ingest"
+    assert "ontology" in kinds
+    assert "insight" in kinds
+    assert kinds[-1] == "tool_call"
+    fetches = {n.get("fetch_from") for n in graph["nodes"] if n.get("fetch_from")}
+    assert "maps.places" in fetches
+    assert "maps.venues" in fetches or "crm.contacts" in fetches
+    ontology = next(n for n in graph["nodes"] if n["kind"] == "ontology")
+    assert "venue_at_place" in ontology["note"]
+    insight = next(n for n in graph["nodes"] if n["kind"] == "insight")
+    assert "leads from contacts" in insight["note"]
+    compile_constructor_graph(graph)
+
+
+def test_generate_define_data_uses_ontology_not_palantir_product():
+    graph = generate_constructor_graph("define data for inventory")
+    assert graph["ok"] is True
+    kinds = [n["kind"] for n in graph["nodes"]]
+    assert "ontology" in kinds
+    assert "insight" in kinds
+    compile_constructor_graph(graph)
+
+
+def test_generate_govern_agents_is_checked_not_palantir_product():
+    """Govern-agents is Cortex agent.checked. P1 parked. Ontology stays Cortex."""
+    graph = generate_constructor_graph("govern agents on inventory")
+    assert graph["ok"] is True
+    assert graph["action"] == "agent.checked"
+    kinds = [n["kind"] for n in graph["nodes"]]
+    assert kinds == ["ingest", "connector", "ontology", "agent", "audit"]
+    assert "foundry" not in kinds
+    compile_constructor_graph(graph)
+
+
+def test_generate_business_insights_stays_foundry_path():
+    graph = generate_constructor_graph("business insights on inventory")
+    assert graph["ok"] is True
+    kinds = [n["kind"] for n in graph["nodes"]]
+    assert "ontology" in kinds
+    assert "insight" in kinds
+    assert "foundry" in kinds
+    compile_constructor_graph(graph)
+
+
+def test_generate_understand_company_is_client_intake_not_palantir_product():
+    graph = generate_constructor_graph("understand this company")
+    assert graph["ok"] is True
+    kinds = [n["kind"] for n in graph["nodes"]]
+    assert kinds == [
+        "ingest",
+        "connector",
+        "ontology",
+        "insight",
+        "foundry",
+        "app",
+        "tool_call",
+    ]
+    assert graph["action"] == "export_pptx"
+    ontology = next(n for n in graph["nodes"] if n["kind"] == "ontology")
+    assert "semantic_layer.yaml" in ontology["note"]
+    assert "P1 parked" in ontology["note"]
+    compile_constructor_graph(graph)
+
+
+def test_generate_refuses_stalk_prompt():
+    with pytest.raises(ConstructorGraphError, match="Refused"):
+        generate_constructor_graph("stalk this person and scrape the internet")
+
+
 def test_generate_verify_is_generator_verifier():
     graph = generate_constructor_graph("verify supplier risk")
     assert graph["pattern"] == "generator_verifier"
@@ -92,6 +168,30 @@ def test_describe_decision_layer_marks_emit():
 def test_compile_rejects_unknown_kind():
     with pytest.raises(ConstructorGraphError):
         compile_constructor_graph({"nodes": [{"id": "x", "kind": "n8n"}], "edges": []})
+
+
+def test_compile_enhance_kind_is_document_ref():
+    from netie.fabrication.dsl_parser import NodeType
+
+    program = compile_constructor_graph(
+        {
+            "nodes": [
+                {
+                    "id": "e1",
+                    "kind": "enhance",
+                    "object_type": "images",
+                    "action_type": "image.enhance",
+                    "fetch_from": "local.model",
+                },
+                {"id": "a1", "kind": "app"},
+            ],
+            "edges": [{"from": "e1", "to": "a1"}],
+        }
+    )
+    by_id = {n.id: n for n in program.nodes}
+    assert by_id["e1"].type == NodeType.DOCUMENT_REF
+    assert by_id["e1"].annotations["constructor_kind"] == "enhance"
+    assert by_id["a1"].type == NodeType.EMIT
 
 
 def test_compile_ontology_fields_land_on_the_dag():
@@ -240,7 +340,8 @@ def test_skin_ghost_honesty_does_not_claim_live_on_404():
     assert "Cortex ghost compile ok" in engine
     assert "Cortex ghost blocked" in engine
     assert "No internal fallback" in engine
-    assert "not an n8n clone" in engine.lower()
+    assert "cortex-shaped compiler" in engine.lower()
+    assert "governed cortex app" in engine.lower()
     assert "app.netie.ai/cortex" in readme
     assert "404" in readme
     assert "do not claim live" in readme.lower()
@@ -301,6 +402,20 @@ def test_generate_route_compiles_chat(dms_client, api_keys_env):
     assert body["edges"]
 
 
+def test_catalog_route_returns_semantic_layer(dms_client, api_keys_env):
+    denied = dms_client.get("/cortex/constructor/catalog")
+    assert denied.status_code == 401
+    res = dms_client.get(
+        "/cortex/constructor/catalog",
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body.get("badge") == "catalog"
+    assert "Certified questions" in (body.get("answer") or "")
+
+
 def test_decision_route_exposes_cortex_layer(dms_client, api_keys_env):
     graph = generate_constructor_graph("export inventory as pptx")
     res = dms_client.post(
@@ -348,6 +463,8 @@ def test_ontology_catalog_is_live_yaml(dms_client, api_keys_env):
     assert "sku" in body["objects"]["inventory"]["points"]
     assert "export_pptx" in body["actions"]
     assert "warehouse.inventory" in body["fetch_places"]
+    assert "maps.venues" in body["fetch_places"]
+    assert "crm.contacts" in body["fetch_places"]
 
 
 def test_fetch_reads_warehouse_inventory(dms_client, api_keys_env):
@@ -378,6 +495,33 @@ def test_fetch_reads_warehouse_inventory(dms_client, api_keys_env):
     assert slice_["row_count"] >= 1
 
 
+def test_fetch_ghost_venue_is_named_not_invented(dms_client, api_keys_env):
+    """Place/Venue compile places have no DuckDB table. Absence is named."""
+    res = dms_client.post(
+        "/cortex/constructor/fetch",
+        json={
+            "nodes": [
+                {
+                    "id": "c1",
+                    "kind": "connector",
+                    "object_type": "venues",
+                    "data_point": "venue_id",
+                    "fetch_from": "maps.venues",
+                }
+            ],
+            "edges": [],
+        },
+        headers={"X-API-Key": api_keys_env["viewer"]},
+    )
+    assert res.status_code == 200, res.text
+    slice_ = res.json()["slice"]
+    assert slice_["table"] is None
+    assert slice_["rows"] == []
+    assert "ghost place" in (slice_["error"] or "")
+    assert "maps.venues" in (slice_["error"] or "")
+    assert slice_.get("row_count", 0) == 0
+
+
 def test_run_seeds_fetch_onto_document_ref(dms_client, api_keys_env):
     res = dms_client.post(
         "/cortex/constructor/run",
@@ -405,6 +549,25 @@ def test_run_seeds_fetch_onto_document_ref(dms_client, api_keys_env):
     assert out["table"] == "inventory"
     assert isinstance(out["rows"], list)
     assert out["rows"]
+
+
+def test_session_rejects_broken_json_with_400(dms_client):
+    res = dms_client.post(
+        "/cortex/session",
+        content="{key:no-quotes}",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+def test_session_sets_cookie_for_viewer_key(dms_client, api_keys_env):
+    res = dms_client.post(
+        "/cortex/session",
+        json={"key": api_keys_env["viewer"]},
+        follow_redirects=False,
+    )
+    assert res.status_code == 303
+    assert "cortex_api_key" in res.cookies
 
 
 def test_issue_key_uses_openvault_token(dms_client, monkeypatch):

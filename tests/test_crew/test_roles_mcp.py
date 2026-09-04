@@ -18,6 +18,7 @@ def test_catalog_names_the_specialists() -> None:
         "Browser",
         "SEO",
         "Skills",
+        "Ontology",
         "Routines",
         "Watchdog",
         "Security",

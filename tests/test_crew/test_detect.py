@@ -67,6 +67,12 @@ DETECT_FIXTURES = (
         ("Ticket",),
         True,
     ),
+    (
+        "understand this company and keep 24/7 insight automation",
+        "orchestrator_subagent",
+        ("Ontology", "Routines"),
+        True,
+    ),
 )
 
 
@@ -101,6 +107,10 @@ def test_linkedin_and_seo_detect() -> None:
     assert "seo" in attached_skills(seo.capabilities)
     got = plan("draft outreach for a factory sales inbox")
     assert "Marketing" in got.capabilities
+    ptr = plan("pointer confirm on the factory walkthrough")
+    assert "Connector" in ptr.capabilities
+    ide = plan("openide search this pack")
+    assert "Connector" in ide.capabilities
     assert got.spawn is True
     skills = attached_skills(got.capabilities)
     assert "outreach" in skills

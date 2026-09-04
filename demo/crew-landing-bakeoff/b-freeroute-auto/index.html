@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cortex Crew – Local Agentic Chat Engine</title>
+    <style>
+        body, html {
+            margin:0;
+            padding:0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f4f7fb;
+            color:#333;
+        }
+        header {
+            text-align:center;
+            padding:4rem 1rem 2rem;
+        }
+        h1 {
+            font-size:2.5rem;
+            margin:0;
+            color:#212b36;
+        }
+        p.tagline {
+            font-size:1.2rem;
+            color:#555;
+            margin-top:0.5rem;
+        }
+        .scene {
+            width:320px;
+            height:320px;
+            margin:2rem auto;
+            perspective:800px;
+        }
+        .cube {
+            width:100%;
+            height:100%;
+            position:relative;
+            transform-style:preserve-3d;
+            transition: transform 0.2s;
+        }
+        .cube div {
+            position:absolute;
+            width:100%;
+            height:100%;
+            background:#fff;
+            border:2px solid #e1e5ea;
+            box-sizing:border-box;
+            border-radius:8px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:1.2rem;
+            font-weight:600;
+            color:#212b36;
+        }
+        .front  { transform: rotateY(   0deg) translateZ(160px); }
+        .back   { transform: rotateY( 180deg) translateZ(160px); }
+        .right  { transform: rotateY(  90deg) translateZ(160px); }
+        .left   { transform: rotateY( -90deg) translateZ(160px); }
+        .top    { transform: rotateX(  90deg) translateZ(160px); }
+        .bottom { transform: rotateX( -90deg) translateZ(160px); }
+
+        .features {
+            max-width:900px;
+            margin:3rem auto;
+            padding:0 1rem;
+            display:grid;
+            grid-template-columns:repeat(auto-fit, minmax(260px,1fr));
+            gap:1.5rem;
+        }
+        .feature {
+            background:#fff;
+            border:1px solid #e1e5ea;
+            border-radius:8px;
+            padding:1.5rem;
+            box-shadow:0 2px 6px rgba(0,0,0,0.05);
+        }
+        .feature h3 {
+            margin-top:0;
+            color:#212b36;
+        }
+        .cta {
+            text-align:center;
+            padding:3rem 1rem;
+            background:#212b36;
+            color:#fff;
+        }
+        .cta h2 {
+            margin:0 0 1rem;
+            font-size:2rem;
+        }
+        .cta button {
+            background:#ff6f61;
+            color:#fff;
+            border:none;
+            padding:0.8rem 2rem;
+            font-size:1rem;
+            border-radius:4px;
+            cursor:pointer;
+        }
+        .footer {
+            text-align:center;
+            padding:2rem 1rem;
+            font-size:0.9rem;
+            color:#777;
+        }
+
+        @media (max-width:600px) {
+            h1 {font-size:2rem;}
+            .scene {width:260px;height:260px;}
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Cortex Crew</h1>
+        <p class="tagline">Local agentic chat over the Cortex governed engine – secure, fast, private.</p>
+        <div class="scene" id="scene">
+            <div class="cube" id="cube">
+                <div class="front">Chat</div>
+                <div class="back">Engine</div>
+                <div class="right">AI</div>
+                <div class="left">Secure</div>
+                <div class="top">Local</div>
+                <div class="bottom">OpenVault</div>
+            </div>
+        </div>
+    </header>
+
+    <section class="features">
+        <div class="feature">
+            <h3>Zero‑Latency Local Chat</h3>
+            <p>Run powerful, agentic conversations on‑premise without round‑trip latency.</p>
+        </div>
+        <div class="feature">
+            <h3>Cortex‑Governed Engine</h3>
+            <p>Leverage the Cortex engine for consistent, policy‑driven behavior across all agents.</p>
+        </div>
+        <div class="feature">
+            <h3>OpenVault Key Management</h3>
+            <p>All cryptographic keys stay safely inside OpenVault – never leave your environment.</p>
+        </div>
+        <div class="feature">
+            <h3>Port 8020 Ready</h3>
+            <p>Connect instantly on the dedicated port 8020 – firewall‑friendly and easy to configure.</p>
+        </div>
+        <div class="feature">
+            <h3>Extensible SDK</h3>
+            <p>Integrate with your stack using our lightweight JavaScript SDK, no heavy dependencies.</p>
+        </div>
+        <div class="feature">
+            <h3>Enterprise Support</h4>
+            <p>24/7 SLA backed support, onboarding assistance, and custom training for your team.</p>
+        </div>
+    </section>
+
+    <section class="cta">
+        <h2>Get Started on Port 8020 Today</h2>
+        <button onclick="location.href='mailto:sales@cortexcrew.io?subject=Inquiry%20about%20Cortex%20Crew'">Contact Sales</button>
+    </section>
+
+    <footer class="footer">
+        © 2026 Cortex Crew • All Rights Reserved • <a href="https://cortexcrew.io/privacy" style="color:#aaa;">Privacy Policy</a>
+    </footer>
+
+    <script>
+        const cube = document.getElementById('cube');
+        let startX, startY, currentX = 0, currentY = 0;
+        let isDragging = false;
+
+        const scene = document.getElementById('scene');
+
+        scene.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+            currentX += deltaY * 0.5;
+            currentY += deltaX * 0.5;
+            startX = e.clientX;
+            startY = e.clientY;
+            updateCube();
+        });
+
+        window.addEventListener('mouseup', () => { isDragging = false; });
+        window.addEventListener('mouseleave', () => { isDragging = false; });
+
+        function updateCube() {
+            cube.style.transform = `rotateX(${currentX}deg) rotateY(${currentY}deg)`;
+        }
+
+        // Touch support
+        scene.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            const touch = e.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const touch = e.touches[0];
+            const deltaX = touch.clientX - startX;
+            const deltaY = touch.clientY - startY;
+            currentX += deltaY * 0.5;
+            currentY += deltaX * 0.5;
+            startX = touch.clientX;
+            startY = touch.clientY;
+            updateCube();
+        });
+
+        window.addEventListener('touchend', () => { isDragging = false; });
+    </script>
+</body>
+</html>

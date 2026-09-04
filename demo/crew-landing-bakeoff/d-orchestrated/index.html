@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cortex Crew -- detect, spawn, verify</title>
+  <style>
+    :root { --bg:#0b0c0a; --panel:#141610; --ink:#eceadf; --lime:#b8e14a; --line:#2c2f24; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:grid; grid-template-columns:1.2fr 0.8fr; background:var(--bg); color:var(--ink); font:15px/1.4 ui-sans-serif, system-ui, sans-serif; }
+    .scene { position:relative; overflow:hidden; perspective:900px; }
+    .rig { position:absolute; inset:12% 8%; transform-style:preserve-3d; }
+    .orb { position:absolute; width:5.5rem; height:5.5rem; border-radius:50%; border:1px solid var(--line); display:grid; place-items:center; font-size:0.72rem; letter-spacing:0.04em; background:rgba(20,24,16,0.85); }
+    h1 { margin:0; font-size:clamp(2rem, 4vw, 3.2rem); letter-spacing:-0.05em; padding:2rem 2rem 0; }
+    .lede { padding:0.8rem 2rem 0; color:#b3b6a0; max-width:36rem; }
+    .cta { margin:1.2rem 2rem; display:flex; gap:0.5rem; }
+    a { color:#0b0c0a; background:var(--lime); text-decoration:none; padding:0.65rem 0.9rem; font-weight:650; }
+    a.ghost { background:transparent; color:var(--lime); border:1px solid var(--line); }
+    aside { border-left:1px solid var(--line); background:var(--panel); padding:1.2rem 1.1rem; overflow:auto; }
+    pre { white-space:pre-wrap; font:12px/1.45 ui-monospace, Consolas, monospace; color:#c9ccb4; margin:0; }
+    .tag { font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase; color:#8b8f76; }
+    @media (max-width: 860px) { body { grid-template-columns:1fr; } aside { border-left:0; border-top:1px solid var(--line); } }
+  </style>
+</head>
+<body>
+  <section class="scene" id="scene">
+    <h1>Orchestrate, then prove it.</h1>
+    <p class="lede">Lane D. Detect names Surface. Verify is on. The Manager spawns a job-named teammate and a verifier. The 3D desk still has to move -- a transcript is not a landing page.</p>
+    <div class="cta">
+      <a href="http://127.0.0.1:8020/">Run in Crew</a>
+      <a class="ghost" href="../index.html">Votes</a>
+    </div>
+    <div class="rig" id="rig"></div>
+  </section>
+  <aside>
+    <div class="tag">detect (fixture, not a live call)</div>
+    <pre id="detect"></pre>
+  </aside>
+  <script>
+    document.getElementById("detect").textContent = `[detect]
+pattern: generator_verifier
+why: quality-critical 3d landing; verifier needs explicit criteria
+capability: Surface
+skills: analog-surface, product-surface, seo, ship
+verify_criteria:
+- page opens as one HTML file
+- CSS 3D or canvas/webgl tilts with the pointer
+- no pasted image hero
+- no solid-color box grid as the product
+engine: crew A2A; OpenVault holds keys; Cortex :8011 for governed ask`;
+    const names = ["Manager", "Surface", "Verifier", "Gate"];
+    const rig = document.getElementById("rig");
+    names.forEach((n, i) => {
+      const el = document.createElement("div");
+      el.className = "orb";
+      el.textContent = n;
+      const a = (i / names.length) * Math.PI * 2;
+      el.dataset.a = String(a);
+      rig.appendChild(el);
+    });
+    const orbs = [...rig.children];
+    addEventListener("pointermove", (e) => {
+      const nx = (e.clientX / innerWidth) * 2 - 1;
+      const ny = (e.clientY / innerHeight) * 2 - 1;
+      rig.style.transform = `rotateX(${(-ny * 16).toFixed(1)}deg) rotateY(${(nx * 22).toFixed(1)}deg)`;
+    });
+    const loop = (t) => {
+      orbs.forEach((el, i) => {
+        const a = Number(el.dataset.a) + t / 2400;
+        const x = 50 + Math.cos(a) * 32;
+        const y = 48 + Math.sin(a) * 24;
+        const z = Math.sin(a) * 80;
+        el.style.left = x + "%";
+        el.style.top = y + "%";
+        el.style.transform = `translate(-50%, -50%) translateZ(${z}px)`;
+      });
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
