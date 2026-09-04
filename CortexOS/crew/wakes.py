@@ -13,6 +13,7 @@ does not HTTP-ping Cortex; ``cortex.detail`` is ``not probed``.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any
 
 from CortexOS.crew.queue import JobQueue
@@ -79,6 +80,29 @@ def _ticket_item(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _fetched_item(row: dict[str, Any]) -> dict[str, Any]:
+    spec = str(row.get("spec") or "").strip()
+    repo = str(row.get("repo") or "").strip()
+    number: int | None = None
+    raw = row.get("number")
+    if isinstance(raw, int):
+        number = raw
+    elif isinstance(raw, str) and raw.isdigit():
+        number = int(raw)
+    elif "#" in spec:
+        right = spec.rsplit("#", 1)[-1]
+        if right.isdigit():
+            number = int(right)
+    return {
+        "repo": repo or (spec.rsplit("#", 1)[0] if "#" in spec else ""),
+        "number": number,
+        "title": str(row.get("title") or spec),
+        "ready": True,
+        "url": str(row.get("url") or ""),
+        "spec": spec,
+    }
+
+
 def conveyor(
     store: CrewStore,
     wakes: WakeBoard,
@@ -86,17 +110,37 @@ def conveyor(
     *,
     mailbox_nonempty: bool = False,
     assignments: list[dict[str, Any]] | None = None,
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Display JSON for ``GET /v1/belt`` and ``GET /crew/belt``.
 
     Control proxies this as display-only. Crew owns leases and the tick.
     ``plan_for_next.decides_work_shape`` stays false: this snapshot does not
     pick the next writer. Cortex is not probed from the belt.
+    Fetched GitHub issues come from the last /fetch cache on disk, not a live
+    gh call (Control belt GET is 1.5s).
     """
+    from CortexOS.crew import github as github_mod
     from CortexOS.crew.board import snapshot as board_snapshot
 
     board = board_snapshot()
     items = [_ticket_item(t) for t in board.get("tickets") or [] if isinstance(t, dict)]
+    claimed = {
+        str(row.get("ticket") or "")
+        for row in (board.get("tickets") or [])
+        if isinstance(row, dict)
+    }
+    claimed.update(
+        str(row.get("owner_pr") or "")
+        for row in (board.get("tickets") or [])
+        if isinstance(row, dict)
+    )
+    if data_dir is not None:
+        for row in github_mod.remembered_issues(data_dir):
+            spec = str(row.get("spec") or "")
+            if not spec or spec in claimed or row.get("seated"):
+                continue
+            items.append(_fetched_item(row))
     spaces = store.list_spaces()
     confirms: list[dict[str, Any]] = []
     agents: list[dict[str, Any]] = []

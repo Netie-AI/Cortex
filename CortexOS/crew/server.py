@@ -115,6 +115,7 @@ class CrewApp:
             self.queue,
             mailbox_nonempty=self.mailbox_nonempty(),
             assignments=assignment_public(self.settings.data_dir),
+            data_dir=self.settings.data_dir,
         )
 
     async def startup(self) -> None:
@@ -660,6 +661,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             if isinstance(row, dict)
         )
         fetched = github_mod.list_open_issues()
+        github_mod.remember_fetched(crew.settings.data_dir, fetched)
         issues = []
         for row in fetched.get("issues") or []:
             if not isinstance(row, dict):

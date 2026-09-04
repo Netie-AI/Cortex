@@ -393,6 +393,8 @@ def test_tickets_lists_fetched_github_issues_minus_claims(
                 },
                 {
                     "spec": "Netie-AI/Cortex#164",
+                    "repo": "Netie-AI/Cortex",
+                    "number": 164,
                     "title": "fetch hud",
                     "seated": False,
                     "ready": True,
@@ -406,6 +408,13 @@ def test_tickets_lists_fetched_github_issues_minus_claims(
     assert board["issues"][0]["spec"] == "Netie-AI/Cortex#164"
     assert board["issues"][0]["ready"] is True
     assert board["issues_ok"] is True
+    belt = client.http.get("/v1/belt").json()
+    ready = [row for row in belt["tickets"]["items"] if row.get("ready")]
+    assert any(
+        row.get("spec") == "Netie-AI/Cortex#164" or row.get("title") == "fetch hud"
+        for row in ready
+    )
+    assert not any(row.get("ready") and row.get("number") == 128 for row in belt["tickets"]["items"])
 
 
 def test_operator_can_choose_runtime_backend(client) -> None:
