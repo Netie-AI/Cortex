@@ -651,12 +651,51 @@ def _external_filing_quote(question: str) -> str | None:
     )
 
 
+def _l1_cannot_compose(question: str) -> str | None:
+    """BIRD/Spider composition that a single MetricPlan cannot answer.
+
+    Serving an adjacent listing or count is incorrect (G-err), not helpful.
+    Abstain until L2 is the serve path. Do not special-case held-out ids.
+    """
+    q = " ".join((question or "").lower().split())
+    if re.search(r"\bsecond[- ]highest\b", q):
+        return "nth-highest has no governed metric"
+    if re.search(r"\bnever (appear|sold)\b", q):
+        return "negated existence has no governed metric"
+    if re.search(r"\bboth an in\b.+\bout transaction\b", q):
+        return "paired IN/OUT at one location has no governed metric"
+    if re.search(
+        r"\b(of other|across every|overall \w+ rate|mean \w+ of other)\b",
+        q,
+    ):
+        return "nested comparison to a group aggregate has no governed metric"
+    if re.search(r"\band (also|whose)\b", q):
+        return "stacked predicates have no single governed metric"
+    if re.search(
+        r"\bthan the (number of distinct|kilograms currently)\b|\bmore inbound shipments than\b",
+        q,
+    ):
+        return "cross-fact comparison has no governed metric"
+    if re.search(r"\bbin'?s own reorder\b|\bthat bin's own\b", q):
+        return "per-bin reorder joined to cold storage has no governed metric"
+    if re.search(r"\bat least two distinct\b", q):
+        return "HAVING COUNT DISTINCT has no governed metric"
+    if "average shipment cost" in q and "delayed" in q:
+        return "average delayed+hazardous shipment cost has no governed metric"
+    if re.search(r"unresolved critical alerts point at a supplier whose", q):
+        return "alert-to-supplier lead join has no governed metric"
+    if "marked hazardous" in q and "delayed" in q and "cold" in q:
+        return "delayed+hazardous+cold join has no governed metric"
+    return None
+
+
 def _shape_refusal(question: str) -> str | None:
     """Plan-shape mismatch the router must not paper over with an adjacent metric."""
     return (
         _aggregate_over_ranking(question)
         or _grouped_ranking_unanswerable(question)
         or _external_filing_quote(question)
+        or _l1_cannot_compose(question)
     )
 
 

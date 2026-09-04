@@ -11,6 +11,7 @@ import pytest
 from CortexOS.dms.answer_engine import (
     _aggregate_over_ranking,
     _external_filing_quote,
+    _l1_cannot_compose,
     answer,
     route_to_metric,
 )
@@ -126,3 +127,21 @@ def test_external_10k_quote_does_not_serve_utilisation() -> None:
     assert "filing" in (body.get("answer") or "").lower() or "filing" in (
         body.get("assumptions") or ""
     ).lower()
+
+
+def test_compositional_delayed_hazardous_cold_abstains() -> None:
+    q = (
+        "Count DELAYED shipments whose SKU is marked hazardous and whose "
+        "destination location is a cold-storage site."
+    )
+    assert _l1_cannot_compose(q) is not None
+    assert route_to_metric(q) is None
+    body = answer(q)
+    assert body["badge"] == "abstain"
+    assert body["rows"] == []
+
+
+def test_simple_delayed_count_still_l1() -> None:
+    body = answer("How many delayed shipments are there?")
+    assert body["layer"] == "governed_metric"
+    assert body.get("rows")

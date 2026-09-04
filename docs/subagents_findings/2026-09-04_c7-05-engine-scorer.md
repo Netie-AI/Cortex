@@ -19,4 +19,4 @@ Does not prove: live FreeRoute quality, G-sh >= 500 shadow lines, or L2-on-miss 
 
 ## Live L1 baseline (2026-09-04, DMS_L2_ENABLED=0)
 
-`python -m bench.heldout --engine` after warehouse load: 28 items, 1 correct / 16 abstained / 11 incorrect. G-env true. G-abs false until the Nestle 10-K utilisation leak was refused as an external filing. G-err false (10+ SQL incorrect). G-sh 0 lines. G-man: `pytest tests/test_execution` 228 passed.
+Live L1 after compositional L1 abstain (2026-09-04): 28 items, 1 correct / 27 abstained / 0 incorrect. G-abs, G-err, G-env true. G-sh 0 lines. G-man: `pytest tests/test_execution` 228 passed. `cutover` stays false.
