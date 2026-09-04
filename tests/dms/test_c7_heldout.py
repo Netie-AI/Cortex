@@ -171,3 +171,68 @@ def test_dms_envelope_spelling_is_accepted():
         "route": "sql",
     }
     assert score_envelope(item, env_ok).outcome == "correct"
+
+
+def test_score_engine_uses_ask_callable_not_live_l2():
+    import os
+
+    from bench.heldout import score_engine
+
+    item = HeldoutItem(
+        id="must_abs",
+        split="must_abstain",
+        provenance="different_model_abstain",
+        question="esg plus berlin weather 1997",
+        expect="abstain",
+    )
+    os.environ.pop("DMS_L2_ENABLED", None)
+    seen: dict[str, str | None] = {}
+
+    def ask(question: str) -> dict:
+        seen["flag"] = os.environ.get("DMS_L2_ENABLED")
+        del question
+        return {
+            "answer": "I can't answer that.",
+            "rows": [],
+            "badge": "abstain",
+            "route": "needs_clarification",
+        }
+
+    report = score_engine(
+        [item], ask=ask, enable_l2=True, count_shadow=False
+    )
+    assert seen["flag"] == "1"
+    assert os.environ.get("DMS_L2_ENABLED") is None
+    assert report["totals"]["abstained"] == 1
+    assert report["gates"]["g_abs"] is True
+    assert report["cutover"] is False
+    assert report["l2_enabled_for_run"] is True
+
+
+def test_score_engine_does_not_claim_cutover_when_g4_empty_success():
+    from bench.heldout import score_engine
+
+    item = HeldoutItem(
+        id="sql_empty",
+        split="sql",
+        provenance="bird_style",
+        question="how many skus",
+        expect="correct_rows",
+        match="scalar",
+        key_columns=["n"],
+        expected_rows=[{"n": 4}],
+    )
+
+    def ask(question: str) -> dict:
+        del question
+        return {
+            "answer": "none",
+            "rows": [],
+            "badge": "L2_VALIDATED",
+            "route": "sql",
+        }
+
+    report = score_engine([item], ask=ask, count_shadow=False)
+    assert report["totals"]["incorrect"] == 1
+    assert report["gates"]["g_env"] is False
+    assert report["cutover"] is False
