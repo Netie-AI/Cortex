@@ -9,8 +9,11 @@ declares this port, the active pack registers an implementation, and
 from __future__ import annotations
 
 import importlib
+import json
 import os
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -87,12 +90,24 @@ class L2Attempt:
     violations: list[str] | None = None
 
 
-def attempt_l2(question: str, *, verified: Any = None) -> L2Attempt | None:
+def _env_on(name: str) -> bool:
+    return os.environ.get(name, "").lower() in ("1", "true", "yes")
+
+
+def attempt_l2(
+    question: str,
+    *,
+    verified: Any = None,
+    force: bool = False,
+    promote: bool = True,
+) -> L2Attempt | None:
     """Run L2 through the registered port. ``None`` when the L2 flag is off.
 
+    ``force=True`` runs even when ``DMS_L2_ENABLED`` is unset (shadow).
+    ``promote=False`` skips steward recording so shadow cannot mutate L0.
     Lives here so ``answer_engine`` never names pack generation modules.
     """
-    if os.environ.get("DMS_L2_ENABLED", "").lower() not in ("1", "true", "yes"):
+    if not force and not _env_on("DMS_L2_ENABLED"):
         return None
 
     from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
@@ -151,15 +166,140 @@ def attempt_l2(question: str, *, verified: Any = None) -> L2Attempt | None:
         )
 
     sql = gate.safe_sql
-    try:
-        l2.record_validated(question, sql)
-    except Exception:  # noqa: BLE001 — promotion signal must not block answers
-        pass
+    if promote:
+        try:
+            l2.record_validated(question, sql)
+        except Exception:  # noqa: BLE001 — promotion signal must not block answers
+            pass
     tables = list((reduced.get("tables") or {}).keys())
     return L2Attempt(
         sql=sql,
         assumptions=f"L2 FreeRoute SQL over reduced schema tables={tables}",
     )
+
+
+_SKIP_SHADOW_LAYERS = frozenset({"generated", "blocked", "rag", "catalog"})
+
+
+def _shadow_path() -> Path:
+    override = (os.environ.get("DMS_L2_SHADOW_PATH") or "").strip()
+    if override:
+        return Path(override)
+    from CortexOS.paths import data_path
+
+    return data_path("engine", "l2_shadow.jsonl")
+
+
+def _compact_values(rows: list[Any] | None) -> list[Any] | None:
+    if not rows or len(rows) > 3:
+        return None
+    return json.loads(json.dumps(rows, default=str))
+
+
+def _l2_execute(sql: str, verified: Any) -> tuple[list[Any] | None, str | None]:
+    if verified is not None:
+        from CortexOS.execution.manifest import ManifestError
+        from CortexOS.execution.submit import execute_sql
+
+        try:
+            rows, _, _ = execute_sql(verified, sql)
+            return list(rows), None
+        except ManifestError as exc:
+            return None, type(exc).__name__
+        except Exception as exc:  # noqa: BLE001
+            return None, type(exc).__name__
+    from CortexOS.dms.sql_guardrail import guard_and_execute
+    from CortexOS.dms.warehouse_db import (
+        DEFAULT_DB,
+        get_connection,
+        load_semantic_layer,
+        read_only_queries_enabled,
+    )
+
+    con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
+    try:
+        gate, rows, _ = guard_and_execute(sql, load_semantic_layer(), con)
+        if not gate.passed:
+            return None, "guardrail"
+        return list(rows), None
+    finally:
+        con.close()
+
+
+def _write_l2_shadow(
+    question: str,
+    served: dict[str, Any],
+    *,
+    verified: Any,
+) -> None:
+    started = time.perf_counter()
+    refusal: str | None = None
+    l2_sql: str | None = None
+    l2_rows: list[Any] | None = None
+    try:
+        out = attempt_l2(question, verified=verified, force=True, promote=False)
+        if out is None:
+            refusal = "not_enabled"
+        elif not out.sql:
+            refusal = (out.reason or "l2_refused")[:240]
+        else:
+            l2_sql = out.sql
+            l2_rows, exec_ref = _l2_execute(out.sql, verified)
+            if exec_ref:
+                refusal = exec_ref
+                l2_sql = out.sql
+    except Exception as exc:  # noqa: BLE001
+        refusal = f"exception:{type(exc).__name__}"
+    latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
+    served_rows = list(served.get("rows") or [])
+    served_n = served.get("row_count")
+    if served_n is None:
+        served_n = served.get("total_count")
+    if served_n is None:
+        served_n = len(served_rows)
+    l2_n = len(l2_rows) if l2_rows is not None else None
+    served_empty = served.get("layer") in ("abstain", "refused") or not served_rows
+    l2_empty = l2_rows is None
+    if served_empty and l2_empty:
+        agree = True
+    elif served_empty or l2_empty:
+        agree = False
+    else:
+        agree = int(served_n) == int(l2_n or 0)
+    rec = {
+        "question": question,
+        "served_layer": served.get("layer"),
+        "served_badge": served.get("badge"),
+        "served_row_count": served_n,
+        "served_values": _compact_values(served_rows),
+        "l2_sql": l2_sql,
+        "l2_refusal_type": refusal,
+        "l2_row_count": l2_n,
+        "l2_values": _compact_values(l2_rows),
+        "agree": agree,
+        "latency_ms": latency_ms,
+    }
+    path = _shadow_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, default=str) + "\n")
+
+
+def maybe_record_l2_shadow(
+    question: str,
+    served: dict[str, Any],
+    *,
+    verified: Any = None,
+) -> None:
+    """Compare L2 to a served envelope. Never raises; never mutates ``served``."""
+    if not _env_on("DMS_L2_SHADOW"):
+        return
+    if served.get("layer") in _SKIP_SHADOW_LAYERS:
+        return
+    try:
+        _write_l2_shadow(question, served, verified=verified)
+    except Exception:  # noqa: BLE001
+        return
 
 
 __all__ = [
@@ -168,6 +308,7 @@ __all__ = [
     "L2NotRegistered",
     "attempt_l2",
     "clear_l2_generation",
+    "maybe_record_l2_shadow",
     "register_l2_generation",
     "resolve_l2_generation",
 ]
