@@ -66,6 +66,7 @@ _RULES: tuple[tuple[str, str], ...] = (
      r"stock(?:s)? (?:running )?thin|getting low on stock)\b", "below reorder level"),
     (r"\bwhat(?:'s| is) low in\b", "below reorder level in"),
     (r"\bsku(?:s)? (?:that are )?scarce\b", "below reorder level"),
+    (r"\bstockouts?\b", "low stock"),
     (r"\breorder\s+point\b", "reorder level"),
     (r"\b(?:past (?:its |their )?expiry(?: date)?|past shelf life|out of date|"
      r"gone past (?:its |their )?expiry)\b", "expired"),
@@ -98,6 +99,7 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\bkilograms?\b", "kg"),
     (r"\bby weight\b", "by kg"),
     (r"\b(?:typical|mean)\b", "average"),
+    (r"\bdays to deliver\b", "lead time"),
     (r"\btrailing month\b", "last 30 days"),
     (r"\b(?:past|last)\s+thirty\s+days\b", "last 30 days"),
     (r"\bworth\b", "stock value"),

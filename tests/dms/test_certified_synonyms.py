@@ -96,6 +96,17 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
         ("what chemical products do we hold", "items_by_category"),
         ("rank our vendors on risk and lead time together", "supplier_ranking"),
         ("risky suppliers who still owe us shipments", "high_risk_pending"),
+        ("count our inventory items", "sku_count"),
+        ("how many products are we stocking", "sku_count"),
+        ("warehouse A stockouts risk", "low_stock"),
+        ("items with no restock in 30 days", "stale_restock"),
+        ("our five biggest earners by sales value", "sales_by_value"),
+        ("which SKUs bring in the most money, top 5", "sales_by_value"),
+        ("how much did we sell in the past 30 days", "revenue_windowed"),
+        ("what is our inventory worth per category", "stock_value_by_category"),
+        ("value of stock held broken down by category", "stock_value_by_category"),
+        ("show me our riskiest vendors above 0.7", "suppliers_by_risk"),
+        ("mean days to deliver by country", "avg_lead_time_by_country"),
     ],
 )
 def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
@@ -110,6 +121,17 @@ def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str)
     assert r.get("rows"), r.get("answer")
     text = r.get("answer") or ""
     assert text.strip()
+
+
+def test_null_expiry_count_does_not_compile_as_sku_count():
+    """Bare 'inventory items' is sku_count; a NULL-expiry filter is not."""
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "How many inventory items have no expiry date?"
+    plan = route_to_metric(q)
+    assert plan is None or plan.metric_id != "sku_count"
+    r = answer(q)
+    assert r["badge"] == "abstain", r.get("answer")
 
 
 def test_pending_high_risk_is_not_a_bare_risk_listing():

@@ -422,8 +422,8 @@ _SUBJECT_SKIP = frozenset({
 _SUBJECT_MEASURES = frozenset({
     "amount", "revenue", "sales", "value", "volume", "quantity", "kg",
     "units", "unit", "cost", "price", "risk", "capacity", "utilisation",
-    "utilization", "spend", "score", "time", "days", "percent", "weight",
-    "kilograms",
+    "utilization",     "spend", "score", "time", "days", "percent", "weight",
+    "kilograms", "money", "earners",
 })
 # Alias token -> display name. Only counted as known when that table exists.
 _TABLE_SUBJECT_ALIASES: dict[str, tuple[str, ...]] = {
@@ -570,8 +570,8 @@ def _subject_allows_sales_rank(q: str) -> bool:
 def _wants_sales_rank(q: str, q_raw: str) -> bool:
     if not _subject_allows_sales_rank(q):
         return False
-    if re.search(r"\b(top|best|highest|most)\b", q) and re.search(
-        r"\b(sell(?:ing|ers)?|sold|revenue|sales|sku|skus|revnue)\b", q
+    if re.search(r"\b(top|best|highest|most|biggest)\b", q) and re.search(
+        r"\b(sell(?:ing|ers)?|sold|revenue|sales|sku|skus|revnue|earners)\b", q
     ):
         return True
     if re.search(r"\btop\s+\d+\b", q):
@@ -838,15 +838,32 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return _metric_plan("sku_count_by_category", {}, "SKU count grouped by category")
     # metrics.yaml sku_count synonyms, not only "how many skus"
     if (
-        re.search(r"\bskus?\b", q)
+        (
+            re.search(r"\bskus?\b", q)
+            or re.search(r"\binventory items\b", q)
+            or (
+                re.search(r"\bproducts?\b", q)
+                and re.search(r"\bstocking\b", q)
+            )
+        )
         and (
             re.search(r"\b(how many|number of|count of|count)\b", q)
             or re.search(r"\bberapa\b.{0,24}\b(banyak|sku)", q)
             or re.search(r"\bdistinct skus?\b", q)
         )
-        and not re.search(r"\b(category|per|by)\b", q)
+        and not re.search(r"\b(category|per|by|expired|expiry|delayed)\b", q)
     ):
         return _metric_plan("sku_count", {}, "distinct SKU count")
+    if (
+        re.search(r"\b(stock value|inventory value|value of stock)\b", q)
+        and "category" in q
+        and re.search(r"\b(per|by|each)\b", q)
+    ):
+        return _metric_plan(
+            "stock_value_by_category",
+            {},
+            "inventory value grouped by category",
+        )
     if (
         re.search(r"\bchemicals?\b", q)
         and not _wants_aggregate(q)
@@ -892,7 +909,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
     # revenue — calendar month before rolling-day window; bare total before ranked "top sales"
     if re.search(r"\b(revenue|sales|sold)\b", q) and _calendar_month(q) == "last":
         return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
-    if re.search(r"\b(revenue|sales|sold)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
+    if re.search(r"\b(revenue|sales|sold|sell)\b", q) and re.search(r"\b(last|past|within|previous)\b.*\bday", q):
         return _metric_plan("revenue_windowed", {"days": _days(q_raw, 30)}, "revenue over a rolling window")
     # metrics.yaml revenue_windowed synonyms ("recent revenue", "revenue last")
     if (
@@ -937,7 +954,7 @@ def route_to_metric(question: str) -> MetricPlan | None:
             f"CCTV camera for {loc}",
         )
     # supplier risk threshold
-    if re.search(r"\brisk\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
+    if re.search(r"\brisk(?:y|iest)?\b", q) and re.search(r"\b(above|over|below|under|greater|less|more than|exceed|>|<)\b", q):
         return _metric_plan("suppliers_by_risk",
                           {"threshold": _threshold(q_raw), "op": _threshold_op(q_raw)},
                           "suppliers filtered by risk-score threshold")
@@ -993,7 +1010,9 @@ def route_to_metric(question: str) -> MetricPlan | None:
                           f"items below reorder level{' at ' + loc if loc else ''}")
 
     # not restocked window
-    if re.search(r"\b(not restocked|stale)\b", q) or ("restock" in q and "not" in q):
+    if re.search(r"\b(not restocked|stale)\b", q) or (
+        "restock" in q and re.search(r"\b(not|no)\b", q)
+    ):
         return _metric_plan("stale_restock", {"days": _days(q_raw, 30)}, "items not restocked within a window")
 
     # expired — aggregate / calendar month BEFORE bare listing
