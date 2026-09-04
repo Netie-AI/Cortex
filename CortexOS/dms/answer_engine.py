@@ -1446,6 +1446,7 @@ def answer(
     metric_slots: dict[str, Any] = {}
     skill_score: float | None = None
     planned_tables: tuple[str, ...] = ()
+    l2_retrieved: tuple[str, ...] = ()
 
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
@@ -1575,6 +1576,11 @@ def answer(
             sql = l2_out.sql
             layer, badge = l2_out.layer, l2_out.badge
             assumptions = l2_out.assumptions
+            l2_retrieved = tuple(l2_out.retrieved_tables)
+            from CortexOS.dms.l2_plausibility import sql_table_names
+
+            used = tuple(sorted(sql_table_names(sql)))
+            planned_tables = used or l2_retrieved
         else:
             if l2_out is not None and not l2_out.sql:
                 if l2_out.refused or (l2_out.reason or "").startswith(
@@ -1683,6 +1689,23 @@ def answer(
 
     if not guard_result.passed:
         return _abs(f"internal SQL failed guardrail {guard_result.violations}")
+
+    if layer == "generated":
+        from CortexOS.dms.l2_plausibility import (
+            assess_plausibility,
+            leftover_literals_via_port,
+        )
+
+        used_sql = guard_result.safe_sql or sql or ""
+        trip = assess_plausibility(
+            question,
+            used_sql,
+            rows,
+            retrieved_tables=l2_retrieved,
+            leftover_literals=leftover_literals_via_port(used_sql),
+        )
+        if not trip.ok:
+            return _abs(trip.reason)
 
     truncated = total_count is not None and len(rows) >= MAX_LIMIT and total_count > len(rows)
     answer_text = synthesize_answer(rows, question)
