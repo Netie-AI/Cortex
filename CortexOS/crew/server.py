@@ -217,6 +217,12 @@ class KeysIn(BaseModel):
     keys: dict[str, str | None]
 
 
+class TicketAssignIn(BaseModel):
+    spec: str
+    space_id: str
+    name: str = "Ticket"
+
+
 def build_router(crew: CrewApp) -> APIRouter:
     router = APIRouter(prefix="/crew")
 
@@ -637,9 +643,51 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.get("/tickets")
     async def list_tickets() -> dict[str, Any]:
+        from CortexOS.crew.assign import public as assignment_public
         from CortexOS.crew.board import snapshot
 
-        return snapshot()
+        body = snapshot()
+        body["assignments"] = assignment_public(crew.settings.data_dir)
+        return body
+
+    @router.post("/tickets/claim")
+    async def claim_ticket(body: TicketAssignIn) -> dict[str, Any]:
+        """Local /assign bind. Does not write CLAIMS.json. Does not seat Ticket Runner."""
+        if crew.store.get_space(body.space_id) is None:
+            raise HTTPException(404, "unknown space")
+        rest = f"{body.spec.strip()} | {body.name.strip() or 'Ticket'}"
+        text, args = await crew.runtime._assign_issue_slash(body.space_id, rest)
+        if text.startswith("DENIED"):
+            code = 409 if "SEATED" in text else 400
+            raise HTTPException(code, text)
+        return {
+            "ok": True,
+            "detail": text,
+            "args": args,
+            "law": "Local bind. Did not write CLAIMS.json. Did not set a GitHub assignee.",
+        }
+
+    @router.post("/tickets/release")
+    async def release_ticket(body: TicketAssignIn) -> dict[str, Any]:
+        """Drop a Crew-local bind. Never edits CLAIMS.json."""
+        from CortexOS.crew import github as github_mod
+        from CortexOS.crew.assign import release as release_bind
+
+        seated = github_mod.seated_claim(body.spec)
+        if seated is not None:
+            raise HTTPException(
+                409,
+                (
+                    f"DENIED: {seated.get('ticket')} is SEATED "
+                    f"({seated.get('owner_pr')}). Ticket Runner owns the seat."
+                ),
+            )
+        release_bind(crew.settings.data_dir, body.spec)
+        return {
+            "ok": True,
+            "spec": github_mod.canonical_spec(body.spec),
+            "law": "Released local bind. Did not edit CLAIMS.json.",
+        }
 
     @router.get("/desk")
     async def desk() -> dict[str, Any]:

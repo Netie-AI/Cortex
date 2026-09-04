@@ -92,7 +92,8 @@
         <div id="ticketPane" hidden>
           <div class="block">
             <h2>Work - Tickets</h2>
-            <div id="tickets" class="empty">loading...</div>
+            <p class="hint">Claim is Crew /assign (local). Ticket Runner seats CLAIMS. Control does not assign.</p>
+            <div id="tickets" class="empty">unread</div>
           </div>
         </div>
         <div class="block">
@@ -854,21 +855,38 @@
       ).join("");
     }
     function renderTickets(board) {
+      const assigns = (board && board.assignments) || [];
+      const held = {};
+      assigns.forEach((a) => { if (a && a.spec) held[a.spec] = a; });
+      const assignBlock = assigns.length
+        ? assigns.slice(0, 12).map((a) =>
+            `<div class="row">${esc(a.spec)} <span class="claim">${esc(a.agent || "")}</span>`
+            + `<small>${esc(a.title || "")}</small></div>`
+          ).join("")
+        : `<div class="empty">assignments none. Claim or /assign binds a teammate. Control does not assign.</div>`;
       if (!board || !board.tickets || !board.tickets.length) {
-        $("tickets").innerHTML = `<div class="empty empty--orb">${esc((board && board.law) || "No CLAIMS.json")}</div>`;
+        $("tickets").innerHTML = assignBlock
+          + `<div class="empty empty--orb">${esc((board && board.law) || "CLAIMS unread")}</div>`;
         return;
       }
-      $("tickets").innerHTML = `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>` +
-        board.tickets.slice(0, 12).map((t) => {
+      $("tickets").innerHTML = assignBlock
+        + `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>`
+        + board.tickets.slice(0, 12).map((t) => {
           const seated = t.role === "SEATED";
-          const label = seated ? "claimed" : "unclaimed";
           const key = String(t.ticket || "");
-          return `<div class="row">${esc(key)} <span class="claim ${seated ? "" : "unclaimed"}">${label}</span>`
+          const mine = held[key];
+          const label = seated ? "SEATED" : (mine ? ("assigned " + (mine.agent || "")) : "unseated");
+          const actions = seated
+            ? `<small>Ticket Runner owns the seat. Crew does not steal it.</small>`
+            : (`<div class="row-actions">`
+              + (mine
+                ? `<button class="ghost" type="button" data-release="${esc(key)}">Release</button>`
+                : `<button class="ghost" type="button" data-claim="${esc(key)}">Claim</button>`)
+              + `</div>`);
+          return `<div class="row">${esc(key)} <span class="claim ${seated ? "" : "unclaimed"}">${esc(label)}</span>`
             + `<small><span class="id">${esc(t.owner_pr || "")}</span> ${esc(t.role)} - write=${t.may_write}</small>`
-            + `<div class="row-actions">`
-            + `<button class="ghost" type="button" data-claim="${esc(key)}" ${seated ? "disabled" : ""}>Claim</button>`
-            + `<button class="ghost" type="button" data-release="${esc(key)}" ${seated ? "" : "disabled"}>Release</button>`
-            + `</div></div>`;
+            + actions
+            + `</div>`;
         }).join("");
       $("tickets").querySelectorAll("[data-claim]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.claim, "claim"));
       $("tickets").querySelectorAll("[data-release]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.release, "release"));
@@ -878,20 +896,31 @@
         toast("Claim in flight. No silent retry.", "warn");
         return;
       }
+      if (!state.spaceId) {
+        toast("Open a space first.", "warn");
+        return;
+      }
       state.claimBusy = ticket + ":" + act;
       try {
-        const resp = await fetch("/crew/tickets/" + encodeURIComponent(ticket) + "/" + act, { method: "POST" });
+        const name = (($("spawnName") && $("spawnName").value) || "Ticket").trim() || "Ticket";
+        const resp = await fetch("/crew/tickets/" + act, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spec: ticket, space_id: state.spaceId, name: name })
+        });
+        const data = await resp.json().catch(() => ({}));
         if (resp.status === 409) {
-          toast("Someone else holds this claim.", "bad");
+          toast(data.detail || "SEATED. Ticket Runner owns the seat.", "bad");
           return;
         }
         if (!resp.ok) {
-          const data = await resp.json().catch(() => ({}));
           toast((data.detail || ("claim " + resp.status)) + " - no silent retry.", "bad");
           return;
         }
         const board = await api("/crew/tickets").catch(() => null);
         if (board) renderTickets(board);
+        const belt = await api("/v1/belt").catch(() => api("/crew/belt").catch(() => null));
+        if (belt) renderBelt(belt);
       } catch (err) {
         toast(err.message + " - no silent retry.", "bad");
       } finally {
@@ -971,16 +1000,17 @@
       const seated = items.filter((t) => !t.ready).length;
       const held = q.leased || 0;
       const hitl = (b.confirms || []).length;
+      const assigned = (b.assignments || []).length;
       $("workWidget").innerHTML =
         `<div class="work-stats">`
         + `<span>ready <b>${ready}</b></span>`
         + `<span>seated <b>${seated}</b></span>`
+        + `<span>assigned <b>${assigned}</b></span>`
         + `<span>held <b>${held}</b></span>`
         + `<span>HITL pending <b>${hitl}</b></span>`
         + `</div>`;
       const stalls = [];
-      const strandedReady = items.filter((t) => t.ready && !t.repo && !t.title);
-      if (ready && seated === 0) stalls.push("ready work, no assignee");
+      if (ready && seated === 0 && assigned === 0) stalls.push("ready work, no assignee");
       items.forEach((t) => {
         if (t.ready && !(t.number || t.title)) stalls.push("stranded ticket");
       });

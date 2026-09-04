@@ -114,6 +114,7 @@ def test_ui_index_is_served(client) -> None:
     assert "Does not kill Manager" in page.text
     assert "Claim" in page.text
     assert "Release" in page.text
+    assert "Control does not assign" in page.text
     assert 'id="tabWork"' in page.text
     assert 'data-scope="space"' in page.text
     assert 'data-scope="user"' in page.text
@@ -280,6 +281,7 @@ def test_tickets_skills_and_voice(client, tmp_path, monkeypatch) -> None:
     assert board["ok"] is True
     assert board["unseated"] == 1
     assert board["tickets"][0]["ticket"] == "FF-03"
+    assert board["assignments"] == []
     assert "cloud agent" in board["law"]
     saved = client.http.post(
         "/crew/skills", json={"title": "monday-briefing", "body": "Goal:\nDo not spawn a cloud swarm.\n"}
@@ -290,6 +292,63 @@ def test_tickets_skills_and_voice(client, tmp_path, monkeypatch) -> None:
     voice = client.http.get("/crew/voice").json()
     assert voice["available"] is False
     assert "fake speech" in voice["reason"]
+
+
+def test_ticket_claim_is_local_assign_and_refuses_seated(
+    client, tmp_path, monkeypatch
+) -> None:
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    space = client.http.post("/crew/spaces", json={"title": "HQ"}).json()
+    seated = client.http.post(
+        "/crew/tickets/claim",
+        json={
+            "spec": "Netie-AI/Cortex#128",
+            "space_id": space["id"],
+            "name": "Scout",
+        },
+    )
+    assert seated.status_code == 409
+    assert "SEATED" in seated.json()["detail"]
+    blocked = client.http.post(
+        "/crew/tickets/release",
+        json={
+            "spec": "Netie-AI/Cortex#128",
+            "space_id": space["id"],
+            "name": "Scout",
+        },
+    )
+    assert blocked.status_code == 409
+    claims.write_text('{"tickets":[]}', encoding="utf-8")
+    ok = client.http.post(
+        "/crew/tickets/claim",
+        json={
+            "spec": "Netie-AI/Cortex#162",
+            "space_id": space["id"],
+            "name": "Scout",
+        },
+    ).json()
+    assert ok["ok"] is True
+    assert "CLAIMS" in ok["law"]
+    board = client.http.get("/crew/tickets").json()
+    assert board["assignments"][0]["spec"] == "Netie-AI/Cortex#162"
+    assert board["assignments"][0]["agent"] == "Scout"
+    belt = client.http.get("/v1/belt").json()
+    assert belt["assignments"][0]["agent"] == "Scout"
+    dropped = client.http.post(
+        "/crew/tickets/release",
+        json={
+            "spec": "Netie-AI/Cortex#162",
+            "space_id": space["id"],
+            "name": "Scout",
+        },
+    ).json()
+    assert dropped["ok"] is True
+    assert client.http.get("/crew/tickets").json()["assignments"] == []
 
 
 def test_operator_can_choose_runtime_backend(client) -> None:
