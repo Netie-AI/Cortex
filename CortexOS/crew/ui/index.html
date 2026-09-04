@@ -123,7 +123,8 @@
           <div id="skills" class="empty">loading...</div>
         </div>
         <div class="block">
-          <h2>Activity</h2>
+          <h2>Activity <span class="scope" id="a2aPending">switchboard</span></h2>
+          <!-- thread--waiting thread--dead thread--timeout thread--answered -->
           <div id="graph" class="graph"></div>
           <div class="chip-row" id="activityChips"></div>
           <div id="activity" class="empty empty--orb">Agent-to-agent traffic lands here.</div>
@@ -244,7 +245,7 @@
       stick: true, unread: 0, retry: null, live: false,
       belt: null, memScope: "space", claimBusy: null,
       sessionAllow: {}, denyStreak: {}, runStarted: 0,
-      routeProvider: "", usage: null
+      routeProvider: "", usage: null, asks: []
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
@@ -397,26 +398,33 @@
 
     function passesFilter(m) {
       if (state.focusAgent) return m.agent_id === state.focusAgent || m.to_agent_id === state.focusAgent;
-      if (state.activityOnly) return m.role === "agent";
+      if (state.activityOnly) return isWire(m);
       return true;
     }
+    function wireMeta(m) { return (m.meta && m.meta.a2a) || null; }
+    function isWire(m) { return !!(wireMeta(m) || m.role === "agent"); }
     function whoLine(m) {
       const t = clock(m.created_at);
       const time = t ? `<span class="stamp">${esc(t)}</span>` : "";
+      const wire = wireMeta(m) || {};
       if (m.role === "user") {
-        const wire = (m.meta && m.meta.a2a) || {};
         const to = wire.to || nameOf(m.to_agent_id) || "Manager";
         return `<span>You -&gt; ${esc(to)}</span>${time}`;
       }
       if (m.role === "assistant") return `<span>Manager</span>${time}`;
+      if (m.role === "system" && (wire.status === "dead" || wire.status === "timeout" || wire.kind === "none")) {
+        const label = wire.status === "timeout" ? "timeout" : "dead";
+        return `<span class="pill stall">${esc(label)}</span>`
+          + `<span>${esc(wire.from || "teammate")} mid-ask</span>${time}`;
+      }
       if (m.role === "agent") {
-        const wire = (m.meta && m.meta.a2a) || {};
         const from = wire.from || nameOf(m.agent_id) || "agent";
         const to = wire.to || nameOf(m.to_agent_id) || "space";
         const kind = wire.kind || "message";
         const tint = esc(colorOf(m.agent_id));
+        const re = wire.reply_to ? `<span class="stamp">re ${esc(String(wire.reply_to).slice(0, 8))}</span>` : "";
         return `<span class="pill" style="border-color:${tint};color:${tint}">${esc(kind)}</span>`
-          + `<span>${esc(from)} -&gt; ${esc(to)}</span>${time}`;
+          + `<span>${esc(from)} -&gt; ${esc(to)}</span>${re}${time}`;
       }
       if (m.role === "tool") return `<span>${esc((m.meta && m.meta.tool) || "tool")}</span>${time}`;
       return `<span>${esc(m.role)}</span>${time}`;
@@ -432,6 +440,11 @@
       const el = document.createElement("article");
       el.className = "msg " + m.role;
       el.dataset.id = m.id;
+      const wire = wireMeta(m) || {};
+      if (wire.kind === "ask") el.classList.add("msg--ask");
+      if (wire.reply_to) el.classList.add("msg--reply");
+      if (wire.status === "dead" || wire.status === "timeout" || wire.kind === "none") el.classList.add("msg--dead");
+      el.dataset.thread = wire.reply_to || (wire.kind === "ask" ? m.id : "");
       const body = String(m.content || "");
       if (m.role === "tool" || (m.role === "agent" && body.length > 420)) {
         const head = body.split("\n")[0].slice(0, 110);
@@ -506,18 +519,53 @@
       return true;
     }
 
-    function wireRows() { return state.messages.filter((m) => m.role === "agent"); }
+    function wireRows() { return state.messages.filter(isWire); }
+    function threadRows(messages, pending) {
+      pending = pending || state.asks || [];
+      const pendingQ = {};
+      pending.forEach((p) => { if (p.question_id) pendingQ[p.question_id] = p; });
+      const children = {};
+      const roots = [];
+      messages.filter(isWire).forEach((m) => {
+        const w = wireMeta(m) || {};
+        if (w.reply_to) (children[w.reply_to] = children[w.reply_to] || []).push(m);
+        else roots.push(m);
+      });
+      return roots.map((m) => {
+        const w = wireMeta(m) || {};
+        const hops = children[m.id] || [];
+        const hopMeta = hops.map((h) => wireMeta(h) || {});
+        let status = "sent";
+        if (hopMeta.some((x) => x.status === "dead")) status = "dead";
+        else if (hopMeta.some((x) => x.status === "timeout")) status = "timeout";
+        else if (hopMeta.some((x) => x.kind === "none")) status = "dead";
+        else if (pendingQ[m.id]) status = "waiting";
+        else if (hops.length) status = "answered";
+        else if (w.kind === "ask") status = "open";
+        return { id: m.id, status, kind: w.kind || "message", from: w.from, to: w.to, text: m.content || "", hops, root: m };
+      });
+    }
+    function threadNode(t) {
+      const tint = esc(colorOf(t.root && t.root.agent_id));
+      const hopsHtml = (t.hops || []).map((h) => {
+        const w = wireMeta(h) || {};
+        return `<div class="hop">${esc(w.kind || "reply")} ${esc(w.from || "")} -&gt; ${esc(w.to || "")}`
+          + `<div>${esc(String(h.content || "").slice(0, 200))}</div></div>`;
+      }).join("");
+      return `<div class="thread thread--${esc(t.status)}" data-thread="${esc(t.id)}" style="border-left-color:${tint}">`
+        + `<b>${esc(t.from || "agent")} -&gt; ${esc(t.to || "space")}</b> `
+        + `<i>${esc(t.kind)}</i> <span class="chip-mini">${esc(t.status)}</span>`
+        + `<div>${esc(String(t.text || "").slice(0, 240))}</div>`
+        + hopsHtml
+        + `</div>`;
+    }
     function renderWire() {
       const a2a = wireRows();
-      $("activity").innerHTML = a2a.length
-        ? a2a.slice(-40).map((m) => {
-            const w = (m.meta && m.meta.a2a) || {};
-            const from = w.from || nameOf(m.agent_id) || "agent";
-            const to = w.to || nameOf(m.to_agent_id) || "space";
-            return `<div class="wire" style="border-left-color:${esc(colorOf(m.agent_id))}">`
-              + `<b>${esc(from)} -&gt; ${esc(to)}</b> <i>${esc(w.kind || "message")}</i>`
-              + `<div>${esc(String(m.content || "").slice(0, 240))}</div></div>`;
-          }).join("")
+      const threads = threadRows(state.messages, state.asks);
+      const waiting = threads.filter((t) => t.status === "waiting").length;
+      $("a2aPending").textContent = waiting ? ("switchboard " + waiting + " waiting") : "switchboard";
+      $("activity").innerHTML = threads.length
+        ? threads.slice(-40).map(threadNode).join("")
         : `<div class="empty">Agent-to-agent traffic lands here.</div>`;
       renderGraph(a2a);
     }
@@ -613,8 +661,13 @@
         kinds[k] = (kinds[k] || 0) + 1;
       });
       const chips = [];
+      const threads = threadRows(state.messages, state.asks);
+      const waiting = threads.filter((t) => t.status === "waiting").length;
+      const dead = threads.filter((t) => t.status === "dead").length;
       if (state.agents.length) chips.push(`<span class="chip-mini">subagent ${state.agents.length}</span>`);
       if (state.confirms.some((c) => c.status === "pending")) chips.push(`<span class="chip-mini stall">interrupt HITL</span>`);
+      if (waiting) chips.push(`<span class="chip-mini stall">${waiting} waiting</span>`);
+      if (dead) chips.push(`<span class="chip-mini stall">${dead} dead</span>`);
       if (kinds.ask || kinds.broadcast) chips.push(`<span class="chip-mini">offload</span>`);
       Object.keys(kinds).slice(0, 3).forEach((k) => {
         chips.push(`<span class="chip-mini">${esc(k)}</span>`);
@@ -995,18 +1048,29 @@
       const space = state.spaces.find((s) => s.id === id);
       $("spaceTitle").textContent = space ? space.title : "Space";
       renderSpaces();
-      const [messages, agents, confirms] = await Promise.all([
+      const [messages, agents, confirms, hud] = await Promise.all([
         api("/crew/spaces/" + id + "/messages"),
         api("/crew/spaces/" + id + "/agents"),
         api("/crew/confirms?space_id=" + id),
+        api("/crew/spaces/" + id + "/threads").catch(() => null),
       ]);
       state.messages = messages;
       state.seq = messages.reduce((n, m) => Math.max(n, m.seq || 0), 0);
       state.agents = agents;
       state.confirms = confirms;
+      state.asks = (hud && hud.asks) || [];
       renderFocus(); renderAgents(); renderConfirms(); renderLog(); renderMemory();
       loadComposer(id);
       listen(id);
+    }
+    async function refreshThreads() {
+      if (!state.spaceId) return;
+      try {
+        const hud = await api("/crew/spaces/" + state.spaceId + "/threads");
+        state.asks = hud.asks || [];
+        renderWire();
+        renderFocus();
+      } catch (err) { /* local grouping still paints the tape */ }
     }
     async function catchUp(id) {
       try {
@@ -1019,7 +1083,7 @@
         ]);
         state.agents = agents; state.confirms = confirms;
         renderAgents(); renderConfirms();
-        if (changed) renderWire();
+        if (changed) { renderWire(); refreshThreads(); }
       } catch (err) { toast("Could not catch up: " + err.message, "bad"); }
     }
     function listen(id) {
@@ -1040,7 +1104,17 @@
           if (data.message) {
             if (data.message.role === "assistant") { state.draft = ""; paintDraft(); }
             addMessage(data.message);
-            if (data.message.role === "agent") renderWire();
+            const wire = wireMeta(data.message) || {};
+            if (isWire(data.message)) renderWire();
+            if (wire.kind === "ask" || wire.kind === "none" || wire.status === "dead" || wire.status === "timeout") {
+              refreshThreads();
+            }
+          }
+          if (data.bus === "switchboard" || data.thread_id) {
+            if (data.status === "dead" || data.status === "timeout") {
+              toast(data.text || "Ask failed", "bad");
+            }
+            refreshThreads();
           }
           if (data.agent) {
             const i = state.agents.findIndex((a) => a.id === data.agent.id);
@@ -1063,7 +1137,7 @@
             if (data.stats) paintUsage(data.stats);
           }
         };
-        ["message", "agent", "confirm", "run", "detect"].forEach((name) => src.addEventListener(name, apply));
+        ["message", "agent", "confirm", "run", "detect", "a2a"].forEach((name) => src.addEventListener(name, apply));
         src.addEventListener("delta", (ev) => {
           const data = JSON.parse(ev.data);
           if (data.text) { state.draft += data.text; paintDraft(); }

@@ -474,11 +474,12 @@ class CrewRuntime:
         if handle is not None and handle.task is not None and not handle.task.done():
             handle.task.cancel()
         else:
-            for asker_id in self.switch.abandon(agent_id, life.dead_reason(killed or row)):
+            why = life.dead_reason(killed or row)
+            for wait in self.switch.abandon(agent_id, why):
                 ctx_id = self._space_run.get(row["space_id"])
                 ctx = self._runs.get(ctx_id) if ctx_id else None
                 if ctx is not None:
-                    self._note_abandoned(ctx, asker_id, row["name"])
+                    self._note_ask_closed(ctx, wait, dead_name=row["name"], status=a2a.DEAD)
             self.switch.forget(agent_id)
         if killed is not None:
             note = self.store.add_message(
@@ -711,8 +712,8 @@ class CrewRuntime:
             fresh = self.store.get_agent(row["id"]) or row
             if not life.is_alive(fresh) or (fresh.get("status") == life.STATUS_FAILED):
                 why = life.dead_reason(fresh, name=name)
-                for asker_id in self.switch.abandon(row["id"], why):
-                    self._note_abandoned(ctx, asker_id, name)
+                for wait in self.switch.abandon(row["id"], why):
+                    self._note_ask_closed(ctx, wait, dead_name=name, status=a2a.DEAD)
             elif not self.switch.mailbox(row["id"]).empty() and not ctx.closed:
                 self._handle(row).task = None
                 self._wake_if_idle(ctx, self.store.get_agent(row["id"]) or row)
@@ -1640,10 +1641,23 @@ class CrewRuntime:
             self.switch.close_ask(row["id"], target["id"])
             self._set_status(row["id"], prev or life.STATUS_ACTIVE)
             fresh = self.store.get_agent(target["id"]) or target
-            return (
+            qid = str(msg["id"]) if msg is not None else ""
+            note = (
                 f"{target_name} did not answer within {timeout}s"
-                f" (they are {fresh.get('status')}). Proceed without them, or ask again."
+                f" (they are {fresh.get('status')})."
             )
+            self._note_ask_closed(
+                ctx,
+                {
+                    "asker_id": row["id"],
+                    "target_id": target["id"],
+                    "question_id": qid,
+                },
+                dead_name=target_name,
+                status=a2a.TIMEOUT,
+                text=note + " Proceed without them, or ask again.",
+            )
+            return note + " Proceed without them, or ask again."
         self._set_status(row["id"], prev or life.STATUS_ACTIVE)
         if kind == a2a.NO_ANSWER:
             return f"{target_name} {answer}"
@@ -1653,17 +1667,52 @@ class CrewRuntime:
         # transcript.
         return f"{target_name} answered: {answer}"
 
-    def _note_abandoned(self, ctx: RunContext, asker_id: str, dead_name: str) -> None:
-        """Say in the transcript that a wait ended because the target stopped."""
-        asker = self.store.get_agent(asker_id)
+    def _note_ask_closed(
+        self,
+        ctx: RunContext,
+        wait: dict[str, Any],
+        *,
+        dead_name: str,
+        status: str,
+        text: str | None = None,
+    ) -> None:
+        """Stamp a fail-loud closer on the ask thread (R-0011).
+
+        The closer is a system row with ``meta.a2a.reply_to`` set to the
+        question id, so the HUD can correlate it on the same Switchboard bus
+        instead of hiding a dead wait in a flat tape.
+        """
+        asker = self.store.get_agent(str(wait.get("asker_id") or ""))
         if asker is None:
             return
+        target_name = dead_name or "teammate"
+        if status == a2a.DEAD:
+            body = f"{asker['name']} was waiting on {target_name}, which stopped running."
+        else:
+            body = text or f"{target_name} did not answer."
+        qid = str(wait.get("question_id") or "") or None
         msg = self.store.add_message(
             ctx.space_id,
             "system",
-            f"{asker['name']} was waiting on {dead_name}, which stopped running.",
+            body,
+            agent_id=str(wait["target_id"]) if wait.get("target_id") else None,
+            to_agent_id=asker["id"],
+            meta={
+                "a2a": {
+                    "kind": a2a.NO_ANSWER,
+                    "from": target_name,
+                    "to": asker["name"],
+                    "reply_to": qid,
+                    "status": status,
+                }
+            },
         )
         self.bus.emit(ctx.space_id, "message", {"message": msg})
+        self.bus.emit(
+            ctx.space_id,
+            "a2a",
+            {"status": status, "thread_id": qid, "text": body, "bus": "switchboard"},
+        )
 
     def _deliver_a2a(
         self,

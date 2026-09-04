@@ -56,6 +56,14 @@ ANSWERING_KINDS = frozenset({REPLY, TELL, REPORT})
 #: Reported back when an ask ended without anyone answering it.
 NO_ANSWER = "none"
 
+#: HUD thread status. These are not delivery kinds; the bus stays Envelope.kind.
+WAITING = "waiting"
+DEAD = "dead"
+TIMEOUT = "timeout"
+ANSWERED = "answered"
+OPEN = "open"
+SENT = "sent"
+
 #: How a kind is announced to the model. Kept terse; models read a lot of these.
 _LEAD = {
     BRIEF: "brief",
@@ -257,14 +265,30 @@ class Switchboard:
     def close_ask(self, asker_id: str, target_id: str) -> None:
         self._asks.pop((asker_id, target_id), None)
 
-    def abandon(self, agent_id: str, reason: str) -> list[str]:
+    def pending_asks(self) -> list[dict[str, Any]]:
+        """Open asks the operator HUD can paint. Not a second mailbox."""
+        out: list[dict[str, Any]] = []
+        for (asker_id, target_id), ask in self._asks.items():
+            if ask.future.done():
+                continue
+            out.append(
+                {
+                    "asker_id": asker_id,
+                    "target_id": target_id,
+                    "question_id": ask.question_id,
+                    "status": WAITING,
+                }
+            )
+        return out
+
+    def abandon(self, agent_id: str, reason: str) -> list[dict[str, str]]:
         """Resolve every ask waiting on ``agent_id``; it is not coming back.
 
-        Returns the asker ids that were unblocked, so the caller can record
-        that a wait ended because the target died rather than because it
-        answered.
+        Returns one row per unblocked asker, including the question id, so the
+        HUD can stamp the dead closer onto that thread instead of a silent
+        stall (R-0011).
         """
-        freed: list[str] = []
+        freed: list[dict[str, str]] = []
         for key in list(self._asks):
             asker_id, target_id = key
             if target_id != agent_id:
@@ -272,7 +296,14 @@ class Switchboard:
             pending = self._asks.pop(key)
             if not pending.future.done():
                 pending.future.set_result((NO_ANSWER, f"(no answer: {reason})"))
-                freed.append(asker_id)
+                freed.append(
+                    {
+                        "asker_id": asker_id,
+                        "target_id": target_id,
+                        "question_id": pending.question_id,
+                        "reason": reason,
+                    }
+                )
         return freed
 
     def waiting_targets(self, asker_id: str) -> list[str]:
@@ -287,6 +318,153 @@ class Switchboard:
         Derived look only. Does not allocate a second mailbox.
         """
         return any(not box.empty() for box in self._boxes.values())
+
+
+def a2a_meta(msg: dict[str, Any]) -> dict[str, Any]:
+    """Wire stamp on a stored message. CMD and the HUD both read this."""
+    meta = msg.get("meta") if isinstance(msg.get("meta"), dict) else {}
+    wire = meta.get("a2a") if isinstance(meta, dict) else None
+    return dict(wire) if isinstance(wire, dict) else {}
+
+
+def is_wire(msg: dict[str, Any]) -> bool:
+    """True when the operator HUD should treat this row as Switchboard traffic.
+
+    Agent rows are the original tape. Any role with ``meta.a2a`` is included
+    so CMD operator ``@`` lines (role=user) and dead-ask closers (role=system)
+    paint on the same bus rather than a fork.
+    """
+    if a2a_meta(msg):
+        return True
+    return msg.get("role") == "agent"
+
+
+def hop_public(msg: dict[str, Any]) -> dict[str, Any]:
+    wire = a2a_meta(msg)
+    return {
+        "id": msg.get("id"),
+        "kind": wire.get("kind") or "message",
+        "from": wire.get("from") or "",
+        "to": wire.get("to") or "",
+        "text": str(msg.get("content") or ""),
+        "seq": int(msg.get("seq") or 0),
+        "reply_to": wire.get("reply_to"),
+        "status": wire.get("status"),
+    }
+
+
+def _thread_status(
+    kind: str, mid: str, hops: list[dict[str, Any]], pending_q: set[str]
+) -> str:
+    if any(h.get("status") == DEAD for h in hops):
+        return DEAD
+    if any(h.get("status") == TIMEOUT for h in hops):
+        return TIMEOUT
+    if any(h.get("kind") == NO_ANSWER for h in hops):
+        return DEAD
+    if mid in pending_q:
+        return WAITING
+    if hops:
+        return ANSWERED
+    if kind == ASK:
+        return OPEN
+    return SENT
+
+
+def hud_threads(
+    messages: list[dict[str, Any]],
+    pending: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Group ``/spaces/messages`` into correlated ask/reply threads.
+
+    Roots are wires without ``reply_to``. Children attach by ``reply_to`` =
+    the ask's message id. Pending overlay is live Switchboard state, not a
+    second inbox.
+    """
+    pending = pending or []
+    pending_q = {str(p.get("question_id") or "") for p in pending if p.get("question_id")}
+    children: dict[str, list[dict[str, Any]]] = {}
+    roots: list[dict[str, Any]] = []
+    for msg in messages:
+        if not is_wire(msg):
+            continue
+        rid = a2a_meta(msg).get("reply_to")
+        if rid:
+            children.setdefault(str(rid), []).append(msg)
+        else:
+            roots.append(msg)
+
+    threads: list[dict[str, Any]] = []
+    for msg in roots:
+        mid = str(msg.get("id") or "")
+        hops = [hop_public(child) for child in children.pop(mid, [])]
+        wire = a2a_meta(msg)
+        kind = str(wire.get("kind") or "message")
+        threads.append(
+            {
+                "id": mid,
+                "status": _thread_status(kind, mid, hops, pending_q),
+                "kind": kind,
+                "from": wire.get("from") or "",
+                "to": wire.get("to") or "",
+                "text": str(msg.get("content") or ""),
+                "seq": int(msg.get("seq") or 0),
+                "reply_to": None,
+                "hops": hops,
+            }
+        )
+
+    for rid, kids in children.items():
+        hops = [hop_public(child) for child in kids]
+        first = hops[0] if hops else {}
+        threads.append(
+            {
+                "id": rid,
+                "status": _thread_status(ASK, rid, hops, pending_q),
+                "kind": ASK,
+                "from": first.get("to") or "",
+                "to": first.get("from") or "",
+                "text": "",
+                "seq": int(first.get("seq") or 0),
+                "reply_to": None,
+                "hops": hops,
+            }
+        )
+
+    have = {str(t["id"]) for t in threads}
+    for row in pending:
+        qid = str(row.get("question_id") or "")
+        if not qid or qid in have:
+            continue
+        threads.append(
+            {
+                "id": qid,
+                "status": WAITING,
+                "kind": ASK,
+                "from": row.get("from") or "",
+                "to": row.get("to") or "",
+                "text": "",
+                "seq": 0,
+                "reply_to": None,
+                "hops": [],
+            }
+        )
+    threads.sort(key=lambda t: int(t.get("seq") or 0))
+    return threads
+
+
+def hud(
+    messages: list[dict[str, Any]],
+    pending: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Operator HUD payload. ``bus`` names the existing Switchboard."""
+    pending = pending or []
+    return {
+        "bus": "switchboard",
+        "pending": len(pending),
+        "asks": pending,
+        "threads": hud_threads(messages, pending),
+    }
 
 
 def lead_for(kind: str) -> str:
