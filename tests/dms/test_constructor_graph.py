@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from CortexOS.constructor_graph import (
-    ConstructorGraphError,
     FOUNDRY_KINDS,
     NAMED_GENERATE,
+    ConstructorGraphError,
     compile_constructor_graph,
     generate_constructor_graph,
 )
