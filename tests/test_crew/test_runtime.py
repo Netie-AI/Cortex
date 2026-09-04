@@ -298,3 +298,34 @@ async def test_takeover_skips_mutating_click(settings, crew_env) -> None:
     tools = [m for m in store.list_messages(space["id"]) if m["role"] == "tool"]
     assert tools and "TOOK OVER" in tools[0]["content"]
     store.close()
+
+
+async def test_ws_write_then_read_paints_in_transcript(rig) -> None:
+    space = rig.store.create_space("HQ")
+    rig.llm.manager.append(
+        LLMResult(
+            tool_calls=[
+                _tc("ws_write", path="ticket.md", content="working Netie-AI/Cortex#160"),
+            ]
+        )
+    )
+    rig.llm.manager.append(
+        LLMResult(tool_calls=[_tc("ws_read", path="ticket.md")])
+    )
+    rig.llm.manager.append(LLMResult(text="Notes are in the workspace."))
+    await rig.runtime.on_user_message(space["id"], "keep notes on the ticket")
+    await wait_run_done(rig.runtime, space["id"])
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "working Netie-AI/Cortex#160" in painted
+    assert "Notes are in the workspace." in painted
+
+
+async def test_ws_read_escape_is_denied_in_transcript(rig) -> None:
+    space = rig.store.create_space("HQ")
+    rig.llm.manager.append(LLMResult(tool_calls=[_tc("ws_read", path="../secrets.txt")]))
+    rig.llm.manager.append(LLMResult(text="Jail held."))
+    await rig.runtime.on_user_message(space["id"], "read outside the jail")
+    await wait_run_done(rig.runtime, space["id"])
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "DENIED" in painted
+    assert "Jail held." in painted

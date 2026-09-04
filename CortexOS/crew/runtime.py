@@ -1309,6 +1309,46 @@ class CrewRuntime:
                 ["repo"],
             ),
             spec(
+                "ws_ls",
+                "List files in this space's jailed workspace. Paths cannot escape the jail. "
+                "Use this to keep ticket notes and patches. Do not write the Cortex engine tree.",
+                {"path": {"type": "string", "description": "relative path; default ."}},
+                [],
+            ),
+            spec(
+                "ws_read",
+                "Read a file from this space's jailed workspace. Escape attempts are denied.",
+                {
+                    "path": {"type": "string"},
+                    "offset": {"type": "integer", "description": "start line, 0-based"},
+                    "limit": {"type": "integer", "description": "max lines"},
+                },
+                ["path"],
+            ),
+            spec(
+                "ws_write",
+                "Write a file in this space's jailed workspace. Creates parents. Size-capped. "
+                "Does not touch CLAIMS.json or merge PRs.",
+                {"path": {"type": "string"}, "content": {"type": "string"}},
+                ["path", "content"],
+            ),
+            spec(
+                "ws_edit",
+                "Replace one unique old_string with new_string in a jailed workspace file.",
+                {
+                    "path": {"type": "string"},
+                    "old": {"type": "string"},
+                    "new": {"type": "string"},
+                },
+                ["path", "old", "new"],
+            ),
+            spec(
+                "ws_glob",
+                "Find files in this space's jailed workspace by glob pattern.",
+                {"pattern": {"type": "string"}},
+                [],
+            ),
+            spec(
                 "cortex_ask",
                 "Ask the governed Cortex engine a data question. Returns the answer with its"
                 " badge, sources and audit id. The engine may abstain; report that honestly.",
@@ -1617,6 +1657,34 @@ class CrewRuntime:
             repo = str(args.get("repo", "")).strip() or "all"
             text = render_slug(repo)
             self._persist_tool(ctx, row, "ship_gate", {"repo": repo}, text)
+            return text
+
+        if name in {"ws_ls", "ws_read", "ws_write", "ws_edit", "ws_glob"}:
+            from CortexOS.crew import workspace as ws_mod
+
+            ws = ws_mod.workspace_for(self.settings.data_dir, ctx.space_id)
+            try:
+                if name == "ws_ls":
+                    text = ws.ls(str(args.get("path") or "."))
+                elif name == "ws_read":
+                    text = ws.read(
+                        str(args.get("path") or ""),
+                        offset=int(args.get("offset") or 0),
+                        limit=int(args.get("limit") or 200),
+                    )
+                elif name == "ws_write":
+                    text = ws.write(str(args.get("path") or ""), str(args.get("content") or ""))
+                elif name == "ws_edit":
+                    text = ws.edit(
+                        str(args.get("path") or ""),
+                        str(args.get("old") or ""),
+                        str(args.get("new") or ""),
+                    )
+                else:
+                    text = ws.glob(str(args.get("pattern") or "*"))
+            except (ws_mod.WorkspaceError, TypeError, ValueError) as exc:
+                text = ws_mod.as_error(exc)
+            self._persist_tool(ctx, row, name, args, text)
             return text
 
         if name == "cortex_ask":
