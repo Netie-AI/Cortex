@@ -298,3 +298,34 @@ async def test_takeover_skips_mutating_click(settings, crew_env) -> None:
     tools = [m for m in store.list_messages(space["id"]) if m["role"] == "tool"]
     assert tools and "TOOK OVER" in tools[0]["content"]
     store.close()
+
+
+async def test_show_issue_tool_paints_body_in_transcript(rig, monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+
+    def fake_show(spec, *, runner=None):  # noqa: ANN001, ARG001
+        return {
+            "ok": True,
+            "spec": spec,
+            "title": "assign slice",
+            "body": "Bind then execute.",
+            "state": "OPEN",
+            "seated": False,
+            "ready": True,
+            "detail": "",
+            "law": "Read only.",
+        }
+
+    monkeypatch.setattr(github_mod, "show_issue", fake_show)
+    space = rig.store.create_space("HQ")
+    rig.llm.manager.append(
+        LLMResult(tool_calls=[_tc("show_issue", spec="Netie-AI/Cortex#160")])
+    )
+    rig.llm.manager.append(LLMResult(text="Issue body is Bind then execute."))
+    await rig.runtime.on_user_message(space["id"], "read Cortex#160")
+    await wait_run_done(rig.runtime, space["id"])
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "Bind then execute." in painted
+    assert "Issue body is Bind then execute." in painted

@@ -264,6 +264,105 @@ def issue_title(spec: str, *, runner: RunFn | None = None) -> str:
     return title or canonical_spec(spec)
 
 
+def show_issue(spec: str, *, runner: RunFn | None = None) -> dict[str, Any]:
+    """Read-only issue title and body. Never assigns, closes, or merges."""
+    law = (
+        "Read only. Crew does not set GitHub assignees. "
+        "SEATED tickets stay with Ticket Runner."
+    )
+    parsed = parse_issue_spec(spec)
+    if parsed is None:
+        return {
+            "ok": False,
+            "spec": (spec or "").strip(),
+            "title": "",
+            "body": "",
+            "state": "",
+            "seated": False,
+            "ready": False,
+            "detail": "DENIED: owner/repo#n",
+            "law": law,
+        }
+    canon = canonical_spec(spec)
+    seated = seated_claim(canon)
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
+        return {
+            "ok": False,
+            "spec": canon,
+            "title": canon,
+            "body": "",
+            "state": "",
+            "seated": seated is not None,
+            "ready": seated is None,
+            "detail": "CREW_LIVE_PROBES=0",
+            "law": law,
+        }
+    owner, repo, number = parsed
+    run = runner or _run
+    argv = [
+        "gh",
+        "issue",
+        "view",
+        str(number),
+        "--repo",
+        f"{owner}/{repo}",
+        "--json",
+        "title,body,state",
+    ]
+    try:
+        result = run(argv, timeout=_gh_wait_s())
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False,
+            "spec": canon,
+            "title": canon,
+            "body": "",
+            "state": "",
+            "seated": seated is not None,
+            "ready": seated is None,
+            "detail": f"{type(exc).__name__}",
+            "law": law,
+        }
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "spec": canon,
+            "title": canon,
+            "body": "",
+            "state": "",
+            "seated": seated is not None,
+            "ready": seated is None,
+            "detail": (result.stderr or result.stdout or "gh failed")[:400],
+            "law": law,
+        }
+    try:
+        blob = json.loads(result.stdout or "{}")
+    except ValueError:
+        blob = {}
+    if not isinstance(blob, dict):
+        blob = {}
+    title = str(blob.get("title") or "").strip() or canon
+    body = str(blob.get("body") or "")[:4000]
+    state = str(blob.get("state") or "").strip()
+    detail = ""
+    if seated is not None:
+        detail = (
+            f"SEATED ({seated.get('owner_pr')}). Do not implement. "
+            "Ticket Runner owns the seat."
+        )
+    return {
+        "ok": True,
+        "spec": canon,
+        "title": title,
+        "body": body,
+        "state": state,
+        "seated": seated is not None,
+        "ready": seated is None,
+        "detail": detail,
+        "law": law,
+    }
+
+
 def list_open_issues(limit: int = 20, *, runner: RunFn | None = None) -> dict[str, Any]:
     """Open GitHub *issues* for CLAIMS repos. Marks SEATED. Never assigns on GitHub."""
     law = (

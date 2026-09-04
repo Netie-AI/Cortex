@@ -246,7 +246,21 @@ async def test_slash_fetch_and_assign_refuse_seated_and_bind_ready(
             ],
         },
     )
-    monkeypatch.setattr(github_mod, "issue_title", lambda spec, **_k: spec)
+    monkeypatch.setattr(
+        github_mod,
+        "show_issue",
+        lambda spec, **_k: {
+            "ok": True,
+            "spec": spec,
+            "title": spec,
+            "body": "Bind then execute." if str(spec).endswith("#160") else "",
+            "state": "OPEN",
+            "seated": str(spec).endswith("#128"),
+            "ready": str(spec).endswith("#160"),
+            "detail": "",
+            "law": "Read only.",
+        },
+    )
     space = rig.store.create_space("HQ")
     fetched = await rig.runtime.on_user_message(space["id"], "/fetch")
     assert fetched.get("run_id") is None
@@ -270,6 +284,7 @@ async def test_slash_fetch_and_assign_refuse_seated_and_bind_ready(
     scout = rig.store.get_agent_by_name(space["id"], "Scout")
     assert scout is not None
     assert "Netie-AI/Cortex#160" in (scout.get("goal_text") or "")
+    assert "Bind then execute." in (scout.get("goal_text") or "")
     ok = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "tool"][-1]
     assert "Assigned" in ok["content"] and "Scout" in ok["content"]
     painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
@@ -281,6 +296,7 @@ async def test_slash_fetch_and_assign_refuse_seated_and_bind_ready(
         and m.get("to_agent_id") == scout["id"]
     ]
     assert briefs
+    assert "Bind then execute." in (briefs[0].get("content") or "")
     from CortexOS.crew.assign import public as assignment_public
 
     rows = assignment_public(rig.settings.data_dir)

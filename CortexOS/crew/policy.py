@@ -66,6 +66,7 @@ INTERNAL_TOOLS = frozenset(
         "stop_agent",
         "kill_agent",
         "set_agent_mode",
+        "show_issue",
     }
 )
 
