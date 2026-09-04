@@ -127,3 +127,32 @@ def test_conveyor_adds_cached_unseated_issues(tmp_path, monkeypatch) -> None:
         }
     ]
     store.close()
+
+
+def test_warm_fetched_writes_cache_for_belt(tmp_path, monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_CLAIMS", str(tmp_path / "missing-claims.json"))
+    monkeypatch.setenv("CREW_RUNTIME", str(tmp_path / "missing-runtime.md"))
+    monkeypatch.setattr(
+        github_mod,
+        "list_open_issues",
+        lambda **_k: {
+            "ok": True,
+            "issues": [
+                {
+                    "spec": "Netie-AI/Cortex#175",
+                    "repo": "Netie-AI/Cortex",
+                    "number": 175,
+                    "title": "belt cache",
+                    "seated": False,
+                }
+            ],
+        },
+    )
+    github_mod.warm_fetched(tmp_path / "crew")
+    store = CrewStore(tmp_path / "crew.db")
+    body = conveyor(store, WakeBoard(), JobQueue(), data_dir=tmp_path / "crew")
+    ready = [row for row in body["tickets"]["items"] if row.get("ready")]
+    assert ready[0]["spec"] == "Netie-AI/Cortex#175"
+    store.close()

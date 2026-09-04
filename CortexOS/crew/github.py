@@ -482,6 +482,11 @@ def remembered_issues(data_dir: Path) -> list[dict[str, Any]]:
     return out[:_FETCH_CAP]
 
 
+def warm_fetched(data_dir: Path) -> None:
+    """Fill the belt cache once. Belt GETs stay off gh."""
+    remember_fetched(data_dir, list_open_issues())
+
+
 def close_issue(
     spec: str,
     *,
