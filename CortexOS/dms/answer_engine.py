@@ -218,6 +218,13 @@ def _location(question: str) -> str | None:
     return res.value if res.ok else None
 
 
+def _category(question: str) -> str | None:
+    from packs.dms.semantic import values as vd
+
+    res = vd.resolve(question, "category")
+    return res.value if res.ok else None
+
+
 _EXCLUSION_STOP = re.compile(
     r"\b(?:what|show|list|give|find|get|top|bottom|best|worst|highest|lowest|"
     r"ranked?|numbers?|ranks?|selling|sold|"
@@ -840,6 +847,18 @@ def route_to_metric(question: str) -> MetricPlan | None:
         and not re.search(r"\b(category|per|by)\b", q)
     ):
         return _metric_plan("sku_count", {}, "distinct SKU count")
+    if (
+        re.search(r"\bchemicals?\b", q)
+        and not _wants_aggregate(q)
+        and "value" not in q
+        and not re.search(r"\b(per|by|each)\b", q)
+    ):
+        cat = _category(q) or "CHEMICALS"
+        return _metric_plan(
+            "items_by_category",
+            {"category": cat},
+            f"inventory listing for category {cat}",
+        )
     # "how many delayed" / Malay "berapa ... delayed" must not return the listing.
     if (
         ("delayed" in q)
@@ -922,6 +941,16 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return _metric_plan("suppliers_by_risk",
                           {"threshold": _threshold(q_raw), "op": _threshold_op(q_raw)},
                           "suppliers filtered by risk-score threshold")
+    if (
+        re.search(r"\b(rank|ranking|scorecard|benchmark|compare)\b", q)
+        and re.search(r"\bsuppliers?\b", q)
+        and re.search(r"\b(risk|lead|score|combined|together)\b", q)
+    ):
+        return _metric_plan(
+            "supplier_ranking",
+            {"limit": _explicit_limit(q_raw) or 10, "direction": _direction(q_raw)},
+            "suppliers ranked by combined risk and lead time",
+        )
 
     # average lead time by country
     if re.search(r"\baverage\b|\bmean\b|\bavg\b", q) and "lead time" in q:

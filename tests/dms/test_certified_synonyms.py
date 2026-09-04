@@ -92,6 +92,10 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
         ("procurement spend broken down by country", "spend_by_country"),
         ("which vendors are due for an audit", "audit_overdue"),
         ("camera feed for warehouse A", "cctv_by_location"),
+        ("show me everything in the chemicals category", "items_by_category"),
+        ("what chemical products do we hold", "items_by_category"),
+        ("rank our vendors on risk and lead time together", "supplier_ranking"),
+        ("risky suppliers who still owe us shipments", "high_risk_pending"),
     ],
 )
 def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
@@ -204,6 +208,42 @@ def test_cctv_warehouse_a_returns_camera_id():
     assert rows[0].get("cctv_camera_id")
     assert "WH-A" in text
     assert str(rows[0]["cctv_camera_id"]) in text
+
+
+def test_chemicals_paraphrase_lists_chemical_skus():
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "show me everything in the chemicals category"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "items_by_category"
+    assert str(plan.slots.get("category")).upper() == "CHEMICALS"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert "sku" in rows[0]
+    assert str(rows[0]["sku"]) in text
+
+
+def test_supplier_scorecard_paraphrase_ranks_suppliers():
+    from CortexOS.dms.answer_engine import answer, route_to_metric
+
+    q = "rank our vendors on risk and lead time together"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "supplier_ranking"
+    r = answer(q)
+    assert r["badge"] != "abstain", r.get("answer")
+    rows = r.get("rows") or []
+    assert rows, r.get("answer")
+    text = r.get("answer") or ""
+    assert text.strip()
+    assert "supplier_id" in rows[0]
+    assert "ranking_score" in rows[0]
+    assert str(rows[0]["supplier_id"]) in text
 
 
 def test_certified_sales_synonym_hits_l0():
