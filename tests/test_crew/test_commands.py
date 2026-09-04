@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from CortexOS.crew.commands import (
@@ -14,7 +16,7 @@ from CortexOS.crew.commands import (
     parse_mentions,
     resolve_mentions,
 )
-from CortexOS.crew.llm import LLMResult
+from CortexOS.crew.llm import LLMResult, ToolCall
 from tests.test_crew.conftest import wait_run_done
 
 
@@ -322,6 +324,105 @@ async def test_slash_fetch_and_assign_refuse_seated_and_bind_ready(
     assert row is not None and row["status"] == "approved"
     assert assignment_public(rig.settings.data_dir) == []
     assert not rig.runtime._space_run.get(space["id"])
+
+
+def _tc(tool: str, **args: object) -> ToolCall:
+    return ToolCall(id=f"c-{tool}", name=tool, args=dict(args))
+
+
+@pytest.mark.asyncio
+async def test_assign_teammate_notes_then_request_close_hitl(
+    rig, tmp_path, monkeypatch
+) -> None:
+    """Assigned teammate writes jail notes then parks the same HITL as /done."""
+    from CortexOS.crew import github as github_mod
+    from CortexOS.crew.assign import public as assignment_public
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text('{"tickets":[]}', encoding="utf-8")
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    monkeypatch.setattr(
+        github_mod,
+        "show_issue",
+        lambda spec, **_k: {
+            "ok": True,
+            "spec": spec,
+            "title": "assign slice",
+            "body": "Bind then execute.",
+            "state": "OPEN",
+            "seated": False,
+            "ready": True,
+            "detail": "",
+            "law": "Read only.",
+        },
+    )
+    closed: dict[str, str] = {}
+
+    def fake_close(spec, *, comment="", runner=None):  # noqa: ANN001, ARG001
+        closed["spec"] = spec
+        closed["comment"] = comment
+        return {
+            "ok": True,
+            "spec": spec,
+            "detail": "Closed",
+            "law": "Closed the issue. Did not merge a PR. Ticket Runner seats writers.",
+        }
+
+    monkeypatch.setattr(github_mod, "close_issue", fake_close)
+    space = rig.store.create_space("HQ")
+    rig.llm.manager.extend(
+        [
+            LLMResult(tool_calls=[_tc("wait_for_replies", timeout_seconds=8)]),
+            LLMResult(text="Scout is on the ticket."),
+        ]
+    )
+    rig.llm.teammate.extend(
+        [
+            LLMResult(
+                tool_calls=[
+                    _tc("ws_write", path="ticket.md", content="verified Netie-AI/Cortex#160")
+                ]
+            ),
+            LLMResult(tool_calls=[_tc("ws_read", path="ticket.md")]),
+            LLMResult(
+                tool_calls=[
+                    _tc(
+                        "request_close",
+                        spec="Netie-AI/Cortex#160",
+                        comment="notes in jail",
+                    )
+                ]
+            ),
+            LLMResult(text="Closed after you approved."),
+        ]
+    )
+
+    async def auto_approve() -> None:
+        for _ in range(400):
+            pending = rig.store.pending_confirms(space["id"])
+            if pending:
+                rig.runtime.decide_confirm(pending[0]["id"], True)
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("confirm never appeared")
+
+    waiter = asyncio.create_task(auto_approve())
+    posted = await rig.runtime.on_user_message(
+        space["id"], "/assign Netie-AI/Cortex#160 | Scout"
+    )
+    assert posted.get("run_id")
+    await wait_run_done(rig.runtime, space["id"], timeout=15.0)
+    await waiter
+    assert closed["spec"] == "Netie-AI/Cortex#160"
+    assert "notes" in closed["comment"]
+    painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
+    assert "wrote ticket.md" in painted
+    assert "verified Netie-AI/Cortex#160" in painted
+    assert "Closed" in painted
+    assert "Closed after you approved." in painted
+    assert "Did not merge" in painted
+    assert "Cut off" not in painted
+    assert assignment_public(rig.settings.data_dir) == []
 
 
 @pytest.mark.asyncio
