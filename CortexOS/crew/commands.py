@@ -57,6 +57,57 @@ _DESK: tuple[dict[str, Any], ...] = (
     },
 )
 
+_LIFE: tuple[dict[str, Any], ...] = (
+    {
+        "slash": "spawn",
+        "aliases": ("hire",),
+        "kind": "life",
+        "action": "spawn",
+        "title": "Spawn teammate",
+        "hint": "/spawn name | brief | goal",
+    },
+    {
+        "slash": "kill",
+        "aliases": (),
+        "kind": "life",
+        "action": "kill",
+        "title": "Kill teammate",
+        "hint": "/kill name | reason",
+    },
+    {
+        "slash": "stop",
+        "aliases": (),
+        "kind": "life",
+        "action": "stop",
+        "title": "Stop teammate",
+        "hint": "/stop name  (parks idle/goal; can accept again)",
+    },
+    {
+        "slash": "idle",
+        "aliases": (),
+        "kind": "life",
+        "action": "idle",
+        "title": "Park idle",
+        "hint": "/idle name",
+    },
+    {
+        "slash": "wait",
+        "aliases": (),
+        "kind": "life",
+        "action": "wait",
+        "title": "Park waiting",
+        "hint": "/wait name",
+    },
+    {
+        "slash": "goal",
+        "aliases": (),
+        "kind": "life",
+        "action": "goal",
+        "title": "Set goal mode",
+        "hint": "/goal name | goal text",
+    },
+)
+
 _MEMORY: tuple[dict[str, Any], ...] = (
     {
         "slash": "memory",
@@ -137,6 +188,22 @@ def catalog(skills_dir: Path | None = None) -> list[dict[str, Any]]:
             _public_cmd(
                 slash=slash,
                 kind="desk",
+                action=str(row["action"]),
+                title=str(row["title"]),
+                hint=str(row["hint"]),
+                aliases=aliases,
+            )
+        )
+
+    for row in _LIFE:
+        slash = str(row["slash"])
+        if not take(slash):
+            continue
+        aliases = tuple(a for a in row["aliases"] if take(a))
+        out.append(
+            _public_cmd(
+                slash=slash,
+                kind="life",
                 action=str(row["action"]),
                 title=str(row["title"]),
                 hint=str(row["hint"]),
