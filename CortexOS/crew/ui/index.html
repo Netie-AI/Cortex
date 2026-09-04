@@ -4,35 +4,35 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cortex Crew</title>
-  <link rel="stylesheet" href="/stolen.css" />
+  <link rel="stylesheet" href="/crew.css" />
 </head>
 <body>
-  <div class="app">
-    <aside class="rail" id="rail">
-      <div class="rail__brand">
-        <button class="rail__tab" id="toggleRail" title="Hide rail" type="button">[</button>
-        <div class="rail__wordmark rail__hideable">Cortex Crew<small>from Guaca rail + Rakazo ink</small></div>
+  <div class="desk">
+    <aside class="spaces" id="rail">
+      <div class="spaces__brand">
+        <button class="spaces__fold" id="toggleRail" title="Hide spaces" type="button">[</button>
+        <div class="spaces__mark spaces__hide">Netie Crew<small>operator desk</small></div>
       </div>
-      <div class="rail__hideable" style="padding:0 0.75rem">
+      <div class="spaces__tools spaces__hide">
         <div class="chip" id="providerChip">no provider</div>
-        <button class="rail__search rail__hideable" id="openSearch" type="button">Search<span class="rail__key">Ctrl K</span></button>
-        <button class="gear" id="openSettings">Providers / API keys</button>
-        <button class="gear" id="openPlugins">Plugins</button>
-        <button class="gear" id="openHost" type="button">This computer</button>
-        <button class="gear" id="openTeach" type="button">Teach</button>
-        <button class="gear" id="openVoice" type="button">Voice</button>
-        <p class="empty" style="margin:0.4rem 0 0">Drop chats or .eml here. No import button. Check PRs in chat.</p>
+        <button class="spaces__search" id="openSearch" type="button">Search<span class="spaces__key">Ctrl K</span></button>
+        <button class="tool" id="openSettings">Providers / API keys</button>
+        <button class="tool" id="openPlugins">Plugins</button>
+        <button class="tool" id="openHost" type="button">This computer</button>
+        <button class="tool" id="openTeach" type="button">Teach</button>
+        <button class="tool" id="openVoice" type="button">Voice</button>
+        <p class="hint">Drop chats or .eml here. No import button. Check PRs in chat.</p>
       </div>
-      <div class="rail__body rail__hideable" id="spaces"></div>
-      <div class="rail__hideable" style="padding:0 0.55rem 0.7rem">
+      <div class="spaces__list spaces__hide" id="spaces"></div>
+      <div class="spaces__hide">
         <button class="new-space" id="newSpace">+ New space</button>
       </div>
     </aside>
-    <main>
-      <div class="pane__head">
+    <main class="converse">
+      <div class="converse__head">
         <h1 id="spaceTitle">Select a space</h1>
-        <div class="top-actions">
-          <span class="conn" id="conn" title="Live event stream">live</span>
+        <div class="head-actions">
+          <span class="heartbeat" id="conn" title="Live event stream">heartbeat</span>
           <div class="status" id="runStatus"></div>
           <button class="ghost" id="uiSmaller" type="button" title="Smaller text">A-</button>
           <button class="ghost" id="uiBigger" type="button" title="Bigger text">A+</button>
@@ -41,11 +41,11 @@
         </div>
       </div>
       <div class="focus-bar" id="focusBar" hidden></div>
-      <div class="pane__wrap">
-        <div class="pane__scroll" id="log"></div>
+      <div class="converse__body">
+        <div class="log" id="log"></div>
         <button class="jump" id="jump" type="button" hidden>New below</button>
       </div>
-      <div class="approvals" id="approvalBar" hidden></div>
+      <div class="hitl-dock" id="approvalBar" hidden></div>
       <div class="composer">
         <div id="roles" class="role-chips"></div>
         <div class="composer__row">
@@ -54,48 +54,53 @@
         </div>
       </div>
     </main>
-    <aside class="inspector" id="insp">
-      <div class="inspector__head">
-        <h2 class="inspector__title">Desk</h2>
-        <button class="inspector__tab" id="toggleInsp" title="Hide inspector" type="button">]</button>
+    <aside class="belt" id="insp">
+      <div class="belt__head">
+        <h2 class="belt__title">Belt</h2>
+        <button class="belt__fold" id="toggleInsp" title="Hide belt" type="button">]</button>
       </div>
-      <div class="inspector__body">
-        <div class="insp-block">
-          <h2 class="inspector__title">Crew</h2>
+      <div class="belt__body">
+        <div class="block">
+          <h2>Heartbeat / wakes</h2>
+          <div class="queue" id="queueCells"></div>
+          <div id="wakes" class="empty">No wakes. Control GET /v1/belt is display-only.</div>
+        </div>
+        <div class="block">
+          <h2>Tickets / claim</h2>
+          <div id="tickets" class="empty">loading...</div>
+        </div>
+        <div class="block">
+          <h2>Crew</h2>
           <div id="agents" class="empty">No agents yet.</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Skills / tone</h2>
+        <div class="block">
+          <h2>Collections <span class="scope">crew</span></h2>
           <div id="skills" class="empty">loading...</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Activity</h2>
+        <div class="block">
+          <h2>Activity</h2>
           <div id="graph" class="graph"></div>
           <div id="activity" class="empty">Agent-to-agent traffic lands here.</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Approvals</h2>
+        <div class="block">
+          <h2>HITL lease</h2>
           <div id="confirms" class="empty">None pending. Human is money and decision authority.</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Tickets</h2>
-          <div id="tickets" class="empty">loading...</div>
-        </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">PRs / mail / keys</h2>
+        <div class="block">
+          <h2>PRs / mail / keys</h2>
           <div id="desk" class="empty">loading...</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Routines</h2>
+        <div class="block">
+          <h2>Routines</h2>
           <div id="routines" class="empty">loading...</div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Computer control</h2>
+        <div class="block">
+          <h2>Computer control</h2>
           <div id="mcpMaster" class="warn"></div>
           <div id="mcp"></div>
         </div>
-        <div class="insp-block">
-          <h2 class="inspector__title">Engine</h2>
+        <div class="block">
+          <h2>Engine</h2>
           <div id="engine" class="empty">checking...</div>
         </div>
       </div>
@@ -104,7 +109,7 @@
   <div class="toasts" id="toasts"></div>
   <div class="takeover" id="takeover" hidden>
     <div class="takeover__box" role="dialog" aria-modal="true" aria-labelledby="takeoverTitle">
-      <p class="takeover__kicker">Needs you</p>
+      <p class="takeover__kicker">HITL lease</p>
       <h2 id="takeoverTitle">Login or 2FA. Take over this computer.</h2>
       <p class="empty" id="takeoverBody">The agent stopped before typing secrets. Finish Chrome yourself. This stays up until you click Done, Let the agent click, or Deny.</p>
       <pre class="takeover__args" id="takeoverArgs"></pre>
@@ -120,13 +125,13 @@
       <div class="palette__query">
         <input class="palette__input" id="searchQ" placeholder="Search spaces, agents, messages" />
       </div>
-      <div id="searchHits" class="inspector__body"></div>
+      <div id="searchHits" class="belt__body"></div>
     </div>
   </div>
   <div class="host" id="teach">
     <div class="skill-card">
       <h2>Draft skill</h2>
-      <p class="empty">Write the task as markdown. Saved under data/crew/skills. Not Grok AppData.</p>
+      <p class="hint">Write the task as markdown. Saved under data/crew/skills. Collection scope: crew.</p>
       <label>Name</label>
       <input id="skillName" placeholder="monday-briefing" />
       <label>Playbook</label>
@@ -157,13 +162,13 @@
         <button class="ghost" id="closePlugins" type="button">Close</button>
       </div>
       <input class="plugins__search" id="pluginSearch" placeholder="Search apps" />
-      <div id="pluginList" class="inspector__body"></div>
+      <div id="pluginList" class="belt__body"></div>
     </div>
   </div>
   <div class="scrim" id="settings">
     <div class="dialog">
       <h2>Providers</h2>
-      <p class="empty">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
+      <p class="hint">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
       <form id="keysForm"></form>
       <div class="chain" id="providerChain"></div>
       <div class="dialog-foot">
@@ -179,7 +184,8 @@
       source: null, seq: 0, runId: null, draft: "", keyFields: [],
       plan: null, skills: [], roles: [],
       activityOnly: false, focusAgent: null,
-      stick: true, unread: 0, retry: null, live: false
+      stick: true, unread: 0, retry: null, live: false,
+      belt: null
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
@@ -203,9 +209,6 @@
       const blob = (c.tool || "") + " " + Object.keys(c.args || {}).join(" ");
       return AUTH_KEYS.test(blob) || /login|signin|sign-in|auth/i.test(blob);
     }
-    // Escape first, then re-introduce a small closed set of markup. Agents emit
-    // fenced code and tool dumps constantly, and a flat escaped blob made those
-    // unreadable - which is why answers were being scrolled straight past.
     function fmt(text) {
       const chunks = String(text ?? "").split("```");
       let out = "";
@@ -236,12 +239,7 @@
     }
     function agentOf(id) { return state.agents.find((x) => x.id === id) || null; }
     function nameOf(id) { const a = agentOf(id); return a ? a.name : null; }
-    function colorOf(id) { const a = agentOf(id); return (a && a.color) || "#8b949e"; }
-
-    // -- transcript, mounted one node at a time ----------------------------
-    // The old renderer rewrote the whole log on every streamed token: it threw
-    // away the reader's text selection, fought their scroll, and got slower the
-    // longer the conversation ran.
+    function colorOf(id) { const a = agentOf(id); return (a && a.color) || "#8b91a3"; }
 
     function passesFilter(m) {
       if (state.focusAgent) return m.agent_id === state.focusAgent || m.to_agent_id === state.focusAgent;
@@ -278,8 +276,6 @@
       el.dataset.id = m.id;
       const body = String(m.content || "");
       if (m.role === "tool" || (m.role === "agent" && body.length > 420)) {
-        // Long tool dumps and long wire messages collapse. They are evidence,
-        // not the answer, and at full length they buried the answer.
         const head = body.split("\n")[0].slice(0, 110);
         el.innerHTML = `<div class="who">${whoLine(m)}${badgeOf(m)}</div>`
           + `<details class="bubble fold"><summary>${esc(head)}${body.length > head.length ? " ..." : ""}</summary>`
@@ -348,12 +344,9 @@
       state.messages.push(m);
       state.messages.sort((a, b) => (a.seq || 0) - (b.seq || 0));
       state.seq = Math.max(state.seq, m.seq || 0);
-      // A message that sorts before the tail cannot simply be appended.
       if (state.messages[state.messages.length - 1].id === m.id) mount(m); else renderLog();
       return true;
     }
-
-    // -- the agent-to-agent panel ------------------------------------------
 
     function wireRows() { return state.messages.filter((m) => m.role === "agent"); }
     function renderWire() {
@@ -370,9 +363,6 @@
         : `<div class="empty">Agent-to-agent traffic lands here.</div>`;
       renderGraph(a2a);
     }
-    // A live picture of who is actually talking to whom. The flat list could
-    // not show that one teammate was carrying every edge, or that a spawned
-    // agent had never been spoken to at all.
     function renderGraph(a2a) {
       const nodes = state.agents.slice(0, 8);
       if (nodes.length < 2) { $("graph").innerHTML = ""; return; }
@@ -395,21 +385,19 @@
         const p = at[ends[0]], q = at[ends[1]];
         const hot = k === lastKey;
         return `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${q.x.toFixed(1)}" y2="${q.y.toFixed(1)}"`
-          + ` stroke="${hot ? "#4fc48c" : esc(p.a.color || "#8b949e")}" stroke-width="${Math.min(4, 0.8 + edges[k] * 0.5).toFixed(1)}"`
+          + ` stroke="${hot ? "#5ec4c9" : esc(p.a.color || "#8b91a3")}" stroke-width="${Math.min(4, 0.8 + edges[k] * 0.5).toFixed(1)}"`
           + ` opacity="${hot ? 0.95 : 0.45}" />`;
       }).join("");
       const dots = nodes.map((a) => {
         const p = at[a.id];
         const busy = a.status === "thinking" || a.status === "acting";
         return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${busy ? 8 : 6}"`
-          + ` fill="${esc(a.color || "#8b949e")}" stroke="${busy ? "#4fc48c" : "none"}" stroke-width="1.5">`
+          + ` fill="${esc(a.color || "#8b91a3")}" stroke="${busy ? "#5ec4c9" : "none"}" stroke-width="1.5">`
           + `<title>${esc(a.name)} (${esc(a.status)})</title></circle>`
           + `<text x="${p.x.toFixed(1)}" y="${(p.y + 17).toFixed(1)}" text-anchor="middle" class="gnode">${esc(a.name.slice(0, 9))}</text>`;
       }).join("");
       $("graph").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="agent to agent traffic">${lines}${dots}</svg>`;
     }
-
-    // -- panels -------------------------------------------------------------
 
     function setProvider(active, chain) {
       $("providerChip").textContent = active ? (active.label + " / " + active.model) : "no provider configured";
@@ -421,7 +409,7 @@
     }
     function renderSpaces() {
       $("spaces").innerHTML = state.spaces.map((s, i) =>
-        `<button class="space${s.id === state.spaceId ? " active" : ""}" data-id="${s.id}"><span class="ord">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}</button>`
+        `<button class="space${s.id === state.spaceId ? " on" : ""}" data-id="${s.id}"><span class="ord">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}</button>`
       ).join("");
       $("spaces").querySelectorAll(".space").forEach((el) => el.onclick = () => selectSpace(el.dataset.id));
     }
@@ -442,7 +430,7 @@
         const deny = a.deny_tools ? " - deny " + a.deny_tools : "";
         const busy = a.status === "thinking" || a.status === "acting";
         return `<button class="agent${state.focusAgent === a.id ? " agent--on" : ""}" data-id="${esc(a.id)}" type="button" title="Show only this agent's traffic">`
-          + `<div class="orb ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#a8c95f")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
+          + `<div class="mark ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#7ea0d4")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
           + `<div>${esc(a.name)}<small>${esc(a.status)}${esc(cap)}${esc(model)}${esc(deny)}</small></div></button>`;
       }).join("");
       $("agents").querySelectorAll(".agent").forEach((el) => el.onclick = () => {
@@ -453,11 +441,11 @@
     function renderSkills(rows) {
       const list = rows || state.skills || [];
       if (!list.length) {
-        $("skills").innerHTML = `<div class="empty">None yet. Teach saves markdown. tone.md is ASCII grok-bot default.</div>`;
+        $("skills").innerHTML = `<div class="empty">None yet. Teach saves markdown. Scope: crew collection.</div>`;
         return;
       }
       $("skills").innerHTML = list.map((s) =>
-        `<div class="routines-row">${esc(s.title)}<small>${esc(s.head || s.path || "")}</small></div>`
+        `<div class="row">${esc(s.title)} <span class="scope">crew</span><small>${esc(s.head || s.path || "")}</small></div>`
       ).join("");
     }
     function renderRoles(roles) {
@@ -471,9 +459,6 @@
           `<span class="role-chip${hits.has(r.name) ? " role-chip--hit" : ""}" title="${esc(r.blurb)}">${esc(r.name)}</span>`
         ).join("");
     }
-    // Approvals block a run. They used to live only in the inspector, which is
-    // collapsible - so an operator with it closed saw a run that had simply
-    // stopped, with nothing saying it was waiting on them.
     function renderConfirms() {
       const pending = state.confirms.filter((c) => c.status === "pending");
       const bar = $("approvalBar");
@@ -485,14 +470,14 @@
         return;
       }
       const html = pending.map((c) =>
-        `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">${esc(JSON.stringify(redactArgs(c.args)))}</div></div>
+        `<div class="confirm"><div><b>${esc(c.tool)}</b><div class="empty">lease waiting on you - ${esc(JSON.stringify(redactArgs(c.args)))}</div></div>
          <button data-id="${c.id}" data-act="takeover">Take over</button>
          <button data-id="${c.id}" data-ok="1">Approve</button>
          <button class="deny" data-id="${c.id}" data-ok="0">Deny</button></div>`
       ).join("");
       $("confirms").innerHTML = html;
       bar.hidden = false;
-      bar.innerHTML = `<div class="approvals__head">${pending.length} call${pending.length > 1 ? "s" : ""} waiting on you</div>` + html;
+      bar.innerHTML = `<div class="hitl-dock__head">${pending.length} HITL lease${pending.length > 1 ? "s" : ""} waiting on you</div>` + html;
       const bind = (root) => root.querySelectorAll("button[data-id]").forEach((el) => {
         el.onclick = () => {
           if (el.dataset.act === "takeover") decide(el.dataset.id, false, true);
@@ -522,7 +507,7 @@
     function renderRoutines(rows) {
       if (!rows || !rows.length) { $("routines").innerHTML = `<div class="empty">None.</div>`; return; }
       $("routines").innerHTML = rows.map((r) =>
-        `<div class="routines-row">${esc(r.name)}<small>${esc(r.when)} - ${esc(r.layer)}</small></div>`
+        `<div class="row">${esc(r.name)}<small>${esc(r.when)} - ${esc(r.layer)}</small></div>`
       ).join("");
     }
     function renderPlugins() {
@@ -530,7 +515,7 @@
       const rows = state.plugins.filter((p) => !q || (p.name + p.slug + p.layer).toLowerCase().indexOf(q) >= 0);
       $("pluginList").innerHTML = rows.map((p) =>
         `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
-         <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#7A7A80">${esc(p.slug)} - ${esc(p.layer)}</small></div>
+         <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#8b91a3">${esc(p.slug)} - ${esc(p.layer)}</small></div>
          <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : "mapped"}</div></div>`
       ).join("");
     }
@@ -540,9 +525,12 @@
         return;
       }
       $("tickets").innerHTML = `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>` +
-        board.tickets.slice(0, 12).map((t) =>
-          `<div class="routines-row">${esc(t.ticket)}<small>${esc(t.role)} - write=${t.may_write}</small></div>`
-        ).join("");
+        board.tickets.slice(0, 12).map((t) => {
+          const seated = t.role === "SEATED";
+          const label = seated ? "claimed" : "unclaimed";
+          return `<div class="row">${esc(t.ticket)} <span class="claim ${seated ? "" : "unclaimed"}">${label}</span>`
+            + `<small>${esc(t.role)} - write=${t.may_write}</small></div>`;
+        }).join("");
     }
     function renderDesk(desk) {
       if (!desk) { $("desk").innerHTML = `<div class="empty">Desk unavailable.</div>`; return; }
@@ -550,13 +538,32 @@
       const mail = desk.inbox || {};
       const cursor = desk.cursor || {};
       const prLines = prs.length
-        ? prs.slice(0, 8).map((p) => `<div class="routines-row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
+        ? prs.slice(0, 8).map((p) => `<div class="row">#${esc(p.number)} ${esc(p.title)}<small>${esc(p.repo)} - ${esc(p.review || "open")}</small></div>`).join("")
         : `<div class="empty">${esc((desk.prs && desk.prs.detail) || "No open PRs (or gh not in this folder). Ask in chat.")}</div>`;
       $("desk").innerHTML =
         `<div class="empty">${esc(desk.law || "")}</div>` +
-        `<div class="routines-row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
-        `<div class="routines-row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
+        `<div class="row">Cursor key ${cursor.configured ? "set" : "missing"}<small>model=${esc(cursor.model || "grok-4.6")} chars=${esc(cursor.chars || 0)}</small></div>` +
+        `<div class="row">Mail ${mail.connected ? "IMAP" : "drop-file"}<small>${esc(mail.detail || "")}</small></div>` +
         prLines;
+    }
+    function renderBelt(belt) {
+      state.belt = belt || state.belt;
+      const b = state.belt || {};
+      const q = b.queue || { pending: 0, leased: 0, done: 0, dead: 0 };
+      $("queueCells").innerHTML =
+        `<div class="queue__cell"><b>${q.pending || 0}</b><span>pending</span></div>`
+        + `<div class="queue__cell leased"><b>${q.leased || 0}</b><span>leased</span></div>`
+        + `<div class="queue__cell done"><b>${q.done || 0}</b><span>done</span></div>`
+        + `<div class="queue__cell dead"><b>${q.dead || 0}</b><span>dead</span></div>`;
+      const wakes = b.wakes || [];
+      const stranded = !state.live || (q.dead || 0) > 0;
+      const keepalive = state.live ? "keepalive" : "stranded";
+      const head = `<div class="row">${esc(keepalive)} <span class="claim ${stranded ? "stranded" : ""}">${esc(keepalive)}</span>`
+        + `<small>converse=${b.converse ? "yes" : "no"} bus=${esc(b.bus || "")} needs_human=${b.plan_for_next && b.plan_for_next.needs_human ? "yes" : "no"}</small></div>`;
+      const wakeRows = wakes.length
+        ? wakes.map((w) => `<div class="wake">${esc(w.kind)} <span class="claim">${esc(w.state || "")}</span><small>${esc(w.note || "")}</small></div>`).join("")
+        : `<div class="empty">No wakes. Control GET /v1/belt is display-only.</div>`;
+      $("wakes").innerHTML = head + wakeRows;
     }
     function renderKeyForm(fields, status) {
       $("keysForm").innerHTML = fields.map((f) => {
@@ -572,20 +579,20 @@
     }
     function setConn(live) {
       state.live = live;
-      $("conn").textContent = live ? "live" : "reconnecting";
+      $("conn").textContent = live ? "heartbeat" : "stranded";
       $("conn").classList.toggle("off", !live);
+      if (state.belt) renderBelt(state.belt);
     }
 
-    // -- boot and space switching -------------------------------------------
-
     async function boot() {
-      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills] = await Promise.all([
+      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt] = await Promise.all([
         api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
         api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
         api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
         api("/crew/tickets").catch(() => ({ tickets: [] })),
         api("/crew/desk").catch(() => null),
-        api("/crew/skills").catch(() => [])
+        api("/crew/skills").catch(() => []),
+        api("/v1/belt").catch(() => api("/crew/belt").catch(() => null))
       ]);
       renderRoles(roles || []);
       state.skills = skills || [];
@@ -607,6 +614,7 @@
       renderRoutines(routines || []);
       renderTickets(tickets || {});
       renderDesk(desk);
+      renderBelt(belt);
       state.spaces = spaces;
       if (!state.spaces.length) {
         const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title: "General" }) });
@@ -614,6 +622,13 @@
       }
       renderSpaces();
       await selectSpace(state.spaces[0].id);
+      setInterval(refreshBelt, 4000);
+    }
+    async function refreshBelt() {
+      try {
+        const belt = await api("/v1/belt");
+        renderBelt(belt);
+      } catch (err) { /* display-only; converse stays on this page */ }
     }
     async function selectSpace(id) {
       state.spaceId = id;
@@ -636,9 +651,6 @@
       renderFocus(); renderAgents(); renderConfirms(); renderLog();
       listen(id);
     }
-    // Refetch everything newer than what we hold. Used on reconnect and on the
-    // server's resync signal, which is how a client that fell behind stops
-    // rendering a transcript with holes in it.
     async function catchUp(id) {
       try {
         const rows = await api("/crew/spaces/" + id + "/messages?after=" + state.seq);
@@ -658,8 +670,6 @@
       if (state.source) { state.source.close(); state.source = null; }
       const open = () => {
         if (state.spaceId !== id) return;
-        // Reopen with the current seq rather than letting EventSource retry the
-        // original URL, whose `after` would be frozen at first-connect time.
         const src = new EventSource("/crew/spaces/" + id + "/events?after=" + state.seq);
         state.source = src;
         src.onopen = () => setConn(true);
@@ -708,17 +718,12 @@
       open();
     }
 
-    // -- actions -------------------------------------------------------------
-
     async function send() {
       const text = $("input").value.trim();
       if (!text || !state.spaceId) return;
       $("input").value = ""; growInput();
       state.stick = true;
       try {
-        // A run in flight is not a reason to refuse input: the server queues
-        // the message into the Manager's mailbox, which is how the operator
-        // steers a run that is already going.
         const posted = await api("/crew/spaces/" + state.spaceId + "/messages", { method: "POST", body: JSON.stringify({ text }) });
         if (posted.queued) toast("Queued for the running crew.");
         state.runId = posted.run_id || state.runId;
@@ -795,20 +800,20 @@
     $("toggleRail").onclick = () => {
       const rail = $("rail");
       const autoHidden = window.matchMedia("(max-width: 900px)").matches
-        && !rail.classList.contains("rail--pinned")
-        && !rail.classList.contains("rail--closed");
-      if (autoHidden) { rail.classList.add("rail--pinned"); return; }
-      rail.classList.toggle("rail--closed");
-      rail.classList.add("rail--pinned");
+        && !rail.classList.contains("spaces--pinned")
+        && !rail.classList.contains("spaces--shut");
+      if (autoHidden) { rail.classList.add("spaces--pinned"); return; }
+      rail.classList.toggle("spaces--shut");
+      rail.classList.add("spaces--pinned");
     };
     $("toggleInsp").onclick = () => {
       const insp = $("insp");
       const autoHidden = window.matchMedia("(max-width: 900px)").matches
-        && !insp.classList.contains("inspector--pinned")
-        && !insp.classList.contains("inspector--closed");
-      if (autoHidden) { insp.classList.add("inspector--pinned"); return; }
-      insp.classList.toggle("inspector--closed");
-      insp.classList.add("inspector--pinned");
+        && !insp.classList.contains("belt--pinned")
+        && !insp.classList.contains("belt--shut");
+      if (autoHidden) { insp.classList.add("belt--pinned"); return; }
+      insp.classList.toggle("belt--shut");
+      insp.classList.add("belt--pinned");
     };
     $("uiSmaller").onclick = () => setScale(-0.05);
     $("uiBigger").onclick = () => setScale(0.05);
@@ -920,7 +925,7 @@
       return !!dt && Array.from(dt.types || []).indexOf("Files") >= 0;
     };
     document.addEventListener("dragenter", (e) => {
-      if (!hasFiles(e)) return;   // dragging a text selection used to raise the veil too
+      if (!hasFiles(e)) return;
       e.preventDefault();
       dragDepth += 1;
       veil.classList.add("on");

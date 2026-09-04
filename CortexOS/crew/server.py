@@ -478,7 +478,7 @@ def create_app(
         return crew.belt()
 
     index = crew.settings.ui_dir / "index.html"
-    stolen = crew.settings.ui_dir / "stolen.css"
+    chrome = crew.settings.ui_dir / "crew.css"
 
     @app.get("/")
     async def root() -> Any:
@@ -488,11 +488,19 @@ def create_app(
             {"ok": False, "detail": "UI file missing (CortexOS/crew/ui/index.html)"}, 503
         )
 
+    @app.get("/crew.css")
+    async def crew_css() -> Any:
+        if chrome.is_file():
+            return FileResponse(chrome, media_type="text/css")
+        return JSONResponse({"ok": False, "detail": "crew.css missing"}, 503)
+
     @app.get("/stolen.css")
     async def stolen_css() -> Any:
-        if stolen.is_file():
-            return FileResponse(stolen, media_type="text/css")
-        return JSONResponse({"ok": False, "detail": "stolen.css missing"}, 503)
+        """Retired clone stylesheet. Original chrome is GET /crew.css."""
+        return JSONResponse(
+            {"ok": False, "detail": "stolen.css retired; use /crew.css"},
+            410,
+        )
 
     return app
 
