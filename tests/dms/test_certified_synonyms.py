@@ -98,14 +98,54 @@ TOP3_CATEGORY_SALES_PHRASES = (
     "top 3 categories by sales value",
 )
 
-# Warehouse OUT revenue by category after DISTINCT sku, category (lot dedupe).
-# Naive JOIN inventory ON sku inflates ~14.8x (ELECTRONICS 133,931,869.04).
-EXPECTED_TOP3_CATEGORY_SALES = (
-    ("ELECTRONICS", 8_953_922.60),
-    ("CHEMICALS", 8_799_446.70),
-    ("FOOD_COLD", 8_754_427.11),
-)
-NAIVE_JOIN_ELECTRONICS_MYR = 133_931_869.04
+# Independent of certified YAML: map sku -> category via GROUP BY, not DISTINCT.
+_ORACLE_CATEGORY_SALES = """
+SELECT m.category,
+       ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
+FROM transactions t
+JOIN (
+    SELECT sku, MIN(category) AS category
+    FROM inventory
+    GROUP BY sku
+) m ON t.sku = m.sku
+WHERE t.txn_type = 'OUT'
+GROUP BY m.category
+ORDER BY sales_value_myr DESC, m.category ASC
+"""
+_NAIVE_LOT_JOIN_TOP = """
+SELECT i.category,
+       ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
+FROM transactions t
+JOIN inventory i ON t.sku = i.sku
+WHERE t.txn_type = 'OUT'
+GROUP BY i.category
+ORDER BY sales_value_myr DESC, i.category ASC
+LIMIT 1
+"""
+_OUT_REVENUE = """
+SELECT ROUND(SUM(quantity_kg * unit_cost_myr), 2)
+FROM transactions WHERE txn_type = 'OUT'
+"""
+
+
+def _category_sales_oracle():
+    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
+
+    con = get_connection(DEFAULT_DB, read_only=True)
+    try:
+        overall = float(con.execute(_OUT_REVENUE).fetchone()[0])
+        all_rows = [
+            (str(r[0]), float(r[1])) for r in con.execute(_ORACLE_CATEGORY_SALES).fetchall()
+        ]
+        naive_top = float(con.execute(_NAIVE_LOT_JOIN_TOP).fetchone()[1])
+        mixed = con.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT sku FROM inventory GROUP BY sku "
+            "HAVING COUNT(DISTINCT category) > 1)"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    return overall, all_rows, naive_top, int(mixed)
 
 
 @pytest.mark.parametrize("phrase", TOP3_CATEGORY_SALES_PHRASES)
@@ -134,13 +174,22 @@ def test_categoty_typo_hits_certified_top3_category_sales():
     assert len(rows) == 3, f"expected 3 category rows, got {len(rows)}: {r.get('answer')!r}"
     text = r.get("answer") or ""
     assert text.strip()
+
+    overall, oracle_all, naive_top, mixed_sku = _category_sales_oracle()
+    assert mixed_sku == 0, "DISTINCT sku, category is unsafe if a SKU has two categories"
+    oracle_sum = round(sum(v for _, v in oracle_all), 2)
+    assert oracle_sum == pytest.approx(overall, abs=0.011)
+    assert naive_top > overall, (
+        f"naive lot JOIN should exceed OUT revenue ({naive_top} vs {overall})"
+    )
+    expected = oracle_all[:3]
     got = [(str(row["category"]), float(row["sales_value_myr"])) for row in rows]
-    assert [c for c, _ in got] == [c for c, _ in EXPECTED_TOP3_CATEGORY_SALES]
-    for (cat, val), (exp_cat, exp_val) in zip(got, EXPECTED_TOP3_CATEGORY_SALES, strict=True):
+    assert [c for c, _ in got] == [c for c, _ in expected]
+    blob = (text + str(rows)).replace(",", "")
+    for (cat, val), (exp_cat, exp_val) in zip(got, expected, strict=True):
         assert cat == exp_cat
         assert val == pytest.approx(exp_val, abs=0.011)
+        assert val < overall, f"{cat}={val} exceeds OUT total {overall} (lot fan-out)"
         assert cat in text
         assert str(int(exp_val)) in text.replace(",", "")
-    assert "FOOD_DRY" not in {c for c, _ in got}
-    blob = text.replace(",", "") + str(rows)
-    assert f"{NAIVE_JOIN_ELECTRONICS_MYR:.2f}".replace(",", "") not in blob.replace(",", "")
+        assert f"{int(naive_top)}" not in blob
