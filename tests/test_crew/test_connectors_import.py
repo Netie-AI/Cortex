@@ -128,6 +128,62 @@ def test_github_list_org_repos_uses_injected_runner(monkeypatch) -> None:
     assert "auto-merge" in out["law"].lower()
 
 
+def test_github_close_issue_is_issue_close_not_merge(monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+
+    class Result:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = "Closed #99"
+            self.stderr = ""
+
+    seen: list[list[str]] = []
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        seen.append(list(argv))
+        return Result()
+
+    empty = {
+        "ok": True,
+        "tickets": [],
+    }
+    monkeypatch.setattr(github_mod, "board_snapshot", lambda: empty)
+    out = github_mod.close_issue(
+        "https://github.com/Netie-AI/Cortex/issues/99",
+        comment="verified",
+        runner=runner,
+    )
+    assert out["ok"] is True
+    assert out["spec"] == "Netie-AI/Cortex#99"
+    assert "merge" not in out["law"].lower() or "Did not merge" in out["law"]
+    assert seen[0][:4] == ["gh", "issue", "close", "99"]
+    assert "--repo" in seen[0] and "Netie-AI/Cortex" in seen[0]
+    assert "merge" not in seen[0]
+
+
+def test_github_close_issue_refuses_seated_claim(tmp_path, monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":[{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    called = {"n": 0}
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        called["n"] += 1
+        raise AssertionError("gh must not run for a SEATED ticket")
+
+    out = github_mod.close_issue("Netie-AI/Cortex#128", runner=runner)
+    assert out["ok"] is False
+    assert "SEATED" in out["detail"]
+    assert called["n"] == 0
+
+
 def test_inbox_without_creds_tells_operator_to_drop(monkeypatch) -> None:
     from CortexOS.crew import inbox as inbox_mod
 
