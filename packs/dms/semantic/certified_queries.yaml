@@ -171,19 +171,23 @@ certified:
     verified_at: "2026-07-20"
     tags: [suppliers, time]
 
+  # inventory is one row per lot (~14.5 lots/SKU). JOIN inventory ON sku
+  # fans outbound sales ~14.8x and can flip rank (FOOD_DRY vs FOOD_COLD).
   - id: cq_top3_category_sales
     question: "show top 3 category sales"
     synonyms:
       - "show top 3 categoty sales"
+      - "top 3 categoty sales"
       - "top 3 category sales"
+      - "top 3 categories by sales value"
     sql: >
-      SELECT i.category,
+      SELECT c.category,
              ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
       FROM transactions t
-      JOIN inventory i ON t.sku = i.sku
+      JOIN (SELECT DISTINCT sku, category FROM inventory) c ON t.sku = c.sku
       WHERE t.txn_type = 'OUT'
-      GROUP BY i.category
-      ORDER BY sales_value_myr DESC, i.category ASC
+      GROUP BY c.category
+      ORDER BY sales_value_myr DESC, c.category ASC
       LIMIT 3
     verified_by: seed
     verified_at: "2026-09-04"

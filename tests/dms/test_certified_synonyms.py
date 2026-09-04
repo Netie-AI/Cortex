@@ -89,6 +89,35 @@ def test_value_norm_lookup_hits_certified_canonical(monkeypatch):
     assert hit.id == "cq_beta"
 
 
+# Canonical + curated synonyms (F32 typo `categoty` included). Not intent regex.
+TOP3_CATEGORY_SALES_PHRASES = (
+    "show top 3 category sales",
+    "show top 3 categoty sales",
+    "top 3 categoty sales",
+    "top 3 category sales",
+    "top 3 categories by sales value",
+)
+
+# Warehouse OUT revenue by category after DISTINCT sku, category (lot dedupe).
+# Naive JOIN inventory ON sku inflates ~14.8x (ELECTRONICS 133,931,869.04).
+EXPECTED_TOP3_CATEGORY_SALES = (
+    ("ELECTRONICS", 8_953_922.60),
+    ("CHEMICALS", 8_799_446.70),
+    ("FOOD_COLD", 8_754_427.11),
+)
+NAIVE_JOIN_ELECTRONICS_MYR = 133_931_869.04
+
+
+@pytest.mark.parametrize("phrase", TOP3_CATEGORY_SALES_PHRASES)
+def test_match_certified_hits_top3_category_sales(phrase: str):
+    cq = match_certified(phrase)
+    assert cq is not None, phrase
+    assert cq.id == "cq_top3_category_sales"
+    compact = " ".join(cq.sql.split()).lower()
+    assert "select distinct sku, category from inventory" in compact
+    assert "join inventory i on t.sku = i.sku" not in compact
+
+
 def test_categoty_typo_hits_certified_top3_category_sales():
     """VQ-01: curated synonym, not product-intent regex. Envelope on answer()."""
     cq = match_certified("show top 3 categoty sales")
@@ -105,10 +134,13 @@ def test_categoty_typo_hits_certified_top3_category_sales():
     assert len(rows) == 3, f"expected 3 category rows, got {len(rows)}: {r.get('answer')!r}"
     text = r.get("answer") or ""
     assert text.strip()
-    prev = None
-    for row in rows:
-        cat = str(row["category"])
-        val = float(row["sales_value_myr"])
+    got = [(str(row["category"]), float(row["sales_value_myr"])) for row in rows]
+    assert [c for c, _ in got] == [c for c, _ in EXPECTED_TOP3_CATEGORY_SALES]
+    for (cat, val), (exp_cat, exp_val) in zip(got, EXPECTED_TOP3_CATEGORY_SALES, strict=True):
+        assert cat == exp_cat
+        assert val == pytest.approx(exp_val, abs=0.011)
         assert cat in text
-        assert prev is None or val <= prev
-        prev = val
+        assert str(int(exp_val)) in text.replace(",", "")
+    assert "FOOD_DRY" not in {c for c, _ in got}
+    blob = text.replace(",", "") + str(rows)
+    assert f"{NAIVE_JOIN_ELECTRONICS_MYR:.2f}".replace(",", "") not in blob.replace(",", "")
