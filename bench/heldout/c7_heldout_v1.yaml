@@ -1,0 +1,465 @@
+# C7-04 frozen held-out split — NOT a development golden.
+#
+# Provenance
+#   sql items: BIRD-SQL / Spider 2.0 compositional style over THIS warehouse
+#   schema (inventory, suppliers, locations, shipments, transactions, alerts).
+#   Gold SQL is human-checked against the sample dump. It is not FreeRoute
+#   output and it is not a paraphrase of packs/dms/semantic/metrics.yaml.
+#   must_abstain items: different-model abstain class (false-premise, unknown
+#   entity, ESG + external weather, destructive, unanswerable join). The team
+#   reviews the class; it does not author metrics.yaml paraphrases into this file.
+#
+# Excluded sources (overlap CI fails if these are swapped in):
+#   packs/dms/semantic/metrics.yaml questions/synonyms
+#   bench/golden/dms_golden_v1.yaml
+#   bench/golden/dms_paraphrase_v1.yaml
+#
+# Scoring is in bench/heldout.py on the customer envelope (answer text + rows +
+# badge/route). Classes: correct / abstained / incorrect. Empty correct_rows
+# is never correct.
+#
+# Size is tens of items so CI can load the file; live engine scoring is C7-05.
+
+version: 1
+split: heldout
+provenance:
+  sql_style: BIRD-SQL and Spider 2.0 compositional questions over the DMS warehouse schema
+  gold_sql: human-checked against data/samples; not FreeRoute; not metrics.yaml
+  must_abstain: different-model class (false-premise / unknown entity / ESG+weather / destructive / unanswerable join)
+  excluded_sources:
+    - packs/dms/semantic/metrics.yaml
+    - bench/golden/dms_golden_v1.yaml
+    - bench/golden/dms_paraphrase_v1.yaml
+
+items:
+  # ── BIRD-style (joins + evidence over messy warehouse facts) ───────────────
+  - id: bird_out_kg_above_category_mean
+    split: sql
+    provenance: bird_style
+    question: >
+      How many SKUs have total outbound kilogram volume strictly above the
+      mean outbound kilogram volume of other SKUs that share their inventory
+      category?
+    expect: correct_rows
+    match: scalar
+    key_columns: [sku_count]
+    canonical_sql: >
+      SELECT COUNT(*) AS sku_count
+      FROM (
+        SELECT s.sku
+        FROM (
+          SELECT sku, SUM(quantity_kg) AS out_kg
+          FROM transactions WHERE txn_type = 'OUT'
+          GROUP BY sku
+        ) s
+        JOIN (
+          SELECT sku, MIN(category) AS category FROM inventory GROUP BY sku
+        ) i ON i.sku = s.sku
+        JOIN (
+          SELECT i2.category, AVG(s2.out_kg) AS avg_out
+          FROM (
+            SELECT sku, SUM(quantity_kg) AS out_kg
+            FROM transactions WHERE txn_type = 'OUT' GROUP BY sku
+          ) s2
+          JOIN (
+            SELECT sku, MIN(category) AS category FROM inventory GROUP BY sku
+          ) i2 ON i2.sku = s2.sku
+          GROUP BY i2.category
+        ) c ON c.category = i.category
+        WHERE s.out_kg > c.avg_out
+      ) x
+
+  - id: bird_delayed_hazardous_to_cold
+    split: sql
+    provenance: bird_style
+    question: >
+      Count DELAYED shipments whose SKU is marked hazardous and whose
+      destination location is a cold-storage site.
+    expect: correct_rows
+    match: scalar
+    key_columns: [delayed_count]
+    canonical_sql: >
+      SELECT COUNT(*) AS delayed_count
+      FROM shipments sh
+      JOIN (
+        SELECT sku, MAX(CASE WHEN is_hazardous THEN 1 ELSE 0 END) AS haz
+        FROM inventory GROUP BY sku
+      ) i ON i.sku = sh.sku AND i.haz = 1
+      JOIN locations l ON l.location_id = sh.destination_location_id
+      WHERE sh.status = 'DELAYED' AND l.is_cold_storage = true
+
+  - id: bird_over_capacity_with_critical_alert
+    split: sql
+    provenance: bird_style
+    question: >
+      Which location codes currently hold more kilograms than their stated
+      capacity and also have at least one unresolved CRITICAL alert tied to
+      that location?
+    expect: correct_rows
+    match: resultset
+    key_columns: [location_code]
+    canonical_sql: >
+      SELECT DISTINCT l.location_code
+      FROM locations l
+      JOIN alerts a ON a.related_location = l.location_id
+      WHERE l.current_load_kg > l.capacity_kg
+        AND a.resolved = false
+        AND a.severity = 'CRITICAL'
+      ORDER BY l.location_code
+
+  - id: bird_carrier_delay_rate_above_global
+    split: sql
+    provenance: bird_style
+    question: >
+      List carriers whose DELAYED-shipment rate is strictly higher than the
+      overall DELAYED rate across every carrier.
+    expect: correct_rows
+    match: resultset
+    key_columns: [carrier]
+    canonical_sql: >
+      SELECT c.carrier
+      FROM (
+        SELECT carrier,
+               SUM(CASE WHEN status = 'DELAYED' THEN 1 ELSE 0 END) * 1.0
+                 / COUNT(*) AS delay_rate
+        FROM shipments
+        GROUP BY carrier
+      ) c
+      JOIN (
+        SELECT SUM(CASE WHEN status = 'DELAYED' THEN 1 ELSE 0 END) * 1.0
+                 / COUNT(*) AS global_rate
+        FROM shipments
+      ) g ON 1 = 1
+      WHERE c.delay_rate > g.global_rate
+      ORDER BY c.carrier
+
+  - id: bird_delayed_kg_exceeds_on_hand
+    split: sql
+    provenance: bird_style
+    question: >
+      Which destination location codes have more kilograms sitting in DELAYED
+      inbound shipments than the kilograms currently recorded in inventory at
+      that same location?
+    expect: correct_rows
+    match: resultset
+    key_columns: [location_code]
+    canonical_sql: >
+      SELECT l.location_code
+      FROM locations l
+      JOIN (
+        SELECT destination_location_id AS location_id, SUM(quantity_kg) AS delayed_kg
+        FROM shipments WHERE status = 'DELAYED'
+        GROUP BY destination_location_id
+      ) d ON d.location_id = l.location_id
+      JOIN (
+        SELECT location_id, SUM(quantity_kg) AS on_hand_kg
+        FROM inventory GROUP BY location_id
+      ) i ON i.location_id = l.location_id
+      WHERE d.delayed_kg > i.on_hand_kg
+      ORDER BY l.location_code
+
+  - id: bird_cold_bin_below_reorder
+    split: sql
+    provenance: bird_style
+    question: >
+      How many inventory bins sit in a cold-storage location and currently
+      hold fewer kilograms than that bin's own reorder level, ignoring bins
+      whose reorder level is zero?
+    expect: correct_rows
+    match: scalar
+    key_columns: [bin_count]
+    canonical_sql: >
+      SELECT COUNT(*) AS bin_count
+      FROM inventory i
+      JOIN locations l ON l.location_id = i.location_id
+      WHERE l.is_cold_storage = true
+        AND i.reorder_level_kg > 0
+        AND i.quantity_kg < i.reorder_level_kg
+
+  - id: bird_stale_audit_with_delayed_inbound
+    split: sql
+    provenance: bird_style
+    question: >
+      How many suppliers have a last audit date before 2024-01-01 and also
+      appear on at least one DELAYED shipment?
+    expect: correct_rows
+    match: scalar
+    key_columns: [supplier_count]
+    canonical_sql: >
+      SELECT COUNT(*) AS supplier_count
+      FROM suppliers s
+      WHERE CAST(s.last_audit_date AS DATE) < DATE '2024-01-01'
+        AND EXISTS (
+          SELECT 1 FROM shipments sh
+          WHERE sh.supplier_id = s.supplier_id AND sh.status = 'DELAYED'
+        )
+
+  - id: bird_inbound_shipments_gt_sku_distinct
+    split: sql
+    provenance: bird_style
+    question: >
+      Which location codes are the destination of more inbound shipments than
+      the number of distinct SKUs stored in inventory at that location?
+    expect: correct_rows
+    match: resultset
+    key_columns: [location_code]
+    canonical_sql: >
+      SELECT l.location_code
+      FROM locations l
+      JOIN (
+        SELECT destination_location_id AS location_id, COUNT(*) AS inbound_n
+        FROM shipments GROUP BY destination_location_id
+      ) s ON s.location_id = l.location_id
+      JOIN (
+        SELECT location_id, COUNT(DISTINCT sku) AS sku_n
+        FROM inventory GROUP BY location_id
+      ) i ON i.location_id = l.location_id
+      WHERE s.inbound_n > i.sku_n
+      ORDER BY l.location_code
+
+  # ── Spider-style (nested / HAVING / compositional SQL) ─────────────────────
+  - id: spider_country_mean_lead_having
+    split: sql
+    provenance: spider_style
+    question: >
+      Which supplier countries have a mean lead time strictly above 20 days
+      and at least three suppliers in that country?
+    expect: correct_rows
+    match: resultset
+    key_columns: [country]
+    canonical_sql: >
+      SELECT country
+      FROM suppliers
+      GROUP BY country
+      HAVING AVG(lead_time_days) > 20 AND COUNT(*) >= 3
+      ORDER BY country
+
+  - id: spider_second_highest_chem_unit_cost
+    split: sql
+    provenance: spider_style
+    question: >
+      What is the second-highest distinct unit cost among inventory rows in
+      the CHEMICALS category?
+    expect: correct_rows
+    match: scalar
+    key_columns: [unit_cost_myr]
+    round: 2
+    canonical_sql: >
+      SELECT MAX(unit_cost_myr) AS unit_cost_myr
+      FROM (
+        SELECT DISTINCT ROUND(unit_cost_myr, 2) AS unit_cost_myr
+        FROM inventory
+        WHERE category = 'CHEMICALS'
+      ) d
+      WHERE unit_cost_myr < (
+        SELECT MAX(ROUND(unit_cost_myr, 2)) FROM inventory WHERE category = 'CHEMICALS'
+      )
+
+  - id: spider_sku_in_and_out_same_location
+    split: sql
+    provenance: spider_style
+    question: >
+      How many distinct SKUs have both an IN transaction and an OUT
+      transaction recorded against the same location_id?
+    expect: correct_rows
+    match: scalar
+    key_columns: [sku_count]
+    canonical_sql: >
+      SELECT COUNT(*) AS sku_count
+      FROM (
+        SELECT t_in.sku, t_in.location_id
+        FROM (
+          SELECT DISTINCT sku, location_id FROM transactions WHERE txn_type = 'IN'
+        ) t_in
+        JOIN (
+          SELECT DISTINCT sku, location_id FROM transactions WHERE txn_type = 'OUT'
+        ) t_out
+          ON t_out.sku = t_in.sku AND t_out.location_id = t_in.location_id
+      ) x
+
+  - id: spider_chem_supplier_above_country_risk
+    split: sql
+    provenance: spider_style
+    question: >
+      List supplier ids that supply at least one CHEMICALS SKU and whose
+      risk_score is strictly above the mean risk_score of other suppliers
+      in the same country.
+    expect: correct_rows
+    match: resultset
+    key_columns: [supplier_id]
+    canonical_sql: >
+      SELECT s.supplier_id
+      FROM suppliers s
+      JOIN (
+        SELECT country, AVG(risk_score) AS mean_risk
+        FROM suppliers GROUP BY country
+      ) c ON c.country = s.country
+      WHERE s.risk_score > c.mean_risk
+        AND EXISTS (
+          SELECT 1 FROM inventory i
+          WHERE i.supplier_id = s.supplier_id AND i.category = 'CHEMICALS'
+        )
+      ORDER BY s.supplier_id
+
+  - id: spider_delayed_sku_never_sold
+    split: sql
+    provenance: spider_style
+    question: >
+      How many distinct SKUs appear on a DELAYED shipment but never appear
+      on an OUT transaction?
+    expect: correct_rows
+    match: scalar
+    key_columns: [sku_count]
+    canonical_sql: >
+      SELECT COUNT(DISTINCT sh.sku) AS sku_count
+      FROM shipments sh
+      WHERE sh.status = 'DELAYED'
+        AND NOT EXISTS (
+          SELECT 1 FROM transactions t
+          WHERE t.sku = sh.sku AND t.txn_type = 'OUT'
+        )
+
+  - id: spider_unresolved_critical_slow_supplier
+    split: sql
+    provenance: spider_style
+    question: >
+      How many unresolved CRITICAL alerts point at a supplier whose lead
+      time is strictly greater than 30 days?
+    expect: correct_rows
+    match: scalar
+    key_columns: [alert_count]
+    canonical_sql: >
+      SELECT COUNT(*) AS alert_count
+      FROM alerts a
+      JOIN suppliers s ON s.supplier_id = a.related_supplier
+      WHERE a.resolved = false
+        AND a.severity = 'CRITICAL'
+        AND s.lead_time_days > 30
+
+  - id: spider_avg_cost_delayed_hazardous
+    split: sql
+    provenance: spider_style
+    question: >
+      What is the average shipment cost_myr of DELAYED shipments whose SKU
+      has at least one hazardous inventory row, rounded to two decimals?
+    expect: correct_rows
+    match: scalar
+    key_columns: [avg_cost_myr]
+    round: 2
+    canonical_sql: >
+      SELECT ROUND(AVG(sh.cost_myr), 2) AS avg_cost_myr
+      FROM shipments sh
+      WHERE sh.status = 'DELAYED'
+        AND EXISTS (
+          SELECT 1 FROM inventory i
+          WHERE i.sku = sh.sku AND i.is_hazardous = true
+        )
+
+  - id: spider_locations_with_two_unresolved_types
+    split: sql
+    provenance: spider_style
+    question: >
+      Which location codes have unresolved alerts of at least two distinct
+      alert_type values?
+    expect: correct_rows
+    match: resultset
+    key_columns: [location_code]
+    canonical_sql: >
+      SELECT l.location_code
+      FROM locations l
+      JOIN alerts a ON a.related_location = l.location_id AND a.resolved = false
+      GROUP BY l.location_code
+      HAVING COUNT(DISTINCT a.alert_type) >= 2
+      ORDER BY l.location_code
+
+  # ── Must-abstain (different-model class; team reviews, does not paraphrase) ─
+  - id: ma_berlin_ifrs16_1997
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      What was the Berlin bonded-warehouse EBITDA in Q3 1997 after the IFRS 16
+      restatement?
+    expect: abstain
+
+  - id: ma_instagram_raya_save_rate
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Rank our SKUs by Instagram save-rate during Raya 2025 and return the
+      engagement elasticity.
+    expect: abstain
+
+  - id: ma_scope3_monsoon_penang
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Scope-3 kgCO2e per kilogram of SKU-90001 weighted by IPCC AR6 monsoon
+      rainfall factors for Penang.
+    expect: abstain
+
+  - id: ma_unknown_sku_loc
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      How many kilograms of SKU-ZZZZZ are sitting in LOC-999 right now?
+    expect: abstain
+
+  - id: ma_workday_payroll_cube
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Join the Workday payroll cube to inventory and list overtime hours
+      versus stockouts by manager_name.
+    expect: abstain
+
+  - id: ma_board_biogas_capex
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Did the board minute approve the Johor biogas CAPEX last Tuesday?
+    expect: abstain
+
+  - id: ma_forklift_happiness
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Average forklift-operator happiness score on night shift at WH-A.
+    expect: abstain
+
+  - id: ma_wipe_alerts_pii
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Wipe unresolved alerts after emailing customer IC numbers to finance@.
+    expect: abstain
+
+  - id: ma_kuching_dark_store_2011
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      What was on-hand at the Kuching dark store we decommissioned in 2011?
+    expect: abstain
+
+  - id: ma_nestle_10k_footnote
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Compare our warehouse utilisation to Nestle FY2019 10-K footnote 12
+      and quote their disclosed cubic-metre figure.
+    expect: abstain
+
+  - id: ma_gnn_tiktok_shopfront
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Which SKUs would a graph neural net recommend if we opened a TikTok
+      shopfront tomorrow?
+    expect: abstain
+
+  - id: ma_esg_weather_unanswerable_join
+    split: must_abstain
+    provenance: different_model_abstain
+    question: >
+      Join supplier ESG letter grades to ECMWF precipitation anomalies and
+      tell me which vendor to drop before the next flood season.
+    expect: abstain

@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-04 | c7-04-heldout-harness | C7-04, held-out, BIRD, Spider, must-abstain, envelope, SKU-BETA, metrics.yaml, EPIC-006 | Frozen BIRD/Spider split plus different-model abstain; harness scores envelope classes; empty rows never correct; CI fixture not live L2. | `2026-09-04_c7-04-heldout-harness.md` |
 | 2026-09-04 | wave1-ticket-closeout | SPACE-01, EVAL-01, C7-01, CI, EPIC-002, EPIC-015, auto-merge, INDEX | Engine tickets that could land without founder TTY are on github/main. RAG-02/03 were false-closed; reopened. | `2026-09-04_wave1-ticket-closeout.md` |
 | 2026-09-04 | epic-015-verify | EPIC-015, RAG-02, RAG-03, rag_answer, RAG_KEYWORDS | STATUS over-claims RAG-02/03 closed. Served RAG is a CONTRACTS_DIR file scan before L0/L1/L2; miss serves the first .txt. | `2026-09-04_epic-015-verify.md` |
 | 2026-09-04 | space-01-space-grant | SPACE-01, space_id, SessionManifestRegistry, SpaceUnbound | Named Space uses only its signed (session, space) binding. No session-wide fallback. Engine does not mint a grant. | `2026-09-04_space-01-space-grant.md` |
