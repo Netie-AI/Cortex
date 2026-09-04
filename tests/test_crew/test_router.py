@@ -61,7 +61,8 @@ def test_openvault_pin_refuses_when_vault_is_down(clean_env: pytest.MonkeyPatch)
         openvault.require_live()
 
 
-def test_connector_require_names_the_reason() -> None:
+def test_connector_require_names_the_reason(clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("CREW_OPENVAULT", "0")
     rows = connectors.catalog()
     ov = next(r for r in rows if r["slug"] == "openvault")
     assert ov["connected"] is False
