@@ -432,11 +432,14 @@ def summarize(results: list[HeldoutResult]) -> dict[str, Any]:
 
 
 def _shadow_target(path: Path | str | None = None) -> Path:
-    if path is None:
-        from CortexOS.paths import data_path
+    if path is not None:
+        return Path(path)
+    env = (os.environ.get("DMS_L2_SHADOW_PATH") or "").strip()
+    if env:
+        return Path(env)
+    from CortexOS.paths import data_path
 
-        return data_path("engine", "l2_shadow.jsonl")
-    return Path(path)
+    return data_path("engine", "l2_shadow.jsonl")
 
 
 def shadow_line_count(path: Path | str | None = None) -> int:

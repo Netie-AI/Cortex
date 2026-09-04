@@ -310,6 +310,18 @@ def test_summarize_shadow_reports_l1_only_vs_l2_only(tmp_path: Path):
     assert out["l2_only_correct"] == 1
 
 
+def test_shadow_target_honors_env_path(tmp_path: Path, monkeypatch):
+    from bench.heldout import _shadow_target, summarize_shadow
+
+    dest = tmp_path / "gsh.jsonl"
+    dest.write_text('{"question": "how many skus in inventory now", "l2_sql": "SELECT 1"}\n', encoding="utf-8")
+    monkeypatch.setenv("DMS_L2_SHADOW_PATH", str(dest))
+    assert _shadow_target() == dest
+    out = summarize_shadow()
+    assert out["n_lines"] == 1
+    assert out["n_l2_sql"] == 1
+
+
 def test_collect_dev_questions_are_operator_phrases():
     from bench.heldout import collect_dev_questions
 
