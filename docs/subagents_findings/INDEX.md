@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-04 | crew-tickets-fetch | crew, fetch, tickets, hud, issues, claim, issue-164 | GET /crew/tickets includes fetched GH issues minus CLAIMS specs so HUD Claim can bind them. | `2026-09-04_crew-tickets-fetch.md` |
 | 2026-09-04 | crew-ticket-claim | crew, claim, release, hud, assign, seated, issue-162 | HUD Claim/Release were 404 chrome. Now local /assign bind. SEATED 409. No CLAIMS write. | `2026-09-04_crew-ticket-claim.md` |
 | 2026-09-04 | crew-assign-fetch | crew, assign, fetch, belt, seated, f-0030, issue-160 | Crew /fetch lists open GH issues; /assign binds unseated to a teammate goal. Control display-only. No CLAIMS/GitHub assignee write. | `2026-09-04_crew-assign-fetch.md` |
 | 2026-09-04 | crew-facts-md-hud | crew, facts.md, memory, epic-116, hud, clear-chat | EPIC-CREW-01 leftover was facts.md not on main. Landed durable markdown memory on cursor/crew-facts-md-116. | `2026-09-04_crew-facts-md-hud.md` |

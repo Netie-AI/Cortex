@@ -854,6 +854,20 @@
          <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : esc(p.detail || "mapped")}</div></div>`
       ).join("");
     }
+    function ticketRow(key, seated, mine, extra) {
+      const label = seated ? "SEATED" : (mine ? ("assigned " + (mine.agent || "")) : "ready");
+      const actions = seated
+        ? `<small>Ticket Runner owns the seat. Crew does not steal it.</small>`
+        : (`<div class="row-actions">`
+          + (mine
+            ? `<button class="ghost" type="button" data-release="${esc(key)}">Release</button>`
+            : `<button class="ghost" type="button" data-claim="${esc(key)}">Claim</button>`)
+          + `</div>`);
+      return `<div class="row">${esc(key)} <span class="claim ${seated ? "" : "unclaimed"}">${esc(label)}</span>`
+        + `<small>${esc(extra || "")}</small>`
+        + actions
+        + `</div>`;
+    }
     function renderTickets(board) {
       const assigns = (board && board.assignments) || [];
       const held = {};
@@ -864,30 +878,25 @@
             + `<small>${esc(a.title || "")}</small></div>`
           ).join("")
         : `<div class="empty">assignments none. Claim or /assign binds a teammate. Control does not assign.</div>`;
-      if (!board || !board.tickets || !board.tickets.length) {
-        $("tickets").innerHTML = assignBlock
-          + `<div class="empty empty--orb">${esc((board && board.law) || "CLAIMS unread")}</div>`;
-        return;
-      }
-      $("tickets").innerHTML = assignBlock
-        + `<div class="empty">${esc(board.seated + " seated / " + board.unseated + " unseated. " + (board.law || ""))}</div>`
-        + board.tickets.slice(0, 12).map((t) => {
-          const seated = t.role === "SEATED";
-          const key = String(t.ticket || "");
-          const mine = held[key];
-          const label = seated ? "SEATED" : (mine ? ("assigned " + (mine.agent || "")) : "unseated");
-          const actions = seated
-            ? `<small>Ticket Runner owns the seat. Crew does not steal it.</small>`
-            : (`<div class="row-actions">`
-              + (mine
-                ? `<button class="ghost" type="button" data-release="${esc(key)}">Release</button>`
-                : `<button class="ghost" type="button" data-claim="${esc(key)}">Claim</button>`)
-              + `</div>`);
-          return `<div class="row">${esc(key)} <span class="claim ${seated ? "" : "unclaimed"}">${esc(label)}</span>`
-            + `<small><span class="id">${esc(t.owner_pr || "")}</span> ${esc(t.role)} - write=${t.may_write}</small>`
-            + actions
-            + `</div>`;
-        }).join("");
+      const claims = (board && board.tickets) || [];
+      const issues = (board && board.issues) || [];
+      const claimsBlock = claims.length
+        ? `<div class="empty">${esc((board.seated || 0) + " seated / " + (board.unseated || 0) + " unseated. " + (board.law || ""))}</div>`
+          + claims.slice(0, 12).map((t) => {
+            const seated = t.role === "SEATED";
+            const key = String(t.ticket || "");
+            return ticketRow(key, seated, held[key], (t.owner_pr || "") + " " + (t.role || "") + " write=" + t.may_write);
+          }).join("")
+        : `<div class="empty empty--orb">${esc((board && board.law) || "CLAIMS unread")}</div>`;
+      const issueBlock = issues.length
+        ? `<div class="empty">open GitHub ${esc(issues.length)} (CLAIMS specs omitted). ${esc(board.issues_detail || "")}</div>`
+          + issues.slice(0, 20).map((t) => {
+            const seated = !!t.seated;
+            const key = String(t.spec || "");
+            return ticketRow(key, seated, held[key], t.title || "");
+          }).join("")
+        : `<div class="empty">open GitHub none. /fetch or live probes. Control does not assign.</div>`;
+      $("tickets").innerHTML = assignBlock + claimsBlock + issueBlock;
       $("tickets").querySelectorAll("[data-claim]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.claim, "claim"));
       $("tickets").querySelectorAll("[data-release]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.release, "release"));
     }
