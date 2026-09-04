@@ -2,8 +2,12 @@
 
 The crew layer never requires one specific model host. Resolution walks a
 chain (explicit ``CREW_MODEL``, then live OpenVault FreeRoute, then Anthropic,
-Cursor, OpenRouter, DeepSeek, any OpenAI-compatible endpoint, and last a
-locally reachable Ollama). The winner is stamped on every reply envelope.
+Cursor, OpenRouter, DeepSeek, any OpenAI-compatible endpoint, Groq / Google /
+Cerebras / Mistral, and last a locally reachable Ollama).
+
+``CREW_PROVIDER`` pins one label. A pin does not fall through to the next
+configured host if that label is unset or down. The winner is stamped on
+every reply envelope.
 """
 
 from __future__ import annotations
@@ -107,7 +111,11 @@ def _ollama_first_model(base_url: str, timeout: float = 0.8) -> str | None:
 
 
 def resolve_providers() -> list[Provider]:
-    """Build the provider chain; exactly the first configured entry is active."""
+    """Build the provider chain.
+
+    Default: the first configured entry is active. When ``CREW_PROVIDER`` is
+    set, only that label may be active; a miss stays inactive (no fallback).
+    """
     env = os.environ
     chain: list[Provider] = []
 
@@ -128,7 +136,7 @@ def resolve_providers() -> list[Provider]:
     chain.append(
         Provider(
             label="openvault",
-            model="openvault/auto",
+            model="openvault/" + (env.get("CREW_OPENVAULT_MODEL", "").strip() or "auto"),
             source="OpenVault FreeRoute (loopback, keys stay in the vault)",
             configured=ov_ok,
             api_base=env.get("CREW_OPENVAULT_URL", "http://127.0.0.1:5000"),
@@ -186,6 +194,38 @@ def resolve_providers() -> list[Provider]:
             api_base=openai_base,
         )
     )
+    chain.append(
+        Provider(
+            label="groq",
+            model="groq/" + env.get("CREW_GROQ_MODEL", "llama-3.3-70b-versatile"),
+            source="GROQ_API_KEY",
+            configured=bool(env.get("GROQ_API_KEY")),
+        )
+    )
+    chain.append(
+        Provider(
+            label="google",
+            model="gemini/" + env.get("CREW_GOOGLE_MODEL", "gemini-2.0-flash"),
+            source="GOOGLE_API_KEY",
+            configured=bool(env.get("GOOGLE_API_KEY")),
+        )
+    )
+    chain.append(
+        Provider(
+            label="cerebras",
+            model="cerebras/" + env.get("CREW_CEREBRAS_MODEL", "llama3.1-8b"),
+            source="CEREBRAS_API_KEY",
+            configured=bool(env.get("CEREBRAS_API_KEY")),
+        )
+    )
+    chain.append(
+        Provider(
+            label="mistral",
+            model="mistral/" + env.get("CREW_MISTRAL_MODEL", "mistral-small-latest"),
+            source="MISTRAL_API_KEY",
+            configured=bool(env.get("MISTRAL_API_KEY")),
+        )
+    )
     ollama_model: str | None = None
     if env.get("CREW_ALLOW_OLLAMA", "1") != "0":
         ollama_model = _ollama_first_model(
@@ -200,7 +240,33 @@ def resolve_providers() -> list[Provider]:
         )
     )
 
+    pin = env.get("CREW_PROVIDER", "").strip().lower()
+    if pin in {"openai", "ov", "vault", "gemini"}:
+        pin = {"openai": "openai-compatible", "ov": "openvault", "vault": "openvault", "gemini": "google"}[pin]
+
     out: list[Provider] = []
+    if pin:
+        matched = False
+        for p in chain:
+            if p.label.lower() == pin:
+                matched = True
+                if p.configured:
+                    out.append(Provider(p.label, p.model, p.source, True, True, p.api_base))
+                else:
+                    out.append(p)
+            else:
+                out.append(
+                    Provider(p.label, p.model, p.source, p.configured, False, p.api_base)
+                    if p.active
+                    else p
+                )
+        if not matched:
+            return [
+                Provider(p.label, p.model, p.source, p.configured, False, p.api_base)
+                for p in chain
+            ]
+        return out
+
     activated = False
     for p in chain:
         if p.configured and not activated:

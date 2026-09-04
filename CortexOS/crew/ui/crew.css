@@ -118,6 +118,15 @@ button { cursor: pointer; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.route-pick {
+  flex: none;
+  max-width: 7.5rem;
+  border: 0;
+  background: var(--well);
+  color: var(--ink);
+  font: 0.62rem var(--mono);
+  padding: 0.35rem 0.3rem;
+}
 .tool {
   display: block;
   width: 100%;
@@ -629,6 +638,19 @@ button { cursor: pointer; }
 }
 .chain { font: 0.62rem/1.45 var(--mono); color: var(--mute); margin-top: 0.5rem; }
 .chain .on { color: var(--claim); }
+.chain-pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.15rem 0;
+  cursor: pointer;
+}
+.chain-pick:disabled { opacity: 0.55; cursor: not-allowed; }
+.chain-pick.on { color: var(--claim); }
 
 .plugins {
   position: fixed;

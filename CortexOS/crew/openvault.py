@@ -73,6 +73,18 @@ def healthz(timeout: float = 1.5) -> dict[str, Any]:
         return {"ok": False, "url": base_url(), "detail": f"{type(exc).__name__}"}
 
 
+def require_live(timeout: float = 1.5) -> dict[str, Any]:
+    """OpenVault must be up for this turn. Never fall through to another host."""
+    st = healthz(timeout=timeout)
+    if not st.get("ok"):
+        raise LLMError(
+            "OpenVault connector refused: "
+            + str(st.get("detail") or "unreachable")
+            + " (no silent fallback)"
+        )
+    return st
+
+
 def _tools_from_choice(message: dict[str, Any]) -> list[ToolCall]:
     calls: list[ToolCall] = []
     for i, tc in enumerate(message.get("tool_calls") or []):
@@ -116,12 +128,18 @@ async def chat(
     choice = (data.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     usage = data.get("usage") or {}
+    cost = usage.get("cost") or usage.get("total_cost") or usage.get("cost_usd")
+    try:
+        cost_usd = float(cost) if cost is not None else None
+    except (TypeError, ValueError):
+        cost_usd = None
     return LLMResult(
         text=str(message.get("content") or ""),
         tool_calls=_tools_from_choice(message),
         finish_reason=str(choice.get("finish_reason") or ""),
         prompt_tokens=usage.get("prompt_tokens"),
         completion_tokens=usage.get("completion_tokens"),
+        cost_usd=cost_usd,
         model=str(data.get("model") or "openvault/auto"),
     )
 

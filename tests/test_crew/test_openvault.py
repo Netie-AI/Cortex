@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from CortexOS.crew import config, openvault
 
 
@@ -186,3 +188,9 @@ def test_ingest_csv_drop_refuses_when_vault_off(monkeypatch, tmp_path) -> None:
     assert result["ok"] is False
     assert "CREW_OPENVAULT" in str(result.get("detail"))
     assert "super-secret" not in str(result)
+
+
+def test_require_live_refuses_when_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "0")
+    with pytest.raises(openvault.LLMError, match="no silent fallback"):
+        openvault.require_live()
