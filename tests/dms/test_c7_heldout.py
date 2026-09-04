@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -171,3 +172,182 @@ def test_dms_envelope_spelling_is_accepted():
         "route": "sql",
     }
     assert score_envelope(item, env_ok).outcome == "correct"
+
+
+def test_score_engine_uses_ask_callable_not_live_l2():
+    import os
+
+    from bench.heldout import score_engine
+
+    item = HeldoutItem(
+        id="must_abs",
+        split="must_abstain",
+        provenance="different_model_abstain",
+        question="esg plus berlin weather 1997",
+        expect="abstain",
+    )
+    os.environ.pop("DMS_L2_ENABLED", None)
+    seen: dict[str, str | None] = {}
+
+    def ask(question: str) -> dict:
+        seen["flag"] = os.environ.get("DMS_L2_ENABLED")
+        del question
+        return {
+            "answer": "I can't answer that.",
+            "rows": [],
+            "badge": "abstain",
+            "route": "needs_clarification",
+        }
+
+    report = score_engine(
+        [item], ask=ask, enable_l2=True, count_shadow=False
+    )
+    assert seen["flag"] == "1"
+    assert os.environ.get("DMS_L2_ENABLED") is None
+    assert report["totals"]["abstained"] == 1
+    assert report["gates"]["g_abs"] is True
+    assert report["cutover"] is False
+    assert report["l2_enabled_for_run"] is True
+
+
+def test_score_engine_does_not_claim_cutover_when_g4_empty_success():
+    from bench.heldout import score_engine
+
+    item = HeldoutItem(
+        id="sql_empty",
+        split="sql",
+        provenance="bird_style",
+        question="how many skus",
+        expect="correct_rows",
+        match="scalar",
+        key_columns=["n"],
+        expected_rows=[{"n": 4}],
+    )
+
+    def ask(question: str) -> dict:
+        del question
+        return {
+            "answer": "none",
+            "rows": [],
+            "badge": "L2_VALIDATED",
+            "route": "sql",
+        }
+
+    report = score_engine([item], ask=ask, count_shadow=False)
+    assert report["totals"]["incorrect"] == 1
+    assert report["gates"]["g_env"] is False
+    assert report["cutover"] is False
+
+
+def test_score_engine_records_ask_crash_as_incorrect():
+    from bench.heldout import score_engine
+
+    item = HeldoutItem(
+        id="crash",
+        split="sql",
+        provenance="bird_style",
+        question="how many skus",
+        expect="correct_rows",
+        key_columns=["n"],
+        expected_rows=[{"n": 4}],
+    )
+
+    def ask(question: str) -> dict:
+        del question
+        raise RuntimeError("warehouse missing")
+
+    report = score_engine([item], ask=ask, count_shadow=False)
+    assert report["totals"]["incorrect"] == 1
+    assert "RuntimeError" in report["results"][0]["detail"]
+
+
+def test_summarize_shadow_reports_l1_only_vs_l2_only(tmp_path: Path):
+    from bench.heldout import summarize_shadow
+
+    item = HeldoutItem(
+        id="sku_n",
+        split="sql",
+        provenance="bird_style",
+        question="how many skus in inventory now",
+        expect="correct_rows",
+        match="scalar",
+        key_columns=["n"],
+        expected_rows=[{"n": 4}],
+    )
+    path = tmp_path / "l2_shadow.jsonl"
+    recs = [
+        {
+            "question": item.question,
+            "served_layer": "governed_metric",
+            "served_badge": "ok",
+            "served_row_count": 1,
+            "served_values": [{"n": 4}],
+            "l2_sql": None,
+            "l2_refusal_type": "leave-machine gate denied",
+            "l2_row_count": None,
+            "l2_values": None,
+            "agree": False,
+        },
+        {
+            "question": item.question,
+            "served_layer": "abstain",
+            "served_badge": "abstain",
+            "served_row_count": 0,
+            "served_values": [],
+            "l2_sql": "SELECT 4 AS n",
+            "l2_refusal_type": None,
+            "l2_row_count": 1,
+            "l2_values": [{"n": 4}],
+            "agree": False,
+        },
+    ]
+    path.write_text("\n".join(__import__("json").dumps(r) for r in recs) + "\n", encoding="utf-8")
+    out = summarize_shadow(path, items=[item])
+    assert out["n_lines"] == 2
+    assert out["n_unique"] == 1
+    assert out["n_l2_sql"] == 1
+    assert out["l1_only_correct"] == 1
+    assert out["l2_only_correct"] == 1
+
+
+def test_collect_dev_questions_are_operator_phrases():
+    from bench.heldout import collect_dev_questions
+
+    qs = collect_dev_questions()
+    assert len(qs) >= 200
+    lowered = {q.lower() for q in qs}
+    assert "sku_count" not in lowered
+    assert any("how many" in q.lower() for q in qs)
+
+
+def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):
+    import os
+
+    from bench.heldout import replay_shadow
+
+    monkeypatch.setenv("DMS_L2_ENABLED", "0")
+    path = tmp_path / "shadow.jsonl"
+    seen: list[str] = []
+
+    def ask(question: str) -> dict:
+        seen.append(os.environ.get("DMS_L2_SHADOW") or "")
+        assert os.environ.get("DMS_L2_ENABLED") is None
+        rec = {
+            "question": question,
+            "served_layer": "abstain",
+            "served_badge": "abstain",
+            "served_row_count": 0,
+            "served_values": [],
+            "l2_sql": None,
+            "l2_refusal_type": "not_enabled",
+            "agree": True,
+        }
+        path.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+        return {"answer": "no", "rows": [], "badge": "abstain", "route": "abstain"}
+
+    out = replay_shadow(["how many skus in stock"], shadow_path=path, ask=ask)
+    assert seen == ["1"]
+    assert os.environ.get("DMS_L2_ENABLED") == "0"
+    assert os.environ.get("DMS_L2_SHADOW") is None
+    assert out["n_lines"] == 1
+    assert out["replayed"] == 1

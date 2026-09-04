@@ -8,7 +8,6 @@ If FreeRoute is down or the leave-machine gate refuses → empty candidates
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from typing import Any
@@ -35,31 +34,23 @@ def is_configured() -> bool:
 
 
 def _leave_machine_allowed() -> tuple[bool, str]:
-    """FreeRoute SQL leaves the box — OpenVault gate must allow it.
+    """FreeRoute SQL leaves the box — OpenVault gate must allow ``leave``.
 
-    Local OpenVault ``/v1/chat/completions`` still counts as leave-machine when
-    it forwards to a cloud provider. Deny-by-default if OV is offline.
+    Live OpenVault ``GateCheckBody.action`` is retrieve|run|deploy|leave|connect.
+    ``llm`` / ``leave_machine`` 422 that schema; Cortex then treated the 422 as
+    unreachable and never asked ``leave``. Do not fall back to ``run``: that is
+    a local-run gate, not leave-machine permission.
     """
     try:
         from CortexOS.integrations.openvault_gate import check_gate
 
-        # Prefer explicit llm/freeroute; fall back to leave_machine / run.
-        for action, destination in (
-            ("llm", "freeroute"),
-            ("leave_machine", "freeroute"),
-            ("run", "openvault"),
-        ):
-            gate = check_gate(
-                action=action,
-                destination=destination,
-                required_providers=[],
-            )
-            if gate.get("allowed") is True:
-                return True, f"ok:{action}"
-            # Unreachable OV → hard deny (do not try softer actions as bypass).
-            if gate.get("ok") is False and "unreachable" in str(gate.get("reasons") or "").lower():
-                reasons = gate.get("reasons") or ["OpenVault unreachable"]
-                return False, "; ".join(str(r) for r in reasons)[:240]
+        gate = check_gate(
+            action="leave",
+            destination="freeroute",
+            required_providers=[],
+        )
+        if gate.get("allowed") is True:
+            return True, "ok:leave"
         reasons = gate.get("reasons") or ["leave-machine gate denied"]
         return False, "; ".join(str(r) for r in reasons)[:240]
     except Exception as exc:  # noqa: BLE001

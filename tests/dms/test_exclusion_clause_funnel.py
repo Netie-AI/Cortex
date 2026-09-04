@@ -107,3 +107,15 @@ def test_route_still_compiles_sales_rank() -> None:
     assert plan is not None
     assert plan.metric_id == "sales_by_value"
     assert plan.slots.get("exclude_skus") == ["SKU-BETA"]
+
+
+def test_exclusion_and_also_show_is_not_l1_composition() -> None:
+    from CortexOS.dms.answer_engine import _l1_cannot_compose
+
+    assert _l1_cannot_compose(
+        "ignore SKU-BETA and also show the top 5 SKUs by revenue"
+    ) is None
+    assert _l1_cannot_compose(
+        "Count DELAYED shipments whose SKU is marked hazardous and whose "
+        "destination location is a cold-storage site."
+    ) is not None

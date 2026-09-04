@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from CortexOS.dms.answer_engine import _aggregate_over_ranking, answer, route_to_metric
+from CortexOS.dms.answer_engine import (
+    _aggregate_over_ranking,
+    _external_filing_quote,
+    _l1_cannot_compose,
+    answer,
+    route_to_metric,
+)
 
 AGGREGATE_OVER_RANKING = [
     "i mean the sum of top 5 selling skus",
@@ -105,3 +111,37 @@ def test_order_decides_it_not_membership() -> None:
     assert _aggregate_over_ranking("top 5 skus by total revenue") is None
     assert _aggregate_over_ranking("total revenue of the top 3") is not None
     assert _aggregate_over_ranking("top 3 by total revenue") is None
+
+
+def test_external_10k_quote_does_not_serve_utilisation() -> None:
+    """G-abs: 10-K quote is not warehouse utilisation (held-out ma_nestle_10k_footnote)."""
+    q = (
+        "Compare our warehouse utilisation to Nestle FY2019 10-K footnote 12 "
+        "and quote their disclosed cubic-metre figure."
+    )
+    assert _external_filing_quote(q) is not None
+    assert route_to_metric(q) is None
+    body = answer(q)
+    assert body["badge"] == "abstain"
+    assert body["rows"] == []
+    assert "filing" in (body.get("answer") or "").lower() or "filing" in (
+        body.get("assumptions") or ""
+    ).lower()
+
+
+def test_compositional_delayed_hazardous_cold_abstains() -> None:
+    q = (
+        "Count DELAYED shipments whose SKU is marked hazardous and whose "
+        "destination location is a cold-storage site."
+    )
+    assert _l1_cannot_compose(q) is not None
+    assert route_to_metric(q) is None
+    body = answer(q)
+    assert body["badge"] == "abstain"
+    assert body["rows"] == []
+
+
+def test_simple_delayed_count_still_l1() -> None:
+    body = answer("How many delayed shipments are there?")
+    assert body["layer"] == "governed_metric"
+    assert body.get("rows")
