@@ -210,6 +210,8 @@ class CrewRuntime:
             self._run_slash_desk(space_id, manager, parsed.command, parsed.rest)
         elif parsed.command and parsed.command.get("kind") == "memory":
             self._run_slash_memory(space_id, manager, parsed.command, parsed.rest)
+        elif parsed.command and parsed.command.get("kind") == "life":
+            await self._run_slash_life(space_id, manager, parsed.command, parsed.rest)
         elif parsed.command and parsed.command.get("kind") in {"skill", "routine"}:
             self._load_slash_pack(space_id, parsed.command, parsed.rest)
 
@@ -224,7 +226,12 @@ class CrewRuntime:
             and parsed.command.get("kind") == "memory"
             and not parsed.mentions
         )
-        if desk_only or memory_only:
+        life_only = bool(
+            parsed.command
+            and parsed.command.get("kind") == "life"
+            and not parsed.mentions
+        )
+        if desk_only or memory_only or life_only:
             return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
 
         turn_provider = (provider or "").strip() or None
@@ -425,6 +432,105 @@ class CrewRuntime:
             to_agent_id=manager["id"],
             meta={
                 "tool": f"memory_{action}",
+                "args": args,
+                "slash": True,
+                "a2a": {"kind": a2a.USER, "from": "operator", "to": manager["name"]},
+            },
+        )
+        self.bus.emit(space_id, "message", {"message": msg})
+
+    async def _run_slash_life(
+        self,
+        space_id: str,
+        manager: dict[str, Any],
+        command: dict[str, Any],
+        rest: str,
+    ) -> None:
+        """Operator /spawn /kill /stop /idle /wait /goal. Same methods as the HUD."""
+        action = str(command.get("action") or "")
+        parts = [p.strip() for p in rest.split("|")]
+        name = parts[0] if parts else ""
+        extra = parts[1] if len(parts) > 1 else ""
+        more = "|".join(parts[2:]).strip() if len(parts) > 2 else ""
+        args: dict[str, Any] = {"name": name}
+        text = ""
+        if action == "spawn":
+            if not name:
+                text = "DENIED: /spawn name | brief | goal"
+            else:
+                payload = {"name": name, "brief": extra}
+                if more:
+                    payload["mode"] = life.MODE_GOAL
+                    payload["goal"] = more
+                elif extra and not more:
+                    payload["brief"] = extra
+                result = await self.operator_spawn(space_id, payload)
+                args = payload
+                if result.get("error"):
+                    text = str(result["error"])
+                else:
+                    agent = result["agent"]
+                    text = (
+                        f"Spawned {agent['name']} status={agent.get('status')} "
+                        f"mode={agent.get('mode')}"
+                    )
+        elif action in {"kill", "stop", "idle", "wait", "goal"}:
+            if not name:
+                text = f"DENIED: /{action} name"
+            else:
+                row = self.store.get_agent_by_name(space_id, name)
+                if row is None:
+                    text = f"DENIED: no teammate named {name}"
+                elif action == "kill":
+                    why = extra or "operator killed"
+                    args = {"name": name, "reason": why}
+                    result = self.kill_agent(row["id"], reason=why)
+                    if isinstance(result, dict) and result.get("error"):
+                        text = str(result["error"])
+                    else:
+                        text = life.dead_reason(result or row)
+                elif action in {"stop", "idle"}:
+                    result = self.stop_agent(row["id"])
+                    if isinstance(result, dict) and result.get("error"):
+                        text = str(result["error"])
+                    else:
+                        parked = result or row
+                        text = f"{parked.get('name')} status={parked.get('status')}"
+                elif action == "wait":
+                    if row["name"] == "Manager":
+                        text = "DENIED: Manager wait is the run; do not park the Manager"
+                    elif not life.can_accept(row):
+                        text = f"DENIED: {life.dead_reason(row)}"
+                    else:
+                        self._set_status(row["id"], life.STATUS_WAITING)
+                        parked = self.store.get_agent(row["id"]) or row
+                        text = f"{parked.get('name')} status={parked.get('status')}"
+                else:
+                    goal_text = extra or more
+                    if not goal_text:
+                        text = "DENIED: /goal name | goal text"
+                    else:
+                        args = {"name": name, "goal": goal_text}
+                        updated = self.set_agent_mode(
+                            row["id"], life.MODE_GOAL, goal_text=goal_text
+                        )
+                        if updated is None:
+                            text = f"DENIED: no teammate named {name}"
+                        else:
+                            text = (
+                                f"{updated.get('name')} mode={updated.get('mode')} "
+                                f"goal={updated.get('goal_text')}"
+                            )
+        else:
+            text = f"Unknown life action {action}"
+        msg = self.store.add_message(
+            space_id,
+            "tool",
+            text[:4000],
+            agent_id=manager["id"],
+            to_agent_id=manager["id"],
+            meta={
+                "tool": action,
                 "args": args,
                 "slash": True,
                 "a2a": {"kind": a2a.USER, "from": "operator", "to": manager["name"]},
