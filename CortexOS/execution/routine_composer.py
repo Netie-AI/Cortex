@@ -138,6 +138,10 @@ def compose(goal: str, *, now: float | None = None) -> dict[str, Any]:
         f"and pause the routine if it spends more than RM{DEPTH_COST_CAPS[depth]:g} in a day."
     )
     assumptions.append("If it fails 3 times in a row I'll pause it and tell you.")
+    from CortexOS.execution import scheduled_work
+
+    kinds = scheduled_work.classify(goal)
+    assumptions.append(scheduled_work.explain_kinds(kinds))
 
     return {
         "name": suggest_name(goal),
@@ -153,12 +157,13 @@ def compose(goal: str, *, now: float | None = None) -> dict[str, Any]:
         "daily_cost_cap_myr": DEPTH_COST_CAPS[depth],
         "assumptions": assumptions,
         "schedule_recognized": parsed["matched"],
+        "work_kinds": sorted(kinds),
     }
 
 
 SUGGESTIONS: list[str] = [
     "Summarize my open PRs every weekday morning",
-    "Check the site is up every 15 minutes",
-    "Draft release notes every Friday at 5pm",
+    "Run the AirGPT ship-gate every weekday",
+    "Email me a daily inbox digest every morning",
     "Deep research on our competitors every Monday morning",
 ]

@@ -305,3 +305,48 @@ def test_discover_exports_skips_appdata(tmp_path) -> None:
     msgs = store.list_messages(result["spaces"][0]["id"])
     assert any("hey" in m["content"] for m in msgs)
     assert (skills / "chat.md").exists()
+
+
+def test_github_pr_diff_uses_injected_runner(monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+
+    class Result:
+        def __init__(self, code: int, stdout: str) -> None:
+            self.returncode = code
+            self.stdout = stdout
+            self.stderr = ""
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        assert "pr" in argv and "diff" in argv
+        assert "12" in argv
+        return Result(0, "+hello\n")
+
+    out = github_mod.pr_diff(number=12, repo="acme/cortex", runner=runner)
+    assert out["ok"] is True
+    assert "+hello" in out["diff"]
+
+
+def test_github_create_pr_uses_injected_runner(monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+
+    class Result:
+        def __init__(self, code: int, stdout: str) -> None:
+            self.returncode = code
+            self.stdout = stdout
+            self.stderr = ""
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        assert "pr" in argv and "create" in argv
+        assert "--title" in argv
+        return Result(0, "https://github.com/acme/cortex/pull/99\n")
+
+    out = github_mod.create_pr(title="crew drop", runner=runner)
+    assert out["ok"] is True
+    assert "/pull/99" in out["url"]
+    assert "auto-merge" in out["law"].lower()
+
+
