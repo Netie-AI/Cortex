@@ -65,6 +65,7 @@ type = forbidden
 source_modules =
     CortexOS.constructor_graph
     CortexOS.execution.distill_options
+    CortexOS.execution.rsf_boundary
 forbidden_modules =
     n8n
     langchain
