@@ -2,6 +2,10 @@
 
 Does not execute a new orchestrator. Maps preset id → existing Cortex paths
 (dag_runner, memory/RAG assemble, marketplace adapters behind the Cortex gate).
+
+Constructor distill-options (myn8n / langchain / langflow / gencfsm_dag) are
+not product presets. See ``CortexOS.execution.distill_options`` — route table
+only, engine_role never product_engine.
 """
 
 from __future__ import annotations

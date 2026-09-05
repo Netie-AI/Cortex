@@ -2,7 +2,10 @@
 root_packages =
     CortexOS
     packs
-include_external_packages = False
+# Required so contract 3 can forbid n8n/langchain/langflow/gencfsm without
+# vendoring them. Contract 1 then also sees function-level packs imports that
+# grimp previously skipped; those already live on the AST C2 allowlist.
+include_external_packages = True
 
 [importlinter:contract:1]
 name = the engine never reaches into a pack (C2 boundary)
@@ -39,6 +42,7 @@ ignore_imports =
     CortexOS.api.context_routes -> packs.**
     CortexOS.dms.query_service -> packs.**
     CortexOS.dms.seed_demo -> packs.**
+    CortexOS.dms.answer_engine -> packs
     CortexOS.nlp.local_inference -> packs.**
     CortexOS.execution.tool_runner -> packs.**
     CortexOS.ponytail.middleware -> packs.**
@@ -54,3 +58,18 @@ independent_from =
     CortexOS.execution.dag_runner
     CortexOS.execution.osr
     CortexOS.execution.seeker
+
+[importlinter:contract:3]
+name = constructor engine never imports n8n/langchain/langflow/gencfsm as engine
+type = forbidden
+source_modules =
+    CortexOS.constructor_graph
+    CortexOS.execution.distill_options
+forbidden_modules =
+    n8n
+    langchain
+    langchain_core
+    langchain_community
+    langflow
+    langgraph
+    gencfsm

@@ -46,6 +46,11 @@ def test_engine_backends_lists_architecture_presets(engine_client):
     assert res.status_code == 200
     data = res.json()
     assert any(p["id"] == "minimal" for p in data["architecture_presets"])
+    option_ids = {row["id"] for row in data["distill_options"]}
+    assert {"myn8n", "langchain", "langflow", "gencfsm_dag"} <= option_ids
+    by_id = {row["id"]: row for row in data["distill_options"]}
+    assert by_id["myn8n"]["engine_role"] == "distill_only"
+    assert by_id["gencfsm_dag"]["engine_role"] != "product_engine"
 
 
 def test_engine_config_architecture_preset_roundtrip(engine_client):
