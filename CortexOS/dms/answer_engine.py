@@ -8,7 +8,8 @@ abstains rather than guess. This is the "adaptive, fail-then-escalate" core:
   L1 METRIC      rule-based intent+slot routing → compile a governed metric
                  template (Q1) → guardrail-verified SQL. Deterministic.
   L2 FREEFORM    (flag DMS_L2_ENABLED, default OFF) sampled LLM SQL →
-                 parse+allowlist+execute+vote+rails. Not wired until a model is.
+                 parse+allowlist+execute+plausibility. Badge L2_VALIDATED only
+                 after plausibility. Not the process default (C7-05).
   L3 ABSTAIN     no trustworthy layer fired → clarify + suggest nearest
                  answerable questions. Never the old confident-wrong fallback.
 
@@ -1829,10 +1830,14 @@ def answer(
         # the space-scoped document stub; keyword RAG never runs first.
         from CortexOS.dms.l2_generation import L2_MANIFEST_REASON_PREFIX, attempt_l2
 
-        l2_out = attempt_l2(question, verified=verified)
+        # promote=False: steward recording waits until plausibility passes.
+        l2_out = attempt_l2(question, verified=verified, promote=False)
         if l2_out is not None and l2_out.sql:
             sql = l2_out.sql
-            layer, badge = l2_out.layer, l2_out.badge
+            layer = "generated"
+            # Fail closed: L2Attempt.badge is L2_VALIDATED before execute.
+            # Serve that token only after assess_plausibility (below).
+            badge = "abstain"
             assumptions = l2_out.assumptions
             l2_retrieved = tuple(l2_out.retrieved_tables)
             from CortexOS.dms.l2_plausibility import sql_table_names
@@ -1949,6 +1954,7 @@ def answer(
         return _abs(f"internal SQL failed guardrail {guard_result.violations}")
 
     if layer == "generated":
+        from CortexOS.dms.l2_generation import resolve_l2_generation
         from CortexOS.dms.l2_plausibility import (
             assess_plausibility,
             leftover_literals_via_port,
@@ -1964,6 +1970,14 @@ def answer(
         )
         if not trip.ok:
             return _abs(trip.reason)
+        badge = "L2_VALIDATED"
+        try:
+            resolve_l2_generation().record_validated(question, used_sql)
+        except Exception:  # noqa: BLE001 — promotion must not block a gated serve
+            pass
+
+    if layer == "generated" and badge != "L2_VALIDATED":
+        return _abs("L2 serve blocked: plausibility did not pass")
 
     truncated = total_count is not None and len(rows) >= MAX_LIMIT and total_count > len(rows)
     answer_text = synthesize_answer(rows, question)
