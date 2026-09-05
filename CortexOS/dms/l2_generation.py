@@ -128,6 +128,8 @@ def attempt_l2(
 
     ``force=True`` runs even when ``DMS_L2_ENABLED`` is unset (shadow).
     ``promote=False`` skips steward recording so shadow cannot mutate L0.
+    Serve (``answer``) must pass ``promote=False`` and stamp ``L2_VALIDATED``
+    only after plausibility — this return is not the customer envelope.
     Lives here so ``answer_engine`` never names pack generation modules.
     """
     if not force and not _env_on("DMS_L2_ENABLED"):
