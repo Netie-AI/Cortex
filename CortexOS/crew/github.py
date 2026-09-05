@@ -534,3 +534,82 @@ def close_issue(
         "detail": (result.stdout or "").strip()[:400],
         "law": "Closed the issue. Did not merge a PR. Ticket Runner seats writers.",
     }
+
+
+def pr_diff(
+    number: int | None = None,
+    *,
+    repo: str = "",
+    runner: RunFn | None = None,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """Read a PR diff. Review material only — never merge."""
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0" and runner is None:
+        return {"ok": False, "detail": "CREW_LIVE_PROBES=0", "diff": ""}
+    run = runner or _run
+    wait = max(_gh_wait_s(), 3.0) if timeout is None else float(timeout)
+    argv = ["gh", "pr", "diff"]
+    if number is not None:
+        argv.append(str(int(number)))
+    if repo:
+        argv.extend(["--repo", repo])
+    try:
+        result = run(argv, timeout=wait)
+    except FileNotFoundError:
+        return {"ok": False, "detail": "gh not installed", "diff": ""}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": type(exc).__name__, "diff": ""}
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "detail": (result.stderr or result.stdout or "gh failed")[:200],
+            "diff": "",
+        }
+    return {
+        "ok": True,
+        "diff": (result.stdout or "")[:12000],
+        "number": number,
+        "repo": repo,
+        "law": "Report in chat. Do not auto-merge.",
+    }
+
+
+def create_pr(
+    *,
+    title: str = "",
+    body: str = "",
+    repo: str = "",
+    runner: RunFn | None = None,
+) -> dict[str, Any]:
+    """Open a PR with gh. Never merges. Skip when live probes are off."""
+    if os.environ.get("CREW_LIVE_PROBES", "1") == "0" and runner is None:
+        return {"ok": False, "detail": "CREW_LIVE_PROBES=0", "url": ""}
+    run = runner or _run
+    argv = ["gh", "pr", "create"]
+    title = (title or "").strip()
+    if title:
+        argv.extend(["--title", title[:200], "--body", (body or title)[:2000]])
+    else:
+        argv.append("--fill")
+    if repo:
+        argv.extend(["--repo", repo])
+    try:
+        result = run(argv, timeout=max(_gh_wait_s(), 3.0))
+    except FileNotFoundError:
+        return {"ok": False, "detail": "gh not installed", "url": ""}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": type(exc).__name__, "url": ""}
+    text = (result.stdout or result.stderr or "")[:500]
+    if result.returncode != 0:
+        return {"ok": False, "detail": text or "gh failed", "url": ""}
+    url = ""
+    for token in text.split():
+        if token.startswith("https://") and "/pull/" in token:
+            url = token.strip()
+            break
+    return {
+        "ok": True,
+        "url": url or text.strip(),
+        "detail": text.strip(),
+        "law": "Do not auto-merge. Ticket Runner seats existing writers.",
+    }

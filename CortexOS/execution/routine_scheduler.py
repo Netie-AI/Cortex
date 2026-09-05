@@ -231,6 +231,12 @@ def create_from_goal(goal: str, **overrides: Any) -> dict[str, Any]:
         # An explicit interval beats an inferred calendar schedule.
         draft["schedule"] = None
     draft.update(explicit)
+    vars_merged = dict(draft.get("vars") or {})
+    if "vars" in explicit and isinstance(explicit.get("vars"), dict):
+        vars_merged.update(explicit["vars"])
+    kinds = draft.get("work_kinds") or []
+    if kinds:
+        vars_merged["work_kinds"] = kinds
     routine = create_routine(
         draft["name"],
         draft["prompt"],
@@ -241,8 +247,10 @@ def create_from_goal(goal: str, **overrides: Any) -> dict[str, Any]:
         timeout_seconds=draft["timeout_seconds"],
         schedule=draft["schedule"],
         predicates=draft["predicates"],
+        vars=vars_merged or None,
     )
     routine["assumptions"] = draft["assumptions"]
+    routine["work_kinds"] = kinds
     return routine
 
 
@@ -255,7 +263,12 @@ def get_routine(rid: str) -> dict[str, Any] | None:
 def list_routines() -> list[dict[str, Any]]:
     with _conn() as conn:
         rows = conn.execute("SELECT * FROM routines ORDER BY created_at").fetchall()
-    return [_row_to_dict(r) for r in rows]
+    out = [_row_to_dict(r) for r in rows]
+    for item in out:
+        runs = list_runs(item["id"], limit=1)
+        if runs:
+            item["last_run"] = _public_run(runs[0])
+    return out
 
 
 def update_routine(rid: str, **fields: Any) -> dict[str, Any] | None:
@@ -292,6 +305,33 @@ def pause(rid: str, reason: str = "user") -> dict[str, Any] | None:
 
 def resume(rid: str) -> dict[str, Any] | None:
     return update_routine(rid, status="idle", paused_reason="", error_streak=0)
+
+
+def _public_run(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("output") or ""
+    text = str(raw)
+    steps: list[dict[str, Any]] = []
+    kinds: list[str] = []
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) and raw[:1] in "{[" else None
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
+        text = str(parsed.get("text") or parsed.get("output") or "")
+        steps = list(parsed.get("steps") or [])
+        kinds = list(parsed.get("work_kinds") or [])
+        if not text and parsed.get("text") is None:
+            text = json.dumps(parsed, default=str)[:4000]
+    elif isinstance(parsed, str):
+        text = parsed
+    return {
+        "status": row.get("status"),
+        "finished_at": row.get("finished_at"),
+        "error": row.get("error") or "",
+        "text": text[:4000],
+        "steps": steps,
+        "work_kinds": kinds,
+    }
 
 
 def list_runs(rid: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -377,6 +417,14 @@ async def _dispatch(
     predicates: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     """'auto' means the engine picks — first run races, later runs reuse the winner."""
+    from CortexOS.execution import scheduled_work
+
+    kinds = scheduled_work.classify(prompt)
+    stored = (routine.get("vars") or {}).get("work_kinds") or []
+    if stored:
+        kinds = frozenset(str(k) for k in stored) | kinds
+    if scheduled_work.is_operator_work(kinds):
+        return await asyncio.to_thread(scheduled_work.run, prompt, kinds=kinds)
     if str(routine.get("preset") or "") == "auto":
         from CortexOS.execution import race_router
 
@@ -505,7 +553,16 @@ async def run_once(
                 "ok" if ok else "error",
                 started,
                 finished,
-                json.dumps(result.get("output"), default=str)[:4000],
+                json.dumps(
+                    {
+                        "text": result.get("output"),
+                        "steps": result.get("steps") or [],
+                        "work_kinds": result.get("work_kinds") or [],
+                    },
+                    default=str,
+                )[:20000]
+                if result.get("steps") is not None
+                else json.dumps(result.get("output"), default=str)[:20000],
                 str(result.get("error") or "")[:1000],
                 cost,
             ),
@@ -533,6 +590,9 @@ async def run_once(
         "cost_myr": cost,
         "governor": governor_action,
         "next_run_at": next_run_at,
+        "output": result.get("output"),
+        "steps": result.get("steps") or [],
+        "work_kinds": result.get("work_kinds") or [],
     }
 
 
