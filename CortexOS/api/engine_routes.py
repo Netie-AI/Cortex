@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from netie.engine import registry
 from pydantic import BaseModel, Field
 
-from CortexOS.execution import architecture_presets
+from CortexOS.execution import architecture_presets, distill_options
 from CortexOS.execution.preset_router import plan_for_request
 from CortexOS.execution.run_plan import execute_run_plan
 from CortexOS.paths import data_path
@@ -138,6 +138,7 @@ async def engine_backends(caller: Caller = Depends(require_role("viewer"))) -> d
              "blurb": "Chain/tool runtime — install via marketplace, runs behind the Cortex gate."},
         ],
         "architecture_presets": architecture_presets.catalog(),
+        "distill_options": distill_options.catalog(),
         "coordination_patterns_hint": (
             "GET /api/engine/coordination-patterns — Anthropic multi-agent "
             "pattern catalog mapped to Cortex runners"

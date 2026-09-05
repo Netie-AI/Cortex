@@ -67,6 +67,12 @@ def test_compile_rejects_unknown_kind():
         compile_constructor_graph({"nodes": [{"id": "x", "kind": "n8n"}], "edges": []})
 
 
+def test_compile_rejects_banned_engine_kinds():
+    for kind in ("n8n", "myn8n", "langchain", "langflow", "gencfsm_dag"):
+        with pytest.raises(ConstructorGraphError, match="distill-only analog"):
+            compile_constructor_graph({"nodes": [{"id": "x", "kind": kind}], "edges": []})
+
+
 def test_compile_enhance_kind_is_document_ref():
     from netie.fabrication.dsl_parser import NodeType
 

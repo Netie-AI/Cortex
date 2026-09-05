@@ -25,6 +25,9 @@ _KINDS = frozenset(
     }
 )
 
+# Distill-option ids / analog engines. Not Constructor canvas kinds.
+_BANNED_ENGINE_KINDS = frozenset({"n8n", "myn8n", "langchain", "langflow", "gencfsm_dag"})
+
 _KIND_TO_TYPE = {
     "ingest": NodeType.DOCUMENT_REF,
     "connector": NodeType.DOCUMENT_REF,
@@ -59,6 +62,10 @@ def compile_constructor_graph(payload: dict[str, Any]) -> AgenticDSLProgram:
         if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
             raise ConstructorGraphError("each node needs a string id")
         kind = raw.get("kind")
+        if kind in _BANNED_ENGINE_KINDS:
+            raise ConstructorGraphError(
+                f"{kind!r} is a distill-only analog; not a Constructor engine kind"
+            )
         if kind not in _KINDS:
             raise ConstructorGraphError(f"unknown kind {kind!r}")
         if raw["id"] in by_id:
