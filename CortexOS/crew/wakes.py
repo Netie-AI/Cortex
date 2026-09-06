@@ -123,6 +123,7 @@ def conveyor(
     gh call (Control belt GET is 1.5s).
     """
     from CortexOS.crew import github as github_mod
+    from CortexOS.crew.assign_router import map_public
     from CortexOS.crew.board import snapshot as board_snapshot
 
     board = board_snapshot()
@@ -177,6 +178,7 @@ def conveyor(
             "Crew /assign (local bind). CLAIMS seating is Ticket Runner. "
             "Control does not assign."
         ),
+        "assign_map": map_public(),
         "leases": live_leases,
         "lease_owner": (
             "Crew POST /crew/tickets/{id}/claim. Control does not lease."

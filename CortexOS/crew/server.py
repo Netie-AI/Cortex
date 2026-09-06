@@ -263,6 +263,17 @@ class TicketLeaseIn(BaseModel):
     space_id: str = ""
 
 
+class TaskAssignIn(BaseModel):
+    destination: str
+    space_id: str = ""
+    brief: str = ""
+    name: str = "Assign"
+    spec: str = ""
+    execute: bool = False
+    lane: str = ""
+    live_ssh: bool = False
+
+
 _LEASE_LAW = (
     "Crew lease. Control display-only. Did not write CLAIMS.json. "
     "Did not set a GitHub assignee."
@@ -808,6 +819,36 @@ def build_router(crew: CrewApp) -> APIRouter:
         return ingest_readable(
             crew.store, roots, skills_dir=crew.settings.data_dir / "skills"
         )
+
+    @router.get("/assign")
+    async def assign_catalog() -> dict[str, Any]:
+        """Destination coordinate map. Control may GET-display. Does not execute."""
+        from CortexOS.crew.assign_router import catalog as assign_catalog
+
+        return assign_catalog(live=True)
+
+    @router.post("/assign")
+    async def assign_task(body: TaskAssignIn) -> Any:
+        """Execute through Crew adapters. Control must not POST this."""
+        from CortexOS.crew.assign_router import dispatch as assign_dispatch
+
+        result = await assign_dispatch(
+            crew.runtime,
+            {
+                "destination": body.destination,
+                "space_id": body.space_id,
+                "brief": body.brief,
+                "name": body.name,
+                "spec": body.spec,
+                "execute": body.execute,
+                "lane": body.lane,
+                "live_ssh": body.live_ssh,
+            },
+        )
+        if not result.get("ok"):
+            code = int(result.get("status_code") or 409)
+            return JSONResponse(result, status_code=code)
+        return result
 
     @router.get("/tickets")
     async def list_tickets() -> dict[str, Any]:

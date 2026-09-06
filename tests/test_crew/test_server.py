@@ -133,6 +133,11 @@ def test_ui_index_is_served(client) -> None:
     assert "No silent retry." in page.text
     assert '/crew/tickets/" + encodeURI(ticket) + "/" + act' in page.text
     assert "Control does not assign" in page.text
+    assert "Control does not POST assign" in page.text
+    assert 'id="assignGo"' in page.text
+    assert 'id="assignDest"' in page.text
+    assert "/crew/assign" in page.text
+    assert "HUMAN_STOP" in page.text
     assert "open GitHub" in page.text
     assert 'id="tabWork"' in page.text
     assert 'data-scope="space"' in page.text
@@ -192,6 +197,7 @@ def test_ui_index_is_served(client) -> None:
     assert b"thread--dead" in css.content
     assert b"thread--waiting" in css.content
     assert b"ask-card" in css.content
+    assert b"dest-chip" in css.content
     assert b"msg--ask" in css.content
     assert b"hop--pending" in css.content
     assert b"claim.life-stopped" in css.content
@@ -317,6 +323,16 @@ def test_belt_and_wakes_are_get_only_and_skip_cortex_ping(client) -> None:
     assert belt["assignments"] == []
     assert belt["leases"] == []
     assert "Control does not assign" in belt["assign_owner"]
+    assert belt["assign_map"]["control"] == "display-only"
+    assert belt["assign_map"]["execute"] == "POST /crew/assign"
+    assert {d["id"] for d in belt["assign_map"]["destinations"]} >= {
+        "crew",
+        "claude_code",
+        "claude_app",
+        "cursor_cloud",
+        "local_model",
+        "airgpt",
+    }
     assert "Control does not lease" in belt["lease_owner"]
     assert client.http.post("/crew/wakes", json={"kind": "timer"}).status_code == 405
     assert client.http.post("/v1/belt", json={"wake": "x"}).status_code == 405
@@ -328,6 +344,58 @@ def test_belt_and_wakes_are_get_only_and_skip_cortex_ping(client) -> None:
     live = client.http.get("/v1/belt").json()
     assert live["wakes"][0]["note"] == "morning brief"
     assert live["queue"]["pending"] == 1
+
+
+def test_assign_http_crew_live_unarmed_refuse_no_second_vault(client) -> None:
+    listed = client.http.get("/crew/assign").json()
+    assert listed["ok"] is True
+    assert listed["control"] == "display-only"
+    assert listed["execute"] == "POST /crew/assign"
+    assert "OpenVault" in listed["vault"]
+    ids = [d["id"] for d in listed["destinations"]]
+    assert ids == [
+        "crew",
+        "claude_code",
+        "claude_app",
+        "cursor_cloud",
+        "local_model",
+        "airgpt",
+    ]
+    space = client.http.post("/crew/spaces", json={"title": "HQ"}).json()
+    live = client.http.post(
+        "/crew/assign",
+        json={
+            "destination": "crew",
+            "space_id": space["id"],
+            "brief": "hold the line",
+            "name": "Scout",
+        },
+    )
+    assert live.status_code == 200
+    body = live.json()
+    assert body["ok"] is True
+    assert body["destination"] == "crew"
+    assert body["executed"] is True
+    assert body["agent"]["name"] == "Scout"
+    agents = client.http.get(f"/crew/spaces/{space['id']}/agents").json()
+    assert any(a["name"] == "Scout" and a["goal_text"] == "hold the line" for a in agents)
+    unarmed = client.http.post(
+        "/crew/assign", json={"destination": "local_model", "brief": "run locally"}
+    )
+    assert unarmed.status_code == 409
+    detail = unarmed.json()["detail"]
+    assert "no silent fallback" in detail
+    missing = client.http.post(
+        "/crew/assign",
+        json={"destination": "crew", "space_id": space["id"], "name": "Scout"},
+    )
+    assert missing.status_code == 400
+    assert "brief" in missing.json()["detail"].lower()
+    data_dir = client.crew.settings.data_dir
+    assert not (data_dir / "keys.json").is_file()
+    assert not (data_dir / "vault.json").is_file()
+    assert not (data_dir / "openvault.json").is_file()
+    assert client.http.post("/v1/belt", json={"destination": "crew"}).status_code == 405
 
 
 def test_tickets_skills_and_voice(client, tmp_path, monkeypatch) -> None:
