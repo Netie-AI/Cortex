@@ -90,7 +90,9 @@ jobs:
       - name: Guard invariants / contract / importlinter
         env:
           BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_REF: ${{ github.sha }}
+          # pull_request github.sha is the merge commit; its body never carries
+          # INVARIANT-CHANGE:. Use the PR branch tip (or the push SHA on main).
+          HEAD_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           if [ -z "${BASE_REF}" ] || [ "${BASE_REF}" = "0000000000000000000000000000000000000000" ]; then
