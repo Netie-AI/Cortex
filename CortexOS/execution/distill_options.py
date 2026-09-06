@@ -159,7 +159,7 @@ def get_option(option_id: str) -> dict[str, Any]:
 
 
 def register_option(entry: Mapping[str, Any]) -> None:
-    """RSF-03/04/06 hook: extra distill options. Does not start those slices."""
+    """RSF-03/04/06 hook: extra distill options. Harness is distill_harness."""
     _validate(entry)
     oid = str(entry["id"])
     if any(row["id"] == oid for row in _REGISTRY):
