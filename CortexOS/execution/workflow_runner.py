@@ -347,6 +347,18 @@ def _make_on_event(run_id: str):
             if tel:
                 if not (tel.get("prompt_tokens") or tel.get("completion_tokens")):
                     workflow_store.mark_tokens_estimated(run_id)
+                if not (tel.get("tools") or tel.get("tool_count")):
+                    tel = {
+                        **tel,
+                        "tools": [
+                            {
+                                "tool": "think",
+                                "ok": True,
+                                "ms": 0,
+                                "summary": str(ev.get("excerpt") or "step complete")[:400],
+                            }
+                        ],
+                    }
                 workflow_store.agent_finished(
                     run_id,
                     node,
@@ -356,12 +368,23 @@ def _make_on_event(run_id: str):
                 )
         elif et == "node_error":
             if "agent_task" in kind_s or node:
+                err = str(ev.get("error") or "")
                 workflow_store.agent_finished(
                     run_id,
                     node,
-                    {"error": ev.get("error") or ""},
+                    {
+                        "error": err,
+                        "tools": [
+                            {
+                                "tool": "think",
+                                "ok": False,
+                                "ms": 0,
+                                "summary": err[:400] or "agent error",
+                            }
+                        ],
+                    },
                     status="error",
-                    error=str(ev.get("error") or ""),
+                    error=err,
                 )
         elif et == "agent_tool":
             workflow_store.note_tool_call(

@@ -47,7 +47,10 @@ async def _stub_execute_node(node, context, router, ledger, workflow_cost_ceilin
             "tier": "T1",
             "cost_myr": 0.01,
             "steps": 1,
-            "tools": [{"tool": "web_search", "ok": True, "ms": 5, "summary": "1 hit"}],
+            "tools": [
+                {"tool": "think", "ok": True, "ms": 0, "summary": "step 1"},
+                {"tool": "web_search", "ok": True, "ms": 5, "summary": "1 hit"},
+            ],
             "label": ann.get("label"),
             "purpose": ann.get("purpose"),
         }
@@ -166,6 +169,14 @@ def test_smoothness_audit_runs_all_phases():
     assert task["totals"]["phases_done"] == task["totals"]["phases_total"]
     assert task["totals"]["tokens"] > 0
     assert len(task["phases"][0]["agents"]) >= 4
+    tools = [
+        t.get("tool")
+        for ph in task["phases"]
+        for a in (ph.get("agents") or [])
+        for t in (a.get("tool_detail") or [])
+    ]
+    assert "think" in tools
+    assert "web_search" in tools
 
 
 def test_cancel_mid_run():

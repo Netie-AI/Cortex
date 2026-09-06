@@ -388,6 +388,9 @@ async def run_agent_task(
 
     for step in range(max_steps):
         telemetry.steps = step + 1
+        telemetry.tool_calls.append(
+            ToolCallRecord(tool="think", ok=True, ms=0, summary=f"step {telemetry.steps}")
+        )
         prompt = base_prompt if not transcript else base_prompt + "\n\n" + "\n\n".join(transcript)
         model_req = ModelRequest(
             request_type=str(ann.get("prompt_id") or node.id),

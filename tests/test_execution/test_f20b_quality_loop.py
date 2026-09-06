@@ -198,7 +198,8 @@ def test_native_openai_tool_call_runs_broker(monkeypatch):
     )
     out, tel = _run(_node(tools=["web_search"], quality_criteria=["x"]), ctx)
     assert calls == [("web_search", {"query": "OpenManus"})]
-    assert tel.tool_calls[0].tool == "web_search"
+    assert any(t.tool == "think" for t in tel.tool_calls)
+    assert any(t.tool == "web_search" for t in tel.tool_calls)
     assert tel.stop_reason == "quality"
     assert "OpenManus" in out["content"]
     assert seen_tools and seen_tools[0]
