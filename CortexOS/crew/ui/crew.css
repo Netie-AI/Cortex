@@ -13,9 +13,11 @@
    - Memory scope chips (space|user|agent|run); recall untrusted
    - Standing-approval ladder in settings (revocable, circuit-breaker)
    - Claim/Release on Work-Tickets (409 = someone else, no silent retry)
+   - Assign destinations (Crew live; others preview; Control display-only map)
    - Ask cards + switchboard thread status (waiting/dead/timeout; no invented replies)
 
-   Control GET /v1/belt display JSON is unchanged. GET /stolen.css is 410.
+   Control GET /v1/belt display JSON stays additive (assign_map is display-only).
+   GET /stolen.css is 410.
 */
 
 :root {
@@ -903,6 +905,13 @@ button { cursor: pointer; }
   padding: 0.28rem 0.4rem;
 }
 .life-spawn button { grid-column: 1 / -1; }
+.dest-chip {
+  font: 0.68rem var(--mono);
+  color: var(--mute);
+  margin-left: 0.35rem;
+}
+.dest-chip--live { color: var(--ok); }
+.dest-chip--preview { color: var(--claim); }
 .agent-card { border-bottom: 1px solid var(--line); padding-bottom: 0.25rem; margin-bottom: 0.2rem; }
 .ladder {
   margin-top: 0.85rem;

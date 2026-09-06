@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-ASSIGN destination router (OpenVault-only) — 2026-09-06
+
+Assign surface on CortexOS/crew (parent Cortex #116). `GET /crew/assign` is
+the coordinate map; `POST /crew/assign` is the only execute path. Destinations:
+Cortex Crew (live spawn/brief), local model (live when loopback/Ollama armed),
+Claude Code / Claude App / Cursor Cloud Agent / AirGPT (preview handoff).
+Unarmed destinations refuse. Credentials stay in OpenVault; Crew does not
+grow a second vault. HUMAN_STOP for live SSH and cloud-agent spawn. Control
+GET `/v1/belt.assign_map` is display-only (POST stays 405). Rebased onto
+CREW-LIFE-HARDEN (#193 / a26f517d) and CREW-FACTS-MD (#192). Local
+`pytest tests/test_crew -q`: **256 passed**. Not a CI claim. Live `:8020`
+needs founder restart.
+
 ## CREW-LIFE-HARDEN spawn/wait/stop/idle honesty — 2026-09-06
 
 Life verbs were already on main (spawn/kill/stop, slash wait/idle/goal, goal

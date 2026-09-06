@@ -1,6 +1,21 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-LIFE-HARDEN**; **CREW-FACTS-MD HUD**
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-ASSIGN**
 
+> **2026-09-06 (CREW-ASSIGN):** Assign-task router under Cortex #116.
+> `GET /crew/assign` is the destination coordinate map (Control display-only).
+> `POST /crew/assign` executes only through Crew adapters. Credentials come
+> from the existing OpenVault-armed Crew router; unarmed refuses; no second
+> vault. HUMAN_STOP blocks live SSH and Cursor cloud spawn.
+> Honesty: **live** = Cortex Crew (in-app spawn/brief) and local model when
+> Ollama/loopback is armed. **preview** = Claude Code (lane declared, no live
+> SSH), Claude App (link/handoff), Cursor Cloud Agent (handoff shape), AirGPT
+> (`:8765` probe, refuse if down). Chrome Tickets panel posts `/crew/assign`.
+> Belt `assign_map` is GET-only. Rebased onto `origin/main` including
+> CREW-LIFE-HARDEN (#193 / a26f517d) and CREW-FACTS-MD (#192). Did not
+> attach #4/#41-#44. Did not kill `:8020`. Local `pytest tests/test_crew -q`
+> **256 passed**. Live `:8020` needs founder restart. Not a GitHub CI claim.
+> Did not write CLAIMS.json.
+>
 > **2026-09-06 (CREW-LIFE-HARDEN):** Grok-Bot-class lifecycle polish on
 > existing Crew life (`life.py` + slash #158 + spawn/stop/kill #142).
 > **Already present:** spawn/kill/stop, smart-idle mailbox, goal mode

@@ -91,6 +91,18 @@
         </div>
         <div id="ticketPane" hidden>
           <div class="block">
+            <h2>Assign</h2>
+            <p class="hint">Crew adapters only. Control GET-displays the map. Control does not POST assign. Unarmed refuses. HUMAN_STOP for value-moving.</p>
+            <div class="life-spawn">
+              <select id="assignDest"></select>
+              <input id="assignName" placeholder="teammate name" />
+              <input id="assignBrief" placeholder="brief" />
+              <input id="assignLane" placeholder="lane (Claude Code)" />
+              <button class="ghost" id="assignGo" type="button">Assign</button>
+            </div>
+            <div id="assignMap" class="empty">loading destinations...</div>
+          </div>
+          <div class="block">
             <h2>Work - Tickets</h2>
             <p class="hint">Claim is Crew /assign (local). Ticket Runner seats CLAIMS. Control does not assign.</p>
             <div id="tickets" class="empty">unread</div>
@@ -1023,6 +1035,39 @@
       $("tickets").querySelectorAll("[data-claim]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.claim, "claim"));
       $("tickets").querySelectorAll("[data-release]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.release, "release"));
     }
+    function renderAssign(body) {
+      const dests = (body && body.destinations) || [];
+      const sel = $("assignDest");
+      if (sel) {
+        const current = sel.value;
+        sel.innerHTML = dests.map((d) => {
+          const label = esc(d.title) + " (" + esc(d.status) + (d.armed ? ", armed" : ", unarmed") + ")";
+          return `<option value="${esc(d.id)}">${label}</option>`;
+        }).join("");
+        if (current && dests.some((d) => d.id === current)) sel.value = current;
+      }
+      const map = $("assignMap");
+      if (!map) return;
+      if (!dests.length) {
+        map.innerHTML = `<div class="empty">No destinations. Control GET /crew/assign is display-only.</div>`;
+        return;
+      }
+      map.innerHTML = dests.map((d) => {
+        const klass = d.status === "live" ? "dest-chip dest-chip--live" : "dest-chip dest-chip--preview";
+        const arm = d.armed ? "armed" : "unarmed";
+        return `<div class="row">${esc(d.title)} <span class="${klass}">${esc(d.status)} ${arm}</span>`
+          + `<small>${esc(d.honesty || d.adapter || "")}</small></div>`;
+      }).join("");
+    }
+    async function loadAssign() {
+      try {
+        const body = await api("/crew/assign");
+        state.assign = body;
+        renderAssign(body);
+      } catch (err) {
+        if ($("assignMap")) $("assignMap").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
     async function checkoutTicket(ticket, act) {
       if (state.claimBusy) {
         toast("Claim in flight. No silent retry.", "warn");
@@ -1213,6 +1258,7 @@
       renderPlugins();
       renderRoutines(routines || []);
       renderTickets(tickets || {});
+      await loadAssign();
       renderDesk(desk);
       renderBelt(belt);
       renderLadder();
@@ -1570,6 +1616,35 @@
         await refreshAgents();
         toast("Spawned " + name + ".");
       } catch (err) { toast(err.message, "bad"); }
+    };
+    $("assignGo").onclick = async () => {
+      const dest = (($("assignDest") && $("assignDest").value) || "crew").trim();
+      const brief = (($("assignBrief") && $("assignBrief").value) || "").trim();
+      const name = (($("assignName") && $("assignName").value) || "Assign").trim() || "Assign";
+      const lane = (($("assignLane") && $("assignLane").value) || "").trim();
+      if (!brief) { toast("Assign needs a brief.", "bad"); return; }
+      if (dest === "crew" && !state.spaceId) { toast("Pick a space first.", "bad"); return; }
+      try {
+        const out = await api("/crew/assign", {
+          method: "POST",
+          body: JSON.stringify({
+            destination: dest,
+            space_id: state.spaceId || "",
+            brief: brief,
+            name: name,
+            lane: lane
+          })
+        });
+        toast(out.destination + " " + (out.executed ? "live" : (out.status || "preview")) + ".", out.ok === false ? "bad" : "ok");
+        $("assignBrief").value = "";
+        await loadAssign();
+        if (dest === "crew") await refreshAgents();
+        const board = await api("/crew/tickets").catch(() => null);
+        if (board) renderTickets(board);
+      } catch (err) {
+        toast(err.message + " - no silent retry.", "bad");
+        await loadAssign();
+      }
     };
     $("clearChat").onclick = async () => {
       if (!state.spaceId) return;
