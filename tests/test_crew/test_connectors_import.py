@@ -15,6 +15,8 @@ def test_connector_catalog_names_netie_owners() -> None:
     assert uacc["connected"] is True
     cursor = next(r for r in rows if r["slug"] == "cursor")
     assert cursor["connected"] is True
+    groq = next(r for r in rows if r["slug"] == "groq")
+    assert groq["armable"] is True
 
 
 def test_parse_markdown_and_rakazo_thread() -> None:

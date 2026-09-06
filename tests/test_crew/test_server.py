@@ -28,6 +28,9 @@ def test_health_and_roles_and_spaces(client) -> None:
     health = client.http.get("/crew/health").json()
     assert health["ok"] is True
     assert health["provider"]["label"] == "explicit"
+    assert health["chosen"]["label"] == "explicit"
+    assert health["chosen"]["connector"]
+    assert health["refused"] is None
     assert health["computer_control"] is False
     assert health["grok_offloaded"] is True
     assert health["grok_autostart"] is False
@@ -184,6 +187,11 @@ def test_ui_index_is_served(client) -> None:
     assert desk["usage"]["llm_calls"] == 0
     assert "id=\"usageChip\"" in page.text
     assert "id=\"routePick\"" in page.text
+    assert "data-arm-slug" in page.text
+    assert "vault-armed" in page.text
+    assert "/crew/connectors/" in page.text
+    assert "unarmed" in page.text
+    assert "via " in page.text
     usage = client.http.get("/crew/usage").json()
     assert usage["llm_calls"] == 0
     assert "tokens" in usage
@@ -233,6 +241,25 @@ def test_pin_and_per_turn_refuse_without_fallback(client) -> None:
     assert msgs[-1]["role"] == "system"
     assert "anthropic" in msgs[-1]["content"]
     client.http.post("/crew/providers", json={"provider": ""})
+
+
+def test_arm_api_connector_fail_closed_when_vault_off(client) -> None:
+    resp = client.http.post("/crew/connectors/groq/arm", json={"armed": True})
+    assert resp.status_code == 409
+    assert "no silent fallback" in resp.json()["detail"]
+    grok = client.http.post("/crew/connectors/grok/arm", json={"armed": True})
+    assert grok.status_code == 409
+    assert "OFFLOADED" in grok.json()["detail"]
+    unknown = client.http.post("/crew/connectors/not-a-plug/arm", json={"armed": True})
+    assert unknown.status_code == 409
+
+
+def test_providers_surface_chosen_route(client) -> None:
+    body = client.http.get("/crew/providers").json()
+    assert body["chosen"]["label"] == "explicit"
+    assert body["chosen"]["model"] == "test/fake-model"
+    assert body["refused"] is None
+    assert body["chain"][0]["armed"] is True
 
 
 def test_computer_control_arm_is_refused(client) -> None:

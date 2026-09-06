@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,183 @@ _ENV_TO_PROVIDER: dict[str, str] = {
     "MISTRAL_API_KEY": "mistral",
 }
 
+_ENV_TO_LABEL: dict[str, str] = {
+    "ANTHROPIC_API_KEY": "anthropic",
+    "OPENROUTER_API_KEY": "openrouter",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "OPENAI_API_KEY": "openai-compatible",
+    "CURSOR_API_KEY": "cursor",
+    "XAI_API_KEY": "xai",
+    "GROQ_API_KEY": "groq",
+    "GOOGLE_API_KEY": "google",
+    "CEREBRAS_API_KEY": "cerebras",
+    "MISTRAL_API_KEY": "mistral",
+}
+
+_PROVIDER_TO_LABEL: dict[str, str] = {
+    "anthropic": "anthropic",
+    "openrouter": "openrouter",
+    "openai": "openai-compatible",
+    "deepseek": "deepseek",
+    "groq": "groq",
+    "google": "google",
+    "gemini": "google",
+    "cerebras": "cerebras",
+    "mistral": "mistral",
+    "xai": "xai",
+    "cursor": "cursor",
+}
+
+_VAULT_CACHE: tuple[float, tuple[dict[str, Any], ...]] = (0.0, ())
+
+
+def reset_vault_cache() -> None:
+    """Test hook. Arm/upsert also busts this so a new key is visible."""
+    global _VAULT_CACHE
+    _VAULT_CACHE = (0.0, ())
+
+
+def _crew_label(raw: dict[str, Any]) -> str:
+    env_key = str(raw.get("env_key") or "").strip()
+    if env_key in _ENV_TO_LABEL:
+        return _ENV_TO_LABEL[env_key]
+    label = str(raw.get("label") or "").strip()
+    if label in _ENV_TO_LABEL:
+        return _ENV_TO_LABEL[label]
+    provider = str(raw.get("provider") or "").strip().lower()
+    return _PROVIDER_TO_LABEL.get(provider, "")
+
+
+def _public_vault_row(raw: Any) -> dict[str, Any] | None:
+    """Strip secrets. Unknown shapes are dropped, not invented."""
+    if not isinstance(raw, dict):
+        return None
+    kid = str(raw.get("id") or "").strip()
+    if not kid:
+        return None
+    enabled = raw.get("enabled") is not False
+    return {
+        "id": kid,
+        "label": str(raw.get("label") or "").strip(),
+        "provider": str(raw.get("provider") or "").strip(),
+        "env_key": str(raw.get("env_key") or "").strip(),
+        "enabled": enabled,
+        "crew_label": _crew_label(raw),
+    }
+
+
+def list_vault_keys(
+    *, timeout: float = 1.5, ttl: float = 5.0, fresh: bool = False
+) -> list[dict[str, Any]]:
+    """Public vault rows. Never includes secret values. Empty if unarmed/down."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return []
+    global _VAULT_CACHE
+    now = time.monotonic()
+    if not fresh and _VAULT_CACHE[0] > 0 and now - _VAULT_CACHE[0] < ttl:
+        return [dict(row) for row in _VAULT_CACHE[1]]
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(f"{base_url()}/api/keys")
+        if resp.status_code != 200:
+            _VAULT_CACHE = (now, ())
+            return []
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001 - vault body is untrusted
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+    except httpx.HTTPError:
+        _VAULT_CACHE = (now, ())
+        return []
+    raw_keys = data.get("keys") if isinstance(data, dict) else None
+    if not isinstance(raw_keys, list):
+        raw_keys = []
+    out: list[dict[str, Any]] = []
+    for raw in raw_keys:
+        pub = _public_vault_row(raw)
+        if pub is not None:
+            out.append(pub)
+    _VAULT_CACHE = (now, tuple(out))
+    return [dict(row) for row in out]
+
+
+def vault_sources() -> dict[str, dict[str, Any]]:
+    """crew_label -> public vault row. Enabled wins when duplicates exist."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in list_vault_keys():
+        label = str(row.get("crew_label") or "")
+        if not label:
+            continue
+        prev = out.get(label)
+        if prev is None or (row.get("enabled") and not prev.get("enabled")):
+            out[label] = row
+    return out
+
+
+def vault_armed_labels() -> set[str]:
+    return {label for label, row in vault_sources().items() if row.get("enabled")}
+
+
+def arm_source(label: str, armed: bool, *, slug: str | None = None) -> dict[str, Any]:
+    """Enable/disable matching OpenVault keys. Fail-closed; no silent fallback."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0 (no silent fallback)", "armed": False}
+    needle = (label or "").strip().lower()
+    if needle in {"openai", "openai-compatible"}:
+        needle = "openai-compatible"
+    if needle in {"ov", "vault"}:
+        needle = "openvault"
+    if needle == "openvault":
+        return {
+            "ok": False,
+            "detail": "OpenVault is the vault host, not an API key row (no silent fallback)",
+            "armed": False,
+        }
+    rows = [r for r in list_vault_keys(fresh=True) if r.get("crew_label") == needle]
+    if not rows:
+        return {
+            "ok": False,
+            "detail": f"connector {slug or needle} has no OpenVault key (no silent fallback)",
+            "armed": False,
+        }
+    patched: list[str] = []
+    errors: list[str] = []
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            for row in rows:
+                resp = client.patch(
+                    f"{base_url()}/api/keys/{row['id']}",
+                    json={"enabled": bool(armed)},
+                )
+                if resp.status_code >= 400:
+                    errors.append(f"{row['id']}: HTTP {resp.status_code}")
+                else:
+                    patched.append(str(row["id"]))
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "detail": f"{type(exc).__name__} (no silent fallback)",
+            "armed": False,
+        }
+    reset_vault_cache()
+    if errors and not patched:
+        return {
+            "ok": False,
+            "detail": "; ".join(errors) + " (no silent fallback)",
+            "armed": False,
+        }
+    return {
+        "ok": not errors,
+        "armed": bool(armed),
+        "slug": slug or needle,
+        "label": needle,
+        "ids": patched,
+        "detail": "armed" if armed else "disarmed",
+        "errors": errors,
+    }
+
 
 def upsert_env_key(env_key: str, secret: str) -> dict[str, Any]:
     """Store one secret in OpenVault forever. Never logs the secret."""
@@ -182,8 +360,11 @@ def upsert_env_key(env_key: str, secret: str) -> dict[str, Any]:
         data = resp.json()
         first = (data.get("results") or [{}])[0]
         key = first.get("key") or {}
+        ok = bool(data.get("ok") and first.get("ok"))
+        if ok:
+            reset_vault_cache()
         return {
-            "ok": bool(data.get("ok") and first.get("ok")),
+            "ok": ok,
             "label": env_key,
             "id": key.get("id"),
             "provider": key.get("provider") or provider,

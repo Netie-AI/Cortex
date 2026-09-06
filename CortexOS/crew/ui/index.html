@@ -226,7 +226,7 @@
   <div class="scrim" id="settings">
     <div class="dialog">
       <h2>Providers</h2>
-      <p class="hint">Paste a live key. Crew writes it to OpenVault forever and uses FreeRoute for every turn. Values are never shown back.</p>
+      <p class="hint">Paste a live key. Crew writes it to OpenVault forever and does not keep a crew copy. FreeRoute is preferred when the vault is live. Values are never shown back. Unarmed sources refuse; no silent fallback.</p>
       <form id="keysForm"></form>
       <div class="chain" id="providerChain"></div>
       <div class="ladder">
@@ -453,7 +453,10 @@
       const meta = m.meta || {};
       const env = meta.envelope || {};
       if (env.badge) return `<span class="badge">${esc(env.badge)}${env.audit_id ? " " + esc(env.audit_id) : ""}</span>`;
-      if (meta.model) return `<span class="badge">${esc(meta.provider || "")} ${esc(meta.model)}</span>`;
+      if (meta.model) {
+        const via = meta.connector ? (" via " + meta.connector) : "";
+        return `<span class="badge">${esc(meta.provider || "")} ${esc(meta.model)}${esc(via)}</span>`;
+      }
       return "";
     }
     function msgNode(m) {
@@ -635,23 +638,30 @@
       if (!chip) return;
       chip.textContent = "usage " + calls + " calls / " + tokens + " tok / $" + Number(cost).toFixed(4);
     }
-    function setProvider(active, chain) {
-      $("providerChip").textContent = active ? (active.label + " / " + active.model) : "no provider configured";
+    function setProvider(active, chain, chosen) {
+      const shown = chosen || active;
+      if (!shown) {
+        $("providerChip").textContent = "no provider configured (unarmed)";
+      } else {
+        const via = shown.connector ? (" via " + shown.connector) : "";
+        $("providerChip").textContent = shown.label + " / " + shown.model + via;
+      }
       const pick = $("routePick");
       const rows = chain || [];
       if (pick) {
         const current = state.routeProvider || (active && active.label) || "";
         pick.innerHTML = `<option value="">default</option>` + rows.map((p) =>
-          `<option value="${esc(p.label)}" ${p.label === current ? "selected" : ""} ${p.configured ? "" : "disabled"}>${esc(p.label)}${p.configured ? "" : " (unset)"}</option>`
+          `<option value="${esc(p.label)}" ${p.label === current ? "selected" : ""} ${p.configured ? "" : "disabled"}>${esc(p.label)}${p.configured ? "" : " (unarmed)"}</option>`
         ).join("");
         if (current) pick.value = current;
         pick.onchange = () => { state.routeProvider = pick.value || ""; };
       }
       if (chain) {
-        $("providerChain").innerHTML = chain.map((p) =>
-          `<button type="button" class="chain-pick${p.active ? " on" : ""}" data-label="${esc(p.label)}" ${p.configured ? "" : "disabled"}>`
-          + `${esc(p.label)} ${p.configured ? "ready" : "unset"} - ${esc(p.model)}</button>`
-        ).join("");
+        $("providerChain").innerHTML = chain.map((p) => {
+          const via = p.armed_via === "openvault" || p.armed_via === "both" ? "vault-armed" : (p.configured ? "ready" : "unarmed");
+          return `<button type="button" class="chain-pick${p.active ? " on" : ""}" data-label="${esc(p.label)}" ${p.configured ? "" : "disabled"}>`
+            + `${esc(p.label)} ${via} - ${esc(p.model)}</button>`;
+        }).join("");
         $("providerChain").querySelectorAll(".chain-pick").forEach((el) => {
           el.onclick = () => pinProvider(el.dataset.label);
         });
@@ -660,7 +670,7 @@
     async function pinProvider(label) {
       try {
         const saved = await api("/crew/providers", { method: "POST", body: JSON.stringify({ provider: label }) });
-        setProvider(saved.active, saved.chain);
+        setProvider(saved.active, saved.chain, saved.chosen);
         state.routeProvider = label;
         if (saved.refused) toast(saved.refused, "bad");
         else toast("Route pinned: " + label + ". No silent fallback.");
@@ -851,11 +861,36 @@
     function renderPlugins() {
       const q = ($("pluginSearch").value || "").toLowerCase();
       const rows = state.plugins.filter((p) => !q || (p.name + p.slug + p.layer).toLowerCase().indexOf(q) >= 0);
-      $("pluginList").innerHTML = rows.map((p) =>
-        `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
-         <div style="flex:1;min-width:0">${esc(p.name)}<small style="display:block;color:#8b91a3">${esc(p.slug)} - ${esc(p.layer)}</small></div>
-         <div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : esc(p.detail || "mapped")}</div></div>`
-      ).join("");
+      $("pluginList").innerHTML = rows.map((p) => {
+        const status = p.armable
+          ? `<label class="empty"><input type="checkbox" data-arm-slug="${esc(p.slug)}" ${p.armed ? "checked" : ""} /> arm</label>`
+          : `<div class="${p.connected ? "on" : "empty"}">${p.connected ? "connected" : esc(p.detail || "mapped")}</div>`;
+        const via = p.armed_via ? `<small style="display:block;color:#8b91a3">${esc(p.armed_via)}${p.detail ? " - " + esc(p.detail) : ""}</small>` : `<small style="display:block;color:#8b91a3">${esc(p.slug)} - ${esc(p.layer)}</small>`;
+        return `<div class="plugin-row"><div class="plugin-mark">${esc((p.name || "?")[0])}</div>
+         <div style="flex:1;min-width:0">${esc(p.name)}${via}</div>
+         ${status}</div>`;
+      }).join("");
+      $("pluginList").querySelectorAll("[data-arm-slug]").forEach((el) => {
+        el.onchange = () => armConnector(el.dataset.armSlug, el.checked, el);
+      });
+    }
+    async function armConnector(slug, armed, el) {
+      try {
+        const out = await api("/crew/connectors/" + encodeURIComponent(slug) + "/arm", {
+          method: "POST",
+          body: JSON.stringify({ armed: !!armed })
+        });
+        if (out.catalog) {
+          state.plugins = out.catalog;
+          renderPlugins();
+        }
+        const prov = await api("/crew/providers");
+        setProvider(prov.active, prov.chain, prov.chosen);
+        toast(out.detail || (armed ? "Armed via OpenVault." : "Disarmed."), out.ok === false ? "bad" : "");
+      } catch (err) {
+        toast(err.message, "bad");
+        if (el) el.checked = !armed;
+      }
     }
     function ticketRow(key, seated, mine, extra) {
       const holder = mine && (mine.worker || mine.agent || "");
@@ -1074,7 +1109,7 @@
       renderSkills(state.skills);
       state.keyFields = keys.fields || [];
       renderKeyForm(state.keyFields, keys.status || {});
-      setProvider(prov.active, prov.chain);
+      setProvider(prov.active, prov.chain, prov.chosen);
       paintUsage((health && health.usage) || (desk && desk.usage));
       const ov = health.openvault || {};
       const eng = health.engine || {};
@@ -1601,7 +1636,7 @@
       });
       try {
         const saved = await api("/crew/keys", { method: "POST", body: JSON.stringify({ keys: body }) });
-        setProvider(saved.active, saved.chain);
+        setProvider(saved.active, saved.chain, saved.chosen);
         renderKeyForm(state.keyFields, saved.status);
         $("keysForm").querySelectorAll("input").forEach((el) => { el.value = ""; });
         $("settings").classList.remove("open");

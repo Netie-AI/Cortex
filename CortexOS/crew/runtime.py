@@ -1127,7 +1127,8 @@ class CrewRuntime:
         brief: str | None = None,
     ) -> None:
         space = self.store.get_space(ctx.space_id) or {}
-        model, api_base, label = self._provider(ctx, space, row)
+        route = self._provider(ctx, space, row)
+        model, api_base, label = route.model, route.api_base, route.label
         self._set_status(row["id"], life.STATUS_ACTIVE)
         last_user = ""
         for m in reversed(self.store.list_messages(ctx.space_id, limit=10_000)):
@@ -1263,6 +1264,9 @@ class CrewRuntime:
                     "model": upstream,
                     "route": model,
                     "provider": label,
+                    "source": route.source,
+                    "connector": route.connector,
+                    "armed_via": route.armed_via,
                     "run_id": ctx.id,
                     "cost_usd": ctx.stats.get("cost_usd"),
                     "prompt_tokens": ctx.stats.get("prompt_tokens"),
@@ -2078,25 +2082,20 @@ class CrewRuntime:
         ctx: RunContext,
         space: dict[str, Any],
         row: dict[str, Any] | None = None,
-    ) -> tuple[str, str | None, str]:
+    ) -> llm_mod.Route:
         agent_model = str((row or {}).get("model") or "").strip()
         if agent_model:
             if "grok" in agent_model.lower() and "fast" in agent_model.lower():
                 agent_model = "openai/grok-4.6"
-            return agent_model, None, "agent-override"
+            return llm_mod.resolve_route(model=agent_model)
         turn_p = (ctx.turn_provider or "").strip()
         turn_m = (ctx.turn_model or "").strip()
         if turn_p or turn_m:
-            route = llm_mod.resolve_route(provider=turn_p or None, model=turn_m or None)
-            return route.model, route.api_base, route.label
+            return llm_mod.resolve_route(provider=turn_p or None, model=turn_m or None)
         override = (space.get("model") or "").strip()
         if override:
-            if override.startswith("openvault/"):
-                route = llm_mod.resolve_route(provider="openvault", model=override)
-                return route.model, route.api_base, route.label
-            return override, None, "space-override"
-        route = llm_mod.resolve_route()
-        return route.model, route.api_base, route.label
+            return llm_mod.resolve_route(model=override)
+        return llm_mod.resolve_route()
 
     def _handle(self, row: dict[str, Any]) -> AgentHandle:
         handle = self._handles.get(row["id"])

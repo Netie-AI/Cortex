@@ -55,6 +55,16 @@ class Route:
     api_base: str | None
     source: str
     connector: str
+    armed_via: str = ""
+
+    def as_public(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "model": self.model,
+            "source": self.source,
+            "connector": self.connector,
+            "armed_via": self.armed_via,
+        }
 
 
 _PROVIDER_ALIASES = {
@@ -63,6 +73,21 @@ _PROVIDER_ALIASES = {
     "vault": "openvault",
     "google": "google",
     "gemini": "google",
+}
+
+_MODEL_PREFIX_TO_LABEL = {
+    "openvault": "openvault",
+    "anthropic": "anthropic",
+    "openrouter": "openrouter",
+    "deepseek": "deepseek",
+    "openai": "openai-compatible",
+    "xai": "xai",
+    "groq": "groq",
+    "gemini": "google",
+    "google": "google",
+    "cerebras": "cerebras",
+    "mistral": "mistral",
+    "ollama": "ollama",
 }
 
 
@@ -153,8 +178,23 @@ def _norm_provider(label: str) -> str:
     return _PROVIDER_ALIASES.get(raw, raw)
 
 
-def _connector_for(label: str) -> str:
-    return "openvault" if label == "openvault" else "litellm"
+def _label_for_model(model: str) -> str:
+    raw = (model or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("openvault/"):
+        return "openvault"
+    if "grok" in raw.lower():
+        return "cursor"
+    prefix = raw.split("/", 1)[0].lower()
+    return _MODEL_PREFIX_TO_LABEL.get(prefix, "")
+
+
+def _connector_for(row: Any) -> str:
+    conn = getattr(row, "connector", None)
+    if conn:
+        return str(conn)
+    return "openvault" if row.label == "openvault" else "litellm"
 
 
 def _refuse_unconfigured(row: Any, pick: str) -> None:
@@ -166,12 +206,13 @@ def _refuse_unconfigured(row: Any, pick: str) -> None:
         detail = str(healthz().get("detail") or "not live")
         raise LLMError(f"OpenVault connector refused: {detail} (no silent fallback)")
     raise LLMError(
-        f"provider '{pick}' is not configured ({row.source}); no silent fallback"
+        f"provider '{pick}' is not configured ({row.source or 'unarmed'}); no silent fallback"
     )
 
 
 def _assert_connector(row: Any) -> None:
-    if row.label == "openvault":
+    connector = _connector_for(row)
+    if connector == "openvault" or row.label == "openvault":
         from CortexOS.crew.openvault import require_live
 
         require_live()
@@ -180,12 +221,32 @@ def _assert_connector(row: Any) -> None:
     from CortexOS.crew.connectors import require as require_connector
 
     slug = "openai" if row.label == "openai-compatible" else row.label
-    if slug in {"explicit", "ollama", "cursor"}:
+    if slug in {"explicit", "ollama"}:
         return
     try:
         require_connector(slug)
     except ConnectorError as exc:
         raise LLMError(str(exc)) from exc
+
+
+def _route_from_row(row: Any, model_s: str) -> Route:
+    connector = _connector_for(row)
+    chosen = model_s or row.model
+    if connector == "openvault" and not chosen.startswith("openvault/"):
+        if row.label == "cursor" and not model_s:
+            from CortexOS.crew.openvault import cursor_model
+
+            chosen = "openvault/" + cursor_model()
+        else:
+            chosen = "openvault/" + chosen.removeprefix("openvault/")
+    return Route(
+        label=row.label,
+        model=chosen,
+        api_base=None if connector == "openvault" else row.api_base,
+        source=row.source,
+        connector=connector,
+        armed_via=str(getattr(row, "armed_via", "") or ""),
+    )
 
 
 def resolve_route(*, provider: str | None = None, model: str | None = None) -> Route:
@@ -201,6 +262,17 @@ def resolve_route(*, provider: str | None = None, model: str | None = None) -> R
     model_s = _rewrite_grok_fast(model or "")
     chain = resolve_providers()
 
+    if not pick and model_s:
+        inferred = _label_for_model(model_s)
+        if inferred:
+            pick = inferred
+        else:
+            explicit = next((p for p in chain if p.label == "explicit" and p.configured), None)
+            if explicit is not None and model_s == explicit.model:
+                pick = "explicit"
+            else:
+                raise LLMError(f"unarmed model '{model_s}' (no silent fallback)")
+
     if pick:
         row = next((p for p in chain if p.label.lower() == pick), None)
         if row is None:
@@ -208,36 +280,7 @@ def resolve_route(*, provider: str | None = None, model: str | None = None) -> R
             raise LLMError(f"unknown provider '{provider}' (known: {known}); no silent fallback")
         _refuse_unconfigured(row, pick)
         _assert_connector(row)
-        chosen = model_s or row.model
-        if row.label == "openvault" and not chosen.startswith("openvault/"):
-            chosen = "openvault/" + chosen.removeprefix("openvault/")
-        return Route(
-            label=row.label,
-            model=chosen,
-            api_base=row.api_base,
-            source=row.source,
-            connector=_connector_for(row.label),
-        )
-
-    if model_s:
-        if model_s.startswith("openvault/"):
-            from CortexOS.crew.openvault import require_live
-
-            require_live()
-            return Route(
-                label="openvault",
-                model=model_s,
-                api_base=None,
-                source="turn-override",
-                connector="openvault",
-            )
-        return Route(
-            label="turn-override",
-            model=model_s,
-            api_base=None,
-            source="turn-override",
-            connector="litellm",
-        )
+        return _route_from_row(row, model_s)
 
     active = active_provider(chain)
     if active is None:
@@ -246,13 +289,18 @@ def resolve_route(*, provider: str | None = None, model: str | None = None) -> R
             " start OpenVault on :5000, or run Ollama); no silent fallback"
         )
     _assert_connector(active)
-    return Route(
-        label=active.label,
-        model=active.model,
-        api_base=active.api_base,
-        source=active.source,
-        connector=_connector_for(active.label),
-    )
+    return _route_from_row(active, "")
+
+
+def chosen_public(
+    *, provider: str | None = None, model: str | None = None
+) -> dict[str, object]:
+    """HUD/API snapshot of the host this turn would use. Null chosen if unarmed."""
+    try:
+        route = resolve_route(provider=provider, model=model)
+        return {"chosen": route.as_public(), "refused": None}
+    except LLMError as exc:
+        return {"chosen": None, "refused": str(exc)}
 
 
 _configured = False

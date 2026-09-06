@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-ROUTER-HARDEN OpenVault/FreeRoute multi-API arming — 2026-09-06
+
+Crew inference sources can be armed from OpenVault without keeping API secrets
+in `data/crew/keys.json`. Vault-armed hosts (Groq/Google/OpenRouter/...) show
+as configured, route through FreeRoute when the vault is live, and refuse with
+a reason when unarmed. `GET /crew/providers` and `/crew/health` stamp `chosen`
+(label/model/source/connector). Plugins arm checkboxes call
+`POST /crew/connectors/{slug}/arm`. Grok Bot stays OFFLOADED. Local
+`pytest tests/test_crew -q` 231 passed. Parent #116. Does not prove live `:8020`.
+
 ## RSF-06 distill harness (myn8n/LC/LF/GenCFSM → Netie-native) — 2026-09-06
 
 In-process `run_distill` reads an options-class recipe, studies names-only analog
