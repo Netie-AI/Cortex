@@ -10,7 +10,15 @@ import pytest
 from CortexOS.crew.llm import LLMResult
 from CortexOS.crew.runtime import RunContext
 from CortexOS.crew.server import create_app
-from CortexOS.crew.wakes import KIND_EVENT, KIND_TIMER, STATE_DUE, STATE_FIRED, WakeStore, expand_wake_note
+from CortexOS.crew.wakes import (
+    KIND_EVENT,
+    KIND_TIMER,
+    STATE_DUE,
+    STATE_FIRED,
+    WakeStore,
+    expand_wake_note,
+    is_semantic_layer_wake,
+)
 from tests.test_crew.conftest import FakeLLM, wait_run_done
 
 
@@ -36,6 +44,9 @@ def test_catalog_shorthand_expands_to_cortex_ask_catalog() -> None:
     assert expand_wake_note("24/7") == SEMANTIC_LAYER_WAKE_NOTE
     assert "cortex_ask" in expand_wake_note("insight automation")
     assert expand_wake_note("call me") == "call me"
+    assert is_semantic_layer_wake("catalog")
+    assert is_semantic_layer_wake("[wake] " + SEMANTIC_LAYER_WAKE_NOTE)
+    assert not is_semantic_layer_wake("call me")
 
 
 def test_completion_wake_marks_due(tmp_path: Path) -> None:
@@ -84,6 +95,36 @@ async def test_due_timer_fires_into_transcript(settings, crew_env) -> None:
         await wait_run_done(crew.runtime, space["id"])
         texts = [m["content"] for m in crew.store.list_messages(space["id"])]
         assert any("[wake]" in t and "call back" in t for t in texts)
+    finally:
+        await crew.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_catalog_wake_posts_engine_catalog_without_llm(settings, crew_env, monkeypatch) -> None:
+    fake = FakeLLM()
+    app = create_app(settings, llm_chat=fake)
+    crew = app.state.crew
+
+    async def catalog_ask(question: str) -> dict:
+        assert "metrics" in question
+        return {
+            "ok": True,
+            "answer": "Here is what you can ask from the DMS semantic layer:",
+            "badge": "catalog",
+        }
+
+    monkeypatch.setattr(crew.runtime.bridge, "ask", catalog_ask)
+    await crew.startup()
+    try:
+        space = crew.store.create_space("Catalog")
+        past = datetime.now(timezone.utc) - timedelta(seconds=1)
+        crew.wakes.add_timer(space["id"], past, note=expand_wake_note("catalog"))
+        fired = await crew.fire_due_wakes()
+        assert fired and "metrics" in fired[0]["note"]
+        texts = [m["content"] for m in crew.store.list_messages(space["id"])]
+        assert any("semantic layer" in t for t in texts)
+        assert any("badge: catalog" in t for t in texts)
+        assert fake.manager == []
     finally:
         await crew.shutdown()
 

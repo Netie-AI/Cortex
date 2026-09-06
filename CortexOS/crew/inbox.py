@@ -51,15 +51,16 @@ def status(*, limit: int = 8) -> dict[str, Any]:
     return fetch(limit=limit)
 
 
-def fetch(limit: int = 8) -> dict[str, Any]:
+def fetch(limit: int = 8, *, timeout: float | None = None) -> dict[str, Any]:
     user = os.environ.get("GMAIL_IMAP_USER", "").strip()
-    secret = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+    secret = os.environ.get("GMAIL_APP_PASSWORD", "").strip().replace(" ", "")
     host = os.environ.get("GMAIL_IMAP_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST
+    wait = 1.5 if timeout is None else float(timeout)
     if not user or not secret:
         return status()
     client: imaplib.IMAP4_SSL | None = None
     try:
-        client = imaplib.IMAP4_SSL(host, timeout=1.5)
+        client = imaplib.IMAP4_SSL(host, timeout=wait)
         client.login(user, secret)
         client.select("INBOX", readonly=True)
         _typ, data = client.search(None, "ALL")
@@ -90,7 +91,11 @@ def fetch(limit: int = 8) -> dict[str, Any]:
             "ok": False,
             "connected": False,
             "messages": [],
-            "detail": f"IMAP failed ({type(exc).__name__}). Drop .eml instead. Crew never sends.",
+            "detail": (
+                f"IMAP failed ({type(exc).__name__}: {str(exc)[:160]}). "
+                "Use a Google App Password (16 chars), not the Google account password. "
+                "Crew never sends."
+            ),
         }
     finally:
         if client is not None:

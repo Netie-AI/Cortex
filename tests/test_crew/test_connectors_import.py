@@ -99,6 +99,49 @@ def test_github_list_prs_uses_injected_runner(monkeypatch) -> None:
     assert "auto-merge" in out["law"].lower() or "Do not auto-merge" in out["law"]
 
 
+def test_github_pr_diff_uses_injected_runner(monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+
+    class Result:
+        def __init__(self, code: int, stdout: str) -> None:
+            self.returncode = code
+            self.stdout = stdout
+            self.stderr = ""
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        assert "pr" in argv and "diff" in argv
+        assert "12" in argv
+        return Result(0, "+hello\n")
+
+    out = github_mod.pr_diff(number=12, repo="acme/cortex", runner=runner)
+    assert out["ok"] is True
+    assert "+hello" in out["diff"]
+
+
+def test_github_create_pr_uses_injected_runner(monkeypatch) -> None:
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+
+    class Result:
+        def __init__(self, code: int, stdout: str) -> None:
+            self.returncode = code
+            self.stdout = stdout
+            self.stderr = ""
+
+    def runner(argv, timeout=20):  # noqa: ANN001, ARG001
+        assert "pr" in argv and "create" in argv
+        assert "--title" in argv
+        return Result(0, "https://github.com/acme/cortex/pull/99\n")
+
+    out = github_mod.create_pr(title="crew drop", runner=runner)
+    assert out["ok"] is True
+    assert "/pull/99" in out["url"]
+    assert "auto-merge" in out["law"].lower()
+
+
 def test_github_list_org_repos_uses_injected_runner(monkeypatch) -> None:
     from CortexOS.crew import github as github_mod
 
@@ -137,6 +180,24 @@ def test_inbox_without_creds_tells_operator_to_drop(monkeypatch) -> None:
     assert st["connected"] is False
     assert "Drop .eml" in st["detail"]
     assert "never sends" in st["detail"].lower()
+
+
+def test_inbox_fetch_timeout_is_opt_in(monkeypatch) -> None:
+    from CortexOS.crew import inbox as inbox_mod
+
+    seen: list[float] = []
+
+    class Boom:
+        def __init__(self, host, timeout=1.5):  # noqa: ARG002
+            seen.append(timeout)
+            raise OSError("skip")
+
+    monkeypatch.setenv("GMAIL_IMAP_USER", "a@example.test")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "secret")
+    monkeypatch.setattr(inbox_mod.imaplib, "IMAP4_SSL", Boom)
+    out = inbox_mod.fetch(timeout=20.0)
+    assert seen == [20.0]
+    assert out["connected"] is False
 
 
 
@@ -194,6 +255,24 @@ def test_github_list_prs_fail_closes_hung_gh(monkeypatch) -> None:
     assert seen
     assert all(t == github_mod.GH_WAIT_S for t in seen)
     assert github_mod.GH_WAIT_S <= 1.5
+
+
+def test_github_list_prs_scheduled_timeout_is_opt_in(monkeypatch) -> None:
+    import subprocess
+
+    from CortexOS.crew import github as github_mod
+
+    monkeypatch.setenv("CREW_LIVE_PROBES", "1")
+    monkeypatch.setenv("CREW_GH_REPOS", "acme/a")
+    seen: list[float] = []
+
+    def capture(argv, timeout=20):  # noqa: ANN001, ARG001
+        seen.append(timeout)
+        raise subprocess.TimeoutExpired(cmd="gh", timeout=timeout)
+
+    out = github_mod.list_prs(runner=capture, timeout=20.0)
+    assert seen == [20.0]
+    assert out["ok"] is False
     assert out["ok"] is False
     assert out["prs"] == []
     assert "TimeoutExpired" in (out.get("detail") or "")

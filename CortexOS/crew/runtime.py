@@ -259,6 +259,19 @@ class CrewRuntime:
         msg = self.store.add_message(space_id, "user", text)
         self.bus.emit(space_id, "message", {"message": msg})
 
+        from CortexOS.crew.wakes import is_semantic_layer_wake
+
+        if is_semantic_layer_wake(text):
+            envelope = await self.bridge.ask(
+                "what metrics are available in the data"
+            )
+            answer = str(envelope.get("answer") or "").strip() or "(empty catalog)"
+            badge = envelope.get("badge") or envelope.get("layer") or ""
+            body = answer if not badge else f"{answer}\n\nbadge: {badge}"
+            sysmsg = self.store.add_message(space_id, "assistant", body)
+            self.bus.emit(space_id, "message", {"message": sysmsg})
+            return {"ok": bool(envelope.get("ok")), "catalog": True, "badge": badge}
+
         space = self.store.get_space(space_id)
         if space is None:
             return {"error": "unknown space"}

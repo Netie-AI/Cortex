@@ -46,6 +46,17 @@ def expand_wake_note(note: str) -> str:
     return (note or "").strip()
 
 
+def is_semantic_layer_wake(note: str) -> bool:
+    """True when a wake (or [wake] transcript line) is the 24/7 catalog turn."""
+    raw = (note or "").strip()
+    if raw.lower().startswith("[wake] "):
+        raw = raw[7:].strip()
+    low = raw.lower()
+    if low in SEMANTIC_LAYER_ALIASES:
+        return True
+    return raw == SEMANTIC_LAYER_WAKE_NOTE
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
