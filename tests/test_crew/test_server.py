@@ -112,6 +112,7 @@ def test_ui_index_is_served(client) -> None:
     assert "Standing approvals" in page.text
     assert "one-off" in page.text
     assert "circuit-breaker" in page.text
+    assert "/crew/approvals" in page.text
     assert "Does not kill Manager" in page.text
     assert "Claim" in page.text
     assert "Release" in page.text
@@ -673,3 +674,39 @@ def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:
     tape = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
     assert tape[0]["meta"]["a2a"]["kind"] == a2a.ASK
     assert tape[-1]["meta"]["a2a"]["status"] == a2a.DEAD
+
+
+def test_approvals_ladder_is_server_sot(client) -> None:
+    snap = client.http.get("/crew/approvals").json()
+    assert snap["mode"] == "one-off"
+    assert snap["allow"] == {}
+    assert "circuit-breaker" in snap["law"]
+    standing = client.http.put("/crew/approvals", json={"mode": "standing"}).json()
+    assert standing["mode"] == "standing"
+    bad = client.http.put("/crew/approvals", json={"mode": "always"})
+    assert bad.status_code == 400
+
+    space = client.http.post("/crew/spaces", json={"title": "HQ"}).json()
+    pending = client.crew.store.create_confirm(
+        space["id"], run_id=None, agent_id=None, tool="uacc.click", args={"x": 1}
+    )
+    decided = client.http.post(
+        f"/crew/confirms/{pending['id']}", json={"approved": True}
+    ).json()
+    assert decided["approvals"]["allow"]["uacc.click"] == "standing"
+
+    for _ in range(3):
+        row = client.crew.store.create_confirm(
+            space["id"], run_id=None, agent_id=None, tool="uacc.click", args={}
+        )
+        client.http.post(f"/crew/confirms/{row['id']}", json={"approved": False})
+    tripped = client.http.get("/crew/approvals").json()
+    assert tripped["mode"] == "one-off"
+    assert "uacc.click" in tripped["circuit"]
+    assert "uacc.click" not in tripped["allow"]
+
+    revoked = client.http.post("/crew/approvals/revoke", json={}).json()
+    assert revoked["allow"] == {}
+    assert revoked["circuit"] == {}
+    assert revoked["mode"] == "one-off"
+

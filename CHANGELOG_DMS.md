@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-POLICY-STANDING server ladder on CortexOS/crew — 2026-09-06
+
+Standing allowlist / session / one-off from Settings is Crew policy SoT, not
+localStorage. `GET|PUT /crew/approvals` and `POST /crew/approvals/revoke` hold
+mode + standing + circuit; confirm approve/deny records grants and deny streaks.
+`policy.decide` / `decide_with_approvals` skip per-call confirm only when a
+session or standing grant covers the tool. Three denies trip the circuit-breaker
+(standing revoked). Per-agent grants only tighten the crew floor. Parent #116.
+Control untouched. Did not mint a second epic.
+
 ## RSF-04 orchestrator (research→segment→classify→filter) — 2026-09-06
 
 In-process `run_rsf` emits per-stage RSF-02 wire artifacts (CERTIFIED|ABSTAIN|REFUSE).

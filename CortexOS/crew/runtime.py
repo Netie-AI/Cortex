@@ -24,6 +24,7 @@ from typing import Any
 from CortexOS.crew import a2a, detect, life, policy, roles
 from CortexOS.crew import llm as llm_mod
 from CortexOS.crew import memory as crew_memory
+from CortexOS.crew.approvals import ApprovalBook
 from CortexOS.crew.config import CrewSettings, active_provider
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.events import EventBus
@@ -140,12 +141,14 @@ class CrewRuntime:
         mcp: MCPManager,
         bridge: EngineBridge,
         llm_chat: Any = None,
+        approvals: ApprovalBook | None = None,
     ) -> None:
         self.store = store
         self.bus = bus
         self.settings = settings
         self.mcp = mcp
         self.bridge = bridge
+        self.approvals = approvals or ApprovalBook()
         self._llm = llm_chat or llm_mod.chat
         self._handles: dict[str, AgentHandle] = {}
         self.switch = a2a.Switchboard()
@@ -769,8 +772,18 @@ class CrewRuntime:
     def decide_confirm(
         self, confirm_id: str, approved: bool, *, takeover: bool = False
     ) -> dict[str, Any] | None:
+        prior = self.store.get_confirm(confirm_id)
+        if prior is None:
+            return None
+        if str(prior.get("status") or "") != "pending":
+            return prior
         row = self.store.decide_confirm(confirm_id, approved, takeover=takeover)
         if row is not None:
+            tool = str(row.get("tool") or "")
+            if approved and not takeover:
+                self.approvals.record_approve(tool)
+            elif not takeover:
+                self.approvals.record_deny(tool)
             self.bus.emit(row["space_id"], "confirm", {"confirm": row})
             if (
                 approved
@@ -1590,13 +1603,15 @@ class CrewRuntime:
             server, real_tool = self._mcp_names[name]
             client = self.mcp.clients.get(server)
             armed = bool(client and client.spec.armed)
-            decision, reason = policy.decide(
+            decision, reason = policy.decide_with_approvals(
                 real_tool,
                 server=server,
                 armed=armed,
                 master_on=self.mcp.master_on,
                 allowed=allowed,
                 denied=denied,
+                approvals=self.approvals,
+                args=args,
             )
             if decision == policy.CONFIRM:
                 verdict = await self._await_confirm(ctx, row, f"{server}.{real_tool}", args)
@@ -1626,13 +1641,15 @@ class CrewRuntime:
             self._persist_tool(ctx, row, f"{server}.{real_tool}", args, outcome)
             return outcome
 
-        decision, reason = policy.decide(
+        decision, reason = policy.decide_with_approvals(
             name,
             server=None,
             armed=False,
             master_on=False,
             allowed=allowed,
             denied=denied,
+            approvals=self.approvals,
+            args=args,
         )
         if decision != policy.ALLOW:
             return f"DENIED: {reason}"
