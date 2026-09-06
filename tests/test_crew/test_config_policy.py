@@ -150,3 +150,32 @@ def test_provider_pin_does_not_fall_through(clean_env: pytest.MonkeyPatch) -> No
     assert config.active_provider(chain) is None
     assert all(not p.active for p in chain)
 
+
+def test_vault_armed_without_env_is_configured(
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.crew import openvault
+
+    clean_env.setenv("CREW_OPENVAULT", "1")
+    monkeypatch.setattr(
+        openvault, "healthz", lambda timeout=1.5: {"ok": True, "url": "http://127.0.0.1:5000"}
+    )
+    monkeypatch.setattr(
+        openvault,
+        "vault_sources",
+        lambda: {
+            "mistral": {
+                "id": "k-m",
+                "label": "MISTRAL_API_KEY",
+                "enabled": True,
+                "crew_label": "mistral",
+            }
+        },
+    )
+    chain = config.resolve_providers()
+    mistral = next(p for p in chain if p.label == "mistral")
+    assert mistral.configured is True
+    assert mistral.connector == "openvault"
+    assert mistral.armed_via == "openvault"
+    assert mistral.public()["armed"] is True
+

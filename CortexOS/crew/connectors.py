@@ -74,7 +74,11 @@ def _row(
     layer: str,
     connected: bool,
     detail: str,
+    armable: bool = False,
+    armed: bool | None = None,
+    armed_via: str = "",
 ) -> dict[str, Any]:
+    is_armed = connected if armed is None else bool(armed)
     return {
         "slug": slug,
         "name": name,
@@ -84,10 +88,16 @@ def _row(
         "ok": connected,
         "noAuth": True,
         "logo": None,
+        "armable": armable,
+        "armed": is_armed,
+        "armed_via": armed_via,
     }
 
 
 def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dict[str, Any]]:
+    from CortexOS.crew.openvault import vault_sources
+
+    sources = vault_sources()
     out: list[dict[str, Any]] = []
     for row in _ROWS:
         connected = False
@@ -133,10 +143,29 @@ def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dic
         )
     for row in _API_ROWS:
         env_key = row["env"]
-        connected = bool(os.environ.get(env_key, "").strip())
-        if row["slug"] == "openai" and not connected:
-            connected = bool(os.environ.get("CREW_OPENAI_BASE_URL", "").strip())
-        detail = f"{env_key} configured" if connected else f"{env_key} unset"
+        env_ok = bool(os.environ.get(env_key, "").strip())
+        if row["slug"] == "openai" and not env_ok:
+            env_ok = bool(os.environ.get("CREW_OPENAI_BASE_URL", "").strip())
+        label = "openai-compatible" if row["slug"] == "openai" else row["slug"]
+        vault_row = sources.get(label)
+        vault_on = bool(vault_row and vault_row.get("enabled"))
+        vault_off = bool(vault_row and not vault_row.get("enabled"))
+        connected = bool(env_ok or vault_on)
+        if env_ok and vault_on:
+            via = "both"
+            detail = f"{env_key} vault-armed"
+        elif vault_on:
+            via = "openvault"
+            detail = f"{env_key} vault-armed"
+        elif env_ok:
+            via = "env"
+            detail = f"{env_key} configured"
+        elif vault_off:
+            via = ""
+            detail = f"{env_key} vault-disarmed"
+        else:
+            via = ""
+            detail = f"{env_key} unset"
         out.append(
             _row(
                 slug=row["slug"],
@@ -144,6 +173,9 @@ def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dic
                 layer=row["layer"],
                 connected=connected,
                 detail=detail,
+                armable=True,
+                armed=connected,
+                armed_via=via,
             )
         )
     return out
@@ -168,3 +200,29 @@ def require(slug: str, **catalog_kwargs: Any) -> dict[str, Any]:
         reason = str(row.get("detail") or "not connected")
         raise ConnectorError(f"connector {slug} refused: {reason} (no silent fallback)")
     return row
+
+
+_ARMABLE = frozenset({row["slug"] for row in _API_ROWS} | {"cursor"})
+
+
+def arm(slug: str, armed: bool) -> dict[str, Any]:
+    """Arm/disarm an inference API via OpenVault. Fail-closed. No secrets."""
+    needle = (slug or "").strip().lower()
+    if needle == "openai-compatible":
+        needle = "openai"
+    if needle == "grok":
+        raise ConnectorError(
+            "Grok Bot is OFFLOADED; watchdog must not auto-start (no silent fallback)"
+        )
+    if needle not in _ARMABLE:
+        raise ConnectorError(f"unknown connector '{slug}' (no silent fallback)")
+    from CortexOS.crew.openvault import arm_source
+
+    label = "openai-compatible" if needle == "openai" else needle
+    result = arm_source(label, armed, slug=needle)
+    if not result.get("ok"):
+        detail = str(result.get("detail") or "unarmed")
+        if "no silent fallback" not in detail:
+            detail = detail + " (no silent fallback)"
+        raise ConnectorError(detail)
+    return result

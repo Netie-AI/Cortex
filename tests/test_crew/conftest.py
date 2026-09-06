@@ -49,8 +49,10 @@ def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CREW_OPENVAULT", "0")
     monkeypatch.setenv("CREW_LIVE_PROBES", "0")
     from CortexOS.crew.llm import reset_usage
+    from CortexOS.crew.openvault import reset_vault_cache
 
     reset_usage()
+    reset_vault_cache()
 
 
 @pytest.fixture()

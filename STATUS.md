@@ -1,6 +1,14 @@
 # STATUS.md
 **Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-06 distill harness**
 
+> **2026-09-06 (CREW-ROUTER-HARDEN):** Multi-API sources arm via OpenVault
+> (no crew-held secret on disk after a successful vault upsert). Vault-armed
+> hosts prefer FreeRoute when OV is live; unarmed pins refuse (no silent
+> fallback). `GET /crew/providers` and `/crew/health` surface `chosen`
+> label/model/connector. Parent #116. Local `pytest tests/test_crew -q`
+> 231 passed. Live `:8020` needs founder restart. Does not attach #4/#41-#44.
+> Does not write CLAIMS.json.
+>
 > **2026-09-06 (RSF-06 / Cortex#155):** Distill harness
 > `CortexOS.execution.distill_harness.run_distill` takes an options-class recipe
 > (myn8n / langchain / langflow / gencfsm_dag) and emits Netie-native learn traces.

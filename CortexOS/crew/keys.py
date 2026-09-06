@@ -78,14 +78,25 @@ def save(data_dir: Path, updates: dict[str, str | None]) -> dict[str, Any]:
             current.pop(key, None)
             os.environ.pop(key, None)
         else:
-            current[key] = str(value).strip()
-            os.environ[key] = current[key]
+            stripped = str(value).strip()
+            os.environ[key] = stripped
+            keep_local = True
             if key.endswith("_API_KEY"):
                 from CortexOS.crew.openvault import upsert_env_key
 
-                vaulted = upsert_env_key(key, current[key])
-                if not vaulted.get("ok"):
-                    os.environ["CREW_VAULT_LAST_ERROR"] = str(vaulted.get("detail") or "vault upsert failed")
+                vaulted = upsert_env_key(key, stripped)
+                if vaulted.get("ok"):
+                    # Secret lives in OpenVault. Do not keep a crew copy on disk.
+                    keep_local = False
+                    os.environ.pop("CREW_VAULT_LAST_ERROR", None)
+                else:
+                    os.environ["CREW_VAULT_LAST_ERROR"] = str(
+                        vaulted.get("detail") or "vault upsert failed"
+                    )
+            if keep_local:
+                current[key] = stripped
+            else:
+                current.pop(key, None)
     data_dir.mkdir(parents=True, exist_ok=True)
     path = _path(data_dir)
     path.write_text(json.dumps(current, indent=2), encoding="utf-8")

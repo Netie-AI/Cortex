@@ -308,11 +308,14 @@ def build_router(crew: CrewApp) -> APIRouter:
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
         mcp = crew.mcp.status()
-        from CortexOS.crew.llm import usage_view
+        from CortexOS.crew.llm import chosen_public, usage_view
 
+        choice = chosen_public()
         return {
             "ok": True,
             "provider": active.public() if active else None,
+            "chosen": choice["chosen"],
+            "refused": choice["refused"],
             "engine": await crew.bridge.health(),
             "openvault": healthz(),
             "computer_control": crew.settings.master_computer_control,
@@ -325,33 +328,34 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.get("/providers")
     async def providers() -> dict[str, Any]:
+        from CortexOS.crew.llm import chosen_public
+
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
+        choice = chosen_public()
         return {
             "active": active.public() if active else None,
             "chain": [p.public() for p in chain],
+            "chosen": choice["chosen"],
+            "refused": choice["refused"],
         }
 
     @router.post("/providers")
     async def pin_provider(body: ProviderPin) -> dict[str, Any]:
         from CortexOS.crew.keys import pin_provider as save_pin
-        from CortexOS.crew.llm import LLMError as RouteError
-        from CortexOS.crew.llm import resolve_route
+        from CortexOS.crew.llm import chosen_public
 
         save_pin(crew.settings.data_dir, body.provider, body.model)
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
-        refused: str | None = None
-        if (body.provider or "").strip() or (body.model or "").strip():
-            try:
-                resolve_route(provider=body.provider, model=body.model)
-            except RouteError as exc:
-                refused = str(exc)
+        choice = chosen_public(provider=body.provider, model=body.model)
         return {
-            "ok": refused is None,
+            "ok": choice["refused"] is None
+            or not ((body.provider or "").strip() or (body.model or "").strip()),
             "active": active.public() if active else None,
             "chain": [p.public() for p in chain],
-            "refused": refused,
+            "chosen": choice["chosen"],
+            "refused": choice["refused"],
         }
 
     @router.get("/usage")
@@ -677,6 +681,24 @@ def build_router(crew: CrewApp) -> APIRouter:
             uacc_armed=bool(uacc.get("armed")),
         )
 
+    @router.post("/connectors/{slug}/arm")
+    async def arm_connector(slug: str, body: ArmIn) -> dict[str, Any]:
+        from CortexOS.crew import connectors as connectors_mod
+
+        try:
+            result = connectors_mod.arm(slug, body.armed)
+        except connectors_mod.ConnectorError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        mcp = crew.mcp.status()
+        uacc = next((row for row in mcp if row.get("name") == "uacc"), {})
+        return {
+            **result,
+            "catalog": connectors_mod.catalog(
+                uacc_enabled=bool(uacc.get("enabled")),
+                uacc_armed=bool(uacc.get("armed")),
+            ),
+        }
+
     @router.get("/routines")
     async def list_routines() -> list[dict[str, Any]]:
         from CortexOS.crew.routines import catalog as routine_catalog
@@ -912,14 +934,19 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.post("/keys")
     async def post_keys(body: KeysIn) -> dict[str, Any]:
+        from CortexOS.crew.llm import chosen_public
+
         saved = save_keys(crew.settings.data_dir, body.keys)
         chain = resolve_providers()
         active = next((p for p in chain if p.active), None)
+        choice = chosen_public()
         return {
             "ok": True,
             "status": saved["fields"],
             "active": active.public() if active else None,
             "chain": [p.public() for p in chain],
+            "chosen": choice["chosen"],
+            "refused": choice["refused"],
         }
 
     @router.get("/mcp")

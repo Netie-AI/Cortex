@@ -194,3 +194,113 @@ def test_require_live_refuses_when_disabled(monkeypatch) -> None:
     monkeypatch.setenv("CREW_OPENVAULT", "0")
     with pytest.raises(openvault.LLMError, match="no silent fallback"):
         openvault.require_live()
+
+
+def test_list_vault_keys_strips_secrets_and_maps_labels(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    openvault.reset_vault_cache()
+
+    class Client:
+        def __init__(self, *a, **k):  # noqa: ANN002, ANN003
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):  # noqa: ANN002
+            return False
+
+        def get(self, url: str) -> _FakeResp:
+            assert url.endswith("/api/keys")
+            return _FakeResp(
+                200,
+                {
+                    "keys": [
+                        {
+                            "id": "k-groq",
+                            "label": "GROQ_API_KEY",
+                            "provider": "groq",
+                            "env_key": "GROQ_API_KEY",
+                            "enabled": True,
+                            "secret": "gsk-should-never-leak",
+                            "value": "gsk-should-never-leak",
+                        },
+                        {
+                            "id": "k-cursor",
+                            "label": "CURSOR_API_KEY",
+                            "provider": "custom",
+                            "env_key": "CURSOR_API_KEY",
+                            "enabled": False,
+                        },
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(openvault.httpx, "Client", Client)
+    rows = openvault.list_vault_keys(fresh=True)
+    assert {r["crew_label"] for r in rows} == {"groq", "cursor"}
+    groq = next(r for r in rows if r["crew_label"] == "groq")
+    assert groq["enabled"] is True
+    assert "secret" not in groq
+    assert "gsk-should-never-leak" not in str(rows)
+    sources = openvault.vault_sources()
+    assert sources["groq"]["enabled"] is True
+    assert sources["cursor"]["enabled"] is False
+    assert openvault.vault_armed_labels() == {"groq"}
+
+
+def test_arm_source_patches_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    patched: list[dict] = []
+    listed = {
+        "keys": [
+            {
+                "id": "k-groq",
+                "label": "GROQ_API_KEY",
+                "provider": "groq",
+                "env_key": "GROQ_API_KEY",
+                "enabled": False,
+            }
+        ]
+    }
+
+    class Client:
+        def __init__(self, *a, **k):  # noqa: ANN002, ANN003
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):  # noqa: ANN002
+            return False
+
+        def get(self, url: str) -> _FakeResp:
+            return _FakeResp(200, listed)
+
+        def patch(self, url: str, json: dict) -> _FakeResp:
+            patched.append({"url": url, **json})
+            return _FakeResp(200, {"id": "k-groq", "enabled": json["enabled"]})
+
+    monkeypatch.setattr(openvault.httpx, "Client", Client)
+    out = openvault.arm_source("groq", True, slug="groq")
+    assert out["ok"] is True
+    assert out["armed"] is True
+    assert patched[0]["enabled"] is True
+    assert "k-groq" in patched[0]["url"]
+
+
+def test_save_does_not_keep_secret_in_crew_when_vault_ok(tmp_path, monkeypatch) -> None:
+    from CortexOS.crew.keys import save
+
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    monkeypatch.setattr(
+        openvault,
+        "upsert_env_key",
+        lambda key, secret: {"ok": True, "id": "k3", "label": key},
+    )
+    data_dir = tmp_path / "crew"
+    out = save(data_dir, {"GROQ_API_KEY": "gsk-crew-must-not-store"})
+    assert out["fields"]["GROQ_API_KEY"]["configured"] is True
+    stored = (data_dir / "keys.json").read_text(encoding="utf-8")
+    assert "gsk-crew-must-not-store" not in stored
+    assert "GROQ_API_KEY" not in stored

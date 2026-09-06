@@ -30,6 +30,9 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     monkeypatch.setenv("CREW_ALLOW_OLLAMA", "0")
     monkeypatch.setenv("CREW_OPENVAULT", "0")
     monkeypatch.setenv("CREW_LIVE_PROBES", "0")
+    from CortexOS.crew.openvault import reset_vault_cache
+
+    reset_vault_cache()
     return monkeypatch
 
 
@@ -119,3 +122,130 @@ async def test_per_turn_miss_is_a_visible_refuse(rig) -> None:
     assert "no silent fallback" in result["error"]
     sysmsgs = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "system"]
     assert sysmsgs and "anthropic" in sysmsgs[0]["content"]
+
+
+def _live_vault(monkeypatch: pytest.MonkeyPatch, rows: dict[str, dict]) -> None:
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    monkeypatch.setattr(
+        openvault, "healthz", lambda timeout=1.5: {"ok": True, "url": "http://127.0.0.1:5000"}
+    )
+    monkeypatch.setattr(openvault, "require_live", lambda timeout=1.5: {"ok": True})
+    monkeypatch.setattr(openvault, "vault_sources", lambda: rows)
+
+
+def test_vault_armed_source_routes_via_freeroute_without_env_secret(
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _live_vault(
+        monkeypatch,
+        {
+            "groq": {
+                "id": "k-groq",
+                "label": "GROQ_API_KEY",
+                "provider": "groq",
+                "env_key": "GROQ_API_KEY",
+                "enabled": True,
+                "crew_label": "groq",
+            }
+        },
+    )
+    from CortexOS.crew.config import resolve_providers
+
+    groq = next(p for p in resolve_providers() if p.label == "groq")
+    assert groq.configured is True
+    assert groq.armed_via == "openvault"
+    assert groq.connector == "openvault"
+    assert groq.model.startswith("openvault/")
+    route = resolve_route(provider="groq")
+    assert route.label == "groq"
+    assert route.connector == "openvault"
+    assert route.model.startswith("openvault/")
+    assert route.as_public()["connector"] == "openvault"
+    snap = llm.chosen_public(provider="groq")
+    assert snap["refused"] is None
+    assert snap["chosen"]["label"] == "groq"
+
+
+def test_vault_disarmed_source_refuses_without_fallback(
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _live_vault(
+        monkeypatch,
+        {
+            "groq": {
+                "id": "k-groq",
+                "label": "GROQ_API_KEY",
+                "provider": "groq",
+                "env_key": "GROQ_API_KEY",
+                "enabled": False,
+                "crew_label": "groq",
+            }
+        },
+    )
+    with pytest.raises(LLMError, match="no silent fallback"):
+        resolve_route(provider="groq")
+    groq = next(r for r in connectors.catalog() if r["slug"] == "groq")
+    assert groq["connected"] is False
+    assert groq["armable"] is True
+    assert "vault-disarmed" in groq["detail"]
+
+
+def test_env_plus_vault_prefers_freeroute(
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clean_env.setenv("GROQ_API_KEY", "x")
+    _live_vault(
+        monkeypatch,
+        {
+            "groq": {
+                "id": "k-groq",
+                "label": "GROQ_API_KEY",
+                "provider": "groq",
+                "env_key": "GROQ_API_KEY",
+                "enabled": True,
+                "crew_label": "groq",
+            }
+        },
+    )
+    route = resolve_route(provider="groq")
+    assert route.connector == "openvault"
+    assert route.armed_via == "both"
+    groq = next(r for r in connectors.catalog() if r["slug"] == "groq")
+    assert groq["armed"] is True
+    assert groq["armed_via"] == "both"
+
+
+def test_unarmed_model_string_refuses(clean_env: pytest.MonkeyPatch) -> None:
+    with pytest.raises(LLMError, match="no silent fallback"):
+        resolve_route(model="anthropic/claude-sonnet-5")
+    with pytest.raises(LLMError, match="unarmed model"):
+        resolve_route(model="not-a-host/mystery")
+
+
+def test_catalog_marks_vault_armed_api(
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _live_vault(
+        monkeypatch,
+        {
+            "openrouter": {
+                "id": "k-or",
+                "label": "OPENROUTER_API_KEY",
+                "provider": "openrouter",
+                "env_key": "OPENROUTER_API_KEY",
+                "enabled": True,
+                "crew_label": "openrouter",
+            }
+        },
+    )
+    row = next(r for r in connectors.catalog() if r["slug"] == "openrouter")
+    assert row["connected"] is True
+    assert row["armed"] is True
+    assert row["armable"] is True
+    assert row["armed_via"] == "openvault"
+    connectors.require("openrouter")
+
+
+def test_arm_grok_offloaded_refuses(clean_env: pytest.MonkeyPatch) -> None:
+    with pytest.raises(connectors.ConnectorError, match="OFFLOADED"):
+        connectors.arm("grok", True)

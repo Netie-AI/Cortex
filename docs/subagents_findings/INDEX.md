@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-06 | crew-router-harden | crew, router, openvault, freeroute, arm, multi-model, epic-116 | Vault-armed APIs count as configured without crew secrets. FreeRoute preferred when OV live. Unarmed refuse. chosen stamped. | `2026-09-06_crew-router-harden.md` |
 | 2026-09-06 | rsf-06-distill-harness | rsf, rsf-06, distill, harness, myn8n, langchain, #155 | run_distill emits Netie-native learn traces. Paste as product_engine REFUSE. Scale-check miss is not invent-green COMPLETE. | `2026-09-06_rsf-06-distill-harness.md` |
 | 2026-09-06 | crew-memory-api | crew, memory, collection, facts.md, scope, epic-116 | Collection-scoped Crew memory (space|user|agent|run). HUD uses list/search/export API; files survive chat clear. | `2026-09-06_crew-memory-api.md` |
 | 2026-09-06 | crew-policy-standing | crew, policy, standing, allowlist, session, one-off, circuit-breaker, epic-116 | Settings ladder is Crew policy SoT. decide/decide_with_approvals enforce standing/session/one-off. Repeated deny trips circuit. Per-agent grants only tighten. | `2026-09-06_crew-policy-standing.md` |
