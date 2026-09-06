@@ -7,8 +7,8 @@
 > `spaces/<id>/memory/facts.md`. user/agent/run write sibling collection dirs.
 > HUD chips call those endpoints (not derived chat/agent/run state). Clear chat
 > does not delete collection files. Recall stays untrusted-wrapped. Slash remember
-> still writes only the space collection. Control untouched. Local pytest
-> `tests/test_crew` after this slice; this line is not a GitHub CI claim.
+> still writes only the space collection. Control untouched. Local `pytest tests/test_crew -q`
+> **211 passed**. This line is not a GitHub CI claim.
 >
 > **2026-09-06 (CREW-POLICY-STANDING):** Standing allowlist / session / one-off
 > is Crew policy SoT (`CortexOS/crew/approvals.py`), not localStorage.

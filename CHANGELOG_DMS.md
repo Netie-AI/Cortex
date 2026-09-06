@@ -10,7 +10,7 @@ UI-derived capped facts. Space remains `memory/facts.md`. user/agent/run persist
 under `spaces/<id>/collections/<scope>/<owner>/` and survive Clear chat. Recall
 payloads stay inside the untrusted wrapper. Slash remember/recall/forget still
 write only the space collection (no dual-write with standing-policy or CLAIMS).
-Control not touched. Local `pytest tests/test_crew` is the gate; not a CI claim.
+Control not touched. Local `pytest tests/test_crew -q`: **211 passed**. Not a CI claim.
 
 ## CREW-POLICY-STANDING server ladder on CortexOS/crew — 2026-09-06
 

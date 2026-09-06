@@ -109,7 +109,8 @@ def test_ui_index_is_served(client) -> None:
     assert 'id="memSave"' in page.text
     assert 'id="memExport"' in page.text
     assert "/crew/spaces/" in page.text
-    assert "/memory/search" in page.text
+    assert 'base + "/search?"' in page.text
+    assert "memoryQuery" in page.text
     assert 'filter((m) => m.role === "user")' not in page.text
     assert "No facts in this collection." in page.text
     assert "Standing approvals" in page.text
@@ -722,7 +723,8 @@ def test_collection_memory_api_survives_clear_and_does_not_dual_write(client) ->
     assert missing.status_code == 404
 
     page = client.http.get("/")
-    assert "/memory/search" in page.text
+    assert 'base + "/search?"' in page.text
+    assert "memoryQuery" in page.text
     assert 'filter((m) => m.role === "user")' not in page.text
     claims = list(client.crew.settings.data_dir.rglob("CLAIMS.json"))
     assert claims == []

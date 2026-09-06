@@ -35,6 +35,8 @@ Chrome already painted space|user|agent|run chips. Only space hit `/crew/spaces/
 python -m pytest tests/test_crew -q
 ```
 
+Local: 211 passed. Not a GitHub CI claim.
+
 ## Not this slice
 
 Control stays display-only. CLAIMS.json not written. Standing-approval ladder untouched. Live `:8020` needs founder restart. GitHub CI not claimed.
