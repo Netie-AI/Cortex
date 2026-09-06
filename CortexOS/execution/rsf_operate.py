@@ -11,7 +11,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from CortexOS.execution.rsf_orchestrator import BAKEOFF_SURFACES, bakeoff_hooks
-from CortexOS.rsf import RSF_STAGES, RSF_STATUSES, RsfConsumerError, parse_rsf_artifact, parse_rsf_trace
+from CortexOS.rsf import (
+    RSF_STAGES,
+    RSF_STATUSES,
+    RsfConsumerError,
+    parse_rsf_artifact,
+    parse_rsf_trace,
+)
 
 _GAP_REASON = "prior stage not CERTIFIED; will not display invented CERTIFIED"
 _INVALID_REASON = "invalid artifact; will not invent CERTIFIED"

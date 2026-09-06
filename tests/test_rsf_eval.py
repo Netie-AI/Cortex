@@ -200,8 +200,9 @@ def test_live_eval_attaches_audit_operate(allow_leave) -> None:
 
 
 def test_eval_and_operate_modules_stay_engine_clean() -> None:
-    for path in (EVAL_PY, OPERATE_PY):
-        src = path.read_text(encoding="utf-8")
+    eval_src = EVAL_PY.read_text(encoding="utf-8")
+    op_src = OPERATE_PY.read_text(encoding="utf-8")
+    for src in (eval_src, op_src):
         assert "import n8n" not in src
         assert "import langchain" not in src
         assert "import langflow" not in src
@@ -210,8 +211,9 @@ def test_eval_and_operate_modules_stay_engine_clean() -> None:
         assert "from n8n" not in src
         assert "urlopen" not in src
         assert "127.0.0.1:20128" not in src
-        assert "will not invent" in src or "will not display invented" in src
-    assert "run_rsf" in EVAL_PY.read_text(encoding="utf-8")
+    assert "run_rsf" in eval_src
+    assert "WRONG" in eval_src
+    assert "will not display invented CERTIFIED" in op_src
     assert list(RSF_STAGES) == ["research", "segment", "classify", "filter"]
 
 
