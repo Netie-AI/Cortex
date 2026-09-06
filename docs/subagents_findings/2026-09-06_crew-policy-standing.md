@@ -40,6 +40,8 @@ treated every mutating MCP call as one-off.
 python -m pytest tests/test_crew -q
 ```
 
+216 passed locally. Did not invent CI green.
+
 ## Not this slice
 
 Live `:8020` until founder restart. Control HTML. GitHub CI not claimed from

@@ -71,7 +71,7 @@ def test_repeated_deny_trips_circuit_and_revokes_standing() -> None:
     book.record_approve("uacc.click")
     for _ in range(CIRCUIT_TRIPS - 1):
         book.record_deny("uacc.click")
-        assert book.covers("click") == MODE_STANDING
+        assert book.covers("click", "uacc.click") == MODE_STANDING
     snap = book.record_deny("uacc.click")
     assert snap["mode"] == MODE_ONE_OFF
     assert "uacc.click" in snap["circuit"]

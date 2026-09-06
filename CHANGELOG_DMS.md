@@ -10,7 +10,7 @@ mode + standing + circuit; confirm approve/deny records grants and deny streaks.
 `policy.decide` / `decide_with_approvals` skip per-call confirm only when a
 session or standing grant covers the tool. Three denies trip the circuit-breaker
 (standing revoked). Per-agent grants only tighten the crew floor. Parent #116.
-Control untouched. Did not mint a second epic.
+Control untouched. Did not mint a second epic. Local `tests/test_crew` 216 passed.
 
 ## RSF-04 orchestrator (research→segment→classify→filter) — 2026-09-06
 

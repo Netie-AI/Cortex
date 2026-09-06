@@ -7,7 +7,7 @@
 > session may only turn `confirm` into `allow`. Three denies trip the
 > circuit-breaker (standing revoked, mode back to one-off). Per-agent grants
 > still only tighten the crew floor. Parent #116. Control untouched. Did not
-> mint a second epic. Local `pytest tests/test_crew -q` after this slice.
+> mint a second epic. Local `pytest tests/test_crew -q` 216 passed.
 > Live `:8020` needs founder restart. Did not attach freeze lanes #4/#41/#42/#43/#44.
 >
 > **2026-09-06 (RSF-04 / Cortex#154):** In-process RSF meta-router
