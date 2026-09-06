@@ -40,7 +40,7 @@
           <button class="ghost" id="uiBigger" type="button" title="Bigger text">A+</button>
           <button class="ghost" id="toggleActivity" title="Show only agent-to-agent traffic">Activity</button>
           <button class="ghost danger" id="cancelRun" hidden title="Stops this run. Does not kill Manager.">Cancel</button>
-          <button class="ghost" id="clearChat" type="button" title="Clears chat. Goal/active mode stays in crew store.">Clear chat</button>
+          <button class="ghost" id="clearChat" type="button" title="Clears chat. facts.md stays.">Clear chat</button>
         </div>
       </div>
       <div class="focus-bar" id="focusBar" hidden></div>
@@ -1062,9 +1062,11 @@
         const data = await api(path);
         const facts = data.facts || [];
         const label = data.scope || scope;
+        const file = data.file || data.filename || "facts.md";
+        const head = `<div class="hint" data-mem-file="${esc(file)}">${esc(file)} - ${esc(label)} - survives Clear chat</div>`;
         $("memory").innerHTML = facts.length
-          ? facts.map((f) => `<div class="row">${esc(f.name)} <span class="scope">${esc(label)}</span><div class="hint">${esc(f.description)}</div></div>`).join("")
-          : `<div class="empty empty--orb">No facts in this collection.</div>`;
+          ? head + facts.map((f) => `<div class="row">${esc(f.name)} <span class="scope">${esc(label)}</span><div class="hint">${esc(f.description)}</div><div class="hint">${esc(f.body || "")}</div></div>`).join("")
+          : head + `<div class="empty empty--orb">No facts in this collection.</div>`;
       } catch (err) {
         $("memory").innerHTML = `<div class="empty empty--orb">${esc(err.message)}</div>`;
       }
@@ -1541,9 +1543,12 @@
     $("clearChat").onclick = async () => {
       if (!state.spaceId) return;
       try {
-        await api("/crew/spaces/" + state.spaceId + "/clear", { method: "POST", body: "{}" });
+        const cleared = await api("/crew/spaces/" + state.spaceId + "/clear", { method: "POST", body: "{}" });
         await selectSpace(state.spaceId);
-        toast("Chat cleared. Goal mode and memory collections stayed.");
+        await renderMemory();
+        toast(cleared.facts_survived
+          ? "Chat cleared. facts.md stayed."
+          : "Chat cleared.");
       } catch (err) { toast(err.message, "bad"); }
     };
     $("toggleRail").onclick = () => {

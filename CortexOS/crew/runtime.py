@@ -930,13 +930,32 @@ class CrewRuntime:
         agents = self.store.reset_life_after_clear(space_id)
         for row in agents:
             self.bus.emit(space_id, "agent", {"agent": row})
+        collections = crew_memory.surviving_payloads(self.settings.data_dir, space_id)
+        space_mem = next(
+            (row for row in collections if row.get("scope") == "space"),
+            {
+                "facts": [],
+                "file": crew_memory.FACTS_FILE,
+                "filename": crew_memory.FACTS_FILE,
+                "scope": "space",
+                "owner": "",
+            },
+        )
         note = self.store.add_message(
             space_id,
             "system",
-            "Chat cleared. Goal/active mode persisted on teammates.",
+            "Chat cleared. Goal/active mode and facts.md stayed.",
         )
         self.bus.emit(space_id, "message", {"message": note})
-        return {"ok": True, "agents": agents, "cleared": True}
+        return {
+            "ok": True,
+            "agents": agents,
+            "cleared": True,
+            "transcript_cleared": True,
+            "facts_survived": True,
+            "memory": space_mem,
+            "collections": collections,
+        }
 
     async def operator_spawn(self, space_id: str, args: dict[str, Any]) -> dict[str, Any]:
         """HUD spawn. Uses the live run when one exists; otherwise persists idle/goal."""

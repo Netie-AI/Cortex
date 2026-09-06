@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-FACTS-MD Memory HUD + facts.md survives clear — 2026-09-06
+
+Follow-on under CLOSED Cortex #116. Memory panel paints `facts.md` + body
+from `/crew/spaces/{id}/memory` (list/search/save/export, scopes
+space|user|agent|run). Chat clear drops transcript only; `facts_survived`
+is on the clear envelope and facts reappear via `renderMemory`. Tests:
+`test_clear_does_not_wipe_facts`, `test_export_markdown`. Local
+`pytest tests/test_crew -q` **241 passed**. Not a CI claim. Control not
+touched.
+
 ## CREW-A2A-HARDEN ask cards + deadlock honesty — 2026-09-06
 
 Operator-visible bot-to-bot messaging on existing Switchboard (parent Cortex
