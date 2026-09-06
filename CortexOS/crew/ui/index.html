@@ -855,7 +855,8 @@
       ).join("");
     }
     function ticketRow(key, seated, mine, extra) {
-      const label = seated ? "SEATED" : (mine ? ("assigned " + (mine.agent || "")) : "ready");
+      const holder = mine && (mine.worker || mine.agent || "");
+      const label = seated ? "SEATED" : (holder ? ("leased " + holder) : "ready");
       const actions = seated
         ? `<small>Ticket Runner owns the seat. Crew does not steal it.</small>`
         : (`<div class="row-actions">`
@@ -871,7 +872,7 @@
     function renderTickets(board) {
       const assigns = (board && board.assignments) || [];
       const held = {};
-      assigns.forEach((a) => { if (a && a.spec) held[a.spec] = a; });
+      ((board && board.leases) || []).forEach((a) => { if (a && a.id) held[a.id] = a; });
       const assignBlock = assigns.length
         ? assigns.slice(0, 12).map((a) =>
             `<div class="row">${esc(a.spec)} <span class="claim">${esc(a.agent || "")}</span>`
@@ -905,21 +906,21 @@
         toast("Claim in flight. No silent retry.", "warn");
         return;
       }
-      if (!state.spaceId) {
-        toast("Open a space first.", "warn");
-        return;
-      }
       state.claimBusy = ticket + ":" + act;
       try {
         const name = (($("spawnName") && $("spawnName").value) || "Ticket").trim() || "Ticket";
-        const resp = await fetch("/crew/tickets/" + act, {
+        const resp = await fetch("/crew/tickets/" + encodeURI(ticket) + "/" + act, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ spec: ticket, space_id: state.spaceId, name: name })
+          body: JSON.stringify({ worker: name, name: name, ttl_s: 900 })
         });
         const data = await resp.json().catch(() => ({}));
         if (resp.status === 409) {
-          toast(data.detail || "SEATED. Ticket Runner owns the seat.", "bad");
+          toast((data.detail || "Held elsewhere.") + " No silent retry.", "bad");
+          return;
+        }
+        if (resp.status === 403) {
+          toast((data.detail || "Not the holder.") + " No silent retry.", "bad");
           return;
         }
         if (!resp.ok) {
@@ -928,7 +929,7 @@
         }
         toast(
           act === "claim"
-            ? ((data.detail || "Assigned.") + (data.run_id ? (" run " + data.run_id) : " run none"))
+            ? (data.detail || ("Leased to " + (data.worker || name)))
             : (data.detail || "Released."),
           "ok"
         );

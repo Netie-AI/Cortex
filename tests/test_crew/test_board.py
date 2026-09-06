@@ -21,6 +21,20 @@ def test_snapshot_reads_claims_and_names_the_law(tmp_path, monkeypatch) -> None:
     assert "GATE PASS" in board["runtime_head"]
 
 
+def test_overlay_leases_stamps_live_holder_only() -> None:
+    from CortexOS.crew.board import overlay_leases
+
+    rows = overlay_leases(
+        [
+            {"ticket": "FF-03", "role": "UNSEATED"},
+            {"spec": "Netie-AI/Cortex#199", "title": "lease sot"},
+        ],
+        [{"id": "FF-03", "worker": "Scout", "until": 42}],
+    )
+    assert rows[0]["lease"] == {"worker": "Scout", "until": 42}
+    assert "lease" not in rows[1]
+
+
 def test_list_skills_reads_markdown(tmp_path) -> None:
     folder = tmp_path / "skills"
     folder.mkdir()

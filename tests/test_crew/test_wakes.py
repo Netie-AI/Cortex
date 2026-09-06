@@ -77,6 +77,8 @@ def test_conveyor_skips_cortex_ping_and_does_not_decide_shape(tmp_path, monkeypa
     assert body["agents"][0]["name"] == "Scout"
     assert body["assignments"] == []
     assert "Control does not assign" in body["assign_owner"]
+    assert body["leases"] == []
+    assert "Control does not lease" in body["lease_owner"]
     assert "dag_runner" not in body
 
 

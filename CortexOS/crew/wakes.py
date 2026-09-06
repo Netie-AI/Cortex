@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from CortexOS.crew.belt import TicketLeaseLedger, stamp_items
 from CortexOS.crew.queue import JobQueue
 from CortexOS.crew.store import CrewStore
 
@@ -111,6 +112,7 @@ def conveyor(
     mailbox_nonempty: bool = False,
     assignments: list[dict[str, Any]] | None = None,
     data_dir: Path | None = None,
+    leases: TicketLeaseLedger | list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Display JSON for ``GET /v1/belt`` and ``GET /crew/belt``.
 
@@ -153,14 +155,20 @@ def conveyor(
             *public_wakes,
             {"kind": "mailbox", "state": "pending", "note": "mailbox nonempty"},
         ]
+    if isinstance(leases, TicketLeaseLedger):
+        live_leases = leases.public()
+    else:
+        live_leases = list(leases or [])
+    counts = dict(queue.counts())
+    counts["leased"] = int(counts.get("leased") or 0) + len(live_leases)
     return {
         "bus": "github-issues",
-        "tickets": {"items": items, "unreachable": []},
+        "tickets": {"items": stamp_items(items, live_leases), "unreachable": []},
         "handoffs": [],
         "cortex": {"ok": False, "detail": "not probed"},
         "plan_for_next": {"decides_work_shape": False, "needs_human": True},
         "wakes": public_wakes,
-        "queue": queue.counts(),
+        "queue": counts,
         "confirms": [{"id": c["id"]} for c in confirms],
         "spaces": [{"id": s["id"]} for s in spaces],
         "agents": [{"id": a["id"], "name": a["name"]} for a in agents],
@@ -168,6 +176,10 @@ def conveyor(
         "assign_owner": (
             "Crew /assign (local bind). CLAIMS seating is Ticket Runner. "
             "Control does not assign."
+        ),
+        "leases": live_leases,
+        "lease_owner": (
+            "Crew POST /crew/tickets/{id}/claim. Control does not lease."
         ),
         "converse": True,
     }

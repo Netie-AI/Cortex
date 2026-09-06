@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-BELT-CLAIM ticket leases on CortexOS/crew — 2026-09-06
+
+Crew (not Control) is lease SoT. `POST /crew/tickets/{id}/claim` binds worker + TTL;
+409 if another worker holds a live lease or Ticket Runner SEATED the spec.
+`POST /crew/tickets/{id}/release` succeeds only for the holder (403 else, 409 if
+not held). `GET /crew/belt` / `GET /v1/belt` keep the Control display contract and
+add `leases` / `lease_owner`. Chrome Claim/Release calls those POSTs; 409/403 toast
+with no silent retry. Does not write CLAIMS.json. Local `tests/test_crew` 208 passed.
+Does not prove live `:8020` until restart.
+
 ## Engine capability: cost ledger + DAG parallel + T0 routing — 2026-08-28
 
 General Cortex engine (not DMS-specific):
