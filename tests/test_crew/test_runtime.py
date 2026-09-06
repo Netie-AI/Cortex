@@ -475,3 +475,37 @@ async def test_ws_read_escape_is_denied_in_transcript(rig) -> None:
     painted = " ".join(str(m.get("content") or "") for m in rig.store.list_messages(space["id"]))
     assert "DENIED" in painted
     assert "Jail held." in painted
+
+
+async def test_standing_allowlist_skips_mutating_confirm(settings, crew_env) -> None:
+    from CortexOS.crew.approvals import MODE_STANDING, ApprovalBook
+
+    settings.master_computer_control = True
+    store = CrewStore(settings.db_path)
+    bus = EventBus()
+    mcp = MCPManager(settings.mcp_config_path, master_on=True)
+    fake = FakeMCPClient("uacc", [{"name": "click", "inputSchema": {"type": "object"}}], armed=True)
+    mcp.clients["uacc"] = fake
+    llm = FakeLLM()
+    book = ApprovalBook()
+    book.set_mode(MODE_STANDING)
+    book.record_approve("uacc.click")
+    runtime = CrewRuntime(
+        store, bus, settings, mcp, FakeBridge(), llm_chat=llm, approvals=book
+    )
+
+    space = store.create_space("Desk")
+    llm.manager.extend(
+        [
+            LLMResult(tool_calls=[_tc("mcp_uacc_click", x=1, y=2)]),
+            LLMResult(text="Clicked after standing grant."),
+        ]
+    )
+    await runtime.on_user_message(space["id"], "click it")
+    await wait_run_done(runtime, space["id"])
+    assert fake.called == [("click", {"x": 1, "y": 2})]
+    assert store.pending_confirms(space["id"]) == []
+    tools = [m for m in store.list_messages(space["id"]) if m["role"] == "tool"]
+    assert tools and "denied" not in tools[0]["content"].lower()
+    store.close()
+

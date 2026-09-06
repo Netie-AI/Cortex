@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-06 | crew-policy-standing | crew, policy, standing, allowlist, session, one-off, circuit-breaker, epic-116 | Settings ladder is Crew policy SoT. decide/decide_with_approvals enforce standing/session/one-off. Repeated deny trips circuit. Per-agent grants only tighten. | `2026-09-06_crew-policy-standing.md` |
 | 2026-09-06 | rsf-04-orchestrator | rsf, rsf-04, orchestrator, certified, abstain, #154 | In-process run_rsf certifies research→segment→classify→filter. Priors from RSF_STAGES. No invent-green downstream. Options advisory. | `2026-09-06_rsf-04-orchestrator.md` |
 | 2026-09-06 | crew-belt-claim | crew, belt, claim, release, lease, ttl, 409, epic-116 | Chrome Claim/Release is Crew lease SoT (worker+TTL). 409 held/SEATED. 403 non-holder release. Control display-only. | `2026-09-06_crew-belt-claim.md` |
 | 2026-09-04 | crew-tickets-fetch | crew, fetch, tickets, hud, issues, claim, issue-164 | GET /crew/tickets includes fetched GH issues minus CLAIMS specs so HUD Claim can bind them. | `2026-09-04_crew-tickets-fetch.md` |

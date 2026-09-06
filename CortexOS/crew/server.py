@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from CortexOS.crew.approvals import ApprovalBook
 from CortexOS.crew.belt import TicketLeaseLedger
 from CortexOS.crew.config import CrewSettings, load_settings, resolve_providers
 from CortexOS.crew.engine_bridge import EngineBridge
@@ -70,8 +71,15 @@ class CrewApp:
         self.mcp = MCPManager(
             self.settings.mcp_config_path, self.settings.master_computer_control
         )
+        self.approvals = ApprovalBook(self.settings.data_dir / "approvals.json")
         self.runtime = CrewRuntime(
-            self.store, self.bus, self.settings, self.mcp, self.bridge, llm_chat=llm_chat
+            self.store,
+            self.bus,
+            self.settings,
+            self.mcp,
+            self.bridge,
+            llm_chat=llm_chat,
+            approvals=self.approvals,
         )
         self.shell = CrewShell(self.settings)
         self.wakes = WakeBoard()
@@ -176,6 +184,14 @@ class ProviderPin(BaseModel):
 class ConfirmIn(BaseModel):
     approved: bool = False
     takeover: bool = False
+
+
+class ApprovalIn(BaseModel):
+    mode: str | None = None
+
+
+class ApprovalRevokeIn(BaseModel):
+    tool: str = ""
 
 
 class MemoryIn(BaseModel):
@@ -551,7 +567,26 @@ def build_router(crew: CrewApp) -> APIRouter:
         )
         if row is None:
             raise HTTPException(404, "unknown confirm")
-        return {"ok": True, "confirm": row}
+        return {"ok": True, "confirm": row, "approvals": crew.approvals.snapshot()}
+
+    @router.get("/approvals")
+    async def get_approvals() -> dict[str, Any]:
+        """Standing / session / one-off ladder. Server SoT, not localStorage."""
+        return crew.approvals.snapshot()
+
+    @router.put("/approvals")
+    async def put_approvals(body: ApprovalIn) -> dict[str, Any]:
+        if body.mode is None:
+            return crew.approvals.snapshot()
+        try:
+            return crew.approvals.set_mode(body.mode)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/approvals/revoke")
+    async def revoke_approvals(body: ApprovalRevokeIn | None = None) -> dict[str, Any]:
+        tool = (body.tool if body is not None else "") or ""
+        return crew.approvals.revoke(tool.strip() or None)
 
     @router.get("/roles")
     async def list_roles() -> list[dict[str, Any]]:

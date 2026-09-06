@@ -12,6 +12,8 @@ refuses silently would read as a hang (KB R-0011).
 
 from __future__ import annotations
 
+from typing import Any
+
 from CortexOS.crew.config import BACKEND_CF_COMPUTER, BACKEND_LAPTOP, FLAG_CF_COMPUTER
 
 # Windows-MCP capture/timing tools that observe but do not act. Everything not
@@ -134,13 +136,16 @@ def decide(
     master_on: bool,
     allowed: frozenset[str] | None = None,
     denied: frozenset[str] | None = None,
+    approvals: Any | None = None,
+    args: dict | None = None,
 ) -> tuple[str, str]:
     """Return (decision, reason) for one tool call.
 
     ``server`` is None for crew-internal tools and the MCP server name for
     third-party tools. ``allowed`` / ``denied`` are per-agent grants on the
     shared connector pool: empty allowed means share everything that already
-    passed master/arm/confirm; a deny always wins.
+    passed master/arm/confirm; a deny always wins. Standing / session grants
+    may only turn ``confirm`` into ``allow``; they never lift a deny.
     """
     names = {tool}
     if server:
@@ -159,7 +164,55 @@ def decide(
         return DENY, f"MCP server '{server}' is not armed (arm it in the Computer control panel)"
     if tool in READ_ONLY_TOOLS:
         return ALLOW, "read-only capture tool on an armed server"
-    return CONFIRM, "mutating computer-control tool needs operator approval"
+    decision, reason = CONFIRM, "mutating computer-control tool needs operator approval"
+    if approvals is None:
+        return decision, reason
+    return _apply_approvals(tool, server, decision, reason, approvals, args)
+
+
+def decide_with_approvals(
+    tool: str,
+    *,
+    server: str | None,
+    armed: bool,
+    master_on: bool,
+    allowed: frozenset[str] | None = None,
+    denied: frozenset[str] | None = None,
+    approvals: Any,
+    args: dict | None = None,
+) -> tuple[str, str]:
+    """Same floor as ``decide``, then the Settings ladder (standing / session / one-off)."""
+    return decide(
+        tool,
+        server=server,
+        armed=armed,
+        master_on=master_on,
+        allowed=allowed,
+        denied=denied,
+        approvals=approvals,
+        args=args,
+    )
+
+
+def _apply_approvals(
+    tool: str,
+    server: str | None,
+    decision: str,
+    reason: str,
+    approvals: Any,
+    args: dict | None,
+) -> tuple[str, str]:
+    if decision != CONFIRM:
+        return decision, reason
+    key = f"{server}.{tool}" if server else tool
+    if approvals.broken(key) or approvals.broken(tool):
+        return CONFIRM, "circuit-breaker: standing revoked; one-off only"
+    if needs_takeover(tool, args):
+        return CONFIRM, reason
+    scope = approvals.covers(tool, key)
+    if scope:
+        return ALLOW, f"{scope} allowlist"
+    return decision, reason
 
 
 def _argv0(argv: list[str]) -> str:

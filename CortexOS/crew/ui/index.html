@@ -255,7 +255,8 @@
       activityOnly: false, focusAgent: null,
       stick: true, unread: 0, retry: null, live: false,
       belt: null, memScope: "space", claimBusy: null,
-      sessionAllow: {}, denyStreak: {}, runStarted: 0,
+      approvals: { mode: "one-off", allow: {}, session: {}, circuit: {} },
+      runStarted: 0,
       routeProvider: "", usage: null, asks: []
     };
     const $ = (id) => document.getElementById(id);
@@ -360,11 +361,13 @@
       return { gate: "crew policy", note: "mutating tool needs operator approval" };
     }
     function loadLadder() {
-      try { return JSON.parse(localStorage.getItem("crew.ladder") || "{}"); }
-      catch (e) { return {}; }
+      return state.approvals || { mode: "one-off", allow: {}, session: {}, circuit: {} };
     }
-    function saveLadder(data) {
-      try { localStorage.setItem("crew.ladder", JSON.stringify(data)); } catch (e) { /* private mode */ }
+    async function refreshApprovals() {
+      try {
+        state.approvals = await api("/crew/approvals");
+        renderLadder();
+      } catch (e) { /* keep last snapshot */ }
     }
     function renderLadder() {
       const data = loadLadder();
@@ -767,7 +770,7 @@
     function confirmCard(c) {
       const v = verbs(c);
       const gate = strictness(c);
-      const standing = (loadLadder().allow || {})[c.tool] || state.sessionAllow[c.tool];
+      const standing = (loadLadder().allow || {})[c.tool] || (loadLadder().session || {})[c.tool];
       const broken = (loadLadder().circuit || {})[c.tool];
       return `<div class="confirm">`
         + `<div><b>${esc(humanTitle(c))}</b>`
@@ -1069,7 +1072,7 @@
     }
 
     async function boot() {
-      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt, composer] = await Promise.all([
+      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt, composer, ladder] = await Promise.all([
         api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
         api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
         api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
@@ -1077,10 +1080,12 @@
         api("/crew/desk").catch(() => null),
         api("/crew/skills").catch(() => []),
         api("/v1/belt").catch(() => api("/crew/belt").catch(() => null)),
-        api("/crew/commands").catch(() => ({ commands: [], mentions: [] }))
+        api("/crew/commands").catch(() => ({ commands: [], mentions: [] })),
+        api("/crew/approvals").catch(() => ({ mode: "one-off", allow: {}, session: {}, circuit: {} }))
       ]);
       state.commands = composer.commands || [];
       state.mentions = composer.mentions || [];
+      state.approvals = ladder;
       renderRoles(roles || []);
       state.skills = skills || [];
       renderSkills(state.skills);
@@ -1341,30 +1346,9 @@
           method: "POST",
           body: JSON.stringify({ approved: !!approved, takeover: !!takeover })
         });
-        if (tool && approved) {
-          const mode = (document.querySelector("input[name=ladder]:checked") || {}).value || "one-off";
-          if (mode === "session") state.sessionAllow[tool] = "session";
-          if (mode === "standing") {
-            const data = loadLadder();
-            data.allow = data.allow || {};
-            data.allow[tool] = "standing";
-            saveLadder(data);
-            renderLadder();
-          }
-        }
-        if (tool && !approved && !takeover) {
-          state.denyStreak[tool] = (state.denyStreak[tool] || 0) + 1;
-          if (state.denyStreak[tool] >= 3) {
-            const data = loadLadder();
-            data.circuit = data.circuit || {};
-            data.circuit[tool] = state.denyStreak[tool];
-            if (data.allow) delete data.allow[tool];
-            data.mode = "one-off";
-            saveLadder(data);
-            delete state.sessionAllow[tool];
-            renderLadder();
-            toast("Circuit-breaker: standing revoked for " + tool, "warn");
-          }
+        await refreshApprovals();
+        if (tool && !approved && !takeover && (loadLadder().circuit || {})[tool]) {
+          toast("Circuit-breaker: standing revoked for " + tool, "warn");
         }
       } catch (err) { toast(err.message, "bad"); }
     }
@@ -1495,7 +1479,7 @@
     };
     $("uiSmaller").onclick = () => setScale(-0.05);
     $("uiBigger").onclick = () => setScale(0.05);
-    $("openSettings").onclick = () => { renderLadder(); $("settings").classList.add("open"); };
+    $("openSettings").onclick = () => { refreshApprovals(); $("settings").classList.add("open"); };
     $("closeSettings").onclick = () => $("settings").classList.remove("open");
     $("openPlugins").onclick = () => $("plugins").classList.add("open");
     $("closePlugins").onclick = () => $("plugins").classList.remove("open");
@@ -1547,21 +1531,22 @@
       } catch (err) { toast(err.message, "bad"); }
     };
     document.querySelectorAll("input[name=ladder]").forEach((el) => {
-      el.onchange = () => {
-        const data = loadLadder();
-        data.mode = el.value;
-        saveLadder(data);
-        renderLadder();
+      el.onchange = async () => {
+        try {
+          state.approvals = await api("/crew/approvals", {
+            method: "PUT",
+            body: JSON.stringify({ mode: el.value })
+          });
+          renderLadder();
+        } catch (err) { toast(err.message, "bad"); }
       };
     });
-    $("revokeStanding").onclick = () => {
-      const data = loadLadder();
-      data.allow = {};
-      data.mode = "one-off";
-      saveLadder(data);
-      state.sessionAllow = {};
-      renderLadder();
-      toast("Standing allowlist revoked.");
+    $("revokeStanding").onclick = async () => {
+      try {
+        state.approvals = await api("/crew/approvals/revoke", { method: "POST", body: JSON.stringify({}) });
+        renderLadder();
+        toast("Standing allowlist revoked.");
+      } catch (err) { toast(err.message, "bad"); }
     };
     async function runSearch() {
       const q = $("searchQ").value.trim();
