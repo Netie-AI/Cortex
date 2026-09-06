@@ -13,7 +13,7 @@
 > Tiny webmanifest only. Off freeze #4/#41-#44. Did not start/kill `:8020`.
 > Rebased onto main after #194 CREW-ASSIGN (`ed548eee`), #193 LIFE-HARDEN,
 > and #192 FACTS-MD. Assign notes, LIFE chips, and FACTS HUD stay. Local
-> `pytest tests/test_crew -q` recount after rebase. Not a GitHub CI claim.
+> `pytest tests/test_crew -q` **261 passed**. Not a GitHub CI claim.
 
 > **2026-09-06 (CREW-ASSIGN):** Assign-task router under Cortex #116.
 > `GET /crew/assign` is the destination coordinate map (Control display-only).

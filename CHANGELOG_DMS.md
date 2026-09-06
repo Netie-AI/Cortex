@@ -11,7 +11,7 @@ surfaces with banner Display only F-0030; no converse copy; no POST
 run/goal/route/secrets; Control is not Crew spawn. Audit tab deep-links
 Constructor RSF Audit/Operate and surfaces honest `rsf_operate` statuses.
 Cmd-K registers the new pages. Mobile-ready rail/drawer CSS. Local
-`pytest tests/test_crew -q` recount after rebase onto #194. Off freeze
+`pytest tests/test_crew -q` **261 passed**. Off freeze
 #4/#41-#44. Rebased onto main after #194 CREW-ASSIGN, #193 LIFE-HARDEN,
 and #192 FACTS-MD. Assign notes, LIFE chips, and FACTS HUD stay.
 
