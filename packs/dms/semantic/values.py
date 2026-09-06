@@ -170,3 +170,51 @@ def resolve(entity_text: str, column: str) -> Resolution:
 
     # ambiguous / not found
     return Resolution(None, 0.0, column, (contained or values)[:5])
+def resolve_against_sheet_values(value: str, column: str, distincts: list[str]):
+    import re as _re
+    text = (value or "").strip()
+    if not text or not distincts:
+        return value, None
+    lower = text.lower()
+    by_lower = {v.lower(): v for v in distincts}
+    if lower in by_lower:
+        return by_lower[lower], None
+    def norm(s):
+        return _re.sub(r"[\s_\-]+", "", s.lower())
+    by_norm = {norm(v): v for v in distincts}
+    if norm(text) in by_norm:
+        hit = by_norm[norm(text)]
+        return hit, None if hit.lower() == lower else (repr(text) + "->" + repr(hit))
+    if column == "sku":
+        cands = []
+        if not lower.startswith("sku"):
+            cands.append("SKU-" + text.upper())
+        else:
+            cands.append(text.upper())
+            m = _re.match(r"^sku[-\s]?(.+)$", text, flags=_re.I)
+            if m:
+                cands.append("SKU-" + m.group(1).strip().upper())
+        for cand in cands:
+            if cand in distincts:
+                return cand, repr(text) + "->" + repr(cand)
+            if cand.lower() in by_lower:
+                hit = by_lower[cand.lower()]
+                return hit, repr(text) + "->" + repr(hit)
+    if len(text) <= 4 and text.isalpha():
+        want = text.upper(); hits = []
+        for v in distincts:
+            parts = [p for p in _re.split(r"[\s_\-]+", str(v).strip()) if p]
+            if "".join(p[0] for p in parts).upper() == want:
+                hits.append(v)
+        if len(hits) == 1:
+            return hits[0], repr(text) + "->" + repr(hits[0])
+    return value, None
+def resolve_against(entity_text: str, column: str, values: list[str]) -> Resolution:
+    """Resolve against an explicit named-sheet value list (VQ-01). Never invents."""
+    resolved, _note = resolve_against_sheet_values(entity_text, column, values)
+    by_lower = {v.lower(): v for v in values}
+    if resolved and resolved.lower() in by_lower:
+        conf = 1.0 if resolved.lower() == (entity_text or "").strip().lower() else 0.95
+        return Resolution(by_lower[resolved.lower()], conf, column, [by_lower[resolved.lower()]])
+    return Resolution(None, 0.0, column, list(values)[:5])
+

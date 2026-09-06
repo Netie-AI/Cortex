@@ -33,6 +33,18 @@ def test_ontology_requires_api_key(dms_client):
     assert dms_client.get("/dms/ontology").status_code == 401
 
 
+def test_slim_constructor_app_serves_ontology(api_keys_env):
+    reset_limiter(per_minute=120)
+    from packs.dms.constructor_app import create_constructor_app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_constructor_app())
+    res = client.get("/dms/ontology", headers={"X-API-Key": api_keys_env["viewer"]})
+    assert res.status_code == 200, res.text
+    assert res.json()["pack"] == "dms"
+    assert res.json()["counts"]["object_types"] >= 1
+
+
 def test_ontology_summary_matches_registry(dms_client, api_keys_env):
     res = dms_client.get("/dms/ontology", headers={"X-API-Key": api_keys_env["viewer"]})
     assert res.status_code == 200, res.text

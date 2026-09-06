@@ -56,3 +56,15 @@ def test_meta01_revenue_still_governed():
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "revenue_total"
+
+
+def test_grounded_http_catalog_does_not_need_session_grant():
+    """POST /dms/query require_grounding must not abstain on catalog browse."""
+    from CortexOS.dms.query_service import answer_question
+
+    r = answer_question(
+        "what metrics are available in the data",
+        session_id="demo-unbound",
+        require_grounding=True,
+    )
+    _assert_catalog_payload(r)

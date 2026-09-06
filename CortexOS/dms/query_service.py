@@ -910,6 +910,17 @@ def answer_question(
         )
         from CortexOS.execution.manifest import ManifestError
 
+        from packs.dms.semantic.catalog_answer import is_catalog_intent
+
+        # Catalog browse is metadata, not warehouse SQL. A bound session grant
+        # is not required; requiring one made 24/7 wakes abstain before L0.
+        if is_catalog_intent(question):
+            return _engine_answer(
+                question,
+                session_id=session_id,
+                require_grounding=False,
+            )
+
         verified = None
         if require_grounding:
             try:

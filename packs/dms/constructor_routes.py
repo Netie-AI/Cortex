@@ -97,7 +97,7 @@ label,input,button{display:block;margin:.5rem 0}input{padding:.5rem;min-width:20
 button{padding:.5rem .8rem;background:#111;color:#e5e5e5;border:1px solid #333}</style>
 </head><body>
 <h1>Cortex</h1>
-<p>Engine path. Paste an ov_ OpenVault key, or an operator key from DMS_API_KEYS. Demo keys are refused. Generate only works when OpenVault is on this machine. If Generate returns 503 while http://127.0.0.1:5000 health is ok, restart the openmw console -- do not start a second listener.</p>
+<p>Engine path. Paste an ov_ OpenVault key, or a viewer key from DMS_API_KEYS. Laptop default is dms-demo-viewer-key (unless DMS_REFUSE_DEMO_KEYS=1). If Issue key returns 503 while OpenVault :5000 health is ok, restart that console -- do not start a second listener -- or paste the demo viewer key to generate.</p>
 <form id="login" method="post" action="/cortex/session">
 <label for="key">OpenVault key</label>
 <input id="key" name="key" type="password" autocomplete="off" required/>
