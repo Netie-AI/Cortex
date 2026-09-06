@@ -12,7 +12,7 @@ a live/thinking chip and is not "still working" for `wait_for_replies`;
 work; mode toggle no longer wipes `goal_text`. Stop/idle/wait still DENY
 Manager and do not touch `:8020`. Rebased onto `afbd4ae1` so facts.md
 clear survival from #192 stays. Parent #116. Control untouched. Local
-`pytest tests/test_crew -q`: **241 passed**. Not a CI claim.
+`pytest tests/test_crew -q`: **245 passed**. Not a CI claim.
 
 ## CREW-FACTS-MD Memory HUD + facts.md survives clear — 2026-09-06
 

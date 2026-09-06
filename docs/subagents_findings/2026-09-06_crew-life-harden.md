@@ -40,8 +40,12 @@ spawn: skip
 - HTTP POST `.../wait` and `.../idle`. Manager DENIED. No :8020 kill.
 - HUD chips `life-*`, Wait/Idle, spawnGoal; mode toggle keeps goal text.
 - Parent #116. Control untouched. No CLAIMS.json. Freeze lanes not attached.
+- Rebased onto `afbd4ae1` (#192). facts.md clear survival stays.
 
 ## Verify
 
 ```
-241 passed locally. Not a GitHub CI claim.
+python -m pytest tests/test_crew -q
+```
+
+245 passed locally after rebase onto #192. Not a GitHub CI claim.

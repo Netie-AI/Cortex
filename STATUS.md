@@ -11,7 +11,7 @@
 > keeps `goal_text`; Wait/Idle chips + spawnGoal. Stop still does not
 > kill Manager or `:8020`. Rebased onto `afbd4ae1` so facts.md clear
 > survival from #192 stays. Parent #116. Control untouched. Freeze
-> #4/#41-#44 not attached. Local `pytest tests/test_crew -q` **241 passed**. Live
+> #4/#41-#44 not attached. Local `pytest tests/test_crew -q` **245 passed**. Live
 > `:8020` needs founder restart. Did not write CLAIMS.json.
 >
 > **2026-09-06 (CREW-FACTS-MD):** Closed the last #116 honesty gap on the
