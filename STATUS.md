@@ -1,6 +1,16 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-07 eval corpus**
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-FACTS-MD HUD**
 
+> **2026-09-06 (CREW-FACTS-MD):** Closed the last #116 honesty gap on the
+> Memory panel (R-0001). Durable facts stay in `facts.md` (space) and
+> collection `facts.md` (user|agent|run). `POST .../clear` returns
+> `facts_survived` + surviving collections; transcript drops, files stay.
+> HUD list/save/search/export still use memory API scopes; `#memory` paints
+> `facts.md` + body and re-renders after Clear chat. Follow-on under CLOSED
+> epic #116. Control untouched. Freeze #4/#41-#44 not attached. Local
+> `pytest tests/test_crew -q` **241 passed**. Not a GitHub CI claim. Live
+> `:8020` needs founder restart. Did not write CLAIMS.json.
+>
 > **2026-09-06 (CREW-A2A-HARDEN):** Switchboard ask cards + deadlock honesty
 > under Cortex #116. `would_deadlock` walks wait cycles (not only A<->B).
 > `wait_for_replies` is DENIED when a teammate is already waiting on you.
