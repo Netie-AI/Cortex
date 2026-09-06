@@ -136,14 +136,33 @@ def test_oom_gate_cpu_caps_at_two():
     assert g["max_parallel"] <= 2
 
 
-def _wait_done(run_id: str, timeout: float = 8.0):
+def _wait_done(run_id: str, timeout: float = 30.0):
+    """Wait for a run to leave running/queued, and FAIL if it does not.
+
+    This used to give up quietly and return the still-running task, which made
+    the timeout invisible: the next assertion read the panel, did not find the
+    run under "finished", and reported ``assert False`` with no hint that the
+    cause was a wait that expired. That is how test_panel_snapshot_shape passed
+    alone and failed straight after a slower test file - the run was simply not
+    done yet, and nothing said so.
+
+    The 8s budget was also too tight for this machine, which sits near 96
+    percent RAM under load (KB S-0002), where a first module import inside a
+    run can eat most of it.
+    """
     deadline = time.time() + timeout
+    task = None
     while time.time() < deadline:
         task = workflow_runner.get_task(run_id)
         if task and task["status"] not in ("running", "queued"):
             return task
         time.sleep(0.1)
-    return workflow_runner.get_task(run_id)
+    status = (task or {}).get("status", "no such task")
+    raise AssertionError(
+        f"run {run_id} was still {status!r} after {timeout}s - it never finished. "
+        "Raise the budget only if the run is genuinely slow; do not make the "
+        "wait silent again."
+    )
 
 
 def test_smoothness_audit_runs_all_phases():
