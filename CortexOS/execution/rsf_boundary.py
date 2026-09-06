@@ -5,8 +5,10 @@ destination=freeroute). Unreachable OpenVault fails closed. OmniRoute :20128
 is refused, never vendored.
 
 Distill may list analog study trees (D:\\myn8n, langchain, langflow) but
-must not promote them to Constructor ``product_engine``. RSF-06 owns the
-distill harness; this slice only names the trees and keeps the role lock.
+must not promote them to Constructor ``product_engine``. RSF-06
+(``CortexOS.execution.distill_harness``) distills names-only listings into
+Netie-native learn traces. This slice only names the trees and keeps the
+role lock.
 """
 
 from __future__ import annotations
@@ -139,7 +141,7 @@ def read_study_tree(option_id: str, *, root: Path | None = None) -> dict[str, An
     exists = path.is_dir()
     samples: list[str] = []
     if exists:
-        # Names only. Do not import analog packages. RSF-06 distills later.
+        # Names only. Do not import analog packages. RSF-06 distills these.
         try:
             samples = sorted(p.name for p in path.iterdir())[:_SAMPLE_CAP]
         except OSError as exc:

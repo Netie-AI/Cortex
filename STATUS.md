@@ -1,6 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-04 orchestrator**
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-06 distill harness**
 
+> **2026-09-06 (RSF-06 / Cortex#155):** Distill harness
+> `CortexOS.execution.distill_harness.run_distill` takes an options-class recipe
+> (myn8n / langchain / langflow / gencfsm_dag) and emits Netie-native learn traces.
+> Loop is improve → scale-check → improve. Scale-check miss is INCOMPLETE, never
+> invent-green COMPLETE. Paste of n8n/LC/LF as Constructor `product_engine` is
+> REFUSE. Study trees stay names-only (RSF-03); gen-cFSM studies in-repo
+> `gen_cfsm.py` + G1 docs. Scale surfaces: dms_rag / normal_chat / agentic_actions
+> / constructor. FreeRoute over OmniRoute. importlinter contract 3 now includes
+> `distill_harness`. No CCA edit, no Crew dual-seat, no freeze #4/#41-#44.
+> Local: `pytest tests/test_distill_harness.py tests/contract/test_rsf06_paste_ban.py`.
+> Does not claim GHA green. Does not close RSF-07.
+>
 > **2026-09-06 (CREW-MEMORY-API):** Collection-scoped Crew memory under Cortex #116.
 > `GET/POST /crew/spaces/{id}/memory`, `GET .../memory/search`, `GET .../memory/export`,
 > `DELETE .../memory/{name}` take `scope=space|user|agent|run`. Space stays

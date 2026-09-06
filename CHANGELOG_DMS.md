@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## RSF-06 distill harness (myn8n/LC/LF/GenCFSM → Netie-native) — 2026-09-06
+
+In-process `run_distill` reads an options-class recipe, studies names-only analog
+trees (or in-repo gen_cfsm + G1), and emits Netie-native candidates plus learn
+traces. Loop is improve → scale-check → improve. Paste as Constructor engine is
+REFUSE. Failed scale-check is INCOMPLETE, not invent-green COMPLETE. Strengthens
+import-linter contract 3. Closes Cortex#155 (parent EPIC-RSF #151). Local pytest
+only; not GHA.
+
 ## CREW-MEMORY-API collection scopes on CortexOS/crew — 2026-09-06
 
 Collection-scoped markdown memory (parent Cortex #116). HUD Save / Search / Export

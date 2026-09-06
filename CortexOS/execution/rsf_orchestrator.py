@@ -6,6 +6,7 @@ CERTIFIED unless every prior stage in ``RSF_STAGES`` is CERTIFIED.
 RSF-01 options are advisory distill (listed, never shipped as product_engine).
 Not an n8n / LangChain / LangFlow engine swap. No third orchestrator daemon.
 No ``/v1/rsf`` (not a cortex-contract bump). Constructor consume is RSF-05.
+Distill harness (improve→scale-check→improve) is RSF-06.
 """
 
 from __future__ import annotations
