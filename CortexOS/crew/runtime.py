@@ -2458,8 +2458,12 @@ class CrewRuntime:
             return ""
         return "Tone (from skills/tone.md):\n" + body[:4000]
 
-    def _mem(self, space_id: str) -> crew_memory.CrewMemory:
-        return crew_memory.memory_for(self.settings.data_dir, space_id)
+    def _mem(
+        self, space_id: str, scope: str = "space", owner: str = ""
+    ) -> crew_memory.CrewMemory:
+        return crew_memory.collection_for(
+            self.settings.data_dir, space_id, scope=scope, owner=owner
+        )
 
     def _manager_history(self, space_id: str, limit: int = 40) -> list[dict[str, Any]]:
         rows = self.store.list_messages(space_id, limit=10_000)

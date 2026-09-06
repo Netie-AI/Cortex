@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-MEMORY-API collection scopes on CortexOS/crew — 2026-09-06
+
+Collection-scoped markdown memory (parent Cortex #116). HUD Save / Search / Export
+use `/crew/spaces/{id}/memory` with `scope=space|user|agent|run` instead of
+UI-derived capped facts. Space remains `memory/facts.md`. user/agent/run persist
+under `spaces/<id>/collections/<scope>/<owner>/` and survive Clear chat. Recall
+payloads stay inside the untrusted wrapper. Slash remember/recall/forget still
+write only the space collection (no dual-write with standing-policy or CLAIMS).
+Control not touched. Local `pytest tests/test_crew` is the gate; not a CI claim.
+
 ## CREW-POLICY-STANDING server ladder on CortexOS/crew — 2026-09-06
 
 Standing allowlist / session / one-off from Settings is Crew policy SoT, not

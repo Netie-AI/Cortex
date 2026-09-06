@@ -109,6 +109,9 @@ def test_ui_index_is_served(client) -> None:
     assert 'id="memSave"' in page.text
     assert 'id="memExport"' in page.text
     assert "/crew/spaces/" in page.text
+    assert "/memory/search" in page.text
+    assert 'filter((m) => m.role === "user")' not in page.text
+    assert "No facts in this collection." in page.text
     assert "Standing approvals" in page.text
     assert "one-off" in page.text
     assert "circuit-breaker" in page.text
@@ -618,6 +621,111 @@ def test_operator_life_routes_spawn_kill_clear(client) -> None:
     )
     assert refuse.status_code == 400
     assert "DENIED" in refuse.json()["detail"]
+
+
+def test_collection_memory_api_survives_clear_and_does_not_dual_write(client) -> None:
+    space = client.http.post("/crew/spaces", json={"title": "Collections"}).json()
+    sid = space["id"]
+    saved = client.http.post(
+        f"/crew/spaces/{sid}/memory",
+        json={
+            "name": "tz",
+            "description": "founder timezone",
+            "body": "MYT",
+            "scope": "user",
+        },
+    ).json()
+    assert saved["ok"] is True
+    assert saved["scope"] == "user"
+    assert saved["owner"] == "operator"
+
+    listed = client.http.get(f"/crew/spaces/{sid}/memory", params={"scope": "user"}).json()
+    assert listed["scope"] == "user"
+    assert listed["owner"] == "operator"
+    assert listed["file"] == "facts.md"
+    assert listed["facts"][0]["name"] == "tz"
+    assert listed["facts"][0]["body"] == "MYT"
+
+    space_listed = client.http.get(f"/crew/spaces/{sid}/memory").json()
+    assert space_listed["scope"] == "space"
+    assert space_listed["facts"] == []
+
+    searched = client.http.get(
+        f"/crew/spaces/{sid}/memory/search",
+        params={"scope": "user", "q": "timezone"},
+    ).json()
+    assert searched["query"] == "timezone"
+    assert searched["facts"][0]["name"] == "tz"
+
+    for scope, body in (
+        ("agent", "keep answers short"),
+        ("run", "CREW-MEMORY-API"),
+    ):
+        row = client.http.post(
+            f"/crew/spaces/{sid}/memory",
+            json={
+                "name": "note",
+                "description": f"{scope} notebook",
+                "body": body,
+                "scope": scope,
+            },
+        ).json()
+        assert row["ok"] is True
+        assert row["scope"] == scope
+
+    client.http.post(
+        f"/crew/spaces/{sid}/messages",
+        json={"text": "throw away"},
+    )
+    deadline = time.time() + 5
+    while client.crew.runtime._space_run.get(sid):
+        if time.time() > deadline:
+            break
+        time.sleep(0.02)
+    cleared = client.http.post(f"/crew/spaces/{sid}/clear").json()
+    assert cleared["ok"] is True
+
+    for scope, expected in (
+        ("user", "MYT"),
+        ("agent", "keep answers short"),
+        ("run", "CREW-MEMORY-API"),
+    ):
+        after = client.http.get(
+            f"/crew/spaces/{sid}/memory", params={"scope": scope}
+        ).json()
+        assert after["facts"][0]["body"] == expected
+
+    exported = client.http.get(
+        f"/crew/spaces/{sid}/memory/export", params={"scope": "user"}
+    ).json()
+    assert exported["filename"] == "user-operator.md"
+    assert exported["scope"] == "user"
+    assert "# Crew facts" in exported["markdown"]
+    assert "scope: user" in exported["markdown"]
+    assert "MYT" in exported["markdown"]
+
+    forgotten = client.http.delete(
+        f"/crew/spaces/{sid}/memory/tz", params={"scope": "user"}
+    ).json()
+    assert forgotten["ok"] is True
+    empty = client.http.get(f"/crew/spaces/{sid}/memory", params={"scope": "user"}).json()
+    assert empty["facts"] == []
+
+    bad = client.http.post(
+        f"/crew/spaces/{sid}/memory",
+        json={"name": "x", "description": "nope", "body": "x", "scope": "global"},
+    )
+    assert bad.status_code == 400
+    assert "space, user, agent or run" in bad.json()["detail"]
+
+    missing = client.http.get("/crew/spaces/no-such-space/memory/search", params={"q": "x"})
+    assert missing.status_code == 404
+
+    page = client.http.get("/")
+    assert "/memory/search" in page.text
+    assert 'filter((m) => m.role === "user")' not in page.text
+    claims = list(client.crew.settings.data_dir.rglob("CLAIMS.json"))
+    assert claims == []
 
 
 def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:

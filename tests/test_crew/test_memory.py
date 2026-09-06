@@ -16,6 +16,7 @@ from CortexOS.crew.memory import (
     INDEX_PROMPT_MAX_CHARS,
     CrewMemory,
     CrewMemoryError,
+    collection_for,
     memory_for,
 )
 from CortexOS.execution.untrusted_payload import BEGIN, END, is_wrapped
@@ -228,6 +229,54 @@ def test_memory_for_mirrors_the_workspace_jail_layout(tmp_path: Path) -> None:
     assert mem.root == (tmp_path / "crew" / "spaces" / "space-7" / "memory").resolve()
     mem.remember("hello", "a greeting", "hi")
     assert (tmp_path / "crew" / "spaces" / "space-7" / "memory" / "hello.md").is_file()
+
+
+def test_collection_for_isolates_scopes_and_survives_a_fresh_process(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "crew"
+    space = collection_for(data, "s1", scope="space")
+    user = collection_for(data, "s1", scope="user")
+    agent = collection_for(data, "s1", scope="agent")
+    run = collection_for(data, "s1", scope="run")
+    assert user.owner == "operator"
+    assert agent.owner == "crew"
+    assert run.owner == "session"
+
+    user.remember("tz", "founder timezone", "MYT")
+    agent.remember("voice", "how this teammate talks", "short")
+    run.remember("pass", "current pass name", "CREW-MEMORY-API")
+    space.remember("port", "which port crew listens on", "8020")
+
+    # a brand new object, as if chat clear + process restart
+    again = collection_for(data, "s1", scope="user")
+    assert [f.name for f in again.list_facts()] == ["tz"]
+    assert "MYT" in again.recall("timezone")
+    assert is_wrapped(again.recall("timezone"))
+
+    space_files = {p.name for p in space.root.glob("*.md")}
+    assert "tz.md" not in space_files
+    assert "port.md" in space_files
+    assert (user.root / "facts.md").is_file()
+    assert (agent.root / "facts.md").is_file()
+    assert (run.root / "facts.md").is_file()
+    assert not list(tmp_path.rglob("CLAIMS.json"))
+
+
+def test_collection_owner_and_scope_are_jailed(tmp_path: Path) -> None:
+    data = tmp_path / "crew"
+    with pytest.raises(CrewMemoryError) as scope_exc:
+        collection_for(data, "s1", scope="global")
+    assert "space, user, agent or run" in str(scope_exc.value)
+
+    with pytest.raises(CrewMemoryError) as owner_exc:
+        collection_for(data, "s1", scope="user", owner="../escape")
+    assert str(owner_exc.value).strip()
+
+    collection_for(data, "s1", scope="user").remember("kept", "must survive", "yes")
+    written = {p for p in tmp_path.rglob("*.md")}
+    roots = tmp_path / "crew" / "spaces" / "s1" / "collections" / "user" / "operator"
+    assert written == {roots / "kept.md", roots / "INDEX.md", roots / "facts.md"}
 
 
 def test_the_module_opens_no_database() -> None:

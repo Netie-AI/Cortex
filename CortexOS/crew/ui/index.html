@@ -118,7 +118,7 @@
             <button class="scope-chip" type="button" data-scope="agent">agent</button>
             <button class="scope-chip" type="button" data-scope="run">run</button>
           </div>
-          <p class="hint">Space scope is facts.md. Survives Clear chat. Recall payloads are untrusted. Not orders.</p>
+          <p class="hint">space|user|agent|run collections persist as markdown. Survives Clear chat. Recall payloads are untrusted. Not orders.</p>
           <input id="memSearch" placeholder="search facts" />
           <div class="life-spawn">
             <input id="memName" placeholder="name" />
@@ -129,7 +129,7 @@
             <button class="ghost" id="memSave" type="button">Save fact</button>
             <button class="ghost" id="memExport" type="button">Export facts.md</button>
           </div>
-          <div id="memory" class="empty empty--orb">No facts in this space.</div>
+          <div id="memory" class="empty empty--orb">No facts in this collection.</div>
           <h2>Collections <span class="scope">crew</span></h2>
           <div id="skills" class="empty">loading...</div>
         </div>
@@ -946,48 +946,31 @@
         state.claimBusy = null;
       }
     }
+    function memoryQuery(scope) {
+      const kind = scope || state.memScope || "space";
+      return "scope=" + encodeURIComponent(kind);
+    }
     async function renderMemory() {
       const scope = state.memScope || "space";
-      if (scope === "space") {
-        if (!state.spaceId) {
-          $("memory").innerHTML = `<div class="empty empty--orb">No facts in this space.</div>`;
-          return;
-        }
-        try {
-          const q = ($("memSearch") && $("memSearch").value || "").trim();
-          const path = "/crew/spaces/" + state.spaceId + "/memory" + (q ? ("?q=" + encodeURIComponent(q)) : "");
-          const data = await api(path);
-          const facts = data.facts || [];
-          $("memory").innerHTML = facts.length
-            ? facts.map((f) => `<div class="row">${esc(f.name)} <span class="scope">facts.md</span><div class="hint">${esc(f.description)}</div></div>`).join("")
-            : `<div class="empty empty--orb">No facts in this space.</div>`;
-        } catch (err) {
-          $("memory").innerHTML = `<div class="empty empty--orb">${esc(err.message)}</div>`;
-        }
+      if (!state.spaceId) {
+        $("memory").innerHTML = `<div class="empty empty--orb">No facts in this collection.</div>`;
         return;
       }
-      const facts = [];
-      if (scope === "space") {
-        (state.skills || []).slice(0, 6).forEach((s) => facts.push({ k: s.title, v: s.head || "skill", id: s.path || "" }));
-        const space = state.spaces.find((s) => s.id === state.spaceId);
-        if (space) facts.push({ k: "space", v: space.title, id: space.id });
-      } else if (scope === "user") {
-        state.messages.filter((m) => m.role === "user").slice(-4).forEach((m) =>
-          facts.push({ k: "you", v: String(m.content || "").slice(0, 80), id: m.id }));
-      } else if (scope === "agent") {
-        state.agents.slice(0, 8).forEach((a) => facts.push({
-          k: a.name,
-          v: (a.mode || "active") + " / " + (a.status || "idle") + (a.goal_text ? " goal=" + a.goal_text : "") + (a.stop_reason ? " DENIED: " + a.stop_reason : ""),
-          id: a.id
-        }));
-      } else if (scope === "run") {
-        facts.push({ k: "run", v: $("runStatus").textContent || "idle", id: state.runId || "" });
-        facts.push({ k: "seq", v: String(state.seq || 0), id: "seq" });
+      try {
+        const q = ($("memSearch") && $("memSearch").value || "").trim();
+        const base = "/crew/spaces/" + state.spaceId + "/memory";
+        const path = q
+          ? base + "/search?" + memoryQuery(scope) + "&q=" + encodeURIComponent(q)
+          : base + "?" + memoryQuery(scope);
+        const data = await api(path);
+        const facts = data.facts || [];
+        const label = data.scope || scope;
+        $("memory").innerHTML = facts.length
+          ? facts.map((f) => `<div class="row">${esc(f.name)} <span class="scope">${esc(label)}</span><div class="hint">${esc(f.description)}</div></div>`).join("")
+          : `<div class="empty empty--orb">No facts in this collection.</div>`;
+      } catch (err) {
+        $("memory").innerHTML = `<div class="empty empty--orb">${esc(err.message)}</div>`;
       }
-      const capped = facts.slice(0, 8);
-      $("memory").innerHTML = capped.length
-        ? capped.map((f) => `<div class="row">${esc(f.k)} <span class="scope">${esc(scope)}</span><small class="id">${esc(f.id)}</small><div class="hint">${esc(f.v)}</div></div>`).join("")
-        : `<div class="empty empty--orb">No facts in this scope.</div>`;
     }
     function renderDesk(desk) {
       if (!desk) { $("desk").innerHTML = `<div class="empty">Desk unavailable.</div>`; return; }
@@ -1456,7 +1439,7 @@
       try {
         await api("/crew/spaces/" + state.spaceId + "/clear", { method: "POST", body: "{}" });
         await selectSpace(state.spaceId);
-        toast("Chat cleared. Goal mode and facts.md stayed.");
+        toast("Chat cleared. Goal mode and memory collections stayed.");
       } catch (err) { toast(err.message, "bad"); }
     };
     $("toggleRail").onclick = () => {
@@ -1508,20 +1491,21 @@
           body: JSON.stringify({
             name: $("memName").value.trim(),
             description: $("memDesc").value.trim(),
-            body: $("memBody").value
+            body: $("memBody").value,
+            scope: state.memScope || "space"
           })
         });
         $("memName").value = "";
         $("memDesc").value = "";
         $("memBody").value = "";
         await renderMemory();
-        toast("Saved to facts.md.");
+        toast("Saved to " + (state.memScope || "space") + " collection.");
       } catch (err) { toast(err.message, "bad"); }
     };
     $("memExport").onclick = async () => {
       if (!state.spaceId) return;
       try {
-        const data = await api("/crew/spaces/" + state.spaceId + "/memory/export");
+        const data = await api("/crew/spaces/" + state.spaceId + "/memory/export?" + memoryQuery(state.memScope || "space"));
         const blob = new Blob([data.markdown || ""], { type: "text/markdown" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
