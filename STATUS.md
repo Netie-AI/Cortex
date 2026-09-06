@@ -1,6 +1,19 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-FACTS-MD HUD**
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-LIFE-HARDEN**; **CREW-FACTS-MD HUD**
 
+> **2026-09-06 (CREW-LIFE-HARDEN):** Grok-Bot-class lifecycle polish on
+> existing Crew life (`life.py` + slash #158 + spawn/stop/kill #142).
+> **Already present:** spawn/kill/stop, smart-idle mailbox, goal mode
+> survives clear, Manager stop/kill DENIED, slash `/wait`/`/idle`/`/goal`.
+> **Newly hardened:** waiting is not invent-green running (HUD orb +
+> `_busy_names`); `/idle` forces status idle (mode/goal text stay);
+> HTTP `/wait` `/idle`; stop parks immediately then cancels; mode toggle
+> keeps `goal_text`; Wait/Idle chips + spawnGoal. Stop still does not
+> kill Manager or `:8020`. Rebased onto `afbd4ae1` so facts.md clear
+> survival from #192 stays. Parent #116. Control untouched. Freeze
+> #4/#41-#44 not attached. Local `pytest tests/test_crew -q` **245 passed**. Live
+> `:8020` needs founder restart. Did not write CLAIMS.json.
+>
 > **2026-09-06 (CREW-FACTS-MD):** Closed the last #116 honesty gap on the
 > Memory panel (R-0001). Durable facts stay in `facts.md` (space) and
 > collection `facts.md` (user|agent|run). `POST .../clear` returns

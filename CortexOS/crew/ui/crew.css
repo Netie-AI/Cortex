@@ -487,6 +487,12 @@ button { cursor: pointer; }
 }
 .claim.unclaimed { color: var(--hitl); border-color: var(--hitl); }
 .claim.stranded { color: var(--dead); border-color: var(--dead); }
+.claim.life-stopped, .claim.life-failed { color: var(--dead); border-color: var(--dead); }
+.claim.life-waiting { color: var(--hitl); border-color: var(--hitl); }
+.claim.life-idle { color: var(--mute); }
+.claim.life-goal { color: var(--lease); }
+.claim.life-active { color: var(--live); border-color: var(--live); }
+.orb.stopped { opacity: 0.45; }
 .scope {
   display: inline-block;
   font: 0.55rem var(--mono);

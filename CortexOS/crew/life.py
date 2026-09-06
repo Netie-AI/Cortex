@@ -36,8 +36,10 @@ STATUSES = frozenset(
     }
 )
 
-#: In-loop work. Parked idle/goal is not busy.
-WORKING = frozenset({STATUS_ACTIVE, STATUS_WAITING, "thinking", "acting"})
+#: In-loop work that may keep wait_for_replies blocked. Operator-parked
+#: ``waiting`` is not busy; only a live unparked task is.
+BUSY = frozenset({STATUS_ACTIVE, "thinking", "acting"})
+WORKING = frozenset({*BUSY, STATUS_WAITING})
 
 _STATUS_ALIAS = {
     "thinking": STATUS_ACTIVE,
@@ -65,6 +67,13 @@ def is_alive(row: dict[str, Any] | None) -> bool:
     return canonical_status(str(row.get("status") or "")) != STATUS_STOPPED
 
 
+def is_busy(row: dict[str, Any] | None) -> bool:
+    """True only for in-loop active work. Waiting/idle/goal/stopped are not live."""
+    if not is_alive(row):
+        return False
+    return canonical_status(str((row or {}).get("status") or "")) in BUSY
+
+
 def can_accept(row: dict[str, Any] | None) -> bool:
     """False when the operator would see a dead/failed teammate."""
     if not is_alive(row):
@@ -88,3 +97,36 @@ def park_status(row: dict[str, Any] | None) -> str:
     """Idle unless this teammate is in persisted goal mode."""
     mode = canonical_mode(str((row or {}).get("mode") or MODE_ACTIVE))
     return STATUS_GOAL if mode == MODE_GOAL else STATUS_IDLE
+
+
+def hud_chip(row: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator-visible life chip. Never paints stopped as live/running."""
+    if not row:
+        return {"status": STATUS_IDLE, "kind": "idle", "busy": False, "tone": "idle"}
+    status = canonical_status(str(row.get("status") or ""))
+    if not is_alive(row) or status == STATUS_STOPPED:
+        return {
+            "status": STATUS_STOPPED,
+            "kind": "stopped",
+            "busy": False,
+            "tone": "stranded",
+        }
+    if status == STATUS_FAILED:
+        return {
+            "status": STATUS_FAILED,
+            "kind": "failed",
+            "busy": False,
+            "tone": "stranded",
+        }
+    if status == STATUS_WAITING:
+        return {
+            "status": STATUS_WAITING,
+            "kind": "waiting",
+            "busy": False,
+            "tone": "stall",
+        }
+    if status in BUSY:
+        return {"status": STATUS_ACTIVE, "kind": "active", "busy": True, "tone": "live"}
+    if status == STATUS_GOAL:
+        return {"status": STATUS_GOAL, "kind": "goal", "busy": False, "tone": "goal"}
+    return {"status": STATUS_IDLE, "kind": "idle", "busy": False, "tone": "idle"}

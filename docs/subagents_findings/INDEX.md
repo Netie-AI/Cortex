@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-06 | crew-life-harden | crew, life, spawn, wait, stop, idle, goal, hud, epic-116 | Honest wait/idle/stop chips. Waiting is not invent-green running. Stop does not kill Manager. | `2026-09-06_crew-life-harden.md` |
 | 2026-09-06 | crew-a2a-harden | crew, a2a, ask-card, deadlock, switchboard, epic-116 | Walk wait cycles, refuse wait-while-owed, paint ask cards from Switchboard HUD. No invented replies. | `2026-09-06_crew-a2a-harden.md` |
 | 2026-09-06 | rsf-07-eval-corpus | rsf, rsf-07, eval, r-0003, audit, operate, #156 | Frozen RSF cases fail on one WRONG CERTIFIED. Audit/Operate traces never paint invented CERTIFIED. | `2026-09-06_rsf-07-eval-corpus.md` |
 | 2026-09-06 | crew-router-harden | crew, router, openvault, freeroute, arm, multi-model, epic-116 | Vault-armed APIs count as configured without crew secrets. FreeRoute preferred when OV live. Unarmed refuse. chosen stamped. | `2026-09-06_crew-router-harden.md` |

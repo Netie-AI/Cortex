@@ -2,6 +2,18 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-LIFE-HARDEN spawn/wait/stop/idle honesty — 2026-09-06
+
+Life verbs were already on main (spawn/kill/stop, slash wait/idle/goal, goal
+survives clear). This slice closes honesty gaps only: parked `waiting` is not
+a live/thinking chip and is not "still working" for `wait_for_replies`;
+`/idle` forces status idle without dropping mode/goal text; HTTP
+`POST .../wait` and `.../idle`; stop parks the HUD immediately then cancels
+work; mode toggle no longer wipes `goal_text`. Stop/idle/wait still DENY
+Manager and do not touch `:8020`. Rebased onto `afbd4ae1` so facts.md
+clear survival from #192 stays. Parent #116. Control untouched. Local
+`pytest tests/test_crew -q`: **245 passed**. Not a CI claim.
+
 ## CREW-FACTS-MD Memory HUD + facts.md survives clear — 2026-09-06
 
 Follow-on under CLOSED Cortex #116. Memory panel paints `facts.md` + body

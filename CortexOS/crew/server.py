@@ -230,7 +230,7 @@ class AgentSpawnIn(BaseModel):
 
 class AgentModeIn(BaseModel):
     mode: str
-    goal: str = ""
+    goal: str | None = None
 
 
 class AgentKillIn(BaseModel):
@@ -448,6 +448,26 @@ def build_router(crew: CrewApp) -> APIRouter:
         if isinstance(stopped, dict) and stopped.get("error"):
             raise HTTPException(400, str(stopped["error"]))
         return {"ok": True, "agent": stopped}
+
+    @router.post("/spaces/{space_id}/agents/{agent_id}/idle")
+    async def idle_agent(space_id: str, agent_id: str) -> dict[str, Any]:
+        row = crew.store.get_agent(agent_id)
+        if row is None or row.get("space_id") != space_id:
+            raise HTTPException(404, "unknown agent")
+        idled = crew.runtime.idle_agent(agent_id)
+        if isinstance(idled, dict) and idled.get("error"):
+            raise HTTPException(400, str(idled["error"]))
+        return {"ok": True, "agent": idled}
+
+    @router.post("/spaces/{space_id}/agents/{agent_id}/wait")
+    async def wait_agent(space_id: str, agent_id: str) -> dict[str, Any]:
+        row = crew.store.get_agent(agent_id)
+        if row is None or row.get("space_id") != space_id:
+            raise HTTPException(404, "unknown agent")
+        waiting = crew.runtime.wait_agent(agent_id)
+        if isinstance(waiting, dict) and waiting.get("error"):
+            raise HTTPException(400, str(waiting["error"]))
+        return {"ok": True, "agent": waiting}
 
     @router.post("/spaces/{space_id}/agents/{agent_id}/kill")
     async def kill_agent(space_id: str, agent_id: str, body: AgentKillIn | None = None) -> dict[str, Any]:

@@ -168,6 +168,13 @@ def test_ui_index_is_served(client) -> None:
     assert "ask-card" in page.text
     assert "ask-card--waiting" in page.text
     assert "hop--pending" in page.text
+    assert 'id="spawnGoal"' in page.text
+    assert 'data-act="wait"' in page.text
+    assert 'data-act="idle"' in page.text
+    assert 'kind: "waiting", busy: false' in page.text
+    assert "life-wait" in page.text
+    assert "function lifeChip" in page.text
+    assert "Cancel never kills Manager" in page.text
     stolen = client.http.get("/stolen.css")
     assert stolen.status_code == 410
     css = client.http.get("/crew.css")
@@ -187,6 +194,9 @@ def test_ui_index_is_served(client) -> None:
     assert b"ask-card" in css.content
     assert b"msg--ask" in css.content
     assert b"hop--pending" in css.content
+    assert b"claim.life-stopped" in css.content
+    assert b"claim.life-waiting" in css.content
+    assert b"claim.life-active" in css.content
     assert b"--rail-ground" not in css.content
     assert b"--rk-page" not in css.content
     desk = client.http.get("/crew/desk").json()
@@ -660,6 +670,67 @@ def test_operator_life_routes_spawn_kill_clear(client) -> None:
     )
     assert refuse.status_code == 400
     assert "DENIED" in refuse.json()["detail"]
+
+
+def test_operator_life_spawn_wait_stop_idle(client) -> None:
+    space = client.http.post("/crew/spaces", json={"title": "LifePath"}).json()
+    sid = space["id"]
+    spawned = client.http.post(
+        f"/crew/spaces/{sid}/agents",
+        json={"name": "Scout", "brief": "watch", "mode": "active"},
+    ).json()
+    assert spawned["ok"] is True
+    scout = spawned["agent"]
+    waiting = client.http.post(f"/crew/spaces/{sid}/agents/{scout['id']}/wait")
+    assert waiting.status_code == 200
+    body = waiting.json()
+    assert body["agent"]["status"] == "waiting"
+    listed = client.http.get(f"/crew/spaces/{sid}/agents").json()
+    row = next(a for a in listed if a["name"] == "Scout")
+    assert row["status"] == "waiting"
+
+    stopped = client.http.post(f"/crew/spaces/{sid}/agents/{scout['id']}/stop")
+    assert stopped.status_code == 200
+    assert stopped.json()["agent"]["status"] == "idle"
+
+    idled = client.http.post(f"/crew/spaces/{sid}/agents/{scout['id']}/idle")
+    assert idled.status_code == 200
+    assert idled.json()["agent"]["status"] == "idle"
+
+    keeper = client.http.post(
+        f"/crew/spaces/{sid}/agents",
+        json={
+            "name": "Keeper",
+            "brief": "hold",
+            "mode": "goal",
+            "goal": "hold the line",
+        },
+    ).json()["agent"]
+    assert keeper["status"] == "goal"
+    keep_idle = client.http.post(f"/crew/spaces/{sid}/agents/{keeper['id']}/idle")
+    assert keep_idle.status_code == 200
+    parked = keep_idle.json()["agent"]
+    assert parked["status"] == "idle"
+    assert parked["mode"] == "goal"
+    assert parked["goal_text"] == "hold the line"
+
+    toggled = client.http.post(
+        f"/crew/spaces/{sid}/agents/{keeper['id']}/mode",
+        json={"mode": "goal"},
+    )
+    assert toggled.status_code == 200
+    assert toggled.json()["agent"]["goal_text"] == "hold the line"
+
+    mgr = next(a for a in client.http.get(f"/crew/spaces/{sid}/agents").json() if a["name"] == "Manager")
+    refuse_wait = client.http.post(f"/crew/spaces/{sid}/agents/{mgr['id']}/wait")
+    assert refuse_wait.status_code == 400
+    assert "DENIED" in refuse_wait.json()["detail"]
+    refuse_idle = client.http.post(f"/crew/spaces/{sid}/agents/{mgr['id']}/idle")
+    assert refuse_idle.status_code == 400
+    assert "DENIED" in refuse_idle.json()["detail"]
+    refuse_stop = client.http.post(f"/crew/spaces/{sid}/agents/{mgr['id']}/stop")
+    assert refuse_stop.status_code == 400
+    assert "DENIED" in refuse_stop.json()["detail"]
 
 
 def test_collection_memory_api_survives_clear_and_does_not_dual_write(client) -> None:
