@@ -18,6 +18,7 @@ from CortexOS.crew.memory import (
     CrewMemoryError,
     collection_for,
     memory_for,
+    surviving_payloads,
 )
 from CortexOS.execution.untrusted_payload import BEGIN, END, is_wrapped
 
@@ -277,6 +278,52 @@ def test_collection_owner_and_scope_are_jailed(tmp_path: Path) -> None:
     written = {p for p in tmp_path.rglob("*.md")}
     roots = tmp_path / "crew" / "spaces" / "s1" / "collections" / "user" / "operator"
     assert written == {roots / "kept.md", roots / "INDEX.md", roots / "facts.md"}
+
+
+def test_export_markdown(tmp_path: Path) -> None:
+    """Operator export is rebuilt facts.md (space) or scope-owner.md (collections)."""
+    data = tmp_path / "crew"
+    space = collection_for(data, "s1", scope="space")
+    user = collection_for(data, "s1", scope="user")
+    space.remember("crew-port", "which port crew listens on", "8020")
+    user.remember("tz", "founder timezone", "MYT")
+
+    exported = space.export_markdown()
+    assert exported.startswith("# Crew facts")
+    assert "## crew-port" in exported
+    assert "8020" in exported
+    assert (space.root / "facts.md").read_text(encoding="utf-8") == exported
+    assert space.export_filename() == "facts.md"
+
+    user_md = user.export_markdown()
+    assert "scope: user" in user_md
+    assert "MYT" in user_md
+    assert user.export_filename() == "user-operator.md"
+    assert (user.root / "facts.md").is_file()
+
+
+def test_surviving_payloads_skip_missing_scopes_and_keep_facts_md(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "crew"
+    sid = "s1"
+    assert surviving_payloads(data, sid) == []
+
+    space = collection_for(data, sid, scope="space")
+    user = collection_for(data, sid, scope="user")
+    space.remember("crew-port", "which port crew listens on", "8020")
+    user.remember("tz", "founder timezone", "MYT")
+
+    rows = surviving_payloads(data, sid)
+    by_scope = {row["scope"]: row for row in rows}
+    assert set(by_scope) == {"space", "user"}
+    assert by_scope["space"]["file"] == "facts.md"
+    assert by_scope["space"]["facts"][0]["body"] == "8020"
+    assert by_scope["user"]["facts"][0]["body"] == "MYT"
+    assert "agent" not in by_scope
+    assert "run" not in by_scope
+    assert (space.root / "facts.md").is_file()
+    assert (user.root / "facts.md").is_file()
 
 
 def test_the_module_opens_no_database() -> None:

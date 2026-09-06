@@ -116,6 +116,11 @@ def test_ui_index_is_served(client) -> None:
     assert "memoryQuery" in page.text
     assert 'filter((m) => m.role === "user")' not in page.text
     assert "No facts in this collection." in page.text
+    assert "data-mem-file" in page.text
+    assert "facts_survived" in page.text
+    assert "cleared.facts_survived" in page.text
+    assert "(f.body" in page.text
+    assert "data.file" in page.text
     assert "Standing approvals" in page.text
     assert "one-off" in page.text
     assert "circuit-breaker" in page.text
@@ -761,6 +766,119 @@ def test_collection_memory_api_survives_clear_and_does_not_dual_write(client) ->
     assert 'filter((m) => m.role === "user")' not in page.text
     claims = list(client.crew.settings.data_dir.rglob("CLAIMS.json"))
     assert claims == []
+
+
+def _wait_space_idle(client, space_id: str, seconds: float = 5.0) -> None:
+    deadline = time.time() + seconds
+    while client.crew.runtime._space_run.get(space_id):
+        if time.time() > deadline:
+            break
+        time.sleep(0.02)
+
+
+def test_clear_does_not_wipe_facts(client) -> None:
+    """R-0001: Clear drops transcript only. facts.md stays on disk and in the clear envelope."""
+    space = client.http.post("/crew/spaces", json={"title": "Facts survive"}).json()
+    sid = space["id"]
+    saved = client.http.post(
+        f"/crew/spaces/{sid}/memory",
+        json={
+            "name": "crew-port",
+            "description": "which port crew listens on",
+            "body": "8020",
+        },
+    ).json()
+    assert saved["ok"] is True
+    assert saved["file"] == "facts.md"
+    user_saved = client.http.post(
+        f"/crew/spaces/{sid}/memory",
+        json={
+            "name": "tz",
+            "description": "founder timezone",
+            "body": "MYT",
+            "scope": "user",
+        },
+    ).json()
+    assert user_saved["ok"] is True
+
+    client.http.post(f"/crew/spaces/{sid}/messages", json={"text": "throw away"})
+    _wait_space_idle(client, sid)
+    cleared = client.http.post(f"/crew/spaces/{sid}/clear").json()
+    assert cleared["ok"] is True
+    assert cleared["transcript_cleared"] is True
+    assert cleared["facts_survived"] is True
+    assert cleared["memory"]["file"] == "facts.md"
+    assert cleared["memory"]["facts"][0]["name"] == "crew-port"
+    assert cleared["memory"]["facts"][0]["body"] == "8020"
+    user_row = next(row for row in cleared["collections"] if row["scope"] == "user")
+    assert user_row["facts"][0]["body"] == "MYT"
+
+    msgs = client.http.get(f"/crew/spaces/{sid}/messages").json()
+    assert not any(m["role"] == "user" for m in msgs)
+    assert any("facts.md stayed" in (m.get("content") or "") for m in msgs)
+
+    listed = client.http.get(f"/crew/spaces/{sid}/memory").json()
+    assert listed["facts"][0]["body"] == "8020"
+    user_listed = client.http.get(
+        f"/crew/spaces/{sid}/memory", params={"scope": "user"}
+    ).json()
+    assert user_listed["facts"][0]["body"] == "MYT"
+
+    facts_path = (
+        client.crew.settings.data_dir / "spaces" / sid / "memory" / "facts.md"
+    )
+    assert facts_path.is_file()
+    assert "8020" in facts_path.read_text(encoding="utf-8")
+    user_facts = (
+        client.crew.settings.data_dir
+        / "spaces"
+        / sid
+        / "collections"
+        / "user"
+        / "operator"
+        / "facts.md"
+    )
+    assert "MYT" in user_facts.read_text(encoding="utf-8")
+    assert list(client.crew.settings.data_dir.rglob("CLAIMS.json")) == []
+
+
+def test_export_markdown(client) -> None:
+    """GET /memory/export is the operator facts.md download after list/save/search."""
+    space = client.http.post("/crew/spaces", json={"title": "Export md"}).json()
+    sid = space["id"]
+    client.http.post(
+        f"/crew/spaces/{sid}/memory",
+        json={
+            "name": "crew-port",
+            "description": "which port crew listens on",
+            "body": "8020",
+        },
+    )
+    searched = client.http.get(
+        f"/crew/spaces/{sid}/memory/search", params={"q": "port"}
+    ).json()
+    assert searched["facts"][0]["name"] == "crew-port"
+    exported = client.http.get(f"/crew/spaces/{sid}/memory/export").json()
+    assert exported["filename"] == "facts.md"
+    assert exported["scope"] == "space"
+    assert exported["markdown"].startswith("# Crew facts")
+    assert "## crew-port" in exported["markdown"]
+    assert "8020" in exported["markdown"]
+
+    client.http.post(f"/crew/spaces/{sid}/messages", json={"text": "throw away"})
+    _wait_space_idle(client, sid)
+    client.http.post(f"/crew/spaces/{sid}/clear")
+    after = client.http.get(f"/crew/spaces/{sid}/memory/export").json()
+    assert after["filename"] == "facts.md"
+    assert "8020" in after["markdown"]
+
+    page = client.http.get("/")
+    assert 'id="memory"' in page.text
+    assert 'id="memExport"' in page.text
+    assert "data-mem-file" in page.text
+    assert "facts_survived" in page.text
+    assert "/memory/export" in page.text
+    assert "(f.body" in page.text
 
 
 def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:

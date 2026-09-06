@@ -354,6 +354,37 @@ def memory_for(data_dir: Path, space_id: str) -> CrewMemory:
     return collection_for(data_dir, space_id, scope="space")
 
 
+def surviving_payloads(data_dir: Path, space_id: str) -> list[dict[str, object]]:
+    """Collections already on disk. Chat clear must not mkdir missing scopes."""
+    out: list[dict[str, object]] = []
+    space_root = data_dir / "spaces" / space_id / "memory"
+    if space_root.is_dir():
+        out.append(_payload_keeping_facts_md(space_root, scope="space", owner=""))
+    collections = data_dir / "spaces" / space_id / "collections"
+    if not collections.is_dir():
+        return out
+    for scope in ("user", "agent", "run"):
+        scope_dir = collections / scope
+        if not scope_dir.is_dir():
+            continue
+        for owner_dir in sorted(path for path in scope_dir.iterdir() if path.is_dir()):
+            out.append(
+                _payload_keeping_facts_md(
+                    owner_dir, scope=scope, owner=owner_dir.name
+                )
+            )
+    return out
+
+
+def _payload_keeping_facts_md(
+    root: Path, *, scope: str, owner: str
+) -> dict[str, object]:
+    mem = CrewMemory(root, scope=scope, owner=owner)
+    if mem.list_facts() or (mem.root / FACTS_FILE).is_file():
+        mem.export_markdown()
+    return mem.public_payload()
+
+
 def collection_for(
     data_dir: Path,
     space_id: str,

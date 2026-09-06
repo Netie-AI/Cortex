@@ -116,8 +116,10 @@ async def test_slash_remember_writes_facts_md_without_a_run(rig) -> None:
     assert "remembered 'crew-port'" in tool["content"]
     facts = rig.settings.data_dir / "spaces" / space["id"] / "memory" / "facts.md"
     assert "8020" in facts.read_text(encoding="utf-8")
-    rig.runtime.clear_chat(space["id"])
+    cleared = rig.runtime.clear_chat(space["id"])
+    assert cleared["facts_survived"] is True
     assert "8020" in facts.read_text(encoding="utf-8")
+    assert cleared["memory"]["facts"][0]["body"] == "8020"
 
 
 @pytest.mark.asyncio
