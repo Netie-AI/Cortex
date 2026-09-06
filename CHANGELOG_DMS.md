@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-APPSHELL operator shell around Crew — 2026-09-06
+
+AppShell nav wraps existing Crew chrome. Apps launcher tiles (DMS, Constructor,
+AirGPT, OpenVault, Pointer, Space, Control) open via deep-link/iframe/panel and
+show GET health when probes are on. Control tab embeds/deep-links `:8040` GET
+surfaces with banner Display only F-0030; no converse copy; no POST
+run/goal/route/secrets; Control is not Crew spawn. Audit tab deep-links
+Constructor RSF Audit/Operate and surfaces honest `rsf_operate` statuses.
+Cmd-K registers the new pages. Mobile-ready rail/drawer CSS. Local
+`pytest tests/test_crew -q` recount after rebase onto #194. Off freeze
+#4/#41-#44. Rebased onto main after #194 CREW-ASSIGN, #193 LIFE-HARDEN,
+and #192 FACTS-MD. Assign notes, LIFE chips, and FACTS HUD stay.
+
 ## CREW-ASSIGN destination router (OpenVault-only) — 2026-09-06
 
 Assign surface on CortexOS/crew (parent Cortex #116). `GET /crew/assign` is

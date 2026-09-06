@@ -1,0 +1,8 @@
+{
+  "name": "Cortex",
+  "short_name": "Cortex",
+  "start_url": "/#/home",
+  "display": "standalone",
+  "background_color": "#16181e",
+  "theme_color": "#16181e"
+}

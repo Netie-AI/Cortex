@@ -4,9 +4,61 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cortex Crew</title>
+  <meta name="theme-color" content="#16181e" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="/appshell.webmanifest" />
   <link rel="stylesheet" href="/crew.css" />
 </head>
 <body>
+  <div class="appshell" id="appshell">
+    <nav class="appshell__nav" id="shellNav" aria-label="AppShell">
+      <button class="appshell__menu" id="shellMenu" type="button" title="Open AppShell nav">Menu</button>
+      <button class="appshell__brand" type="button" data-nav="home">Cortex</button>
+      <button class="appshell__link" type="button" data-nav="home">Home</button>
+      <button class="appshell__link on" type="button" data-nav="crew">Crew</button>
+      <button class="appshell__link" type="button" data-nav="agents">Agents</button>
+      <button class="appshell__link" type="button" data-nav="control">Control</button>
+      <button class="appshell__link" type="button" data-nav="apps">Apps</button>
+      <button class="appshell__link" type="button" data-nav="audit">Audit</button>
+      <button class="appshell__link" type="button" data-nav="assign">Assign</button>
+      <button class="appshell__link" type="button" data-nav="memory">Memory</button>
+      <button class="appshell__link" type="button" data-nav="settings">Settings</button>
+    </nav>
+    <div class="appshell__body">
+      <section class="shell-plane" id="plane-home">
+        <h1>Cortex</h1>
+        <p class="hint">Brains=Cortex. Keys=OpenVault. Launch=Control. Chat-spawn=Crew. Canvas=Constructor. Planes stay separate.</p>
+        <div class="app-tiles" id="homeTiles"></div>
+      </section>
+      <section class="shell-plane" id="plane-apps">
+        <h1>Apps</h1>
+        <p class="hint">Tiles open via deep-link, iframe, or panel. Control is display only F-0030. Not Crew spawn.</p>
+        <div class="app-tiles" id="appTiles"></div>
+        <iframe class="shell-frame" id="appFrame" hidden title="App panel" sandbox="allow-scripts allow-same-origin"></iframe>
+      </section>
+      <section class="shell-plane" id="plane-control">
+        <h1>Control</h1>
+        <div class="shell-banner" id="controlBanner">Display only F-0030</div>
+        <p class="hint">GET display surfaces on :8040. No converse copy. No POST run/goal/route/secrets.</p>
+        <div class="chip-row">
+          <a class="ghost" id="controlOpen" href="http://127.0.0.1:8040/" target="_blank" rel="noopener">Open Control</a>
+        </div>
+        <iframe class="shell-frame" id="controlFrame" title="Control display" sandbox="allow-scripts allow-same-origin"></iframe>
+        <div id="controlSurfaces"></div>
+      </section>
+      <section class="shell-plane" id="plane-audit">
+        <h1>Audit</h1>
+        <p class="hint">Constructor RSF Audit/Operate. Status is CERTIFIED, ABSTAIN, or REFUSE. No invent-green.</p>
+        <div class="chip-row">
+          <a class="ghost" id="auditOpen" href="/cortex/constructor/" target="_blank" rel="noopener">Open Constructor</a>
+        </div>
+        <div class="eyebrow">AUDIT</div>
+        <ol id="shellAudit" class="rsf-stages"></ol>
+        <div class="eyebrow">OPERATE</div>
+        <ol id="shellOperate" class="rsf-stages"></ol>
+        <iframe class="shell-frame" id="auditFrame" hidden title="Constructor Audit" sandbox="allow-scripts allow-same-origin"></iframe>
+      </section>
+      <section class="shell-plane shell-plane--crew on" id="plane-crew">
   <div class="desk">
     <aside class="spaces" id="rail">
       <div class="spaces__brand">
@@ -177,6 +229,9 @@
       </div>
     </aside>
   </div>
+      </section>
+    </div>
+  </div>
   <div class="toasts" id="toasts"></div>
   <div class="takeover" id="takeover" hidden>
     <div class="takeover__box" role="dialog" aria-modal="true" aria-labelledby="takeoverTitle">
@@ -194,7 +249,7 @@
   <div class="scrim scrim--palette" id="palette">
     <div class="palette">
       <div class="palette__query">
-        <input class="palette__input" id="searchQ" placeholder="Search spaces, agents, messages" />
+        <input class="palette__input" id="searchQ" placeholder="Pages, spaces, agents, messages" />
       </div>
       <div id="searchHits" class="belt__body"></div>
     </div>
@@ -270,7 +325,8 @@
       belt: null, memScope: "space", claimBusy: null,
       approvals: { mode: "one-off", allow: {}, session: {}, circuit: {} },
       runStarted: 0,
-      routeProvider: "", usage: null, asks: [], threads: null
+      routeProvider: "", usage: null, asks: [], threads: null,
+      plane: "crew", shell: null, appHealth: []
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
@@ -1223,6 +1279,147 @@
       if (state.belt) renderBelt(state.belt);
     }
 
+    function rsfStatusClass(status) {
+      if (status === "CERTIFIED") return "rsf-certified";
+      if (status === "REFUSE") return "rsf-refuse";
+      return "rsf-abstain";
+    }
+    function paintShellStages(el, rows) {
+      if (!el) return;
+      el.innerHTML = "";
+      (rows || []).forEach((row) => {
+        const status = row.status;
+        if (status !== "CERTIFIED" && status !== "ABSTAIN" && status !== "REFUSE") return;
+        const li = document.createElement("li");
+        li.className = "rsf-stage " + rsfStatusClass(status);
+        const chosen = status === "CERTIFIED" ? (row.chosen_option || "") : "";
+        li.textContent = (row.stage || "?") + " " + status + (chosen ? " " + chosen : "");
+        el.appendChild(li);
+      });
+    }
+    function healthFor(slug) {
+      return (state.appHealth || []).find((h) => h.slug === slug) || {};
+    }
+    function renderLauncher() {
+      const apps = (state.shell && state.shell.apps) || [];
+      $("appTiles").innerHTML = apps.map((app) => {
+        const h = healthFor(app.slug);
+        const cls = h.status || "unprobed";
+        return `<div class="app-tile" data-slug="${esc(app.slug)}">
+          <b>${esc(app.name)}</b>
+          <small>${esc(app.layer)}</small>
+          <span class="health ${esc(cls)}">${esc(h.detail || cls)}</span>
+          <small>${esc(app.note || "")}</small>
+          <div class="opens">
+            <button class="ghost" type="button" data-open="deep-link" data-slug="${esc(app.slug)}">deep-link</button>
+            <button class="ghost" type="button" data-open="iframe" data-slug="${esc(app.slug)}">iframe</button>
+            <button class="ghost" type="button" data-open="panel" data-slug="${esc(app.slug)}">panel</button>
+          </div>
+        </div>`;
+      }).join("");
+      $("appTiles").querySelectorAll("[data-open]").forEach((el) => {
+        el.onclick = () => openApp(el.dataset.slug, el.dataset.open);
+      });
+      const nav = (state.shell && state.shell.nav) || [];
+      $("homeTiles").innerHTML = nav.map((n) =>
+        `<button class="app-tile" type="button" data-nav-home="${esc(n.id)}"><b>${esc(n.label)}</b><small>${esc(n.hint)}</small></button>`
+      ).join("");
+      $("homeTiles").querySelectorAll("[data-nav-home]").forEach((el) => {
+        el.onclick = () => goNav(el.getAttribute("data-nav-home"));
+      });
+    }
+    function openApp(slug, how) {
+      const app = ((state.shell && state.shell.apps) || []).find((a) => a.slug === slug);
+      if (!app) return;
+      if (how === "spawn" || app.spawn) {
+        toast("Control launchers are not Crew spawn", "bad");
+        return;
+      }
+      if (slug === "control") {
+        if (how === "deep-link") { window.open(app.url, "_blank", "noopener"); return; }
+        goNav("control");
+        return;
+      }
+      if (how === "deep-link") {
+        window.open(app.url, "_blank", "noopener");
+        return;
+      }
+      goNav("apps");
+      const frame = $("appFrame");
+      frame.hidden = false;
+      frame.src = app.url;
+    }
+    function applyShellFocus(focus) {
+      if (!focus) return;
+      if (focus === "settings") { $("settings").classList.add("open"); return; }
+      $("insp").classList.add("belt--pinned");
+      $("insp").classList.remove("belt--shut");
+      if (focus === "assign") {
+        $("workPane").hidden = true; $("ticketPane").hidden = false;
+        $("tabWork").classList.remove("on"); $("tabTickets").classList.add("on");
+      }
+    }
+    function goNav(id, fromHash) {
+      const item = ((state.shell && state.shell.nav) || []).find((n) => n.id === id) || { id: id, plane: id, focus: "" };
+      const plane = item.plane || id;
+      state.plane = id;
+      document.querySelectorAll(".shell-plane").forEach((el) => el.classList.toggle("on", el.id === "plane-" + plane));
+      document.querySelectorAll("[data-nav]").forEach((el) => el.classList.toggle("on", el.getAttribute("data-nav") === id));
+      $("appshell").classList.remove("appshell--open");
+      if (!fromHash) {
+        const next = "#/" + id;
+        if (location.hash !== next) history.replaceState(null, "", next);
+      }
+      applyShellFocus(item.focus || "");
+      if (plane === "control") loadControl();
+      if (plane === "audit") loadAudit();
+      if (plane === "apps" || plane === "home") renderLauncher();
+    }
+    async function loadControl() {
+      try {
+        const snap = await api("/crew/appshell/control");
+        $("controlBanner").textContent = snap.banner || "Display only F-0030";
+        if (snap.control_url) {
+          $("controlOpen").href = snap.control_url;
+          $("controlFrame").src = snap.control_url;
+        }
+        const rows = snap.surfaces || [];
+        $("controlSurfaces").innerHTML = rows.length
+          ? rows.map((s) => {
+              const body = typeof s.body === "string" ? s.body : JSON.stringify(s.body || {}, null, 2);
+              return `<div class="control-surface"><b>${esc(s.path)}</b> ${esc(s.detail || s.status || "")}\n${esc(body || "")}</div>`;
+            }).join("")
+          : `<div class="empty">Control unprobed or down.</div>`;
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    async function loadAudit() {
+      try {
+        const payload = await api("/crew/appshell/audit");
+        if (payload.constructor_url) {
+          $("auditOpen").href = payload.constructor_url;
+          $("auditFrame").hidden = false;
+          $("auditFrame").src = payload.constructor_url;
+        }
+        paintShellStages($("shellAudit"), payload.audit && payload.audit.stages);
+        paintShellStages($("shellOperate"), payload.operate && payload.operate.stages);
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    function pageHits(q) {
+      const pages = (state.shell && state.shell.palette) || [];
+      const n = (q || "").trim().toLowerCase();
+      return pages.filter((p) => !n || (p.label + " " + p.id + " " + (p.hint || "")).toLowerCase().indexOf(n) >= 0);
+    }
+    async function initShell() {
+      try {
+        state.shell = await api("/crew/appshell");
+        const health = await api("/crew/appshell/health").catch(() => ({ apps: [] }));
+        state.appHealth = health.apps || [];
+      } catch (err) { toast(err.message, "bad"); }
+      renderLauncher();
+      const start = (location.hash || "").replace(/^#\/?/, "") || "crew";
+      goNav(start, true);
+    }
+
     async function boot() {
       const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt, composer, ladder] = await Promise.all([
         api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
@@ -1269,6 +1466,7 @@
       }
       renderSpaces();
       await selectSpace(state.spaces[0].id);
+      await initShell();
       setInterval(refreshBelt, 4000);
     }
     async function refreshBelt() {
@@ -1749,15 +1947,26 @@
     };
     async function runSearch() {
       const q = $("searchQ").value.trim();
+      const pages = pageHits(q);
       let hits = [];
       try { hits = q.length < 2 ? [] : await api("/crew/search?q=" + encodeURIComponent(q)); }
       catch (err) { toast(err.message, "bad"); }
-      $("searchHits").innerHTML = hits.length
-        ? hits.map((h) => `<button class="palette__hit" data-space="${esc(h.space_id)}"><b>${esc(h.kind)}</b> ${esc(h.title)}<small>${esc(h.snippet)}</small></button>`).join("")
-        : `<div class="empty" style="padding:1rem">No results</div>`;
-      $("searchHits").querySelectorAll(".palette__hit").forEach((el) => el.onclick = () => {
-        $("palette").classList.remove("open");
-        selectSpace(el.dataset.space);
+      const pageHtml = pages.map((p) =>
+        `<button class="palette__hit" data-hash="${esc(p.hash)}"><b>${esc(p.label)}</b> page<small>${esc(p.hint || "")}</small></button>`
+      ).join("");
+      const hitHtml = hits.map((h) =>
+        `<button class="palette__hit" data-space="${esc(h.space_id)}"><b>${esc(h.kind)}</b> ${esc(h.title)}<small>${esc(h.snippet)}</small></button>`
+      ).join("");
+      $("searchHits").innerHTML = (pageHtml + hitHtml) || `<div class="empty" style="padding:1rem">No results</div>`;
+      $("searchHits").querySelectorAll(".palette__hit").forEach((el) => {
+        el.onclick = () => {
+          $("palette").classList.remove("open");
+          if (el.dataset.hash) {
+            goNav(el.dataset.hash.replace(/^#\//, ""));
+            return;
+          }
+          selectSpace(el.dataset.space);
+        };
       });
     }
     function openSearch() { $("palette").classList.add("open"); $("searchQ").focus(); runSearch(); }
@@ -1767,7 +1976,16 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openSearch(); }
       if (e.key === "Escape") {
         ["palette", "host", "teach", "voice", "settings", "plugins"].forEach((id) => $(id).classList.remove("open"));
+        $("appshell").classList.remove("appshell--open");
       }
+    });
+    $("shellMenu").onclick = () => $("appshell").classList.toggle("appshell--open");
+    document.querySelectorAll("[data-nav]").forEach((el) => {
+      el.onclick = () => goNav(el.getAttribute("data-nav"));
+    });
+    window.addEventListener("hashchange", () => {
+      const id = (location.hash || "#/crew").replace(/^#\/?/, "") || "crew";
+      goNav(id, true);
     });
     $("palette").onclick = (e) => { if (e.target.id === "palette") $("palette").classList.remove("open"); };
     $("settings").onclick = (e) => { if (e.target.id === "settings") $("settings").classList.remove("open"); };
