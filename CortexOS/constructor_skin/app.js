@@ -453,11 +453,52 @@ function setGhost(on) {
   if (btn) btn.textContent = window.Constructor.ghost ? "Ghost on" : "Ghost off";
 }
 
+function rsfStatusClass(status) {
+  if (status === "CERTIFIED") return "rsf-certified";
+  if (status === "REFUSE") return "rsf-refuse";
+  return "rsf-abstain";
+}
+
+function paintRsfStages(el, stages) {
+  el.innerHTML = "";
+  if (!Array.isArray(stages) || !stages.length) {
+    el.hidden = true;
+    return;
+  }
+  for (const row of stages) {
+    const status = row && row.status;
+    if (status !== "CERTIFIED" && status !== "ABSTAIN" && status !== "REFUSE") continue;
+    const li = document.createElement("li");
+    li.className = "rsf-stage " + rsfStatusClass(status);
+    const chosen = status === "CERTIFIED" ? row.chosen_option || "" : "";
+    const head = document.createElement("div");
+    head.className = "rsf-head";
+    head.textContent = (row.stage || "?") + " " + status + (chosen ? " " + chosen : "");
+    li.appendChild(head);
+    if (Array.isArray(row.route_trace) && row.route_trace.length) {
+      const note = document.createElement("div");
+      const last = row.route_trace[row.route_trace.length - 1] || {};
+      note.textContent = (last.step || "route") + ": " + (last.chosen || last.note || "none");
+      li.appendChild(note);
+    }
+    el.appendChild(li);
+  }
+  el.hidden = el.children.length === 0;
+}
+
 function showAudit(obj) {
   inspectEmpty.hidden = true;
   inspectForm.hidden = true;
   inspectJson.hidden = false;
   inspectJson.textContent = JSON.stringify(obj, null, 2);
+  const rsfAudit = document.getElementById("rsf-audit");
+  const rsfOperate = document.getElementById("rsf-operate");
+  const operateEmpty = document.getElementById("operate-empty");
+  const auditStages = obj && obj.audit && obj.audit.stages;
+  const operateStages = obj && obj.operate && obj.operate.stages;
+  if (rsfAudit) paintRsfStages(rsfAudit, auditStages);
+  if (rsfOperate) paintRsfStages(rsfOperate, operateStages);
+  if (operateEmpty) operateEmpty.hidden = !!(operateStages && operateStages.length);
 }
 
 function markGhostWalk(ids) {
@@ -516,6 +557,8 @@ window.Constructor = {
   wire,
   setGhost,
   showAudit,
+  rsfStatusClass,
+  paintRsfStages,
   markGhostWalk,
   loadFoundryPath,
   replaceGraph,

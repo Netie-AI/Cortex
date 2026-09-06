@@ -202,6 +202,40 @@ body.ghost-mode .top {
   border-bottom-color: #666;
 }
 
+.rsf-stages {
+  list-style: none;
+  margin: 0.4rem 0 0.8rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.rsf-stage {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.rsf-stage .rsf-head {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.rsf-certified {
+  border-color: #7a7;
+}
+
+.rsf-abstain {
+  border-color: #aa8;
+}
+
+.rsf-refuse {
+  border-color: #c66;
+}
+
 .approaches {
   display: flex;
   flex-direction: column;

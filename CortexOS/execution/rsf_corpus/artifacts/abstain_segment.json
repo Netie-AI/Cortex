@@ -1,0 +1,115 @@
+{
+  "id": "abstain_segment",
+  "ok": false,
+  "engine": "cortex",
+  "question": "units sold by region",
+  "destination": "freeroute",
+  "artifacts": [
+    {
+      "artifact_id": "rsf_research_fixture02",
+      "stage": "research",
+      "question": "units sold by region",
+      "options": ["warehouse_grant", "web_search"],
+      "chosen_option": "warehouse_grant",
+      "route_trace": [
+        {
+          "step": "pick",
+          "considered": ["warehouse_grant", "web_search"],
+          "chosen": "warehouse_grant",
+          "rejected": {},
+          "note": "research ok"
+        },
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": "cortex",
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": ["grant=sales_fact"],
+      "status": "CERTIFIED",
+      "reasons": ["grant present"]
+    },
+    {
+      "artifact_id": "rsf_segment_fixture02",
+      "stage": "segment",
+      "question": "units sold by region",
+      "options": ["region", "country"],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "pick",
+          "considered": ["region", "country"],
+          "chosen": null,
+          "rejected": {},
+          "note": "will not invent a segment"
+        },
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "ABSTAIN",
+      "reasons": ["grant does not name a segment key"]
+    },
+    {
+      "artifact_id": "rsf_classify_fixture02",
+      "stage": "classify",
+      "question": "units sold by region",
+      "options": [],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "ABSTAIN",
+      "reasons": ["segment ABSTAIN; will not invent a downstream classification"]
+    },
+    {
+      "artifact_id": "rsf_filter_fixture02",
+      "stage": "filter",
+      "question": "units sold by region",
+      "options": [],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "ABSTAIN",
+      "reasons": ["segment ABSTAIN; will not invent a downstream classification"]
+    }
+  ]
+}

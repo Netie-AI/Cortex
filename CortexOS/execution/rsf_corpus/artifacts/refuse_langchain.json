@@ -1,0 +1,110 @@
+{
+  "id": "refuse_langchain",
+  "ok": false,
+  "engine": "cortex",
+  "question": "which orchestrator should run this",
+  "destination": "freeroute",
+  "artifacts": [
+    {
+      "artifact_id": "rsf_research_fixture03",
+      "stage": "research",
+      "question": "which orchestrator should run this",
+      "options": ["cortex", "langchain", "myn8n"],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "pick",
+          "considered": ["cortex", "langchain", "myn8n"],
+          "chosen": "langchain",
+          "rejected": {},
+          "note": "banned analog"
+        },
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "REFUSE",
+      "reasons": [
+        "BAN: langchain cannot be the Constructor product_engine. Distill-only analog. Engine stays cortex."
+      ]
+    },
+    {
+      "artifact_id": "rsf_segment_fixture03",
+      "stage": "segment",
+      "question": "which orchestrator should run this",
+      "options": [],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "ABSTAIN",
+      "reasons": ["research REFUSE; will not invent a downstream classification"]
+    },
+    {
+      "artifact_id": "rsf_classify_fixture03",
+      "stage": "classify",
+      "question": "which orchestrator should run this",
+      "options": [],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "ABSTAIN",
+      "reasons": ["research REFUSE; will not invent a downstream classification"]
+    },
+    {
+      "artifact_id": "rsf_filter_fixture03",
+      "stage": "filter",
+      "question": "which orchestrator should run this",
+      "options": [],
+      "chosen_option": null,
+      "route_trace": [
+        {
+          "step": "meta_router",
+          "considered": ["cortex", "gencfsm_dag", "langchain", "langflow", "myn8n"],
+          "chosen": null,
+          "rejected": {
+            "myn8n": "distill_only; never product_engine",
+            "langchain": "distill_only; never product_engine",
+            "langflow": "distill_only; never product_engine"
+          },
+          "note": "RSF-01 options are advisory distill. Product engine stays cortex."
+        }
+      ],
+      "evidence": [],
+      "status": "ABSTAIN",
+      "reasons": ["research REFUSE; will not invent a downstream classification"]
+    }
+  ]
+}

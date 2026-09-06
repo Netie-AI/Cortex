@@ -187,6 +187,9 @@ def test_vendored_skin_is_served_without_laptop_path(dms_client, api_keys_env):
     )
     assert ok.status_code == 200
     assert b"id=\"stage\"" in ok.content
+    assert b"id=\"rsf-audit\"" in ok.content
+    assert b">OPERATE<" in ok.content
+    assert b"id=\"rsf-operate\"" in ok.content
 
 
 def test_run_401_without_key(dms_client):

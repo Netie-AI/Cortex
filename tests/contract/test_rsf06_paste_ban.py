@@ -66,6 +66,8 @@ def test_importlinter_contract_covers_distill_harness() -> None:
         if line.strip()
     }
     assert "CortexOS.execution.distill_harness" in sources
+    assert "CortexOS.execution.rsf_eval" in sources
+    assert "CortexOS.execution.rsf_operate" in sources
     forbidden = {
         line.strip()
         for line in parser.get(section, "forbidden_modules").splitlines()
