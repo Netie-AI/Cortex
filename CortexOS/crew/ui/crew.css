@@ -18,6 +18,9 @@
 
    Control GET /v1/belt display JSON stays additive (assign_map is display-only).
    GET /stolen.css is 410.
+
+   AppShell nav wraps Crew; Apps / Control / Audit stay separate planes.
+   --shell-bottom-nav-h is 0 until a mobile bottom-nav lands.
 */
 
 :root {
@@ -38,6 +41,9 @@
   --ui-scale: 1;
   --spaces-w: min(13.5rem, 22vw);
   --belt-w: min(18.5rem, 28vw);
+  --shell-nav-w: 4.6rem;
+  --shell-nav-collapsed: 2.5rem;
+  --shell-bottom-nav-h: 0px;
   --scrim: rgb(10 12 18 / 0.72);
   --font: "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -926,4 +932,140 @@ button { cursor: pointer; }
   .spaces:not(.spaces--pinned) .spaces__hide { display: none; }
   .belt:not(.belt--pinned) { width: 2.2rem; }
   .belt:not(.belt--pinned) .belt__body { display: none; }
+}
+
+.appshell {
+  display: grid;
+  grid-template-columns: var(--shell-nav-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--shell-bottom-nav-h);
+  height: 100%;
+  min-height: 0;
+}
+.appshell__nav {
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  padding: 0.4rem 0.28rem calc(0.4rem + var(--shell-bottom-nav-h));
+  background: var(--well);
+  border-right: 1px solid var(--line);
+  overflow: auto;
+  min-height: 0;
+}
+.appshell__brand {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 0.62rem/1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 0.25rem 0.3rem 0.45rem;
+}
+.appshell__link,
+.appshell__menu {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--mute);
+  text-align: left;
+  padding: 0.28rem 0.35rem;
+  font: 0.62rem/1.2 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  width: 100%;
+}
+.appshell__link:hover { color: var(--ink); border-color: var(--line); }
+.appshell__link.on { color: var(--live); border-color: var(--live); }
+.appshell__menu { display: none; }
+.appshell__body {
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell-plane {
+  display: none;
+  height: 100%;
+  overflow: auto;
+  padding: 0.75rem 1rem 1rem;
+}
+.shell-plane.on { display: block; }
+.shell-plane--crew { padding: 0; overflow: hidden; }
+.shell-plane--crew.on {
+  display: flex;
+  flex-direction: column;
+}
+.shell-plane--crew .desk { flex: 1; height: 100%; min-height: 0; }
+.shell-plane h1 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+.eyebrow { color: var(--dim); font: 0.58rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.6rem; }
+.shell-banner {
+  border: 1px solid var(--hitl);
+  background: var(--hitl-bg);
+  color: var(--hitl);
+  padding: 0.35rem 0.55rem;
+  font: 0.68rem/1.35 var(--mono);
+  margin: 0.35rem 0 0.65rem;
+}
+.app-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.55rem;
+  margin: 0.7rem 0;
+}
+.app-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--pane);
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+}
+.app-tile:hover { border-color: var(--lease); }
+.app-tile b { font-size: 0.88rem; }
+.app-tile small { color: var(--mute); font-size: 0.68rem; }
+.app-tile .health { font: 0.58rem var(--mono); color: var(--dim); }
+.app-tile .health.up { color: var(--ok); }
+.app-tile .health.down, .app-tile .health.unprobed { color: var(--mute); }
+.app-tile .opens { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.25rem; }
+.shell-frame {
+  width: 100%;
+  height: min(28rem, 52vh);
+  border: 1px solid var(--line);
+  background: var(--pane);
+  margin-top: 0.5rem;
+}
+.rsf-stages { margin: 0.4rem 0 0.8rem; padding-left: 1.1rem; }
+.rsf-stage { margin: 0.25rem 0; font: 0.72rem/1.35 var(--mono); }
+.rsf-certified { color: var(--ok); }
+.rsf-abstain { color: var(--hitl); }
+.rsf-refuse { color: var(--dead); }
+.control-surface {
+  border: 1px solid var(--line);
+  background: var(--pane);
+  padding: 0.45rem 0.55rem;
+  margin: 0.35rem 0;
+  font: 0.68rem/1.35 var(--mono);
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 10rem;
+}
+
+@media (max-width: 720px) {
+  .appshell {
+    grid-template-columns: var(--shell-nav-collapsed) minmax(0, 1fr);
+  }
+  .appshell:not(.appshell--open) .appshell__nav .appshell__link,
+  .appshell:not(.appshell--open) .appshell__nav .appshell__brand {
+    display: none;
+  }
+  .appshell__menu { display: block; }
+  .appshell.appshell--open {
+    grid-template-columns: min(14rem, 72vw) minmax(0, 1fr);
+  }
+  .appshell.appshell--open .appshell__nav {
+    position: relative;
+    z-index: 8;
+  }
 }

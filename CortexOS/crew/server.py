@@ -695,6 +695,47 @@ def build_router(crew: CrewApp) -> APIRouter:
             cmds = filter_commands(cmds, needle)
         return {"commands": cmds, "mentions": mentions}
 
+    @router.get("/appshell")
+    async def appshell_catalog() -> dict[str, Any]:
+        """Nav + Apps launcher + Control/Audit deep-links. GET catalog only."""
+        from CortexOS.crew import appshell as appshell_mod
+
+        return appshell_mod.catalog(engine_url=crew.settings.engine_url)
+
+    @router.get("/appshell/health")
+    async def appshell_health() -> dict[str, Any]:
+        from CortexOS.crew import appshell as appshell_mod
+
+        return appshell_mod.health(engine_url=crew.settings.engine_url)
+
+    @router.get("/appshell/control")
+    async def appshell_control(path: str | None = None) -> dict[str, Any]:
+        """Control :8040 display GET. Never POST run/goal/route/secrets."""
+        from CortexOS.crew import appshell as appshell_mod
+
+        body = appshell_mod.control_display(path=path)
+        if body.get("refused"):
+            raise HTTPException(403, body.get("reason") or "not a Control display GET")
+        return body
+
+    @router.get("/appshell/audit")
+    async def appshell_audit() -> dict[str, Any]:
+        """Honest RSF Audit/Operate payload. CERTIFIED|ABSTAIN|REFUSE only."""
+        from CortexOS.crew import appshell as appshell_mod
+
+        return appshell_mod.audit_payload()
+
+    @router.post("/appshell/control")
+    async def appshell_control_post() -> Any:
+        raise HTTPException(405, "Control is display-only F-0030. GET only.")
+
+    @router.post("/appshell/spawn")
+    async def appshell_spawn_refused() -> dict[str, Any]:
+        from CortexOS.crew import appshell as appshell_mod
+
+        body = appshell_mod.refuse_control_spawn()
+        raise HTTPException(403, body["reason"])
+
     @router.get("/detect")
     async def detect_plan(q: str = "") -> dict[str, Any]:
         from CortexOS.crew.detect import plan
@@ -1065,6 +1106,7 @@ def create_app(
 
     index = crew.settings.ui_dir / "index.html"
     chrome = crew.settings.ui_dir / "crew.css"
+    manifest = crew.settings.ui_dir / "appshell.webmanifest"
 
     @app.get("/")
     async def root() -> Any:
@@ -1079,6 +1121,12 @@ def create_app(
         if chrome.is_file():
             return FileResponse(chrome, media_type="text/css")
         return JSONResponse({"ok": False, "detail": "crew.css missing"}, 503)
+
+    @app.get("/appshell.webmanifest")
+    async def appshell_manifest() -> Any:
+        if manifest.is_file():
+            return FileResponse(manifest, media_type="application/manifest+json")
+        return JSONResponse({"ok": False, "detail": "appshell.webmanifest missing"}, 503)
 
     @app.get("/stolen.css")
     async def stolen_css() -> Any:

@@ -1,5 +1,19 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-ASSIGN**
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-APPSHELL**
+
+> **2026-09-06 (CORTEX-APPSHELL):** Unified operator shell around Crew chrome.
+> Nav (Home / Crew / Agents / Control / Apps / Audit / Assign / Memory / Settings)
+> wraps `CortexOS/crew` without collapsing planes. Apps launcher tiles DMS,
+> Constructor, AirGPT, OpenVault, Pointer, Space, Control (deep-link / iframe /
+> panel). Control tab is GET display on `:8040` with banner `Display only F-0030`;
+> Crew never POSTs run/goal/route/secrets and never treats Control launchers as
+> spawn. Audit tab deep-links Constructor `/cortex/constructor/` and paints
+> `rsf_operate` CERTIFIED|ABSTAIN|REFUSE (no invent-green). Cmd-K lists the new
+> pages. Mobile CSS: rail collapses to a drawer; `--shell-bottom-nav-h` reserved.
+> Tiny webmanifest only. Off freeze #4/#41-#44. Did not start/kill `:8020`.
+> Rebased onto main after #194 CREW-ASSIGN (`ed548eee`), #193 LIFE-HARDEN,
+> and #192 FACTS-MD. Assign notes, LIFE chips, and FACTS HUD stay. Local
+> `pytest tests/test_crew -q` **261 passed**. Not a GitHub CI claim.
 
 > **2026-09-06 (CREW-ASSIGN):** Assign-task router under Cortex #116.
 > `GET /crew/assign` is the destination coordinate map (Control display-only).
