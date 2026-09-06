@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-A2A-HARDEN ask cards + deadlock honesty — 2026-09-06
+
+Operator-visible bot-to-bot messaging on existing Switchboard (parent Cortex
+#116). Ask/broadcast/wait_for_replies stay fail-closed: wait-graph deadlock is
+refused, and wait_for_replies is DENIED when someone is waiting on your answer.
+HUD threads carry waiting/dead/timeout counts; pending asks show as cards with
+empty hops (no invented replies). Chrome Activity/log use that HUD. Control
+not touched. Local `pytest tests/test_crew -q`: **237 passed**. Not a CI claim.
+
 ## RSF-07 eval corpus + Audit/Operate trace — 2026-09-06
 
 Frozen RSF cases under `CortexOS/execution/rsf_corpus/` score live `run_rsf`

@@ -160,6 +160,9 @@ def test_ui_index_is_served(client) -> None:
     assert "thread--dead" in page.text
     assert "thread--waiting" in page.text
     assert 'id="a2aPending"' in page.text
+    assert "ask-card" in page.text
+    assert "ask-card--waiting" in page.text
+    assert "hop--pending" in page.text
     stolen = client.http.get("/stolen.css")
     assert stolen.status_code == 410
     css = client.http.get("/crew.css")
@@ -176,6 +179,9 @@ def test_ui_index_is_served(client) -> None:
     assert b".thread" in css.content
     assert b"thread--dead" in css.content
     assert b"thread--waiting" in css.content
+    assert b"ask-card" in css.content
+    assert b"msg--ask" in css.content
+    assert b"hop--pending" in css.content
     assert b"--rail-ground" not in css.content
     assert b"--rk-page" not in css.content
     desk = client.http.get("/crew/desk").json()
@@ -783,10 +789,13 @@ def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:
     body = client.http.get(f"/crew/spaces/{space['id']}/threads").json()
     assert body["bus"] == "switchboard"
     assert body["pending"] == 1
+    assert body["waiting"] == 1
     assert body["threads"][0]["id"] == ask["id"]
     assert body["threads"][0]["status"] == a2a.WAITING
+    assert body["threads"][0]["hops"] == []
     assert body["asks"][0]["from"] == "Manager"
     assert body["asks"][0]["to"] == "Scout"
+    assert body["asks"][0]["kind"] == a2a.ASK
 
     crew.store.add_message(
         space["id"],
@@ -807,6 +816,8 @@ def test_threads_hud_paints_pending_and_dead_on_switchboard(client) -> None:
     crew.runtime.switch.abandon(scout["id"], "Scout stopped running")
     dead = client.http.get(f"/crew/spaces/{space['id']}/threads").json()
     assert dead["pending"] == 0
+    assert dead["waiting"] == 0
+    assert dead["dead"] == 1
     assert dead["threads"][0]["status"] == a2a.DEAD
     tape = client.http.get(f"/crew/spaces/{space['id']}/messages").json()
     assert tape[0]["meta"]["a2a"]["kind"] == a2a.ASK

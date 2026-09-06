@@ -135,7 +135,7 @@
         </div>
         <div class="block">
           <h2>Activity <span class="scope" id="a2aPending">switchboard</span></h2>
-          <!-- thread--waiting thread--dead thread--timeout thread--answered -->
+          <!-- thread--waiting thread--dead thread--timeout ask-card ask-card--waiting -->
           <div id="graph" class="graph"></div>
           <div class="chip-row" id="activityChips"></div>
           <div id="activity" class="empty empty--orb">Agent-to-agent traffic lands here.</div>
@@ -257,7 +257,7 @@
       belt: null, memScope: "space", claimBusy: null,
       approvals: { mode: "one-off", allow: {}, session: {}, circuit: {} },
       runStarted: 0,
-      routeProvider: "", usage: null, asks: []
+      routeProvider: "", usage: null, asks: [], threads: null
     };
     const $ = (id) => document.getElementById(id);
     const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
@@ -443,8 +443,10 @@
         const kind = wire.kind || "message";
         const tint = esc(colorOf(m.agent_id));
         const re = wire.reply_to ? `<span class="stamp">re ${esc(String(wire.reply_to).slice(0, 8))}</span>` : "";
+        const st = kind === "ask" ? askStatus(m.id) : "";
+        const chip = st ? `<span class="chip-mini ask-status ask-status--${esc(st)}">${esc(st)}</span>` : "";
         return `<span class="pill" style="border-color:${tint};color:${tint}">${esc(kind)}</span>`
-          + `<span>${esc(from)} -&gt; ${esc(to)}</span>${re}${time}`;
+          + `<span>${esc(from)} -&gt; ${esc(to)}</span>${re}${chip}${time}`;
       }
       if (m.role === "tool") return `<span>${esc((m.meta && m.meta.tool) || "tool")}</span>${time}`;
       return `<span>${esc(m.role)}</span>${time}`;
@@ -459,12 +461,24 @@
       }
       return "";
     }
+    function threadOf(id) {
+      return (state.threads || []).find((t) => t.id === id) || null;
+    }
+    function askStatus(id) {
+      const t = threadOf(id);
+      if (t && t.status) return t.status;
+      if ((state.asks || []).some((a) => a.question_id === id)) return "waiting";
+      return "";
+    }
     function msgNode(m) {
       const el = document.createElement("article");
       el.className = "msg " + m.role;
       el.dataset.id = m.id;
       const wire = wireMeta(m) || {};
-      if (wire.kind === "ask") el.classList.add("msg--ask");
+      if (wire.kind === "ask") {
+        const st = askStatus(m.id) || "open";
+        el.classList.add("msg--ask", "ask-card", "ask-card--" + st);
+      }
       if (wire.reply_to) el.classList.add("msg--reply");
       if (wire.status === "dead" || wire.status === "timeout" || wire.kind === "none") el.classList.add("msg--dead");
       el.dataset.thread = wire.reply_to || (wire.kind === "ask" ? m.id : "");
@@ -554,7 +568,7 @@
         if (w.reply_to) (children[w.reply_to] = children[w.reply_to] || []).push(m);
         else roots.push(m);
       });
-      return roots.map((m) => {
+      const out = roots.map((m) => {
         const w = wireMeta(m) || {};
         const hops = children[m.id] || [];
         const hopMeta = hops.map((h) => wireMeta(h) || {});
@@ -567,29 +581,77 @@
         else if (w.kind === "ask") status = "open";
         return { id: m.id, status, kind: w.kind || "message", from: w.from, to: w.to, text: m.content || "", hops, root: m };
       });
+      const have = {};
+      out.forEach((t) => { have[t.id] = true; });
+      pending.forEach((p) => {
+        if (!p.question_id || have[p.question_id]) return;
+        out.push({
+          id: p.question_id,
+          status: "waiting",
+          kind: "ask",
+          from: p.from || "",
+          to: p.to || "",
+          text: "",
+          hops: []
+        });
+      });
+      return out;
+    }
+    function hopLine(h) {
+      const w = h.kind ? h : (wireMeta(h) || {});
+      const kind = h.kind || w.kind || "reply";
+      const from = h.from || w.from || "";
+      const to = h.to || w.to || "";
+      const text = h.text || h.content || "";
+      const st = h.status || w.status || "";
+      return `<div class="hop">${esc(kind)} ${esc(from)} -&gt; ${esc(to)}`
+        + (st ? ` <span class="chip-mini ask-status ask-status--${esc(st)}">${esc(st)}</span>` : "")
+        + `<div>${esc(String(text).slice(0, 200))}</div></div>`;
     }
     function threadNode(t) {
       const tint = esc(colorOf(t.root && t.root.agent_id));
-      const hopsHtml = (t.hops || []).map((h) => {
-        const w = wireMeta(h) || {};
-        return `<div class="hop">${esc(w.kind || "reply")} ${esc(w.from || "")} -&gt; ${esc(w.to || "")}`
-          + `<div>${esc(String(h.content || "").slice(0, 200))}</div></div>`;
-      }).join("");
-      return `<div class="thread thread--${esc(t.status)}" data-thread="${esc(t.id)}" style="border-left-color:${tint}">`
+      const hops = t.hops || [];
+      const hopsHtml = hops.length
+        ? hops.map(hopLine).join("")
+        : (t.status === "waiting"
+          ? `<div class="hop hop--pending">waiting - no reply yet</div>`
+          : "");
+      const card = (t.kind === "ask" || t.status === "waiting") ? " ask-card ask-card--" + t.status : "";
+      return `<div class="thread thread--${esc(t.status)}${card}" data-thread="${esc(t.id)}" style="border-left-color:${tint}">`
         + `<b>${esc(t.from || "agent")} -&gt; ${esc(t.to || "space")}</b> `
         + `<i>${esc(t.kind)}</i> <span class="chip-mini">${esc(t.status)}</span>`
         + `<div>${esc(String(t.text || "").slice(0, 240))}</div>`
         + hopsHtml
         + `</div>`;
     }
+    function liveThreads() {
+      return Array.isArray(state.threads) ? state.threads : threadRows(state.messages, state.asks);
+    }
+    function paintAskCards() {
+      const log = $("log");
+      if (!log) return;
+      log.querySelectorAll(".msg--ask, .ask-card").forEach((el) => {
+        const id = el.dataset.id;
+        const st = askStatus(id);
+        if (!st) return;
+        el.classList.remove("ask-card--waiting", "ask-card--dead", "ask-card--timeout", "ask-card--answered", "ask-card--open", "ask-card--sent");
+        el.classList.add("ask-card--" + st);
+        const chip = el.querySelector(".ask-status");
+        if (chip) {
+          chip.textContent = st;
+          chip.className = "chip-mini ask-status ask-status--" + st;
+        }
+      });
+    }
     function renderWire() {
       const a2a = wireRows();
-      const threads = threadRows(state.messages, state.asks);
+      const threads = liveThreads();
       const waiting = threads.filter((t) => t.status === "waiting").length;
       $("a2aPending").textContent = waiting ? ("switchboard " + waiting + " waiting") : "switchboard";
       $("activity").innerHTML = threads.length
         ? threads.slice(-40).map(threadNode).join("")
         : `<div class="empty">Agent-to-agent traffic lands here.</div>`;
+      paintAskCards();
       renderGraph(a2a);
     }
     function renderGraph(a2a) {
@@ -691,7 +753,7 @@
         kinds[k] = (kinds[k] || 0) + 1;
       });
       const chips = [];
-      const threads = threadRows(state.messages, state.asks);
+      const threads = liveThreads();
       const waiting = threads.filter((t) => t.status === "waiting").length;
       const dead = threads.filter((t) => t.status === "dead").length;
       if (state.agents.length) chips.push(`<span class="chip-mini">subagent ${state.agents.length}</span>`);
@@ -1056,6 +1118,9 @@
       if (state.runStarted && Date.now() - state.runStarted > 120000 && $("runStatus").textContent === "streaming") {
         stalls.push("stream stall");
       }
+      if ((state.asks || []).length) stalls.push(state.asks.length + " a2a waiting");
+      const deadAsks = liveThreads().filter((t) => t.status === "dead" || t.status === "timeout").length;
+      if (deadAsks) stalls.push(deadAsks + " a2a dead");
       $("stalls").innerHTML = stalls.length
         ? stalls.map((s) => `<span class="chip-mini stall">${esc(s)}</span>`).join(" ")
           + `<div class="hint">Stall chips only. Cancel stops this run. Does not kill Manager.</div>`
@@ -1162,6 +1227,7 @@
       state.agents = agents;
       state.confirms = confirms;
       state.asks = (hud && hud.asks) || [];
+      state.threads = hud ? (hud.threads || []) : null;
       renderFocus(); renderAgents(); renderConfirms(); renderLog(); renderMemory();
       loadComposer(id);
       listen(id);
@@ -1171,8 +1237,11 @@
       try {
         const hud = await api("/crew/spaces/" + state.spaceId + "/threads");
         state.asks = hud.asks || [];
+        state.threads = hud.threads || [];
         renderWire();
         renderFocus();
+        paintAskCards();
+        if (state.belt) renderBelt(state.belt);
       } catch (err) { /* local grouping still paints the tape */ }
     }
     async function catchUp(id) {

@@ -1,6 +1,15 @@
 # STATUS.md
 **Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-07 eval corpus**
 
+> **2026-09-06 (CREW-A2A-HARDEN):** Switchboard ask cards + deadlock honesty
+> under Cortex #116. `would_deadlock` walks wait cycles (not only A<->B).
+> `wait_for_replies` is DENIED when a teammate is already waiting on you.
+> `GET /spaces/{id}/threads` adds waiting/dead/timeout counts; pending
+> overlay keeps hops empty (no invented replies). Chrome paints ask cards
+> and a2a stall chips from that HUD. Control untouched. Freeze lanes
+> not attached. Local `pytest tests/test_crew -q` **237 passed**. Live
+> `:8020` needs founder restart. Did not write CLAIMS.json.
+>
 > **2026-09-06 (RSF-07 / Cortex#156):** Eval corpus
 > `CortexOS.execution.rsf_eval.run_eval` scores live RSF-04 `run_rsf` against
 > frozen happy/abstain/refuse fixtures (dms_rag / normal_chat / agentic_actions,

@@ -238,12 +238,26 @@ class Switchboard:
     # -- asks --------------------------------------------------------------
 
     def would_deadlock(self, asker_id: str, target_id: str) -> bool:
-        """True when the target is already blocked asking the asker.
+        """True when arming ``asker -> target`` would close a wait cycle.
 
-        Arming the second half of that cycle guarantees both sides wait out
-        their timeouts, so the runtime refuses it and says why.
+        Direct (the target is already asking the asker) and longer chains
+        (A waits on B who waits on C who would wait on A) both stall every
+        participant until timeout, so the runtime refuses them and says why.
         """
-        return (target_id, asker_id) in self._asks
+        if asker_id == target_id:
+            return True
+        seen: set[str] = set()
+        stack = [target_id]
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            for nxt in self.waiting_targets(node):
+                if nxt == asker_id:
+                    return True
+                stack.append(nxt)
+        return False
 
     def open_ask(
         self, asker_id: str, target_id: str, question_id: str
@@ -276,6 +290,7 @@ class Switchboard:
                     "asker_id": asker_id,
                     "target_id": target_id,
                     "question_id": ask.question_id,
+                    "kind": ASK,
                     "status": WAITING,
                 }
             )
@@ -311,6 +326,10 @@ class Switchboard:
 
     def pending_count(self) -> int:
         return len(self._asks)
+
+    def pending_on(self, target_id: str) -> list[dict[str, Any]]:
+        """Asks whose target is ``target_id``. They need a reply, not another wait."""
+        return [row for row in self.pending_asks() if row["target_id"] == target_id]
 
     def any_waiting(self) -> bool:
         """True when any mailbox still holds unread envelopes.
@@ -459,11 +478,15 @@ def hud(
 ) -> dict[str, Any]:
     """Operator HUD payload. ``bus`` names the existing Switchboard."""
     pending = pending or []
+    threads = hud_threads(messages, pending)
     return {
         "bus": "switchboard",
         "pending": len(pending),
         "asks": pending,
-        "threads": hud_threads(messages, pending),
+        "threads": threads,
+        "waiting": sum(1 for t in threads if t["status"] == WAITING),
+        "dead": sum(1 for t in threads if t["status"] == DEAD),
+        "timeout": sum(1 for t in threads if t["status"] == TIMEOUT),
     }
 
 
