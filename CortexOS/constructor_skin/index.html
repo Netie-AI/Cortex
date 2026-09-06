@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Constructor — Netie</title>
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="styles.css?v=4" />
   </head>
   <body>
     <header class="top">
@@ -55,8 +55,12 @@
       <aside class="inspect" id="inspect">
         <div class="eyebrow">AUDIT</div>
         <p class="hint" id="inspect-empty">Select a node, or ghost-run the graph.</p>
+        <ol id="rsf-audit" class="rsf-stages" hidden></ol>
         <form id="inspect-form" class="inspect-form" hidden></form>
         <pre id="inspect-json" hidden></pre>
+        <div class="eyebrow">OPERATE</div>
+        <p class="hint" id="operate-empty">RSF route decisions appear here. No fake CERTIFIED.</p>
+        <ol id="rsf-operate" class="rsf-stages" hidden></ol>
         <div class="eyebrow">APPROACHES</div>
         <div id="approaches" class="approaches"></div>
       </aside>
@@ -75,7 +79,7 @@
       </form>
     </section>
 
-    <script src="app.js?v=3"></script>
-    <script src="engine.js?v=3"></script>
+    <script src="app.js?v=4"></script>
+    <script src="engine.js?v=4"></script>
   </body>
 </html>

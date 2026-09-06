@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## RSF-07 eval corpus + Audit/Operate trace — 2026-09-06
+
+Frozen RSF cases under `CortexOS/execution/rsf_corpus/` score live `run_rsf`
+(happy / abstain / refuse, bake-off surfaces, FreeRoute vs OmniRoute). One
+confidently-wrong CERTIFIED fails the suite. `render_audit_operate` feeds
+Constructor AUDIT/OPERATE with per-stage status + chosen_option + route_trace
+and will not display invented CERTIFIED after a gap. Closes Cortex#156
+(parent EPIC-RSF #151). Local pytest only; not GHA. R-0003 verify is a
+different run.
+
 ## CREW-ROUTER-HARDEN OpenVault/FreeRoute multi-API arming — 2026-09-06
 
 Crew inference sources can be armed from OpenVault without keeping API secrets

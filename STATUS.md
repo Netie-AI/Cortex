@@ -1,6 +1,17 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-06 distill harness**
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-07 eval corpus**
 
+> **2026-09-06 (RSF-07 / Cortex#156):** Eval corpus
+> `CortexOS.execution.rsf_eval.run_eval` scores live RSF-04 `run_rsf` against
+> frozen happy/abstain/refuse fixtures (dms_rag / normal_chat / agentic_actions,
+> FreeRoute vs OmniRoute). Precision-on-answered: one WRONG CERTIFIED fails.
+> Audit/Operate `render_audit_operate` shows per-stage status, chosen_option,
+> and route_trace; a CERTIFIED after a gap is displayed as ABSTAIN. Constructor
+> AUDIT/OPERATE panels paint only the honest status class. No `/v1/rsf`, no CCA
+> edit, no Crew dual-seat, no freeze #4/#41-#44. Local:
+> `pytest tests/test_rsf_eval.py`. Does not claim GHA green. Does not claim
+> epic COMPLETE (R-0003 is a different-run verify).
+>
 > **2026-09-06 (CREW-ROUTER-HARDEN):** Multi-API sources arm via OpenVault
 > (no crew-held secret on disk after a successful vault upsert). Vault-armed
 > hosts prefer FreeRoute when OV is live; unarmed pins refuse (no silent

@@ -1,0 +1,369 @@
+{
+  "version": "rsf07-v1",
+  "note": "Frozen R-0003 eval cases. Live scoring calls run_rsf; do not invent CERTIFIED gold.",
+  "cases": [
+    {
+      "id": "happy_dms_rag",
+      "surface": "dms_rag",
+      "path": "happy",
+      "question": "units sold by region for BETA",
+      "destination": "freeroute",
+      "proposals": {
+        "research": {
+          "options": ["warehouse_grant", "web_search"],
+          "chosen_option": "warehouse_grant",
+          "evidence": ["grant=sales_fact"],
+          "reasons": ["warehouse grant is in the signed session"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["warehouse_grant", "web_search"],
+              "chosen": "warehouse_grant",
+              "rejected": {"web_search": "no web grant"},
+              "note": "DMS RAG uses the warehouse"
+            }
+          ]
+        },
+        "segment": {
+          "options": ["region", "country"],
+          "chosen_option": "region",
+          "evidence": ["column=sales_fact.region"],
+          "reasons": ["question names region"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["region", "country"],
+              "chosen": "region",
+              "rejected": {},
+              "note": "segment key from grant"
+            }
+          ]
+        },
+        "classify": {
+          "options": ["sku", "customer"],
+          "chosen_option": "sku",
+          "evidence": ["metric=units_sold"],
+          "reasons": ["units sold is a sku metric"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["sku", "customer"],
+              "chosen": "sku",
+              "rejected": {},
+              "note": "classify from metric"
+            }
+          ]
+        },
+        "filter": {
+          "options": ["BETA", "ALPHA"],
+          "chosen_option": "BETA",
+          "evidence": ["value-norm=SKU-BETA"],
+          "reasons": ["BETA normalizes to SKU-BETA"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["BETA", "ALPHA"],
+              "chosen": "BETA",
+              "rejected": {},
+              "note": "value-norm"
+            }
+          ]
+        }
+      },
+      "gold": {
+        "ok": true,
+        "engine": "cortex",
+        "statuses": ["CERTIFIED", "CERTIFIED", "CERTIFIED", "CERTIFIED"],
+        "chosen": {
+          "research": "warehouse_grant",
+          "segment": "region",
+          "classify": "sku",
+          "filter": "BETA"
+        }
+      }
+    },
+    {
+      "id": "happy_normal_chat",
+      "surface": "normal_chat",
+      "path": "happy",
+      "question": "show units sold by region for BETA in chat",
+      "destination": "freeroute",
+      "proposals": {
+        "research": {
+          "options": ["warehouse_grant", "web_search"],
+          "chosen_option": "warehouse_grant",
+          "evidence": ["grant=sales_fact"],
+          "reasons": ["chat still uses the warehouse grant"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["warehouse_grant", "web_search"],
+              "chosen": "warehouse_grant",
+              "rejected": {},
+              "note": "normal chat, not a paste engine"
+            }
+          ]
+        },
+        "segment": {
+          "options": ["region", "country"],
+          "chosen_option": "region",
+          "evidence": ["column=sales_fact.region"],
+          "reasons": ["chat names region"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["region", "country"],
+              "chosen": "region",
+              "rejected": {},
+              "note": "segment"
+            }
+          ]
+        },
+        "classify": {
+          "options": ["sku", "customer"],
+          "chosen_option": "sku",
+          "evidence": ["metric=units_sold"],
+          "reasons": ["units sold"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["sku", "customer"],
+              "chosen": "sku",
+              "rejected": {},
+              "note": "classify"
+            }
+          ]
+        },
+        "filter": {
+          "options": ["BETA", "ALPHA"],
+          "chosen_option": "BETA",
+          "evidence": ["value-norm=SKU-BETA"],
+          "reasons": ["BETA"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["BETA", "ALPHA"],
+              "chosen": "BETA",
+              "rejected": {},
+              "note": "filter"
+            }
+          ]
+        }
+      },
+      "gold": {
+        "ok": true,
+        "engine": "cortex",
+        "statuses": ["CERTIFIED", "CERTIFIED", "CERTIFIED", "CERTIFIED"],
+        "chosen": {
+          "research": "warehouse_grant",
+          "segment": "region",
+          "classify": "sku",
+          "filter": "BETA"
+        }
+      }
+    },
+    {
+      "id": "happy_agentic_gencfsm",
+      "surface": "agentic_actions",
+      "path": "happy",
+      "question": "compile a bounded dag for the sku filter",
+      "destination": "freeroute",
+      "proposals": {
+        "research": {
+          "options": ["cortex", "gencfsm_dag", "myn8n"],
+          "chosen_option": "gencfsm_dag",
+          "evidence": ["CortexOS.execution.gen_cfsm"],
+          "reasons": ["learn via existing gen_cfsm, not a third orchestrator"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["cortex", "gencfsm_dag", "myn8n"],
+              "chosen": "gencfsm_dag",
+              "rejected": {"myn8n": "distill_only"},
+              "note": "agentic actions learn path"
+            }
+          ]
+        },
+        "segment": {
+          "options": ["region", "country"],
+          "chosen_option": "region",
+          "evidence": ["column=sales_fact.region"],
+          "reasons": ["segment remains a warehouse key"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["region", "country"],
+              "chosen": "region",
+              "rejected": {},
+              "note": "segment"
+            }
+          ]
+        },
+        "classify": {
+          "options": ["sku", "customer"],
+          "chosen_option": "sku",
+          "evidence": ["metric=units_sold"],
+          "reasons": ["sku class"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["sku", "customer"],
+              "chosen": "sku",
+              "rejected": {},
+              "note": "classify"
+            }
+          ]
+        },
+        "filter": {
+          "options": ["BETA", "ALPHA"],
+          "chosen_option": "BETA",
+          "evidence": ["value-norm=SKU-BETA"],
+          "reasons": ["BETA"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["BETA", "ALPHA"],
+              "chosen": "BETA",
+              "rejected": {},
+              "note": "filter"
+            }
+          ]
+        }
+      },
+      "gold": {
+        "ok": true,
+        "engine": "cortex",
+        "statuses": ["CERTIFIED", "CERTIFIED", "CERTIFIED", "CERTIFIED"],
+        "chosen": {
+          "research": "gencfsm_dag",
+          "segment": "region",
+          "classify": "sku",
+          "filter": "BETA"
+        }
+      }
+    },
+    {
+      "id": "abstain_segment",
+      "surface": "dms_rag",
+      "path": "abstain",
+      "question": "units sold by region",
+      "destination": "freeroute",
+      "proposals": {
+        "research": {
+          "options": ["warehouse_grant", "web_search"],
+          "chosen_option": "warehouse_grant",
+          "evidence": ["grant=sales_fact"],
+          "reasons": ["grant present"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["warehouse_grant", "web_search"],
+              "chosen": "warehouse_grant",
+              "rejected": {},
+              "note": "research ok"
+            }
+          ]
+        },
+        "segment": {
+          "options": ["region", "country"],
+          "chosen_option": null,
+          "evidence": [],
+          "reasons": ["grant does not name a segment key"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["region", "country"],
+              "chosen": null,
+              "rejected": {},
+              "note": "will not invent a segment"
+            }
+          ]
+        }
+      },
+      "gold": {
+        "ok": false,
+        "engine": "cortex",
+        "statuses": ["CERTIFIED", "ABSTAIN", "ABSTAIN", "ABSTAIN"],
+        "chosen": {
+          "research": "warehouse_grant",
+          "segment": null,
+          "classify": null,
+          "filter": null
+        }
+      }
+    },
+    {
+      "id": "refuse_langchain",
+      "surface": "agentic_actions",
+      "path": "refuse",
+      "question": "which orchestrator should run this",
+      "destination": "freeroute",
+      "proposals": {
+        "research": {
+          "options": ["cortex", "langchain", "myn8n"],
+          "chosen_option": "langchain",
+          "evidence": ["docs.langchain.com"],
+          "reasons": ["model picked langchain as engine"],
+          "route_trace": [
+            {
+              "step": "pick",
+              "considered": ["cortex", "langchain", "myn8n"],
+              "chosen": "langchain",
+              "rejected": {},
+              "note": "banned analog"
+            }
+          ]
+        }
+      },
+      "gold": {
+        "ok": false,
+        "engine": "cortex",
+        "statuses": ["REFUSE", "ABSTAIN", "ABSTAIN", "ABSTAIN"],
+        "chosen": {
+          "research": null,
+          "segment": null,
+          "classify": null,
+          "filter": null
+        }
+      }
+    },
+    {
+      "id": "refuse_omniroute",
+      "surface": "normal_chat",
+      "path": "refuse",
+      "question": "research the field via omniroute",
+      "destination": "127.0.0.1:20128",
+      "proposals": {},
+      "gold": {
+        "ok": false,
+        "engine": "cortex",
+        "statuses": ["REFUSE", "ABSTAIN", "ABSTAIN", "ABSTAIN"],
+        "chosen": {
+          "research": null,
+          "segment": null,
+          "classify": null,
+          "filter": null
+        }
+      }
+    },
+    {
+      "id": "empty_question",
+      "surface": "dms_rag",
+      "path": "abstain",
+      "question": "   ",
+      "destination": "freeroute",
+      "proposals": {},
+      "gold": {
+        "ok": false,
+        "engine": "cortex",
+        "statuses": ["ABSTAIN", "ABSTAIN", "ABSTAIN", "ABSTAIN"],
+        "chosen": {
+          "research": null,
+          "segment": null,
+          "classify": null,
+          "filter": null
+        }
+      }
+    }
+  ]
+}

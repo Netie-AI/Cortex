@@ -67,6 +67,8 @@ source_modules =
     CortexOS.execution.distill_options
     CortexOS.execution.rsf_boundary
     CortexOS.execution.rsf_orchestrator
+    CortexOS.execution.rsf_eval
+    CortexOS.execution.rsf_operate
     CortexOS.execution.distill_harness
 forbidden_modules =
     n8n
