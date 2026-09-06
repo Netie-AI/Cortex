@@ -147,6 +147,49 @@ async def test_a_third_agents_report_does_not_answer_the_ask() -> None:
     future.cancel()
 
 
+async def test_a_clarifying_ask_does_not_resolve_the_pending_ask() -> None:
+    """A question is not an answer. Correlating it would invent a reply."""
+    switch = a2a.Switchboard()
+    future = switch.open_ask("mgr", "scout", "q1")
+    answered = switch.deliver(
+        a2a.Envelope(
+            id="m4",
+            kind=a2a.ASK,
+            from_id="scout",
+            from_name="Scout",
+            to_id="mgr",
+            to_name="Manager",
+            text="what do you mean?",
+            seq=9,
+        )
+    )
+    assert answered is None
+    assert not future.done()
+    queued = switch.mailbox("mgr").drain()
+    assert [e.kind for e in queued] == [a2a.ASK]
+    future.cancel()
+
+
+async def test_would_deadlock_walks_direct_and_longer_cycles() -> None:
+    switch = a2a.Switchboard()
+    switch.open_ask("mgr", "scout", "q1")
+    assert switch.would_deadlock("scout", "mgr")
+    assert not switch.would_deadlock("mgr", "auditor")
+    switch.open_ask("scout", "auditor", "q2")
+    assert switch.would_deadlock("auditor", "mgr")
+    assert not switch.would_deadlock("auditor", "ghost")
+    assert switch.would_deadlock("mgr", "mgr")
+
+
+async def test_pending_on_lists_who_owes_a_reply() -> None:
+    switch = a2a.Switchboard()
+    switch.open_ask("mgr", "scout", "q1")
+    owed = switch.pending_on("scout")
+    assert [p["kind"] for p in owed] == [a2a.ASK]
+    assert owed[0]["status"] == a2a.WAITING
+    assert switch.pending_on("mgr") == []
+
+
 async def test_abandon_unblocks_an_ask_on_a_dead_target() -> None:
     switch = a2a.Switchboard()
     future = switch.open_ask("mgr", "ghost", "q1")
@@ -360,6 +403,7 @@ async def test_broadcast_reaches_every_other_agent(rig2) -> None:
     assert all(m["content"] == "STANDUP-NOW" for m in casts)
     results = _tool_results(rig2, "Manager")
     assert any("broadcast to" in t for t in results)
+    assert rig2.runtime.switch.pending_count() == 0
 
 
 async def test_send_to_agent_star_broadcasts(rig2) -> None:
@@ -502,7 +546,10 @@ async def test_hud_threads_correlate_ask_reply_and_pending() -> None:
     )
     assert waiting["bus"] == "switchboard"
     assert waiting["pending"] == 1
+    assert waiting["waiting"] == 1
+    assert waiting["dead"] == 0
     assert waiting["threads"][0]["status"] == a2a.WAITING
+    assert waiting["threads"][0]["hops"] == []
 
 
 async def test_hud_includes_cmd_operator_stamps_on_the_same_bus() -> None:
@@ -553,3 +600,85 @@ async def test_hud_marks_dead_closer_on_the_ask_thread() -> None:
     threads = a2a.hud_threads([ask, closer])
     assert threads[0]["status"] == a2a.DEAD
     assert threads[0]["hops"][0]["status"] == a2a.DEAD
+    payload = a2a.hud([ask, closer])
+    assert payload["dead"] == 1
+    assert payload["waiting"] == 0
+    assert payload["threads"][0]["hops"][0]["text"] == closer["content"]
+
+
+async def test_hud_pending_overlay_does_not_invent_a_reply() -> None:
+    """Live wait is a status overlay. Hops stay empty until a stored reply exists."""
+    ask = {
+        "id": "q9",
+        "role": "agent",
+        "seq": 1,
+        "content": "status?",
+        "meta": {"a2a": {"kind": a2a.ASK, "from": "Manager", "to": "Scout", "reply_to": None}},
+    }
+    hud = a2a.hud(
+        [ask],
+        [{"asker_id": "m", "target_id": "s", "question_id": "q9", "from": "Manager", "to": "Scout"}],
+    )
+    thread = hud["threads"][0]
+    assert thread["status"] == a2a.WAITING
+    assert thread["hops"] == []
+    assert "SCOUT" not in thread["text"]
+    assert hud["waiting"] == 1
+
+
+async def test_ask_back_is_refused_as_deadlock(rig2) -> None:
+    """Asking the agent who is already waiting on you is fail-closed."""
+    space = rig2.store.create_space("Cycle")
+    rig2.llm.script(
+        "Manager",
+        LLMResult(tool_calls=[_tc("spawn_agent", name="Scout", brief="look around")]),
+        LLMResult(
+            tool_calls=[
+                _tc("ask_agent", name="Scout", question="what did you find?", timeout_seconds=20)
+            ]
+        ),
+        LLMResult(text="Scout could not ask me back; I am not inventing its answer."),
+    )
+    rig2.llm.script(
+        "Scout",
+        0.25,
+        LLMResult(tool_calls=[_tc("ask_agent", name="Manager", question="what do you want?")]),
+        LLMResult(text="SCOUT-FINDING"),
+    )
+
+    await rig2.runtime.on_user_message(space["id"], "ask scout")
+    await wait_run_done(rig2.runtime, space["id"], timeout=15.0)
+
+    results = _tool_results(rig2, "Scout")
+    assert any("already waiting" in t for t in results)
+    answers = [t for t in _tool_results(rig2, "Manager") if "answered:" in t]
+    assert answers, "Manager ask never resolved"
+    assert "SCOUT-FINDING" in answers[-1]
+    assert "what do you want?" not in answers[-1]
+
+
+async def test_wait_for_replies_refuses_when_someone_is_waiting_on_you(rig2) -> None:
+    """wait_for_replies while an ask is pending on you would stall both sides."""
+    space = rig2.store.create_space("Owed")
+    rig2.llm.script(
+        "Manager",
+        LLMResult(tool_calls=[_tc("spawn_agent", name="Scout", brief="look around")]),
+        LLMResult(
+            tool_calls=[_tc("ask_agent", name="Scout", question="what did you find?", timeout_seconds=20)]
+        ),
+        LLMResult(text="Scout answered after being told not to wait."),
+    )
+    rig2.llm.script(
+        "Scout",
+        LLMResult(tool_calls=[_tc("wait_for_replies", timeout_seconds=8)]),
+        LLMResult(tool_calls=[_tc("wait_for_replies", timeout_seconds=8)]),
+        LLMResult(text="SCOUT-FINDING"),
+    )
+
+    await rig2.runtime.on_user_message(space["id"], "ask scout")
+    await wait_run_done(rig2.runtime, space["id"], timeout=15.0)
+
+    results = _tool_results(rig2, "Scout")
+    assert any("waiting on your answer" in t for t in results)
+    answers = [t for t in _tool_results(rig2, "Manager") if "answered:" in t]
+    assert answers and "SCOUT-FINDING" in answers[-1]

@@ -61,8 +61,10 @@ answer plane. OpenVault holds keys.
 (ask ONE named teammate and wait for that teammate's answer), broadcast (tell everyone \
 at once), and wait_for_replies (collect whatever has arrived). Prefer ask_agent when you \
 need a specific answer - the reply is correlated for you, so another teammate's report \
-cannot be mistaken for it. If a teammate stops without answering, you are told so \
-plainly: report that instead of inventing what they would have said.
+cannot be mistaken for it. Asking back a teammate who is already waiting on you is \
+refused (deadlock). wait_for_replies while someone is waiting on you is refused; answer \
+them instead. If a teammate stops without answering, you are told so plainly: report \
+that instead of inventing what they would have said.
 - Computer-control tools may be denied or may wait for operator approval; if a call is denied, \
 tell the user what was denied and why instead of pretending it ran.
 - The human operator is money and decision authority. Do not auto-pay, auto-send, or auto-merge.
@@ -81,10 +83,10 @@ to other teammates or the Manager, and any computer-control tools you are offere
 require operator approval). Use ask_agent when you need one named teammate to answer you \
 before you can continue, and broadcast to tell everyone at once. When another agent asks \
 you a question, answer it with send_to_agent back to whoever asked - they are blocked \
-waiting for you. If you are restarted, the messages above are your own real history; \
-continue from them rather than starting over. When you are done, reply with your findings \
-as one compact final message (or call finish). Your reply goes to the Manager, not the \
-user. Plain ASCII only."""""
+waiting for you. Do not ask them back or wait_for_replies; that deadlocks. If you are \
+restarted, the messages above are your own real history; continue from them rather than \
+starting over. When you are done, reply with your findings as one compact final message \
+(or call finish). Your reply goes to the Manager, not the user. Plain ASCII only."""""
 
 
 class _AgentFinished(Exception):
@@ -1438,8 +1440,9 @@ class CrewRuntime:
                 "ask_agent",
                 "Ask one named agent a question and WAIT for that agent's answer. The"
                 " reply is correlated for you, so another teammate's report cannot be"
-                " mistaken for the answer. Returns their answer, or says plainly that"
-                " they did not answer and why.",
+                " mistaken for the answer. Asking a teammate who is already waiting on you"
+                " is refused (deadlock). Returns their answer, or says plainly that they"
+                " did not answer and why.",
                 {
                     "name": {"type": "string"},
                     "question": {"type": "string"},
@@ -1457,7 +1460,9 @@ class CrewRuntime:
                 "wait_for_replies",
                 "Wait for anything addressed to you (briefs, questions, reports). Each"
                 " item comes back labelled with who sent it. Returns immediately when no"
-                " teammate is still working, so you never idle out a timeout for nothing.",
+                " teammate is still working, so you never idle out a timeout for nothing."
+                " Refused when a teammate is already waiting on your answer - reply with"
+                " send_to_agent instead of waiting (deadlock).",
                 {"timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120}},
                 [],
             ),
@@ -1911,6 +1916,19 @@ class CrewRuntime:
             mailbox = self.switch.mailbox(row["id"])
             envs = mailbox.drain()
             if not envs:
+                owed = self.switch.pending_on(row["id"])
+                if owed:
+                    names: list[str] = []
+                    for pending in owed:
+                        asker = self.store.get_agent(str(pending.get("asker_id") or ""))
+                        names.append(
+                            str((asker or {}).get("name") or pending.get("asker_id") or "teammate")
+                        )
+                    who = ", ".join(names)
+                    return (
+                        f"DENIED: {who} waiting on your answer."
+                        " send_to_agent the reply; wait_for_replies would deadlock."
+                    )
                 busy = self._busy_names(ctx.space_id, row["id"])
                 if not busy:
                     return (
@@ -1924,7 +1942,7 @@ class CrewRuntime:
                 if env is None:
                     return (
                         f"nothing arrived within {timeout}s; still working:"
-                        f" {', '.join(busy)}"
+                        f" {', '.join(busy)}. No reply was invented."
                     )
                 envs = [env, *mailbox.drain()]
             return a2a.render_all(envs)
@@ -2220,6 +2238,19 @@ class CrewRuntime:
             # The stored message id IS the question id, so the answer can be
             # matched to this question rather than merely to its sender.
             self.switch.rekey_ask(row["id"], target["id"], str(msg["id"]))
+            self.bus.emit(
+                ctx.space_id,
+                "a2a",
+                {
+                    "status": a2a.WAITING,
+                    "thread_id": str(msg["id"]),
+                    "text": question,
+                    "bus": "switchboard",
+                    "kind": a2a.ASK,
+                    "from": row["name"],
+                    "to": target_name,
+                },
+            )
         try:
             prev = row.get("status")
             self._set_status(row["id"], life.STATUS_WAITING)

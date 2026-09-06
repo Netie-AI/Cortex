@@ -13,6 +13,7 @@
    - Memory scope chips (space|user|agent|run); recall untrusted
    - Standing-approval ladder in settings (revocable, circuit-breaker)
    - Claim/Release on Work-Tickets (409 = someone else, no silent retry)
+   - Ask cards + switchboard thread status (waiting/dead/timeout; no invented replies)
 
    Control GET /v1/belt display JSON is unchanged. GET /stolen.css is 410.
 */
@@ -570,6 +571,19 @@ button { cursor: pointer; }
 }
 .msg--reply { margin-left: 0.55rem; }
 .msg--dead .bubble { border-color: var(--dead); color: var(--dead); }
+.msg--ask .bubble, .ask-card .bubble {
+  border-color: var(--live);
+  background: var(--well);
+}
+.ask-card--waiting { border-left-color: var(--live); }
+.ask-card--dead .bubble, .ask-card--timeout .bubble {
+  border-color: var(--dead);
+  color: var(--dead);
+}
+.ask-status--waiting { color: var(--live); }
+.ask-status--dead, .ask-status--timeout { color: var(--dead); }
+.thread.ask-card { background: var(--well); }
+.thread .hop--pending { color: var(--live); font-style: italic; }
 .graph { margin-bottom: 0.3rem; }
 .gnode { font-size: 7px; fill: var(--mute); }
 
