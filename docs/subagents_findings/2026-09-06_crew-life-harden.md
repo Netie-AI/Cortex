@@ -44,5 +44,4 @@ spawn: skip
 ## Verify
 
 ```
-python -m pytest tests/test_crew -q
-```
+241 passed locally. Not a GitHub CI claim.
