@@ -98,10 +98,11 @@
         </div>
         <div class="block">
           <h2>Crew</h2>
-          <p class="hint">Status: active / idle / waiting / goal. /spawn /kill /stop /idle /wait /goal. Stop parks. Kill refuses with a reason.</p>
+          <p class="hint">Status: active / idle / waiting / goal. /spawn /kill /stop /idle /wait /goal. Stop parks idle/goal. Idle forces idle. Wait parks waiting (not running). Kill refuses with a reason. Cancel never kills Manager.</p>
           <div class="life-spawn">
             <input id="spawnName" placeholder="name" />
             <input id="spawnBrief" placeholder="brief" />
+            <input id="spawnGoal" placeholder="goal (optional)" />
             <select id="spawnMode">
               <option value="active">active</option>
               <option value="goal">goal</option>
@@ -760,6 +761,14 @@
       if (state.confirms.some((c) => c.status === "pending")) chips.push(`<span class="chip-mini stall">interrupt HITL</span>`);
       if (waiting) chips.push(`<span class="chip-mini stall">${waiting} waiting</span>`);
       if (dead) chips.push(`<span class="chip-mini stall">${dead} dead</span>`);
+      const lifeCounts = { idle: 0, waiting: 0, goal: 0, stopped: 0, active: 0, failed: 0 };
+      (state.agents || []).forEach((a) => { lifeCounts[lifeChip(a).kind]++; });
+      if (lifeCounts.active) chips.push(`<span class="chip-mini">${lifeCounts.active} active</span>`);
+      if (lifeCounts.waiting) chips.push(`<span class="chip-mini stall">${lifeCounts.waiting} life-wait</span>`);
+      if (lifeCounts.idle) chips.push(`<span class="chip-mini">${lifeCounts.idle} idle</span>`);
+      if (lifeCounts.goal) chips.push(`<span class="chip-mini">${lifeCounts.goal} goal</span>`);
+      if (lifeCounts.stopped) chips.push(`<span class="chip-mini stall">${lifeCounts.stopped} stopped</span>`);
+      if (lifeCounts.failed) chips.push(`<span class="chip-mini stall">${lifeCounts.failed} failed</span>`);
       if (kinds.ask || kinds.broadcast) chips.push(`<span class="chip-mini">offload</span>`);
       Object.keys(kinds).slice(0, 3).forEach((k) => {
         chips.push(`<span class="chip-mini">${esc(k)}</span>`);
@@ -777,8 +786,18 @@
         bar.innerHTML = chips.join(" ");
       } else { bar.hidden = true; bar.innerHTML = ""; }
     }
+    function lifeChip(a) {
+      const alive = a && a.alive !== 0 && a.alive !== "0";
+      const s = (a && a.status) || "idle";
+      if (!alive || s === "stopped") return { kind: "stopped", busy: false };
+      if (s === "failed") return { kind: "failed", busy: false };
+      if (s === "waiting") return { kind: "waiting", busy: false };
+      if (s === "active" || s === "thinking" || s === "acting") return { kind: "active", busy: true };
+      if (s === "goal") return { kind: "goal", busy: false };
+      return { kind: "idle", busy: false };
+    }
     function lifeBusy(a) {
-      return a.status === "active" || a.status === "waiting" || a.status === "thinking" || a.status === "acting";
+      return lifeChip(a).busy;
     }
     function renderAgents() {
       if (!state.agents.length) { $("agents").innerHTML = `<div class="empty empty--orb">No agents yet.</div>`; return; }
@@ -786,7 +805,8 @@
         const cap = a.capability ? " - " + a.capability : "";
         const model = a.model ? " - " + a.model : "";
         const deny = a.deny_tools ? " - deny " + a.deny_tools : "";
-        const busy = lifeBusy(a);
+        const chip = lifeChip(a);
+        const busy = chip.busy;
         const mode = a.mode || "active";
         const goal = a.goal_text ? esc(String(a.goal_text).slice(0, 80)) : "";
         const reason = a.stop_reason ? `<div class="hint">DENIED: ${esc(a.stop_reason)}</div>` : "";
@@ -795,15 +815,17 @@
           ? `<div class="row-actions"><span class="hint">Cancel stops the run. Does not kill Manager.</span></div>`
           : `<div class="row-actions">`
             + `<button class="ghost" data-act="stop" data-id="${esc(a.id)}" type="button">Stop</button>`
+            + `<button class="ghost" data-act="wait" data-id="${esc(a.id)}" type="button">Wait</button>`
+            + `<button class="ghost" data-act="idle" data-id="${esc(a.id)}" type="button">Idle</button>`
             + `<button class="ghost deny" data-act="kill" data-id="${esc(a.id)}" type="button">Kill</button>`
             + `<button class="ghost" data-act="mode" data-id="${esc(a.id)}" data-mode="${mode === "goal" ? "active" : "goal"}" type="button">${mode === "goal" ? "to active" : "to goal"}</button>`
             + `<button class="ghost" data-act="accept" data-id="${esc(a.id)}" type="button">Accept task</button>`
             + `</div>`;
         return `<div class="agent-card">`
           + `<button class="agent${state.focusAgent === a.id ? " agent--on" : ""}" data-id="${esc(a.id)}" type="button" title="Show only this agent's traffic">`
-          + `<div class="orb ${busy ? "thinking" : ""}" style="background:${esc(a.color || "#7ea0d4")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
+          + `<div class="orb ${busy ? "thinking" : ""} ${chip.kind === "stopped" || chip.kind === "failed" ? "stopped" : ""}" style="background:${esc(a.color || "#7ea0d4")}">${esc((a.icon || a.name || "?").slice(0, 2))}</div>`
           + `<div>${esc(a.name)}<small><span class="id">${esc(a.id || "")}</span>`
-          + ` <span class="claim">${esc(a.status || "idle")}</span>`
+          + ` <span class="claim life-${esc(chip.kind)}">${esc(a.status || "idle")}</span>`
           + ` <span class="scope">${esc(mode)}</span>`
           + `${esc(cap)}${esc(model)}${esc(deny)}</small>`
           + (goal ? `<small>goal: ${goal}</small>` : "")
@@ -1514,8 +1536,15 @@
       const base = "/crew/spaces/" + state.spaceId + "/agents/" + id;
       try {
         if (act === "stop") await api(base + "/stop", { method: "POST", body: "{}" });
+        else if (act === "wait") await api(base + "/wait", { method: "POST", body: "{}" });
+        else if (act === "idle") await api(base + "/idle", { method: "POST", body: "{}" });
         else if (act === "kill") await api(base + "/kill", { method: "POST", body: JSON.stringify({ reason: "operator killed" }) });
-        else if (act === "mode") await api(base + "/mode", { method: "POST", body: JSON.stringify({ mode: mode || "goal", goal: "" }) });
+        else if (act === "mode") {
+          const a = agentOf(id);
+          const payload = { mode: mode || "goal" };
+          if ((mode || "goal") === "goal" && a && a.goal_text) payload.goal = a.goal_text;
+          await api(base + "/mode", { method: "POST", body: JSON.stringify(payload) });
+        }
         else if (act === "accept") await api(base + "/accept", { method: "POST", body: JSON.stringify({ brief: "" }) });
         await refreshAgents();
       } catch (err) { toast(err.message, "bad"); }
@@ -1531,11 +1560,13 @@
             name: name,
             brief: $("spawnBrief").value.trim(),
             mode: $("spawnMode").value || "active",
-            goal: $("spawnMode").value === "goal" ? $("spawnBrief").value.trim() : ""
+            goal: ($("spawnGoal") && $("spawnGoal").value.trim())
+              || ($("spawnMode").value === "goal" ? $("spawnBrief").value.trim() : "")
           })
         });
         $("spawnName").value = "";
         $("spawnBrief").value = "";
+        if ($("spawnGoal")) $("spawnGoal").value = "";
         await refreshAgents();
         toast("Spawned " + name + ".");
       } catch (err) { toast(err.message, "bad"); }

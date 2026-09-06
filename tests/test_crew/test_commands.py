@@ -139,7 +139,8 @@ async def test_slash_spawn_kill_idle_wait_goal_without_a_run(rig) -> None:
     parked = await rig.runtime.on_user_message(space["id"], "/idle Scout")
     assert parked.get("run_id") is None
     idle = rig.store.get_agent(scout["id"])
-    assert idle is not None and idle["status"] in {life.STATUS_IDLE, life.STATUS_GOAL}
+    assert idle is not None and idle["status"] == life.STATUS_IDLE
+    assert idle["mode"] == life.MODE_GOAL
     waiting = await rig.runtime.on_user_message(space["id"], "/wait Scout")
     assert waiting.get("run_id") is None
     wait_row = rig.store.get_agent(scout["id"])

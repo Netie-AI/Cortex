@@ -153,3 +153,86 @@ async def test_mailbox_unget_keeps_smart_idle_accept_order() -> None:
     box.unget(taken)
     drained = box.drain()
     assert [e.text for e in drained] == ["one", "two"]
+
+
+async def test_hud_chip_never_paints_stopped_or_wait_as_busy() -> None:
+    stopped = {
+        "name": "Scout",
+        "status": life.STATUS_STOPPED,
+        "alive": 0,
+        "stop_reason": "operator killed",
+    }
+    chip = life.hud_chip(stopped)
+    assert chip["busy"] is False
+    assert chip["kind"] == "stopped"
+    assert chip["tone"] == "stranded"
+    waiting = {"name": "Scout", "status": life.STATUS_WAITING, "alive": 1}
+    wait_chip = life.hud_chip(waiting)
+    assert wait_chip["busy"] is False
+    assert wait_chip["kind"] == "waiting"
+    assert life.is_busy(waiting) is False
+    active = {"name": "Scout", "status": life.STATUS_ACTIVE, "alive": 1}
+    assert life.hud_chip(active)["busy"] is True
+    assert life.is_busy(active) is True
+
+
+async def test_operator_spawn_wait_stop_idle_path(rig2) -> None:
+    space = rig2.store.create_space("LifePath")
+    spawned = await rig2.runtime.operator_spawn(
+        space["id"], {"name": "Scout", "brief": "watch", "mode": "active"}
+    )
+    scout = spawned["agent"]
+    waiting = rig2.runtime.wait_agent(scout["id"])
+    assert waiting is not None and not waiting.get("error")
+    assert waiting["status"] == life.STATUS_WAITING
+    assert life.hud_chip(waiting)["busy"] is False
+    mgr = rig2.runtime.ensure_manager(space["id"])
+    assert "Scout" not in rig2.runtime._busy_names(space["id"], mgr["id"])
+
+    stopped = rig2.runtime.stop_agent(scout["id"])
+    assert stopped is not None and not stopped.get("error")
+    assert stopped["status"] == life.STATUS_IDLE
+    assert life.can_accept(stopped)
+
+    idled = rig2.runtime.idle_agent(scout["id"])
+    assert idled is not None and idled["status"] == life.STATUS_IDLE
+
+    keeper = await rig2.runtime.operator_spawn(
+        space["id"],
+        {"name": "Keeper", "brief": "hold", "mode": "goal", "goal": "hold the line"},
+    )
+    held = keeper["agent"]
+    assert held["status"] == life.STATUS_GOAL
+    forced = rig2.runtime.idle_agent(held["id"])
+    assert forced is not None
+    assert forced["status"] == life.STATUS_IDLE
+    assert forced["mode"] == life.MODE_GOAL
+    assert forced["goal_text"] == "hold the line"
+
+    deny_wait = rig2.runtime.wait_agent(mgr["id"])
+    assert deny_wait is not None and "DENIED" in str(deny_wait.get("error"))
+    deny_stop = rig2.runtime.stop_agent(mgr["id"])
+    assert deny_stop is not None and "DENIED" in str(deny_stop.get("error"))
+    deny_idle = rig2.runtime.idle_agent(mgr["id"])
+    assert deny_idle is not None and "DENIED" in str(deny_idle.get("error"))
+
+    dead = rig2.runtime.kill_agent(scout["id"], reason="done")
+    assert dead is not None and dead["status"] == life.STATUS_STOPPED
+    refuse_wait = rig2.runtime.wait_agent(scout["id"])
+    assert refuse_wait is not None and "DENIED" in str(refuse_wait.get("error"))
+
+
+async def test_mode_toggle_keeps_goal_text(rig2) -> None:
+    space = rig2.store.create_space("GoalKeep")
+    spawned = await rig2.runtime.operator_spawn(
+        space["id"],
+        {"name": "Scout", "brief": "watch", "mode": "goal", "goal": "hold the line"},
+    )
+    scout = spawned["agent"]
+    again = rig2.runtime.set_agent_mode(scout["id"], life.MODE_GOAL)
+    assert again is not None
+    assert again["goal_text"] == "hold the line"
+    active = rig2.runtime.set_agent_mode(scout["id"], life.MODE_ACTIVE)
+    assert active is not None
+    assert active["goal_text"] == "hold the line"
+    assert active["mode"] == life.MODE_ACTIVE

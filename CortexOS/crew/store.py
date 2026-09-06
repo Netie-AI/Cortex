@@ -336,14 +336,16 @@ class CrewStore:
             self._db.commit()
         return self.get_agent(agent_id)
 
-    def set_agent_status(self, agent_id: str, status: str) -> dict[str, Any] | None:
+    def set_agent_status(
+        self, agent_id: str, status: str, *, remap_idle: bool = True
+    ) -> dict[str, Any] | None:
         from CortexOS.crew.life import canonical_status, park_status
 
         row = self.get_agent(agent_id)
         if row is None:
             return None
         wanted = canonical_status(status)
-        if wanted == "idle":
+        if remap_idle and wanted == "idle":
             wanted = park_status(row)
         with self._lock:
             self._db.execute("UPDATE agents SET status = ? WHERE id = ?", (wanted, agent_id))

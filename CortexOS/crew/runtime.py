@@ -107,6 +107,9 @@ class AgentHandle:
     row: dict[str, Any]
     task: asyncio.Task[None] | None = None
     parked: bool = False
+    #: Operator halt target so CancelledError does not remap wait/idle to goal.
+    park_as: str | None = None
+    park_force: bool = False
 
 
 @dataclass
@@ -668,21 +671,26 @@ class CrewRuntime:
                         text = str(result["error"])
                     else:
                         text = life.dead_reason(result or row)
-                elif action in {"stop", "idle"}:
+                elif action == "stop":
                     result = self.stop_agent(row["id"])
                     if isinstance(result, dict) and result.get("error"):
                         text = str(result["error"])
                     else:
                         parked = result or row
                         text = f"{parked.get('name')} status={parked.get('status')}"
-                elif action == "wait":
-                    if row["name"] == "Manager":
-                        text = "DENIED: Manager wait is the run; do not park the Manager"
-                    elif not life.can_accept(row):
-                        text = f"DENIED: {life.dead_reason(row)}"
+                elif action == "idle":
+                    result = self.idle_agent(row["id"])
+                    if isinstance(result, dict) and result.get("error"):
+                        text = str(result["error"])
                     else:
-                        self._set_status(row["id"], life.STATUS_WAITING)
-                        parked = self.store.get_agent(row["id"]) or row
+                        parked = result or row
+                        text = f"{parked.get('name')} status={parked.get('status')}"
+                elif action == "wait":
+                    result = self.wait_agent(row["id"])
+                    if isinstance(result, dict) and result.get("error"):
+                        text = str(result["error"])
+                    else:
+                        parked = result or row
                         text = f"{parked.get('name')} status={parked.get('status')}"
                 else:
                     goal_text = extra or more
@@ -853,12 +861,41 @@ class CrewRuntime:
             return None
         if row["name"] == "Manager":
             return {"error": "DENIED: Manager cannot be stopped; cancel the run"}
-        handle = self._handles.get(agent_id)
-        if handle is not None and handle.task is not None and not handle.task.done():
+        return self._halt_work(row, life.park_status(row), force=False)
+
+    def idle_agent(self, agent_id: str) -> dict[str, Any] | None:
+        """Halt work and park status=idle. Mode/goal text stay. Does not kill Manager."""
+        row = self.store.get_agent(agent_id)
+        if row is None:
+            return None
+        if row["name"] == "Manager":
+            return {"error": "DENIED: Manager cannot be idled; cancel the run"}
+        return self._halt_work(row, life.STATUS_IDLE, force=True)
+
+    def wait_agent(self, agent_id: str) -> dict[str, Any] | None:
+        """Park waiting. Not busy. Does not kill Manager or :8020."""
+        row = self.store.get_agent(agent_id)
+        if row is None:
+            return None
+        if row["name"] == "Manager":
+            return {"error": "DENIED: Manager wait is the run; do not park the Manager"}
+        if not life.can_accept(row):
+            return {"error": f"DENIED: {life.dead_reason(row)}"}
+        return self._halt_work(row, life.STATUS_WAITING, force=True)
+
+    def _halt_work(
+        self, row: dict[str, Any], status: str, *, force: bool
+    ) -> dict[str, Any]:
+        """Park HUD status immediately, then cancel in-loop work if any."""
+        handle = self._handle(row)
+        running = handle.task is not None and not handle.task.done()
+        if running:
+            handle.park_as = status
+            handle.park_force = force
+        self._set_status(row["id"], status, remap_idle=not force)
+        if running:
             handle.task.cancel()
-        else:
-            self._park_life(row)
-        parked = self.store.get_agent(agent_id) or row
+        parked = self.store.get_agent(row["id"]) or row
         self.bus.emit(parked["space_id"], "agent", {"agent": parked})
         return parked
 
@@ -890,7 +927,7 @@ class CrewRuntime:
         return killed
 
     def set_agent_mode(
-        self, agent_id: str, mode: str, *, goal_text: str = ""
+        self, agent_id: str, mode: str, *, goal_text: str | None = None
     ) -> dict[str, Any] | None:
         row = self.store.set_agent_mode(agent_id, mode, goal_text)
         if row is None:
@@ -1899,7 +1936,7 @@ class CrewRuntime:
             updated = self.set_agent_mode(
                 target["id"],
                 str(args.get("mode") or ""),
-                goal_text=str(args.get("goal") or ""),
+                goal_text=(str(args["goal"]) if "goal" in args else None),
             )
             if updated is None:
                 return f"DENIED: could not set mode on '{target_name}'"
@@ -2144,13 +2181,21 @@ class CrewRuntime:
     def _task_is_parked(self, task: asyncio.Task[None]) -> bool:
         return any(h.task is task and h.parked for h in self._handles.values())
 
-    def _set_status(self, agent_id: str, status: str) -> None:
-        row = self.store.set_agent_status(agent_id, status)
+    def _set_status(self, agent_id: str, status: str, *, remap_idle: bool = True) -> None:
+        row = self.store.set_agent_status(agent_id, status, remap_idle=remap_idle)
         if row is not None:
             self.bus.emit(row["space_id"], "agent", {"agent": row})
 
     def _park_life(self, row: dict[str, Any]) -> None:
         if not life.is_alive(row):
+            return
+        handle = self._handles.get(row["id"])
+        if handle is not None and handle.park_as:
+            wanted = handle.park_as
+            force = handle.park_force
+            handle.park_as = None
+            handle.park_force = False
+            self._set_status(row["id"], wanted, remap_idle=not force)
             return
         self._set_status(row["id"], life.park_status(row))
 
@@ -2191,7 +2236,7 @@ class CrewRuntime:
         created but has not had its first tick yet still reads as 'idle', so
         judging by status would tell a Manager that just spawned someone that
         nobody is working - and wait_for_replies would return before the
-        teammate had even started.
+        teammate had even started. Operator-parked waiting is not working.
         """
         out: list[str] = []
         for a in self.store.list_agents(space_id):
@@ -2204,7 +2249,12 @@ class CrewRuntime:
                 and not handle.task.done()
                 and not handle.parked
             )
-            if running or a["status"] in life.WORKING:
+            if running:
+                out.append(a["name"])
+                continue
+            if handle is not None and handle.parked:
+                continue
+            if life.is_busy(a):
                 out.append(a["name"])
         return out
 
@@ -2429,8 +2479,6 @@ class CrewRuntime:
             return
         fresh = self.store.get_agent(target["id"]) or target
         if not life.can_accept(fresh):
-            return
-        if fresh["status"] in life.WORKING:
             return
         task = asyncio.create_task(self._teammate_run(ctx, fresh, ""))
         handle.task = task

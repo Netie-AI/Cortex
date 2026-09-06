@@ -112,7 +112,7 @@ _LIFE: tuple[dict[str, Any], ...] = (
         "kind": "life",
         "action": "idle",
         "title": "Park idle",
-        "hint": "/idle name",
+        "hint": "/idle name  (status idle; mode/goal text stay)",
     },
     {
         "slash": "wait",
@@ -120,7 +120,7 @@ _LIFE: tuple[dict[str, Any], ...] = (
         "kind": "life",
         "action": "wait",
         "title": "Park waiting",
-        "hint": "/wait name",
+        "hint": "/wait name  (parks waiting; not running)",
     },
     {
         "slash": "goal",
