@@ -1,7 +1,7 @@
 # Cortex Whitepaper — Architecture, Apps, Roadmap, Branches
 
 **Status:** Canonical design thesis (P18) · **Measured:** 2026-07-29  
-**Companions:** [`CORTEX_FINAL_GOAL.md`](CORTEX_FINAL_GOAL.md) · [`PRODUCT_ROLES.md`](../../PRODUCT_ROLES.md) · [`ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md`](ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md) · root [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+**Companions:** [`CORTEX_FINAL_GOAL.md`](CORTEX_FINAL_GOAL.md) · [`PRODUCT_ROLES.md`](../../PRODUCT_ROLES.md) · [`ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md`](ENGINE_SDK_DUAL_BRAIN_PLAN_2026-07-23.md) · [`DIGITAL_CLONE_WHITEPAPER.md`](DIGITAL_CLONE_WHITEPAPER.md) (clone / PaaS thesis, 2026-09-04 draft) · root [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
 
 > Do not present planned work as shipped. Shipped vs partial is marked below and in `ARCHITECTURE.md`.
 

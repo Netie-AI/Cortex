@@ -1,5 +1,11 @@
 # STATUS.md
-**Last updated:** 2026-09-03 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** docs honesty; LOOP/SEC re-verified
+**Last updated:** 2026-09-05 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** scheduled_work (gh/ship-gate/mail)
+
+> **2026-09-05 (scheduled operator work):** Routines whose goal is GitHub,
+> review, ship-gate, or email dispatch `execution/scheduled_work.py` (Crew
+> `gh` / `ship_gate` / IMAP + optional SMTP). Scheduled `gh pr list` uses
+> a 20s timeout (desk chat stays 1.5s). AirGPT surfaces this; it is not a
+> second orchestrator. Do not auto-merge.
 
 > **2026-09-03 (docs honesty + lakehouse env):** Re-ran LOOP-01/02 + SEC-01
 > (11 passed). Live `:8011` `/health` 200 (not hung); `/api/engine/specs`
