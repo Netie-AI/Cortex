@@ -2,9 +2,14 @@
 
 Absorbs the DeepAgents MIT persistent-memory pattern - a directory of named
 notes, each with a one-line description, plus an index - as original Cortex
-code, so a space that is reopened tomorrow does not restart cold. It does not
-decide work shape (dag_runner + manifest + ledger still own that) and it never
-opens DuckDB: files only, under the same per-space jail as the workspace.
+code, so a space that is reopened tomorrow does not restart cold. Collections
+are scoped space|user|agent|run; only the space collection uses ``memory/``.
+Slash remember/recall/forget stay on that space writer - no dual-write into
+user/agent/run files or CLAIMS.json.
+
+It does not decide work shape (dag_runner + manifest + ledger still own that)
+and it never opens DuckDB: files only, under the same per-space jail as the
+workspace.
 
 Three failures this module exists to prevent:
 
@@ -51,6 +56,13 @@ INDEX_FILE = "INDEX.md"
 FACTS_NAME = "facts"
 FACTS_FILE = "facts.md"
 UNTRUSTED_SOURCE = "crew-memory"
+SCOPES = ("space", "user", "agent", "run")
+DEFAULT_OWNERS = {
+    "space": "",
+    "user": "operator",
+    "agent": "crew",
+    "run": "session",
+}
 
 _NAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -96,11 +108,15 @@ class CrewMemory:
         *,
         max_facts: int = MAX_FACTS,
         max_body_bytes: int = MAX_BODY_BYTES,
+        scope: str = "space",
+        owner: str = "",
     ) -> None:
         self._ws = SpaceWorkspace(root)
         self.root = self._ws.root
         self.max_facts = max(1, int(max_facts))
         self.max_body_bytes = max(1, int(max_body_bytes))
+        self.scope = (scope or "space").strip().lower() or "space"
+        self.owner = (owner or "").strip().lower()
 
     # ---- naming and paths -------------------------------------------------
 
@@ -198,6 +214,26 @@ class CrewMemory:
             for fact in self.list_facts()
         ]
 
+    def export_filename(self) -> str:
+        """Download name. Space keeps facts.md; other scopes do not collide with it."""
+        if self.scope == "space" or not self.owner:
+            return FACTS_FILE
+        return f"{self.scope}-{self.owner}.md"
+
+    def public_payload(self, facts: list[MemoryFact] | None = None) -> dict[str, object]:
+        """List/search JSON. ``file`` stays facts.md so existing HUD pins keep working."""
+        rows = facts if facts is not None else self.list_facts()
+        return {
+            "facts": [
+                {"name": fact.name, "description": fact.description, "body": fact.body}
+                for fact in rows
+            ],
+            "file": FACTS_FILE,
+            "filename": self.export_filename(),
+            "scope": self.scope,
+            "owner": self.owner,
+        }
+
     def export_markdown(self) -> str:
         """Operator-visible facts.md. Rebuilt from the named notes, never patched."""
         self._write_facts_md()
@@ -291,6 +327,13 @@ class CrewMemory:
         """One markdown file the operator can export. Chat clear does not touch it."""
         facts = self.list_facts()
         parts = ["# Crew facts", ""]
+        if self.scope != "space":
+            parts = [
+                "# Crew facts",
+                f"scope: {self.scope}",
+                f"owner: {self.owner}",
+                "",
+            ]
         if not facts:
             parts.append("(empty)")
         for fact in facts:
@@ -307,8 +350,61 @@ class CrewMemory:
 
 
 def memory_for(data_dir: Path, space_id: str) -> CrewMemory:
-    """Sibling of :func:`CortexOS.crew.workspace.workspace_for` - same per-space jail."""
-    return CrewMemory(data_dir / "spaces" / space_id / "memory")
+    """Space collection. Slash/tools keep writing here; other scopes use collection_for."""
+    return collection_for(data_dir, space_id, scope="space")
+
+
+def collection_for(
+    data_dir: Path,
+    space_id: str,
+    *,
+    scope: str = "space",
+    owner: str = "",
+) -> CrewMemory:
+    """One markdown collection. Space stays under memory/; others are siblings.
+
+    user/agent/run live in ``spaces/<id>/collections/<scope>/<owner>/`` so a
+    space remember cannot dual-write into them, and chat clear (transcript
+    only) cannot delete them.
+    """
+    kind = _scope_name(scope)
+    if kind == "space":
+        return CrewMemory(
+            data_dir / "spaces" / space_id / "memory",
+            scope="space",
+            owner="",
+        )
+    who = _owner_slug(owner) if (owner or "").strip() else DEFAULT_OWNERS[kind]
+    return CrewMemory(
+        data_dir / "spaces" / space_id / "collections" / kind / who,
+        scope=kind,
+        owner=who,
+    )
+
+
+def _scope_name(scope: str) -> str:
+    raw = (scope or "space").strip().lower()
+    if raw not in SCOPES:
+        raise CrewMemoryError(
+            f"unknown memory scope {scope!r}; use space, user, agent or run"
+        )
+    return raw
+
+
+def _owner_slug(owner: str) -> str:
+    raw = (owner or "").strip().lower()
+    if not raw:
+        raise CrewMemoryError("a collection needs an owner")
+    if len(raw) > MAX_NAME_CHARS:
+        raise CrewMemoryError(
+            f"owner is {len(raw)} chars; the cap is {MAX_NAME_CHARS}"
+        )
+    if not _NAME_RE.match(raw):
+        raise CrewMemoryError(
+            f"bad collection owner {owner!r}: use lowercase letters, digits, '.', '_' or '-' "
+            "(no slashes, no '..', no drive letters)"
+        )
+    return raw
 
 
 def as_error(exc: BaseException) -> str:

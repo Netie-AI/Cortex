@@ -1,6 +1,15 @@
 # STATUS.md
 **Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-04 orchestrator**
 
+> **2026-09-06 (CREW-MEMORY-API):** Collection-scoped Crew memory under Cortex #116.
+> `GET/POST /crew/spaces/{id}/memory`, `GET .../memory/search`, `GET .../memory/export`,
+> `DELETE .../memory/{name}` take `scope=space|user|agent|run`. Space stays
+> `spaces/<id>/memory/facts.md`. user/agent/run write sibling collection dirs.
+> HUD chips call those endpoints (not derived chat/agent/run state). Clear chat
+> does not delete collection files. Recall stays untrusted-wrapped. Slash remember
+> still writes only the space collection. Control untouched. Local `pytest tests/test_crew -q`
+> **211 passed**. This line is not a GitHub CI claim.
+>
 > **2026-09-06 (CREW-POLICY-STANDING):** Standing allowlist / session / one-off
 > is Crew policy SoT (`CortexOS/crew/approvals.py`), not localStorage.
 > `policy.decide` / `decide_with_approvals` apply the ladder; standing and

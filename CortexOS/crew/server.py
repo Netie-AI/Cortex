@@ -198,6 +198,8 @@ class MemoryIn(BaseModel):
     name: str
     description: str
     body: str = ""
+    scope: str = "space"
+    owner: str = ""
 
 
 class ArmIn(BaseModel):
@@ -477,40 +479,82 @@ def build_router(crew: CrewApp) -> APIRouter:
             raise HTTPException(400, str(accepted["error"]))
         return {"ok": True, "agent": accepted}
 
-    @router.get("/spaces/{space_id}/memory")
-    async def list_memory(space_id: str, q: str = "") -> dict[str, Any]:
+    def _space_mem(space_id: str, scope: str = "space", owner: str = "") -> Any:
+        from CortexOS.crew.memory import CrewMemoryError
+
         if crew.store.get_space(space_id) is None:
             raise HTTPException(404, "unknown space")
-        mem = crew.runtime._mem(space_id)
+        try:
+            return crew.runtime._mem(space_id, scope=scope, owner=owner)
+        except CrewMemoryError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/spaces/{space_id}/memory")
+    async def list_memory(
+        space_id: str, q: str = "", scope: str = "space", owner: str = ""
+    ) -> dict[str, Any]:
+        mem = _space_mem(space_id, scope, owner)
         query = q.strip()
         facts = mem.search(query) if query else mem.list_facts()
-        return {
-            "facts": [
-                {"name": f.name, "description": f.description, "body": f.body}
-                for f in facts
-            ],
-            "file": "facts.md",
-        }
+        return mem.public_payload(facts)
+
+    @router.get("/spaces/{space_id}/memory/search")
+    async def search_memory(
+        space_id: str, q: str = "", scope: str = "space", owner: str = ""
+    ) -> dict[str, Any]:
+        mem = _space_mem(space_id, scope, owner)
+        payload = mem.public_payload(mem.search(q))
+        payload["query"] = q
+        return payload
 
     @router.post("/spaces/{space_id}/memory")
     async def save_memory(space_id: str, body: MemoryIn) -> dict[str, Any]:
-        if crew.store.get_space(space_id) is None:
-            raise HTTPException(404, "unknown space")
         from CortexOS.crew.memory import CrewMemoryError
 
-        mem = crew.runtime._mem(space_id)
+        mem = _space_mem(space_id, body.scope, body.owner)
         try:
             detail = mem.remember(body.name, body.description, body.body)
         except CrewMemoryError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return {"ok": True, "detail": detail, "facts": mem.public_facts()}
+        return {
+            "ok": True,
+            "detail": detail,
+            "facts": mem.public_facts(),
+            "scope": mem.scope,
+            "owner": mem.owner,
+            "file": "facts.md",
+        }
 
     @router.get("/spaces/{space_id}/memory/export")
-    async def export_memory(space_id: str) -> dict[str, Any]:
-        if crew.store.get_space(space_id) is None:
-            raise HTTPException(404, "unknown space")
-        mem = crew.runtime._mem(space_id)
-        return {"filename": "facts.md", "markdown": mem.export_markdown()}
+    async def export_memory(
+        space_id: str, scope: str = "space", owner: str = ""
+    ) -> dict[str, Any]:
+        mem = _space_mem(space_id, scope, owner)
+        return {
+            "filename": mem.export_filename(),
+            "markdown": mem.export_markdown(),
+            "scope": mem.scope,
+            "owner": mem.owner,
+        }
+
+    @router.delete("/spaces/{space_id}/memory/{name}")
+    async def forget_memory(
+        space_id: str, name: str, scope: str = "space", owner: str = ""
+    ) -> dict[str, Any]:
+        from CortexOS.crew.memory import CrewMemoryError
+
+        mem = _space_mem(space_id, scope, owner)
+        try:
+            detail = mem.forget(name)
+        except CrewMemoryError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "ok": True,
+            "detail": detail,
+            "facts": mem.public_facts(),
+            "scope": mem.scope,
+            "owner": mem.owner,
+        }
 
     @router.post("/spaces/{space_id}/clear")
     async def clear_chat(space_id: str) -> dict[str, Any]:
