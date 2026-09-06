@@ -70,6 +70,7 @@ def test_importlinter_contract_covers_rsf_boundary() -> None:
         if line.strip()
     }
     assert "CortexOS.execution.rsf_boundary" in sources
+    assert "CortexOS.execution.rsf_orchestrator" in sources
     forbidden = {
         line.strip()
         for line in parser.get(section, "forbidden_modules").splitlines()

@@ -1,6 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **RSF-04 orchestrator**
 
+> **2026-09-06 (RSF-04 / Cortex#154):** In-process RSF meta-router
+> `CortexOS.execution.rsf_orchestrator.run_rsf` certifies research→segment→
+> classify→filter via RSF-02 `parse_rsf_artifact` (CERTIFIED|ABSTAIN|REFUSE).
+> Prior gating follows `RSF_STAGES` (DMS schema / Constructor parseRsfTrace).
+> ABSTAIN/REFUSE blocks downstream CERTIFIED (no invented classifications).
+> Research calls RSF-03 `gate_research_egress` (fail-closed). RSF-01 catalog is
+> advisory distill; n8n/LC/LF as chosen_option is REFUSE. Bake-off hooks for
+> dms_rag / normal_chat / agentic_actions record null latency/cost/tokens
+> (no invented targets). No `/v1/rsf`, no CCA edit, no Crew dual-seat.
+> Local: `pytest tests/test_rsf_orchestrator.py tests/test_rsf_consumer.py`.
+> Does not claim GHA green. Does not close RSF-06/07.
+>
 > **2026-09-06 (CREW-BELT-CLAIM):** Crew owns ticket leases. `POST /crew/tickets/{id}/claim`
 > takes worker + TTL (409 if held elsewhere or SEATED). `POST .../release` is holder-only
 > (403 otherwise; 409 if not held). `GET /crew/belt` == `GET /v1/belt` stays display JSON

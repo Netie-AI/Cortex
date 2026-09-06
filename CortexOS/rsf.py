@@ -2,7 +2,11 @@
 
 Inbound body fields: artifact_id, stage, question, options, chosen_option,
 route_trace, evidence, status, reasons. No dms_core import, no CCA, no
-cortex_contract bump, no /v1/rsf route -- RSF-04 calls parse_rsf_artifact.
+cortex_contract bump, no /v1/rsf route.
+
+RSF-04 (``CortexOS.execution.rsf_orchestrator``) calls ``parse_rsf_artifact``
+per stage and ``parse_rsf_trace`` on the run. ``RSF_STAGES`` order is the
+pipeline: later CERTIFIED is illegal once a prior stage is not CERTIFIED.
 
 Analog reuse: TAS-CONSTRUCTOR. Live: tests/dms/test_constructor_graph.py
 (kind n8n refused). Analog read-only: none.
@@ -14,6 +18,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+# Fixed pipeline order (DMS schema of record + Constructor parseRsfTrace).
+# Ticket #154 names the four stages; "prior" for CERTIFIED gating is this tuple.
 RSF_STAGES = ("research", "segment", "classify", "filter")
 RSF_STATUSES = frozenset({"CERTIFIED", "ABSTAIN", "REFUSE"})
 
@@ -65,3 +71,43 @@ def parse_rsf_artifact(raw: Any) -> RsfArtifact:
         evidence=tuple(evidence),
         stage=str(raw.get("stage") or ""),
     )
+
+
+def require_certified_priors(trace: list[RsfArtifact] | list[Mapping[str, Any]]) -> None:
+    """A later stage cannot be CERTIFIED after a prior ABSTAIN/REFUSE/missing.
+
+    Order in ``RSF_STAGES`` is what "prior" means (DMS ``require_certified_priors``).
+    """
+    by_stage: dict[str, str] = {}
+    for item in trace:
+        if isinstance(item, RsfArtifact):
+            by_stage[item.stage] = item.status
+        elif isinstance(item, Mapping):
+            by_stage[str(item.get("stage") or "")] = str(item.get("status") or "")
+        else:
+            raise RsfConsumerError("RSF trace item must be an artifact or object")
+    blocked = False
+    for stage in RSF_STAGES:
+        status = by_stage.get(stage)
+        if blocked:
+            if status == "CERTIFIED":
+                raise RsfConsumerError(
+                    f"{stage} must not be CERTIFIED after a prior ABSTAIN/REFUSE/missing stage"
+                )
+            continue
+        if status != "CERTIFIED":
+            blocked = True
+
+
+def parse_rsf_trace(raw: Any) -> list[RsfArtifact]:
+    """Parse a run's stage artifacts. Invent-green CERTIFIED after a gap raises."""
+    if not isinstance(raw, list):
+        raise RsfConsumerError("RSF trace must be a list")
+    out = [parse_rsf_artifact(item) for item in raw]
+    seen: set[str] = set()
+    for item in out:
+        if item.stage in seen:
+            raise RsfConsumerError(f"duplicate stage {item.stage}")
+        seen.add(item.stage)
+    require_certified_priors(out)
+    return out

@@ -2,6 +2,14 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## RSF-04 orchestrator (research→segment→classify→filter) — 2026-09-06
+
+In-process `run_rsf` emits per-stage RSF-02 wire artifacts (CERTIFIED|ABSTAIN|REFUSE).
+A non-CERTIFIED stage blocks later CERTIFIED. Research is fail-closed on OpenVault
+leave-machine. Distill options stay advisory; n8n/LangChain/LangFlow cannot be the
+chosen product engine. Bake-off hooks exist with null metrics. No `/v1/rsf`.
+Closes Cortex#154 (parent EPIC-RSF #151). Local pytest only; not GHA.
+
 ## CREW-BELT-CLAIM ticket leases on CortexOS/crew — 2026-09-06
 
 Crew (not Control) is lease SoT. `POST /crew/tickets/{id}/claim` binds worker + TTL;

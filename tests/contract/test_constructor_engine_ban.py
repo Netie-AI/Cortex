@@ -23,6 +23,7 @@ CONSTRUCTOR_ENGINE_PATHS = (
     ROOT / "CortexOS" / "constructor_graph.py",
     ROOT / "CortexOS" / "execution" / "distill_options.py",
     ROOT / "CortexOS" / "execution" / "rsf_boundary.py",
+    ROOT / "CortexOS" / "execution" / "rsf_orchestrator.py",
     ROOT / "packs" / "dms" / "constructor_routes.py",
     ROOT / "packs" / "dms" / "constructor_fetch.py",
 )
@@ -93,6 +94,7 @@ def test_importlinter_contract_forbids_banned_engines() -> None:
     assert "CortexOS.constructor_graph" in sources
     assert "CortexOS.execution.distill_options" in sources
     assert "CortexOS.execution.rsf_boundary" in sources
+    assert "CortexOS.execution.rsf_orchestrator" in sources
     assert parser.getboolean("importlinter", "include_external_packages") is True
 
 
