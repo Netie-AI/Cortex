@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from CortexOS.crew.belt import TicketLeaseLedger
 from CortexOS.crew.config import CrewSettings, load_settings, resolve_providers
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.events import EventBus
@@ -75,6 +76,7 @@ class CrewApp:
         self.shell = CrewShell(self.settings)
         self.wakes = WakeBoard()
         self.queue = JobQueue()
+        self.leases = TicketLeaseLedger()
         self._fetch_warm: asyncio.Task[None] | None = None
 
     def mailbox_nonempty(self) -> bool:
@@ -117,6 +119,7 @@ class CrewApp:
             mailbox_nonempty=self.mailbox_nonempty(),
             assignments=assignment_public(self.settings.data_dir),
             data_dir=self.settings.data_dir,
+            leases=self.leases,
         )
 
     async def startup(self) -> None:
@@ -233,6 +236,38 @@ class TicketAssignIn(BaseModel):
     spec: str
     space_id: str
     name: str = "Ticket"
+
+
+class TicketLeaseIn(BaseModel):
+    worker: str = ""
+    name: str = ""
+    ttl_s: int | None = None
+    space_id: str = ""
+
+
+_LEASE_LAW = (
+    "Crew lease. Control display-only. Did not write CLAIMS.json. "
+    "Did not set a GitHub assignee."
+)
+
+
+def _lease_worker(body: TicketLeaseIn) -> str:
+    return (body.worker or body.name or "").strip()
+
+
+def _refuse_seated(spec: str) -> None:
+    from CortexOS.crew import github as github_mod
+
+    seated = github_mod.seated_claim(spec)
+    if seated is None:
+        return
+    raise HTTPException(
+        409,
+        (
+            f"DENIED: {seated.get('ticket')} is SEATED "
+            f"({seated.get('owner_pr')}). Ticket Runner owns the seat."
+        ),
+    )
 
 
 def build_router(crew: CrewApp) -> APIRouter:
@@ -657,7 +692,7 @@ def build_router(crew: CrewApp) -> APIRouter:
     async def list_tickets() -> dict[str, Any]:
         from CortexOS.crew import github as github_mod
         from CortexOS.crew.assign import public as assignment_public
-        from CortexOS.crew.board import snapshot
+        from CortexOS.crew.board import overlay_leases, snapshot
 
         body = snapshot()
         body["assignments"] = assignment_public(crew.settings.data_dir)
@@ -681,9 +716,15 @@ def build_router(crew: CrewApp) -> APIRouter:
             if spec and spec in claimed:
                 continue
             issues.append(row)
-        body["issues"] = issues
+        leases = crew.leases.public()
+        body["leases"] = leases
+        body["tickets"] = overlay_leases(body.get("tickets") or [], leases)
+        body["issues"] = overlay_leases(issues, leases)
         body["issues_detail"] = fetched.get("detail") or ""
         body["issues_ok"] = bool(fetched.get("ok"))
+        body["lease_owner"] = (
+            "Crew POST /crew/tickets/{id}/claim. Control does not lease."
+        )
         return body
 
     @router.post("/tickets/claim")
@@ -724,6 +765,46 @@ def build_router(crew: CrewApp) -> APIRouter:
             "ok": True,
             "spec": github_mod.canonical_spec(body.spec),
             "law": "Released local bind. Did not edit CLAIMS.json.",
+        }
+
+    @router.post("/tickets/{ticket_id:path}/claim")
+    async def claim_ticket_lease(ticket_id: str, body: TicketLeaseIn) -> dict[str, Any]:
+        """Claim a ticket lease. 409 if held elsewhere or SEATED. Control never POSTs."""
+        _refuse_seated(ticket_id)
+        result = crew.leases.claim(ticket_id, _lease_worker(body), body.ttl_s)
+        if not result["ok"]:
+            code = 409 if result["reason"] == "conflict" else 400
+            raise HTTPException(code, result["detail"])
+        lease = result["lease"]
+        return {
+            "ok": True,
+            "id": lease["id"],
+            "worker": lease["worker"],
+            "ttl_s": lease["ttl_s"],
+            "until": lease["until"],
+            "detail": result["detail"],
+            "law": _LEASE_LAW,
+        }
+
+    @router.post("/tickets/{ticket_id:path}/release")
+    async def release_ticket_lease(ticket_id: str, body: TicketLeaseIn) -> dict[str, Any]:
+        """Release only the holder. 403 other worker. 409 if not held or SEATED."""
+        _refuse_seated(ticket_id)
+        result = crew.leases.release(ticket_id, _lease_worker(body))
+        if not result["ok"]:
+            if result["reason"] == "forbidden":
+                code = 403
+            elif result["reason"] == "missing":
+                code = 409
+            else:
+                code = 400
+            raise HTTPException(code, result["detail"])
+        lease = result["lease"]
+        return {
+            "ok": True,
+            "id": lease["id"],
+            "detail": result["detail"],
+            "law": "Released Crew lease. Did not edit CLAIMS.json.",
         }
 
     @router.get("/desk")

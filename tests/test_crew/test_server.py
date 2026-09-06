@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections.abc import Iterator
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,6 +115,10 @@ def test_ui_index_is_served(client) -> None:
     assert "Does not kill Manager" in page.text
     assert "Claim" in page.text
     assert "Release" in page.text
+    assert 'encodeURI(ticket)' in page.text
+    assert "resp.status === 409" in page.text
+    assert "No silent retry." in page.text
+    assert '/crew/tickets/" + encodeURI(ticket) + "/" + act' in page.text
     assert "Control does not assign" in page.text
     assert "open GitHub" in page.text
     assert 'id="tabWork"' in page.text
@@ -257,7 +262,9 @@ def test_belt_and_wakes_are_get_only_and_skip_cortex_ping(client) -> None:
     assert belt["queue"] == {"pending": 0, "leased": 0, "done": 0, "dead": 0}
     assert "tickets" in belt and "items" in belt["tickets"]
     assert belt["assignments"] == []
+    assert belt["leases"] == []
     assert "Control does not assign" in belt["assign_owner"]
+    assert "Control does not lease" in belt["lease_owner"]
     assert client.http.post("/crew/wakes", json={"kind": "timer"}).status_code == 405
     assert client.http.post("/v1/belt", json={"wake": "x"}).status_code == 405
     assert client.http.post("/crew/belt", json={"ticket": "x"}).status_code == 405
@@ -365,6 +372,65 @@ def test_ticket_claim_is_local_assign_and_refuses_seated(
     ).json()
     assert dropped["ok"] is True
     assert client.http.get("/crew/tickets").json()["assignments"] == []
+
+
+def test_ticket_lease_claim_release_ttl_and_conflicts(
+    client, tmp_path, monkeypatch
+) -> None:
+    claims = tmp_path / "CLAIMS.json"
+    claims.write_text(
+        '{"tickets":['
+        '{"ticket":"Netie-AI/Cortex#128","owner_pr":"Netie-AI/Cortex#128","role":"SEATED"},'
+        '{"ticket":"Netie-AI/Cortex#199","role":"UNSEATED","repo":"Netie-AI/Cortex"}'
+        "]}",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREW_CLAIMS", str(claims))
+    seated_path = "/crew/tickets/" + quote("Netie-AI/Cortex#128", safe="/") + "/claim"
+    seated = client.http.post(seated_path, json={"worker": "Scout"})
+    assert seated.status_code == 409
+    assert "SEATED" in seated.json()["detail"]
+
+    spec = "Netie-AI/Cortex#199"
+    path = "/crew/tickets/" + quote(spec, safe="/") + "/claim"
+    rel = "/crew/tickets/" + quote(spec, safe="/") + "/release"
+    missing_worker = client.http.post(path, json={"worker": ""})
+    assert missing_worker.status_code == 400
+    claimed = client.http.post(path, json={"worker": "Scout", "ttl_s": 120})
+    assert claimed.status_code == 200
+    body = claimed.json()
+    assert body["ok"] is True
+    assert body["id"] == spec
+    assert body["worker"] == "Scout"
+    assert body["ttl_s"] == 120
+    assert body["until"] > 0
+    assert "CLAIMS" in body["law"]
+    belt = client.http.get("/v1/belt").json()
+    alt = client.http.get("/crew/belt").json()
+    assert belt == alt
+    assert belt["queue"]["leased"] == 1
+    assert belt["leases"][0]["worker"] == "Scout"
+    assert belt["leases"][0]["id"] == spec
+    assert "Control does not lease" in belt["lease_owner"]
+    assert any(row.get("lease", {}).get("worker") == "Scout" for row in belt["tickets"]["items"])
+    board = client.http.get("/crew/tickets").json()
+    assert board["leases"][0]["worker"] == "Scout"
+    clash = client.http.post(path, json={"worker": "Gate"})
+    assert clash.status_code == 409
+    assert "held by Scout" in clash.json()["detail"]
+    forbidden = client.http.post(rel, json={"worker": "Gate"})
+    assert forbidden.status_code == 403
+    dropped_lease = client.http.post(rel, json={"worker": "Scout"})
+    assert dropped_lease.status_code == 200
+    assert dropped_lease.json()["ok"] is True
+    empty = client.http.post(rel, json={"worker": "Scout"})
+    assert empty.status_code == 409
+    simple = client.http.post(
+        "/crew/tickets/FF-03/claim", json={"name": "Watchdog", "ttl_s": 30}
+    )
+    assert simple.status_code == 200
+    assert simple.json()["worker"] == "Watchdog"
+    assert client.http.get("/v1/belt").json()["queue"]["leased"] == 1
 
 
 def test_tickets_lists_fetched_github_issues_minus_claims(

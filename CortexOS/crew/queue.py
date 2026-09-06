@@ -1,12 +1,13 @@
-"""Crew-owned work leases. Control displays counts; Control never POSTs.
+"""Crew-owned FIFO work leases. Control displays counts; Control never POSTs.
 
 Not a second A2A mailbox and not LangGraph. Pending work is leased by Crew,
 acked to done, or nacked to dead. Counts (pending / leased / done / dead)
 are what Control renders on the conveyor.
 
-The A2A mailbox remains the delivery channel; this queue is the belt's
-lease ledger so an operator can see work that is claimed without Control
-ever POSTing a wake or a lease.
+Ticket-id Claim/Release with worker + TTL lives on
+:class:`CortexOS.crew.belt.TicketLeaseLedger`. This FIFO stays kind-agnostic
+jobs. Conveyor adds live ticket leases into the displayed ``leased`` count
+so chrome "held" matches the belt without Control POSTing.
 """
 
 from __future__ import annotations

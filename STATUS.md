@@ -1,6 +1,12 @@
 # STATUS.md
-**Last updated:** 2026-09-04 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY
+**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY
 
+> **2026-09-06 (CREW-BELT-CLAIM):** Crew owns ticket leases. `POST /crew/tickets/{id}/claim`
+> takes worker + TTL (409 if held elsewhere or SEATED). `POST .../release` is holder-only
+> (403 otherwise; 409 if not held). `GET /crew/belt` == `GET /v1/belt` stays display JSON
+> (`leases` + `lease_owner` additive). Control does not lease. Local `pytest tests/test_crew -q`
+> 208 passed. Live `:8020` needs founder restart. No GitHub issue minted on this branch.
+>
 > **2026-09-04 (wave1 land + honesty):** Auto-merge is live on public `main`
 > (`ALLOWED_BASES={main}`). Landed: Crew belt/wakes PR #98; C7-01 shadow PR #106
 > (#100 closed, epic #17 and #101-#105 remain); EVAL-01 seeds gate PR #108

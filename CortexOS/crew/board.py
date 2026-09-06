@@ -65,6 +65,29 @@ def snapshot() -> dict[str, Any]:
     }
 
 
+def overlay_leases(
+    rows: list[dict[str, Any]],
+    leases: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Stamp a live Crew lease onto CLAIMS/issue rows. Does not seat writers."""
+    held = {
+        str(row.get("id") or ""): row
+        for row in leases
+        if isinstance(row, dict) and str(row.get("id") or "").strip()
+    }
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        ident = str(item.get("ticket") or item.get("spec") or item.get("id") or "").strip()
+        lease = held.get(ident)
+        if lease is not None:
+            item["lease"] = {"worker": lease.get("worker"), "until": lease.get("until")}
+        out.append(item)
+    return out
+
+
 PACKS_DIR = Path(__file__).resolve().parent / "skill_packs"
 
 
