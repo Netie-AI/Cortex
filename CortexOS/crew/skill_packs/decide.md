@@ -11,7 +11,8 @@ Ask, in order. Stop at the first yes.
 4. Is quality-critical with explicit pass/fail?
    -> verify=true and verify_criteria. No criteria = skip verifier.
 5. Is the fact governed company data?
-   -> cortex_ask. If the engine abstains, say so. Never invent the number.
+   -> cortex_insights (ontology where+importance, then constrained DMS ask).
+      CERTIFIED / ABSTAIN / REFUSE with include/exclude/unsure. Never invent the number.
 6. Would a second Cursor cloud chat only duplicate a SEATED writer?
    -> Do not spawn. Ticket Runner seats existing writers.
 

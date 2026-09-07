@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-07 | crew-insights | crew, insights, ontology, where, importance, certify, refuse, #196 | Intent then ontology where+importance then constrained DMS ask. CERTIFIED envelopes carry include/exclude/unsure. | `2026-09-07_crew-insights.md` |
 | 2026-09-06 | cortex-appshell | appshell, crew, control, f-0030, apps, audit, cmd-k | Operator shell wraps Crew: nav + Apps launcher + Control/Audit GET deep-links. No Control spawn. Honest RSF statuses. | `2026-09-06_cortex-appshell.md` |
 | 2026-09-06 | crew-assign-router | crew, assign, destinations, openvault, unarmed, human_stop, airgpt, epic-116 | Assign router POST /crew/assign. OpenVault-only creds. Unarmed refuse. Control display-only map. Preview != live SSH/cloud. | `2026-09-06_crew-assign-router.md` |
 | 2026-09-06 | crew-life-harden | crew, life, spawn, wait, stop, idle, goal, hud, epic-116 | Honest wait/idle/stop chips. Waiting is not invent-green running. Stop does not kill Manager. | `2026-09-06_crew-life-harden.md` |

@@ -94,6 +94,7 @@ def test_policy_master_switch_and_arming_fail_closed() -> None:
 
     # crew-internal tools are allowed; unknown internal names are not
     assert policy.decide("cortex_ask", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("cortex_insights", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("netie_board", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("desk_status", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("estate_status", server=None, armed=False, master_on=False)[0] == policy.ALLOW

@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-INSIGHTS intent to ontology to DMS ask — 2026-09-07
+
+Crew AI-for-database ask spine (Cortex #196). Ontology where+importance is
+ranked before any insights ask. Constrained trials reuse `EngineBridge` /
+`POST /dms/query` (no free-form SQL in Crew, no EPIC-020 widen). Certified
+envelopes carry include/exclude/unsure; missing audit or invented adds
+REFUSE. Excel/PPT/Copilot deferred to #197-#199. Cloudflare Computer isolate
+is the preferred later export runtime (CREW-RUNTIME); this slice does not
+export. Keys stay on the OpenVault-armed Crew engine bridge. 1GB to 10TB is
+a design target only, not COMPLETE. `GET/POST /crew/insights`, tool
+`cortex_insights`, AppShell Insights plane. Local `pytest tests/test_crew -q`
+**275 passed**. Not a GitHub CI claim.
+
 ## CORTEX-APPSHELL operator shell around Crew — 2026-09-06
 
 AppShell nav wraps existing Crew chrome. Apps launcher tiles (DMS, Constructor,

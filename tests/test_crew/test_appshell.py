@@ -38,6 +38,7 @@ def test_catalog_nav_and_app_tiles() -> None:
         "apps",
         "audit",
         "assign",
+        "insights",
         "memory",
         "settings",
     ]
@@ -143,6 +144,8 @@ def test_http_appshell_routes(client) -> None:
     assert 'id="appshell"' in page.text
     assert 'aria-label="AppShell"' in page.text
     assert 'data-nav="apps"' in page.text
+    assert 'data-nav="insights"' in page.text
+    assert 'id="plane-insights"' in page.text
     assert "Display only F-0030" in page.text
     assert 'id="appTiles"' in page.text
     assert 'id="controlFrame"' in page.text

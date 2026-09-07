@@ -58,6 +58,7 @@ INTERNAL_TOOLS = frozenset(
         "ask_agent",
         "broadcast",
         "wait_for_replies",
+        "cortex_insights",
         "cortex_ask",
         "finish",
         "netie_board",

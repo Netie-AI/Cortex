@@ -214,6 +214,11 @@ class RuntimeIn(BaseModel):
     backend: str  # laptop | cloudflare-computer
 
 
+class InsightsIn(BaseModel):
+    intent: str
+    ask: bool = True
+
+
 class SkillIn(BaseModel):
     title: str
     body: str
@@ -889,6 +894,47 @@ def build_router(crew: CrewApp) -> APIRouter:
         if not result.get("ok"):
             code = int(result.get("status_code") or 409)
             return JSONResponse(result, status_code=code)
+        return result
+
+    @router.get("/insights")
+    async def insights_law() -> dict[str, Any]:
+        """Ask+ontology map. No numbers. Control may GET-display."""
+        from CortexOS.crew import insights as insights_mod
+
+        return insights_mod.public_law(shell_public=crew.shell.public())
+
+    @router.get("/insights/ontology")
+    async def insights_ontology(q: str = "") -> dict[str, Any]:
+        """Where + importance ranking only. Does not ask DMS."""
+        from CortexOS.crew import insights as insights_mod
+
+        intent = (q or "").strip()
+        if not intent:
+            raise HTTPException(400, "q is required")
+        ranking = insights_mod.retrieve_ontology(intent)
+        return {
+            "ok": bool(ranking.get("ok")),
+            "phase": "ontology",
+            "intent": intent,
+            "ontology": ranking,
+            "law": insights_mod.LAW,
+            "export_runtime": insights_mod.export_runtime_hint(crew.shell.public()),
+        }
+
+    @router.post("/insights")
+    async def insights_ask(body: InsightsIn) -> Any:
+        """Ontology first, then constrained DMS ask. CERTIFIED|ABSTAIN|REFUSE."""
+        from CortexOS.crew import insights as insights_mod
+
+        intent = (body.intent or "").strip()
+        if not intent:
+            raise HTTPException(400, "intent is required")
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=crew.bridge,
+            ask=body.ask,
+            shell_public=crew.shell.public(),
+        )
         return result
 
     @router.get("/tickets")

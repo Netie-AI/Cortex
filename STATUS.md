@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-06 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-APPSHELL**
+**Last updated:** 2026-09-07 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-INSIGHTS**
+
+> **2026-09-07 (CREW-INSIGHTS):** Cortex #196 ask+ontology spine. Intent retrieves
+> ontology **where** (object/table locations) and **importance** (ranked metrics /
+> certified questions) before any DMS ask. Constrained trials go through the
+> existing `EngineBridge` `POST /dms/query` path. Envelopes are CERTIFIED,
+> ABSTAIN, or REFUSE with include/exclude/unsure; refuse instead of padding.
+> `GET /crew/insights` + `GET /crew/insights/ontology` + `POST /crew/insights`.
+> Tool `cortex_insights`. AppShell Insights plane. Reuses CREW-RUNTIME
+> Cloudflare Computer as the later export hook; Excel/PPT not implemented
+> (#197-#199). OpenVault-armed engine key only; no second vault. Did not
+> widen EPIC-020 / dms tickets. 1GB to 10TB is a design target only -- not
+> COMPLETE. Off freeze #4/#41-#44. Did not start/kill `:8020`. Local
+> `pytest tests/test_crew -q` **275 passed**. Not a GitHub CI claim.
 
 > **2026-09-06 (CORTEX-APPSHELL):** Unified operator shell around Crew chrome.
 > Nav (Home / Crew / Agents / Control / Apps / Audit / Assign / Memory / Settings)

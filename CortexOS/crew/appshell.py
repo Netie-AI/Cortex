@@ -33,6 +33,7 @@ NAV: tuple[dict[str, str], ...] = (
     {"id": "apps", "label": "Apps", "plane": "apps", "focus": "", "hint": "Launcher tiles. Deep-link / iframe / panel."},
     {"id": "audit", "label": "Audit", "plane": "audit", "focus": "", "hint": "Constructor RSF Audit/Operate. No invent-green."},
     {"id": "assign", "label": "Assign", "plane": "crew", "focus": "assign", "hint": "Crew tickets /assign. Control does not assign."},
+    {"id": "insights", "label": "Insights", "plane": "insights", "focus": "", "hint": "Intent then ontology where+importance then DMS ask. CERTIFIED|ABSTAIN|REFUSE."},
     {"id": "memory", "label": "Memory", "plane": "crew", "focus": "memory", "hint": "Crew facts.md collections."},
     {"id": "settings", "label": "Settings", "plane": "crew", "focus": "settings", "hint": "Providers. Keys stay in OpenVault."},
 )

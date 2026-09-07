@@ -21,6 +21,7 @@
       <button class="appshell__link" type="button" data-nav="apps">Apps</button>
       <button class="appshell__link" type="button" data-nav="audit">Audit</button>
       <button class="appshell__link" type="button" data-nav="assign">Assign</button>
+      <button class="appshell__link" type="button" data-nav="insights">Insights</button>
       <button class="appshell__link" type="button" data-nav="memory">Memory</button>
       <button class="appshell__link" type="button" data-nav="settings">Settings</button>
     </nav>
@@ -57,6 +58,19 @@
         <div class="eyebrow">OPERATE</div>
         <ol id="shellOperate" class="rsf-stages"></ol>
         <iframe class="shell-frame" id="auditFrame" hidden title="Constructor Audit" sandbox="allow-scripts allow-same-origin"></iframe>
+      </section>
+      <section class="shell-plane" id="plane-insights">
+        <h1>Insights</h1>
+        <p class="hint">Intent then ontology (where + importance) then constrained DMS ask. CERTIFIED, ABSTAIN, or REFUSE. Never invent numbers. Excel/PPT deferred. Prefer Cloudflare Computer for later heavy export.</p>
+        <div class="life-spawn">
+          <input id="insightsIntent" placeholder="metric or path intent" />
+          <button class="ghost" id="insightsOntology" type="button">Ontology</button>
+          <button class="ghost" id="insightsAsk" type="button">Ask</button>
+        </div>
+        <div class="eyebrow">ONTOLOGY where + importance</div>
+        <div id="insightsWhere" class="empty">retrieve ontology before ask</div>
+        <div class="eyebrow">ENVELOPE</div>
+        <div id="insightsEnvelope" class="empty">no ask yet</div>
       </section>
       <section class="shell-plane shell-plane--crew on" id="plane-crew">
   <div class="desk">
@@ -1373,6 +1387,7 @@
       applyShellFocus(item.focus || "");
       if (plane === "control") loadControl();
       if (plane === "audit") loadAudit();
+      if (plane === "insights") loadInsightsLaw();
       if (plane === "apps" || plane === "home") renderLauncher();
     }
     async function loadControl() {
@@ -1402,6 +1417,56 @@
         }
         paintShellStages($("shellAudit"), payload.audit && payload.audit.stages);
         paintShellStages($("shellOperate"), payload.operate && payload.operate.stages);
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    function paintInsights(body) {
+      const onto = (body && body.ontology) || body || {};
+      const locs = onto.locations || [];
+      const metrics = (onto.certified || []).concat(onto.metrics || []);
+      $("insightsWhere").innerHTML = locs.length || metrics.length
+        ? locs.map((row) => {
+            const imp = row.importance || {};
+            const where = row.where || {};
+            return `<div class="rsf-stage">#${esc(imp.rank)} <b>${esc(row.id)}</b> table ${esc(where.table || row.id)} score ${esc(imp.score)} - ${esc(imp.why || "")}</div>`;
+          }).join("") + metrics.slice(0, 8).map((row) => {
+            const imp = row.importance || {};
+            return `<div class="rsf-stage">importance #${esc(imp.rank)} <b>${esc(row.id)}</b> ${esc(row.kind)} - ${esc(imp.why || "")}</div>`;
+          }).join("")
+        : `<div class="empty">${esc((onto.refuse_reason || "no ontology path") + "")}</div>`;
+      const status = body && body.status;
+      const val = (body && body.validation) || {};
+      if (!status) {
+        $("insightsEnvelope").innerHTML = `<div class="empty">ontology only. ask not run. Excel/PPT deferred. 1GB to 10TB is a design target, not COMPLETE.</div>`;
+        return;
+      }
+      const cls = rsfStatusClass(status);
+      const list = (rows, label) => (rows || []).slice(0, 8).map((r) =>
+        `<div class="rsf-stage">${esc(label)} ${esc(r.id || "")}: ${esc(r.why || "")}</div>`
+      ).join("");
+      $("insightsEnvelope").innerHTML =
+        `<div class="rsf-stage ${cls}">${esc(status)} ${esc((body.answer || "").slice(0, 400))}</div>`
+        + list(val.include, "include")
+        + list(val.exclude, "exclude")
+        + list(val.unsure, "unsure");
+    }
+    async function loadInsightsLaw() {
+      try {
+        const law = await api("/crew/insights");
+        if (!($("insightsEnvelope").dataset.asked === "1")) {
+          $("insightsEnvelope").innerHTML = `<div class="empty">${esc(law.agents || law.law || "")}</div>`;
+        }
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    async function runInsights(ask) {
+      const intent = (($("insightsIntent") && $("insightsIntent").value) || "").trim();
+      if (!intent) { toast("Insights needs an intent.", "bad"); return; }
+      try {
+        const body = await api("/crew/insights", {
+          method: "POST",
+          body: JSON.stringify({ intent: intent, ask: ask })
+        });
+        if (ask) $("insightsEnvelope").dataset.asked = "1";
+        paintInsights(body);
       } catch (err) { toast(err.message, "bad"); }
     }
     function pageHits(q) {
@@ -1844,6 +1909,8 @@
         await loadAssign();
       }
     };
+    $("insightsOntology").onclick = () => runInsights(false);
+    $("insightsAsk").onclick = () => runInsights(true);
     $("clearChat").onclick = async () => {
       if (!state.spaceId) return;
       try {
