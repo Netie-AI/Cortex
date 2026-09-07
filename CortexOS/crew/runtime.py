@@ -41,9 +41,11 @@ workspace over the Cortex engine.
 
 How to work:
 - Answer simple questions directly and concisely yourself.
-- For questions about governed company data or metrics, use cortex_ask. Report its answer \
-together with its badge and audit id. If the engine abstains or is offline, say so plainly. \
-Never invent numbers the engine did not return.
+- For questions about governed company data or metrics, use cortex_insights. It ranks \
+ontology where (tables/objects) and importance (which metrics matter) BEFORE any DMS ask, \
+then runs constrained trials and returns CERTIFIED, ABSTAIN, or REFUSE with include / \
+exclude / unsure. If it refuses or abstains, say so plainly. Never invent numbers. \
+cortex_ask is a raw engine passthrough; prefer cortex_insights for database asks.
 - For multi-part or specialist work, spawn teammates with spawn_agent. Name \
 them for THIS job (not a fixed roster). Copy a capability template when one \
 fits; its default skills are copied into the teammate automatically. Restrict \
@@ -78,7 +80,9 @@ existing writers.
 
 TEAMMATE_CHARTER = """You are {name}, a teammate in a Cortex Crew space. Your role: {role}
 
-Work the brief you were given. You may use cortex_ask for governed data, send_to_agent to talk \
+Work the brief you were given. You may use cortex_insights for governed database asks \
+(ontology where+importance first, then CERTIFIED/ABSTAIN/REFUSE). cortex_ask is a raw \
+engine passthrough. Use send_to_agent to talk \
 to other teammates or the Manager, and any computer-control tools you are offered (they may \
 require operator approval). Use ask_agent when you need one named teammate to answer you \
 before you can continue, and broadcast to tell everyone at once. When another agent asks \
@@ -1454,9 +1458,18 @@ class CrewRuntime:
                 [],
             ),
             spec(
+                "cortex_insights",
+                "AI-for-database ask. Ranks ontology where+importance first, then constrained"
+                " DMS trials. Returns CERTIFIED, ABSTAIN, or REFUSE with include/exclude/"
+                "unsure. Never invents numbers. Not Excel/PPT.",
+                {"intent": {"type": "string"}},
+                ["intent"],
+            ),
+            spec(
                 "cortex_ask",
                 "Ask the governed Cortex engine a data question. Returns the answer with its"
-                " badge, sources and audit id. The engine may abstain; report that honestly.",
+                " badge, sources and audit id. The engine may abstain; report that honestly."
+                " Prefer cortex_insights for metric/database asks.",
                 {"question": {"type": "string"}},
                 ["question"],
             ),
@@ -1854,6 +1867,30 @@ class CrewRuntime:
             except (ws_mod.WorkspaceError, TypeError, ValueError) as exc:
                 text = ws_mod.as_error(exc)
             self._persist_tool(ctx, row, name, args, text)
+            return text
+
+        if name == "cortex_insights":
+            from CortexOS.crew import insights as insights_mod
+
+            intent = str(args.get("intent") or args.get("question") or "").strip()
+            envelope = await insights_mod.run_insights(
+                intent,
+                bridge=self.bridge,
+                ask=True,
+                shell_public={
+                    "backend": self.settings.runtime_backend,
+                    "cf_computer": self.settings.cf_computer_enabled,
+                },
+            )
+            text = insights_mod.render_tool_text(envelope)
+            msg = self.store.add_message(
+                ctx.space_id,
+                "tool",
+                text,
+                agent_id=row["id"],
+                meta={"tool": "cortex_insights", "args": {"intent": intent}, "envelope": envelope},
+            )
+            self.bus.emit(ctx.space_id, "message", {"message": msg})
             return text
 
         if name == "cortex_ask":
@@ -2543,7 +2580,8 @@ class CrewRuntime:
         return (
             f"\n\nCurrent crew: {names}."
             f" Computer control: off ({mcp_tools} MCP tools registered, none armed)."
-            f" Engine: {self.bridge.base_url} (cortex_ask). Models: OpenVault FreeRoute."
+            f" Engine: {self.bridge.base_url} (cortex_insights then cortex_ask)."
+            f" Models: OpenVault FreeRoute."
             f"{skill_bit}{tone_bit}{mem_bit}"
         )
 

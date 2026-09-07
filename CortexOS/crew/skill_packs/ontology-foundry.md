@@ -4,7 +4,7 @@ When: company ontology, object/link/action types, foundry path, Constructor conn
 
 Order:
 1. Name what exists (objects), how it joins (links), and the only legal writes (actions). One registry. Do not grow a second engine or a Cortex-crew fork.
-2. cortex_ask for governed facts. If the engine abstains, say so. Never invent a warehouse number.
+2. cortex_insights for governed database asks: retrieve ontology where (tables/objects) and importance (which metrics matter) first, then constrained DMS trials. CERTIFIED / ABSTAIN / REFUSE with include/exclude/unsure. Never invent a warehouse number. cortex_ask is a raw passthrough.
 3. Sketch only the plumbing already in this repo (YAML registry, action-gated write, ledger). Constructor may canvas; Crew does not become Foundry.
 4. O6+ / Palantir-as-a-service stays PARKING_LOT P1. Do not claim AIP parity. Do not start LangGraph, Mayor, or beads.
 5. Then load skill build. Smallest change. One named verify command. Do not claim green unless it ran.
