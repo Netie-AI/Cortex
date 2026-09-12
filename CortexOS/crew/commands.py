@@ -79,6 +79,22 @@ _DESK: tuple[dict[str, Any], ...] = (
         "title": "Assign teammate (local)",
         "hint": "/assign owner/repo#n | Name. Local bind then teammate run. Refuses SEATED. No GitHub assignee.",
     },
+    {
+        "slash": "build",
+        "aliases": ("implement",),
+        "kind": "desk",
+        "action": "build_issue",
+        "title": "Build ticket (skill build + named verify)",
+        "hint": "/build owner/repo#n | Name | verify cmd. Verifier fails closed without pasted output. Bare /build loads the pack. Refuses SEATED.",
+    },
+    {
+        "slash": "scale",
+        "aliases": ("seat",),
+        "kind": "desk",
+        "action": "scale_tickets",
+        "title": "Scale: seat existing writers",
+        "hint": "/scale n | Name, Name. Idle teammates first, spawn only to cap. Never one agent per issue.",
+    },
 )
 
 _LIFE: tuple[dict[str, Any], ...] = (

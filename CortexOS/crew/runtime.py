@@ -72,6 +72,9 @@ tell the user what was denied and why instead of pretending it ran.
 - The human operator is money and decision authority. Do not auto-pay, auto-send, or auto-merge.
 - Do not spawn infinite Cursor cloud chats. One issue per human-opened chat. Ticket Runner seats \
 existing writers.
+- Operator slashes /build (one ticket: skill build plus a verifier whose criteria name the test \
+command) and /scale (seat existing idle teammates across ready tickets, spawn only to cap) bind \
+tickets locally. You do not seat writers yourself and you never claim a verify command ran.
 - Models go through OpenVault FreeRoute. Cursor chats use grok-4.6 (high), never grok-fast.
 - To check PRs, mail, connectors, the Cursor key, or the GitHub org estate, call desk_status or estate_status. Before shipping, call ship_gate (repo=slug or repo=all). Do not ask the operator to click import or PR buttons. Dropped files already become spaces.
 - Your final plain-text reply is the only thing the user reads. Keep it direct. Plain ASCII only.
@@ -256,19 +259,21 @@ class CrewRuntime:
             and parsed.command.get("action") == "fetch_issues"
             and not parsed.mentions
         )
-        assign_only = bool(
+        bind_only = bool(
             parsed.command
-            and parsed.command.get("action") == "assign_issue"
+            and parsed.command.get("action") in {"assign_issue", "build_issue", "scale_tickets"}
             and not parsed.mentions
         )
-        if desk_only or memory_only or life_only or close_only or fetch_only:
-            return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
-        if assign_only:
+        if bind_only:
+            # /assign /build /scale already briefed the teammates and started
+            # the run; run_id None here would hide live work from the operator.
             return {
                 "ok": True,
                 "command": parsed.command.get("slash"),
                 "run_id": desk_run_id,
             }
+        if desk_only or memory_only or life_only or close_only or fetch_only:
+            return {"ok": True, "command": parsed.command.get("slash"), "run_id": None}
 
         turn_provider = (provider or "").strip() or None
         turn_model = (model or "").strip() or None
@@ -453,6 +458,16 @@ class CrewRuntime:
             args = {"repos": fetched.get("repos") or []}
         elif action == "assign_issue":
             text, args = await self._assign_issue_slash(space_id, rest)
+        elif action == "build_issue":
+            if not rest.strip():
+                # Bare /build keeps loading the build pack (Ponytail ladder).
+                self._load_slash_pack(
+                    space_id, {"kind": "skill", "action": "build", "slash": "build"}, ""
+                )
+                return None
+            text, args = await self._build_issue_slash(space_id, rest)
+        elif action == "scale_tickets":
+            text, args = await self._scale_slash(space_id, rest)
         else:
             text = f"Unknown desk action {action}"
         msg = self.store.add_message(
@@ -469,7 +484,7 @@ class CrewRuntime:
             },
         )
         self.bus.emit(space_id, "message", {"message": msg})
-        if action == "assign_issue" and text.startswith("Assigned"):
+        if action in {"assign_issue", "build_issue", "scale_tickets"}:
             rid = args.get("run_id")
             return str(rid) if rid else None
         return None
@@ -477,16 +492,126 @@ class CrewRuntime:
     async def _assign_issue_slash(
         self, space_id: str, rest: str
     ) -> tuple[str, dict[str, Any]]:
-        from CortexOS.crew import assign as assign_mod
-        from CortexOS.crew import github as github_mod
-
         bits = [p.strip() for p in rest.split("|")]
         spec = bits[0] if bits else ""
         agent_name = bits[1] if len(bits) > 1 else ""
-        args: dict[str, Any] = {"spec": spec, "name": agent_name}
+        return await self._bind_issue(space_id, spec, agent_name)
+
+    async def _build_issue_slash(
+        self, space_id: str, rest: str
+    ) -> tuple[str, dict[str, Any]]:
+        """Operator /build: one ticket, skill build, verifier with a named command."""
+        from CortexOS.crew import scale as scale_mod
+
+        spec, agent_name, cmd = scale_mod.parse_build_rest(rest)
+        return await self._bind_issue(
+            space_id, spec, agent_name, build=True, verify_cmd=cmd
+        )
+
+    async def _scale_slash(self, space_id: str, rest: str) -> tuple[str, dict[str, Any]]:
+        """Operator /scale: seat existing idle teammates across ready tickets.
+
+        Binds first (no run), then one run briefs every seat. Spawns only while
+        the cap leaves room for the writer and its verifier; the rest is queued
+        with a visible reason. Never one agent per issue, never CLAIMS.json.
+        """
+        from CortexOS.crew import assign as assign_mod
+        from CortexOS.crew import github as github_mod
+        from CortexOS.crew import scale as scale_mod
+
+        limit, names = scale_mod.parse_scale_rest(rest)
+        args: dict[str, Any] = {"limit": limit, "names": names}
+        self.ensure_manager(space_id)
+        bound_rows = assign_mod.load(self.settings.data_dir)
+        bound = {
+            str(r.get("agent") or ""): str(r.get("spec") or "")
+            for r in bound_rows
+            if str(r.get("agent") or "").strip()
+        }
+        tickets = scale_mod.ready_tickets(
+            self.settings.data_dir,
+            bound_specs={str(r.get("spec") or "") for r in bound_rows},
+        )
+        if not tickets:
+            if github_mod.remembered_issues(self.settings.data_dir):
+                why = "every fetched issue is SEATED or already bound"
+            else:
+                why = "no fetched issues cached; /fetch first"
+            return f"DENIED: no ready tickets ({why}). {scale_mod.LAW_SCALE}", args
+        plan = scale_mod.plan_scale(
+            tickets,
+            self.store.list_agents(space_id),
+            cap=self.settings.max_agents_per_space,
+            limit=limit,
+            names=names,
+            bound=bound,
+        )
+        outcomes: list[tuple[Any, bool, str]] = []
+        seated: list[dict[str, Any]] = []
+        for seat in plan.seats:
+            text, bind_args = await self._bind_issue(
+                space_id,
+                seat.spec,
+                seat.writer,
+                build=True,
+                verify_cmd=scale_mod.DEFAULT_VERIFY_CMD,
+                execute=False,
+            )
+            ok = not text.startswith("DENIED")
+            outcomes.append((seat, ok, text))
+            if ok:
+                seated.append(bind_args)
+        run_id: str | None = None
+        for bind_args in seated:
+            row = self.store.get_agent(str(bind_args.get("agent_id") or ""))
+            if row is None:
+                continue
+            rid = self._execute_assigned(space_id, row, str(bind_args.get("goal") or ""))
+            run_id = run_id or rid
+        args.update(
+            {
+                "seated": [
+                    {"spec": seat.spec, "writer": seat.writer, "reused": seat.reused}
+                    for seat, ok, _text in outcomes
+                    if ok
+                ],
+                "queued": [{"spec": spec, "reason": why} for spec, why in plan.queued],
+                "skipped": [{"writer": who, "reason": why} for who, why in plan.skipped],
+                "run_id": run_id,
+            }
+        )
+        return scale_mod.render_scale(plan, outcomes), args
+
+    async def _bind_issue(
+        self,
+        space_id: str,
+        spec: str,
+        agent_name: str,
+        *,
+        build: bool = False,
+        verify_cmd: str = "",
+        execute: bool = True,
+    ) -> tuple[str, dict[str, Any]]:
+        """Local bind of one ticket to a teammate, then brief + run.
+
+        ``build`` copies skill build in and arms the verifier with criteria
+        that name ``verify_cmd``. ``execute=False`` binds without briefing so
+        one caller can start a single run for several seats (``/scale``).
+        Does not write CLAIMS.json. Does not set a GitHub assignee.
+        """
+        from CortexOS.crew import assign as assign_mod
+        from CortexOS.crew import github as github_mod
+        from CortexOS.crew import scale as scale_mod
+
+        usage = (
+            "/build owner/repo#n | Name | verify cmd" if build else "/assign owner/repo#n | Name"
+        )
         parsed = github_mod.parse_issue_spec(spec)
+        if build and parsed is not None and not agent_name:
+            agent_name = scale_mod.job_name(spec)
+        args: dict[str, Any] = {"spec": spec, "name": agent_name}
         if parsed is None or not agent_name:
-            return "DENIED: /assign owner/repo#n | Name", args
+            return f"DENIED: {usage}", args
         seated = github_mod.seated_claim(spec)
         if seated is not None:
             return (
@@ -501,24 +626,34 @@ class CrewRuntime:
         shown = github_mod.show_issue(canon)
         title = str(shown.get("title") or canon).strip()
         body = str(shown.get("body") or "").strip()
-        goal = (
-            f"{canon}: {title}. Execute this issue. "
-            "Close with request_close (HITL) or /done after verify. "
-            "Do not steal SEATED seats. Do not merge PRs."
-        )
-        if body:
-            goal = f"{goal}\n\n{body[:2000]}"
+        cmd = ""
+        criteria: list[str] = []
+        if build:
+            cmd = (verify_cmd or "").strip() or scale_mod.DEFAULT_VERIFY_CMD
+            criteria = scale_mod.build_criteria(cmd)
+            goal = scale_mod.build_goal(canon, title, body, cmd)
+            args["verify"] = cmd
+        else:
+            goal = (
+                f"{canon}: {title}. Execute this issue. "
+                "Close with request_close (HITL) or /done after verify. "
+                "Do not steal SEATED seats. Do not merge PRs."
+            )
+            if body:
+                goal = f"{goal}\n\n{body[:2000]}"
         row = self.store.get_agent_by_name(space_id, agent_name)
         if row is None:
-            spawned = await self.operator_spawn(
-                space_id,
-                {
-                    "name": agent_name,
-                    "mode": life.MODE_GOAL,
-                    "goal": goal,
-                    "brief": canon,
-                },
-            )
+            payload: dict[str, Any] = {
+                "name": agent_name,
+                "mode": life.MODE_GOAL,
+                "goal": goal,
+                "brief": canon,
+            }
+            if build:
+                payload["skills"] = [scale_mod.BUILD_SKILL]
+                payload["verify"] = True
+                payload["verify_criteria"] = criteria
+            spawned = await self.operator_spawn(space_id, payload)
             if spawned.get("error"):
                 return str(spawned["error"]), args
             row = spawned.get("agent")
@@ -527,6 +662,19 @@ class CrewRuntime:
         elif not life.can_accept(row):
             return f"DENIED: {life.dead_reason(row)}", args
         else:
+            if build:
+                # Existing writer: copy the build pack and arm its verifier
+                # before the brief lands, so the run reads verify from the store.
+                self.store.upsert_agent(
+                    space_id,
+                    str(row.get("name") or agent_name),
+                    role_prompt=self._role_with_skills(
+                        str(row.get("role_prompt") or ""), [scale_mod.BUILD_SKILL]
+                    ),
+                    verify=True,
+                    verify_criteria=criteria,
+                    skills=[scale_mod.BUILD_SKILL],
+                )
             updated = self.set_agent_mode(row["id"], life.MODE_GOAL, goal_text=goal)
             row = updated or row
         if not isinstance(row, dict) or not row.get("id"):
@@ -544,10 +692,21 @@ class CrewRuntime:
             "name": row.get("name"),
             "agent_id": row.get("id"),
         }
+        if build:
+            args["verify"] = cmd
         if not bound.get("ok"):
             return str(bound.get("detail") or "DENIED: assign failed"), args
-        run_id = self._execute_assigned(space_id, row, goal)
-        args["run_id"] = run_id
+        if execute:
+            run_id = self._execute_assigned(space_id, row, goal)
+            args["run_id"] = run_id
+        else:
+            args["goal"] = goal
+        if build:
+            return (
+                f"Build {canon} -> {row.get('name')} mode=goal skill=build "
+                f"verify: {cmd}. {scale_mod.LAW_BUILD}",
+                args,
+            )
         return (
             f"Assigned {canon} to {row.get('name')} mode=goal. {bound.get('law')}",
             args,
@@ -1030,6 +1189,14 @@ class CrewRuntime:
         role = str(args.get("role") or "").strip()
         if preset is not None and not role:
             role = preset.role
+        verify = bool(args.get("verify"))
+        criteria = _str_list(args.get("verify_criteria"))
+        if verify and not criteria:
+            verify = False
+        skill_names = _str_list(args.get("skills"))
+        if preset is not None:
+            skill_names = list(dict.fromkeys([*preset.skills, *skill_names]))
+        role = self._role_with_skills(role, skill_names)
         teammate = self.store.upsert_agent(
             space_id,
             name,
@@ -1038,6 +1205,9 @@ class CrewRuntime:
             color=AGENT_COLORS[len(live) % len(AGENT_COLORS)],
             spawned_by=manager["id"],
             capability=(preset.name if preset is not None else cap_name),
+            verify=verify,
+            verify_criteria=criteria,
+            skills=skill_names,
             mode=mode,
             goal_text=goal_text,
         )
@@ -2067,16 +2237,7 @@ class CrewRuntime:
         skill_names = _str_list(args.get("skills"))
         if preset is not None:
             skill_names = list(dict.fromkeys([*preset.skills, *skill_names]))
-        if skill_names:
-            from CortexOS.crew.board import read_skill
-
-            bits = []
-            for title in skill_names:
-                body = read_skill(self.settings.data_dir / "skills", title).strip()
-                if body:
-                    bits.append(f"Skill {title}:\n{body[:3500]}")
-            if bits:
-                role = (role + "\n\n" if role else "") + "\n\n".join(bits)
+        role = self._role_with_skills(role, skill_names)
         model = str(args.get("model") or "").strip()
         mode = life.canonical_mode(str(args.get("mode") or ""))
         if mode == life.MODE_GOAL:
@@ -2124,6 +2285,23 @@ class CrewRuntime:
             extra += "; mode=goal (survives chat clear)"
         return f"spawned {name}; they are working the brief and will report back{extra}"
 
+    def _role_with_skills(self, role: str, skill_names: list[str]) -> str:
+        """Copy each named skill pack into the role prompt once."""
+        if not skill_names:
+            return role
+        from CortexOS.crew.board import read_skill
+
+        bits: list[str] = []
+        for title in skill_names:
+            if f"Skill {title}:" in role:
+                continue
+            body = read_skill(self.settings.data_dir / "skills", title).strip()
+            if body:
+                bits.append(f"Skill {title}:\n{body[:3500]}")
+        if not bits:
+            return role
+        return (role + "\n\n" if role else "") + "\n\n".join(bits)
+
     async def _spawn_verifier(
         self, ctx: RunContext, worker: dict[str, Any], output: str
     ) -> None:
@@ -2131,6 +2309,14 @@ class CrewRuntime:
             return
         agents = self.store.list_agents(ctx.space_id)
         if len(agents) >= self.settings.max_agents_per_space:
+            # A silent skip would read as verified (R-0011). Say it in the transcript.
+            note = self.store.add_message(
+                ctx.space_id,
+                "system",
+                f"DENIED: verify skipped for {worker['name']}: agent cap reached "
+                f"({self.settings.max_agents_per_space}). Not verified; not green.",
+            )
+            self.bus.emit(ctx.space_id, "message", {"message": note})
             return
         gate = roles.by_name("Gate")
         criteria = _str_list(worker.get("verify_criteria"))
@@ -2155,6 +2341,8 @@ class CrewRuntime:
             capability="Gate",
             verify=False,
         )
+        self._set_status(verifier["id"], life.STATUS_ACTIVE)
+        verifier = self.store.get_agent(verifier["id"]) or verifier
         self.bus.emit(ctx.space_id, "agent", {"agent": verifier})
         self._deliver_a2a(ctx, worker, name, brief, kind=a2a.BRIEF, wake=False)
         task = asyncio.create_task(self._teammate_run(ctx, verifier, brief))

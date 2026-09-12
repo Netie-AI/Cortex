@@ -1,5 +1,19 @@
 # STATUS.md
-**Last updated:** 2026-09-07 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-INSIGHTS**
+**Last updated:** 2026-09-12 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-SCALE-BUILD**; CREW-INSIGHTS
+
+> **2026-09-12 (CREW-SCALE-BUILD):** Operator `/scale n | Name, Name` seats
+> existing idle teammates across ready fetched issues (never one agent per
+> issue): a job-named teammate is spawned only while `max_agents_per_space`
+> still leaves a writer + verifier slot; the rest is queued with a visible
+> reason. `/build owner/repo#n | Name | verify cmd` binds one ticket with skill
+> build and a verifier whose criteria name the command (default
+> `python -m pytest tests/test_crew -q`, asserted equal to the pack). Bare
+> `/build` still loads the pack. HUD Build per ready issue + Scale button;
+> `POST /crew/tickets/build|scale`. A verifier skipped at the cap is a visible
+> DENIED in the transcript, not silence; verifier rows are never writers.
+> Local binds only; CLAIMS.json and GitHub assignees untouched. Control stays
+> display-only. Off freeze #4/#41-#44. Did not start/kill `:8020`. Local
+> `pytest tests/test_crew -q` **289 passed**. Not a GitHub CI claim.
 
 > **2026-09-07 (CREW-INSIGHTS):** Cortex #196 ask+ontology spine. Intent retrieves
 > ontology **where** (object/table locations) and **importance** (ranked metrics /
