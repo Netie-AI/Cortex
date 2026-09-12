@@ -279,6 +279,19 @@ class TaskAssignIn(BaseModel):
     live_ssh: bool = False
 
 
+class TicketBuildIn(BaseModel):
+    spec: str
+    space_id: str
+    name: str = ""
+    verify: str = ""
+
+
+class TicketScaleIn(BaseModel):
+    space_id: str
+    limit: int = 3
+    names: str = ""
+
+
 _LEASE_LAW = (
     "Crew lease. Control display-only. Did not write CLAIMS.json. "
     "Did not set a GitHub assignee."
@@ -1014,6 +1027,51 @@ def build_router(crew: CrewApp) -> APIRouter:
             "ok": True,
             "spec": github_mod.canonical_spec(body.spec),
             "law": "Released local bind. Did not edit CLAIMS.json.",
+        }
+
+    @router.post("/tickets/build")
+    async def build_ticket(body: TicketBuildIn) -> dict[str, Any]:
+        """Operator /build over HTTP: skill build + verifier named test. 409 SEATED."""
+        from CortexOS.crew import scale as scale_mod
+
+        if crew.store.get_space(body.space_id) is None:
+            raise HTTPException(404, "unknown space")
+        rest = f"{body.spec.strip()} | {body.name.strip()} | {body.verify.strip()}"
+        text, args = await crew.runtime._build_issue_slash(body.space_id, rest)
+        if text.startswith("DENIED"):
+            code = 409 if "SEATED" in text else 400
+            raise HTTPException(code, text)
+        return {
+            "ok": True,
+            "detail": text,
+            "args": args,
+            "run_id": args.get("run_id"),
+            "verify": args.get("verify"),
+            "law": scale_mod.LAW_BUILD,
+        }
+
+    @router.post("/tickets/scale")
+    async def scale_tickets(body: TicketScaleIn) -> dict[str, Any]:
+        """Operator /scale over HTTP: seat existing writers, spawn only to cap."""
+        from CortexOS.crew import scale as scale_mod
+
+        if crew.store.get_space(body.space_id) is None:
+            raise HTTPException(404, "unknown space")
+        limit = max(1, min(scale_mod.MAX_SCALE_LIMIT, int(body.limit)))
+        rest = str(limit)
+        if body.names.strip():
+            rest = f"{rest} | {body.names.strip()}"
+        text, args = await crew.runtime._scale_slash(body.space_id, rest)
+        if text.startswith("DENIED"):
+            raise HTTPException(409, text)
+        return {
+            "ok": True,
+            "detail": text,
+            "seated": args.get("seated") or [],
+            "queued": args.get("queued") or [],
+            "skipped": args.get("skipped") or [],
+            "run_id": args.get("run_id"),
+            "law": scale_mod.LAW_SCALE,
         }
 
     @router.post("/tickets/{ticket_id:path}/claim")

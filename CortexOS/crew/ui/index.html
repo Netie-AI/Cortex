@@ -170,7 +170,8 @@
           </div>
           <div class="block">
             <h2>Work - Tickets</h2>
-            <p class="hint">Claim is Crew /assign (local). Ticket Runner seats CLAIMS. Control does not assign.</p>
+            <p class="hint">Claim is Crew /assign (local). Build = skill build + named verify command. Scale seats idle teammates first, spawns only to cap, never one agent per issue. Ticket Runner seats CLAIMS. Control does not assign.</p>
+            <div class="row-actions"><button class="ghost" id="ticketsScale" type="button" title="/scale 3: seat existing idle teammates across ready tickets">Scale</button></div>
             <div id="tickets" class="empty">unread</div>
           </div>
         </div>
@@ -1061,12 +1062,17 @@
     function ticketRow(key, seated, mine, extra) {
       const holder = mine && (mine.worker || mine.agent || "");
       const label = seated ? "SEATED" : (holder ? ("leased " + holder) : "ready");
+      // Build needs owner/repo#n; CLAIMS ids like FF-03 have no issue to read.
+      const buildable = !seated && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+$/.test(key);
       const actions = seated
         ? `<small>Ticket Runner owns the seat. Crew does not steal it.</small>`
         : (`<div class="row-actions">`
           + (mine
             ? `<button class="ghost" type="button" data-release="${esc(key)}">Release</button>`
             : `<button class="ghost" type="button" data-claim="${esc(key)}">Claim</button>`)
+          + (buildable
+            ? `<button class="ghost" type="button" data-build="${esc(key)}" title="/build: skill build + verifier with the named test command">Build</button>`
+            : "")
           + `</div>`);
       return `<div class="row">${esc(key)} <span class="claim ${seated ? "" : "unclaimed"}">${esc(label)}</span>`
         + `<small>${esc(extra || "")}</small>`
@@ -1104,6 +1110,7 @@
       $("tickets").innerHTML = assignBlock + claimsBlock + issueBlock;
       $("tickets").querySelectorAll("[data-claim]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.claim, "claim"));
       $("tickets").querySelectorAll("[data-release]").forEach((el) => el.onclick = () => checkoutTicket(el.dataset.release, "release"));
+      $("tickets").querySelectorAll("[data-build]").forEach((el) => el.onclick = () => buildTicket(el.dataset.build));
     }
     function renderAssign(body) {
       const dests = (body && body.destinations) || [];
@@ -1174,6 +1181,59 @@
         if (board) renderTickets(board);
         const belt = await api("/v1/belt").catch(() => api("/crew/belt").catch(() => null));
         if (belt) renderBelt(belt);
+      } catch (err) {
+        toast(err.message + " - no silent retry.", "bad");
+      } finally {
+        state.claimBusy = null;
+      }
+    }
+    async function buildTicket(spec) {
+      if (!state.spaceId) { toast("Pick a space first.", "bad"); return; }
+      if (state.claimBusy) { toast("Claim in flight. No silent retry.", "warn"); return; }
+      state.claimBusy = spec + ":build";
+      try {
+        const name = (($("spawnName") && $("spawnName").value) || "").trim();
+        const resp = await fetch("/crew/tickets/build", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spec: spec, space_id: state.spaceId, name: name })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          toast((data.detail || ("build " + resp.status)) + " - no silent retry.", "bad");
+          return;
+        }
+        toast(data.detail || ("Build " + spec), "ok");
+        await refreshAgents();
+        const board = await api("/crew/tickets").catch(() => null);
+        if (board) renderTickets(board);
+      } catch (err) {
+        toast(err.message + " - no silent retry.", "bad");
+      } finally {
+        state.claimBusy = null;
+      }
+    }
+    async function scaleTickets() {
+      if (!state.spaceId) { toast("Pick a space first.", "bad"); return; }
+      if (state.claimBusy) { toast("Claim in flight. No silent retry.", "warn"); return; }
+      state.claimBusy = "scale";
+      try {
+        const resp = await fetch("/crew/tickets/scale", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ space_id: state.spaceId, limit: 3 })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          toast((data.detail || ("scale " + resp.status)) + " - no silent retry.", "bad");
+          return;
+        }
+        const seated = (data.seated || []).length;
+        const queued = (data.queued || []).length;
+        toast("Scaled " + seated + " seated, " + queued + " queued. Existing writers first; never one agent per issue.", seated ? "ok" : "warn");
+        await refreshAgents();
+        const board = await api("/crew/tickets").catch(() => null);
+        if (board) renderTickets(board);
       } catch (err) {
         toast(err.message + " - no silent retry.", "bad");
       } finally {
@@ -1909,6 +1969,7 @@
         await loadAssign();
       }
     };
+    $("ticketsScale").onclick = () => scaleTickets();
     $("insightsOntology").onclick = () => runInsights(false);
     $("insightsAsk").onclick = () => runInsights(true);
     $("clearChat").onclick = async () => {
