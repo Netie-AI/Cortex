@@ -45,6 +45,8 @@ How to work:
 ontology where (tables/objects) and importance (which metrics matter) BEFORE any DMS ask, \
 then runs constrained trials and returns CERTIFIED, ABSTAIN, or REFUSE with include / \
 exclude / unsure. If it refuses or abstains, say so plainly. Never invent numbers. \
+When a model is needed, cortex_insights generate=true routes via OpenVault FreeRoute \
+and refuses if the vault is unarmed. Do not invent keys. \
 cortex_ask is a raw engine passthrough; prefer cortex_insights for database asks.
 - For multi-part or specialist work, spawn teammates with spawn_agent. Name \
 them for THIS job (not a fixed roster). Copy a capability template when one \
@@ -1460,9 +1462,16 @@ class CrewRuntime:
             spec(
                 "cortex_insights",
                 "AI-for-database ask. Ranks ontology where+importance first, then constrained"
-                " DMS trials. Returns CERTIFIED, ABSTAIN, or REFUSE with include/exclude/"
-                "unsure. Never invents numbers. Not Excel/PPT.",
-                {"intent": {"type": "string"}},
+                " DMS trials. generate=true runs NL then ontology then FreeRoute SQL then"
+                " validate (fail-closed if OpenVault unarmed). Returns CERTIFIED, ABSTAIN,"
+                " or REFUSE with include/exclude/unsure. Never invents numbers. Not Excel/PPT.",
+                {
+                    "intent": {"type": "string"},
+                    "generate": {
+                        "type": "boolean",
+                        "description": "If true, route SQL generation via OpenVault FreeRoute",
+                    },
+                },
                 ["intent"],
             ),
             spec(
@@ -1873,10 +1882,12 @@ class CrewRuntime:
             from CortexOS.crew import insights as insights_mod
 
             intent = str(args.get("intent") or args.get("question") or "").strip()
+            generate = bool(args.get("generate"))
             envelope = await insights_mod.run_insights(
                 intent,
                 bridge=self.bridge,
                 ask=True,
+                generate=generate,
                 shell_public={
                     "backend": self.settings.runtime_backend,
                     "cf_computer": self.settings.cf_computer_enabled,
@@ -1888,7 +1899,11 @@ class CrewRuntime:
                 "tool",
                 text,
                 agent_id=row["id"],
-                meta={"tool": "cortex_insights", "args": {"intent": intent}, "envelope": envelope},
+                meta={
+                    "tool": "cortex_insights",
+                    "args": {"intent": intent, "generate": generate},
+                    "envelope": envelope,
+                },
             )
             self.bus.emit(ctx.space_id, "message", {"message": msg})
             return text

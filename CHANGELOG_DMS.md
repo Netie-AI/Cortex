@@ -2,6 +2,20 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-OV-FREEROUTE central AI layer — 2026-09-13
+
+Cortex #211. OpenVault FreeRoute is the model path for Crew Insights
+generative-ask and for `POST /crew/freeroute` (prompt / think / act). Extends
+existing `CortexOS/crew/openvault.py` arming; no second vault. Vault-armed
+(local or cloud keys) required; unarmed fail-closed. Measured route among
+bundled families (DeepSeek+Qwen+...), not a hardcoded grok-only path.
+Identity `cortex:crew` (`GET /crew/identity`); keys stay in OV; no mint.
+Generated SQL is validated against ontology and not executed in Crew.
+L0/L1 `EngineBridge` ask unchanged. DMS #180 Formal GREEN @ d2f116a6
+(gen 57.69% vs exact 38.46%, WRONG=0 both) cited as baseline only. Off freeze
+#4/#41-#44. Local `pytest tests/test_crew -q` **287 passed**. Not a GitHub CI
+claim. Did not implement #212 / #213.
+
 ## CREW-INSIGHTS intent to ontology to DMS ask — 2026-09-07
 
 Crew AI-for-database ask spine (Cortex #196). Ontology where+importance is
