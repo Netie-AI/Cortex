@@ -13,6 +13,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -43,8 +44,14 @@ def cursor_key_status() -> dict[str, Any]:
     }
 
 
-def resolve_ov_model(model: str) -> str:
-    """Map crew model strings onto FreeRoute. Prefer grok-4.6 (high), never fast."""
+def resolve_ov_model(model: str, *, measured: bool = False) -> str:
+    """Map crew model strings onto FreeRoute.
+
+    Crew chat may still prefer grok-4.6 (high) when a Cursor/xAI key is in
+    process env. The measured Insights/FreeRoute layer does not: ``auto``
+    stays auto so OpenVault can pick among bundled models. Grok-fast is
+    always rewritten to high, never fast.
+    """
     raw = (model or "").strip()
     if raw.startswith("openvault/"):
         raw = raw.split("/", 1)[1].strip()
@@ -52,6 +59,8 @@ def resolve_ov_model(model: str) -> str:
         override = os.environ.get("CREW_OPENVAULT_MODEL", "").strip()
         if override:
             return override
+        if measured:
+            return "auto"
         if os.environ.get("CURSOR_API_KEY", "").strip() or os.environ.get("XAI_API_KEY", "").strip():
             return cursor_model()
         return "auto"
@@ -107,9 +116,11 @@ async def chat(
     max_tokens: int = 2048,
     timeout: int = 180,
     model: str = "auto",
+    identity: str = "",
+    measured: bool = False,
 ) -> LLMResult:
     payload: dict[str, Any] = {
-        "model": resolve_ov_model(model),
+        "model": resolve_ov_model(model, measured=measured),
         "messages": messages,
         "max_tokens": max_tokens,
         "stream": False,
@@ -117,9 +128,16 @@ async def chat(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    headers: dict[str, str] = {}
+    if identity.strip():
+        # Identity is Cortex-side attribution. Do not put it in OpenAI
+        # ``metadata`` (OpenVault extra=allow forwards that to Google and 400s).
+        headers["X-Cortex-Identity"] = identity.strip()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(f"{base_url()}/v1/chat/completions", json=payload)
+            resp = await client.post(
+                f"{base_url()}/v1/chat/completions", json=payload, headers=headers
+            )
     except httpx.HTTPError as exc:
         raise LLMError(f"OpenVault unreachable ({type(exc).__name__})") from exc
     if resp.status_code != 200:
@@ -275,6 +293,87 @@ def vault_sources() -> dict[str, dict[str, Any]]:
 
 def vault_armed_labels() -> set[str]:
     return {label for label, row in vault_sources().items() if row.get("enabled")}
+
+
+def list_models(*, timeout: float = 1.5) -> list[dict[str, Any]]:
+    """Public FreeRoute model ids. Empty if unarmed or down. Never invents rows."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return []
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(f"{base_url()}/v1/models")
+        if resp.status_code != 200:
+            return []
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001 - vault body is untrusted
+            return []
+    except httpx.HTTPError:
+        return []
+    raw: list[Any]
+    if isinstance(data, dict):
+        if isinstance(data.get("data"), list):
+            raw = list(data.get("data") or [])
+        elif isinstance(data.get("models"), list):
+            raw = list(data.get("models") or [])
+        else:
+            raw = []
+    elif isinstance(data, list):
+        raw = data
+    else:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if isinstance(item, str):
+            mid = item.strip()
+            owned = ""
+        elif isinstance(item, dict):
+            mid = str(item.get("id") or item.get("model") or "").strip()
+            owned = str(item.get("owned_by") or item.get("ownedBy") or "").strip()
+        else:
+            continue
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        row = {"id": mid}
+        if owned:
+            row["owned_by"] = owned
+        out.append(row)
+    return out
+
+
+def ratelimit(identity: str, *, timeout: float = 1.2) -> dict[str, Any]:
+    """FreeRoute ratelimit for a Cortex identity. Empty/False if unarmed. No secrets."""
+    ident = (identity or "").strip()
+    if not ident:
+        return {"ok": False, "detail": "identity required"}
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "identity": ident, "detail": "CREW_OPENVAULT=0"}
+    q = urlencode({"identity": ident, "tier": "free"})
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            last = "unreachable"
+            for path in ("/api/freeroute/ratelimit", "/api/openfree/ratelimit"):
+                resp = client.get(f"{base_url()}{path}?{q}")
+                last = f"HTTP {resp.status_code}"
+                if resp.status_code != 200:
+                    continue
+                try:
+                    data = resp.json()
+                except Exception:  # noqa: BLE001
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                return {
+                    "ok": True,
+                    "identity": ident,
+                    "remaining": data.get("remaining_tokens", data.get("remaining")),
+                    "path": path,
+                }
+            return {"ok": False, "identity": ident, "detail": last}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "identity": ident, "detail": type(exc).__name__}
 
 
 def arm_source(label: str, armed: bool, *, slug: str | None = None) -> dict[str, Any]:

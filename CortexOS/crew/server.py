@@ -217,6 +217,13 @@ class RuntimeIn(BaseModel):
 class InsightsIn(BaseModel):
     intent: str
     ask: bool = True
+    generate: bool = False
+
+
+class FreeRouteIn(BaseModel):
+    purpose: str = "think"
+    prompt: str = ""
+    messages: list[dict[str, Any]] | None = None
 
 
 class SkillIn(BaseModel):
@@ -340,6 +347,9 @@ def build_router(crew: CrewApp) -> APIRouter:
         from CortexOS.crew.llm import chosen_public, usage_view
 
         choice = chosen_public()
+        from CortexOS.crew import freeroute as freeroute_mod
+
+        identity = freeroute_mod.public_identity()
         return {
             "ok": True,
             "provider": active.public() if active else None,
@@ -347,6 +357,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "refused": choice["refused"],
             "engine": await crew.bridge.health(),
             "openvault": healthz(),
+            "cortex_identity": identity,
             "computer_control": crew.settings.master_computer_control,
             "runtime": crew.shell.public(),
             "grok_offloaded": True,
@@ -946,8 +957,37 @@ def build_router(crew: CrewApp) -> APIRouter:
             intent,
             bridge=crew.bridge,
             ask=body.ask,
+            generate=body.generate,
             shell_public=crew.shell.public(),
         )
+        return result
+
+    @router.get("/identity")
+    async def cortex_identity() -> dict[str, Any]:
+        """Stable Cortex API identity. Keys stay in OpenVault. Never returns a token."""
+        from CortexOS.crew import freeroute as freeroute_mod
+
+        return freeroute_mod.public_identity()
+
+    @router.get("/freeroute")
+    async def freeroute_status() -> dict[str, Any]:
+        """Central FreeRoute layer. Not a live :5000 CI claim."""
+        from CortexOS.crew import freeroute as freeroute_mod
+
+        return freeroute_mod.public_status()
+
+    @router.post("/freeroute")
+    async def freeroute_complete(body: FreeRouteIn) -> Any:
+        """Prompt, think, or act via OpenVault FreeRoute. Fail-closed when unarmed."""
+        from CortexOS.crew import freeroute as freeroute_mod
+
+        result = await freeroute_mod.complete(
+            body.messages,
+            purpose=body.purpose,
+            prompt=body.prompt,
+        )
+        if not result.get("ok"):
+            return JSONResponse(result, status_code=409)
         return result
 
     @router.get("/tickets")

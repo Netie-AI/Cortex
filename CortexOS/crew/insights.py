@@ -1,8 +1,10 @@
 """CREW-INSIGHTS: intent -> ontology (where + importance) -> constrained DMS ask.
 
-Crew never writes SQL. Ranked ontology locations and metrics pick governed
-trial questions; ``EngineBridge`` runs them on ``POST /dms/query``. Envelopes
-are CERTIFIED, ABSTAIN, or REFUSE. Every emitted number carries include /
+Crew never executes SQL and never opens DuckDB. Ranked ontology locations
+and metrics pick governed trial questions; ``EngineBridge`` runs them on
+``POST /dms/query``. Generative-ask (when a model is needed) routes through
+OpenVault FreeRoute: NL then ontology then SQL then validate. Envelopes are
+CERTIFIED, ABSTAIN, or REFUSE. Every emitted number carries include /
 exclude / unsure provenance. Missing provenance is fail-closed REFUSE.
 Numbers are never invented or padded.
 
@@ -31,8 +33,10 @@ LAW = (
     "then constrained DMS ask. CERTIFIED | ABSTAIN | REFUSE. Never invent "
     "numbers. Excel/PPT deferred to #197-#199. 1GB to 10TB is a design target "
     "only, not COMPLETE. Keys via the existing OpenVault-armed Crew engine "
-    "bridge. No second vault. Prefer Cloudflare Computer isolate for later "
-    "heavy export; this slice is ask+ontology only."
+    "bridge. No second vault. When a model is needed (generative-ask), route "
+    "via OpenVault FreeRoute (local or cloud keys) and fail-closed when "
+    "unarmed. Prefer Cloudflare Computer isolate for later heavy export; "
+    "L0/L1 ask stays ontology then EngineBridge."
 )
 
 STATUSES = ("CERTIFIED", "ABSTAIN", "REFUSE")
@@ -118,12 +122,22 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         "excel_ppt": "deferred #197 #198 #199",
         "scale": "1GB to 10TB is a design target only; not COMPLETE",
         "vault": "OpenVault-armed Crew engine bridge only. No second vault.",
+        "freeroute": "GET /crew/freeroute ; POST /crew/freeroute purpose=prompt|think|act",
+        "generate": "POST /crew/insights {generate:true} NL then ontology then SQL then validate",
+        "identity": "GET /crew/identity (keys stay in OpenVault custody)",
         "export_runtime": export_runtime_hint(shell_public),
         "agents": (
             "Retrieve ontology first: locations are where to read; ranked "
-            "metrics are which data is more important. Then ask. Do not skip "
-            "to SQL or export."
+            "metrics are which data is more important. Then ask. Generative-ask "
+            "needs a model: OpenVault FreeRoute only, fail-closed if unarmed. "
+            "Do not skip to SQL or export."
         ),
+        "measured_baseline": {
+            "cite": "DMS #180 Formal GREEN @ d2f116a6",
+            "gen": "57.69%",
+            "exact": "38.46%",
+            "wrong": 0,
+        },
     }
 
 
@@ -914,15 +928,158 @@ def _abstain(
     return body
 
 
+def _sql_schema_prompt(intent: str, ranking: dict[str, Any]) -> str:
+    lines = [
+        "ONTOLOGY (use only these tables and columns):",
+    ]
+    for row in ranking.get("locations") or []:
+        where = row.get("where") or {}
+        table = where.get("table") or row.get("id")
+        cols = where.get("columns") or []
+        lines.append(f"- {table}: {', '.join(str(c) for c in cols[:24])}")
+    joins = ranking.get("joins") or []
+    if joins:
+        lines.append("JOINS:")
+        for link in joins[:12]:
+            lines.append(
+                f"- {link.get('from')}.{link.get('from_property')} -> "
+                f"{link.get('to')}.{link.get('to_property')}"
+            )
+    lines.append("")
+    lines.append(f"INTENT: {intent}")
+    lines.append("Emit one DuckDB SELECT. SQL only. No invented numeric answers.")
+    return "\n".join(lines)
+
+
+async def generative_ask(
+    intent: str,
+    ranking: dict[str, Any],
+    *,
+    complete: Any | None = None,
+) -> dict[str, Any]:
+    """NL then ontology then FreeRoute SQL then validate. No numbers. No DuckDB."""
+    from CortexOS.crew import freeroute as fr
+
+    allowed = _ranked_tables(ranking)
+    arm = fr.arming()
+    if not arm.get("armed"):
+        return {
+            "ok": False,
+            "status": "REFUSE",
+            "phase": "generate",
+            "sql": None,
+            "valid": False,
+            "values": [],
+            "identity": fr.identity_for("generative_ask"),
+            "route": None,
+            "refuse_reason": (
+                "OpenVault FreeRoute unarmed: "
+                + str(arm.get("detail") or "unreachable")
+                + " (no invent-green keys)"
+            ),
+            "arming": arm,
+        }
+    prompt = _sql_schema_prompt(intent, ranking)
+    runner = complete or fr.complete
+    result = await runner(
+        None,
+        purpose="generative_ask",
+        prompt=prompt,
+    )
+    if not isinstance(result, dict):
+        result = {}
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "status": "REFUSE",
+            "phase": "generate",
+            "sql": None,
+            "valid": False,
+            "values": [],
+            "identity": result.get("identity") or fr.identity_for("generative_ask"),
+            "route": result.get("route"),
+            "refuse_reason": str(result.get("refused") or "FreeRoute complete refused"),
+            "arming": arm,
+            "text": "",
+        }
+    sql = fr.extract_sql(str(result.get("text") or ""))
+    checked = fr.validate_sql(sql or "", allowed)
+    if not checked.get("ok"):
+        return {
+            "ok": False,
+            "status": "REFUSE",
+            "phase": "generate",
+            "sql": None,
+            "valid": False,
+            "values": [],
+            "identity": result.get("identity"),
+            "route": result.get("route"),
+            "refuse_reason": str(checked.get("reason") or "sql failed ontology validate"),
+            "arming": arm,
+            "text": "",
+        }
+    return {
+        "ok": True,
+        "status": "ABSTAIN",
+        "phase": "generate",
+        "sql": checked.get("sql"),
+        "valid": True,
+        "values": [],
+        "identity": result.get("identity"),
+        "route": result.get("route"),
+        "tables": checked.get("tables") or [],
+        "arming": arm,
+        "text": "",
+        "note": "Validated SQL via FreeRoute. Numbers not certified (not executed).",
+    }
+
+
+def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> dict[str, Any]:
+    if not gen:
+        return envelope
+    envelope["generative"] = {
+        "ok": bool(gen.get("ok")),
+        "sql": gen.get("sql"),
+        "valid": bool(gen.get("valid")),
+        "identity": gen.get("identity"),
+        "route": gen.get("route"),
+        "refuse_reason": gen.get("refuse_reason") or "",
+        "values": [],
+        "note": gen.get("note") or "",
+    }
+    if gen.get("sql") and envelope.get("sql_used") is None and envelope.get("status") != "CERTIFIED":
+        envelope["sql_used"] = gen.get("sql")
+    val = envelope.setdefault("validation", {"include": [], "exclude": [], "unsure": []})
+    if gen.get("ok") and gen.get("sql"):
+        val.setdefault("unsure", []).append(
+            {
+                "id": "generative_sql",
+                "kind": "sql",
+                "why": "FreeRoute SQL validated against ontology; not executed in crew",
+            }
+        )
+    elif gen.get("refuse_reason"):
+        val.setdefault("unsure", []).append(
+            {
+                "id": "generative_sql",
+                "kind": "sql",
+                "why": str(gen.get("refuse_reason")),
+            }
+        )
+    return envelope
+
+
 async def run_insights(
     intent: str,
     *,
     bridge: EngineBridge,
     ask: bool = True,
+    generate: bool = False,
+    complete: Any | None = None,
     shell_public: dict[str, Any] | None = None,
     pack_dir: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Ontology first. Optional constrained DMS ask. Never invents numbers."""
+    """Ontology first. Optional DMS ask and/or FreeRoute generative-ask."""
     text = (intent or "").strip()
     if not text:
         empty = {
@@ -944,6 +1101,63 @@ async def run_insights(
         )
 
     ranking = retrieve_ontology(text, pack_dir=pack_dir)
+    gen: dict[str, Any] | None = None
+    if generate:
+        if not ranking.get("ok"):
+            return _refuse(
+                intent=text,
+                ranking=ranking,
+                reason="no ontology path or metric for intent",
+                shell_public=shell_public,
+            )
+        gen = await generative_ask(text, ranking, complete=complete)
+        if not gen.get("ok"):
+            return _attach_generative(
+                _refuse(
+                    intent=text,
+                    ranking=ranking,
+                    reason=str(gen.get("refuse_reason") or "FreeRoute generative-ask refused"),
+                    shell_public=shell_public,
+                ),
+                gen,
+            )
+        if not ask:
+            validation = _validation(
+                status="ABSTAIN",
+                ranking=ranking,
+                trial=None,
+                envelope={},
+                unused_trials=[],
+                extra_unsure=[
+                    {
+                        "id": "generative_sql",
+                        "kind": "sql",
+                        "why": "FreeRoute SQL validated against ontology; not executed in crew",
+                    }
+                ],
+            )
+            return _attach_generative(
+                {
+                    "ok": True,
+                    "status": "ABSTAIN",
+                    "phase": "generate",
+                    "intent": text,
+                    "answer": gen.get("note")
+                    or "Validated SQL via FreeRoute. Numbers not certified (not executed).",
+                    "badge": "abstain",
+                    "audit_id": None,
+                    "values": [],
+                    "sql_used": gen.get("sql"),
+                    "ontology": ranking,
+                    "trials": [],
+                    "validation": validation,
+                    "law": LAW,
+                    "export_runtime": export_runtime_hint(shell_public),
+                    "scale": "1GB to 10TB is a design target only; not COMPLETE",
+                },
+                gen,
+            )
+
     if not ask:
         return {
             "ok": bool(ranking.get("ok")),
@@ -961,20 +1175,26 @@ async def run_insights(
         }
 
     if not ranking.get("ok"):
-        return _refuse(
-            intent=text,
-            ranking=ranking,
-            reason="no ontology path or metric for intent",
-            shell_public=shell_public,
+        return _attach_generative(
+            _refuse(
+                intent=text,
+                ranking=ranking,
+                reason="no ontology path or metric for intent",
+                shell_public=shell_public,
+            ),
+            gen,
         )
 
     trials = constrain_trials(ranking)
     if not trials:
-        return _refuse(
-            intent=text,
-            ranking=ranking,
-            reason="ontology ranked locations but no constrained metric/certified trial",
-            shell_public=shell_public,
+        return _attach_generative(
+            _refuse(
+                intent=text,
+                ranking=ranking,
+                reason="ontology ranked locations but no constrained metric/certified trial",
+                shell_public=shell_public,
+            ),
+            gen,
         )
 
     last_abstain: dict[str, Any] | None = None
@@ -1009,7 +1229,7 @@ async def run_insights(
                         "scale": "1GB to 10TB is a design target only; not COMPLETE",
                     }
                 )
-                return body
+                return _attach_generative(body, gen)
             if body["status"] == "ABSTAIN":
                 last_abstain = _abstain(
                     intent=text,
@@ -1033,7 +1253,7 @@ async def run_insights(
                     "scale": "1GB to 10TB is a design target only; not COMPLETE",
                 }
             )
-            return body
+            return _attach_generative(body, gen)
         if status == "ABSTAIN":
             last_abstain = _abstain(
                 intent=text,
@@ -1048,23 +1268,29 @@ async def run_insights(
         # REFUSE this trial; try the next constrained question unless the engine is gone.
         badge = str(envelope.get("badge") or "")
         if badge in {"engine_offline", "engine_error"}:
-            return _refuse(
-                intent=text,
-                ranking=ranking,
-                reason=str(envelope.get("answer") or "engine unreachable"),
-                envelope=envelope,
-                shell_public=shell_public,
-                trials=attempted,
+            return _attach_generative(
+                _refuse(
+                    intent=text,
+                    ranking=ranking,
+                    reason=str(envelope.get("answer") or "engine unreachable"),
+                    envelope=envelope,
+                    shell_public=shell_public,
+                    trials=attempted,
+                ),
+                gen,
             )
 
     if last_abstain is not None:
-        return last_abstain
-    return _refuse(
-        intent=text,
-        ranking=ranking,
-        reason="constrained trials did not certify; refused instead of padding",
-        shell_public=shell_public,
-        trials=attempted,
+        return _attach_generative(last_abstain, gen)
+    return _attach_generative(
+        _refuse(
+            intent=text,
+            ranking=ranking,
+            reason="constrained trials did not certify; refused instead of padding",
+            shell_public=shell_public,
+            trials=attempted,
+        ),
+        gen,
     )
 
 
@@ -1093,6 +1319,14 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         f"{r.get('id')}: {r.get('why')}" for r in (validation.get("unsure") or [])[:6]
     ) or "none"
     status = envelope.get("status") or "ONTOLOGY"
+    gen = envelope.get("generative") or {}
+    gen_line = ""
+    if gen:
+        gen_line = (
+            f"\nfreeroute: {gen.get('identity') or 'none'}\n"
+            f"sql_valid: {gen.get('valid')}\n"
+            f"sql: {(gen.get('sql') or gen.get('refuse_reason') or '')[:240]}"
+        )
     return (
         f"status: {status}\n"
         f"phase: {envelope.get('phase')}\n"
@@ -1105,4 +1339,5 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         f"unsure: {unsure}\n"
         f"export: prefer {BACKEND_CF_COMPUTER} (Excel/PPT deferred)\n"
         f"scale: 1GB to 10TB is a design target only; not COMPLETE"
+        f"{gen_line}"
     )
