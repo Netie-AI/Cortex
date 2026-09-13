@@ -218,6 +218,9 @@ def test_http_ontology_then_refuse_offline(client) -> None:
     assert "not COMPLETE" in law["scale"]
     assert law["excel_ppt"].startswith("deferred")
     assert "OpenVault" in law["vault"]
+    assert "FreeRoute" in law["freeroute"] or "freeroute" in law["freeroute"]
+    assert law["measured_baseline"]["gen"] == "57.69%"
+    assert law["measured_baseline"]["wrong"] == 0
     onto = client.http.get("/crew/insights/ontology", params={"q": "how many skus"}).json()
     assert onto["phase"] == "ontology"
     assert onto["ontology"]["locations"][0]["where"]["table"]
@@ -236,6 +239,12 @@ def test_http_ontology_then_refuse_offline(client) -> None:
     ).json()
     assert arr["status"] == "REFUSE"
     assert arr["values"] == []
+    gen = client.http.post(
+        "/crew/insights", json={"intent": "how many skus", "ask": False, "generate": True}
+    ).json()
+    assert gen["status"] == "REFUSE"
+    assert gen["values"] == []
+    assert gen["generative"]["ok"] is False
 
 
 def test_http_certified_with_scripted_bridge(client, monkeypatch) -> None:
@@ -282,3 +291,143 @@ async def test_cortex_insights_tool_lands_in_transcript(rig, monkeypatch) -> Non
     answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "12" in answer["content"]
     assert "CERTIFIED" in answer["content"]
+
+
+@pytest.mark.asyncio
+async def test_generate_unarmed_fail_closed_no_invented_numbers(crew_env) -> None:
+    bridge = ScriptedBridge(_certified_engine())
+    env = await insights.run_insights(
+        "how many skus", bridge=bridge, ask=False, generate=True
+    )
+    assert env["status"] == "REFUSE"
+    assert env["values"] == []
+    assert bridge.asked == []
+    assert env["generative"]["ok"] is False
+    assert env["generative"]["values"] == []
+    reason = (env.get("answer") or "") + str(env.get("generative"))
+    assert "unarmed" in reason.lower() or "invent-green" in reason.lower() or "CREW_OPENVAULT" in reason
+    assert "999" not in env["answer"]
+    text = insights.render_tool_text(env)
+    assert "status: REFUSE" in text
+
+
+@pytest.mark.asyncio
+async def test_generate_armed_sql_abstain_no_numbers(monkeypatch) -> None:
+    from CortexOS.crew import freeroute as fr
+
+    monkeypatch.setattr(
+        fr,
+        "arming",
+        lambda: {
+            "ok": True,
+            "armed": True,
+            "vault_live": True,
+            "local_keys": False,
+            "cloud_keys": True,
+            "detail": "vault-armed",
+            "live_5000_ci": False,
+        },
+    )
+
+    async def fake_complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, kwargs
+        assert purpose == "generative_ask"
+        assert "inventory" in (prompt or "")
+        return {
+            "ok": True,
+            "text": "there are 999 skus\n```sql\nSELECT COUNT(DISTINCT sku) AS sku_count FROM inventory\n```",
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "deepseek", "model": "deepseek-chat"},
+        }
+
+    bridge = ScriptedBridge(_certified_engine())
+    env = await insights.run_insights(
+        "how many skus",
+        bridge=bridge,
+        ask=False,
+        generate=True,
+        complete=fake_complete,
+    )
+    assert env["status"] == "ABSTAIN"
+    assert env["values"] == []
+    assert env["generative"]["ok"] is True
+    assert env["generative"]["valid"] is True
+    assert "inventory" in (env["generative"]["sql"] or "").lower()
+    assert env["generative"]["identity"] == "cortex:crew:generative-ask"
+    assert "999" not in env["answer"]
+    assert "999" not in str(env["values"])
+    assert bridge.asked == []
+    text = insights.render_tool_text(env)
+    assert "status: ABSTAIN" in text
+    assert "freeroute:" in text
+    assert "999" not in text
+
+
+@pytest.mark.asyncio
+async def test_generate_rejects_off_ontology_sql(monkeypatch) -> None:
+    from CortexOS.crew import freeroute as fr
+
+    monkeypatch.setattr(
+        fr,
+        "arming",
+        lambda: {"ok": True, "armed": True, "detail": "vault-armed", "live_5000_ci": False},
+    )
+
+    async def fake_complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, purpose, prompt, kwargs
+        return {
+            "ok": True,
+            "text": "SELECT secret FROM payroll",
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "deepseek", "model": "deepseek-chat"},
+        }
+
+    bridge = ScriptedBridge(_certified_engine())
+    env = await insights.run_insights(
+        "how many skus",
+        bridge=bridge,
+        ask=False,
+        generate=True,
+        complete=fake_complete,
+    )
+    assert env["status"] == "REFUSE"
+    assert env["values"] == []
+    assert env["generative"]["ok"] is False
+    assert "payroll" in str(env["generative"]["refuse_reason"]).lower() or "outside" in str(
+        env.get("answer") or ""
+    ).lower() or "outside" in str(env["generative"]["refuse_reason"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_generate_plus_ask_attaches_sql_to_certified(monkeypatch) -> None:
+    from CortexOS.crew import freeroute as fr
+
+    monkeypatch.setattr(
+        fr,
+        "arming",
+        lambda: {"ok": True, "armed": True, "detail": "vault-armed", "live_5000_ci": False},
+    )
+
+    async def fake_complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, purpose, prompt, kwargs
+        return {
+            "ok": True,
+            "text": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "qwen", "model": "qwen2.5-7b-instruct"},
+        }
+
+    bridge = ScriptedBridge(_certified_engine())
+    env = await insights.run_insights(
+        "how many skus",
+        bridge=bridge,
+        ask=True,
+        generate=True,
+        complete=fake_complete,
+    )
+    assert env["status"] == "CERTIFIED"
+    assert env["values"] == [{"sku_count": 12}]
+    assert env["generative"]["ok"] is True
+    assert env["generative"]["sql"]
+    assert any(row.get("id") == "generative_sql" for row in env["validation"]["unsure"])
+    assert bridge.asked

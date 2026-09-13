@@ -1,5 +1,19 @@
 # STATUS.md
-**Last updated:** 2026-09-07 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CREW-INSIGHTS**
+**Last updated:** 2026-09-13 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-OV-FREEROUTE**
+
+> **2026-09-13 (CORTEX-OV-FREEROUTE):** Cortex #211. OpenVault FreeRoute is the
+> central Cortex AI path when Insights / generative-ask needs a model (not an
+> optional litellm side path). Local or cloud keys in OV custody; unarmed
+> fail-closed; no invent-green keys. Measured pick among bundled families
+> (DeepSeek+Qwen+...); `auto` when several are armed and crew has no local
+> measurement. Stable identity `cortex:crew` via `GET /crew/identity` (no
+> token, no #42 mint). `POST /crew/freeroute` prompt|think|act. Insights
+> `generate=true` is NL then ontology then SQL then validate; crew does not
+> execute SQL or invent numbers. L0/L1 EngineBridge ask unchanged. Cites DMS
+> #180 Formal GREEN @ d2f116a6 (gen 57.69% vs exact 38.46%, WRONG=0 both) as
+> baseline only. Reuses gen_cfsm + dag_runner G1; does not clone them. Off
+> freeze #4/#41-#44. Did not start/kill `:8020` or claim live `:5000` CI.
+> Local `pytest tests/test_crew -q` **287 passed**. Not a GitHub CI claim.
 
 > **2026-09-07 (CREW-INSIGHTS):** Cortex #196 ask+ontology spine. Intent retrieves
 > ontology **where** (object/table locations) and **importance** (ranked metrics /

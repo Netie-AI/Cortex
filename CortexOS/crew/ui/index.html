@@ -61,11 +61,12 @@
       </section>
       <section class="shell-plane" id="plane-insights">
         <h1>Insights</h1>
-        <p class="hint">Intent then ontology (where + importance) then constrained DMS ask. CERTIFIED, ABSTAIN, or REFUSE. Never invent numbers. Excel/PPT deferred. Prefer Cloudflare Computer for later heavy export.</p>
+        <p class="hint">Intent then ontology (where + importance) then constrained DMS ask. Generate uses OpenVault FreeRoute (fail-closed if unarmed). CERTIFIED, ABSTAIN, or REFUSE. Never invent numbers. Excel/PPT deferred.</p>
         <div class="life-spawn">
           <input id="insightsIntent" placeholder="metric or path intent" />
           <button class="ghost" id="insightsOntology" type="button">Ontology</button>
           <button class="ghost" id="insightsAsk" type="button">Ask</button>
+          <button class="ghost" id="insightsGenerate" type="button">Generate</button>
         </div>
         <div class="eyebrow">ONTOLOGY where + importance</div>
         <div id="insightsWhere" class="empty">retrieve ontology before ask</div>
@@ -1443,8 +1444,13 @@
       const list = (rows, label) => (rows || []).slice(0, 8).map((r) =>
         `<div class="rsf-stage">${esc(label)} ${esc(r.id || "")}: ${esc(r.why || "")}</div>`
       ).join("");
+      const gen = body && body.generative;
+      const genHtml = gen
+        ? `<div class="rsf-stage">FreeRoute ${esc((gen.identity || "") + "")} valid=${esc(String(gen.valid))} ${(gen.sql || gen.refuse_reason || "").slice(0, 240)}</div>`
+        : "";
       $("insightsEnvelope").innerHTML =
         `<div class="rsf-stage ${cls}">${esc(status)} ${esc((body.answer || "").slice(0, 400))}</div>`
+        + genHtml
         + list(val.include, "include")
         + list(val.exclude, "exclude")
         + list(val.unsure, "unsure");
@@ -1457,15 +1463,15 @@
         }
       } catch (err) { toast(err.message, "bad"); }
     }
-    async function runInsights(ask) {
+    async function runInsights(ask, generate) {
       const intent = (($("insightsIntent") && $("insightsIntent").value) || "").trim();
       if (!intent) { toast("Insights needs an intent.", "bad"); return; }
       try {
         const body = await api("/crew/insights", {
           method: "POST",
-          body: JSON.stringify({ intent: intent, ask: ask })
+          body: JSON.stringify({ intent: intent, ask: !!ask, generate: !!generate })
         });
-        if (ask) $("insightsEnvelope").dataset.asked = "1";
+        if (ask || generate) $("insightsEnvelope").dataset.asked = "1";
         paintInsights(body);
       } catch (err) { toast(err.message, "bad"); }
     }
@@ -1909,8 +1915,9 @@
         await loadAssign();
       }
     };
-    $("insightsOntology").onclick = () => runInsights(false);
-    $("insightsAsk").onclick = () => runInsights(true);
+    $("insightsOntology").onclick = () => runInsights(false, false);
+    $("insightsAsk").onclick = () => runInsights(true, false);
+    $("insightsGenerate").onclick = () => runInsights(false, true);
     $("clearChat").onclick = async () => {
       if (!state.spaceId) return;
       try {
