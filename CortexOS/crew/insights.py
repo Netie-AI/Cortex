@@ -1300,7 +1300,8 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
     if gen:
         # The stamp line says what was asked and what OpenVault served; the
         # identity label is only attribution and stands in when nothing was sent.
-        stamp = gen.get("stamp") if isinstance(gen.get("stamp"), dict) else {}
+        stamp_raw = gen.get("stamp")
+        stamp: dict[str, Any] = stamp_raw if isinstance(stamp_raw, dict) else {}
         route = str(stamp.get("line") or gen.get("identity") or "none")
         validator = f"\nvalidator: {gen.get('validator')}" if gen.get("validator") else ""
         gen_line = (
@@ -1308,7 +1309,8 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
             f"sql_valid: {gen.get('valid')}\n"
             f"sql: {(gen.get('sql') or gen.get('refuse_reason') or '')[:240]}"
         )
-        climb = gen.get("climb") if isinstance(gen.get("climb"), dict) else {}
+        climb_raw = gen.get("climb")
+        climb: dict[str, Any] = climb_raw if isinstance(climb_raw, dict) else {}
         if climb:
             gen_line += f"\nclimb: {climb.get('final') or 'none'} complete=False"
     return (

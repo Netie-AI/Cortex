@@ -19,7 +19,7 @@ baseline; this module does not replace it with a better %.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from CortexOS.execution.gen_cfsm import (
@@ -161,7 +161,7 @@ def _pct(num: int, den: int) -> str:
     return f"{(100.0 * num / den):.2f}%"
 
 
-def coverage_report(outcomes: list[Mapping[str, Any]]) -> dict[str, Any]:
+def coverage_report(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Report this-run fixture coverage vs frozen #180 baseline. Never replaces it."""
     n = len(outcomes)
     validated = sum(1 for row in outcomes if row.get("valid"))
