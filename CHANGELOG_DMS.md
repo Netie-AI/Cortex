@@ -2,6 +2,28 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-OV-FREEROUTE follow-up: one FreeRoute layer — 2026-09-18
+
+Cortex #211 reopened on an independent Verify NO at `ceb7fc2`. `CortexOS/
+integrations/freeroute.py` becomes the single model layer for the engine, the
+DMS pack and Crew: sync and stdlib-only, so `answer()` calls it with no event
+loop and Crew adapts it on an executor. Armed is OpenVault's own
+`/api/freeroute/status` (reachable, unsealed, pooled keys, a spendable
+non-cortex hop) - env keys, a local Ollama and key rows never arm. The
+credential is an operator-issued `ov_` key OpenVault verifies, or the loopback
+tier; a 401 disarms only the credential sent, and the Cortex key is never lent
+to an HTTP caller (A-0009 relay rules on `POST /crew/freeroute` and Insights
+generate). The measured route is live hops x OpenVault catalogue, persisted in
+sqlite and scored on validator verdicts (SQL gate, plausibility, static
+guardrail) against the model OpenVault **served**, because a requested model is
+only a preference. Engine generative-ask drops the `gpt-4o-mini` default and
+names the OpenVault cause in the customer abstain; a Space document answer now
+says why L2 was not used. Crew generate validates with sqlglot plus the engine
+guardrail and still returns ABSTAIN with no values. DMS #180 stays cited
+cross-system only (offline `bind_plan`, badge-only judge). Local
+`pytest tests/test_crew -q` **296 passed**; engine generative-ask set **392
+passed**. Live `:5000` was down during this work. Not a GitHub CI claim.
+
 ## CORTEX-OV-FREEROUTE central AI layer — 2026-09-13
 
 Cortex #211. OpenVault FreeRoute is the model path for Crew Insights

@@ -283,6 +283,31 @@ def test_validity_lands_on_served_model_when_not_honoured(armed_openvault) -> No
     assert arm.armed
 
 
+def test_validity_follows_the_served_model_across_requested_ids(
+    armed_openvault, monkeypatch
+) -> None:
+    """Two requested ids served by one model share that model's record.
+
+    Scoring by requested id would grade a subject OpenVault never ran: the hop
+    serves its own first model whenever the requested one is not in its pool.
+    """
+    armed_openvault.hops = [armed_openvault.hop("groq", 10)]
+    armed_openvault.catalogue = {"groq": ["openai/gpt-oss-120b"]}
+    monkeypatch.setenv("CORTEX_FREEROUTE_MODELS", "alpha,openai/gpt-oss-120b")
+    msgs = [{"role": "user", "content": "q"}]
+    for pin, verdict in (("alpha", "gate_pass"), ("openai/gpt-oss-120b", "gate_fail")):
+        for _ in range(2):
+            out = fr.complete("t", msgs, accept=_sql_ok, pin=pin)
+            assert out.stamp.served == "openai/gpt-oss-120b"
+            fr.note_verdict(out.stamp, verdict)
+    stats = fr._stats("t", ["alpha", "openai/gpt-oss-120b"])
+    assert stats["alpha"].served_most == "openai/gpt-oss-120b"
+    assert stats["alpha"].honored_rate == 0.0
+    # One served model, one record: 2 passes and 2 fails -> (2 + 1) / (4 + 2).
+    assert stats["alpha"].score == stats["openai/gpt-oss-120b"].score == 0.5
+    assert stats["alpha"].scored_n == 4
+
+
 def test_not_honoured_is_named_in_pick_reason(armed_openvault, monkeypatch) -> None:
     armed_openvault.hops = [HOP("groq", 10)]
     monkeypatch.setenv("CORTEX_FREEROUTE_MODELS", "deepseek-v4-pro,qwen/qwen3.6-27b")

@@ -215,6 +215,20 @@ def test_resolve_ov_model_measured_keeps_auto(monkeypatch: pytest.MonkeyPatch) -
     assert openvault.resolve_ov_model("openvault/auto", measured=True) == "auto"
 
 
+def test_crew_kill_switch_refuses_even_when_the_core_would_arm(
+    armed_openvault, monkeypatch
+) -> None:
+    """CREW_OPENVAULT=0 is the crew operator's own off switch: the vault is
+    armed and reachable here, and crew still sends nothing."""
+    monkeypatch.setenv("CREW_OPENVAULT", "0")
+    assert core.arming(fresh=True).armed is True
+    assert fr.arming()["armed"] is False
+    out = asyncio.run(fr.complete(prompt="how many skus", purpose="think"))
+    assert out["ok"] is False
+    assert "CREW_OPENVAULT=0" in out["refused"]
+    assert armed_openvault.chat_calls == []
+
+
 def test_crew_chat_connector_goes_through_the_core(armed_openvault) -> None:
     """The crew chat connector spends through the core, not its own httpx POST."""
     _only_models(armed_openvault, ["openai/gpt-oss-120b"])

@@ -617,13 +617,11 @@ def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
         st.scored = len(scored)
         if scored:
             st.mean_latency_ms = round(sum(float(r["latency_ms"]) for r in scored) / len(scored), 1)
-        served_key = model
-        if st.served_most and not _same_model(model, st.served_most):
-            if st.requests >= EXPLORE_REQUESTS and (st.honored_rate or 0.0) < 0.5:
-                served_key = st.served_most
+        # Validity belongs to the model that answered. OpenVault may serve a
+        # different one than was asked for, and two requested ids can share a
+        # served model, so scoring by request would grade the wrong subject.
+        served_key = st.served_most or model
         window = (by_served.get(served_key) or [])[:SCORE_WINDOW]
-        if not window and st.served_most:
-            window = (by_served.get(st.served_most) or [])[:SCORE_WINDOW]
         if window and st.scored:
             total = sum(_validity(r) for r in window)
             st.score = round((total + 1.0) / (len(window) + 2.0), 4)
