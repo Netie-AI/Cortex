@@ -1,0 +1,1063 @@
+"""OpenVault FreeRoute - the one Cortex model layer (Cortex #211 follow-up).
+
+Every Cortex model call that thinks, generates, or acts goes through here:
+engine generative-ask (NL -> ontology -> SQL -> validate), Crew Insights
+generate, and the Crew chat OpenVault connector. One arming rule, one measured
+route, one credential. Sync and stdlib only, so the engine answer path can call
+it without an event loop and Crew can adapt it on a thread.
+
+Custody. Provider secrets never enter this process. Cortex presents either an
+OpenVault-issued ``ov_`` key (``CORTEX_FREEROUTE_TOKEN``, issued by the operator
+with OpenVault ``POST /api/apikeys``) or nothing, which OpenVault serves as the
+loopback tier. OpenVault verifies the bearer itself; no header Cortex writes
+about itself carries authority (KB A-0009).
+
+Armed means ``GET /api/freeroute/status`` says: reachable, ``sealed`` is False,
+``pooled_key_count`` > 0, and at least one pooled hop is a spendable provider.
+Process-env provider keys, a local Ollama, ``/api/keys`` rows and ``/api/healthz``
+never arm FreeRoute. Anything else is a named refusal (R-0011).
+
+Measured route. OpenVault treats the requested model as a preference: it walks
+hops in its own order and a hop that does not carry the requested id serves its
+own first catalogued model. So every call records requested AND served, validity
+is scored against the served model from validator verdicts (SQL gate,
+plausibility, static guardrail), and a requested id OpenVault does not honour is
+ranked by what it actually got. HTTP refusals are recorded but never scored.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import sqlite3
+import threading
+import time
+import uuid
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+from CortexOS.integrations import openvault_client
+
+IMPL = "openvault-freeroute"
+TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
+MODELS_ENV = "CORTEX_FREEROUTE_MODELS"
+STORE_ENV = "CORTEX_FREEROUTE_SCOREBOARD"
+LEARN_ENV = "CORTEX_FREEROUTE_LEARN"
+SWITCH_ENV = "CORTEX_FREEROUTE"
+
+ARMING_TTL_S = 5.0
+REJECT_TTL_S = 60.0
+INELIGIBLE_S = 60.0
+EXPLORE_REQUESTS = 2
+SCORE_WINDOW = 200
+MAX_CANDIDATES = 6
+PER_PROVIDER = 2
+
+_LOOPBACK_IDENTITIES = frozenset({"", "local", "127.0.0.1", "::1", "localhost", "testclient"})
+
+GOOD_VERDICTS = frozenset({"gate_pass", "plausible", "static_valid"})
+BAD_VERDICTS = frozenset({"gate_fail", "implausible", "static_fail"})
+_FINAL_VERDICTS = frozenset({"plausible", "implausible"})
+
+_STATUS_REASONS: dict[int, str] = {
+    0: "OpenVault unreachable",
+    400: "OpenVault non-retryable upstream error (HTTP 400)",
+    401: "OpenVault rejected the credential (HTTP 401)",
+    402: "FreeRoute pack budget exhausted (HTTP 402)",
+    403: "OpenVault refused (HTTP 403)",
+    429: "FreeRoute token budget exceeded (HTTP 429)",
+    502: "FreeRoute fallback exhausted (HTTP 502)",
+    503: "FreeRoute has no candidate hop (HTTP 503)",
+}
+
+_REDACT = re.compile(
+    r"(ov_[A-Za-z0-9_\-]+|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]+|[A-Za-z0-9_\-]{32,})"
+)
+
+_lock = threading.Lock()
+_arming_cache: dict[tuple[str, str], tuple[float, Arming]] = {}
+_vault_cache: dict[str, tuple[float, _Vault]] = {}
+_rejected: dict[tuple[str, str], tuple[float, str]] = {}
+_verified: dict[tuple[str, str], str] = {}
+_last_arming: dict[tuple[str, str], Arming] = {}
+_store_error: dict[str, str] = {}
+
+_journal_var: ContextVar[list[RouteStamp] | None] = ContextVar("freeroute_journal", default=None)
+_shadow_var: ContextVar[bool] = ContextVar("freeroute_shadow", default=False)
+_transport_var: ContextVar[tuple[Callable[..., Any], str] | None] = ContextVar(
+    "freeroute_transport", default=None
+)
+
+
+# -- redaction and credential ---------------------------------------------------
+
+
+def redact(text: object, *, limit: int = 200) -> str:
+    """Token shapes out, whitespace collapsed, bounded. For any OpenVault/upstream text."""
+    raw = " ".join(str(text or "").split())
+    return _REDACT.sub("<redacted>", raw)[:limit]
+
+
+def fingerprint(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12] if value else ""
+
+
+def _token() -> str:
+    return (os.environ.get(TOKEN_ENV) or "").strip()
+
+
+def child_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Copy of ``env`` without the Cortex OpenVault key, for any subprocess."""
+    out = dict(os.environ if env is None else env)
+    out.pop(TOKEN_ENV, None)
+    return out
+
+
+def auth_headers(bearer: str | None = None) -> dict[str, str]:
+    """``bearer=None``: Cortex's own key. ``""``: send nothing. Otherwise relay it."""
+    value = _token() if bearer is None else bearer.strip()
+    return {"Authorization": f"Bearer {value}"} if value else {}
+
+
+def _credential_fp(bearer: str | None) -> str:
+    return fingerprint(_token() if bearer is None else bearer.strip())
+
+
+def identity() -> dict[str, Any]:
+    """Public view of the Cortex credential. Never the token."""
+    token = _token()
+    url = openvault_client.openvault_base_url()
+    fp = fingerprint(token)
+    key_id = _verified.get((url, fp), "")
+    return {
+        "mode": "api_key" if token else "loopback",
+        "env": TOKEN_ENV,
+        "fingerprint": fp,
+        "key_id": key_id,
+        "verified_by": "openvault" if key_id else ("" if token else "socket peer (OpenVault decides)"),
+        "attributed": bool(key_id),
+        "authority": False,
+        "issue_with": "OpenVault POST /api/apikeys (not the Cortex key screen)",
+    }
+
+
+# -- arming ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Vault:
+    ok: bool
+    reason: str
+    sealed: bool | None = None
+    pooled_keys: int | None = None
+    hops: tuple[dict[str, Any], ...] = ()
+    catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+
+@dataclass(frozen=True)
+class Arming:
+    armed: bool
+    reason: str
+    url: str
+    sealed: bool | None = None
+    pooled_keys: int | None = None
+    spendable_hops: int = 0
+    hops_public: tuple[dict[str, Any], ...] = ()
+    catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    checked_at: float = 0.0
+    probed: bool = True
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "armed": self.armed,
+            "reason": self.reason,
+            "url": self.url,
+            "sealed": self.sealed,
+            "pooled_keys": self.pooled_keys,
+            "spendable_hops": self.spendable_hops,
+            "hops": [dict(h) for h in self.hops_public],
+            "probed": self.probed,
+            "custody": "openvault",
+        }
+
+
+def unarmed(reason: str, *, url: str | None = None, probed: bool = True) -> Arming:
+    return Arming(
+        armed=False,
+        reason=reason,
+        url=url or openvault_client.openvault_base_url(),
+        checked_at=time.time(),
+        probed=probed,
+    )
+
+
+def _hop_parked(hop: Mapping[str, Any]) -> bool:
+    return str(hop.get("circuit") or "").lower() == "open" or bool(hop.get("park_until"))
+
+
+def _read_vault(url: str, timeout: float) -> _Vault:
+    status, body = openvault_client.request_json(
+        "GET", "/api/freeroute/status", timeout=timeout, base=url
+    )
+    if status == 0:
+        return _Vault(False, f"OpenVault unreachable at {url}")
+    if status != 200 or not isinstance(body, dict):
+        return _Vault(False, f"OpenVault /api/freeroute/status answered HTTP {status}")
+    sealed = body.get("sealed")
+    if not isinstance(sealed, bool):
+        return _Vault(False, "OpenVault did not report seal state; FreeRoute cannot be proven armed")
+    if sealed:
+        return _Vault(
+            False,
+            "OpenVault vault is sealed; unseal it in OpenVault (Cortex never holds the passphrase)",
+            sealed=True,
+        )
+    pooled = body.get("pooled_key_count")
+    if isinstance(pooled, bool) or not isinstance(pooled, int) or pooled <= 0:
+        return _Vault(
+            False,
+            "OpenVault pools no keys for FreeRoute; add keys in OpenVault",
+            sealed=False,
+            pooled_keys=pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None,
+        )
+    catalogue: dict[str, tuple[str, ...]] = {}
+    for spec in body.get("spendable") or []:
+        if not isinstance(spec, dict):
+            continue
+        pid = str(spec.get("id") or "").strip()
+        models = tuple(str(m) for m in (spec.get("chat_models") or []) if str(m).strip())
+        if pid and pid != "cortex" and models:
+            catalogue[pid] = models
+    hops: list[dict[str, Any]] = []
+    for hop in body.get("hops") or []:
+        if not isinstance(hop, dict):
+            continue
+        hops.append(
+            {
+                "provider": str(hop.get("provider") or ""),
+                "priority": hop.get("priority"),
+                "circuit": str(hop.get("circuit") or ""),
+                "parked": _hop_parked(hop),
+            }
+        )
+    spendable = [h for h in hops if h["provider"] in catalogue]
+    if not spendable:
+        return _Vault(
+            False,
+            "OpenVault has no spendable FreeRoute hop (pooled rows are not provider keys)",
+            sealed=False,
+            pooled_keys=pooled,
+            hops=tuple(hops),
+        )
+    return _Vault(
+        True,
+        "",
+        sealed=False,
+        pooled_keys=pooled,
+        hops=tuple(hops),
+        catalogue=tuple(sorted(catalogue.items())),
+    )
+
+
+def _vault(url: str, *, fresh: bool, timeout: float) -> _Vault:
+    now = time.monotonic()
+    with _lock:
+        hit = _vault_cache.get(url)
+    if hit and not fresh and now - hit[0] < ARMING_TTL_S:
+        return hit[1]
+    got = _read_vault(url, timeout)
+    with _lock:
+        _vault_cache[url] = (now, got)
+    return got
+
+
+def _rejection(url: str, fp: str) -> str:
+    with _lock:
+        hit = _rejected.get((url, fp))
+    if hit and time.monotonic() < hit[0]:
+        return hit[1]
+    return ""
+
+
+def note_rejected(credential_fp: str, reason: str, *, url: str | None = None) -> None:
+    """Remember a credential OpenVault refused, keyed by the credential actually sent."""
+    root = url or openvault_client.openvault_base_url()
+    with _lock:
+        _rejected[(root, credential_fp)] = (time.monotonic() + REJECT_TTL_S, redact(reason, limit=300))
+        _arming_cache.pop((root, credential_fp), None)
+        _verified.pop((root, credential_fp), None)
+
+
+def _precheck(url: str, token: str, *, relay: bool) -> str:
+    """Offline refusals in rule order. '' when nothing is wrong yet."""
+    if (os.environ.get(SWITCH_ENV) or "1").strip() == "0":
+        return f"{SWITCH_ENV}=0: FreeRoute disabled by the operator (no fallback)"
+    conflict = openvault_client.openvault_base_url_conflict()
+    if conflict:
+        return conflict
+    name = "the caller bearer" if relay else TOKEN_ENV
+    if token and not (token.startswith("ov_") and len(token) >= 12):
+        return f"{name} is not an OpenVault ov_ key; provider keys belong in OpenVault"
+    if not openvault_client.is_loopback_url(url):
+        if not token:
+            return f"remote OpenVault at {url} needs an ov_ key ({name})"
+        if not url.lower().startswith("https://"):
+            return f"remote OpenVault at {url} needs https before an ov_ key is sent"
+    return ""
+
+
+def _verify_token(url: str, token: str, timeout: float) -> str:
+    """'' when OpenVault attributes the key; else the named refusal (cached 60s)."""
+    fp = fingerprint(token)
+    status, body = openvault_client.request_json(
+        "GET",
+        "/api/freeroute/ratelimit",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout,
+        base=url,
+    )
+    if status == 0:
+        return f"OpenVault unreachable at {url}"
+    who = str((body or {}).get("identity") or "") if isinstance(body, dict) else ""
+    if status in (401, 403) or (status == 200 and who in _LOOPBACK_IDENTITIES):
+        seen = f"HTTP {status}" if status != 200 else f"identity '{who or 'none'}'"
+        reason = (
+            f"OpenVault did not accept {TOKEN_ENV} (resolved to {seen}); "
+            "issue it with OpenVault POST /api/apikeys"
+        )
+        note_rejected(fp, reason, url=url)
+        return reason
+    if status != 200:
+        return f"OpenVault did not verify {TOKEN_ENV} (HTTP {status})"
+    with _lock:
+        _verified[(url, fp)] = who
+    return ""
+
+
+def _armed_from(vault: _Vault, url: str, mode: str) -> Arming:
+    spendable = [h for h in vault.hops if h["provider"] in dict(vault.catalogue)]
+    live = [h for h in spendable if not h["parked"]]
+    reason = (
+        f"armed: {vault.pooled_keys} pooled keys, {len(spendable)} spendable hops at {url} as {mode}"
+    )
+    if not live:
+        reason += "; every spendable hop is circuit-open or parked (OpenVault half-opens)"
+    return Arming(
+        armed=True,
+        reason=reason,
+        url=url,
+        sealed=False,
+        pooled_keys=vault.pooled_keys,
+        spendable_hops=len(spendable),
+        hops_public=vault.hops,
+        catalogue=vault.catalogue,
+        checked_at=time.time(),
+    )
+
+
+def _vault_refusal(vault: _Vault, url: str) -> Arming:
+    return Arming(
+        armed=False,
+        reason=vault.reason,
+        url=url,
+        sealed=vault.sealed,
+        pooled_keys=vault.pooled_keys,
+        spendable_hops=0,
+        hops_public=vault.hops,
+        checked_at=time.time(),
+    )
+
+
+def arming(*, fresh: bool = False, timeout: float = 1.5, bearer: str | None = None) -> Arming:
+    """Is FreeRoute spendable for this credential? First failing rule wins, named."""
+    url = openvault_client.openvault_base_url()
+    relay = bearer is not None
+    token = _token() if bearer is None else bearer.strip()
+    fp = fingerprint(token)
+    key = (url, fp)
+    now = time.monotonic()
+    with _lock:
+        hit = _arming_cache.get(key)
+    if hit and not fresh and now - hit[0] < ARMING_TTL_S:
+        return hit[1]
+
+    refused = _precheck(url, token, relay=relay) or _rejection(url, fp)
+    if refused:
+        result = unarmed(refused, url=url)
+    else:
+        vault = _vault(url, fresh=fresh, timeout=timeout)
+        if not vault.ok:
+            result = _vault_refusal(vault, url)
+        elif token and not relay:
+            bad = _verify_token(url, token, timeout)
+            result = _vault_refusal(_Vault(False, bad), url) if bad else _armed_from(
+                vault, url, "api_key"
+            )
+        else:
+            result = _armed_from(vault, url, "relayed bearer" if token else "loopback tier")
+    with _lock:
+        _arming_cache[key] = (now, result)
+        _last_arming[key] = result
+    return result
+
+
+def peek() -> Arming:
+    """Last arming for the Cortex credential. No network."""
+    key = (openvault_client.openvault_base_url(), fingerprint(_token()))
+    with _lock:
+        got = _last_arming.get(key)
+    return got or unarmed("arming not probed yet", url=key[0], probed=False)
+
+
+def leave_gate() -> tuple[bool, str]:
+    """OpenVault leave-machine gate for payloads that carry schema off the box."""
+    try:
+        from CortexOS.integrations import openvault_gate
+
+        gate = openvault_gate.check_gate(
+            action="leave", destination="freeroute", required_providers=[]
+        )
+    except Exception as exc:  # noqa: BLE001 - a broken gate client is a refusal
+        return False, redact(f"gate error: {exc}", limit=240)
+    if gate.get("allowed") is True:
+        return True, "ok:leave"
+    reasons = gate.get("reasons") or ["leave-machine gate denied"]
+    return False, redact("; ".join(str(r) for r in reasons), limit=240)
+
+
+# -- route store ----------------------------------------------------------------
+
+
+def store_path() -> Path:
+    override = (os.environ.get(STORE_ENV) or "").strip()
+    if override:
+        return Path(override)
+    from CortexOS.paths import data_path
+
+    return data_path("engine", "freeroute_routes.db")
+
+
+def _learning() -> bool:
+    return (os.environ.get(LEARN_ENV) or "1").strip() != "0"
+
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS routes (
+    call_id TEXT PRIMARY KEY,
+    task TEXT NOT NULL,
+    requested TEXT NOT NULL,
+    served TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    usable INTEGER NOT NULL,
+    scored INTEGER NOT NULL,
+    verdict TEXT,
+    latency_ms REAL NOT NULL,
+    impl TEXT NOT NULL,
+    shadow INTEGER NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS routes_task_requested ON routes(task, requested, ts);
+CREATE INDEX IF NOT EXISTS routes_task_served ON routes(task, served, ts);
+"""
+
+
+def _note_store_error(exc: BaseException) -> None:
+    with _lock:
+        _store_error["error"] = redact(f"route store unavailable: {type(exc).__name__}: {exc}")
+
+
+def store_error() -> str:
+    with _lock:
+        return _store_error.get("error", "")
+
+
+_store_lock = threading.RLock()
+_initialized: set[str] = set()
+
+
+def _open_for_write(path: Path) -> sqlite3.Connection:
+    """Schema and WAL once per path (both need an exclusive lock), then plain inserts."""
+    key = str(path)
+    if key not in _initialized:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(key, timeout=5.0)
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+            con.executescript(_SCHEMA)
+            con.commit()
+        finally:
+            con.close()
+        _initialized.add(key)
+    return sqlite3.connect(key, timeout=5.0)
+
+
+@contextmanager
+def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
+    path = store_path()
+    con: sqlite3.Connection | None = None
+    held = False
+    try:
+        if write:
+            _store_lock.acquire()
+            held = True
+            con = _open_for_write(path)
+        else:
+            if not path.is_file():
+                yield None
+                return
+            con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
+        yield con
+        if write:
+            con.commit()
+    except (sqlite3.Error, OSError) as exc:
+        _note_store_error(exc)
+        yield None
+    finally:
+        if con is not None:
+            con.close()
+        if held:
+            _store_lock.release()
+
+
+def _write_row(stamp: RouteStamp, *, scored: bool) -> None:
+    if not _learning():
+        return
+    with _connect(write=True) as con:
+        if con is None:
+            return
+        con.execute(
+            "INSERT OR REPLACE INTO routes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                stamp.call_id,
+                stamp.task,
+                stamp.requested,
+                stamp.served,
+                int(stamp.status),
+                1 if stamp.usable else 0,
+                1 if scored else 0,
+                None,
+                float(stamp.latency_ms),
+                stamp.impl,
+                1 if _shadow_var.get() else 0,
+                time.time(),
+            ),
+        )
+
+
+def _rows(task: str) -> list[sqlite3.Row]:
+    with _connect(write=False) as con:
+        if con is None:
+            return []
+        con.row_factory = sqlite3.Row
+        try:
+            return list(
+                con.execute(
+                    "SELECT * FROM routes WHERE task = ? ORDER BY ts DESC LIMIT ?",
+                    (task, SCORE_WINDOW * MAX_CANDIDATES),
+                )
+            )
+        except sqlite3.Error as exc:
+            _note_store_error(exc)
+            return []
+
+
+def _validity(row: Mapping[str, Any]) -> float:
+    verdict = row["verdict"]
+    if verdict in GOOD_VERDICTS:
+        return 1.0
+    if verdict in BAD_VERDICTS or not row["usable"]:
+        return 0.0
+    return 0.5
+
+
+def _same_model(requested: str, served: str) -> bool:
+    if not requested or not served:
+        return False
+    return requested == served or requested.rsplit("/", 1)[-1] == served.rsplit("/", 1)[-1]
+
+
+@dataclass
+class ModelStats:
+    requested: str
+    requests: int = 0
+    scored: int = 0
+    honored_rate: float | None = None
+    served_most: str = ""
+    score: float | None = None
+    scored_n: int = 0
+    mean_latency_ms: float = 0.0
+    ineligible: str = ""
+
+
+def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
+    rows = _rows(task)
+    by_served: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if row["scored"] and row["served"]:
+            by_served.setdefault(row["served"], []).append(row)
+    out: dict[str, ModelStats] = {}
+    now = time.time()
+    for model in models:
+        mine = [r for r in rows if r["requested"] == model]
+        st = ModelStats(requested=model, requests=len(mine))
+        answered = [r for r in mine if r["status"] == 200 and r["served"]]
+        if answered:
+            honored = sum(1 for r in answered if _same_model(model, r["served"]))
+            st.honored_rate = round(honored / len(answered), 3)
+            counts: dict[str, int] = {}
+            for r in answered:
+                counts[r["served"]] = counts.get(r["served"], 0) + 1
+            st.served_most = max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        scored = [r for r in mine if r["scored"]]
+        st.scored = len(scored)
+        if scored:
+            st.mean_latency_ms = round(sum(float(r["latency_ms"]) for r in scored) / len(scored), 1)
+        # Validity belongs to the model that answered. OpenVault may serve a
+        # different one than was asked for, and two requested ids can share a
+        # served model, so scoring by request would grade the wrong subject.
+        served_key = st.served_most or model
+        window = (by_served.get(served_key) or [])[:SCORE_WINDOW]
+        if window and st.scored:
+            total = sum(_validity(r) for r in window)
+            st.score = round((total + 1.0) / (len(window) + 2.0), 4)
+            st.scored_n = len(window)
+        last3 = mine[:3]
+        if (
+            len(last3) == 3
+            and all(not r["scored"] for r in last3)
+            and now - float(last3[0]["ts"]) < INELIGIBLE_S
+        ):
+            st.ineligible = f"last 3 calls refused (HTTP {last3[0]['status']})"
+        out[model] = st
+    return out
+
+
+# -- candidates and pick --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Pick:
+    requested: str
+    reason: str
+    source: str
+    candidates: tuple[str, ...]
+    measured_n: int = 0
+    measured_score: float | None = None
+
+
+def candidates(arm: Arming, *, pin: str = "", pin_source: str = "") -> tuple[tuple[str, ...], str]:
+    pinned = (pin or "").strip()
+    if pinned:
+        return (pinned,), f"operator pin {pin_source or 'pin'}"
+    bundle = [m.strip() for m in (os.environ.get(MODELS_ENV) or "").split(",") if m.strip()]
+    if bundle:
+        return tuple(dict.fromkeys(bundle))[:MAX_CANDIDATES], f"operator bundle {MODELS_ENV}"
+    catalogue = dict(arm.catalogue)
+    found: list[str] = []
+    for hop in arm.hops_public:
+        if hop.get("parked"):
+            continue
+        for model in catalogue.get(str(hop.get("provider") or ""), ())[:PER_PROVIDER]:
+            if model not in found:
+                found.append(model)
+    if found:
+        return tuple(found[:MAX_CANDIDATES]), "live hops x OpenVault catalogue"
+    return ("auto",), "delegated to OpenVault (not measured by Cortex)"
+
+
+def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick:
+    models, source = candidates(arm, pin=pin, pin_source=pin_source)
+    if len(models) == 1:
+        st = _stats(task, list(models))[models[0]]
+        return Pick(models[0], source, source, models, st.scored_n, st.score)
+    stats = _stats(task, list(models))
+    eligible = [m for m in models if not stats[m].ineligible]
+    if not eligible:
+        first = models[0]
+        return Pick(
+            first,
+            f"every candidate refused recently ({stats[first].ineligible}); trying {first}",
+            source,
+            models,
+        )
+    for model in eligible:
+        st = stats[model]
+        if st.requests < EXPLORE_REQUESTS:
+            skipped = [m for m in models if stats[m].ineligible]
+            note = f"; ineligible: {', '.join(skipped)}" if skipped else ""
+            return Pick(
+                model,
+                f"exploring {model} ({st.requests}/{EXPLORE_REQUESTS} requests) among {len(models)}{note}",
+                source,
+                models,
+                st.scored_n,
+                st.score,
+            )
+    ranked = [m for m in eligible if stats[m].score is not None]
+    if not ranked:
+        return Pick(eligible[0], f"no scored route yet; trying {eligible[0]}", source, models)
+    order = {m: i for i, m in enumerate(models)}
+    best = min(
+        ranked,
+        key=lambda m: (-(stats[m].score or 0.0), stats[m].mean_latency_ms, order[m]),
+    )
+    st = stats[best]
+    reason = f"measured best validity {st.score} over n={st.scored_n} among {len(ranked)} scored"
+    if st.served_most and not _same_model(best, st.served_most) and (st.honored_rate or 0.0) < 0.5:
+        reason += f"; not honored (served {st.served_most})"
+    return Pick(best, reason, source, models, st.scored_n, st.score)
+
+
+# -- stamps, journal, transport -------------------------------------------------
+
+
+@dataclass
+class RouteStamp:
+    call_id: str
+    task: str
+    requested: str
+    served: str = ""
+    honored: bool = False
+    pick_reason: str = ""
+    source: str = ""
+    candidates: tuple[str, ...] = ()
+    status: int | None = None
+    usable: bool = False
+    latency_ms: float = 0.0
+    error: str = ""
+    impl: str = IMPL
+    credential: str = ""
+    measured_n: int = 0
+    measured_score: float | None = None
+
+    def line(self) -> str:
+        """Customer-safe: what was asked and what served. Never counts or scores."""
+        prefix = "" if self.impl == IMPL else f"NOT OpenVault FreeRoute ({self.impl}): "
+        if self.status is None:
+            text = f"FreeRoute {self.task}: not sent ({self.error})"
+        else:
+            text = f"FreeRoute {self.task}: asked {self.requested}, served {self.served or 'none'} ({self.source})"
+        err = store_error()
+        if err:
+            text += f" [{err}]"
+        return prefix + text
+
+    def public(self) -> dict[str, Any]:
+        body = asdict(self)
+        body["candidates"] = list(self.candidates)
+        body["line"] = self.line()
+        return body
+
+
+@dataclass
+class Completion:
+    ok: bool
+    text: str = ""
+    message: dict[str, Any] = field(default_factory=dict)
+    stamp: RouteStamp | None = None
+    reason: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+
+
+@contextmanager
+def journal(*, shadow: bool = False) -> Iterator[list[RouteStamp]]:
+    """Collect every stamp written inside this block (threads via copy_context)."""
+    stamps: list[RouteStamp] = []
+    token = _journal_var.set(stamps)
+    shadow_token = _shadow_var.set(shadow)
+    try:
+        yield stamps
+    finally:
+        _shadow_var.reset(shadow_token)
+        _journal_var.reset(token)
+
+
+@contextmanager
+def use_transport(fn: Callable[..., Any], impl: str) -> Iterator[None]:
+    """Replace the OpenVault transport (replay cassettes). Stamps say NOT OpenVault."""
+    token = _transport_var.set((fn, impl))
+    try:
+        yield
+    finally:
+        _transport_var.reset(token)
+
+
+def _journal_add(stamp: RouteStamp) -> None:
+    active = _journal_var.get()
+    if active is not None:
+        active.append(stamp)
+
+
+def note_verdict(target: RouteStamp | str | list[RouteStamp] | None, verdict: str) -> None:
+    """Credit a validator verdict to a call. No-op for unknown ids or when not learning."""
+    if not target or not _learning():
+        return
+    if verdict not in GOOD_VERDICTS and verdict not in BAD_VERDICTS:
+        return
+    if isinstance(target, list):
+        ids = [s.call_id for s in target if s.status is not None]
+    elif isinstance(target, RouteStamp):
+        ids = [target.call_id] if target.status is not None else []
+    else:
+        ids = [str(target)]
+    if not ids:
+        return
+    with _connect(write=True) as con:
+        if con is None:
+            return
+        for call_id in ids:
+            if verdict in _FINAL_VERDICTS:
+                con.execute("UPDATE routes SET verdict = ? WHERE call_id = ?", (verdict, call_id))
+            else:
+                con.execute(
+                    "UPDATE routes SET verdict = ? WHERE call_id = ? "
+                    "AND (verdict IS NULL OR verdict NOT IN ('plausible','implausible'))",
+                    (verdict, call_id),
+                )
+
+
+def last_line(stamps: list[RouteStamp] | None) -> str:
+    return stamps[-1].line() if stamps else ""
+
+
+def _transport() -> tuple[Callable[..., Any], str]:
+    override = _transport_var.get()
+    if override is not None:
+        return override
+    return openvault_client.request_json, IMPL
+
+
+def _error_message(body: Any) -> str:
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            return redact(err.get("message") or err.get("type") or "")
+        if isinstance(err, str):
+            return redact(err)
+        if body.get("detail"):
+            return redact(body.get("detail"))
+    return ""
+
+
+# -- complete -------------------------------------------------------------------
+
+
+def complete(
+    task: str,
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int = 600,
+    temperature: float | None = None,
+    timeout: float = 45.0,
+    accept: Callable[[str], Any] | None = None,
+    pin: str = "",
+    pin_source: str = "",
+    egress: str = "",
+    tools: list[dict[str, Any]] | None = None,
+    bearer: str | None = None,
+) -> Completion:
+    """One FreeRoute call. Never raises. Refusals are named and stamped."""
+    task = (task or "unnamed").strip()
+    arm = arming(bearer=bearer)
+    credential = (
+        "cortex api_key" if bearer is None and _token()
+        else "relayed bearer" if bearer else "loopback tier (unattributed)"
+    )
+    if not arm.armed:
+        return Completion(ok=False, reason=f"FreeRoute not armed: {arm.reason}")
+    if egress == "leave":
+        allowed, why = leave_gate()
+        if not allowed:
+            reason = f"OpenVault leave-machine gate denied: {why}"
+            stamp = RouteStamp(
+                call_id=uuid.uuid4().hex, task=task, requested="", error=reason, credential=credential
+            )
+            _journal_add(stamp)
+            return Completion(ok=False, stamp=stamp, reason=reason)
+
+    chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+    body: dict[str, Any] = {
+        "model": chosen.requested,
+        "messages": messages,
+        "max_tokens": int(max_tokens),
+        "stream": False,
+    }
+    if temperature is not None:
+        body["temperature"] = float(temperature)
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+
+    send, impl = _transport()
+    started = time.monotonic()
+    try:
+        status, data = send(
+            "POST",
+            "/v1/chat/completions",
+            body=body,
+            headers=auth_headers(bearer),
+            timeout=timeout,
+            base=arm.url,
+        )
+    except Exception as exc:  # noqa: BLE001 - a transport must not crash the ask
+        status, data = 0, {"error": {"message": f"transport error: {type(exc).__name__}"}}
+    latency_ms = round((time.monotonic() - started) * 1000.0, 1)
+
+    stamp = RouteStamp(
+        call_id=uuid.uuid4().hex,
+        task=task,
+        requested=chosen.requested,
+        pick_reason=chosen.reason,
+        source=chosen.source,
+        candidates=chosen.candidates,
+        status=int(status),
+        latency_ms=latency_ms,
+        impl=impl,
+        credential=credential,
+        measured_n=chosen.measured_n,
+        measured_score=chosen.measured_score,
+    )
+    text = ""
+    message: dict[str, Any] = {}
+    usage: dict[str, Any] = {}
+    scored = False
+    reason = ""
+    if status == 200 and isinstance(data, dict):
+        stamp.served = str(data.get("model") or "")
+        stamp.honored = _same_model(chosen.requested, stamp.served)
+        try:
+            choice = (data.get("choices") or [{}])[0] or {}
+            message = dict(choice.get("message") or {})
+        except (IndexError, TypeError, AttributeError):
+            message = {}
+        text = str(message.get("content") or "")
+        usage = dict(data.get("usage") or {}) if isinstance(data.get("usage"), dict) else {}
+        usable = bool(text.strip()) or bool(message.get("tool_calls"))
+        if usable and accept is not None:
+            try:
+                usable = bool(accept(text))
+            except Exception:  # noqa: BLE001 - a raising validator means unusable
+                usable = False
+        stamp.usable = usable
+        scored = True
+        if not usable:
+            reason = f"FreeRoute answer unusable for {task} (served {stamp.served or 'unknown'})"
+    else:
+        base = _STATUS_REASONS.get(int(status), f"OpenVault answered HTTP {status}")
+        detail = _error_message(data)
+        reason = f"{base}: {detail}" if detail else base
+        # Refusals about custody, budget or the hop pool say nothing about the
+        # model asked for; only other failures (500, 504, ...) count against it.
+        scored = int(status) not in _STATUS_REASONS
+        if int(status) in (401, 403):
+            if int(status) == 401:
+                note_rejected(_credential_fp(bearer), reason, url=arm.url)
+            else:
+                with _lock:
+                    _arming_cache.clear()
+                    _vault_cache.clear()
+    stamp.error = reason
+    _write_row(stamp, scored=scored)
+    _journal_add(stamp)
+    return Completion(
+        ok=status == 200 and stamp.usable,
+        text=text,
+        message=message,
+        stamp=stamp,
+        reason=reason,
+        usage=usage,
+    )
+
+
+# -- status ---------------------------------------------------------------------
+
+
+def scoreboard(task: str | None = None) -> list[dict[str, Any]]:
+    with _connect(write=False) as con:
+        if con is None:
+            return []
+        con.row_factory = sqlite3.Row
+        try:
+            where = "WHERE task = ?" if task else ""
+            args: tuple[Any, ...] = (task,) if task else ()
+            rows = list(
+                con.execute(
+                    "SELECT task, requested, served, COUNT(*) AS n, SUM(scored) AS scored, "
+                    "SUM(CASE WHEN status = 200 THEN 1 ELSE 0 END) AS answered "
+                    f"FROM routes {where} GROUP BY task, requested, served ORDER BY task, n DESC",
+                    args,
+                )
+            )
+        except sqlite3.Error as exc:
+            _note_store_error(exc)
+            return []
+    return [dict(r) for r in rows]
+
+
+def public_status(task: str | None = None) -> dict[str, Any]:
+    arm = arming()
+    models, source = candidates(arm) if arm.armed else ((), "")
+    stats = _stats(task, list(models)) if task and models else {}
+    return {
+        "layer": "OpenVault FreeRoute (one Cortex model layer)",
+        "impl": _transport()[1],
+        "arming": arm.public(),
+        "identity": identity(),
+        "candidates": list(models),
+        "candidate_source": source,
+        "measured": {m: asdict(s) for m, s in stats.items()},
+        "scoreboard": scoreboard(task),
+        "store": str(store_path()),
+        "store_error": store_error(),
+        "learning": _learning(),
+    }
+
+
+def reset() -> None:
+    """Drop in-process caches (arming, rejections, verification). The store stays."""
+    with _lock:
+        _arming_cache.clear()
+        _vault_cache.clear()
+        _rejected.clear()
+        _verified.clear()
+        _last_arming.clear()
+        _store_error.clear()
+    with _store_lock:
+        _initialized.clear()
+
+
+__all__ = [
+    "Arming",
+    "Completion",
+    "IMPL",
+    "Pick",
+    "RouteStamp",
+    "TOKEN_ENV",
+    "arming",
+    "auth_headers",
+    "candidates",
+    "child_env",
+    "complete",
+    "fingerprint",
+    "identity",
+    "journal",
+    "last_line",
+    "leave_gate",
+    "note_rejected",
+    "note_verdict",
+    "peek",
+    "pick",
+    "public_status",
+    "redact",
+    "reset",
+    "scoreboard",
+    "store_error",
+    "store_path",
+    "unarmed",
+    "use_transport",
+]

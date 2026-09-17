@@ -131,33 +131,28 @@ def test_guardrail_allows_literal_select_without_from():
     assert out.safe_sql
 
 
-def test_freeroute_body_omits_metadata_google_rejects(monkeypatch):
-    """OV extra=allow forwards metadata to Gemini, which 400s the L2 call."""
-    seen: list[dict] = []
+def test_freeroute_body_omits_metadata_google_rejects(monkeypatch, armed_openvault):
+    """OV extra=allow forwards metadata to Gemini, which 400s the L2 call.
 
-    def fake_post(path, body, **kwargs):
-        del path, kwargs
-        seen.append(dict(body))
-        return {
-            "choices": [{
-                "message": {
-                    "content": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
-                }
-            }]
-        }
+    Rewritten for the #211 follow-up: the old seam patched post_json, which
+    swallowed the HTTP status, and rode the hardcoded gpt-4o-mini default.
+    """
+    from CortexOS.integrations import freeroute
 
-    monkeypatch.setattr(sql_generator, "is_configured", lambda: True)
-    monkeypatch.setattr(sql_generator, "_leave_machine_allowed", lambda: (True, "ok:leave"))
-    monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        fake_post,
-    )
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
     out = sql_generator.generate_candidates(
         "how many skus",
         {"tables": {"inventory": {"columns": ["sku"]}}},
     )
-    assert seen, "FreeRoute POST was not attempted"
-    assert "metadata" not in seen[0]
+    chats = armed_openvault.chat_calls
+    assert len(chats) == 1, "FreeRoute POST was not attempted"
+    body, headers = chats[0]["body"], chats[0]["headers"]
+    assert "metadata" not in body
+    assert "X-Cortex-Identity" not in headers
+    models, _source = freeroute.candidates(freeroute.arming())
+    assert body["model"] in models
+    assert body["model"] != "gpt-4o-mini"
+    assert armed_openvault.gate_calls and armed_openvault.gate_calls[-1]["action"] == "leave"
     assert out
     assert "inventory" in out[0].lower()
     assert "sku" in out[0].lower()
@@ -173,6 +168,9 @@ def test_l2_path_abstains_without_freeroute(monkeypatch):
     assert not r.get("rows")
     answer_text = (r.get("answer") or "").lower()
     assert "can't" in answer_text or "cannot" in answer_text or "not" in answer_text
+    # The customer text names why (the autouse fixture switches FreeRoute off), not only "not wired".
+    assert "freeroute not armed" in answer_text
+    assert "cortex_freeroute=0" in answer_text
 
 
 def test_l2_mock_generation_returns_rows_and_answer(monkeypatch):

@@ -1,5 +1,30 @@
 # STATUS.md
-**Last updated:** 2026-09-13 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-OV-FREEROUTE**
+**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-OV-FREEROUTE follow-up**
+
+> **2026-09-18 (CORTEX-OV-FREEROUTE follow-up, PR-A):** Cortex #211 reopened after
+> an independent Verify on `ceb7fc2` read NO (AC1 PARTIAL, AC2 NO, AC3 NO, AC4
+> PARTIAL, AC5 YES). One layer now: `CortexOS/integrations/freeroute.py` is sync
+> and stdlib-only, so the engine, the DMS pack and Crew share one arming rule, one
+> measured route and one credential. **Armed** means OpenVault's own
+> `/api/freeroute/status` says reachable, `sealed` False, pooled keys, and a
+> spendable non-cortex hop; process-env `*_API_KEY`, a local Ollama and `/api/keys`
+> rows never arm. **Credential** is an operator-issued `ov_` key OpenVault verifies
+> (ratelimit identity `local` is not verification) or the loopback tier; a 401
+> disarms only the credential that was sent, and the Cortex key is never lent to an
+> HTTP caller (A-0009). **Measured route** is live hops x OpenVault catalogue,
+> persisted in sqlite and scored on validator verdicts against the model OpenVault
+> actually **served** (a requested model is only a preference). Engine
+> generative-ask runs on it: no `gpt-4o-mini` default, and the customer abstain
+> names the cause (sealed, leave-gate denied, HTTP 503, rejected key). Crew
+> generate validates with sqlglot plus the engine guardrail and still ABSTAINs with
+> no values. `GET/POST /crew/freeroute`, `GET /crew/identity` and Insights
+> `generate=true` keep their #214 shapes. DMS #180 (gen 57.69% / exact 38.46%,
+> WRONG=0 @ `d2f116a6`) is cited cross-system only: that lane is an offline
+> `bind_plan` slot binder scored by a badge-only judge, not a model score. G4
+> direct env keys, other provider call sites and the remaining spend doors are
+> PARKING_LOT P24. Local `pytest tests/test_crew -q` **296 passed**; engine
+> generative-ask set **392 passed**. Live `:5000` was down, so the armed live path
+> is unproven here. Not a GitHub CI claim.
 
 > **2026-09-13 (CORTEX-OV-FREEROUTE):** Cortex #211. OpenVault FreeRoute is the
 > central Cortex AI path when Insights / generative-ask needs a model (not an

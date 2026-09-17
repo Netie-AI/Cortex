@@ -153,7 +153,7 @@ def test_provider_pin_does_not_fall_through(clean_env: pytest.MonkeyPatch) -> No
 
 
 def test_vault_armed_without_env_is_configured(
-    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch, armed_openvault
 ) -> None:
     from CortexOS.crew import openvault
 

@@ -1,9 +1,14 @@
 """Crew talks to OpenVault FreeRoute. Secrets stay in the vault.
 
-Loopback POST /v1/chat/completions with no bearer (OpenVault treats 127.0.0.1
-as the unmetered local tier). Crew never copies Groq/OpenRouter/Cursor secrets
-into its own process. A silent walk onto a dead Cortex primary is OpenVault's
-problem; we send model=auto and surface the typed error.
+Chat goes through the one Cortex FreeRoute core (``CortexOS.integrations
+.freeroute``): armed only by OpenVault's own status, credential verified by
+OpenVault, requested and served model stamped. Crew never copies Groq /
+OpenRouter / Cursor secrets into its own process, and a refusal is raised
+with OpenVault's named reason rather than walked around.
+
+The key-management helpers below (vault rows, upsert, arm/disarm, seeded
+primary) still speak to the OpenVault key API directly; they list and edit
+rows, they never spend.
 """
 
 from __future__ import annotations
@@ -13,20 +18,22 @@ import os
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
 import httpx
 
 from CortexOS.crew.llm import LLMError, LLMResult, ToolCall, _parse_args
+from CortexOS.integrations import freeroute as core
+from CortexOS.integrations import openvault_client
 
-DEFAULT_URL = "http://127.0.0.1:5000"
+DEFAULT_URL = openvault_client.DEFAULT_OPENVAULT_URL
 
 
 DEFAULT_CURSOR_MODEL = "grok-4.6"
 
 
 def base_url() -> str:
-    return os.environ.get("CREW_OPENVAULT_URL", DEFAULT_URL).rstrip("/")
+    explicit = os.environ.get("CREW_OPENVAULT_URL", "").strip()
+    return explicit.rstrip("/") if explicit else openvault_client.openvault_base_url()
 
 
 def cursor_model() -> str:
@@ -47,23 +54,17 @@ def cursor_key_status() -> dict[str, Any]:
 def resolve_ov_model(model: str, *, measured: bool = False) -> str:
     """Map crew model strings onto FreeRoute.
 
-    Crew chat may still prefer grok-4.6 (high) when a Cursor/xAI key is in
-    process env. The measured Insights/FreeRoute layer does not: ``auto``
-    stays auto so OpenVault can pick among bundled models. Grok-fast is
-    always rewritten to high, never fast.
+    ``auto`` stays auto (the core picks a measured candidate) unless the
+    operator pinned ``CREW_OPENVAULT_MODEL``. A process-env Cursor/xAI key
+    never picks the model: env keys do not arm FreeRoute and must not steer
+    it. Grok-fast is always rewritten to high, never fast.
     """
+    _ = measured  # #214 signature; every route is measured now
     raw = (model or "").strip()
     if raw.startswith("openvault/"):
         raw = raw.split("/", 1)[1].strip()
     if raw in {"", "auto"}:
-        override = os.environ.get("CREW_OPENVAULT_MODEL", "").strip()
-        if override:
-            return override
-        if measured:
-            return "auto"
-        if os.environ.get("CURSOR_API_KEY", "").strip() or os.environ.get("XAI_API_KEY", "").strip():
-            return cursor_model()
-        return "auto"
+        return os.environ.get("CREW_OPENVAULT_MODEL", "").strip() or "auto"
     if "fast" in raw.lower() and "grok" in raw.lower():
         return cursor_model()
     return raw
@@ -84,15 +85,22 @@ def healthz(timeout: float = 1.5) -> dict[str, Any]:
 
 
 def require_live(timeout: float = 1.5) -> dict[str, Any]:
-    """OpenVault must be up for this turn. Never fall through to another host."""
-    st = healthz(timeout=timeout)
-    if not st.get("ok"):
+    """FreeRoute must be armed for this turn. Never fall through to another host.
+
+    Reachability (``healthz``) is not arming: a sealed or key-less vault
+    answers its health probe and still cannot serve a model.
+    """
+    _ = timeout  # the core owns its probe timeout
+    from CortexOS.crew.freeroute import arming
+
+    snap = arming()
+    if not snap.get("armed"):
         raise LLMError(
             "OpenVault connector refused: "
-            + str(st.get("detail") or "unreachable")
+            + str(snap.get("detail") or "unreachable")
             + " (no silent fallback)"
         )
-    return st
+    return snap
 
 
 def _tools_from_choice(message: dict[str, Any]) -> list[ToolCall]:
@@ -119,47 +127,46 @@ async def chat(
     identity: str = "",
     measured: bool = False,
 ) -> LLMResult:
-    payload: dict[str, Any] = {
-        "model": resolve_ov_model(model, measured=measured),
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
-    if tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
-    headers: dict[str, str] = {}
-    if identity.strip():
-        # Identity is Cortex-side attribution. Do not put it in OpenAI
-        # ``metadata`` (OpenVault extra=allow forwards that to Google and 400s).
-        headers["X-Cortex-Identity"] = identity.strip()
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                f"{base_url()}/v1/chat/completions", json=payload, headers=headers
-            )
-    except httpx.HTTPError as exc:
-        raise LLMError(f"OpenVault unreachable ({type(exc).__name__})") from exc
-    if resp.status_code != 200:
-        detail = resp.text[:400]
-        raise LLMError(f"OpenVault HTTP {resp.status_code}: {detail}")
-    data = resp.json()
-    choice = (data.get("choices") or [{}])[0]
-    message = choice.get("message") or {}
-    usage = data.get("usage") or {}
+    """One FreeRoute chat through the core. Raises ``LLMError`` with the named reason.
+
+    ``identity`` and ``measured`` stay in the signature for #214 callers and are
+    ignored: attribution is OpenVault's verdict on the bearer, never a header
+    Cortex writes about itself. ``LLMResult.model`` is the model OpenVault
+    actually served, not the one asked for.
+    """
+    _ = identity, measured
+    from CortexOS.crew.freeroute import complete_core
+
+    requested = resolve_ov_model(model)
+    pin = "" if requested == "auto" else requested
+    pinned_env = os.environ.get("CREW_OPENVAULT_MODEL", "").strip()
+    pin_source = "CREW_OPENVAULT_MODEL" if pin and pin == pinned_env else f"openvault/{pin}"
+    completion = await complete_core(
+        "crew-act" if tools else "crew-chat",
+        messages,
+        max_tokens=max_tokens,
+        timeout=float(timeout),
+        tools=tools,
+        pin=pin,
+        pin_source=pin_source if pin else "",
+    )
+    if not completion.ok:
+        raise LLMError(completion.reason)
+    usage = completion.usage
     cost = usage.get("cost") or usage.get("total_cost") or usage.get("cost_usd")
     try:
         cost_usd = float(cost) if cost is not None else None
     except (TypeError, ValueError):
         cost_usd = None
+    message = completion.message
     return LLMResult(
-        text=str(message.get("content") or ""),
+        text=completion.text,
         tool_calls=_tools_from_choice(message),
-        finish_reason=str(choice.get("finish_reason") or ""),
+        finish_reason="tool_calls" if message.get("tool_calls") else "stop",
         prompt_tokens=usage.get("prompt_tokens"),
         completion_tokens=usage.get("completion_tokens"),
         cost_usd=cost_usd,
-        model=str(data.get("model") or "openvault/auto"),
+        model=completion.stamp.served if completion.stamp else "",
     )
 
 
@@ -343,37 +350,32 @@ def list_models(*, timeout: float = 1.5) -> list[dict[str, Any]]:
     return out
 
 
-def ratelimit(identity: str, *, timeout: float = 1.2) -> dict[str, Any]:
-    """FreeRoute ratelimit for a Cortex identity. Empty/False if unarmed. No secrets."""
-    ident = (identity or "").strip()
-    if not ident:
-        return {"ok": False, "detail": "identity required"}
+def ratelimit(identity: str = "", *, timeout: float = 1.2) -> dict[str, Any]:
+    """FreeRoute budget snapshot for Cortex's own credential. Display only.
+
+    OpenVault names the identity it attributes the bearer to; a label Cortex
+    passes is echoed back for the UI and carries no authority. No secrets.
+    """
+    label = (identity or "").strip()
     if os.environ.get("CREW_OPENVAULT", "1") == "0":
-        return {"ok": False, "identity": ident, "detail": "CREW_OPENVAULT=0"}
-    q = urlencode({"identity": ident, "tier": "free"})
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            last = "unreachable"
-            for path in ("/api/freeroute/ratelimit", "/api/openfree/ratelimit"):
-                resp = client.get(f"{base_url()}{path}?{q}")
-                last = f"HTTP {resp.status_code}"
-                if resp.status_code != 200:
-                    continue
-                try:
-                    data = resp.json()
-                except Exception:  # noqa: BLE001
-                    continue
-                if not isinstance(data, dict):
-                    continue
-                return {
-                    "ok": True,
-                    "identity": ident,
-                    "remaining": data.get("remaining_tokens", data.get("remaining")),
-                    "path": path,
-                }
-            return {"ok": False, "identity": ident, "detail": last}
-    except httpx.HTTPError as exc:
-        return {"ok": False, "identity": ident, "detail": type(exc).__name__}
+        return {"ok": False, "identity": label, "detail": "CREW_OPENVAULT=0"}
+    status, data = openvault_client.request_json(
+        "GET",
+        "/api/freeroute/ratelimit",
+        headers=core.auth_headers(),
+        timeout=timeout,
+        base=base_url(),
+    )
+    if status != 200 or not isinstance(data, dict):
+        detail = "unreachable" if status == 0 else f"HTTP {status}"
+        return {"ok": False, "identity": label, "detail": detail}
+    return {
+        "ok": True,
+        "identity": str(data.get("identity") or ""),
+        "label": label,
+        "tier": data.get("tier"),
+        "remaining": data.get("remaining_tokens", data.get("remaining")),
+    }
 
 
 def arm_source(label: str, armed: bool, *, slug: str | None = None) -> dict[str, Any]:

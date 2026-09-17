@@ -13,6 +13,12 @@ class DmsL2Generation:
 
         return sql_generator.is_configured()
 
+    def unarmed_reason(self) -> str:
+        """Why generation is not wired (flag off, FreeRoute not armed), for the abstain."""
+        from packs.dms.generative import sql_generator
+
+        return sql_generator.unarmed_reason()
+
     def retrieve_schema(self, question: str) -> dict[str, Any]:
         from packs.dms.generative import schema_retrieval
 

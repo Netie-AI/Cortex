@@ -201,9 +201,9 @@ def _refuse_unconfigured(row: Any, pick: str) -> None:
     if row.configured:
         return
     if row.label == "openvault":
-        from CortexOS.crew.openvault import healthz
+        from CortexOS.crew.freeroute import arming as freeroute_arming
 
-        detail = str(healthz().get("detail") or "not live")
+        detail = str(freeroute_arming().get("detail") or "not armed")
         raise LLMError(f"OpenVault connector refused: {detail} (no silent fallback)")
     raise LLMError(
         f"provider '{pick}' is not configured ({row.source or 'unarmed'}); no silent fallback"

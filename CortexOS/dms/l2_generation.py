@@ -12,6 +12,7 @@ import importlib
 import json
 import os
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -94,6 +95,8 @@ class L2Attempt:
     violations: list[str] | None = None
     refused: bool = False
     retrieved_tables: tuple[str, ...] = ()
+    route: dict[str, Any] | None = None
+    route_call: str = ""
 
 
 def _env_on(name: str) -> bool:
@@ -149,6 +152,9 @@ def attempt_l2(
         return L2Attempt(reason="no verified answer path (L2 import failed)")
 
     if not l2.is_configured():
+        why = _unarmed_reason(l2)
+        if why:
+            return L2Attempt(reason=f"no verified answer path (L2 not wired: {why})")
         return L2Attempt(reason="no verified answer path (L2 not wired)")
 
     semantic_early = load_semantic_layer()
@@ -172,38 +178,44 @@ def attempt_l2(
         leftover.extend(cands[1:])
         return cands[0]
 
+    from CortexOS.integrations import freeroute
+
     con_explain = None
-    try:
-        # EXPLAIN must run on post-enforce SQL even when a session is bound.
-        con_explain = get_connection(
-            DEFAULT_DB, read_only=read_only_queries_enabled()
-        )
-        gate = gate_with_retry(
-            _gen,
-            question,
-            semantic_early,
-            con=con_explain,
-            verified=verified,
-            max_retries=2,
-        )
-    except SqlGateAbstain as exc:
-        if exc.manifest_refused:
-            return _manifest_l2_attempt(list(exc.violations))
-        return L2Attempt(
-            reason=f"L2 generation failed validation gate: {exc}",
-            violations=list(exc.violations),
-        )
-    finally:
-        if con_explain is not None:
-            con_explain.close()
+    with freeroute.journal(shadow=_shadow_run.get()) as stamps:
+        try:
+            # EXPLAIN must run on post-enforce SQL even when a session is bound.
+            con_explain = get_connection(
+                DEFAULT_DB, read_only=read_only_queries_enabled()
+            )
+            gate = gate_with_retry(
+                _gen,
+                question,
+                semantic_early,
+                con=con_explain,
+                verified=verified,
+                max_retries=2,
+            )
+        except SqlGateAbstain as exc:
+            _credit_gate(stamps, passed=False)
+            if exc.manifest_refused:
+                return _manifest_l2_attempt(list(exc.violations))
+            return L2Attempt(
+                reason=_with_route(f"L2 generation failed validation gate: {exc}", stamps),
+                violations=list(exc.violations),
+            )
+        finally:
+            if con_explain is not None:
+                con_explain.close()
 
     if not gate.passed or not gate.safe_sql:
+        _credit_gate(stamps, passed=False)
         if gate.manifest_refused:
             return _manifest_l2_attempt(list(gate.violations))
         return L2Attempt(
-            reason="L2 generation failed validation gate",
+            reason=_with_route("L2 generation failed validation gate", stamps),
             violations=list(gate.violations),
         )
+    _credit_gate(stamps, passed=True)
 
     # Serve pre-enforce SQL so execute_sql / enforce_manifest runs once.
     # Post-enforce SQL re-submitted as a candidate collides local bind + grant.
@@ -214,11 +226,70 @@ def attempt_l2(
         except Exception:  # noqa: BLE001 — promotion signal must not block answers
             pass
     tables = tuple((reduced.get("tables") or {}).keys())
+    served = _last_usable(stamps)
+    assumptions = f"L2 FreeRoute SQL over reduced schema tables={list(tables)}"
+    if served is not None:
+        assumptions += f"; {served.line()}"
     return L2Attempt(
         sql=sql,
-        assumptions=f"L2 FreeRoute SQL over reduced schema tables={list(tables)}",
+        assumptions=assumptions,
         retrieved_tables=tables,
+        route=served.public() if served is not None else None,
+        route_call=served.call_id if served is not None else "",
     )
+
+
+def _unarmed_reason(port: Any) -> str:
+    """The port's named reason, when it has one. Fake ports keep the old text."""
+    probe = getattr(port, "unarmed_reason", None)
+    if probe is None:
+        return ""
+    try:
+        return str(probe() or "").strip()
+    except Exception:  # noqa: BLE001 - a broken probe must not break the abstain
+        return ""
+
+
+def _last_usable(stamps: list[Any]) -> Any:
+    usable = [s for s in stamps if getattr(s, "usable", False)]
+    return usable[-1] if usable else None
+
+
+def _credit_gate(stamps: list[Any], *, passed: bool) -> None:
+    """Gate verdicts go to the calls that produced SQL: the last one passed, earlier ones failed."""
+    from CortexOS.integrations import freeroute
+
+    usable = [s for s in stamps if getattr(s, "usable", False)]
+    for idx, stamp in enumerate(usable):
+        last = idx == len(usable) - 1
+        freeroute.note_verdict(stamp, "gate_pass" if (passed and last) else "gate_fail")
+
+
+def _with_route(reason: str, stamps: list[Any]) -> str:
+    """Name the OpenVault cause (sealed, gate denied, HTTP 503) instead of a bare NO_CANDIDATE."""
+    if not stamps or any(getattr(s, "usable", False) for s in stamps):
+        return reason
+    last = stamps[-1]
+    line = last.line()
+    error = str(getattr(last, "error", "") or "")
+    if error and error not in line:
+        line = f"{line}: {error}"
+    return f"{reason}; {line}"
+
+
+def note_l2_plausibility(call_id: str, ok: bool) -> None:
+    """Credit the plausibility verdict to the FreeRoute call behind the SQL. Never raises."""
+    if not call_id:
+        return
+    try:
+        from CortexOS.integrations import freeroute
+
+        freeroute.note_verdict(call_id, "plausible" if ok else "implausible")
+    except Exception:  # noqa: BLE001 - measurement must never block an answer
+        return
+
+
+_shadow_run: ContextVar[bool] = ContextVar("l2_shadow_run", default=False)
 
 
 _SKIP_SHADOW_LAYERS = frozenset({"generated", "blocked", "rag", "catalog"})
@@ -279,6 +350,7 @@ def _write_l2_shadow(
     refusal: str | None = None
     l2_sql: str | None = None
     l2_rows: list[Any] | None = None
+    token = _shadow_run.set(True)
     try:
         out = attempt_l2(question, verified=verified, force=True, promote=False)
         if out is None:
@@ -293,6 +365,8 @@ def _write_l2_shadow(
                 l2_sql = out.sql
     except Exception as exc:  # noqa: BLE001
         refusal = f"exception:{type(exc).__name__}"
+    finally:
+        _shadow_run.reset(token)
     latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
     served_rows = list(served.get("rows") or [])
     served_n = served.get("row_count")
@@ -353,6 +427,7 @@ __all__ = [
     "attempt_l2",
     "clear_l2_generation",
     "maybe_record_l2_shadow",
+    "note_l2_plausibility",
     "register_l2_generation",
     "resolve_l2_generation",
 ]
