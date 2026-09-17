@@ -2,6 +2,21 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-API-SURFACE stable Insights API — 2026-09-17
+
+Cortex #213. Engine `GET|POST /v1/insights` is the stable consumer path
+for NL then ontology then SQL then validate / Insights envelopes
+(CERTIFIED|ABSTAIN|REFUSE). Reuses `run_insights` + FreeRoute + cot_climb;
+Crew `/crew/insights` stays a chrome alias. AirGPT `POST /dms/sidecar/insights`
+is the same path (no parallel invent stack). Callers do not hold provider
+keys; `GET /v1/insights/keys` reports local vs cloud hops without secrets.
+A-0009: armed generate from a non-loopback peer needs the caller's own
+`ov_` key. `cortex-contract` 1.2.0 unchanged (sibling surface, not a
+minor). CoT INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited,
+not replaced. G4 litellm/brain/suggest not expanded (P24.1). Off freeze
+#4/#41-#44. Local focused tests only. Not a GitHub CI claim. Did not
+invent live `:5000`/`:8020` green.
+
 ## CORTEX-COT-CLIMB consume FreeRoute think-path — 2026-09-17
 
 Cortex #212. Insights `generate=true` runs CoT/route/improve through
