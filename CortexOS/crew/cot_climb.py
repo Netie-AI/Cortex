@@ -507,7 +507,7 @@ async def climb(
     )
 
 
-async def measure_climb(cases: list[Mapping[str, Any]]) -> dict[str, Any]:
+async def measure_climb(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Fixture coverage vs frozen #180 baseline. Not a live :5000 CI claim."""
     outcomes: list[dict[str, Any]] = []
     for case in cases:

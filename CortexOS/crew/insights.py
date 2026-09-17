@@ -111,6 +111,24 @@ _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
+def _cot_public_map() -> dict[str, Any]:
+    """GET stamp for #212. Consumes cot_climb.public_map; never claims COMPLETE."""
+    from CortexOS.crew import cot_climb
+
+    body = cot_climb.public_map()
+    return {
+        "execute": body["execute"],
+        "complete": False,
+        "status": "INCOMPLETE",
+        "measured_baseline": body["measured_baseline"],
+        "replaces_baseline": False,
+        "invented_better": False,
+        "issue_211_complete": False,
+        "issue_212_complete": False,
+        "jepa": body["jepa"],
+    }
+
+
 def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
     """GET map. No ask. No numbers. Control may display."""
     return {
@@ -123,13 +141,18 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         "scale": "1GB to 10TB is a design target only; not COMPLETE",
         "vault": "OpenVault-armed Crew engine bridge only. No second vault.",
         "freeroute": "GET /crew/freeroute ; POST /crew/freeroute purpose=prompt|think|act",
-        "generate": "POST /crew/insights {generate:true} NL then ontology then SQL then validate",
+        "generate": (
+            "POST /crew/insights {generate:true} CoT/route/improve via cot_climb "
+            "then FreeRoute validate; complete=False"
+        ),
+        "cot_climb": _cot_public_map(),
         "identity": "GET /crew/identity (keys stay in OpenVault custody)",
         "export_runtime": export_runtime_hint(shell_public),
         "agents": (
             "Retrieve ontology first: locations are where to read; ranked "
             "metrics are which data is more important. Then ask. Generative-ask "
             "needs a model: OpenVault FreeRoute only, fail-closed if unarmed. "
+            "generate=true runs CoT/route/improve via cot_climb; not COMPLETE. "
             "Do not skip to SQL or export."
         ),
         "measured_baseline": {

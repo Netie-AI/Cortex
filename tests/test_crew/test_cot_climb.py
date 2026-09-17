@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,12 @@ def test_public_map_cites_baseline_and_is_not_complete() -> None:
     assert base["wrong"] == 0
     assert "d2f116a6" in base["cite"]
     assert "215" in body["insights_wire"]
+    law = insights.public_law()
+    assert law["cot_climb"]["complete"] is False
+    assert law["cot_climb"]["status"] == "INCOMPLETE"
+    assert law["cot_climb"]["issue_212_complete"] is False
+    assert law["cot_climb"]["measured_baseline"]["gen"] == "57.69%"
+    assert "cot_climb" in law["generate"]
 
 
 def test_source_is_netie_native_not_framework_paste() -> None:
@@ -88,14 +95,30 @@ def test_source_is_netie_native_not_framework_paste() -> None:
     assert "from packs" not in src
 
 
-def test_branch_does_not_dual_write_freeroute_layer() -> None:
-    import subprocess
-
-    diff = subprocess.check_output(
-        ["git", "diff", "--name-only", "origin/main"],
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
         cwd=ROOT,
         text=True,
+        capture_output=True,
+        check=False,
     )
+
+
+def _diff_names_vs_main() -> set[str]:
+    """Tree diff vs origin/main. Shallow CI clones fetch the tip; no rewrite."""
+    if _git("rev-parse", "--verify", "origin/main").returncode != 0:
+        fetched = _git("fetch", "--depth=1", "origin", "main")
+        if fetched.returncode != 0:
+            pytest.skip(
+                "origin/main missing and fetch failed; cannot prove dual-write absence"
+            )
+    diff = _git("diff", "--name-only", "origin/main")
+    assert diff.returncode == 0, diff.stderr
+    return {line.strip() for line in diff.stdout.splitlines() if line.strip()}
+
+
+def test_branch_does_not_dual_write_freeroute_layer() -> None:
     banned = {
         "CortexOS/crew/freeroute.py",
         "CortexOS/crew/openvault.py",
@@ -115,8 +138,7 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "tests/freeroute_fake.py",
         "tests/test_freeroute_core.py",
     }
-    touched = {line.strip() for line in diff.splitlines() if line.strip()}
-    overlap = sorted(touched & banned)
+    overlap = sorted(_diff_names_vs_main() & banned)
     assert overlap == [], f"dual-write of #215 FreeRoute files: {overlap}"
 
 

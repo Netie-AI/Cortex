@@ -11,7 +11,8 @@ does not rewrite arming, pick, identity, or `integrations/freeroute.py`.
 JEPA stays proxy. Unarmed fail-closed. Validated SQL is ABSTAIN, never
 CERTIFIED. Fixture coverage 40.00% (2/5, WRONG=0) vs frozen DMS #180
 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 -- baseline not replaced.
-G4 litellm/brain/suggest not expanded (P24.1). Not #211/#212 COMPLETE.
+G4 litellm/brain/suggest not expanded (P24.1). GET `/crew/insights` stamps
+`cot_climb` as INCOMPLETE (baseline cited, not replaced). Not #211/#212 COMPLETE.
 Off freeze #4/#41-#44. Local focused tests only. Not a GitHub CI claim.
 
 ## CORTEX-OV-FREEROUTE follow-up: one FreeRoute layer — 2026-09-18
