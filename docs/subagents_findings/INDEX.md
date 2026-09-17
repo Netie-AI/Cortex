@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-17 | cortex-cot-climb | crew, cot, climb, freeroute, gencfsm, #212 | CoT/route/improve consumes FreeRoute. generate=true delegates to cot_climb. #180 57.69/38.46 cited not replaced. | `2026-09-17_cortex-cot-climb.md` |
 | 2026-09-18 | freeroute-one-layer | freeroute, openvault, arming, credential, measured-route, served-model, a-0009, #211 | One sync core for engine + pack + Crew. Armed only by OpenVault status (unsealed, pooled keys, spendable hop). Validity scored on the model served, not the one requested. Cortex key never lent to an HTTP caller. | `2026-09-18_freeroute-one-layer.md` |
 | 2026-09-13 | cortex-ov-freeroute | crew, freeroute, openvault, insights, generative-ask, identity, #211 | FreeRoute is the model path for Insights generate / prompt-think-act. Unarmed refuse. Measured pick. Identity `cortex:crew`. | `2026-09-13_cortex-ov-freeroute.md` |
 | 2026-09-07 | crew-insights | crew, insights, ontology, where, importance, certify, refuse, #196 | Intent then ontology where+importance then constrained DMS ask. CERTIFIED envelopes carry include/exclude/unsure. | `2026-09-07_crew-insights.md` |

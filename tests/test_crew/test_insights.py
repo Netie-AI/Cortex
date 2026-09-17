@@ -331,8 +331,9 @@ async def test_generate_armed_sql_abstain_no_numbers(monkeypatch) -> None:
 
     async def fake_complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
         _ = messages, kwargs
-        assert purpose == "generative_ask"
-        assert "inventory" in (prompt or "")
+        assert purpose in {"think", "generative_ask"}
+        if purpose == "generative_ask":
+            assert "inventory" in (prompt or "")
         return {
             "ok": True,
             "text": "there are 999 skus\n```sql\nSELECT COUNT(DISTINCT sku) AS sku_count FROM inventory\n```",

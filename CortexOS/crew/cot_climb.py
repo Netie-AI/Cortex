@@ -59,9 +59,9 @@ def public_map() -> dict[str, Any]:
         "ok": True,
         "slice": SLICE,
         "issue": 212,
-        "execute": "CortexOS.crew.cot_climb.climb (consumes FreeRoute complete)",
+        "execute": "POST /crew/insights {generate:true} -> cot_climb.climb",
         "insights_wire": (
-            "not attached to insights.generative_ask; PR #215 owns that file"
+            "generate=true runs CoT/route/improve via climb; FreeRoute G1-G6 stay on #215 @ 50267289"
         ),
         "complete": False,
         "status": "INCOMPLETE",
@@ -79,6 +79,34 @@ def public_map() -> dict[str, Any]:
         "issue_211_complete": False,
         "issue_212_complete": False,
     }
+
+
+def _ranked_columns(ranking: Mapping[str, Any]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for row in ranking.get("locations") or []:
+        where = row.get("where") or {}
+        table = str(where.get("table") or row.get("id") or "").lower()
+        if not table:
+            continue
+        cols = [str(c) for c in (where.get("columns") or []) if str(c).strip()]
+        if cols:
+            seen = out.setdefault(table, [])
+            seen.extend(c for c in cols if c not in seen)
+    return out
+
+
+async def _call_runner(
+    runner: Any,
+    *,
+    purpose: str,
+    prompt: str,
+    bearer: str | None,
+) -> dict[str, Any]:
+    try:
+        out = await runner(None, purpose=purpose, prompt=prompt, bearer=bearer)
+    except TypeError:
+        out = await runner(None, purpose=purpose, prompt=prompt)
+    return out if isinstance(out, dict) else {}
 
 
 def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
@@ -182,6 +210,9 @@ def _envelope(
     refuse_reason: str = "",
     tables: list[str] | None = None,
     note: str = "",
+    stamp: Any = None,
+    check: str = "",
+    validator: str = "",
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "ok": ok,
@@ -192,6 +223,9 @@ def _envelope(
         "values": [],
         "identity": identity,
         "route": route,
+        "stamp": stamp if isinstance(stamp, dict) else None,
+        "check": check,
+        "validator": validator,
         "refuse_reason": refuse_reason,
         "arming": dict(arm),
         "text": "",
@@ -263,6 +297,7 @@ async def climb(
     ranking: Mapping[str, Any],
     *,
     complete: Any | None = None,
+    bearer: str | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
@@ -310,11 +345,12 @@ async def climb(
             ),
         )
     runner = complete or fr.complete
+    columns = _ranked_columns(ranking)
     steps: list[dict[str, Any]] = []
     think_text = ""
-    think = await runner(None, purpose="think", prompt=_think_prompt(text, ranking))
-    if not isinstance(think, dict):
-        think = {}
+    think = await _call_runner(
+        runner, purpose="think", prompt=_think_prompt(text, ranking), bearer=bearer
+    )
     if not think.get("ok"):
         return _envelope(
             ok=False,
@@ -322,6 +358,7 @@ async def climb(
             arm=arm,
             identity=think.get("identity") or identity,
             route=think.get("route"),
+            stamp=think.get("stamp"),
             climb=_climb_meta(final="THINK_REFUSE", g1=g1, steps=steps),
             refuse_reason=str(think.get("refused") or "FreeRoute think refused"),
         )
@@ -344,13 +381,28 @@ async def climb(
     goal_vec = embed_goal(goal_blob)
 
     for step in range(1, HORIZON + 1):
-        gen = await runner(
-            None,
-            purpose="generative_ask",
-            prompt=_sql_prompt(text, ranking, critique),
-        )
-        if not isinstance(gen, dict):
-            gen = {}
+        stamps: list[Any] = []
+        try:
+            from CortexOS.integrations import freeroute as core
+
+            journal = core.journal()
+        except Exception:  # noqa: BLE001 - journal is optional on this consumer
+            journal = None
+        if journal is not None:
+            with journal as stamps:
+                gen = await _call_runner(
+                    runner,
+                    purpose="generative_ask",
+                    prompt=_sql_prompt(text, ranking, critique),
+                    bearer=bearer,
+                )
+        else:
+            gen = await _call_runner(
+                runner,
+                purpose="generative_ask",
+                prompt=_sql_prompt(text, ranking, critique),
+                bearer=bearer,
+            )
         if not gen.get("ok"):
             return _envelope(
                 ok=False,
@@ -358,6 +410,7 @@ async def climb(
                 arm=arm,
                 identity=gen.get("identity") or identity,
                 route=gen.get("route"),
+                stamp=gen.get("stamp"),
                 climb=_climb_meta(
                     final="GENERATE_REFUSE",
                     g1=g1,
@@ -367,7 +420,13 @@ async def climb(
             )
 
         sql = fr.extract_sql(str(gen.get("text") or ""))
-        checked = fr.validate_sql(sql or "", allowed)
+        checked = fr.validate_sql(sql or "", allowed, columns=columns)
+        try:
+            from CortexOS.integrations import freeroute as core
+
+            core.note_verdict(stamps, "static_valid" if checked.get("ok") else "static_fail")
+        except Exception:  # noqa: BLE001 - scoring miss is not invent-green SQL
+            pass
         predicates_pass = bool(checked.get("ok"))
         state_blob = think_text + " " + str(checked.get("sql") or sql or "")
         collapse = collapse_score(embed_goal(state_blob), goal_vec)
@@ -402,9 +461,11 @@ async def climb(
                 arm=arm,
                 identity=gen.get("identity") or identity,
                 route=gen.get("route"),
+                stamp=gen.get("stamp"),
                 sql=str(checked.get("sql") or ""),
                 valid=True,
                 tables=list(checked.get("tables") or []),
+                check=str(checked.get("check") or ""),
                 note=(
                     "Validated SQL via FreeRoute CoT/route/improve. "
                     "Numbers not certified (not executed). not COMPLETE."

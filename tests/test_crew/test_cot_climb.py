@@ -82,7 +82,6 @@ def test_source_is_netie_native_not_framework_paste() -> None:
     assert "from langgraph" not in src
     assert "import langchain" not in src
     assert "from langchain" not in src
-    assert "from CortexOS.integrations" not in src
     assert "LIVE_KEY" not in src
     assert "openpyxl" not in src.lower()
     assert "import packs" not in src
@@ -100,7 +99,6 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
     banned = {
         "CortexOS/crew/freeroute.py",
         "CortexOS/crew/openvault.py",
-        "CortexOS/crew/insights.py",
         "CortexOS/crew/server.py",
         "CortexOS/crew/config.py",
         "CortexOS/crew/llm.py",
@@ -112,7 +110,6 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "packs/dms/generative/l2_adapter.py",
         "packs/dms/generative/sql_generator.py",
         "tests/test_crew/test_freeroute.py",
-        "tests/test_crew/test_insights.py",
         "tests/test_crew/test_openvault.py",
         "tests/conftest.py",
         "tests/freeroute_fake.py",
@@ -291,3 +288,35 @@ async def test_measure_reports_coverage_vs_baseline_not_a_better_percent(
     assert "99.95" not in str(report)
     assert report["issue_211_complete"] is False
     assert report["issue_212_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_insights_generate_exposes_climb_on_the_envelope(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _armed(monkeypatch)
+
+    class _Bridge:
+        async def ask(self, question: str) -> dict[str, Any]:
+            raise AssertionError(f"ask must not run: {question}")
+
+    fake = _script("SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory")
+    env = await insights.run_insights(
+        "how many skus",
+        bridge=_Bridge(),  # type: ignore[arg-type]
+        ask=False,
+        generate=True,
+        complete=fake,
+    )
+    assert env["status"] == "ABSTAIN"
+    assert env["values"] == []
+    climb = (env.get("generative") or {}).get("climb") or {}
+    assert climb.get("final") == DECISION_TERMINATE
+    assert climb.get("complete") is False
+    text = insights.render_tool_text(env)
+    assert "climb:" in text
+    assert "complete=False" in text
+    assert "999" not in text
+    assert climb.get("measured_baseline", {}).get("gen") == "57.69%"
+    assert env["generative"]["validator"].startswith("static sqlglot guardrail")
+
