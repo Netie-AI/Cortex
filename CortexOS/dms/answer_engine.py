@@ -1708,6 +1708,7 @@ def answer(
     skill_score: float | None = None
     planned_tables: tuple[str, ...] = ()
     l2_retrieved: tuple[str, ...] = ()
+    l2_route_call = ""
 
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
@@ -1840,6 +1841,7 @@ def answer(
             badge = "abstain"
             assumptions = l2_out.assumptions
             l2_retrieved = tuple(l2_out.retrieved_tables)
+            l2_route_call = l2_out.route_call
             from CortexOS.dms.l2_plausibility import sql_table_names
 
             used = tuple(sorted(sql_table_names(sql)))
@@ -1854,6 +1856,9 @@ def answer(
                     return _done(refused)
             doc = _space_doc_rag()
             if doc is not None:
+                if l2_out is not None and l2_out.reason:
+                    # The document still answers (R-0005); why L2 did not is visible (R-0011).
+                    doc["assumptions"] = f"L2 generation not used: {l2_out.reason}"
                 return _done(doc)
             if l2_out is not None and not l2_out.sql:
                 return _abs(l2_out.reason)
@@ -1954,7 +1959,7 @@ def answer(
         return _abs(f"internal SQL failed guardrail {guard_result.violations}")
 
     if layer == "generated":
-        from CortexOS.dms.l2_generation import resolve_l2_generation
+        from CortexOS.dms.l2_generation import note_l2_plausibility, resolve_l2_generation
         from CortexOS.dms.l2_plausibility import (
             assess_plausibility,
             leftover_literals_via_port,
@@ -1968,6 +1973,8 @@ def answer(
             retrieved_tables=l2_retrieved,
             leftover_literals=leftover_literals_via_port(used_sql),
         )
+        # Credit the verdict to the FreeRoute call by id: safe_sql may differ from its text.
+        note_l2_plausibility(l2_route_call, ok=trip.ok)
         if not trip.ok:
             return _abs(trip.reason)
         badge = "L2_VALIDATED"

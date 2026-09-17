@@ -118,3 +118,38 @@ def test_shadow_l2_exception_does_not_change_envelope(monkeypatch, tmp_path: Pat
     rec = json.loads((tmp_path / "l2_shadow.jsonl").read_text(encoding="utf-8"))
     assert rec["l2_refusal_type"] == "exception:RuntimeError"
     assert rec["agree"] is False
+
+
+def test_shadow_through_real_freeroute_leaves_envelope_identical(
+    monkeypatch, tmp_path: Path, armed_openvault
+):
+    """#211 follow-up: shadow runs the real DMS port on FreeRoute; rows carry shadow=1."""
+    import sqlite3
+
+    from CortexOS.integrations import freeroute
+    from packs.dms.generative.l2_adapter import DmsL2Generation
+
+    _freeze(monkeypatch)
+    monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
+    monkeypatch.delenv("DMS_L2_SHADOW", raising=False)
+    port = DmsL2Generation()
+    monkeypatch.setattr(l2_generation, "resolve_l2_generation", lambda: port)
+    armed_openvault.default_content = "SELECT sku FROM inventory LIMIT 5"
+    off = _ask()
+    assert armed_openvault.chat_calls == []
+
+    shadow_path = tmp_path / "l2_shadow.jsonl"
+    monkeypatch.setenv("DMS_L2_SHADOW", "1")
+    monkeypatch.setenv("DMS_L2_SHADOW_PATH", str(shadow_path))
+    on = _ask()
+
+    assert _dump(on) == _dump(off)
+    assert armed_openvault.chat_calls, "shadow never reached FreeRoute"
+    rec = json.loads(shadow_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert rec["l2_sql"]
+    con = sqlite3.connect(str(freeroute.store_path()))
+    try:
+        flags = {row[0] for row in con.execute("select shadow from routes")}
+    finally:
+        con.close()
+    assert flags == {1}
