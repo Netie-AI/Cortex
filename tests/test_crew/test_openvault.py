@@ -140,11 +140,19 @@ def test_disable_seeded_cortex_primary(monkeypatch) -> None:
     assert patched[0]["enabled"] is False
 
 
-def test_resolve_ov_model_prefers_grok_high_when_cursor_key(monkeypatch) -> None:
+def test_resolve_ov_model_auto_stays_auto_even_with_a_cursor_key(monkeypatch) -> None:
+    """A process-env key must not steer FreeRoute (#211 follow-up, G2/G3 class).
+
+    Before, CURSOR_API_KEY in the environment turned "auto" into grok-4.6, so an
+    env key picked the model while the envelope reported a measured route. Env
+    keys do not arm FreeRoute, so they do not choose for it either. An operator
+    pin still wins, and grok-fast is still rewritten to high.
+    """
     monkeypatch.setenv("CURSOR_API_KEY", "sk-test")
     monkeypatch.delenv("CREW_OPENVAULT_MODEL", raising=False)
     monkeypatch.delenv("CREW_CURSOR_MODEL", raising=False)
-    assert openvault.resolve_ov_model("openvault/auto") == "grok-4.6"
+    assert openvault.resolve_ov_model("openvault/auto") == "auto"
+    assert openvault.resolve_ov_model("auto") == "auto"
     assert openvault.resolve_ov_model("grok-4.6-fast") == "grok-4.6"
     monkeypatch.setenv("CREW_OPENVAULT_MODEL", "groq/llama")
     assert openvault.resolve_ov_model("auto") == "groq/llama"

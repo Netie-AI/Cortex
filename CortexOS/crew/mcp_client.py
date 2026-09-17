@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from CortexOS.integrations import freeroute as freeroute_core
+
 PROTOCOL_VERSION = "2025-06-18"
 STREAM_LIMIT = 8 * 1024 * 1024  # Windows-MCP snapshots can be megabytes
 START_TIMEOUT_S = 45
@@ -181,10 +183,11 @@ class MCPClient:
             return
         self.status = "starting"
         try:
+            # A tool server never inherits the Cortex OpenVault key (A-0009).
             self._proc = await asyncio.create_subprocess_exec(
                 *self.spec.command,
                 cwd=self.spec.cwd or None,
-                env={**os.environ, **self.spec.env},
+                env=freeroute_core.child_env({**os.environ, **self.spec.env}),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

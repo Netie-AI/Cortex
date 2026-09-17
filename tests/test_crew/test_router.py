@@ -125,6 +125,8 @@ async def test_per_turn_miss_is_a_visible_refuse(rig) -> None:
 
 
 def _live_vault(monkeypatch: pytest.MonkeyPatch, rows: dict[str, dict]) -> None:
+    """Vault rows plus an armed OpenVault. Arming is the scripted status now,
+    not healthz: a reachable vault that is sealed or key-less arms nothing."""
     monkeypatch.setenv("CREW_OPENVAULT", "1")
     monkeypatch.setattr(
         openvault, "healthz", lambda timeout=1.5: {"ok": True, "url": "http://127.0.0.1:5000"}
@@ -134,7 +136,7 @@ def _live_vault(monkeypatch: pytest.MonkeyPatch, rows: dict[str, dict]) -> None:
 
 
 def test_vault_armed_source_routes_via_freeroute_without_env_secret(
-    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch, armed_openvault
 ) -> None:
     _live_vault(
         monkeypatch,
@@ -191,7 +193,7 @@ def test_vault_disarmed_source_refuses_without_fallback(
 
 
 def test_env_plus_vault_prefers_freeroute(
-    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch, armed_openvault
 ) -> None:
     clean_env.setenv("GROQ_API_KEY", "x")
     _live_vault(

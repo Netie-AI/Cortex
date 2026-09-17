@@ -431,3 +431,103 @@ async def test_generate_plus_ask_attaches_sql_to_certified(monkeypatch) -> None:
     assert env["generative"]["sql"]
     assert any(row.get("id") == "generative_sql" for row in env["validation"]["unsure"])
     assert bridge.asked
+
+
+# -- #211 follow-up G6: the generate validator is the engine guardrail, not a regex --
+
+
+def _armed(monkeypatch) -> None:
+    from CortexOS.crew import freeroute as fr
+
+    monkeypatch.setattr(
+        fr,
+        "arming",
+        lambda: {"ok": True, "armed": True, "detail": "vault-armed", "live_5000_ci": False},
+    )
+
+
+def _replies(text: str):
+    async def fake_complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, purpose, prompt, kwargs
+        return {
+            "ok": True,
+            "text": text,
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "groq", "model": "qwen/qwen3.6-27b"},
+            "stamp": {
+                "line": "FreeRoute crew-insights-sql: asked qwen/qwen3.6-27b, served "
+                "openai/gpt-oss-120b (live hops x OpenVault catalogue)",
+                "call_id": "",
+                "served": "openai/gpt-oss-120b",
+            },
+        }
+
+    return fake_complete
+
+
+async def _generate(monkeypatch, text: str) -> dict:
+    _armed(monkeypatch)
+    bridge = ScriptedBridge(_certified_engine())
+    env = await insights.run_insights(
+        "how many skus", bridge=bridge, ask=False, generate=True, complete=_replies(text)
+    )
+    assert bridge.asked == []
+    return env
+
+
+@pytest.mark.asyncio
+async def test_generate_refuses_a_comma_join_onto_an_off_ontology_table(monkeypatch) -> None:
+    """The old regex validator passed 'FROM inventory, payroll' as one table."""
+    env = await _generate(monkeypatch, "SELECT i.sku FROM inventory, payroll")
+    assert env["status"] == "REFUSE"
+    assert env["values"] == []
+    assert "payroll" in str(env["generative"]["refuse_reason"])
+
+
+@pytest.mark.asyncio
+async def test_generate_refuses_a_select_with_no_table(monkeypatch) -> None:
+    env = await _generate(monkeypatch, "SELECT 42 AS revenue")
+    assert env["status"] == "REFUSE"
+    assert env["values"] == []
+    assert "42" not in (env.get("answer") or "")
+
+
+@pytest.mark.asyncio
+async def test_generate_names_the_check_that_ran_and_the_served_model(monkeypatch) -> None:
+    env = await _generate(
+        monkeypatch, "```sql\nSELECT COUNT(DISTINCT sku) AS sku_count FROM inventory\n```"
+    )
+    assert env["status"] == "ABSTAIN"
+    assert env["values"] == []
+    gen = env["generative"]
+    assert gen["valid"] is True
+    assert gen["validator"].startswith("static sqlglot guardrail")
+    assert gen["check"]
+    text = insights.render_tool_text(env)
+    assert "asked qwen/qwen3.6-27b, served openai/gpt-oss-120b" in text
+    assert "static sqlglot guardrail" in text
+    unsure = " ".join(row.get("why") or "" for row in env["validation"]["unsure"])
+    assert "not executed" in unsure
+
+
+@pytest.mark.asyncio
+async def test_generate_refuses_before_calling_the_model_when_nothing_is_ranked(
+    monkeypatch,
+) -> None:
+    _armed(monkeypatch)
+    calls: list[int] = []
+
+    async def fake_complete(messages=None, **kwargs):  # noqa: ANN001
+        _ = messages, kwargs
+        calls.append(1)
+        return {"ok": True, "text": "SELECT sku FROM inventory"}
+
+    bridge = ScriptedBridge(_certified_engine())
+    ranking = {"ok": True, "locations": [], "metrics": [], "certified": [], "joins": []}
+    monkeypatch.setattr(insights, "retrieve_ontology", lambda *a, **k: ranking)
+    env = await insights.run_insights(
+        "how many skus", bridge=bridge, ask=False, generate=True, complete=fake_complete
+    )
+    assert env["status"] == "REFUSE"
+    assert calls == []
+    assert "ranked ontology tables" in str(env["generative"]["refuse_reason"])

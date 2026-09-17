@@ -951,17 +951,45 @@ def _sql_schema_prompt(intent: str, ranking: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+VALIDATOR = "static sqlglot guardrail: not EXPLAINed, not manifest-enforced, not executed"
+
+
+def _generative_unsure_why(gen: dict[str, Any] | None = None) -> str:
+    check = str((gen or {}).get("check") or "table scope")
+    return f"FreeRoute SQL passed the {VALIDATOR} ({check}); not executed in crew"
+
+
+def _ranked_columns(ranking: dict[str, Any]) -> dict[str, list[str]]:
+    """table -> columns the ranking exposed. Missing columns mean table-level only."""
+    out: dict[str, list[str]] = {}
+    for row in ranking.get("locations") or []:
+        where = row.get("where") or {}
+        table = str(where.get("table") or row.get("id") or "").lower()
+        if not table:
+            continue
+        cols = [str(c) for c in (where.get("columns") or []) if str(c).strip()]
+        if cols:
+            out.setdefault(table, []).extend(c for c in cols if c not in out.get(table, []))
+    return out
+
+
 async def generative_ask(
     intent: str,
     ranking: dict[str, Any],
     *,
     complete: Any | None = None,
+    bearer: str | None = None,
 ) -> dict[str, Any]:
-    """NL then ontology then FreeRoute SQL then validate. No numbers. No DuckDB."""
+    """NL then ontology then FreeRoute SQL then static validate. No numbers. No DuckDB.
+
+    ``bearer`` is the HTTP caller's own OpenVault key (or ``""`` for the
+    loopback tier); ``None`` spends Cortex's credential for in-process callers.
+    """
     from CortexOS.crew import freeroute as fr
+    from CortexOS.integrations import freeroute as core
 
     allowed = _ranked_tables(ranking)
-    arm = fr.arming()
+    arm = await fr.run_core(fr.arming)
     if not arm.get("armed"):
         return {
             "ok": False,
@@ -979,45 +1007,51 @@ async def generative_ask(
             ),
             "arming": arm,
         }
+
+    def refused(reason: str, result: dict[str, Any] | None = None) -> dict[str, Any]:
+        got = result or {}
+        stamp = got.get("stamp")
+        return {
+            "ok": False,
+            "status": "REFUSE",
+            "phase": "generate",
+            "sql": None,
+            "valid": False,
+            "values": [],
+            "identity": got.get("identity") or fr.identity_for("generative_ask"),
+            "route": got.get("route"),
+            "stamp": stamp if isinstance(stamp, dict) else None,
+            "refuse_reason": reason,
+            "arming": arm,
+            "text": "",
+        }
+
+    if not allowed:
+        return refused("no ranked ontology tables; cannot prove the SQL stays in scope")
+    columns = _ranked_columns(ranking)
     prompt = _sql_schema_prompt(intent, ranking)
     runner = complete or fr.complete
-    result = await runner(
-        None,
-        purpose="generative_ask",
-        prompt=prompt,
-    )
+    # The journal collects the core stamp written on the executor thread, so
+    # the validator verdict credits the served model. An injected runner that
+    # writes no stamp leaves it empty and note_verdict is a no-op.
+    with core.journal() as stamps:
+        result = await runner(
+            None,
+            purpose="generative_ask",
+            prompt=prompt,
+            bearer=bearer,
+        )
     if not isinstance(result, dict):
         result = {}
     if not result.get("ok"):
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": result.get("identity") or fr.identity_for("generative_ask"),
-            "route": result.get("route"),
-            "refuse_reason": str(result.get("refused") or "FreeRoute complete refused"),
-            "arming": arm,
-            "text": "",
-        }
+        return refused(str(result.get("refused") or "FreeRoute complete refused"), result)
     sql = fr.extract_sql(str(result.get("text") or ""))
-    checked = fr.validate_sql(sql or "", allowed)
+    checked = fr.validate_sql(sql or "", allowed, columns=columns)
+    core.note_verdict(stamps, "static_valid" if checked.get("ok") else "static_fail")
     if not checked.get("ok"):
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": result.get("identity"),
-            "route": result.get("route"),
-            "refuse_reason": str(checked.get("reason") or "sql failed ontology validate"),
-            "arming": arm,
-            "text": "",
-        }
+        return refused(str(checked.get("reason") or "sql failed ontology validate"), result)
+    check = str(checked.get("check") or "")
+    stamp = result.get("stamp")
     return {
         "ok": True,
         "status": "ABSTAIN",
@@ -1027,10 +1061,15 @@ async def generative_ask(
         "values": [],
         "identity": result.get("identity"),
         "route": result.get("route"),
+        "stamp": stamp if isinstance(stamp, dict) else None,
         "tables": checked.get("tables") or [],
+        "check": check,
+        "validator": VALIDATOR,
         "arming": arm,
         "text": "",
-        "note": "Validated SQL via FreeRoute. Numbers not certified (not executed).",
+        "note": (
+            f"Validated SQL via FreeRoute ({check}). Numbers not certified: {VALIDATOR}."
+        ),
     }
 
 
@@ -1043,6 +1082,9 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
         "valid": bool(gen.get("valid")),
         "identity": gen.get("identity"),
         "route": gen.get("route"),
+        "stamp": gen.get("stamp"),
+        "check": gen.get("check") or "",
+        "validator": gen.get("validator") or "",
         "refuse_reason": gen.get("refuse_reason") or "",
         "values": [],
         "note": gen.get("note") or "",
@@ -1055,7 +1097,7 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
             {
                 "id": "generative_sql",
                 "kind": "sql",
-                "why": "FreeRoute SQL validated against ontology; not executed in crew",
+                "why": _generative_unsure_why(gen),
             }
         )
     elif gen.get("refuse_reason"):
@@ -1078,8 +1120,13 @@ async def run_insights(
     complete: Any | None = None,
     shell_public: dict[str, Any] | None = None,
     pack_dir: Path | str | None = None,
+    bearer: str | None = None,
 ) -> dict[str, Any]:
-    """Ontology first. Optional DMS ask and/or FreeRoute generative-ask."""
+    """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
+
+    ``bearer`` only matters with ``generate``: an HTTP caller's own OpenVault
+    key (or ``""`` for the loopback tier); in-process callers leave ``None``.
+    """
     text = (intent or "").strip()
     if not text:
         empty = {
@@ -1110,7 +1157,7 @@ async def run_insights(
                 reason="no ontology path or metric for intent",
                 shell_public=shell_public,
             )
-        gen = await generative_ask(text, ranking, complete=complete)
+        gen = await generative_ask(text, ranking, complete=complete, bearer=bearer)
         if not gen.get("ok"):
             return _attach_generative(
                 _refuse(
@@ -1132,7 +1179,7 @@ async def run_insights(
                     {
                         "id": "generative_sql",
                         "kind": "sql",
-                        "why": "FreeRoute SQL validated against ontology; not executed in crew",
+                        "why": _generative_unsure_why(gen),
                     }
                 ],
             )
@@ -1143,7 +1190,7 @@ async def run_insights(
                     "phase": "generate",
                     "intent": text,
                     "answer": gen.get("note")
-                    or "Validated SQL via FreeRoute. Numbers not certified (not executed).",
+                    or f"Validated SQL via FreeRoute. Numbers not certified: {VALIDATOR}.",
                     "badge": "abstain",
                     "audit_id": None,
                     "values": [],
@@ -1322,8 +1369,13 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
     gen = envelope.get("generative") or {}
     gen_line = ""
     if gen:
+        # The stamp line says what was asked and what OpenVault served; the
+        # identity label is only attribution and stands in when nothing was sent.
+        stamp = gen.get("stamp") if isinstance(gen.get("stamp"), dict) else {}
+        route = str(stamp.get("line") or gen.get("identity") or "none")
+        validator = f"\nvalidator: {gen.get('validator')}" if gen.get("validator") else ""
         gen_line = (
-            f"\nfreeroute: {gen.get('identity') or 'none'}\n"
+            f"\nfreeroute: {route}{validator}\n"
             f"sql_valid: {gen.get('valid')}\n"
             f"sql: {(gen.get('sql') or gen.get('refuse_reason') or '')[:240]}"
         )

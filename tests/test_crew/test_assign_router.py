@@ -139,7 +139,7 @@ async def test_crew_destination_spawns_with_mocks_and_no_second_vault(rig) -> No
 
 @pytest.mark.asyncio
 async def test_claude_code_declares_lane_and_refuses_live_ssh(
-    rig, monkeypatch: pytest.MonkeyPatch
+    rig, monkeypatch: pytest.MonkeyPatch, armed_openvault
 ) -> None:
     _live_vault(
         monkeypatch,
@@ -165,7 +165,7 @@ async def test_claude_code_declares_lane_and_refuses_live_ssh(
 
 @pytest.mark.asyncio
 async def test_cursor_cloud_handoff_and_human_stop_execute(
-    rig, monkeypatch: pytest.MonkeyPatch
+    rig, monkeypatch: pytest.MonkeyPatch, armed_openvault
 ) -> None:
     _live_vault(
         monkeypatch,

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+
 def _freeroute_fake():
     """Load tests/freeroute_fake.py by path.
 
