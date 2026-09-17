@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-COT-CLIMB consume FreeRoute think-path — 2026-09-17
+
+Cortex #212. Insights `generate=true` runs CoT/route/improve through
+`CortexOS.crew.cot_climb` (think then SQL then `gen_cfsm.route_step` then
+improve). Consumes the #215 FreeRoute adapter (`complete`, `validate_sql`);
+does not rewrite arming, pick, identity, or `integrations/freeroute.py`.
+JEPA stays proxy. Unarmed fail-closed. Validated SQL is ABSTAIN, never
+CERTIFIED. Fixture coverage 40.00% (2/5, WRONG=0) vs frozen DMS #180
+gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 -- baseline not replaced.
+G4 litellm/brain/suggest not expanded (P24.1). GET `/crew/insights` stamps
+`cot_climb` as INCOMPLETE (baseline cited, not replaced). Not #211/#212 COMPLETE.
+Off freeze #4/#41-#44. Local focused tests only. Not a GitHub CI claim.
+
 ## CORTEX-OV-FREEROUTE follow-up: one FreeRoute layer — 2026-09-18
 
 Cortex #211 reopened on an independent Verify NO at `ceb7fc2`. `CortexOS/

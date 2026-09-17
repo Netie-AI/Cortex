@@ -221,6 +221,12 @@ def test_http_ontology_then_refuse_offline(client) -> None:
     assert "FreeRoute" in law["freeroute"] or "freeroute" in law["freeroute"]
     assert law["measured_baseline"]["gen"] == "57.69%"
     assert law["measured_baseline"]["wrong"] == 0
+    assert "cot_climb" in law["generate"]
+    assert law["cot_climb"]["complete"] is False
+    assert law["cot_climb"]["status"] == "INCOMPLETE"
+    assert law["cot_climb"]["issue_212_complete"] is False
+    assert law["cot_climb"]["measured_baseline"]["gen"] == "57.69%"
+    assert law["cot_climb"]["replaces_baseline"] is False
     onto = client.http.get("/crew/insights/ontology", params={"q": "how many skus"}).json()
     assert onto["phase"] == "ontology"
     assert onto["ontology"]["locations"][0]["where"]["table"]
@@ -245,6 +251,9 @@ def test_http_ontology_then_refuse_offline(client) -> None:
     assert gen["status"] == "REFUSE"
     assert gen["values"] == []
     assert gen["generative"]["ok"] is False
+    climb = gen["generative"].get("climb") or {}
+    assert climb.get("complete") is False
+    assert climb.get("final") == "UNARMED"
 
 
 def test_http_certified_with_scripted_bridge(client, monkeypatch) -> None:
@@ -331,8 +340,9 @@ async def test_generate_armed_sql_abstain_no_numbers(monkeypatch) -> None:
 
     async def fake_complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
         _ = messages, kwargs
-        assert purpose == "generative_ask"
-        assert "inventory" in (prompt or "")
+        assert purpose in {"think", "generative_ask"}
+        if purpose == "generative_ask":
+            assert "inventory" in (prompt or "")
         return {
             "ok": True,
             "text": "there are 999 skus\n```sql\nSELECT COUNT(DISTINCT sku) AS sku_count FROM inventory\n```",

@@ -111,6 +111,24 @@ _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
+def _cot_public_map() -> dict[str, Any]:
+    """GET stamp for #212. Consumes cot_climb.public_map; never claims COMPLETE."""
+    from CortexOS.crew import cot_climb
+
+    body = cot_climb.public_map()
+    return {
+        "execute": body["execute"],
+        "complete": False,
+        "status": "INCOMPLETE",
+        "measured_baseline": body["measured_baseline"],
+        "replaces_baseline": False,
+        "invented_better": False,
+        "issue_211_complete": False,
+        "issue_212_complete": False,
+        "jepa": body["jepa"],
+    }
+
+
 def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
     """GET map. No ask. No numbers. Control may display."""
     return {
@@ -123,13 +141,18 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         "scale": "1GB to 10TB is a design target only; not COMPLETE",
         "vault": "OpenVault-armed Crew engine bridge only. No second vault.",
         "freeroute": "GET /crew/freeroute ; POST /crew/freeroute purpose=prompt|think|act",
-        "generate": "POST /crew/insights {generate:true} NL then ontology then SQL then validate",
+        "generate": (
+            "POST /crew/insights {generate:true} CoT/route/improve via cot_climb "
+            "then FreeRoute validate; complete=False"
+        ),
+        "cot_climb": _cot_public_map(),
         "identity": "GET /crew/identity (keys stay in OpenVault custody)",
         "export_runtime": export_runtime_hint(shell_public),
         "agents": (
             "Retrieve ontology first: locations are where to read; ranked "
             "metrics are which data is more important. Then ask. Generative-ask "
             "needs a model: OpenVault FreeRoute only, fail-closed if unarmed. "
+            "generate=true runs CoT/route/improve via cot_climb; not COMPLETE. "
             "Do not skip to SQL or export."
         ),
         "measured_baseline": {
@@ -980,97 +1003,25 @@ async def generative_ask(
     complete: Any | None = None,
     bearer: str | None = None,
 ) -> dict[str, Any]:
-    """NL then ontology then FreeRoute SQL then static validate. No numbers. No DuckDB.
+    """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
     ``bearer`` is the HTTP caller's own OpenVault key (or ``""`` for the
     loopback tier); ``None`` spends Cortex's credential for in-process callers.
+    Arming/pick/identity stay on the #215 FreeRoute adapter; this consumes
+    ``complete`` and ``validate_sql`` only.
     """
-    from CortexOS.crew import freeroute as fr
-    from CortexOS.integrations import freeroute as core
+    from CortexOS.crew import cot_climb
 
-    allowed = _ranked_tables(ranking)
-    arm = await fr.run_core(fr.arming)
-    if not arm.get("armed"):
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": fr.identity_for("generative_ask"),
-            "route": None,
-            "refuse_reason": (
-                "OpenVault FreeRoute unarmed: "
-                + str(arm.get("detail") or "unreachable")
-                + " (no invent-green keys)"
-            ),
-            "arming": arm,
-        }
-
-    def refused(reason: str, result: dict[str, Any] | None = None) -> dict[str, Any]:
-        got = result or {}
-        stamp = got.get("stamp")
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": got.get("identity") or fr.identity_for("generative_ask"),
-            "route": got.get("route"),
-            "stamp": stamp if isinstance(stamp, dict) else None,
-            "refuse_reason": reason,
-            "arming": arm,
-            "text": "",
-        }
-
-    if not allowed:
-        return refused("no ranked ontology tables; cannot prove the SQL stays in scope")
-    columns = _ranked_columns(ranking)
-    prompt = _sql_schema_prompt(intent, ranking)
-    runner = complete or fr.complete
-    # The journal collects the core stamp written on the executor thread, so
-    # the validator verdict credits the served model. An injected runner that
-    # writes no stamp leaves it empty and note_verdict is a no-op.
-    with core.journal() as stamps:
-        result = await runner(
-            None,
-            purpose="generative_ask",
-            prompt=prompt,
-            bearer=bearer,
-        )
-    if not isinstance(result, dict):
-        result = {}
-    if not result.get("ok"):
-        return refused(str(result.get("refused") or "FreeRoute complete refused"), result)
-    sql = fr.extract_sql(str(result.get("text") or ""))
-    checked = fr.validate_sql(sql or "", allowed, columns=columns)
-    core.note_verdict(stamps, "static_valid" if checked.get("ok") else "static_fail")
-    if not checked.get("ok"):
-        return refused(str(checked.get("reason") or "sql failed ontology validate"), result)
-    check = str(checked.get("check") or "")
-    stamp = result.get("stamp")
-    return {
-        "ok": True,
-        "status": "ABSTAIN",
-        "phase": "generate",
-        "sql": checked.get("sql"),
-        "valid": True,
-        "values": [],
-        "identity": result.get("identity"),
-        "route": result.get("route"),
-        "stamp": stamp if isinstance(stamp, dict) else None,
-        "tables": checked.get("tables") or [],
-        "check": check,
-        "validator": VALIDATOR,
-        "arming": arm,
-        "text": "",
-        "note": (
+    out = await cot_climb.climb(
+        intent, ranking, complete=complete, bearer=bearer
+    )
+    if out.get("ok"):
+        check = str(out.get("check") or "")
+        out["validator"] = VALIDATOR
+        out["note"] = (
             f"Validated SQL via FreeRoute ({check}). Numbers not certified: {VALIDATOR}."
-        ),
-    }
+        )
+    return out
 
 
 def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> dict[str, Any]:
@@ -1088,6 +1039,7 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
         "refuse_reason": gen.get("refuse_reason") or "",
         "values": [],
         "note": gen.get("note") or "",
+        "climb": gen.get("climb") or {},
     }
     if gen.get("sql") and envelope.get("sql_used") is None and envelope.get("status") != "CERTIFIED":
         envelope["sql_used"] = gen.get("sql")
@@ -1371,7 +1323,8 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
     if gen:
         # The stamp line says what was asked and what OpenVault served; the
         # identity label is only attribution and stands in when nothing was sent.
-        stamp = gen.get("stamp") if isinstance(gen.get("stamp"), dict) else {}
+        stamp_raw = gen.get("stamp")
+        stamp: dict[str, Any] = stamp_raw if isinstance(stamp_raw, dict) else {}
         route = str(stamp.get("line") or gen.get("identity") or "none")
         validator = f"\nvalidator: {gen.get('validator')}" if gen.get("validator") else ""
         gen_line = (
@@ -1379,6 +1332,10 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
             f"sql_valid: {gen.get('valid')}\n"
             f"sql: {(gen.get('sql') or gen.get('refuse_reason') or '')[:240]}"
         )
+        climb_raw = gen.get("climb")
+        climb: dict[str, Any] = climb_raw if isinstance(climb_raw, dict) else {}
+        if climb:
+            gen_line += f"\nclimb: {climb.get('final') or 'none'} complete=False"
     return (
         f"status: {status}\n"
         f"phase: {envelope.get('phase')}\n"

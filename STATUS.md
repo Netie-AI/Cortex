@@ -1,5 +1,13 @@
 # STATUS.md
-**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-OV-FREEROUTE follow-up**
+**Last updated:** 2026-09-17 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-COT-CLIMB #212**
+
+> **2026-09-17 (CORTEX-COT-CLIMB):** Cortex #212 on PR #216. Insights generate
+> runs CoT/route/improve via `cot_climb` consuming FreeRoute. Reuses gen_cfsm
+> G1 + dag_runner. JEPA proxy. Unarmed fail-closed. Fixture 40.00% (2/5 WRONG=0)
+> vs frozen DMS #180 57.69%/38.46% WRONG=0 @ d2f116a6 -- does not replace
+> baseline. FreeRoute G1-G3/G5/G6 stay on #215 @ `50267289`. G4 FreeRoute half
+> only (P24.1 not expanded). Not COMPLETE. Issues #211/#212 stay open. Off freeze
+> #4/#41-#44. Did not mint #42. Did not dual-own #213.
 
 > **2026-09-18 (CORTEX-OV-FREEROUTE follow-up, PR-A):** Cortex #211 reopened after
 > an independent Verify on `ceb7fc2` read NO (AC1 PARTIAL, AC2 NO, AC3 NO, AC4
