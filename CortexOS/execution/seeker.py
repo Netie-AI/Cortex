@@ -16,10 +16,11 @@ Where the work comes from when nothing arrives:
 * **gaps in the goal** — a criterion with no target or no evidence source can't
   ever be judged, so closing that gap is real work.
 
-Proposals are ranked by closeness to the goal using the same embedding the
-racing scoreboard uses, and every one is passed through the ethical gate. The
-seeker proposes; it does not send, publish, buy, deploy or approve. Anything
-external, irreversible or money-adjacent comes back `requires_confirm`.
+Proposals are ranked by closeness to the goal using G1 ``collapse_score``
+(proxy cosine on the racing scoreboard embedding) as the prior, then G2.2
+action_value. That is a collapsible JEPA *family* proxy, not a trained world
+model. The seeker proposes; it does not send, publish, buy, deploy or approve.
+Anything external, irreversible or money-adjacent comes back `requires_confirm`.
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ import hashlib
 from typing import Any
 
 from CortexOS.execution import action_value, enterprise_goal, goal_audit
-from CortexOS.memory.store import cosine
 
 MAX_PROPOSALS = 8
 
@@ -81,11 +81,13 @@ def _goal_text(goal: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def _relevance(text: str, goal_vector: list[float]) -> float:
+def _collapse(text: str, goal_vector: list[float]) -> float:
+    """G1 proxy JEPA collapse. Cosine(state, goal); not a trained world model."""
     try:
         from CortexOS.execution import scoreboard
+        from CortexOS.execution.gen_cfsm import collapse_score
 
-        return round(max(0.0, cosine(scoreboard.embed_goal(text), goal_vector)), 6)
+        return float(collapse_score(scoreboard.embed_goal(text), goal_vector))
     except Exception:
         return 0.0
 
@@ -265,10 +267,10 @@ def seek(
         verdict = enterprise_goal.gate_action(
             goal, action_kind=str(candidate["action"]), violates=candidate.get("violates")
         )
-        relevance = (
-            _relevance(f"{title} {candidate['why']}", goal_vector) if goal_vector else 0.0
-        )
-        # Cosine is the prior; observed outcomes shrink the estimate away from it.
+        blob = f"{title} {candidate['why']}"
+        raw_collapse = _collapse(blob, goal_vector) if goal_vector else 0.0
+        relevance = round(max(0.0, raw_collapse), 6)
+        # collapse_score is the G1 proxy prior; observed outcomes shrink V away from it.
         estimate = action_value.value(
             family, str(candidate["action"]), str(candidate["source"]), prior=relevance
         )
@@ -282,6 +284,9 @@ def seek(
             "requires_confirm": bool(verdict["requires_confirm"]),
             "auto_ok": bool(verdict["allowed"]),
             "relevance": relevance,
+            "collapse_score": round(raw_collapse, 6),
+            "jepa": "proxy",
+            "jepa_trained": False,
             "value": estimate["value"],
             "value_learned": estimate["learned"],
             "value_n": estimate["n"],
@@ -296,8 +301,8 @@ def seek(
             continue
         proposals.append(entry)
 
-    # Value first, cosine as tie-break — identical ordering while cold, because
-    # an unlearned value *is* the cosine prior.
+    # Value first, collapse_score as tie-break — identical ordering while cold,
+    # because an unlearned value *is* the G1 proxy collapse prior.
     proposals.sort(key=lambda p: (-p["value"], -p["relevance"], p["title"]))
     proposals = proposals[:limit]
 
@@ -337,6 +342,9 @@ def seek(
         "requires_confirm": any(p["requires_confirm"] for p in proposals),
         "autonomy_level": autonomy,
         "audit": audit,
+        "jepa": "proxy",
+        "jepa_trained": False,
+        "collapse_sot": "CortexOS.execution.gen_cfsm.collapse_score",
     }
 
 

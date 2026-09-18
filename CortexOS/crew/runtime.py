@@ -50,7 +50,8 @@ and refuses if the vault is unarmed. Do not invent keys. \
 cortex_ask is a raw engine passthrough; prefer cortex_insights for database asks. \
 For governed proactive next steps, use cortex_liberty_seek (G2.1 seeker). It proposes \
 only; it never auto-sends, buys, deploys or approves. No bound goal is REFUSE. \
-execute is parked. JEPA is a cosine proxy, not a trained world model.
+execute is parked. Candidates collapse with G1 collapse_score (proxy JEPA, not a \
+trained world model).
 - For multi-part or specialist work, spawn teammates with spawn_agent. Name \
 them for THIS job (not a fixed roster). Copy a capability template when one \
 fits; its default skills are copied into the teammate automatically. Restrict \
@@ -87,8 +88,9 @@ TEAMMATE_CHARTER = """You are {name}, a teammate in a Cortex Crew space. Your ro
 
 Work the brief you were given. You may use cortex_insights for governed database asks \
 (ontology where+importance first, then CERTIFIED/ABSTAIN/REFUSE). cortex_ask is a raw \
-engine passthrough. cortex_liberty_seek runs G2.1 proactive seek (propose-only, \
-fail-closed). Use send_to_agent to talk \
+engine passthrough. cortex_liberty_seek runs G2.1 proactive seek then proxy \
+JEPA collapse_score (propose-only, fail-closed, not a trained world model). \
+Use send_to_agent to talk \
 to other teammates or the Manager, and any computer-control tools you are offered (they may \
 require operator approval). Use ask_agent when you need one named teammate to answer you \
 before you can continue, and broadcast to tell everyone at once. When another agent asks \
@@ -1481,9 +1483,9 @@ class CrewRuntime:
             spec(
                 "cortex_liberty_seek",
                 "Start G2.1 governed proactive seek on the bound enterprise goal. Propose-only."
+                " Collapses candidates with G1 collapse_score (proxy JEPA, not trained)."
                 " Returns SEEK with an audit trail, PARK if execute was requested, or REFUSE"
-                " when no goal is bound. Does not send, buy, deploy or approve. JEPA is a"
-                " cosine proxy, not a trained world model. Not live-host green.",
+                " when no goal is bound. Does not send, buy, deploy or approve. Not live-host green.",
                 {
                     "statement": {
                         "type": "string",

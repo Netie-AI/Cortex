@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## LIBERTY-JEPA-COLLAPSE proxy collapse_score on buyer liberty path — 2026-09-18
+
+Cortex #224. Extends #223 liberty seek: when the Control+Crew buyer path
+collapses candidates it uses G1 `CortexOS.execution.gen_cfsm.collapse_score`
+(proxy cosine on the scoreboard embedding). `jepa` stamps stay
+proxy / not-trained / not world-model / not COMPLETE -- invent-trained
+claims are refused. Collapse miss labels `collapse.ok=false` and leaves
+scores empty rather than inventing a trained WM. CoT climb #212 stays
+INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited, not
+replaced. Predict-goal is #225. Off freeze #4/#41-#44. Local focused
+tests only. Not a GitHub CI claim. Did not invent live `:5000`/`:8020`
+green. Not COMPLETE.
+
 ## LIBERTY-SEEK G2.1 seeker on Control+Crew — 2026-09-18
 
 Cortex #223. Surfaces the existing G2.1 seeker (`CortexOS.execution.seeker`)
