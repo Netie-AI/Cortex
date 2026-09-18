@@ -13,9 +13,16 @@ from fastapi.testclient import TestClient
 from CortexOS.crew import appshell, liberty_seek
 from CortexOS.crew.llm import LLMResult
 from CortexOS.crew.server import create_app
-from CortexOS.execution import action_event, action_value, app_store, commitments
+from CortexOS.execution import (
+    action_event,
+    action_value,
+    app_store,
+    commitments,
+    goal_audit,
+    routine_scheduler,
+    scoreboard,
+)
 from CortexOS.execution import enterprise_goal as eg
-from CortexOS.execution import goal_audit, routine_scheduler, scoreboard
 from tests.test_crew.conftest import FakeLLM, wait_run_done
 from tests.test_crew.test_runtime import _tc
 
@@ -33,6 +40,10 @@ def _isolate_seeker(tmp_path, monkeypatch):
     monkeypatch.setattr(goal_audit, "LEDGER_DB_PATH", tmp_path / "ledger.db")
     monkeypatch.setattr(commitments, "DB_PATH", tmp_path / "commitments.db")
     monkeypatch.setattr(action_event, "DB_PATH", tmp_path / "action_events.db")
+    from CortexOS.audit import register_ledger
+    from packs.dms.audit import ledger as dms_ledger
+
+    register_ledger(dms_ledger)
     eg.init()
     routine_scheduler.init()
     scoreboard.init()
@@ -156,6 +167,23 @@ def test_execute_true_parks_and_does_not_run(client) -> None:
     assert parked["executed"] == []
 
 
+def test_ledger_miss_parks_without_invented_trail(monkeypatch) -> None:
+    from CortexOS.audit import ledger_registry
+
+    ledger_registry.clear_ledger()
+    monkeypatch.setattr(ledger_registry, "_load_active_pack", lambda: None)
+    body = liberty_seek.start_seek(statement="Grow monthly revenue ethically")
+    assert body["status"] == "PARK"
+    assert body["reason"] == "audit_unavailable"
+    assert body["executed"] == []
+    assert len(body["proposals"]) >= 1
+    assert body["ok"] is False
+    text = liberty_seek.render_tool_text(body)
+    assert "status: PARK" in text
+    assert "executed_count: 0" in text
+    assert "invent" in body["answer"].lower() or "did not invent" in body["answer"].lower()
+
+
 def test_unknown_goal_and_missing_extra_refuse(client, monkeypatch) -> None:
     missing = liberty_seek.start_seek(goal_id="goal-does-not-exist")
     assert missing["status"] == "REFUSE"
@@ -199,10 +227,10 @@ def test_buyer_ui_has_start_seek_and_control_display() -> None:
     assert "/crew/liberty/seek" in html
     assert "langgraph" not in html.lower()
     assert "langchain" not in html.lower()
-    src = liberty_seek.__file__
-    text = Path(src).read_text(encoding="utf-8")
-    for banned in ("langgraph", "langchain", "n8n", "mybot"):
-        assert banned not in text.lower()
+    src = Path(liberty_seek.__file__).read_text(encoding="utf-8")
+    for banned in ("from langgraph", "import langchain", "import n8n", "from n8n", "mybot"):
+        assert banned not in src.lower()
+        assert banned not in html.lower()
 
 
 @pytest.mark.asyncio

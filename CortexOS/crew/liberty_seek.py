@@ -6,7 +6,7 @@ is Crew POST. Control GET-displays. Proposals are auditable. Execution is
 propose-only: execute/auto-run parks. Missing goal or missing extra REFUSE.
 JEPA stays the existing cosine / action_value prior — not a trained world
 model (#224). Predict-goal is #225. CoT climb leftover (#212) is cited, not
-replaced. No LangGraph. No live-host invent-green.
+replaced. No live-host invent-green.
 """
 
 from __future__ import annotations
@@ -323,6 +323,16 @@ def start_seek(
                 "executed=[]."
             ),
         )
+    audit = out.get("audit")
+    if not (isinstance(audit, dict) and audit.get("ok")):
+        return _park(
+            out,
+            reason="audit_unavailable",
+            answer=(
+                "PARK: seeker proposed next steps but the F1 ledger write failed. "
+                "Did not invent an audit trail or execute them."
+            ),
+        )
     return _seek_ok(out)
 
 
@@ -347,7 +357,7 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         f"executed_count: {len(executed)}",
         f"audit_ok: {audit.get('ok') if isinstance(audit, dict) else False}",
         f"audit_event: {audit.get('event') if isinstance(audit, dict) else 'none'}",
-        f"jepa: proxy (not trained)",
+        "jepa: proxy (not trained)",
         f"complete: {bool(envelope.get('complete'))}",
         f"live_5000_ci: {bool(envelope.get('live_5000_ci'))}",
         f"live_8020_ci: {bool(envelope.get('live_8020_ci'))}",

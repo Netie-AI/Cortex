@@ -281,14 +281,6 @@ class FreeRouteIn(BaseModel):
     messages: list[dict[str, Any]] | None = None
 
 
-class LibertySeekIn(BaseModel):
-    goal_id: str | None = None
-    statement: str = ""
-    trigger: str = "liberty"
-    execute: bool = False
-    limit: int = 8
-
-
 class SkillIn(BaseModel):
     title: str
     body: str
@@ -1026,33 +1018,9 @@ def build_router(crew: CrewApp) -> APIRouter:
         )
         return result
 
-    @router.get("/liberty")
-    async def liberty_map() -> dict[str, Any]:
-        """G2.1 seek law. Control may GET-display. Does not seek."""
-        from CortexOS.crew import liberty_seek as liberty_seek_mod
+    from CortexOS.crew.liberty_routes import mount_liberty
 
-        return liberty_seek_mod.control_stamp()
-
-    @router.post("/liberty/seek")
-    async def liberty_seek(body: LibertySeekIn | None = None) -> Any:
-        """Operator start. Runs G2.1 seeker. execute=true parks. No invent autonomy."""
-        from CortexOS.crew import liberty_seek as liberty_seek_mod
-
-        payload = body or LibertySeekIn()
-        return liberty_seek_mod.start_seek(
-            goal_id=payload.goal_id,
-            statement=payload.statement,
-            trigger=payload.trigger,
-            execute=payload.execute,
-            limit=payload.limit,
-        )
-
-    @router.post("/liberty")
-    async def liberty_post_refused() -> Any:
-        raise HTTPException(
-            405,
-            "Liberty start is POST /crew/liberty/seek. Control does not POST spawn.",
-        )
+    mount_liberty(router)
 
     @router.get("/identity")
     async def cortex_identity() -> dict[str, Any]:

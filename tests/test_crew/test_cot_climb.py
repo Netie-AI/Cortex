@@ -122,7 +122,6 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
     banned = {
         "CortexOS/crew/freeroute.py",
         "CortexOS/crew/openvault.py",
-        "CortexOS/crew/server.py",
         "CortexOS/crew/config.py",
         "CortexOS/crew/llm.py",
         "CortexOS/crew/mcp_client.py",
@@ -140,6 +139,17 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
     }
     overlap = sorted(_diff_names_vs_main() & banned)
     assert overlap == [], f"dual-write of #215 FreeRoute files: {overlap}"
+    # server.py may gain unrelated crew routes (liberty seek #223). The
+    # FreeRoute spend handlers themselves must not be rewritten.
+    if "CortexOS/crew/server.py" in _diff_names_vs_main():
+        src = (ROOT / "CortexOS" / "crew" / "server.py").read_text(encoding="utf-8")
+        assert "async def freeroute_status" in src
+        assert "async def freeroute_complete" in src
+        assert "CALLER_KEY_RULE" in src
+        diff = _git("diff", "origin/main", "--", "CortexOS/crew/server.py")
+        assert diff.returncode == 0, diff.stderr
+        assert "-    async def freeroute_complete" not in diff.stdout
+        assert "-    async def freeroute_status" not in diff.stdout
 
 
 @pytest.mark.asyncio
