@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **LIBERTY-JEPA-COLLAPSE #224**
+**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **LIBERTY-PREDICT-GOAL #225**
+
+> **2026-09-18 (LIBERTY-PREDICT-GOAL):** Cortex #225. Control+Crew predict-goal
+> is plan language + tabular/proxy G2.2 `action_value` V(s,a,g). Operator
+> start is `POST /crew/liberty/predict-goal` (tool
+> `cortex_liberty_predict_goal`, AppShell Liberty plane). SEEK path from
+> #223/#224 stays. Envelope status PLAN carries `plan.language=plan` and
+> `values[]` keyed s/a/g. Trained forecast / future-observation flags
+> REFUSE (`invent_trained_forecast`). Proxy-only/JEPA-absent still plans
+> and stamps `forecast.trained_forecast=false` -- does not invent trained
+> JEPA. CoT climb leftover #212 stays INCOMPLETE; DMS #180 gen 57.69% /
+> exact 38.46% WRONG=0 cited, not replaced. #224 remains proxy collapse
+> only. Off freeze #4/#41-#44. Did not start/kill `:5000` or `:8020`. Not
+> a GitHub CI claim. Not COMPLETE.
 
 > **2026-09-18 (LIBERTY-JEPA-COLLAPSE):** Cortex #224. Liberty buyer path
 > collapses G2.1 seek candidates with G1 `gen_cfsm.collapse_score` (proxy
