@@ -129,6 +129,27 @@ def _cot_public_map() -> dict[str, Any]:
     }
 
 
+def _prompt_harness_public_map() -> dict[str, Any]:
+    """GET stamp for #227. Consumes prompt_harness_climb; never closes #212."""
+    from CortexOS.crew import prompt_harness_climb as harness
+
+    body = harness.public_map()
+    return {
+        "execute": body["execute"],
+        "complete": False,
+        "status": "INCOMPLETE",
+        "measured_baseline": body["measured_baseline"],
+        "replaces_baseline": False,
+        "invented_better": False,
+        "like_with_like": False,
+        "issue_212_complete": False,
+        "issue_227_complete": False,
+        "closes_212": False,
+        "gpu_finetune": False,
+        "distill": body["distill"],
+    }
+
+
 def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
     """GET map. No ask. No numbers. Control may display."""
     return {
@@ -149,6 +170,7 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
             "{generate:true} (same run_insights)."
         ),
         "cot_climb": _cot_public_map(),
+        "prompt_harness": _prompt_harness_public_map(),
         "identity": "GET /crew/identity (keys stay in OpenVault custody)",
         "stable_identity": "GET /v1/insights/identity",
         "keys": "GET /v1/insights/keys (local vs cloud posture; no secrets)",

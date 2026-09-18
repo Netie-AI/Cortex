@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## EPIC-PROMPT-HARNESS-CLIMB measure vs #180 on FreeRoute free/normal — 2026-09-18
+
+Cortex #227. Prompt+harness climb loop on tip CoT/FreeRoute/distill
+surfaces (no parallel stack). `GET /crew/prompt-harness` stamps the law;
+`POST /crew/prompt-harness` measures via `cot_climb.measure_climb`.
+FreeRoute free/normal only; unarmed fail-closed. Distill (D) is
+ideas-only (`run_distill`); GPU finetune / trained JEPA / LangGraph paste
+/ invent-COMPLETE REFUSE. Fixture coverage 40.00% (2/5 WRONG=0) vs frozen
+DMS #180 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 -- baseline not
+replaced; like-with-like false. #212 stays OPEN/INCOMPLETE. Off freeze
+#4/#41-#44. Local focused tests only. Not a GitHub CI claim. Did not
+invent live `:5000`/`:8020` green. Not COMPLETE.
+
 ## LIBERTY-PREDICT-GOAL plan language + proxy V(s,a,g) — 2026-09-18
 
 Cortex #225. Extends #223 liberty seek and #224 proxy collapse: operator

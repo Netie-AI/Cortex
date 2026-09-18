@@ -72,6 +72,8 @@ def stamp_api(
         "consumer": consumer,
         "live_5000_ci": False,
         "cot_climb_complete": False,
+        "prompt_harness_complete": False,
+        "issue_212_complete": False,
         "issue_213_complete": False,
     }
     return out

@@ -1,5 +1,16 @@
 # STATUS.md
-**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **LIBERTY-PREDICT-GOAL #225**
+**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **EPIC-PROMPT-HARNESS-CLIMB #227**
+
+> **2026-09-18 (EPIC-PROMPT-HARNESS-CLIMB):** Cortex #227. Prompt+harness
+> climb loop measures CoT/gen vs frozen DMS #180 (gen 57.69% / exact
+> 38.46% WRONG=0 @ d2f116a6) through FreeRoute free/normal models.
+> `GET|POST /crew/prompt-harness` consumes `cot_climb.measure_climb` +
+> distill (D) ideas-only -- no GPU finetune, no analog paste. Unarmed
+> fail-closed. Fixture 40.00% (2/5 WRONG=0) is not like-with-like; does
+> not replace baseline; does not invent better %. Status stays
+> INCOMPLETE; #212 CoT leftover stays OPEN. Off freeze #4/#41-#44. Did
+> not start/kill `:5000` or `:8020`. Not a GitHub CI claim. Not COMPLETE.
+> Did not dual-own #223/#224/#225.
 
 > **2026-09-18 (LIBERTY-PREDICT-GOAL):** Cortex #225. Control+Crew predict-goal
 > is plan language + tabular/proxy G2.2 `action_value` V(s,a,g). Operator
