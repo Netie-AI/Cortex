@@ -2,6 +2,20 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## LIBERTY-PREDICT-GOAL plan language + proxy V(s,a,g) — 2026-09-18
+
+Cortex #225. Extends #223 liberty seek and #224 proxy collapse: operator
+set/predict-goal on Control+Crew is plan language plus tabular/proxy
+G2.2 `action_value` V(s,a,g). `POST /crew/liberty/predict-goal` returns
+PLAN with `plan.language=plan` and `values[]` (s, a, g, value). Trained
+forecast / future-observation requests REFUSE. JEPA absent/proxy-only
+still fail-closed honestly -- no invent trained forecasts. Tool
+`cortex_liberty_predict_goal`. Control GET-displays. CoT climb #212
+stays INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited, not
+replaced. #224 is proxy collapse only. Off freeze #4/#41-#44. Local
+focused tests only. Not a GitHub CI claim. Did not invent live
+`:5000`/`:8020` green. Not COMPLETE.
+
 ## LIBERTY-JEPA-COLLAPSE proxy collapse_score on buyer liberty path — 2026-09-18
 
 Cortex #224. Extends #223 liberty seek: when the Control+Crew buyer path

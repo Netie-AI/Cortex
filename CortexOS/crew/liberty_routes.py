@@ -1,4 +1,4 @@
-"""HTTP mount for LIBERTY-SEEK + proxy JEPA collapse. Kept off FreeRoute handlers."""
+"""HTTP mount for liberty seek, proxy collapse, and predict-goal. Off FreeRoute."""
 
 from __future__ import annotations
 
@@ -18,8 +18,19 @@ class LibertySeekIn(BaseModel):
     limit: int = seeker.MAX_PROPOSALS
 
 
+class LibertyPredictIn(BaseModel):
+    goal_id: str | None = None
+    statement: str = ""
+    trigger: str = "predict-goal"
+    execute: bool = False
+    limit: int = seeker.MAX_PROPOSALS
+    trained: bool = False
+    forecast: bool = False
+    future_observation: bool = False
+
+
 def mount_liberty(router: APIRouter) -> None:
-    """Crew POST starts seek. Control GET-displays. No FreeRoute rewrite."""
+    """Crew POST starts seek/predict-goal. Control GET-displays. No FreeRoute rewrite."""
 
     @router.get("/liberty")
     async def liberty_map() -> dict[str, Any]:
@@ -40,6 +51,23 @@ def mount_liberty(router: APIRouter) -> None:
             trigger=payload.trigger,
             execute=payload.execute,
             limit=payload.limit,
+        )
+
+    @router.post("/liberty/predict-goal")
+    async def liberty_predict_goal(body: LibertyPredictIn | None = None) -> Any:
+        """Operator set/predict-goal. Plan language + proxy V(s,a,g). No trained JEPA."""
+        from CortexOS.crew import liberty_seek as liberty_seek_mod
+
+        payload = body or LibertyPredictIn()
+        return liberty_seek_mod.predict_goal(
+            goal_id=payload.goal_id,
+            statement=payload.statement,
+            trigger=payload.trigger,
+            execute=payload.execute,
+            limit=payload.limit,
+            trained=payload.trained,
+            forecast=payload.forecast,
+            future_observation=payload.future_observation,
         )
 
     @router.post("/liberty")
