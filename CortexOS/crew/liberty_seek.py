@@ -9,7 +9,8 @@ leftover (#212) is cited, not replaced. No live-host invent-green.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from CortexOS.execution import enterprise_goal, seeker
 from CortexOS.execution.gen_cfsm import collapse_score

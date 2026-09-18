@@ -345,13 +345,15 @@ def test_refuse_invent_trained_jepa_claims() -> None:
     assert forced["complete"] is False
     assert forced["mode"] == "proxy"
     assert forced["source"] == liberty_seek.COLLAPSE_SOT
+    refused = liberty_seek.start_seek()
+    _assert_honesty(refused)
+    assert refused["status"] == "REFUSE"
+    assert refused["collapse"]["ok"] is False
+    assert refused["jepa"]["trained"] is False
     body = liberty_seek.start_seek(statement="Grow monthly revenue ethically")
     _assert_honesty(body)
     blob = json.dumps(body).lower()
     assert "trained world model complete" not in blob
     assert "trained jepa complete" not in blob
     assert body["jepa"]["trained"] is False
-    refused = liberty_seek.start_seek()
-    _assert_honesty(refused)
-    assert refused["collapse"]["ok"] is False
-    assert refused["jepa"]["trained"] is False
+    assert body["collapse"]["ok"] is True
