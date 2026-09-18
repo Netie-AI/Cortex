@@ -213,6 +213,7 @@ def test_source_is_ask_spine_not_excel_and_not_complete_claim() -> None:
 def test_http_ontology_then_refuse_offline(client) -> None:
     law = client.http.get("/crew/insights").json()
     assert law["execute"] == "POST /crew/insights"
+    assert law["stable"] == "POST /v1/insights"
     assert law["ontology"].startswith("GET /crew/insights/ontology")
     assert law["statuses"] == ["CERTIFIED", "ABSTAIN", "REFUSE"]
     assert "not COMPLETE" in law["scale"]

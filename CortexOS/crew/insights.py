@@ -135,7 +135,9 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         "ok": True,
         "law": LAW,
         "execute": "POST /crew/insights",
+        "stable": "POST /v1/insights",
         "ontology": "GET /crew/insights/ontology?q=",
+        "stable_ontology": "GET /v1/insights/ontology?q=",
         "statuses": list(STATUSES),
         "excel_ppt": "deferred #197 #198 #199",
         "scale": "1GB to 10TB is a design target only; not COMPLETE",
@@ -143,10 +145,19 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         "freeroute": "GET /crew/freeroute ; POST /crew/freeroute purpose=prompt|think|act",
         "generate": (
             "POST /crew/insights {generate:true} CoT/route/improve via cot_climb "
-            "then FreeRoute validate; complete=False"
+            "then FreeRoute validate; complete=False. Consumers: POST /v1/insights "
+            "{generate:true} (same run_insights)."
         ),
         "cot_climb": _cot_public_map(),
         "identity": "GET /crew/identity (keys stay in OpenVault custody)",
+        "stable_identity": "GET /v1/insights/identity",
+        "keys": "GET /v1/insights/keys (local vs cloud posture; no secrets)",
+        "airgpt": "POST /dms/sidecar/insights (same run_insights; no parallel invent stack)",
+        "consumers": {
+            "dms": "POST /v1/insights - Cortex is compute; DMS stays consumer",
+            "airgpt": "POST /v1/insights or POST /dms/sidecar/insights - skin, same path",
+            "crew": "POST /crew/insights - chrome alias",
+        },
         "export_runtime": export_runtime_hint(shell_public),
         "agents": (
             "Retrieve ontology first: locations are where to read; ranked "

@@ -18,6 +18,68 @@ from typing import Any
 import httpx
 
 
+def flatten_engine_ask(data: dict[str, Any], *, ok: bool = True) -> dict[str, Any]:
+    """Crew HTTP and engine /v1/insights share this field list. Never invent numbers."""
+    return {
+        "ok": ok,
+        "answer": data.get("answer", ""),
+        "badge": data.get("badge"),
+        "route": data.get("route"),
+        "layer": data.get("layer"),
+        "metric_id": data.get("metric_id"),
+        "sources": data.get("sources"),
+        "audit_id": data.get("audit_id"),
+        "row_count": data.get("row_count"),
+        "rows": data.get("rows"),
+        "sql_used": data.get("sql_used"),
+        "assumptions": data.get("assumptions"),
+        "suggestions": data.get("suggestions"),
+        "total_count": data.get("total_count"),
+        "truncated": data.get("truncated"),
+        "source_table": data.get("source_table"),
+        "grant_kind": data.get("grant_kind"),
+        "query_source": data.get("query_source"),
+        "violations_blocked": data.get("violations_blocked"),
+    }
+
+
+class LocalEngineBridge:
+    """In-process /dms/query equivalent for the engine's stable Insights API.
+
+    Crew still uses HTTP ``EngineBridge`` so the served engine stays the SoT.
+    ``/v1/insights`` lives on that engine, so looping HTTP to itself is wrong.
+    """
+
+    def __init__(self, session_id: str = "demo", space_id: str | None = None) -> None:
+        self.session_id = session_id
+        self.space_id = space_id
+        self.base_url = "in-process"
+
+    async def ask(self, question: str) -> dict[str, Any]:
+        try:
+            from CortexOS.dms.query_service import answer_question
+
+            data = answer_question(
+                question,
+                session_id=self.session_id,
+                space_id=self.space_id,
+                require_grounding=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — envelope must refuse, not 500-invent
+            return {
+                "ok": False,
+                "answer": f"Cortex engine error ({type(exc).__name__}): {exc}",
+                "badge": "engine_error",
+            }
+        if not isinstance(data, dict):
+            return {
+                "ok": False,
+                "answer": "Cortex engine returned a non-object envelope",
+                "badge": "engine_error",
+            }
+        return flatten_engine_ask(data)
+
+
 class EngineBridge:
     def __init__(
         self,
@@ -78,24 +140,4 @@ class EngineBridge:
                 "badge": "engine_error",
             }
         data = resp.json()
-        return {
-            "ok": True,
-            "answer": data.get("answer", ""),
-            "badge": data.get("badge"),
-            "route": data.get("route"),
-            "layer": data.get("layer"),
-            "metric_id": data.get("metric_id"),
-            "sources": data.get("sources"),
-            "audit_id": data.get("audit_id"),
-            "row_count": data.get("row_count"),
-            "rows": data.get("rows"),
-            "sql_used": data.get("sql_used"),
-            "assumptions": data.get("assumptions"),
-            "suggestions": data.get("suggestions"),
-            "total_count": data.get("total_count"),
-            "truncated": data.get("truncated"),
-            "source_table": data.get("source_table"),
-            "grant_kind": data.get("grant_kind"),
-            "query_source": data.get("query_source"),
-            "violations_blocked": data.get("violations_blocked"),
-        }
+        return flatten_engine_ask(data if isinstance(data, dict) else {})

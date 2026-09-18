@@ -18,9 +18,15 @@ Denial verdicts map to status codes (403 rbac/filter_hidden, 404 unknown,
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from CortexOS.insights.routes import (
+    InsightsAskIn,
+    execute_insights,
+    ontology_body,
+    public_law_body,
+)
 from packs.dms.security.api_auth import Caller, require_role
 
 router = APIRouter(tags=["sidecar"])
@@ -189,6 +195,42 @@ def sidecar_call_action(
             status_code=status, detail={"error": str(exc), "verdict": verdict, **detail}
         ) from exc
     return {"ok": True, **result}
+
+
+@router.get("/dms/sidecar/insights")
+async def sidecar_insights_law(
+    caller: Caller = Depends(require_role("viewer")),
+) -> dict[str, Any]:
+    """AirGPT skin: same Insights law as GET /v1/insights. No parallel invent stack."""
+    _ = caller
+    body = public_law_body()
+    body["alias"] = "GET /dms/sidecar/insights"
+    return body
+
+
+@router.get("/dms/sidecar/insights/ontology")
+async def sidecar_insights_ontology(
+    q: str = "",
+    caller: Caller = Depends(require_role("viewer")),
+) -> dict[str, Any]:
+    _ = caller
+    intent = (q or "").strip()
+    if not intent:
+        raise HTTPException(status_code=400, detail="q is required")
+    return ontology_body(intent)
+
+
+@router.post("/dms/sidecar/insights")
+async def sidecar_insights_ask(
+    body: InsightsAskIn,
+    request: Request,
+    caller: Caller = Depends(require_role("viewer")),
+) -> Any:
+    """AirGPT skin: same run_insights as POST /v1/insights."""
+    _ = caller
+    return await execute_insights(
+        body, request, consumer="airgpt", alias="POST /dms/sidecar/insights"
+    )
 
 
 def register_sidecar_routes(app) -> None:

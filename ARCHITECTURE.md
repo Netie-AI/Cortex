@@ -8,7 +8,7 @@
 ```
 CLIENT     demo/dms-ui/ (Next.js 14) — query, warehouse, chat, brain, skills, audit
      │ HTTP
-API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse, `/v1/contract/*`)
+API        CortexOS/api/ (+ engine, memory, sidecar, lakehouse, `/v1/contract/*`, `/v1/insights`)
      │
 PACK       packs/dms/ — vision, audit, chat, tasks, skills, lakehouse, security
      │
@@ -25,6 +25,12 @@ DMS (and any other consumer) speaks HTTP at `POST|GET /v1/contract/*`
 (operationIds: ask, submit, ledger.append, ledger.verify, tool.registry,
 drillthrough) and pins the `cortex-contract` package. It must never import
 `CortexOS`. Spec: `contract/openapi-1.2.0.json` (generated, never hand-edited).
+
+Insights / generative-ask is a **sibling** engine surface, not a contract
+minor: `GET|POST /v1/insights` (CERTIFIED|ABSTAIN|REFUSE). AirGPT uses the
+same path (`POST /dms/sidecar/insights` alias). Keys stay in OpenVault;
+callers do not hold provider keys. See [`docs/CORTEX_API.md`](docs/CORTEX_API.md).
+Does not invent live `:5000` CI. `cortex-contract` stays 1.2.0.
 
 ---
 

@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-17 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-COT-CLIMB #212**
+**Last updated:** 2026-09-17 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-API-SURFACE #213**
+
+> **2026-09-17 (CORTEX-API-SURFACE):** Cortex #213. Stable engine API
+> `GET|POST /v1/insights` serves Insights/governed envelopes
+> (CERTIFIED|ABSTAIN|REFUSE) for DMS generative-ask. AirGPT skin uses the
+> same `run_insights` (`POST /dms/sidecar/insights`). OV/FreeRoute holds
+> keys; callers present `ov_` or loopback, never provider secrets.
+> `GET /v1/insights/keys` documents local vs cloud hops without tokens.
+> Sibling to `/v1/contract/*`; `cortex-contract` stays 1.2.0. Unarmed
+> generate REFUSE. Armed generate from a non-loopback peer without `ov_`
+> is 401 (A-0009). CoT remains INCOMPLETE; DMS #180 gen 57.69% / exact
+> 38.46% WRONG=0 cited, not replaced. G4 litellm/brain/suggest not
+> expanded (P24.1). Off freeze #4/#41-#44. Did not start/kill `:5000` or
+> `:8020`. Not a GitHub CI claim. Not #213 COMPLETE.
 
 > **2026-09-17 (CORTEX-COT-CLIMB):** Cortex #212 on PR #216. Insights generate
 > runs CoT/route/improve via `cot_climb` consuming FreeRoute. Reuses gen_cfsm
