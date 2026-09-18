@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-18 | prompt-harness-climb | prompt, harness, climb, freeroute, distill, #227 | Prompt+harness measures CoT/gen vs #180 on FreeRoute free/normal. Distill ideas-only. INCOMPLETE; #212 stays OPEN. | `2026-09-18_prompt-harness-climb.md` |
 | 2026-09-18 | liberty-predict-goal | liberty, predict-goal, plan language, action_value, V(s,a,g), g2.2, #225 | Predict-goal on Control+Crew is plan language + proxy V(s,a,g). Refuse invent-trained forecasts. | `2026-09-18_liberty-predict-goal.md` |
 | 2026-09-18 | liberty-jepa-collapse | liberty, jepa, collapse_score, proxy, gen_cfsm, #224 | Liberty path collapses seek candidates with G1 collapse_score. Proxy only; refuse invent-trained WM COMPLETE. | `2026-09-18_liberty-jepa-collapse.md` |
 | 2026-09-18 | liberty-seek | liberty, seek, g2.1, seeker, control, crew, #223 | G2.1 seeker on Control+Crew. Crew POST starts seek with audit. Control GET-display. REFUSE/PARK fail-closed. | `2026-09-18_liberty-seek.md` |

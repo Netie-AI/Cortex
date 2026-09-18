@@ -1019,8 +1019,10 @@ def build_router(crew: CrewApp) -> APIRouter:
         return result
 
     from CortexOS.crew.liberty_routes import mount_liberty
+    from CortexOS.crew.prompt_harness_routes import mount_prompt_harness
 
     mount_liberty(router)
+    mount_prompt_harness(router)
 
     @router.get("/identity")
     async def cortex_identity() -> dict[str, Any]:
