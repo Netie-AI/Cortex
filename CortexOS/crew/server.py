@@ -1018,6 +1018,10 @@ def build_router(crew: CrewApp) -> APIRouter:
         )
         return result
 
+    from CortexOS.crew.liberty_routes import mount_liberty
+
+    mount_liberty(router)
+
     @router.get("/identity")
     async def cortex_identity() -> dict[str, Any]:
         """Stable Cortex API identity. Keys stay in OpenVault. Never returns a token."""

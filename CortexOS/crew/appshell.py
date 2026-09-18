@@ -34,6 +34,7 @@ NAV: tuple[dict[str, str], ...] = (
     {"id": "audit", "label": "Audit", "plane": "audit", "focus": "", "hint": "Constructor RSF Audit/Operate. No invent-green."},
     {"id": "assign", "label": "Assign", "plane": "crew", "focus": "assign", "hint": "Crew tickets /assign. Control does not assign."},
     {"id": "insights", "label": "Insights", "plane": "insights", "focus": "", "hint": "Intent then ontology then DMS ask or FreeRoute generative-ask. CERTIFIED|ABSTAIN|REFUSE."},
+    {"id": "liberty", "label": "Liberty", "plane": "liberty", "focus": "", "hint": "G2.1 governed proactive seek. Crew POST. Control GET-display. Fail-closed."},
     {"id": "memory", "label": "Memory", "plane": "crew", "focus": "memory", "hint": "Crew facts.md collections."},
     {"id": "settings", "label": "Settings", "plane": "crew", "focus": "settings", "hint": "Providers. Keys stay in OpenVault."},
 )
@@ -242,6 +243,15 @@ def catalog(*, engine_url: str) -> dict[str, Any]:
             "statuses": ["CERTIFIED", "ABSTAIN", "REFUSE"],
             "invented_certified": False,
         },
+        "liberty": {
+            "execute": "POST /crew/liberty/seek",
+            "display": "GET /crew/liberty",
+            "engine": "CortexOS.execution.seeker.seek",
+            "control_spawn": False,
+            "display_only_on_control": True,
+            "complete": False,
+            "jepa_trained": False,
+        },
     }
 
 
@@ -351,6 +361,8 @@ def control_display(
             }
         )
     any_up = any(row.get("ok") for row in surfaces)
+    from CortexOS.crew import liberty_seek as liberty_seek_mod
+
     return {
         "ok": any_up,
         "display_only": True,
@@ -359,6 +371,7 @@ def control_display(
         "spawn": False,
         "control_url": base,
         "surfaces": surfaces,
+        "liberty": liberty_seek_mod.control_stamp(),
     }
 
 
