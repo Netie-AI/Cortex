@@ -15,7 +15,9 @@ A-0009: armed generate from a non-loopback peer needs the caller's own
 minor). CoT INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited,
 not replaced. G4 litellm/brain/suggest not expanded (P24.1). Off freeze
 #4/#41-#44. Local focused tests only. Not a GitHub CI claim. Did not
-invent live `:5000`/`:8020` green.
+invent live `:5000`/`:8020` green. Regenerated `contract/openapi-1.2.0.json`
+(+ sha256) after InsightsAskIn appeared in FastAPI `components.schemas`;
+allowlisted `/v1/contract/*` operationIds unchanged; no contract bump.
 
 ## CORTEX-COT-CLIMB consume FreeRoute think-path — 2026-09-17
 
