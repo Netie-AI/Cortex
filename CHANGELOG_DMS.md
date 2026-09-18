@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## LIBERTY-SEEK G2.1 seeker on Control+Crew — 2026-09-18
+
+Cortex #223. Surfaces the existing G2.1 seeker (`CortexOS.execution.seeker`)
+on the Control+Crew buyer API/UI. `GET /crew/liberty` is the Control
+GET-display map (F-0030, spawn=false). `POST /crew/liberty/seek` starts
+governed proactive seek with an F1 `engine.seek` audit trail. No bound
+goal REFUSE. `execute=true` PARK (`executed=[]`) -- no invent autonomy.
+Tool `cortex_liberty_seek` is propose-only. JEPA remains the cosine /
+action_value prior; trained WM is #224, predict-goal is #225. CoT climb
+#212 stays INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited,
+not replaced. Off freeze #4/#41-#44. Local focused tests only. Not a
+GitHub CI claim. Did not invent live `:5000`/`:8020` green. Not COMPLETE.
+
 ## CORTEX-API-SURFACE stable Insights API — 2026-09-17
 
 Cortex #213. Engine `GET|POST /v1/insights` is the stable consumer path

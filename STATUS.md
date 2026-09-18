@@ -1,5 +1,17 @@
 # STATUS.md
-**Last updated:** 2026-09-17 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **CORTEX-API-SURFACE #213**
+**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **LIBERTY-SEEK #223**
+
+> **2026-09-18 (LIBERTY-SEEK):** Cortex #223. G2.1 `execution/seeker.py` is
+> the governed proactive seeker on the Control+Crew buyer surface. Operator
+> start is `POST /crew/liberty/seek` (tool `cortex_liberty_seek`, AppShell
+> Liberty plane). Control GET-displays `GET /crew/liberty` (F-0030, no spawn).
+> SEEK carries an F1 `engine.seek` audit trail. No bound goal / missing
+> extra REFUSE. `execute=true` PARK with `executed=[]`. JEPA stays the
+> cosine/action_value prior -- not a trained world model (#224 later).
+> Predict-goal is #225, not this seat. CoT climb leftover #212 stays
+> INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited, not
+> replaced. Off freeze #4/#41-#44. Did not start/kill `:5000` or `:8020`.
+> Not a GitHub CI claim. Not COMPLETE. Did not dual-own #224/#225.
 
 > **2026-09-17 (CORTEX-API-SURFACE):** Cortex #213. Stable engine API
 > `GET|POST /v1/insights` serves Insights/governed envelopes
