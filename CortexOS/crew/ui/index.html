@@ -78,7 +78,7 @@
       </section>
       <section class="shell-plane" id="plane-liberty">
         <h1>Liberty seek</h1>
-        <p class="hint">G2.1 governed proactive seek. Crew starts seek. Control GET-displays. Propose-only. Fail-closed. JEPA is a cosine proxy, not a trained world model. CoT climb leftover cited, not replaced. Not COMPLETE.</p>
+        <p class="hint">G2.1 governed proactive seek. Crew starts seek. Control GET-displays. Propose-only. Fail-closed. Candidates collapse with G1 collapse_score (proxy JEPA, not a trained world model). CoT climb leftover cited, not replaced. Not COMPLETE.</p>
         <div class="life-spawn">
           <input id="libertyStatement" placeholder="goal statement (or blank to use the bound goal)" />
           <button class="ghost" id="libertySeek" type="button">Start seek</button>
@@ -1424,7 +1424,7 @@
           : `<div class="empty">Control unprobed or down.</div>`;
         const lib = snap.liberty || {};
         $("controlLiberty").innerHTML =
-          `<div class="rsf-stage">display_only ${esc(String(lib.display_only))} spawn ${esc(String(lib.spawn))} complete ${esc(String(lib.complete))} jepa ${esc((lib.jepa && lib.jepa.mode) || "proxy")}</div>`
+          `<div class="rsf-stage">display_only ${esc(String(lib.display_only))} spawn ${esc(String(lib.spawn))} complete ${esc(String(lib.complete))} jepa proxy (not trained) collapse ${esc((lib.collapse_sot || (lib.jepa && lib.jepa.source) || "gen_cfsm.collapse_score"))}</div>`
           + `<div class="empty">${esc(lib.law || lib.agents || "GET /crew/liberty")}</div>`;
       } catch (err) { toast(err.message, "bad"); }
     }
@@ -1504,9 +1504,9 @@
       const audit = (body && body.audit) || {};
       $("libertyEnvelope").innerHTML =
         `<div class="rsf-stage ${cls}">${esc(status || "LAW")} ${esc((body.answer || body.agents || "").slice(0, 400))}</div>`
-        + `<div class="rsf-stage">audit ${esc(String(audit.ok))} ${esc(audit.event || "")} executed ${esc(String(executed.length))} parked ${esc(String(parked.length))} complete ${esc(String(body.complete))} jepa ${(body.jepa && body.jepa.trained) ? "trained" : "proxy"}</div>`
+        + `<div class="rsf-stage">audit ${esc(String(audit.ok))} ${esc(audit.event || "")} executed ${esc(String(executed.length))} parked ${esc(String(parked.length))} complete ${esc(String(body.complete))} jepa proxy (not trained)</div>`
         + props.slice(0, 8).map((p) =>
-          `<div class="rsf-stage">${esc(p.title || "")} - ${esc(p.why || "")}</div>`
+          `<div class="rsf-stage">${esc(p.title || "")} collapse ${esc(String(p.collapse_score))} - ${esc(p.why || "")}</div>`
         ).join("");
     }
     async function loadLibertyLaw() {

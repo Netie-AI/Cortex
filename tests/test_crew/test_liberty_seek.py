@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,8 +63,18 @@ def client(settings, crew_env) -> Iterator[SimpleNamespace]:
 def _assert_honesty(body: dict[str, Any]) -> None:
     assert body["complete"] is False
     assert body["issue_223_complete"] is False
+    assert body["issue_224_complete"] is False
+    assert body["jepa"]["mode"] == "proxy"
     assert body["jepa"]["trained"] is False
     assert body["jepa"]["world_model"] is False
+    assert body["jepa"]["complete"] is False
+    assert body["jepa"]["source"] == liberty_seek.COLLAPSE_SOT
+    assert body["collapse"]["mode"] == "proxy"
+    assert body["collapse"]["trained"] is False
+    assert body["collapse"]["world_model"] is False
+    assert body["collapse"]["complete"] is False
+    assert body["collapse"]["sot"] == liberty_seek.COLLAPSE_SOT
+    assert body["collapse_sot"] == liberty_seek.COLLAPSE_SOT
     assert body["cot_climb"]["status"] == "INCOMPLETE"
     assert body["cot_climb"]["invented_better"] is False
     assert body["measured_baseline"]["gen"] == "57.69%"
@@ -75,6 +86,9 @@ def _assert_honesty(body: dict[str, Any]) -> None:
     assert body["langgraph"] is False
     assert body["executed"] == [] if "executed" in body else True
     assert body["engine"] == "CortexOS.execution.seeker.seek"
+    blob = json.dumps(body).lower()
+    assert "trained world model complete" not in blob
+    assert "trained jepa complete" not in blob
 
 
 def test_get_map_is_display_only_and_does_not_seek(client) -> None:
@@ -120,6 +134,15 @@ def test_operator_start_runs_g21_seek_with_audit_trail(client) -> None:
     assert "executed_count: 0" in text
     assert body["proposals"][0]["title"] in text
     assert "jepa: proxy (not trained)" in text
+    assert "jepa_source: CortexOS.execution.gen_cfsm.collapse_score" in text
+    assert "collapse_ok: True" in text
+    assert body["collapse"]["ok"] is True
+    scores = [p["collapse_score"] for p in body["proposals"]]
+    assert scores
+    assert all(isinstance(s, float) for s in scores)
+    assert scores == sorted(scores, reverse=True)
+    assert "not a trained world model" in body["answer"].lower()
+    assert any("proxy JEPA collapse score" in a for a in body["assumptions"])
 
 
 def test_no_goal_refuses_without_inventing_autonomy(client) -> None:
@@ -214,7 +237,9 @@ def test_control_get_stamps_liberty_and_does_not_post(client) -> None:
     cat = appshell.catalog(engine_url="http://127.0.0.1:8010")
     assert cat["liberty"]["control_spawn"] is False
     assert cat["liberty"]["jepa_trained"] is False
+    assert cat["liberty"]["jepa_mode"] == "proxy"
     assert cat["liberty"]["complete"] is False
+    assert cat["liberty"]["collapse_sot"] == liberty_seek.COLLAPSE_SOT
 
 
 def test_buyer_ui_has_start_seek_and_control_display() -> None:
@@ -225,12 +250,17 @@ def test_buyer_ui_has_start_seek_and_control_display() -> None:
     assert "Start seek" in html
     assert 'id="controlLiberty"' in html
     assert "/crew/liberty/seek" in html
+    assert "collapse_score" in html
+    assert "jepa proxy (not trained)" in html
     assert "langgraph" not in html.lower()
     assert "langchain" not in html.lower()
     src = Path(liberty_seek.__file__).read_text(encoding="utf-8")
     for banned in ("from langgraph", "import langchain", "import n8n", "from n8n", "mybot"):
         assert banned not in src.lower()
         assert banned not in html.lower()
+    assert "trained world model complete" not in src.lower()
+    assert "trained jepa complete" not in src.lower()
+    assert "trained world model complete" not in html.lower()
 
 
 @pytest.mark.asyncio
@@ -255,6 +285,73 @@ async def test_tool_lands_seek_text_in_transcript(rig) -> None:
     assert env["executed"] == []
     assert len(env["proposals"]) >= 1
     assert env["audit"]["ok"] is True
+    assert env["collapse"]["ok"] is True
+    assert env["jepa"]["trained"] is False
+    assert env["jepa"]["source"] == liberty_seek.COLLAPSE_SOT
+    assert "collapse_ok: True" in tools[0]["content"]
+    assert "jepa: proxy (not trained)" in tools[0]["content"]
     answer = [m for m in rig.store.list_messages(space["id"]) if m["role"] == "assistant"][-1]
     assert "SEEK" in answer["content"]
     assert "executed" in answer["content"].lower() or "draft" in answer["content"].lower()
+
+
+def test_liberty_path_calls_g1_collapse_score(monkeypatch) -> None:
+    calls: list[int] = []
+    real = liberty_seek.collapse_score
+
+    def wrapped(state_vec, goal_vec):
+        calls.append(1)
+        return real(state_vec, goal_vec)
+
+    monkeypatch.setattr(liberty_seek, "collapse_score", wrapped)
+    body = liberty_seek.start_seek(statement="Grow monthly revenue ethically")
+    assert body["status"] == "SEEK"
+    assert calls, "liberty path must call gen_cfsm.collapse_score"
+    assert body["collapse"]["ok"] is True
+    assert body["collapse"]["sot"] == "CortexOS.execution.gen_cfsm.collapse_score"
+    assert body["jepa"]["mode"] == "proxy"
+    assert body["jepa"]["trained"] is False
+    scores = [p["collapse_score"] for p in body["proposals"]]
+    assert scores == sorted(scores, reverse=True)
+    _assert_honesty(body)
+
+
+def test_collapse_failure_stamps_proxy_not_trained(monkeypatch) -> None:
+    def boom(*_a, **_k):
+        raise RuntimeError("embed unavailable")
+
+    monkeypatch.setattr(liberty_seek, "collapse_score", boom)
+    body = liberty_seek.start_seek(statement="Grow monthly revenue ethically")
+    assert body["status"] in ("SEEK", "PARK")
+    assert body["collapse"]["ok"] is False
+    assert body["jepa"]["trained"] is False
+    assert body["jepa"]["mode"] == "proxy"
+    assert body["jepa"]["complete"] is False
+    assert body["complete"] is False
+    assert all(p.get("collapse_score") is None for p in body["proposals"])
+    assert len(body["proposals"]) >= 1
+    text = liberty_seek.render_tool_text(body)
+    assert "jepa: proxy (not trained)" in text
+    assert "jepa_trained: False" in text
+    _assert_honesty(body)
+
+
+def test_refuse_invent_trained_jepa_claims() -> None:
+    forced = liberty_seek.jepa_stamp(
+        extra={"trained": True, "world_model": True, "complete": True, "mode": "trained"}
+    )
+    assert forced["trained"] is False
+    assert forced["world_model"] is False
+    assert forced["complete"] is False
+    assert forced["mode"] == "proxy"
+    assert forced["source"] == liberty_seek.COLLAPSE_SOT
+    body = liberty_seek.start_seek(statement="Grow monthly revenue ethically")
+    _assert_honesty(body)
+    blob = json.dumps(body).lower()
+    assert "trained world model complete" not in blob
+    assert "trained jepa complete" not in blob
+    assert body["jepa"]["trained"] is False
+    refused = liberty_seek.start_seek()
+    _assert_honesty(refused)
+    assert refused["collapse"]["ok"] is False
+    assert refused["jepa"]["trained"] is False

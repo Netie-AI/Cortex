@@ -1,5 +1,16 @@
 # STATUS.md
-**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **LIBERTY-SEEK #223**
+**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **LIBERTY-JEPA-COLLAPSE #224**
+
+> **2026-09-18 (LIBERTY-JEPA-COLLAPSE):** Cortex #224. Liberty buyer path
+> collapses G2.1 seek candidates with G1 `gen_cfsm.collapse_score` (proxy
+> cosine). Crew `POST /crew/liberty/seek` still starts seek; Control GET
+> displays. Envelope stamps `jepa.mode=proxy`, `trained=false`,
+> `world_model=false` -- callers cannot opt into trained WM COMPLETE.
+> Collapse miss is honest (`collapse.ok=false`, scores None), not invent-green.
+> CoT climb leftover #212 stays INCOMPLETE; DMS #180 gen 57.69% / exact
+> 38.46% WRONG=0 cited, not replaced. Predict-goal is #225, not this seat.
+> Off freeze #4/#41-#44. Did not start/kill `:5000` or `:8020`. Not a
+> GitHub CI claim. Not COMPLETE. Did not dual-own #225.
 
 > **2026-09-18 (LIBERTY-SEEK):** Cortex #223. G2.1 `execution/seeker.py` is
 > the governed proactive seeker on the Control+Crew buyer surface. Operator

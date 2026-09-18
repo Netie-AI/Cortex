@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-18 | liberty-jepa-collapse | liberty, jepa, collapse_score, proxy, gen_cfsm, #224 | Liberty path collapses seek candidates with G1 collapse_score. Proxy only; refuse invent-trained WM COMPLETE. | `2026-09-18_liberty-jepa-collapse.md` |
 | 2026-09-18 | liberty-seek | liberty, seek, g2.1, seeker, control, crew, #223 | G2.1 seeker on Control+Crew. Crew POST starts seek with audit. Control GET-display. REFUSE/PARK fail-closed. | `2026-09-18_liberty-seek.md` |
 | 2026-09-17 | cortex-api-surface | api, insights, generative-ask, airgpt, freeroute, #213 | Stable `/v1/insights` for DMS + AirGPT skin. Same run_insights. Keys in OV. | `2026-09-17_cortex-api-surface.md` |
 | 2026-09-17 | cortex-cot-climb | crew, cot, climb, freeroute, gencfsm, #212 | CoT/route/improve consumes FreeRoute. generate=true delegates to cot_climb. #180 57.69/38.46 cited not replaced. | `2026-09-17_cortex-cot-climb.md` |

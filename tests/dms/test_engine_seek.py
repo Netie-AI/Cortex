@@ -168,11 +168,20 @@ def test_proposals_are_ranked_by_closeness_to_the_goal():
         ],
     )
 
-    proposals = seeker.seek(goal["id"])["proposals"]
+    out = seeker.seek(goal["id"])
+    proposals = out["proposals"]
 
     relevances = [p["relevance"] for p in proposals]
     assert relevances == sorted(relevances, reverse=True)
     assert relevances[0] > 0
+    assert out["jepa"] == "proxy"
+    assert out["jepa_trained"] is False
+    assert out["collapse_sot"] == "CortexOS.execution.gen_cfsm.collapse_score"
+    for p in proposals:
+        assert "collapse_score" in p
+        assert p["jepa"] == "proxy"
+        assert p["jepa_trained"] is False
+        assert p["relevance"] == round(max(0.0, float(p["collapse_score"])), 6)
 
 
 def test_seeks_are_recorded_for_the_ui():

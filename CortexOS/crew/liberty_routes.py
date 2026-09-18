@@ -1,4 +1,4 @@
-"""HTTP mount for LIBERTY-SEEK. Kept off the FreeRoute handlers in server.py."""
+"""HTTP mount for LIBERTY-SEEK + proxy JEPA collapse. Kept off FreeRoute handlers."""
 
 from __future__ import annotations
 

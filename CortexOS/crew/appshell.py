@@ -34,7 +34,7 @@ NAV: tuple[dict[str, str], ...] = (
     {"id": "audit", "label": "Audit", "plane": "audit", "focus": "", "hint": "Constructor RSF Audit/Operate. No invent-green."},
     {"id": "assign", "label": "Assign", "plane": "crew", "focus": "assign", "hint": "Crew tickets /assign. Control does not assign."},
     {"id": "insights", "label": "Insights", "plane": "insights", "focus": "", "hint": "Intent then ontology then DMS ask or FreeRoute generative-ask. CERTIFIED|ABSTAIN|REFUSE."},
-    {"id": "liberty", "label": "Liberty", "plane": "liberty", "focus": "", "hint": "G2.1 governed proactive seek. Crew POST. Control GET-display. Fail-closed."},
+    {"id": "liberty", "label": "Liberty", "plane": "liberty", "focus": "", "hint": "G2.1 seek + proxy JEPA collapse_score. Crew POST. Control GET-display. Not trained WM."},
     {"id": "memory", "label": "Memory", "plane": "crew", "focus": "memory", "hint": "Crew facts.md collections."},
     {"id": "settings", "label": "Settings", "plane": "crew", "focus": "settings", "hint": "Providers. Keys stay in OpenVault."},
 )
@@ -247,10 +247,12 @@ def catalog(*, engine_url: str) -> dict[str, Any]:
             "execute": "POST /crew/liberty/seek",
             "display": "GET /crew/liberty",
             "engine": "CortexOS.execution.seeker.seek",
+            "collapse_sot": "CortexOS.execution.gen_cfsm.collapse_score",
             "control_spawn": False,
             "display_only_on_control": True,
             "complete": False,
             "jepa_trained": False,
+            "jepa_mode": "proxy",
         },
     }
 
