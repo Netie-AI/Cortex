@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-18 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **EPIC-PROMPT-HARNESS-CLIMB #227**
+**Last updated:** 2026-09-21 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+
+> **2026-09-21 (CORTEX-COT-CLIMB leftover):** Cortex #212 leftover honesty
+> gap. Product path still `generate=true` via `cot_climb` on FreeRoute.
+> Think text is now consumed in the SQL prompt; improve re-thinks with the
+> prior refusal. `measure_climb` + tip `prompt_harness_climb` treat
+> like-with-like as the pinned 26 ids from DMS #180 @ d2f116a6 -- a 5-item
+> fixture labeled n==26 is not like-with-like. Fixture 40.00% (2/5 WRONG=0)
+> stays this-run, not a replacement. Pinned-26 empty-SQL measure is 0.00%
+> (WRONG=0) -- not an invented climb. Status stays INCOMPLETE; #212 stays
+> OPEN. Consumes GenC/cFSM G1 + dag_runner + FreeRoute + #227 harness.
+> JEPA proxy. Unarmed fail-closed. Off freeze #4/#41-#44. Did not start/kill
+> `:5000` or `:8020`. Not a GitHub CI claim. Not COMPLETE. Did not dual-own
+> #223/#224/#225 or close #227 as COMPLETE.
 
 > **2026-09-18 (EPIC-PROMPT-HARNESS-CLIMB):** Cortex #227. Prompt+harness
 > climb loop measures CoT/gen vs frozen DMS #180 (gen 57.69% / exact

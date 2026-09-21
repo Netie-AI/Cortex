@@ -123,8 +123,13 @@ def _cot_public_map() -> dict[str, Any]:
         "measured_baseline": body["measured_baseline"],
         "replaces_baseline": False,
         "invented_better": False,
+        "like_with_like": False,
+        "like_with_like_corpus": body.get("like_with_like_corpus"),
+        "leftover": body.get("leftover") or "",
+        "prompt_harness": body.get("prompt_harness") or "POST /crew/prompt-harness",
         "issue_211_complete": False,
         "issue_212_complete": False,
+        "issue_227_complete": False,
         "jepa": body["jepa"],
     }
 

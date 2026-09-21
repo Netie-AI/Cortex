@@ -240,8 +240,11 @@ def _ban_reasons(
     return list(dict.fromkeys(reasons))
 
 
-def _like_with_like(corpus: str, n: int) -> bool:
-    return (corpus or "").strip() == LIKE_WITH_LIKE_CORPUS and n == DMS_180_N
+def _like_with_like(corpus: str, ids: Sequence[str]) -> bool:
+    """Delegate to cot_climb pin. Label + n==26 is not like-with-like."""
+    from CortexOS.crew import cot_climb
+
+    return cot_climb.like_with_like(corpus, ids)
 
 
 def distill_ideas(recipe: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -394,6 +397,7 @@ async def run_harness(
             final="DISTILL_REFUSE",
         )
 
+    gated = _wrap_complete(complete, allowed)
     prepared: list[dict[str, Any]] = []
     for case in cases or []:
         if not isinstance(case, Mapping):
@@ -401,10 +405,22 @@ async def run_harness(
         row = dict(case)
         row["complete"] = _wrap_complete(row.get("complete") or complete, allowed)
         prepared.append(row)
-    report = await cot_climb.measure_climb(prepared)
+    report = await cot_climb.measure_climb(
+        prepared or None,
+        corpus=corpus,
+        ideas=list(distilled.get("ideas") or []),
+        complete=None if prepared else gated,
+    )
     this_run = dict(report.get("this_run") or {})
-    n = int(this_run.get("n") or 0)
-    like = _like_with_like(corpus, n)
+    like = bool(report.get("like_with_like"))
+    outcome_ids = [str(row.get("id") or "") for row in (report.get("outcomes") or [])]
+    if like != _like_with_like(corpus, outcome_ids):
+        return _refuse(
+            "BAN: harness like-with-like drifted from cot_climb pin (no invent climb %)",
+            arming=dict(arm),
+            distill=distilled,
+            this_run=this_run,
+        )
     this_gen = str(this_run.get("gen") or "0.00%")
     claimed = (claimed_gen or "").strip()
     if claimed and claimed != this_gen:
@@ -415,6 +431,7 @@ async def run_harness(
             this_run=this_run,
         )
 
+    vs = dict(report.get("vs_baseline") or {})
     body = _honesty()
     body.update(
         {
@@ -432,11 +449,14 @@ async def run_harness(
                 "baseline_wrong": 0,
                 "this_run_gen": this_gen,
                 "like_with_like": like,
-                "improved": False,
-                "note": (
-                    "like-with-like vs DMS #180 curated 26 @ d2f116a6"
-                    if like
-                    else "different corpus; do not replace DMS #180 numbers"
+                "improved": bool(vs.get("improved")),
+                "note": str(
+                    vs.get("note")
+                    or (
+                        "like-with-like vs DMS #180 curated 26 @ d2f116a6"
+                        if like
+                        else "different corpus; do not replace DMS #180 numbers"
+                    )
                 ),
             },
             "like_with_like": like,
@@ -446,15 +466,11 @@ async def run_harness(
             "values": [],
         }
     )
-    if like and int(this_run.get("wrong") or 0) == 0:
-        try:
-            run_val = float(this_gen.rstrip("%"))
-        except ValueError:
-            run_val = -1.0
-        body["vs_baseline"]["improved"] = run_val > 57.69
     # Even a like-with-like improvement does not close #212 from this slice.
     body["complete"] = False
     body["status"] = "INCOMPLETE"
     body["issue_212_complete"] = False
     body["closes_212"] = False
+    body["invented_better"] = False
+    body["replaces_baseline"] = False
     return body

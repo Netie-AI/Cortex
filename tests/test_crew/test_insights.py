@@ -226,6 +226,7 @@ def test_http_ontology_then_refuse_offline(client) -> None:
     assert law["cot_climb"]["complete"] is False
     assert law["cot_climb"]["status"] == "INCOMPLETE"
     assert law["cot_climb"]["issue_212_complete"] is False
+    assert law["cot_climb"]["like_with_like"] is False
     assert law["cot_climb"]["measured_baseline"]["gen"] == "57.69%"
     assert law["cot_climb"]["replaces_baseline"] is False
     onto = client.http.get("/crew/insights/ontology", params={"q": "how many skus"}).json()
