@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-COT-CLIMB leftover honesty gap — 2026-09-21
+
+Cortex #212 leftover. CoT/route/improve on Insights `generate=true`
+consumes think in the SQL prompt and re-thinks on improve. Harness
+`POST /crew/prompt-harness` still measures via `cot_climb.measure_climb`.
+Like-with-like is the pinned 26 ids from DMS #180 @ d2f116a6 -- not the
+5-item fixture, not a label-only n==26. Fixture 40.00% (2/5 WRONG=0) vs
+frozen gen 57.69% / exact 38.46% WRONG=0 -- baseline not replaced.
+Pinned-26 empty complete measures 0.00%; does not invent a better %.
+Status INCOMPLETE; #212 stays OPEN. Unarmed fail-closed. Reuses gen_cfsm
+G1 + dag_runner. JEPA proxy. Off freeze #4/#41-#44. Local focused tests
+only. Not a GitHub CI claim. Not COMPLETE.
+
 ## EPIC-PROMPT-HARNESS-CLIMB measure vs #180 on FreeRoute free/normal — 2026-09-18
 
 Cortex #227. Prompt+harness climb loop on tip CoT/FreeRoute/distill

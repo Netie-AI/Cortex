@@ -13,7 +13,9 @@ Reuses G1 already on tip: ``generate_ir`` / ``compile_ir`` / ``execute_cfsm``
 proxy (PARKING_LOT P21). Unarmed is fail-closed: no invented CoT, no SQL, no
 values. Validated SQL is ABSTAIN (not executed). Never CERTIFIED. Never
 COMPLETE. DMS #180 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 is the frozen
-baseline; this module does not replace it with a better %.
+baseline; this module does not replace it with a better %. Like-with-like is
+the pinned 26 ids from that covering SHA -- not a 5-item fixture, not a
+label-only n==26. Think text is consumed in the SQL prompt; improve re-thinks.
 """
 
 from __future__ import annotations
@@ -40,6 +42,40 @@ from CortexOS.execution.scoreboard import embed_goal
 HORIZON = 3
 JEPA_PATH = "proxy"
 SLICE = "CORTEX-COT-CLIMB"
+LIKE_WITH_LIKE_CORPUS = "dms-180-curated-26"
+DMS_180_N = 26
+# Frozen DMS #180 curated 26 ids+questions @ d2f116a6 (questions.yaml).
+# Pin is identity only -- no scores. Measured gen is this-run, never invented.
+DMS_180_CURATED: tuple[tuple[str, str], ...] = (
+    ("cq_spend_by_country", "What is our total spend by supplier country?"),
+    ("cq_stock_value_by_category", "What is total stock value by category?"),
+    ("cq_sales_top5_value", "Top 5 selling SKUs by revenue"),
+    ("cq_sku_count", "How many SKUs do we have in inventory?"),
+    ("cq_capacity_utilisation", "Show warehouse capacity utilisation"),
+    ("cq_sales_top3_volume", "Top 3 SKUs by quantity sold"),
+    ("cq_sku_count_by_category", "Show SKU count by category"),
+    ("cq_low_stock_wh_a", "Which SKUs are below reorder level in warehouse A?"),
+    ("ops_stock_value", "What is total stock value by category?"),
+    ("ops_shipment_cost", "Show shipment cost by destination"),
+    ("ops_spend_boundary", "What is our total spend by supplier country?"),
+    ("trap_categoty", "Show top 3 categoty sales"),
+    ("trap_last_month", "Just give me last month's number"),
+    ("trap_short_paraphrase", "Are we short on anything the warehouse should worry about?"),
+    ("cq_cold_storage", "Which locations are cold storage?"),
+    ("cq_capacity_above_90", "Which locations are above 90 percent capacity?"),
+    ("cq_expired_items", "Which items are expired?"),
+    ("cq_chemicals_list", "List chemicals in inventory"),
+    ("cq_supplier_ranking", "Rank suppliers by combined risk and lead time score"),
+    ("cq_cctv_wh_a", "Show the CCTV camera for warehouse A"),
+    ("trap_alerts_ungranted", "List active alerts across the warehouse network"),
+    ("trap_high_risk_pending", "Which high-risk suppliers have pending shipments?"),
+    ("ops_supplier_rank_boundary", "Rank suppliers by combined risk and lead time score"),
+    ("trap_delayed_count", "How many delayed incoming shipments per warehouse?"),
+    ("trap_stock_by_bin", "Show stock by storage bin"),
+    ("trap_how_full_synonym", "how full is each warehouse"),
+)
+DMS_180_IDS: frozenset[str] = frozenset(row[0] for row in DMS_180_CURATED)
+_BANNED_IDEA = ("langgraph", "langchain", "n8n", "langflow", "mybot")
 
 
 def _baseline() -> dict[str, Any]:
@@ -68,16 +104,27 @@ def public_map() -> dict[str, Any]:
         "measured_baseline": _baseline(),
         "replaces_baseline": False,
         "invented_better": False,
+        "like_with_like": False,
+        "like_with_like_corpus": LIKE_WITH_LIKE_CORPUS,
+        "like_with_like_n": DMS_180_N,
+        "leftover": (
+            "think consumed in SQL prompt; improve re-thinks; like-with-like only "
+            "when pinned 26 ids @ d2f116a6; still INCOMPLETE"
+        ),
         "jepa": "proxy cosine via gen_cfsm.collapse_score; no trained path named",
         "gencfsm": (
             "reuse generate_ir, compile_ir, execute_cfsm/dag_runner, route_step"
         ),
         "freeroute": "consume crew.freeroute public API only; unarmed fail-closed",
+        "prompt_harness": (
+            "POST /crew/prompt-harness consumes measure_climb; leftover #212 OPEN"
+        ),
         "excel_ppt": "deferred #197 #198 #199",
         "live_5000_ci": False,
         "dms_sot": False,
         "issue_211_complete": False,
         "issue_212_complete": False,
+        "issue_227_complete": False,
     }
 
 
@@ -121,6 +168,36 @@ def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
     return tables
 
 
+def like_with_like(corpus: str, ids: Sequence[str]) -> bool:
+    """True only on the frozen 26 ids. n==26 with a label is not enough."""
+    got = [str(x).strip() for x in ids if str(x).strip()]
+    return (
+        (corpus or "").strip() == LIKE_WITH_LIKE_CORPUS
+        and len(got) == DMS_180_N
+        and set(got) == DMS_180_IDS
+    )
+
+
+def curated_intents() -> list[dict[str, str]]:
+    """Pinned #180 intents. No scores. Ranking filled at measure time."""
+    return [{"id": i, "intent": q} for i, q in DMS_180_CURATED]
+
+
+def _idea_lines(ideas: Sequence[str] | None) -> list[str]:
+    out: list[str] = []
+    for raw in ideas or []:
+        text = str(raw).strip()
+        if not text:
+            continue
+        low = text.lower()
+        if any(mark in low for mark in _BANNED_IDEA):
+            continue
+        out.append(text[:240])
+        if len(out) >= 8:
+            break
+    return out
+
+
 def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
     for row in ranking.get("locations") or []:
@@ -128,10 +205,36 @@ def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
         table = where.get("table") or row.get("id")
         cols = where.get("columns") or []
         lines.append(f"- {table}: {', '.join(str(c) for c in cols[:24])}")
+    for row in list(ranking.get("metrics") or [])[:12]:
+        mid = row.get("id") or ""
+        tables = (row.get("where") or {}).get("tables") or []
+        if mid:
+            lines.append(
+                "- metric "
+                + str(mid)
+                + " tables="
+                + ",".join(str(t) for t in tables[:8])
+            )
+    for row in list(ranking.get("certified") or [])[:8]:
+        where = row.get("where") or {}
+        q = where.get("question") or row.get("id")
+        if q:
+            lines.append(f"- certified question: {q}")
+    for row in list(ranking.get("joins") or [])[:12]:
+        src = row.get("from") or ""
+        dst = row.get("to") or ""
+        if src and dst:
+            lines.append(f"- join {src} -> {dst}")
     return lines
 
 
-def _think_prompt(intent: str, ranking: Mapping[str, Any]) -> str:
+def _think_prompt(
+    intent: str,
+    ranking: Mapping[str, Any],
+    *,
+    critique: str = "",
+    ideas: Sequence[str] | None = None,
+) -> str:
     lines = [
         "Think which ontology tables and metrics answer the intent.",
         "Do not emit SQL. Do not invent warehouse numbers, keys, or live CI.",
@@ -139,17 +242,36 @@ def _think_prompt(intent: str, ranking: Mapping[str, Any]) -> str:
         *_ontology_lines(ranking),
         f"INTENT: {intent}",
     ]
+    idea_lines = _idea_lines(ideas)
+    if idea_lines:
+        lines.extend(["", "DISTILL IDEAS (Netie-native; not a second engine):", *idea_lines])
+    if critique.strip():
+        lines.extend(
+            ["", "PRIOR REFUSAL (improve the plan, do not emit SQL):", critique.strip()]
+        )
     return "\n".join(lines)
 
 
-def _sql_prompt(intent: str, ranking: Mapping[str, Any], critique: str = "") -> str:
+def _sql_prompt(
+    intent: str,
+    ranking: Mapping[str, Any],
+    *,
+    critique: str = "",
+    think: str = "",
+    ideas: Sequence[str] | None = None,
+) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
         *_ontology_lines(ranking),
         "",
         f"INTENT: {intent}",
-        "Emit one DuckDB SELECT. SQL only. No invented numeric answers.",
     ]
+    if think.strip():
+        lines.extend(["", "THINK (use this plan; do not copy numbers):", think.strip()[:2000]])
+    idea_lines = _idea_lines(ideas)
+    if idea_lines:
+        lines.extend(["", "DISTILL IDEAS (Netie-native; not a second engine):", *idea_lines])
+    lines.append("Emit one DuckDB SELECT. SQL only. No invented numeric answers.")
     if critique.strip():
         lines.extend(["", "PRIOR REFUSAL (improve, do not repeat):", critique.strip()])
     return "\n".join(lines)
@@ -161,12 +283,29 @@ def _pct(num: int, den: int) -> str:
     return f"{(100.0 * num / den):.2f}%"
 
 
-def coverage_report(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Report this-run fixture coverage vs frozen #180 baseline. Never replaces it."""
+def coverage_report(
+    outcomes: Sequence[Mapping[str, Any]],
+    *,
+    corpus: str = "",
+) -> dict[str, Any]:
+    """Report this-run coverage vs frozen #180 baseline. Never replaces it."""
     n = len(outcomes)
     validated = sum(1 for row in outcomes if row.get("valid"))
     wrong = sum(1 for row in outcomes if row.get("wrong"))
     gen_label = _pct(validated, n)
+    ids = [str(row.get("id") or "") for row in outcomes]
+    like = like_with_like(corpus, ids)
+    improved = False
+    if like and wrong == 0:
+        try:
+            improved = float(gen_label.rstrip("%")) > 57.69
+        except ValueError:
+            improved = False
+    this_corpus = (
+        LIKE_WITH_LIKE_CORPUS
+        if like
+        else (corpus.strip() or "cortex-cot-climb fixture, not DMS #180 curated 26")
+    )
     return {
         "ok": True,
         "complete": False,
@@ -175,24 +314,32 @@ def coverage_report(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "measured_baseline": _baseline(),
         "replaces_baseline": False,
         "invented_better": False,
-        "like_with_like": False,
+        "like_with_like": like,
         "this_run": {
             "n": n,
             "validated": validated,
             "wrong": wrong,
             "gen": gen_label,
-            "corpus": "cortex-cot-climb fixture, not DMS #180 curated 26",
+            "corpus": this_corpus,
+            "like_with_like": like,
         },
         "vs_baseline": {
             "baseline_gen": "57.69%",
             "baseline_exact": "38.46%",
             "baseline_wrong": 0,
             "this_run_gen": gen_label,
-            "note": "different corpus; do not replace DMS #180 numbers",
+            "like_with_like": like,
+            "improved": improved,
+            "note": (
+                "like-with-like vs DMS #180 curated 26 @ d2f116a6; baseline not replaced"
+                if like
+                else "different corpus; do not replace DMS #180 numbers"
+            ),
         },
         "jepa": JEPA_PATH,
         "issue_211_complete": False,
         "issue_212_complete": False,
+        "issue_227_complete": False,
         "outcomes": [dict(row) for row in outcomes],
     }
 
@@ -249,6 +396,7 @@ def _climb_meta(**extra: Any) -> dict[str, Any]:
         "measured_baseline": _baseline(),
         "replaces_baseline": False,
         "invented_better": False,
+        "think_consumed": False,
         "steps": [],
         "final": None,
         "g1": None,
@@ -298,6 +446,7 @@ async def climb(
     *,
     complete: Any | None = None,
     bearer: str | None = None,
+    ideas: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
@@ -346,10 +495,14 @@ async def climb(
         )
     runner = complete or fr.complete
     columns = _ranked_columns(ranking)
+    idea_list = _idea_lines(ideas)
     steps: list[dict[str, Any]] = []
     think_text = ""
     think = await _call_runner(
-        runner, purpose="think", prompt=_think_prompt(text, ranking), bearer=bearer
+        runner,
+        purpose="think",
+        prompt=_think_prompt(text, ranking, ideas=idea_list),
+        bearer=bearer,
     )
     if not think.get("ok"):
         return _envelope(
@@ -388,19 +541,22 @@ async def climb(
             journal = core.journal()
         except Exception:  # noqa: BLE001 - journal is optional on this consumer
             journal = None
+        sql_prompt = _sql_prompt(
+            text, ranking, critique=critique, think=think_text, ideas=idea_list
+        )
         if journal is not None:
             with journal as stamps:
                 gen = await _call_runner(
                     runner,
                     purpose="generative_ask",
-                    prompt=_sql_prompt(text, ranking, critique),
+                    prompt=sql_prompt,
                     bearer=bearer,
                 )
         else:
             gen = await _call_runner(
                 runner,
                 purpose="generative_ask",
-                prompt=_sql_prompt(text, ranking, critique),
+                prompt=sql_prompt,
                 bearer=bearer,
             )
         if not gen.get("ok"):
@@ -415,6 +571,7 @@ async def climb(
                     final="GENERATE_REFUSE",
                     g1=g1,
                     steps=steps,
+                    think_consumed=bool(think_text),
                 ),
                 refuse_reason=str(gen.get("refused") or "FreeRoute generative_ask refused"),
             )
@@ -452,6 +609,7 @@ async def climb(
                 "decision": routed["decision"],
                 "granted": granted,
                 "reason": last_reason,
+                "think_consumed": bool(think_text),
             }
         )
         if predicates_pass:
@@ -475,6 +633,7 @@ async def climb(
                     g1=g1,
                     steps=steps,
                     attempts=step,
+                    think_consumed=True,
                 ),
             )
         if granted in (DECISION_FORCE_AUDIT,) or step >= HORIZON:
@@ -485,6 +644,40 @@ async def climb(
             DECISION_AUDIT_FAIL,
         ):
             critique = last_reason
+            think = await _call_runner(
+                runner,
+                purpose="think",
+                prompt=_think_prompt(
+                    text, ranking, critique=critique, ideas=idea_list
+                ),
+                bearer=bearer,
+            )
+            if not think.get("ok"):
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=think.get("identity") or identity,
+                    route=think.get("route"),
+                    stamp=think.get("stamp"),
+                    climb=_climb_meta(
+                        final="THINK_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                    ),
+                    refuse_reason=str(think.get("refused") or "FreeRoute think refused"),
+                )
+            think_text = str(think.get("text") or think_text)
+            steps.append(
+                {
+                    "step": step,
+                    "kind": "think",
+                    "purpose": "think",
+                    "ok": True,
+                    "decision": DECISION_CONTINUE,
+                }
+            )
             continue
         break
 
@@ -498,6 +691,7 @@ async def climb(
             g1=g1,
             steps=steps,
             attempts=HORIZON,
+            think_consumed=bool(think_text),
         ),
         refuse_reason=(
             "CoT/route/improve exhausted horizon without ontology-valid SQL: "
@@ -507,14 +701,33 @@ async def climb(
     )
 
 
-async def measure_climb(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Fixture coverage vs frozen #180 baseline. Not a live :5000 CI claim."""
+async def measure_climb(
+    cases: Sequence[Mapping[str, Any]] | None = None,
+    *,
+    corpus: str = "",
+    ideas: Sequence[str] | None = None,
+    complete: Any | None = None,
+) -> dict[str, Any]:
+    """Coverage vs frozen #180 baseline. Not a live :5000 CI claim."""
+    rows: list[Mapping[str, Any]] = [c for c in (cases or []) if isinstance(c, Mapping)]
+    if not rows and (corpus or "").strip() == LIKE_WITH_LIKE_CORPUS:
+        rows = curated_intents()
+    idea_list = _idea_lines(ideas)
     outcomes: list[dict[str, Any]] = []
-    for case in cases:
+    ranking_fn: Any = None
+    for case in rows:
+        ranking = case.get("ranking") or {}
+        if not ranking:
+            if ranking_fn is None:
+                from CortexOS.crew import insights as insights_mod
+
+                ranking_fn = insights_mod.retrieve_ontology
+            ranking = ranking_fn(str(case.get("intent") or ""))
         out = await climb(
             str(case.get("intent") or ""),
-            case.get("ranking") or {},
-            complete=case.get("complete"),
+            ranking,
+            complete=case.get("complete") or complete,
+            ideas=idea_list,
         )
         wrong = bool(out.get("values")) or out.get("status") == "CERTIFIED"
         outcomes.append(
@@ -527,7 +740,9 @@ async def measure_climb(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 "final": (out.get("climb") or {}).get("final"),
             }
         )
-    return coverage_report(outcomes)
+    return coverage_report(outcomes, corpus=corpus)
 
 
 assert HORIZON in ALLOWED_HORIZONS
+assert len(DMS_180_CURATED) == DMS_180_N
+assert len(DMS_180_IDS) == DMS_180_N

@@ -56,6 +56,8 @@ def test_law_is_certified_abstain_refuse_and_names_consumers(api_client) -> None
     assert body["cot_climb"]["complete"] is False
     assert body["cot_climb"]["status"] == "INCOMPLETE"
     assert body["cot_climb"]["replaces_baseline"] is False
+    assert body["cot_climb"]["like_with_like"] is False
+    assert body["cot_climb"]["issue_212_complete"] is False
     assert body["measured_baseline"]["gen"] == "57.69%"
     assert body["measured_baseline"]["exact"] == "38.46%"
     assert body["measured_baseline"]["wrong"] == 0

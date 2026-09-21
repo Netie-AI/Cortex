@@ -211,7 +211,6 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
         "CortexOS/crew/liberty_seek.py",
         "CortexOS/crew/liberty_routes.py",
         "CortexOS/integrations/freeroute.py",
-        "CortexOS/crew/cot_climb.py",
         "CortexOS/execution/distill_harness.py",
         "CortexOS/dms/answer_engine.py",
         "packages/cortex_contract/execution.py",
@@ -400,3 +399,32 @@ def test_http_get_stamps_incomplete_and_post_refuses_invent_complete(client) -> 
     dumped = str(env) + str(law)
     assert "99.95" not in dumped
     assert "LIVE_KEY" not in dumped
+
+
+@pytest.mark.asyncio
+async def test_pinned_26_like_with_like_stays_incomplete(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.crew import cot_climb
+
+    _armed_free(monkeypatch)
+    fake = _script("", "", "")
+    out = await harness.run_harness(
+        corpus=cot_climb.LIKE_WITH_LIKE_CORPUS,
+        complete=fake,
+    )
+    assert out["ok"] is True
+    assert out["like_with_like"] is True
+    assert out["climb_measured"] is True
+    assert out["this_run"]["n"] == 26
+    assert out["this_run"]["gen"] == "0.00%"
+    assert out["this_run"]["gen"] != "57.69%"
+    assert out["vs_baseline"]["improved"] is False
+    assert out["complete"] is False
+    assert out["status"] == "INCOMPLETE"
+    assert out["issue_212_complete"] is False
+    assert out["closes_212"] is False
+    assert out["replaces_baseline"] is False
+    assert out["invented_better"] is False
+    assert out["issue_212"] == "OPEN/INCOMPLETE"
+    assert "99.95" not in str(out)

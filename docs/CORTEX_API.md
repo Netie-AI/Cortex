@@ -55,4 +55,5 @@ lent.
 - G4 litellm / brain / suggest env-key hosts stay P24.1. This slice does not
   expand them.
 - `cot_climb` is INCOMPLETE. Fixture coverage is not a replacement for the
-  DMS #180 baseline.
+  DMS #180 baseline. Like-with-like requires the pinned 26 ids @ `d2f116a6`;
+  a 5-item fixture is not that corpus. Think is consumed in the SQL prompt.

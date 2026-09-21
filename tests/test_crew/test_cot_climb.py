@@ -68,6 +68,10 @@ def test_public_map_cites_baseline_and_is_not_complete() -> None:
     assert body["issue_212_complete"] is False
     assert body["replaces_baseline"] is False
     assert body["invented_better"] is False
+    assert body["like_with_like"] is False
+    assert body["like_with_like_corpus"] == cot_climb.LIKE_WITH_LIKE_CORPUS
+    assert body["issue_227_complete"] is False
+    assert "INCOMPLETE" in body["leftover"]
     assert body["live_5000_ci"] is False
     base = body["measured_baseline"]
     assert base["gen"] == "57.69%"
@@ -194,6 +198,7 @@ async def test_think_then_valid_sql_abstains_no_numbers(
     assert env["complete"] is False
     assert env["climb"]["final"] == DECISION_TERMINATE
     assert env["climb"]["g1"]["horizon"] == 3
+    assert env["climb"]["think_consumed"] is True
     assert env["measured_baseline"]["exact"] == "38.46%"
     assert env["measured_baseline"]["gen"] == "57.69%"
 
@@ -214,6 +219,7 @@ async def test_improve_retries_after_off_ontology_sql(
     assert "payroll" not in (env["sql"] or "").lower()
     kinds = [row["kind"] for row in env["climb"]["steps"]]
     assert kinds.count("generate") == 2
+    assert kinds.count("think") >= 2
     assert env["values"] == []
     assert env["complete"] is False
 
@@ -320,6 +326,78 @@ async def test_measure_reports_coverage_vs_baseline_not_a_better_percent(
     assert "99.95" not in str(report)
     assert report["issue_211_complete"] is False
     assert report["issue_212_complete"] is False
+    labeled = await cot_climb.measure_climb(cases, corpus=cot_climb.LIKE_WITH_LIKE_CORPUS)
+    assert labeled["like_with_like"] is False
+    assert labeled["this_run"]["n"] == 5
+    assert labeled["complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_think_text_is_consumed_in_sql_prompt(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _armed(monkeypatch)
+    prompts: list[str] = []
+    think = "PLAN: count distinct sku on inventory. No numbers."
+
+    async def fake(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, kwargs
+        if purpose == "think":
+            return {
+                "ok": True,
+                "text": think,
+                "identity": "cortex:crew:think",
+                "route": {"label": "deepseek", "model": "deepseek-chat"},
+            }
+        prompts.append(prompt)
+        return {
+            "ok": True,
+            "text": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "deepseek", "model": "deepseek-chat"},
+        }
+
+    env = await cot_climb.climb(
+        "how many skus",
+        _ranking(),
+        complete=fake,
+        ideas=["Learn via existing gen_cfsm compile into dag_runner", "import langgraph"],
+    )
+    assert env["status"] == "ABSTAIN"
+    assert env["climb"]["think_consumed"] is True
+    assert prompts
+    assert "THINK" in prompts[0]
+    assert "count distinct sku" in prompts[0].lower()
+    assert "gen_cfsm" in prompts[0]
+    assert "langgraph" not in prompts[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_pinned_26_is_like_with_like_without_inventing_percent(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _armed(monkeypatch)
+    assert len(cot_climb.DMS_180_CURATED) == 26
+    fake = _script("", "", "")
+    report = await cot_climb.measure_climb(
+        corpus=cot_climb.LIKE_WITH_LIKE_CORPUS,
+        complete=fake,
+    )
+    assert report["this_run"]["n"] == 26
+    assert report["like_with_like"] is True
+    assert report["this_run"]["validated"] == 0
+    assert report["this_run"]["wrong"] == 0
+    assert report["this_run"]["gen"] == "0.00%"
+    assert report["vs_baseline"]["improved"] is False
+    assert report["vs_baseline"]["this_run_gen"] == "0.00%"
+    assert report["vs_baseline"]["this_run_gen"] != "57.69%"
+    assert report["complete"] is False
+    assert report["status"] == "INCOMPLETE"
+    assert report["replaces_baseline"] is False
+    assert report["invented_better"] is False
+    assert report["issue_212_complete"] is False
+    ids = [str(row["id"]) for row in report["outcomes"]]
+    assert set(ids) == set(cot_climb.DMS_180_IDS)
 
 
 @pytest.mark.asyncio
