@@ -1,11 +1,14 @@
 """Executor helpers: pre-call cost gating + adapter invocation."""
 
 from dataclasses import dataclass, replace
+from typing import Any
 
+from netie.decision import decision_log
 from netie.execution.errors import CostCeilingExceeded
 from netie.execution.model_router import ModelRequest, ModelRouter
 from netie.routing.adapters.base import AdapterRequest, AdapterResponse
 from netie.routing.cost_ledger import CostLedger, NodeExecutionRecord, now_utc
+from netie.routing.judgment_model import JudgmentModel, JudgmentRequest
 from netie.routing.tiers import Tier
 from netie.routing.token_estimate import estimate_prompt_tokens
 from netie.security.redact_port import RedactionFailed, redact_prompt_text
@@ -26,6 +29,55 @@ def adapter_token_estimate_family(provider: str) -> str | None:
     if provider == "openai":
         return "openai_compat"
     return None
+
+
+def _decision_state(model_req: ModelRequest) -> dict[str, Any]:
+    """The JudgmentModel state dict for ``model_req``, built exactly as ``route()`` does."""
+    return JudgmentModel._state_for(
+        JudgmentRequest(
+            request_type=model_req.request_type,
+            content=model_req.prompt,
+            context_size=len(model_req.prompt),
+            prior_tier_failures=int(model_req.metadata.get("prior_tier_failures", 0)),
+            user_tier_budget=Tier(model_req.metadata.get("user_tier_budget", model_req.max_tier.value)),
+            is_vip=bool(model_req.metadata.get("is_vip", False)),
+        )
+    )
+
+
+def _log_decision(
+    router: ModelRouter,
+    model_req: ModelRequest,
+    routed: Any,
+    *,
+    run_id: str,
+    node_id: str,
+    status: str,
+    error: BaseException | None = None,
+    cost_myr: float = 0.0,
+) -> None:
+    """KEV-LOG (#246): one JSONL line per outcome. Never raises, never alters the result."""
+    try:
+        state = _decision_state(model_req)
+        decision_log.log_decision(
+            run_id=run_id,
+            node_id=node_id,
+            request_type=model_req.request_type,
+            default_tier=model_req.default_tier,
+            max_tier=model_req.max_tier,
+            tier=routed.tier,
+            reason=routed.reason,
+            status=status,
+            state=state,
+            judgment_model=getattr(router, "judgment_model", None),
+            provider=routed.provider,
+            model=routed.model,
+            error=error,
+            cost_myr=cost_myr,
+        )
+    except Exception:
+        # log_decision already counts its own failures; this guards the state build.
+        return
 
 
 def effective_cost_ceiling(workflow_cost_ceiling_myr: float, node_cost_ceiling_myr: float | None) -> float:
@@ -77,6 +129,7 @@ async def invoke_routed_completion(
             error=None,
         )
         await ledger.add(record)
+        _log_decision(router, model_req, routed, run_id=run_id, node_id=node_id, status="ok")
         return RoutedCompletionOutcome(
             response=AdapterResponse(
                 content="",
@@ -119,6 +172,7 @@ async def invoke_routed_completion(
                 error=str(exc),
             )
         )
+        _log_decision(router, model_req, routed, run_id=run_id, node_id=node_id, status="error", error=exc)
         raise
 
     prompt_blob = f"{adapter_req.system}\n{adapter_req.prompt}"
@@ -129,12 +183,16 @@ async def invoke_routed_completion(
     projected_cost = routed.adapter.cost_myr(est_prompt_tokens, adapter_req.max_tokens)
 
     if not ledger.enforce_ceiling(run_id, ceiling, projected_additional_myr=projected_cost):
-        raise CostCeilingExceeded(
+        ceiling_exc = CostCeilingExceeded(
             node_id,
             projected_myr=projected_cost,
             spent_myr=ledger.total_cost(run_id),
             ceiling_myr=ceiling,
         )
+        _log_decision(
+            router, model_req, routed, run_id=run_id, node_id=node_id, status="error", error=ceiling_exc
+        )
+        raise ceiling_exc
 
     started_at = now_utc()
     final_req = replace(adapter_req, model=routed.model)
@@ -159,6 +217,9 @@ async def invoke_routed_completion(
             error=None,
         )
         await ledger.add(record)
+        _log_decision(
+            router, model_req, routed, run_id=run_id, node_id=node_id, status="ok", cost_myr=actual_cost
+        )
         return RoutedCompletionOutcome(
             response=resp,
             tier=routed.tier.value,
@@ -184,4 +245,5 @@ async def invoke_routed_completion(
             error=str(exc),
         )
         await ledger.add(err_record)
+        _log_decision(router, model_req, routed, run_id=run_id, node_id=node_id, status="error", error=exc)
         raise
