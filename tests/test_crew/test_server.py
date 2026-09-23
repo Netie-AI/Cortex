@@ -630,7 +630,12 @@ def test_commands_autocomplete_and_mention_targets(client) -> None:
     body = client.http.get("/crew/commands").json()
     slashes = {c["slash"] for c in body["commands"]}
     assert {"desk", "board", "estate", "ship_gate", "spawn", "kill", "done"} <= slashes
-    assert any(c["kind"] == "skill" and c["slash"] == "build" for c in body["commands"])
+    # /build is a desk bind now (skill build + named verify); bare /build still
+    # loads the pack. Shipped packs stay listed as skills under their own slug.
+    build = next(c for c in body["commands"] if c["slash"] == "build")
+    assert build["kind"] == "desk" and build["action"] == "build_issue"
+    assert any(c["kind"] == "skill" and c["slash"] == "ship" for c in body["commands"])
+    assert any(c["kind"] == "desk" and c["slash"] == "scale" for c in body["commands"])
     assert any(c["kind"] == "routine" for c in body["commands"])
     names = {m["name"] for m in body["mentions"]}
     assert "Manager" in names
