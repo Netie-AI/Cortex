@@ -95,6 +95,8 @@ def test_policy_master_switch_and_arming_fail_closed() -> None:
     # crew-internal tools are allowed; unknown internal names are not
     assert policy.decide("cortex_ask", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("cortex_insights", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("cortex_liberty_seek", server=None, armed=False, master_on=False)[0] == policy.ALLOW
+    assert policy.decide("cortex_liberty_predict_goal", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("netie_board", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("desk_status", server=None, armed=False, master_on=False)[0] == policy.ALLOW
     assert policy.decide("estate_status", server=None, armed=False, master_on=False)[0] == policy.ALLOW
@@ -153,7 +155,7 @@ def test_provider_pin_does_not_fall_through(clean_env: pytest.MonkeyPatch) -> No
 
 
 def test_vault_armed_without_env_is_configured(
-    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+    clean_env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch, armed_openvault
 ) -> None:
     from CortexOS.crew import openvault
 

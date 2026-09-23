@@ -59,9 +59,11 @@ def create_app() -> Any:
         AGENTIC_STUB_ROUTES,
         register_feature_stubs,
     )
+    from CortexOS.insights.routes import register_insights_routes
     from CortexOS.packaging import extra_available
 
     register_contract_routes(app)
+    register_insights_routes(app)
     register_connector_routes(app)
     register_search_routes(app)
     register_dag_run_routes(app)

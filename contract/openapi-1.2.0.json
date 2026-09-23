@@ -3027,6 +3027,53 @@
         "title": "ImportFolderBody",
         "type": "object"
       },
+      "InsightsAskIn": {
+        "properties": {
+          "ask": {
+            "default": true,
+            "title": "Ask",
+            "type": "boolean"
+          },
+          "consumer": {
+            "default": "dms",
+            "title": "Consumer",
+            "type": "string"
+          },
+          "generate": {
+            "default": false,
+            "title": "Generate",
+            "type": "boolean"
+          },
+          "intent": {
+            "default": "",
+            "title": "Intent",
+            "type": "string"
+          },
+          "question": {
+            "default": "",
+            "title": "Question",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "demo",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          }
+        },
+        "title": "InsightsAskIn",
+        "type": "object"
+      },
       "InstructIn": {
         "properties": {
           "instruction": {

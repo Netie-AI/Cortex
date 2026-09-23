@@ -111,25 +111,86 @@ _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
+def _cot_public_map() -> dict[str, Any]:
+    """GET stamp for #212. Consumes cot_climb.public_map; never claims COMPLETE."""
+    from CortexOS.crew import cot_climb
+
+    body = cot_climb.public_map()
+    return {
+        "execute": body["execute"],
+        "complete": False,
+        "status": "INCOMPLETE",
+        "measured_baseline": body["measured_baseline"],
+        "replaces_baseline": False,
+        "invented_better": False,
+        "like_with_like": False,
+        "like_with_like_corpus": body.get("like_with_like_corpus"),
+        "leftover": body.get("leftover") or "",
+        "prompt_harness": body.get("prompt_harness") or "POST /crew/prompt-harness",
+        "issue_211_complete": False,
+        "issue_212_complete": False,
+        "issue_227_complete": False,
+        "jepa": body["jepa"],
+    }
+
+
+def _prompt_harness_public_map() -> dict[str, Any]:
+    """GET stamp for #227. Consumes prompt_harness_climb; never closes #212."""
+    from CortexOS.crew import prompt_harness_climb as harness
+
+    body = harness.public_map()
+    return {
+        "execute": body["execute"],
+        "complete": False,
+        "status": "INCOMPLETE",
+        "measured_baseline": body["measured_baseline"],
+        "replaces_baseline": False,
+        "invented_better": False,
+        "like_with_like": False,
+        "issue_212_complete": False,
+        "issue_227_complete": False,
+        "closes_212": False,
+        "gpu_finetune": False,
+        "distill": body["distill"],
+    }
+
+
 def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
     """GET map. No ask. No numbers. Control may display."""
     return {
         "ok": True,
         "law": LAW,
         "execute": "POST /crew/insights",
+        "stable": "POST /v1/insights",
         "ontology": "GET /crew/insights/ontology?q=",
+        "stable_ontology": "GET /v1/insights/ontology?q=",
         "statuses": list(STATUSES),
         "excel_ppt": "deferred #197 #198 #199",
         "scale": "1GB to 10TB is a design target only; not COMPLETE",
         "vault": "OpenVault-armed Crew engine bridge only. No second vault.",
         "freeroute": "GET /crew/freeroute ; POST /crew/freeroute purpose=prompt|think|act",
-        "generate": "POST /crew/insights {generate:true} NL then ontology then SQL then validate",
+        "generate": (
+            "POST /crew/insights {generate:true} CoT/route/improve via cot_climb "
+            "then FreeRoute validate; complete=False. Consumers: POST /v1/insights "
+            "{generate:true} (same run_insights)."
+        ),
+        "cot_climb": _cot_public_map(),
+        "prompt_harness": _prompt_harness_public_map(),
         "identity": "GET /crew/identity (keys stay in OpenVault custody)",
+        "stable_identity": "GET /v1/insights/identity",
+        "keys": "GET /v1/insights/keys (local vs cloud posture; no secrets)",
+        "airgpt": "POST /dms/sidecar/insights (same run_insights; no parallel invent stack)",
+        "consumers": {
+            "dms": "POST /v1/insights - Cortex is compute; DMS stays consumer",
+            "airgpt": "POST /v1/insights or POST /dms/sidecar/insights - skin, same path",
+            "crew": "POST /crew/insights - chrome alias",
+        },
         "export_runtime": export_runtime_hint(shell_public),
         "agents": (
             "Retrieve ontology first: locations are where to read; ranked "
             "metrics are which data is more important. Then ask. Generative-ask "
             "needs a model: OpenVault FreeRoute only, fail-closed if unarmed. "
+            "generate=true runs CoT/route/improve via cot_climb; not COMPLETE. "
             "Do not skip to SQL or export."
         ),
         "measured_baseline": {
@@ -951,87 +1012,54 @@ def _sql_schema_prompt(intent: str, ranking: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+VALIDATOR = "static sqlglot guardrail: not EXPLAINed, not manifest-enforced, not executed"
+
+
+def _generative_unsure_why(gen: dict[str, Any] | None = None) -> str:
+    check = str((gen or {}).get("check") or "table scope")
+    return f"FreeRoute SQL passed the {VALIDATOR} ({check}); not executed in crew"
+
+
+def _ranked_columns(ranking: dict[str, Any]) -> dict[str, list[str]]:
+    """table -> columns the ranking exposed. Missing columns mean table-level only."""
+    out: dict[str, list[str]] = {}
+    for row in ranking.get("locations") or []:
+        where = row.get("where") or {}
+        table = str(where.get("table") or row.get("id") or "").lower()
+        if not table:
+            continue
+        cols = [str(c) for c in (where.get("columns") or []) if str(c).strip()]
+        if cols:
+            out.setdefault(table, []).extend(c for c in cols if c not in out.get(table, []))
+    return out
+
+
 async def generative_ask(
     intent: str,
     ranking: dict[str, Any],
     *,
     complete: Any | None = None,
+    bearer: str | None = None,
 ) -> dict[str, Any]:
-    """NL then ontology then FreeRoute SQL then validate. No numbers. No DuckDB."""
-    from CortexOS.crew import freeroute as fr
+    """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
-    allowed = _ranked_tables(ranking)
-    arm = fr.arming()
-    if not arm.get("armed"):
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": fr.identity_for("generative_ask"),
-            "route": None,
-            "refuse_reason": (
-                "OpenVault FreeRoute unarmed: "
-                + str(arm.get("detail") or "unreachable")
-                + " (no invent-green keys)"
-            ),
-            "arming": arm,
-        }
-    prompt = _sql_schema_prompt(intent, ranking)
-    runner = complete or fr.complete
-    result = await runner(
-        None,
-        purpose="generative_ask",
-        prompt=prompt,
+    ``bearer`` is the HTTP caller's own OpenVault key (or ``""`` for the
+    loopback tier); ``None`` spends Cortex's credential for in-process callers.
+    Arming/pick/identity stay on the #215 FreeRoute adapter; this consumes
+    ``complete`` and ``validate_sql`` only.
+    """
+    from CortexOS.crew import cot_climb
+
+    out = await cot_climb.climb(
+        intent, ranking, complete=complete, bearer=bearer
     )
-    if not isinstance(result, dict):
-        result = {}
-    if not result.get("ok"):
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": result.get("identity") or fr.identity_for("generative_ask"),
-            "route": result.get("route"),
-            "refuse_reason": str(result.get("refused") or "FreeRoute complete refused"),
-            "arming": arm,
-            "text": "",
-        }
-    sql = fr.extract_sql(str(result.get("text") or ""))
-    checked = fr.validate_sql(sql or "", allowed)
-    if not checked.get("ok"):
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "phase": "generate",
-            "sql": None,
-            "valid": False,
-            "values": [],
-            "identity": result.get("identity"),
-            "route": result.get("route"),
-            "refuse_reason": str(checked.get("reason") or "sql failed ontology validate"),
-            "arming": arm,
-            "text": "",
-        }
-    return {
-        "ok": True,
-        "status": "ABSTAIN",
-        "phase": "generate",
-        "sql": checked.get("sql"),
-        "valid": True,
-        "values": [],
-        "identity": result.get("identity"),
-        "route": result.get("route"),
-        "tables": checked.get("tables") or [],
-        "arming": arm,
-        "text": "",
-        "note": "Validated SQL via FreeRoute. Numbers not certified (not executed).",
-    }
+    if out.get("ok"):
+        check = str(out.get("check") or "")
+        out["validator"] = VALIDATOR
+        out["note"] = (
+            f"Validated SQL via FreeRoute ({check}). Numbers not certified: {VALIDATOR}."
+        )
+    return out
 
 
 def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> dict[str, Any]:
@@ -1043,9 +1071,13 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
         "valid": bool(gen.get("valid")),
         "identity": gen.get("identity"),
         "route": gen.get("route"),
+        "stamp": gen.get("stamp"),
+        "check": gen.get("check") or "",
+        "validator": gen.get("validator") or "",
         "refuse_reason": gen.get("refuse_reason") or "",
         "values": [],
         "note": gen.get("note") or "",
+        "climb": gen.get("climb") or {},
     }
     if gen.get("sql") and envelope.get("sql_used") is None and envelope.get("status") != "CERTIFIED":
         envelope["sql_used"] = gen.get("sql")
@@ -1055,7 +1087,7 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
             {
                 "id": "generative_sql",
                 "kind": "sql",
-                "why": "FreeRoute SQL validated against ontology; not executed in crew",
+                "why": _generative_unsure_why(gen),
             }
         )
     elif gen.get("refuse_reason"):
@@ -1078,8 +1110,13 @@ async def run_insights(
     complete: Any | None = None,
     shell_public: dict[str, Any] | None = None,
     pack_dir: Path | str | None = None,
+    bearer: str | None = None,
 ) -> dict[str, Any]:
-    """Ontology first. Optional DMS ask and/or FreeRoute generative-ask."""
+    """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
+
+    ``bearer`` only matters with ``generate``: an HTTP caller's own OpenVault
+    key (or ``""`` for the loopback tier); in-process callers leave ``None``.
+    """
     text = (intent or "").strip()
     if not text:
         empty = {
@@ -1110,7 +1147,7 @@ async def run_insights(
                 reason="no ontology path or metric for intent",
                 shell_public=shell_public,
             )
-        gen = await generative_ask(text, ranking, complete=complete)
+        gen = await generative_ask(text, ranking, complete=complete, bearer=bearer)
         if not gen.get("ok"):
             return _attach_generative(
                 _refuse(
@@ -1132,7 +1169,7 @@ async def run_insights(
                     {
                         "id": "generative_sql",
                         "kind": "sql",
-                        "why": "FreeRoute SQL validated against ontology; not executed in crew",
+                        "why": _generative_unsure_why(gen),
                     }
                 ],
             )
@@ -1143,7 +1180,7 @@ async def run_insights(
                     "phase": "generate",
                     "intent": text,
                     "answer": gen.get("note")
-                    or "Validated SQL via FreeRoute. Numbers not certified (not executed).",
+                    or f"Validated SQL via FreeRoute. Numbers not certified: {VALIDATOR}.",
                     "badge": "abstain",
                     "audit_id": None,
                     "values": [],
@@ -1322,11 +1359,21 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
     gen = envelope.get("generative") or {}
     gen_line = ""
     if gen:
+        # The stamp line says what was asked and what OpenVault served; the
+        # identity label is only attribution and stands in when nothing was sent.
+        stamp_raw = gen.get("stamp")
+        stamp: dict[str, Any] = stamp_raw if isinstance(stamp_raw, dict) else {}
+        route = str(stamp.get("line") or gen.get("identity") or "none")
+        validator = f"\nvalidator: {gen.get('validator')}" if gen.get("validator") else ""
         gen_line = (
-            f"\nfreeroute: {gen.get('identity') or 'none'}\n"
+            f"\nfreeroute: {route}{validator}\n"
             f"sql_valid: {gen.get('valid')}\n"
             f"sql: {(gen.get('sql') or gen.get('refuse_reason') or '')[:240]}"
         )
+        climb_raw = gen.get("climb")
+        climb: dict[str, Any] = climb_raw if isinstance(climb_raw, dict) else {}
+        if climb:
+            gen_line += f"\nclimb: {climb.get('final') or 'none'} complete=False"
     return (
         f"status: {status}\n"
         f"phase: {envelope.get('phase')}\n"

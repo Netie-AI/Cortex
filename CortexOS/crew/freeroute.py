@@ -1,30 +1,38 @@
-"""OpenVault FreeRoute as the central Cortex AI layer (Cortex #211).
+"""OpenVault FreeRoute for Crew - an async adapter over the one Cortex core.
 
-Insights / generative-ask / prompt-think-act go through this module when a
-model is needed. It is not a second vault: arming, keys, and completions
-reuse ``CortexOS.crew.openvault``. Unarmed is fail-closed. No invent-green
-keys. Crew chat may still pin litellm; this layer does not silently walk
-that chain.
+Arming, credential, candidate order and the measured route all live in
+``CortexOS.integrations.freeroute`` (sync, stdlib). This module holds no
+routing logic of its own: it runs the core on a dedicated executor so the crew
+event loop stays free, maps crew purposes onto core task keys, and keeps the
+#214 HTTP shapes (purposes, identity labels, ``complete()`` result dict).
 
-Measured climb numbers from DMS #180 stay cited as baseline only
-(gen 57.69% vs exact 38.46%, WRONG=0 both @ d2f116a6). They are not model
-scores. gen_cfsm + dag_runner already shipped G1 on tip; this slice does
-not clone them.
+Insights / generative-ask / prompt-think-act go through here when a model is
+needed. Unarmed is fail-closed and named. No invent-green keys. Attribution is
+OpenVault's: nothing Cortex writes about itself carries authority (KB A-0009).
+
+The DMS #180 numbers stay cited as a cross-system baseline only; they score the
+DMS offline bind_plan lane with a badge-only judge and say nothing about any
+model FreeRoute serves.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
+import functools
 import os
-import re
-import time
+import threading
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
-from CortexOS.crew.llm import LLMError, LLMResult
+from CortexOS.crew.llm import LLMError
+from CortexOS.dms.sql_extract import extract_select
+from CortexOS.integrations import freeroute as core
 
-# Stable in-Cortex identity. Keys stay in OpenVault custody. Not a minted secret.
+# Stable in-Cortex attribution label. Not a credential; OpenVault never reads it.
 CORTEX_IDENTITY = "cortex:crew"
-IDENTITY_HEADER = "X-Cortex-Identity"
 PURPOSES = ("prompt", "think", "act", "insights", "generative_ask")
 
 DMS_180_BASELINE = {
@@ -32,35 +40,53 @@ DMS_180_BASELINE = {
     "gen": "57.69%",
     "exact": "38.46%",
     "wrong": 0,
-    "note": "baseline only; this slice does not invent a better climb",
+    "note": (
+        "DMS offline bind_plan lane scored by a badge-only judge; cited "
+        "cross-system as a baseline, not a model score"
+    ),
 }
 
-# Bundled families FreeRoute may pick among. Catalog order is not a live score.
-# DeepSeek + Qwen are first so a measured pick is never "grok is the only path".
-_BUNDLED: tuple[tuple[str, str, str], ...] = (
-    ("deepseek", "deepseek-chat", "cloud"),
-    ("qwen", "qwen2.5-7b-instruct", "local"),
-    ("openrouter", "deepseek/deepseek-chat", "cloud"),
-    ("groq", "llama-3.3-70b-versatile", "cloud"),
-    ("ollama", "qwen2.5-7b-instruct", "local"),
-    ("google", "gemini-2.0-flash", "cloud"),
-    ("mistral", "mistral-small-latest", "cloud"),
-    ("cerebras", "llama3.1-8b", "cloud"),
-    ("anthropic", "claude-sonnet-5", "cloud"),
-    ("openai-compatible", "gpt-4o-mini", "cloud"),
-    ("cursor", "grok-4.6", "cloud"),
-    ("xai", "grok-4", "cloud"),
-)
+CREW_OFF_REASON = "CREW_OPENVAULT=0 (no invent-green keys)"
+_UNARMED_SUFFIX = " (no silent fallback; no invent-green keys)"
 
-_SQL_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.I | re.S)
-_SELECT = re.compile(r"(SELECT\b.+)", re.I | re.S)
-_FROM = re.compile(r"\b(?:FROM|JOIN)\s+(?:[\w]+\.)?([A-Za-z_][\w]*)", re.I)
-_FORBIDDEN = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|COPY|PRAGMA|INSTALL|LOAD)\b",
-    re.I,
-)
+# Purpose -> core task key. Validity verdicts are scored per task, so the SQL
+# lane ranks models on SQL and the chat lanes on their own outcomes.
+_TASKS = {
+    "prompt": "crew-prompt",
+    "think": "crew-think",
+    "act": "crew-act",
+    "insights": "crew-insights",
+    "generative_ask": "crew-insights-sql",
+}
+_MAX_TOKENS = {"generative_ask": 600}
+_DEFAULT_MAX_TOKENS = 2048
 
-_MEASURED: dict[str, dict[str, Any]] = {}
+T = TypeVar("T")
+
+_executor: ThreadPoolExecutor | None = None
+_executor_lock = threading.Lock()
+
+
+def executor() -> ThreadPoolExecutor:
+    """The crew's FreeRoute thread pool. Core calls block on OpenVault HTTP."""
+    global _executor
+    with _executor_lock:
+        if _executor is None:
+            workers = int(os.environ.get("CREW_FREEROUTE_WORKERS") or 8)
+            _executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="crew-freeroute")
+        return _executor
+
+
+async def run_core(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run a sync core call off the loop, carrying the caller's context.
+
+    ``copy_context`` keeps the core journal / shadow / transport contextvars
+    visible on the worker thread, so a ``core.journal()`` opened by the caller
+    collects the stamps written inside.
+    """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    return await loop.run_in_executor(executor(), ctx.run, functools.partial(fn, *args, **kwargs))
 
 
 @dataclass(frozen=True)
@@ -86,135 +112,80 @@ class RoutePick:
 
 
 def identity_for(purpose: str = "") -> str:
-    raw = (purpose or "").strip().lower().replace("-", "_")
+    """Attribution label for logs and envelopes. Never sent as a header."""
+    raw = _purpose_key(purpose)
     if raw in PURPOSES:
         return f"{CORTEX_IDENTITY}:{raw.replace('_', '-')}"
     return CORTEX_IDENTITY
 
 
+def _purpose_key(purpose: str) -> str:
+    return (purpose or "").strip().lower().replace("-", "_")
+
+
+def task_for(purpose: str) -> str:
+    return _TASKS.get(_purpose_key(purpose), "crew-think")
+
+
 def reset_measurements() -> None:
-    """Test hook. Production records live complete() latency only."""
-    _MEASURED.clear()
+    """Test hook: drop the core's in-process caches. The route store stays."""
+    core.reset()
 
 
-def record_measurement(
-    label: str,
-    *,
-    latency_ms: float,
-    ok: bool,
-    cost_usd: float = 0.0,
-) -> dict[str, Any]:
-    name = (label or "").strip() or "unknown"
-    slot = _MEASURED.setdefault(
-        name,
-        {"calls": 0, "ok": 0, "errors": 0, "latency_ms": 0.0, "cost_usd": 0.0},
-    )
-    slot["calls"] = int(slot["calls"]) + 1
-    if ok:
-        slot["ok"] = int(slot["ok"]) + 1
-    else:
-        slot["errors"] = int(slot["errors"]) + 1
-    n = int(slot["calls"])
-    prev = float(slot["latency_ms"] or 0.0)
-    slot["latency_ms"] = round(((prev * (n - 1)) + float(latency_ms)) / n, 3)
-    slot["cost_usd"] = round(float(slot["cost_usd"] or 0.0) + float(cost_usd or 0.0), 6)
-    return dict(slot)
+# -- arming ---------------------------------------------------------------------
 
 
-def measurements() -> dict[str, dict[str, Any]]:
-    return {name: dict(slot) for name, slot in _MEASURED.items()}
+def crew_off() -> bool:
+    return os.environ.get("CREW_OPENVAULT", "1") == "0"
 
 
-def _env_api_keys() -> bool:
-    for key in (
-        "ANTHROPIC_API_KEY",
-        "OPENROUTER_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "OPENAI_API_KEY",
-        "CURSOR_API_KEY",
-        "XAI_API_KEY",
-        "GROQ_API_KEY",
-        "GOOGLE_API_KEY",
-        "CEREBRAS_API_KEY",
-        "MISTRAL_API_KEY",
-    ):
-        if os.environ.get(key, "").strip():
-            return True
-    return False
+def arm() -> core.Arming:
+    """Cortex's own credential. ``CREW_OPENVAULT=0`` never probes the vault."""
+    if crew_off():
+        return core.unarmed(CREW_OFF_REASON)
+    return core.arming()
 
 
-def _local_ollama() -> str:
-    if os.environ.get("CREW_ALLOW_OLLAMA", "1") == "0":
-        return ""
-    from CortexOS.crew.config import _ollama_first_model
-
-    found = _ollama_first_model(
-        os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-    )
-    return str(found or "")
+def _arming_view(arming_: core.Arming) -> dict[str, Any]:
+    return {
+        "ok": arming_.armed,
+        "armed": arming_.armed,
+        "vault_live": arming_.sealed is not None,
+        "sealed": arming_.sealed,
+        "pooled_keys": arming_.pooled_keys,
+        "spendable_hops": arming_.spendable_hops,
+        "labels": sorted({str(h.get("provider") or "") for h in arming_.hops_public} - {""}),
+        "detail": arming_.reason,
+        "custody": "openvault",
+        "url": arming_.url,
+        "credential": core.identity(),
+        "live_5000_ci": False,
+    }
 
 
 def arming() -> dict[str, Any]:
-    """Vault live + (local or cloud keys). Fail-closed. Never invents a key."""
-    from CortexOS.crew.openvault import healthz, vault_armed_labels
-
-    if os.environ.get("CREW_OPENVAULT", "1") == "0":
-        return {
-            "ok": False,
-            "armed": False,
-            "vault_live": False,
-            "local_keys": False,
-            "cloud_keys": False,
-            "detail": "CREW_OPENVAULT=0 (no invent-green keys)",
-            "custody": "openvault",
-            "live_5000_ci": False,
-        }
-    st = healthz()
-    live = bool(st.get("ok"))
-    armed_labels = vault_armed_labels() if live else set()
-    ollama = _local_ollama()
-    local_keys = bool(ollama) or "ollama" in armed_labels or "qwen" in armed_labels
-    cloud_keys = bool(armed_labels - {"ollama", "qwen"}) or _env_api_keys()
-    armed = bool(live and (local_keys or cloud_keys or armed_labels))
-    detail = "vault-armed" if armed else (
-        str(st.get("detail") or "OpenVault not live")
-        if not live
-        else "OpenVault live but no local or cloud keys armed (no invent-green keys)"
-    )
-    return {
-        "ok": armed,
-        "armed": armed,
-        "vault_live": live,
-        "local_keys": local_keys,
-        "cloud_keys": cloud_keys,
-        "labels": sorted(armed_labels),
-        "ollama": ollama or "",
-        "detail": detail,
-        "custody": "openvault",
-        "live_5000_ci": False,
-        "url": st.get("url"),
-    }
+    """Armed means OpenVault's own status says so. Fail-closed, reason named."""
+    return _arming_view(arm())
 
 
 def require_armed() -> dict[str, Any]:
     snap = arming()
     if not snap.get("armed"):
         raise LLMError(
-            "OpenVault FreeRoute unarmed: "
-            + str(snap.get("detail") or "unreachable")
-            + " (no silent fallback; no invent-green keys)"
+            "OpenVault FreeRoute unarmed: " + str(snap.get("detail") or "unreachable") + _UNARMED_SUFFIX
         )
     return snap
 
 
 def public_identity() -> dict[str, Any]:
-    """Stable Cortex API identity. Never returns a token or provider secret."""
+    """Stable Cortex attribution plus the credential view. No network, no token."""
     return {
         "ok": True,
         "identity": CORTEX_IDENTITY,
-        "header": IDENTITY_HEADER,
         "surfaces": {p: identity_for(p) for p in PURPOSES},
         "custody": "openvault",
+        "authority": False,
+        "credential": core.identity(),
         "mint": False,
         "token_returned": False,
         "seeded_cortex_primary": "disabled (HTTP 404 seed is not this identity)",
@@ -223,241 +194,179 @@ def public_identity() -> dict[str, Any]:
     }
 
 
-def _family_model(label: str, default: str) -> str:
-    env_map = {
-        "deepseek": "CREW_DEEPSEEK_MODEL",
-        "openrouter": "CREW_OPENROUTER_MODEL",
-        "groq": "CREW_GROQ_MODEL",
-        "google": "CREW_GOOGLE_MODEL",
-        "mistral": "CREW_MISTRAL_MODEL",
-        "cerebras": "CREW_CEREBRAS_MODEL",
-        "anthropic": "CREW_ANTHROPIC_MODEL",
-        "openai-compatible": "CREW_OPENAI_MODEL",
-        "cursor": "CREW_CURSOR_MODEL",
-        "xai": "CREW_XAI_MODEL",
-        "qwen": "CREW_QWEN_MODEL",
-        "ollama": "",
-    }
-    env_name = env_map.get(label, "")
-    if env_name:
-        return os.environ.get(env_name, "").strip() or default
-    return default
+# -- candidates and pick --------------------------------------------------------
 
 
-def _score(slot: dict[str, Any] | None) -> float | None:
-    if not slot:
-        return None
-    calls = int(slot.get("calls") or 0)
-    if calls <= 0:
-        return None
-    ok = int(slot.get("ok") or 0)
-    errors = int(slot.get("errors") or 0)
-    rate = ok / calls if calls else 0.0
-    latency = float(slot.get("latency_ms") or 0.0)
-    cost = float(slot.get("cost_usd") or 0.0)
-    # Higher is better. Errors and latency lose. Not DMS #180 climb %.
-    return round((rate * 1000.0) - (latency / 10.0) - (cost * 100.0) - (errors * 50.0), 3)
+def _provider_for(arming_: core.Arming, model: str) -> str:
+    for provider, models in arming_.catalogue:
+        if model in models:
+            return provider
+    return "openvault"
 
 
-def _ov_model_ids() -> list[str]:
-    from CortexOS.crew.openvault import list_models
-
-    return [str(row.get("id") or "") for row in list_models() if row.get("id")]
-
-
-def candidates() -> list[dict[str, Any]]:
-    """Armed bundled families (local or cloud). Empty when unarmed."""
-    snap = arming()
-    if not snap.get("armed"):
+def candidates(purpose: str = "insights") -> list[dict[str, Any]]:
+    """Live hops x OpenVault catalogue, in core order. Empty when unarmed."""
+    arming_ = arm()
+    if not arming_.armed:
         return []
-    labels = set(snap.get("labels") or [])
-    ollama = str(snap.get("ollama") or "")
-    ov_ids = _ov_model_ids()
-    env_labels: set[str] = set()
-    env_to_label = {
-        "ANTHROPIC_API_KEY": "anthropic",
-        "OPENROUTER_API_KEY": "openrouter",
-        "DEEPSEEK_API_KEY": "deepseek",
-        "OPENAI_API_KEY": "openai-compatible",
-        "CURSOR_API_KEY": "cursor",
-        "XAI_API_KEY": "xai",
-        "GROQ_API_KEY": "groq",
-        "GOOGLE_API_KEY": "google",
-        "CEREBRAS_API_KEY": "cerebras",
-        "MISTRAL_API_KEY": "mistral",
-    }
-    for env_key, label in env_to_label.items():
-        if os.environ.get(env_key, "").strip():
-            env_labels.add(label)
-
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for label, default, kind in _BUNDLED:
-        armed = False
-        model = _family_model(label, default)
-        if label in labels or label in env_labels:
-            armed = True
-        if label == "ollama" and ollama:
-            armed = True
-            model = ollama
-        if label == "qwen":
-            if ollama and "qwen" in ollama.lower():
-                armed = True
-                model = ollama
-                kind = "local"
-            elif any("qwen" in mid.lower() for mid in ov_ids):
-                armed = True
-                qwen_id = next(mid for mid in ov_ids if "qwen" in mid.lower())
-                model = qwen_id
-            elif "qwen" in labels:
-                armed = True
-        if not armed:
-            continue
-        if ov_ids and label in {"deepseek", "qwen", "groq", "mistral"}:
-            hit = next(
-                (mid for mid in ov_ids if label in mid.lower() or default.split("/")[-1] in mid.lower()),
-                "",
-            )
-            if hit:
-                model = hit
-        key = f"{label}:{model}"
-        if key in seen:
-            continue
-        seen.add(key)
-        slot = _MEASURED.get(label)
-        out.append(
-            {
-                "label": label,
-                "model": model,
-                "kind": kind,
-                "score": _score(slot),
-                "measured": slot is not None,
-            }
-        )
-    return out
+    models, source = core.candidates(arming_)
+    return [
+        {"label": _provider_for(arming_, m), "model": m, "kind": "freeroute", "source": source}
+        for m in models
+    ]
 
 
-def pick_route(*, purpose: str = "think") -> RoutePick:
-    """Pick a measured FreeRoute model. Never hardcode one vendor as the only path."""
-    ident = identity_for(purpose)
-    rows = candidates()
-    if not rows:
-        raise LLMError(
-            "OpenVault FreeRoute has no armed bundled models "
-            "(DeepSeek+Qwen+...); no silent fallback; no invent-green keys"
-        )
-    measured_rows = [r for r in rows if r.get("score") is not None]
-    if measured_rows:
-        best = max(
-            measured_rows,
-            key=lambda r: (float(r["score"]), 0 if r["kind"] == "local" else -1, r["label"]),
-        )
-        return RoutePick(
-            label=str(best["label"]),
-            model=str(best["model"]),
-            kind=str(best["kind"]),
-            why=(
-                f"measured {best['label']} score {best['score']} "
-                f"among {len(rows)} armed families (not a hardcoded vendor)"
-            ),
-            score=float(best["score"]) if best.get("score") is not None else None,
-            identity=ident,
-        )
-    if len(rows) == 1:
-        row = rows[0]
-        return RoutePick(
-            label=str(row["label"]),
-            model=str(row["model"]),
-            kind=str(row["kind"]),
-            why=f"only armed family {row['label']} (local or cloud key in OpenVault)",
-            identity=ident,
-        )
-    # Several armed, none measured here: send auto and let OpenVault measure.
-    kinds = ",".join(sorted({str(r["label"]) for r in rows}))
+def pick_route(*, purpose: str = "think", arming_: core.Arming | None = None) -> RoutePick:
+    """The core's measured pick for this purpose. Never a hardcoded vendor."""
+    current = arming_ or arm()
+    if not current.armed:
+        raise LLMError("OpenVault FreeRoute unarmed: " + current.reason + _UNARMED_SUFFIX)
+    picked = core.pick(task_for(purpose), current)
     return RoutePick(
-        label="openvault",
-        model="auto",
-        kind="cloud" if any(r["kind"] == "cloud" for r in rows) else "local",
-        why=(
-            f"OpenVault FreeRoute auto among {kinds} "
-            "(vault measures; crew does not hardcode grok or gpt-4o-mini)"
-        ),
-        identity=ident,
+        label=_provider_for(current, picked.requested),
+        model=picked.requested,
+        kind="freeroute",
+        why=f"{picked.reason} ({picked.source})",
+        score=picked.measured_score,
+        identity=identity_for(purpose),
     )
 
 
-def extract_sql(text: str) -> str | None:
-    if not text:
+def _route_from_stamp(arming_: core.Arming, stamp: core.RouteStamp, purpose: str) -> RoutePick | None:
+    if not stamp.requested:
         return None
-    blobs: list[str] = []
-    for match in _SQL_FENCE.finditer(text):
-        blobs.append(match.group(1).strip())
-    blobs.append(_SQL_FENCE.sub(" ", text).strip())
-    blobs.append(text.strip())
-    for body in blobs:
-        found = _SELECT.search(body)
-        if not found:
-            continue
-        sql = found.group(1).strip().rstrip(";")
-        if ";" in sql:
-            sql = sql.split(";", 1)[0].strip()
-        if sql.upper().startswith("SELECT") and _FROM.search(sql):
-            return sql
-    return None
+    return RoutePick(
+        label=_provider_for(arming_, stamp.requested),
+        model=stamp.requested,
+        kind="freeroute",
+        why=f"{stamp.pick_reason} ({stamp.source})",
+        score=stamp.measured_score,
+        identity=identity_for(purpose),
+    )
 
 
-def validate_sql(sql: str, allowed_tables: set[str]) -> dict[str, Any]:
-    """Ontology-constrained SELECT. Crew does not execute. Fail-closed."""
+# -- SQL helpers ----------------------------------------------------------------
+
+extract_sql = extract_select
+
+
+def _cte_names(stmt: Any) -> set[str]:
+    from sqlglot import exp
+
+    return {str(cte.alias_or_name or "").lower() for cte in stmt.find_all(exp.CTE)} - {""}
+
+
+def validate_sql(
+    sql: str,
+    allowed_tables: set[str],
+    *,
+    columns: dict[str, list[str]] | None = None,
+) -> dict[str, Any]:
+    """Static, ontology-constrained SELECT check. Crew never executes it.
+
+    Table scope always; the column guardrail only when the ranking listed
+    columns for every referenced table. ``check`` says which ran. This is not
+    EXPLAIN, not the manifest enforcer, and not a run - the customer text says so.
+    """
+    import sqlglot
+    from sqlglot import exp
+
+    from CortexOS.dms import sql_guardrail
+    from CortexOS.dms.l2_plausibility import sql_table_names
+
+    def refuse(reason: str, tables: list[str] | None = None) -> dict[str, Any]:
+        return {"ok": False, "sql": None, "tables": tables or [], "reason": reason, "check": "refused"}
+
+    allowed = {str(t).lower() for t in allowed_tables if t}
+    if not allowed:
+        return refuse("no ranked ontology tables; cannot prove the SQL stays in scope")
     text = (sql or "").strip()
     if not text:
-        return {"ok": False, "sql": None, "reason": "empty sql"}
-    if _FORBIDDEN.search(text):
-        return {"ok": False, "sql": None, "reason": "non-select sql refused"}
-    if not text.upper().lstrip().startswith("SELECT"):
-        return {"ok": False, "sql": None, "reason": "not a select"}
-    tables = {m.group(1).lower() for m in _FROM.finditer(text)}
+        return refuse("empty sql")
+    try:
+        statements = sqlglot.parse(text, read="duckdb")
+    except Exception as exc:  # noqa: BLE001 - any parse failure is a refusal
+        return refuse(f"sql parse error: {core.redact(exc, limit=160)}")
+    if not statements or statements[0] is None:
+        return refuse("empty sql")
+    if len(statements) > 1:
+        return refuse("more than one statement")
+    stmt = statements[0]
+    if not isinstance(stmt, exp.Select):
+        return refuse("not a select")
+    for node in stmt.walk():
+        if isinstance(node, sql_guardrail.FORBIDDEN):
+            return refuse(f"non-select sql refused ({type(node).__name__.lower()})")
+    tables = sorted(sql_table_names(text) - _cte_names(stmt))
     if not tables:
-        return {"ok": False, "sql": None, "reason": "select has no from/join table"}
-    allowed = {t.lower() for t in allowed_tables if t}
-    extra = sorted(tables - allowed) if allowed else []
-    if allowed and extra:
-        return {
-            "ok": False,
-            "sql": None,
-            "reason": "sql reads tables outside ontology ranking: " + ",".join(extra),
-            "tables": sorted(tables),
-        }
-    return {"ok": True, "sql": text, "tables": sorted(tables), "reason": ""}
-
-
-def public_status() -> dict[str, Any]:
-    snap = arming()
-    ident = public_identity()
-    chosen: dict[str, Any] | None = None
-    refused = None
-    cands = candidates() if snap.get("armed") else []
-    if snap.get("armed"):
-        try:
-            chosen = pick_route(purpose="insights").as_public()
-        except LLMError as exc:
-            refused = str(exc)
-    else:
-        refused = str(snap.get("detail") or "unarmed")
+        return refuse("select has no from/join table")
+    extra = sorted(set(tables) - allowed)
+    if extra:
+        return refuse("sql reads tables outside ontology ranking: " + ",".join(extra), tables)
+    listed = {str(t).lower(): [str(c) for c in cols or []] for t, cols in (columns or {}).items()}
+    bare = [t for t in tables if not listed.get(t)]
+    if columns is not None and not bare:
+        result = sql_guardrail.validate_sql(
+            text, {"tables": {t: {"columns": listed[t]} for t in tables}}
+        )
+        if not result.passed or not result.safe_sql:
+            return refuse("column guardrail: " + ", ".join(result.violations or ["rejected"]), tables)
+        return {"ok": True, "sql": result.safe_sql, "tables": tables, "reason": "", "check": "column guardrail"}
     return {
-        "ok": bool(snap.get("armed")),
-        "armed": bool(snap.get("armed")),
-        "custody": "openvault",
-        "identity": ident,
-        "chosen": chosen,
-        "candidates": cands,
-        "refused": refused,
-        "arming": snap,
-        "live_5000_ci": False,
-        "measured_baseline": dict(DMS_180_BASELINE),
-        "gencfsm": "reuse G1 on tip; this slice does not clone gen_cfsm/dag_runner",
-        "layer": "OpenVault FreeRoute is the central Cortex AI path when a model is needed",
+        "ok": True,
+        "sql": text,
+        "tables": tables,
+        "reason": "",
+        "check": f"table-level check only (ranking listed no columns for {bare[0] if bare else tables[0]})",
     }
 
+
+# -- status ---------------------------------------------------------------------
+
+
+def public_status(purpose: str = "insights") -> dict[str, Any]:
+    """Core status plus the crew's chosen/refused view. Hop rows are public-only."""
+    arming_ = arm()
+    snap = _arming_view(arming_)
+    task = task_for(purpose)
+    chosen: dict[str, Any] | None = None
+    refused: str | None = None
+    if arming_.armed:
+        status = core.public_status(task)
+        chosen = pick_route(purpose=purpose, arming_=arming_).as_public()
+    else:
+        # Never call the core status when crew is off: it would probe the vault.
+        status = {
+            "layer": "OpenVault FreeRoute (one Cortex model layer)",
+            "impl": core.IMPL,
+            "arming": arming_.public(),
+            "identity": core.identity(),
+            "candidates": [],
+            "candidate_source": "",
+            "measured": {},
+            "scoreboard": core.scoreboard(task),
+            "store": str(core.store_path()),
+            "store_error": core.store_error(),
+        }
+        refused = arming_.reason
+    return {
+        "ok": arming_.armed,
+        "armed": arming_.armed,
+        "custody": "openvault",
+        "identity": public_identity(),
+        "chosen": chosen,
+        "candidates": candidates(purpose) if arming_.armed else [],
+        "refused": refused,
+        "arming": snap,
+        "task": task,
+        "core": status,
+        "live_5000_ci": False,
+        "measured_baseline": dict(DMS_180_BASELINE),
+        "layer": "OpenVault FreeRoute is the one Cortex model layer when a model is needed",
+    }
+
+
+# -- complete -------------------------------------------------------------------
 
 _PURPOSE_SYSTEM = {
     "prompt": (
@@ -484,6 +393,27 @@ _PURPOSE_SYSTEM = {
 }
 
 
+async def complete_core(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> core.Completion:
+    """One core call on the crew executor. ``CREW_OPENVAULT=0`` never sends."""
+    if crew_off():
+        return core.Completion(ok=False, reason="FreeRoute not armed: " + CREW_OFF_REASON)
+    return await run_core(core.complete, task, messages, **kwargs)
+
+
+def _refusal(purpose: str, refused: str, **extra: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "ok": False,
+        "status": "REFUSE",
+        "purpose": purpose,
+        "identity": identity_for(purpose),
+        "refused": refused,
+        "values": [],
+        "live_5000_ci": False,
+    }
+    body.update(extra)
+    return body
+
+
 async def complete(
     messages: list[dict[str, Any]] | None = None,
     *,
@@ -492,102 +422,77 @@ async def complete(
     tools: list[dict[str, Any]] | None = None,
     pick: RoutePick | None = None,
     timeout: int = 180,
+    bearer: str | None = None,
 ) -> dict[str, Any]:
-    """Generate / think / act via OpenVault FreeRoute. Fail-closed when unarmed."""
-    purpose_key = (purpose or "think").strip().lower().replace("-", "_")
+    """Generate / think / act via OpenVault FreeRoute. Fail-closed when unarmed.
+
+    ``bearer=None`` spends Cortex's own credential (in-process callers). An HTTP
+    relay passes the caller's ``ov_`` key or ``""`` for the loopback tier; the
+    Cortex key is never lent to a relayed call.
+    """
+    purpose_key = _purpose_key(purpose or "think")
     if purpose_key not in PURPOSES:
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "purpose": purpose,
-            "refused": f"unknown purpose '{purpose}'",
-            "values": [],
-            "live_5000_ci": False,
-        }
-    try:
-        arm = require_armed()
-        chosen = pick or pick_route(purpose=purpose_key)
-    except LLMError as exc:
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "purpose": purpose_key,
-            "identity": identity_for(purpose_key),
-            "refused": str(exc),
-            "values": [],
-            "live_5000_ci": False,
-        }
+        return _refusal(purpose, f"unknown purpose '{purpose}'")
+    arming_ = await run_core(arm)
+    snap = _arming_view(arming_)
+    if not arming_.armed:
+        return _refusal(
+            purpose_key,
+            "OpenVault FreeRoute unarmed: " + arming_.reason + _UNARMED_SUFFIX,
+            arming=snap,
+            measured_baseline=dict(DMS_180_BASELINE),
+        )
 
     body = list(messages or [])
     if prompt.strip():
         body.append({"role": "user", "content": prompt.strip()})
     if not body:
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "purpose": purpose_key,
-            "identity": chosen.identity,
-            "route": chosen.as_public(),
-            "refused": "empty messages",
-            "values": [],
-            "live_5000_ci": False,
-        }
+        return _refusal(
+            purpose_key,
+            "empty messages",
+            route=pick.as_public() if pick else None,
+            arming=snap,
+        )
     if not any(m.get("role") == "system" for m in body):
         body = [{"role": "system", "content": _PURPOSE_SYSTEM[purpose_key]}, *body]
 
-    from CortexOS.crew import openvault as ov
-
-    ov.ratelimit(chosen.identity)
-    started = time.monotonic()
-    try:
-        result: LLMResult = await ov.chat(
-            body,
-            tools=tools if purpose_key == "act" else None,
-            timeout=timeout,
-            model=chosen.model,
-            identity=chosen.identity,
-            measured=True,
-        )
-        ok = True
-        refused = None
-        text = result.text
-    except LLMError as exc:
-        result = LLMResult()
-        ok = False
-        refused = str(exc)
-        text = ""
-    latency_ms = (time.monotonic() - started) * 1000.0
-    record_measurement(
-        chosen.label,
-        latency_ms=latency_ms,
-        ok=ok,
-        cost_usd=float(result.cost_usd or 0.0),
+    completion = await complete_core(
+        task_for(purpose_key),
+        body,
+        max_tokens=_MAX_TOKENS.get(purpose_key, _DEFAULT_MAX_TOKENS),
+        timeout=float(timeout),
+        tools=tools if purpose_key == "act" else None,
+        pin=pick.model if pick else "",
+        pin_source="caller pick" if pick else "",
+        egress="leave" if purpose_key == "generative_ask" else "",
+        bearer=bearer,
     )
-    if not ok:
-        return {
-            "ok": False,
-            "status": "REFUSE",
-            "purpose": purpose_key,
-            "identity": chosen.identity,
-            "route": chosen.as_public(),
-            "refused": refused,
-            "values": [],
-            "arming": arm,
-            "live_5000_ci": False,
-            "measured_baseline": dict(DMS_180_BASELINE),
-        }
+    stamp = completion.stamp
+    route = pick or (_route_from_stamp(arming_, stamp, purpose_key) if stamp else None)
+    if not completion.ok:
+        return _refusal(
+            purpose_key,
+            completion.reason,
+            route=route.as_public() if route else None,
+            arming=snap,
+            stamp=stamp.public() if stamp else None,
+            measured_baseline=dict(DMS_180_BASELINE),
+        )
+    usage = completion.usage
     return {
         "ok": True,
         "status": "OK",
         "purpose": purpose_key,
-        "identity": chosen.identity,
-        "route": chosen.as_public(),
-        "text": text,
-        "model": result.model or chosen.model,
+        "identity": identity_for(purpose_key),
+        "route": route.as_public() if route else None,
+        "text": completion.text,
+        "model": stamp.served if stamp else "",
+        "tool_calls": list(completion.message.get("tool_calls") or []),
         "values": [],
-        "arming": arm,
+        "arming": snap,
+        "stamp": stamp.public() if stamp else None,
         "live_5000_ci": False,
         "measured_baseline": dict(DMS_180_BASELINE),
-        "prompt_tokens": result.prompt_tokens,
-        "completion_tokens": result.completion_tokens,
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
     }

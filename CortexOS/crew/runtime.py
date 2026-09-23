@@ -47,7 +47,12 @@ then runs constrained trials and returns CERTIFIED, ABSTAIN, or REFUSE with incl
 exclude / unsure. If it refuses or abstains, say so plainly. Never invent numbers. \
 When a model is needed, cortex_insights generate=true routes via OpenVault FreeRoute \
 and refuses if the vault is unarmed. Do not invent keys. \
-cortex_ask is a raw engine passthrough; prefer cortex_insights for database asks.
+cortex_ask is a raw engine passthrough; prefer cortex_insights for database asks. \
+For governed proactive next steps, use cortex_liberty_seek (G2.1 seeker). It proposes \
+only; it never auto-sends, buys, deploys or approves. No bound goal is REFUSE. \
+execute is parked. Candidates collapse with G1 collapse_score (proxy JEPA, not a \
+trained world model). For predict-goal, use cortex_liberty_predict_goal: plan \
+language plus tabular/proxy V(s,a,g). It is not a trained JEPA forecast.
 - For multi-part or specialist work, spawn teammates with spawn_agent. Name \
 them for THIS job (not a fixed roster). Copy a capability template when one \
 fits; its default skills are copied into the teammate automatically. Restrict \
@@ -87,7 +92,11 @@ TEAMMATE_CHARTER = """You are {name}, a teammate in a Cortex Crew space. Your ro
 
 Work the brief you were given. You may use cortex_insights for governed database asks \
 (ontology where+importance first, then CERTIFIED/ABSTAIN/REFUSE). cortex_ask is a raw \
-engine passthrough. Use send_to_agent to talk \
+engine passthrough. cortex_liberty_seek runs G2.1 proactive seek then proxy \
+JEPA collapse_score (propose-only, fail-closed, not a trained world model). \
+cortex_liberty_predict_goal is plan language + proxy V(s,a,g), not a trained \
+JEPA forecast. \
+Use send_to_agent to talk \
 to other teammates or the Manager, and any computer-control tools you are offered (they may \
 require operator approval). Use ask_agent when you need one named teammate to answer you \
 before you can continue, and broadcast to tell everyone at once. When another agent asks \
@@ -1645,6 +1654,48 @@ class CrewRuntime:
                 ["intent"],
             ),
             spec(
+                "cortex_liberty_seek",
+                "Start G2.1 governed proactive seek on the bound enterprise goal. Propose-only."
+                " Collapses candidates with G1 collapse_score (proxy JEPA, not trained)."
+                " Returns SEEK with an audit trail, PARK if execute was requested, or REFUSE"
+                " when no goal is bound. Does not send, buy, deploy or approve. Not live-host green.",
+                {
+                    "statement": {
+                        "type": "string",
+                        "description": "Bind this goal statement if none is active",
+                    },
+                    "goal_id": {"type": "string", "description": "Existing bound goal id"},
+                },
+                [],
+            ),
+            spec(
+                "cortex_liberty_predict_goal",
+                "Set/predict a goal as plan language plus tabular/proxy V(s,a,g) (G2.2)."
+                " Not a trained JEPA forecast and not a future observation. Returns PLAN,"
+                " PARK if execute was requested, or REFUSE when no goal is bound or when"
+                " trained forecasts are requested. Propose-only. Not live-host green.",
+                {
+                    "statement": {
+                        "type": "string",
+                        "description": "Bind this goal statement if none is active",
+                    },
+                    "goal_id": {"type": "string", "description": "Existing bound goal id"},
+                    "trained": {
+                        "type": "boolean",
+                        "description": "Must stay false; trained forecasts are refused",
+                    },
+                    "forecast": {
+                        "type": "boolean",
+                        "description": "Must stay false; invent-trained forecasts are refused",
+                    },
+                    "future_observation": {
+                        "type": "boolean",
+                        "description": "Must stay false; future-observation claims are refused",
+                    },
+                },
+                [],
+            ),
+            spec(
                 "cortex_ask",
                 "Ask the governed Cortex engine a data question. Returns the answer with its"
                 " badge, sources and audit id. The engine may abstain; report that honestly."
@@ -2072,6 +2123,61 @@ class CrewRuntime:
                 meta={
                     "tool": "cortex_insights",
                     "args": {"intent": intent, "generate": generate},
+                    "envelope": envelope,
+                },
+            )
+            self.bus.emit(ctx.space_id, "message", {"message": msg})
+            return text
+
+        if name == "cortex_liberty_seek":
+            from CortexOS.crew import liberty_seek as liberty_seek_mod
+
+            envelope = liberty_seek_mod.start_seek(
+                goal_id=str(args.get("goal_id") or "") or None,
+                statement=str(args.get("statement") or args.get("goal") or ""),
+                execute=False,
+            )
+            text = liberty_seek_mod.render_tool_text(envelope)
+            msg = self.store.add_message(
+                ctx.space_id,
+                "tool",
+                text,
+                agent_id=row["id"],
+                meta={
+                    "tool": "cortex_liberty_seek",
+                    "args": {
+                        "goal_id": args.get("goal_id") or "",
+                        "statement": args.get("statement") or args.get("goal") or "",
+                    },
+                    "envelope": envelope,
+                },
+            )
+            self.bus.emit(ctx.space_id, "message", {"message": msg})
+            return text
+
+        if name == "cortex_liberty_predict_goal":
+            from CortexOS.crew import liberty_seek as liberty_seek_mod
+
+            envelope = liberty_seek_mod.predict_goal(
+                goal_id=str(args.get("goal_id") or "") or None,
+                statement=str(args.get("statement") or args.get("goal") or ""),
+                execute=False,
+                trained=bool(args.get("trained")),
+                forecast=bool(args.get("forecast")),
+                future_observation=bool(args.get("future_observation")),
+            )
+            text = liberty_seek_mod.render_predict_text(envelope)
+            msg = self.store.add_message(
+                ctx.space_id,
+                "tool",
+                text,
+                agent_id=row["id"],
+                meta={
+                    "tool": "cortex_liberty_predict_goal",
+                    "args": {
+                        "goal_id": args.get("goal_id") or "",
+                        "statement": args.get("statement") or args.get("goal") or "",
+                    },
                     "envelope": envelope,
                 },
             )

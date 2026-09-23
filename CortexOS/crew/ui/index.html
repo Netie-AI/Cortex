@@ -22,6 +22,7 @@
       <button class="appshell__link" type="button" data-nav="audit">Audit</button>
       <button class="appshell__link" type="button" data-nav="assign">Assign</button>
       <button class="appshell__link" type="button" data-nav="insights">Insights</button>
+      <button class="appshell__link" type="button" data-nav="liberty">Liberty</button>
       <button class="appshell__link" type="button" data-nav="memory">Memory</button>
       <button class="appshell__link" type="button" data-nav="settings">Settings</button>
     </nav>
@@ -46,6 +47,8 @@
         </div>
         <iframe class="shell-frame" id="controlFrame" title="Control display" sandbox="allow-scripts allow-same-origin"></iframe>
         <div id="controlSurfaces"></div>
+        <div class="eyebrow">LIBERTY SEEK (Crew GET, display only)</div>
+        <div id="controlLiberty" class="empty">GET /crew/liberty - Control does not POST seek</div>
       </section>
       <section class="shell-plane" id="plane-audit">
         <h1>Audit</h1>
@@ -72,6 +75,21 @@
         <div id="insightsWhere" class="empty">retrieve ontology before ask</div>
         <div class="eyebrow">ENVELOPE</div>
         <div id="insightsEnvelope" class="empty">no ask yet</div>
+      </section>
+      <section class="shell-plane" id="plane-liberty">
+        <h1>Liberty seek</h1>
+        <p class="hint">G2.1 governed proactive seek. Crew starts seek or predict-goal. Control GET-displays. Propose-only. Fail-closed. Candidates collapse with G1 collapse_score (proxy JEPA, not a trained world model). Predict-goal is plan language + proxy V(s,a,g), not a trained forecast. CoT climb leftover cited, not replaced. Not COMPLETE.</p>
+        <div class="life-spawn">
+          <input id="libertyStatement" placeholder="goal statement (or blank to use the bound goal)" />
+          <button class="ghost" id="libertySeek" type="button">Start seek</button>
+          <button class="ghost" id="libertyPredict" type="button">Predict goal</button>
+        </div>
+        <div class="eyebrow">LAW</div>
+        <div id="libertyLaw" class="empty">GET /crew/liberty</div>
+        <div class="eyebrow">SEEK</div>
+        <div id="libertyEnvelope" class="empty">no seek yet</div>
+        <div class="eyebrow">PREDICT-GOAL</div>
+        <div id="libertyPlan" class="empty">no plan yet</div>
       </section>
       <section class="shell-plane shell-plane--crew on" id="plane-crew">
   <div class="desk">
@@ -1449,6 +1467,7 @@
       if (plane === "control") loadControl();
       if (plane === "audit") loadAudit();
       if (plane === "insights") loadInsightsLaw();
+      if (plane === "liberty") loadLibertyLaw();
       if (plane === "apps" || plane === "home") renderLauncher();
     }
     async function loadControl() {
@@ -1466,6 +1485,10 @@
               return `<div class="control-surface"><b>${esc(s.path)}</b> ${esc(s.detail || s.status || "")}\n${esc(body || "")}</div>`;
             }).join("")
           : `<div class="empty">Control unprobed or down.</div>`;
+        const lib = snap.liberty || {};
+        $("controlLiberty").innerHTML =
+          `<div class="rsf-stage">display_only ${esc(String(lib.display_only))} spawn ${esc(String(lib.spawn))} complete ${esc(String(lib.complete))} jepa proxy (not trained) collapse ${esc((lib.collapse_sot || (lib.jepa && lib.jepa.source) || "gen_cfsm.collapse_score"))} predict ${esc(lib.predict || "POST /crew/liberty/predict-goal")} V(s,a,g) proxy</div>`
+          + `<div class="empty">${esc(lib.law || lib.agents || "GET /crew/liberty")}</div>`;
       } catch (err) { toast(err.message, "bad"); }
     }
     async function loadAudit() {
@@ -1533,6 +1556,61 @@
         });
         if (ask || generate) $("insightsEnvelope").dataset.asked = "1";
         paintInsights(body);
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    function paintLiberty(body) {
+      const status = (body && body.status) || "";
+      const cls = status ? rsfStatusClass(status === "SEEK" || status === "PLAN" ? "CERTIFIED" : status === "PARK" ? "ABSTAIN" : "REFUSE") : "";
+      const props = (body && body.proposals) || [];
+      const parked = (body && body.parked) || [];
+      const executed = (body && body.executed) || [];
+      const audit = (body && body.audit) || {};
+      const plan = (body && body.plan) || {};
+      const values = (body && body.values) || [];
+      $("libertyEnvelope").innerHTML =
+        `<div class="rsf-stage ${cls}">${esc(status || "LAW")} ${esc((body.answer || body.agents || "").slice(0, 400))}</div>`
+        + `<div class="rsf-stage">audit ${esc(String(audit.ok))} ${esc(audit.event || "")} executed ${esc(String(executed.length))} parked ${esc(String(parked.length))} complete ${esc(String(body.complete))} jepa proxy (not trained)</div>`
+        + props.slice(0, 8).map((p) =>
+          `<div class="rsf-stage">${esc(p.title || "")} collapse ${esc(String(p.collapse_score))} V(s,a,g) ${esc(String(p.value))} - ${esc(p.why || "")}</div>`
+        ).join("");
+      if ($("libertyPlan")) {
+        $("libertyPlan").innerHTML = (plan.text || values.length)
+          ? `<div class="rsf-stage">${esc((plan.summary || plan.text || "").slice(0, 500))} trained_forecast ${esc(String(!!plan.trained_forecast))}</div>`
+            + values.slice(0, 8).map((v) =>
+              `<div class="rsf-stage">V(s,a,g) s=${esc(String(v.s || ""))} a=${esc(String(v.a || ""))} g=${esc(String(v.g || ""))} value=${esc(String(v.value))} proxy not trained</div>`
+            ).join("")
+          : `<div class="empty">no plan yet</div>`;
+      }
+    }
+    async function loadLibertyLaw() {
+      try {
+        const law = await api("/crew/liberty");
+        $("libertyLaw").innerHTML = `<div class="empty">${esc(law.agents || law.law || "")}</div>`;
+        if (!($("libertyEnvelope").dataset.asked === "1")) {
+          paintLiberty({ answer: law.agents || law.law, complete: law.complete, jepa: law.jepa, audit: {}, proposals: [], parked: [], executed: [] });
+        }
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    async function runLibertySeek() {
+      const statement = (($("libertyStatement") && $("libertyStatement").value) || "").trim();
+      try {
+        const body = await api("/crew/liberty/seek", {
+          method: "POST",
+          body: JSON.stringify({ statement: statement, execute: false, trigger: "liberty" })
+        });
+        $("libertyEnvelope").dataset.asked = "1";
+        paintLiberty(body);
+      } catch (err) { toast(err.message, "bad"); }
+    }
+    async function runLibertyPredict() {
+      const statement = (($("libertyStatement") && $("libertyStatement").value) || "").trim();
+      try {
+        const body = await api("/crew/liberty/predict-goal", {
+          method: "POST",
+          body: JSON.stringify({ statement: statement, execute: false, trigger: "predict-goal", trained: false, forecast: false, future_observation: false })
+        });
+        $("libertyEnvelope").dataset.asked = "1";
+        paintLiberty(body);
       } catch (err) { toast(err.message, "bad"); }
     }
     function pageHits(q) {
@@ -1979,6 +2057,8 @@
     $("insightsOntology").onclick = () => runInsights(false, false);
     $("insightsAsk").onclick = () => runInsights(true, false);
     $("insightsGenerate").onclick = () => runInsights(false, true);
+    $("libertySeek").onclick = () => runLibertySeek();
+    $("libertyPredict").onclick = () => runLibertyPredict();
     $("clearChat").onclick = async () => {
       if (!state.spaceId) return;
       try {

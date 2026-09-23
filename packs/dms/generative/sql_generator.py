@@ -2,36 +2,51 @@
 
 Schema retrieval → FreeRoute chat completions → literal normalization.
 Never fall back to the L1 keyword cascade or a smaller model silently.
-If FreeRoute is down or the leave-machine gate refuses → empty candidates
-(caller abstains).
+If FreeRoute is not armed or the leave-machine gate refuses → empty candidates
+(caller abstains, and the abstain names the OpenVault cause).
+
+Model calls go through ``CortexOS.integrations.freeroute``: the one arming rule,
+the measured route (no hardcoded model), and the Cortex OpenVault credential.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
+from CortexOS.dms.sql_extract import extract_select
+from CortexOS.integrations import freeroute
 from packs.dms.generative.literal_normalize import normalize_sql_literals
 from packs.dms.generative.schema_retrieval import retrieve, schema_prompt_block
 
-_SQL_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.I | re.S)
-_SELECT = re.compile(r"(SELECT\b.+)", re.I | re.S)
-_FROM = re.compile(r"\bfrom\b", re.I)
+_SYSTEM_PROMPT = (
+    "You write a single DuckDB SELECT for a warehouse analytics app. "
+    "Use ONLY tables/columns in the reduced schema. "
+    "No DDL/DML. No comments. Prefer LIMIT 50. "
+    "Return SQL only."
+)
+_PIN_ENVS = ("DMS_L2_MODEL", "OPENVAULT_SQL_MODEL")
+
+
+def _l2_flag_on() -> bool:
+    enabled = os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes")
+    shadow = os.environ.get("DMS_L2_SHADOW", "").lower() in ("1", "true", "yes")
+    return enabled or shadow
 
 
 def is_configured() -> bool:
-    """True when L2 is enabled or shadowed, and OpenVault answers."""
-    enabled = os.environ.get("DMS_L2_ENABLED", "").lower() in ("1", "true", "yes")
-    shadow = os.environ.get("DMS_L2_SHADOW", "").lower() in ("1", "true", "yes")
-    if not (enabled or shadow):
+    """True when L2 is enabled or shadowed, and FreeRoute is armed in OpenVault."""
+    if not _l2_flag_on():
         return False
-    try:
-        from CortexOS.integrations.openvault_client import ping
+    return freeroute.arming().armed
 
-        return bool(ping(timeout=1.5))
-    except Exception:  # noqa: BLE001
-        return False
+
+def unarmed_reason() -> str:
+    """Why generation cannot run, for the customer abstain. '' when it can."""
+    if not _l2_flag_on():
+        return "DMS_L2_ENABLED / DMS_L2_SHADOW not set"
+    arm = freeroute.arming()
+    return "" if arm.armed else f"FreeRoute not armed: {arm.reason}"
 
 
 def _leave_machine_allowed() -> tuple[bool, str]:
@@ -42,89 +57,41 @@ def _leave_machine_allowed() -> tuple[bool, str]:
     unreachable and never asked ``leave``. Do not fall back to ``run``: that is
     a local-run gate, not leave-machine permission.
     """
-    try:
-        from CortexOS.integrations.openvault_gate import check_gate
-
-        gate = check_gate(
-            action="leave",
-            destination="freeroute",
-            required_providers=[],
-        )
-        if gate.get("allowed") is True:
-            return True, "ok:leave"
-        reasons = gate.get("reasons") or ["leave-machine gate denied"]
-        return False, "; ".join(str(r) for r in reasons)[:240]
-    except Exception as exc:  # noqa: BLE001
-        return False, f"gate error: {exc}"[:240]
+    return freeroute.leave_gate()
 
 
-def _one_select(body: str) -> str | None:
-    m2 = _SELECT.search(body)
-    if not m2:
-        return None
-    sql = m2.group(1).strip().rstrip(";")
-    if ";" in sql:
-        sql = sql.split(";", 1)[0].strip()
-    if not sql.upper().startswith("SELECT"):
-        return None
-    return sql
+# One extractor for engine and Crew; kept under the old name for callers and tests.
+_extract_sql = extract_select
 
 
-def _extract_sql(text: str) -> str | None:
-    """Take one SELECT. Prefer a statement that still has FROM.
-
-    Models often fence only the SELECT list and leave ``FROM t i`` outside
-    the fence. That parsed as ``SELECT i.sku LIMIT 1000`` and EXPLAIN died
-    on alias ``i``. No FROM → None (caller retries / abstains).
-    """
-    if not text:
-        return None
-    blobs: list[str] = []
-    for m in _SQL_FENCE.finditer(text):
-        blobs.append(m.group(1).strip())
-    blobs.append(_SQL_FENCE.sub(" ", text).strip())
-    blobs.append(text.strip())
-    for body in blobs:
-        sql = _one_select(body)
-        if sql and _FROM.search(sql):
-            return sql
-    return None
+def _pin() -> tuple[str, str]:
+    for name in _PIN_ENVS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value, name
+    return "", ""
 
 
-def _freeroute_complete(prompt: str, *, identity: str = "dms:l2-sql") -> str | None:
-    """POST OpenVault /v1/chat/completions — large-model tier. None on any failure."""
-    from CortexOS.integrations.openvault_client import openvault_base_url, post_json
-
-    model = os.environ.get("DMS_L2_MODEL") or os.environ.get("OPENVAULT_SQL_MODEL") or "gpt-4o-mini"
-    body = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You write a single DuckDB SELECT for a warehouse analytics app. "
-                    "Use ONLY tables/columns in the reduced schema. "
-                    "No DDL/DML. No comments. Prefer LIMIT 50. "
-                    "Return SQL only."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.0,
-        "max_tokens": 600,
-    }
+def _freeroute_complete(prompt: str) -> str | None:
+    """One FreeRoute SQL proposal. None on any refusal (named on the journal stamp)."""
+    pin, pin_source = _pin()
     # Do not send OpenAI ``metadata``: OpenVault extra=allow forwards it to
     # Google AI Studio, which 400s (non_retryable) and Cortex sees NO_CANDIDATE.
-    _ = identity
-    data = post_json("/v1/chat/completions", body, timeout=45.0, base=openvault_base_url())
-    if not data:
-        return None
-    try:
-        choices = data.get("choices") or []
-        msg = (choices[0].get("message") or {}).get("content") if choices else None
-        return str(msg) if msg else None
-    except (IndexError, AttributeError, TypeError, KeyError):
-        return None
+    out = freeroute.complete(
+        "gen-ask-sql",
+        [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.0,
+        max_tokens=600,
+        timeout=45.0,
+        accept=lambda text: extract_select(text) is not None,
+        pin=pin,
+        pin_source=pin_source,
+        egress="leave",
+    )
+    return out.text if out.ok else None
 
 
 def _build_prompt(
@@ -159,11 +126,8 @@ def generate_candidates(
     if not is_configured():
         return []
 
-    allowed, reason = _leave_machine_allowed()
-    if not allowed:
-        # Fail closed — never silently degrade to a smaller/local model.
-        return []
-
+    # The leave-machine gate runs inside freeroute.complete(egress="leave"):
+    # a denial sends nothing and never degrades to a smaller/local model.
     schema = schema_context if schema_context is not None else retrieve(question)
     prompt = _build_prompt(question, schema, prior_violations=prior_violations)
     raw = _freeroute_complete(prompt)
@@ -190,15 +154,16 @@ def generate_with_detail(
     configured = is_configured()
     allowed, gate_reason = _leave_machine_allowed() if configured else (False, "not_configured")
     schema = schema_context if schema_context is not None else retrieve(question)
-    cands = generate_candidates(
-        question, schema, prior_violations=prior_violations
-    )
+    with freeroute.journal() as stamps:
+        cands = generate_candidates(question, schema, prior_violations=prior_violations)
     return {
         "configured": configured,
+        "unarmed_reason": unarmed_reason() if not configured else "",
         "gate_allowed": allowed,
         "gate_reason": gate_reason,
         "schema_tables": list((schema.get("tables") or {}).keys()),
         "candidates": cands,
+        "routes": [stamp.public() for stamp in stamps],
     }
 
 
@@ -206,4 +171,5 @@ __all__ = [
     "generate_candidates",
     "generate_with_detail",
     "is_configured",
+    "unarmed_reason",
 ]

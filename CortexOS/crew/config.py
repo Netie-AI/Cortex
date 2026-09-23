@@ -145,11 +145,19 @@ def _ollama_first_model(base_url: str, timeout: float = 0.8) -> str | None:
     return found
 
 
+def _vault_row(vault: dict[str, dict], label: str) -> bool:
+    return bool(vault.get(label) and vault[label].get("enabled"))
+
+
 def _arm_flags(
     label: str, env_ok: bool, ov_ok: bool, vault: dict[str, dict]
 ) -> tuple[bool, str, str]:
-    """Return configured, armed_via, connector. FreeRoute wins when measured live."""
-    vault_ok = bool(vault.get(label) and vault[label].get("enabled"))
+    """Return configured, armed_via, connector. FreeRoute wins when armed.
+
+    A vault row is reachable only through FreeRoute (crew holds no copy of the
+    secret), so with FreeRoute unarmed it names a label and arms nothing.
+    """
+    vault_ok = _vault_row(vault, label) and ov_ok
     configured = bool(env_ok or vault_ok)
     if env_ok and vault_ok:
         via = "both"
@@ -159,8 +167,7 @@ def _arm_flags(
         via = "env"
     else:
         via = ""
-    prefer_ov = bool(ov_ok and vault_ok)
-    connector = "openvault" if (label == "openvault" or prefer_ov) else "litellm"
+    connector = "openvault" if (label == "openvault" or vault_ok) else "litellm"
     return configured, via, connector
 
 
@@ -188,11 +195,19 @@ def resolve_providers() -> list[Provider]:
     env = os.environ
     chain: list[Provider] = []
     ov_ok = False
+    ov_detail = "CREW_OPENVAULT=0"
+    ov_url = env.get("CREW_OPENVAULT_URL", "http://127.0.0.1:5000")
     vault: dict[str, dict] = {}
     if env.get("CREW_OPENVAULT", "1") != "0":
-        from CortexOS.crew.openvault import healthz, vault_sources
+        from CortexOS.crew.freeroute import arming as freeroute_arming
+        from CortexOS.crew.openvault import base_url, vault_sources
 
-        ov_ok = bool(healthz().get("ok"))
+        # Armed means OpenVault's FreeRoute status says so (unsealed, pooled
+        # keys, a spendable hop). Reachability and vault rows alone never arm.
+        arming = freeroute_arming()
+        ov_ok = bool(arming.get("armed"))
+        ov_detail = str(arming.get("detail") or "FreeRoute unarmed")
+        ov_url = base_url()
         vault = vault_sources()
 
     def add(
@@ -216,6 +231,9 @@ def resolve_providers() -> list[Provider]:
         source = env_source
         if conn == "openvault" and label != "explicit":
             source = "OpenVault FreeRoute (vault-armed)" if label != "openvault" else env_source
+        elif not cfg and _vault_row(vault, label):
+            # The row exists but nothing can spend it; a refusal must say why.
+            source = f"{env_source} in OpenVault; FreeRoute unarmed: {ov_detail}"
         chain.append(
             Provider(
                 label=label,
@@ -243,7 +261,7 @@ def resolve_providers() -> list[Provider]:
         "openvault/" + (env.get("CREW_OPENVAULT_MODEL", "").strip() or "auto"),
         "OpenVault FreeRoute (loopback, keys stay in the vault)",
         ov_ok,
-        env.get("CREW_OPENVAULT_URL", "http://127.0.0.1:5000"),
+        ov_url,
         connector="openvault",
         via="openvault" if ov_ok else "",
         configured=ov_ok,

@@ -19,6 +19,10 @@ SHARED_PATHS = (
     ("POST", "/v1/contract/ledger/append"),
     ("POST", "/v1/contract/ledger/verify"),
     ("GET", "/v1/contract/tools"),
+    ("GET", "/v1/insights"),
+    ("POST", "/v1/insights"),
+    ("GET", "/v1/insights/identity"),
+    ("GET", "/v1/insights/keys"),
 )
 
 

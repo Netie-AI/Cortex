@@ -2,6 +2,124 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-COT-CLIMB leftover honesty gap — 2026-09-21
+
+Cortex #212 leftover. CoT/route/improve on Insights `generate=true`
+consumes think in the SQL prompt and re-thinks on improve. Harness
+`POST /crew/prompt-harness` still measures via `cot_climb.measure_climb`.
+Like-with-like is the pinned 26 ids from DMS #180 @ d2f116a6 -- not the
+5-item fixture, not a label-only n==26. Fixture 40.00% (2/5 WRONG=0) vs
+frozen gen 57.69% / exact 38.46% WRONG=0 -- baseline not replaced.
+Pinned-26 empty complete measures 0.00%; does not invent a better %.
+Status INCOMPLETE; #212 stays OPEN. Unarmed fail-closed. Reuses gen_cfsm
+G1 + dag_runner. JEPA proxy. Off freeze #4/#41-#44. Local focused tests
+only. Not a GitHub CI claim. Not COMPLETE.
+
+## EPIC-PROMPT-HARNESS-CLIMB measure vs #180 on FreeRoute free/normal — 2026-09-18
+
+Cortex #227. Prompt+harness climb loop on tip CoT/FreeRoute/distill
+surfaces (no parallel stack). `GET /crew/prompt-harness` stamps the law;
+`POST /crew/prompt-harness` measures via `cot_climb.measure_climb`.
+FreeRoute free/normal only; unarmed fail-closed. Distill (D) is
+ideas-only (`run_distill`); GPU finetune / trained JEPA / LangGraph paste
+/ invent-COMPLETE REFUSE. Fixture coverage 40.00% (2/5 WRONG=0) vs frozen
+DMS #180 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 -- baseline not
+replaced; like-with-like false. #212 stays OPEN/INCOMPLETE. Off freeze
+#4/#41-#44. Local focused tests only. Not a GitHub CI claim. Did not
+invent live `:5000`/`:8020` green. Not COMPLETE.
+
+## LIBERTY-PREDICT-GOAL plan language + proxy V(s,a,g) — 2026-09-18
+
+Cortex #225. Extends #223 liberty seek and #224 proxy collapse: operator
+set/predict-goal on Control+Crew is plan language plus tabular/proxy
+G2.2 `action_value` V(s,a,g). `POST /crew/liberty/predict-goal` returns
+PLAN with `plan.language=plan` and `values[]` (s, a, g, value). Trained
+forecast / future-observation requests REFUSE. JEPA absent/proxy-only
+still fail-closed honestly -- no invent trained forecasts. Tool
+`cortex_liberty_predict_goal`. Control GET-displays. CoT climb #212
+stays INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited, not
+replaced. #224 is proxy collapse only. Off freeze #4/#41-#44. Local
+focused tests only. Not a GitHub CI claim. Did not invent live
+`:5000`/`:8020` green. Not COMPLETE.
+
+## LIBERTY-JEPA-COLLAPSE proxy collapse_score on buyer liberty path — 2026-09-18
+
+Cortex #224. Extends #223 liberty seek: when the Control+Crew buyer path
+collapses candidates it uses G1 `CortexOS.execution.gen_cfsm.collapse_score`
+(proxy cosine on the scoreboard embedding). `jepa` stamps stay
+proxy / not-trained / not world-model / not COMPLETE -- invent-trained
+claims are refused. Collapse miss labels `collapse.ok=false` and leaves
+scores empty rather than inventing a trained WM. CoT climb #212 stays
+INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited, not
+replaced. Predict-goal is #225. Off freeze #4/#41-#44. Local focused
+tests only. Not a GitHub CI claim. Did not invent live `:5000`/`:8020`
+green. Not COMPLETE.
+
+## LIBERTY-SEEK G2.1 seeker on Control+Crew — 2026-09-18
+
+Cortex #223. Surfaces the existing G2.1 seeker (`CortexOS.execution.seeker`)
+on the Control+Crew buyer API/UI. `GET /crew/liberty` is the Control
+GET-display map (F-0030, spawn=false). `POST /crew/liberty/seek` starts
+governed proactive seek with an F1 `engine.seek` audit trail. No bound
+goal REFUSE. `execute=true` PARK (`executed=[]`) -- no invent autonomy.
+Tool `cortex_liberty_seek` is propose-only. JEPA remains the cosine /
+action_value prior; trained WM is #224, predict-goal is #225. CoT climb
+#212 stays INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited,
+not replaced. Off freeze #4/#41-#44. Local focused tests only. Not a
+GitHub CI claim. Did not invent live `:5000`/`:8020` green. Not COMPLETE.
+
+## CORTEX-API-SURFACE stable Insights API — 2026-09-17
+
+Cortex #213. Engine `GET|POST /v1/insights` is the stable consumer path
+for NL then ontology then SQL then validate / Insights envelopes
+(CERTIFIED|ABSTAIN|REFUSE). Reuses `run_insights` + FreeRoute + cot_climb;
+Crew `/crew/insights` stays a chrome alias. AirGPT `POST /dms/sidecar/insights`
+is the same path (no parallel invent stack). Callers do not hold provider
+keys; `GET /v1/insights/keys` reports local vs cloud hops without secrets.
+A-0009: armed generate from a non-loopback peer needs the caller's own
+`ov_` key. `cortex-contract` 1.2.0 unchanged (sibling surface, not a
+minor). CoT INCOMPLETE; DMS #180 gen 57.69% / exact 38.46% WRONG=0 cited,
+not replaced. G4 litellm/brain/suggest not expanded (P24.1). Off freeze
+#4/#41-#44. Local focused tests only. Not a GitHub CI claim. Did not
+invent live `:5000`/`:8020` green. Regenerated `contract/openapi-1.2.0.json`
+(+ sha256) after InsightsAskIn appeared in FastAPI `components.schemas`;
+allowlisted `/v1/contract/*` operationIds unchanged; no contract bump.
+
+## CORTEX-COT-CLIMB consume FreeRoute think-path — 2026-09-17
+
+Cortex #212. Insights `generate=true` runs CoT/route/improve through
+`CortexOS.crew.cot_climb` (think then SQL then `gen_cfsm.route_step` then
+improve). Consumes the #215 FreeRoute adapter (`complete`, `validate_sql`);
+does not rewrite arming, pick, identity, or `integrations/freeroute.py`.
+JEPA stays proxy. Unarmed fail-closed. Validated SQL is ABSTAIN, never
+CERTIFIED. Fixture coverage 40.00% (2/5, WRONG=0) vs frozen DMS #180
+gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 -- baseline not replaced.
+G4 litellm/brain/suggest not expanded (P24.1). GET `/crew/insights` stamps
+`cot_climb` as INCOMPLETE (baseline cited, not replaced). Not #211/#212 COMPLETE.
+Off freeze #4/#41-#44. Local focused tests only. Not a GitHub CI claim.
+
+## CORTEX-OV-FREEROUTE follow-up: one FreeRoute layer — 2026-09-18
+
+Cortex #211 reopened on an independent Verify NO at `ceb7fc2`. `CortexOS/
+integrations/freeroute.py` becomes the single model layer for the engine, the
+DMS pack and Crew: sync and stdlib-only, so `answer()` calls it with no event
+loop and Crew adapts it on an executor. Armed is OpenVault's own
+`/api/freeroute/status` (reachable, unsealed, pooled keys, a spendable
+non-cortex hop) - env keys, a local Ollama and key rows never arm. The
+credential is an operator-issued `ov_` key OpenVault verifies, or the loopback
+tier; a 401 disarms only the credential sent, and the Cortex key is never lent
+to an HTTP caller (A-0009 relay rules on `POST /crew/freeroute` and Insights
+generate). The measured route is live hops x OpenVault catalogue, persisted in
+sqlite and scored on validator verdicts (SQL gate, plausibility, static
+guardrail) against the model OpenVault **served**, because a requested model is
+only a preference. Engine generative-ask drops the `gpt-4o-mini` default and
+names the OpenVault cause in the customer abstain; a Space document answer now
+says why L2 was not used. Crew generate validates with sqlglot plus the engine
+guardrail and still returns ABSTAIN with no values. DMS #180 stays cited
+cross-system only (offline `bind_plan`, badge-only judge). Local
+`pytest tests/test_crew -q` **296 passed**; engine generative-ask set **392
+passed**. Live `:5000` was down during this work. Not a GitHub CI claim.
+
 ## CORTEX-OV-FREEROUTE central AI layer — 2026-09-13
 
 Cortex #211. OpenVault FreeRoute is the model path for Crew Insights

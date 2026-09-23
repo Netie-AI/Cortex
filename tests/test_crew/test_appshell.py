@@ -39,6 +39,7 @@ def test_catalog_nav_and_app_tiles() -> None:
         "audit",
         "assign",
         "insights",
+        "liberty",
         "memory",
         "settings",
     ]
@@ -147,6 +148,11 @@ def test_http_appshell_routes(client) -> None:
     assert 'data-nav="insights"' in page.text
     assert 'id="plane-insights"' in page.text
     assert 'id="insightsGenerate"' in page.text
+    assert 'data-nav="liberty"' in page.text
+    assert 'id="plane-liberty"' in page.text
+    assert 'id="libertySeek"' in page.text
+    assert 'id="libertyPredict"' in page.text
+    assert 'id="controlLiberty"' in page.text
     assert "Display only F-0030" in page.text
     assert 'id="appTiles"' in page.text
     assert 'id="controlFrame"' in page.text

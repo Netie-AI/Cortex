@@ -207,6 +207,16 @@ OpenVault trust root (`30a8d9a`) already settled.
 **First slice when promoted:** G3.0 system prompt compiler only (answer vs agentic vs plan vs computer_control vs abstain).
 **Condition:** owner explicit promote (this file's move-out rule). Do not start G3 mid-sprint on a DMS envelope ticket. Never LangGraph. Never weaken `manifest.py`.
 
+## P24 - FreeRoute one-layer leftovers (Cortex #211 follow-up PR-A)
+PR-A put engine generative-ask, Crew Insights generate and the Crew chat OpenVault connector on `CortexOS/integrations/freeroute.py`. These stay parked, each with its own unlock:
+1. **Direct env-key hosts in Crew** (litellm on `*_API_KEY` when OpenVault is unarmed) and the direct Anthropic SDK in `packs/dms/generative/brain.py` and `packs/dms/tasks/suggest.py`. Planned as PR-B (pin-only env hosts, brain/suggest on the core, call-site ratchet). **Condition:** founder decision 1 on #211 is yes.
+2. **`CortexOS/fabrication/hls_compiler.py` and `CortexOS/routing/adapters/*`** still call providers directly (litellm / anthropic / openai / vllm; `CortexOS/config.py` `synthesis_model="gpt-4o-mini"` feeds hls_compiler only). **Condition:** the first served or scheduled caller of HLSCompiler, or of an LLM_JUDGED / AGENT_TASK node.
+3. **Served-model attestation and model-aware hop order.** OpenVault walks hops in its own order and serves a hop's first catalogued model when the requested id is not carried, so Cortex can steer only inside the first healthy provider; the served id comes from the response body, not an OpenVault attestation. **Condition:** OpenVault returns an attested model_served per call, or routes by requested provider.
+4. **Spend doors on Cortex's own credential.** Engine `POST /dms/query` and Crew `POST /crew/spaces/{id}/messages` (the agent loop) still spend under Cortex's credential for any unauthenticated local caller. `#213` landed caller authority on `POST /v1/insights` generate and kept `POST /crew/freeroute` / Crew Insights generate. **Remainder:** `/dms/query` and Crew messages. **Condition:** founder decision to put those spend doors on caller `ov_` as well.
+5. **Older Crew custody paths.** `POST /crew/keys` writes `keys.json` and `os.environ` when the vault upsert fails; startup `CURSOR_API_KEY` ingest; MCP children still inherit host provider keys (only `CORTEX_FREEROUTE_TOKEN` is stripped). **Condition:** P24.1 lands, or the first MCP server not built by Netie is armed.
+6. **Gate 4xx naming.** `openvault_gate.check_gate` (shared with `rsf_boundary`) reads a gate 4xx as "unreachable: empty response". **Condition:** the first customer abstain whose cause is a gate 4xx, or RSF needs named statuses.
+7. **Engine L2 blocks the event loop** inside `contract_ask` (sync answer path), and Crew does not cancel in-flight FreeRoute calls on run stop. **Condition:** #212 adds more than one model call per L2 attempt, or Crew run stop is used during a generate.
+
 ---
 
 ## Move out of parking lot

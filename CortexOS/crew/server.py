@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -35,6 +36,60 @@ from CortexOS.crew.wakes import WakeBoard, conveyor
 
 SSE_KEEPALIVE_S = 25
 SSE_BREAK = '\n\n'
+
+CALLER_KEY_RULE = (
+    "FreeRoute spend from a non-loopback caller needs its own OpenVault ov_ key "
+    "(Authorization: Bearer ov_...)"
+)
+_LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _peer_is_loopback(request: Request) -> bool:
+    """Only the socket peer counts. Forwarded headers are caller-written and
+    Starlette's TestClient peer ``testclient`` is not an address, so neither
+    proves loopback (OpenVault applies the same rule to its own callers)."""
+    host = str(request.client.host if request.client else "").strip()
+    if host in _LOOPBACK_PEERS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _caller_bearer(request: Request) -> str | None:
+    """The credential a FreeRoute spend is relayed with; ``None`` refuses (A-0009).
+
+    A caller's own ``Bearer ov_...`` is relayed verbatim from any peer. Without
+    one, only a loopback peer talking to a loopback OpenVault proceeds, with no
+    Authorization at all (OpenVault's loopback tier, stamped unattributed).
+    Cortex's own key is never lent to a relayed call, and no header the caller
+    writes about itself (``X-Cortex-Identity`` included) is read.
+    """
+    from CortexOS.crew.openvault import base_url
+    from CortexOS.integrations.openvault_client import is_loopback_url
+
+    auth = str(request.headers.get("authorization") or "").strip()
+    bearer = auth[len("bearer ") :].strip() if auth.lower().startswith("bearer ") else ""
+    if bearer.startswith("ov_"):
+        return bearer
+    if _peer_is_loopback(request) and is_loopback_url(base_url()):
+        return ""
+    return None
+
+
+def _caller_refused(purpose: str) -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": False,
+            "status": "REFUSE",
+            "purpose": purpose,
+            "refused": CALLER_KEY_RULE,
+            "values": [],
+            "live_5000_ci": False,
+        },
+        status_code=401,
+    )
 
 
 def _loss_frame(crew: CrewApp, sub: Any) -> str:
@@ -348,8 +403,11 @@ def build_router(crew: CrewApp) -> APIRouter:
 
         choice = chosen_public()
         from CortexOS.crew import freeroute as freeroute_mod
+        from CortexOS.integrations import freeroute as freeroute_core
 
+        # Credential view plus the last arming seen: no new OpenVault call here.
         identity = freeroute_mod.public_identity()
+        identity["arming"] = freeroute_core.peek().public()
         return {
             "ok": True,
             "provider": active.public() if active else None,
@@ -946,21 +1004,38 @@ def build_router(crew: CrewApp) -> APIRouter:
         }
 
     @router.post("/insights")
-    async def insights_ask(body: InsightsIn) -> Any:
+    async def insights_ask(body: InsightsIn, request: Request) -> Any:
         """Ontology first, then constrained DMS ask. CERTIFIED|ABSTAIN|REFUSE."""
+        from CortexOS.crew import freeroute as freeroute_mod
         from CortexOS.crew import insights as insights_mod
 
         intent = (body.intent or "").strip()
         if not intent:
             raise HTTPException(400, "intent is required")
+        bearer: str | None = None
+        if body.generate:
+            # Unarmed refuses inside run_insights with nothing spent; only an
+            # armed generate needs the caller's own authority to spend.
+            armed = await freeroute_mod.run_core(freeroute_mod.arming)
+            if armed.get("armed"):
+                bearer = _caller_bearer(request)
+                if bearer is None:
+                    return _caller_refused("generative_ask")
         result = await insights_mod.run_insights(
             intent,
             bridge=crew.bridge,
             ask=body.ask,
             generate=body.generate,
             shell_public=crew.shell.public(),
+            bearer=bearer,
         )
         return result
+
+    from CortexOS.crew.liberty_routes import mount_liberty
+    from CortexOS.crew.prompt_harness_routes import mount_prompt_harness
+
+    mount_liberty(router)
+    mount_prompt_harness(router)
 
     @router.get("/identity")
     async def cortex_identity() -> dict[str, Any]:
@@ -971,20 +1046,30 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     @router.get("/freeroute")
     async def freeroute_status() -> dict[str, Any]:
-        """Central FreeRoute layer. Not a live :5000 CI claim."""
+        """Central FreeRoute layer. Not a live :5000 CI claim. Public hop rows only."""
         from CortexOS.crew import freeroute as freeroute_mod
 
-        return freeroute_mod.public_status()
+        return await freeroute_mod.run_core(freeroute_mod.public_status)
 
     @router.post("/freeroute")
-    async def freeroute_complete(body: FreeRouteIn) -> Any:
+    async def freeroute_complete(body: FreeRouteIn, request: Request) -> Any:
         """Prompt, think, or act via OpenVault FreeRoute. Fail-closed when unarmed."""
         from CortexOS.crew import freeroute as freeroute_mod
 
+        armed = await freeroute_mod.run_core(freeroute_mod.arming)
+        if not armed.get("armed"):
+            result = await freeroute_mod.complete(
+                body.messages, purpose=body.purpose, prompt=body.prompt
+            )
+            return JSONResponse(result, status_code=409)
+        bearer = _caller_bearer(request)
+        if bearer is None:
+            return _caller_refused(body.purpose)
         result = await freeroute_mod.complete(
             body.messages,
             purpose=body.purpose,
             prompt=body.prompt,
+            bearer=bearer,
         )
         if not result.get("ok"):
             return JSONResponse(result, status_code=409)

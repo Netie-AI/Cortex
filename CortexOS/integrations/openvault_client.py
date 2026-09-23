@@ -10,6 +10,7 @@ and half-upgraded stacks still work.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import urllib.error
@@ -19,6 +20,9 @@ from collections.abc import Mapping
 from typing import Any
 
 DEFAULT_OPENVAULT_URL = "http://127.0.0.1:5000"
+
+# Engine names first; Crew's historical name last. One OpenVault per Cortex.
+_BASE_URL_ENVS: tuple[str, ...] = ("OPENVAULT_BASE_URL", "OPENVAULT_URL", "CREW_OPENVAULT_URL")
 
 # Canonical first, legacy alias second — see OpenVault rename (FreeRoute/FreeBuild/FreeIDE).
 _RATELIMIT_PATHS: tuple[str, ...] = (
@@ -33,11 +37,86 @@ _HEALTH_PATHS: tuple[str, ...] = (
 
 
 def openvault_base_url() -> str:
-    return (
-        os.environ.get("OPENVAULT_BASE_URL")
-        or os.environ.get("OPENVAULT_URL")
-        or DEFAULT_OPENVAULT_URL
-    ).rstrip("/")
+    for name in _BASE_URL_ENVS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value.rstrip("/")
+    return DEFAULT_OPENVAULT_URL
+
+
+def openvault_base_url_conflict() -> str:
+    """Name the variables when two OpenVault URL aliases disagree; '' when they agree.
+
+    Engine and Crew used to read different names. Two vaults behind one Cortex
+    would split arming from spend, so the disagreement is refused, not resolved.
+    """
+    seen: dict[str, str] = {}
+    for name in _BASE_URL_ENVS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            seen[name] = value.rstrip("/")
+    if len(set(seen.values())) <= 1:
+        return ""
+    named = ", ".join(f"{name}={value}" for name, value in seen.items())
+    return f"OpenVault URL variables disagree ({named}); set one OpenVault"
+
+
+def is_loopback_url(url: str) -> bool:
+    host = (urllib.parse.urlsplit(url).hostname or "").strip().lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _json_dict(raw: bytes) -> dict[str, Any] | None:
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def request_json(
+    method: str,
+    path: str,
+    *,
+    body: Mapping[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: float = 5.0,
+    base: str | None = None,
+) -> tuple[int, dict[str, Any] | None]:
+    """HTTP JSON with the status code; ``(0, None)`` when OpenVault is unreachable.
+
+    Error bodies are parsed too, so callers name a 401 / 403 / 429 instead of
+    collapsing every refusal into "unreachable". Loopback bases skip proxies:
+    a system proxy must never receive a bearer meant for 127.0.0.1. Never raises.
+    """
+    root = base or openvault_base_url()
+    url = f"{root}{path}"
+    payload = json.dumps(dict(body)).encode("utf-8") if body is not None else None
+    sent = {"Accept": "application/json"}
+    if payload is not None:
+        sent["Content-Type"] = "application/json"
+    sent.update(dict(headers or {}))
+    try:
+        req = urllib.request.Request(url, data=payload, method=method.upper(), headers=sent)
+        if is_loopback_url(root):
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        else:
+            opener = urllib.request.build_opener()
+        with opener.open(req, timeout=timeout) as resp:
+            return int(resp.status), _json_dict(resp.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read()
+        except OSError:
+            raw = b""
+        return int(exc.code), _json_dict(raw)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return 0, None
 
 
 def get_json(
@@ -157,9 +236,12 @@ __all__ = [
     "freeroute_ratelimit",
     "get_json",
     "get_json_first",
+    "is_loopback_url",
     "memory_route",
     "openvault_base_url",
+    "openvault_base_url_conflict",
     "ping",
     "post_json",
+    "request_json",
     "resolve_access",
 ]
