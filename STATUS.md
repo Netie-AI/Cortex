@@ -1,5 +1,21 @@
 # STATUS.md
-**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT covering INCOMPLETE**; APPSHELL-BUYER-REACH
+
+> **2026-09-23 (APPSHELL-BUYER-REACH):** Cortex #237 (parent EPIC-APPSHELL-HOSTED #236).
+> Control+Crew AppShell documented host path is `https://app.netie.ai/appshell`
+> (same existing host as `/cortex`, not a new name) plus engine `GET /appshell`.
+> Reuses #195 chrome @ a0f1723b and #232 leftover @ adcb0369. Tunnel `:8020`
+> leftover stays NOT buyer COMPLETE. OpenVault leave-machine
+> (`action=leave`, `destination=appshell-host`) fail-closes unarmed/denied
+> public bind or live public claim. `GET /crew/appshell/host` is the law;
+> `GET /crew/appshell/host/live` / `python -m CortexOS.crew.appshell_host`
+> is founder/platform prove. `CREW_LIVE_PROBES=0` / host-down is
+> `NOT_PROVEN`; gate deny is `HOST_DENIED`. Does not invent CI live-host
+> green, RELEASE, or product COMPLETE. Control stays GET F-0030. Off freeze
+> #4/#41-#44. Did not start/kill `:5000` or `:8020`. Did not seat #197-#200
+> or #235. #212 stays OPEN/INCOMPLETE. Local `pytest tests/test_crew -q`
+> **390 passed**. This environment live public prove was `HOST_DENIED`
+> (`OpenVault unreachable: empty response`) -- not invent-green.
 
 > **2026-09-23 (CORTEX-COT-CLIMB covering):** Cortex #212 covering increment
 > after leftover honesty @ c6df0d7c. Think-path consumes the G1

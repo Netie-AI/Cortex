@@ -1,7 +1,7 @@
 {
   "name": "Cortex",
   "short_name": "Cortex",
-  "start_url": "/#/home",
+  "start_url": "/appshell#/home",
   "display": "standalone",
   "background_color": "#16181e",
   "theme_color": "#16181e"

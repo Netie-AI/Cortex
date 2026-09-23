@@ -839,6 +839,10 @@ def build_router(crew: CrewApp) -> APIRouter:
         body = appshell_mod.refuse_control_spawn()
         raise HTTPException(403, body["reason"])
 
+    from CortexOS.crew.appshell_host_routes import mount_appshell_host_api
+
+    mount_appshell_host_api(router)
+
     @router.get("/detect")
     async def detect_plan(q: str = "") -> dict[str, Any]:
         from CortexOS.crew.detect import plan
@@ -1361,6 +1365,10 @@ def create_app(
             {"ok": False, "detail": "UI file missing (CortexOS/crew/ui/index.html)"}, 503
         )
 
+    from CortexOS.crew.appshell_host_routes import mount_appshell_page
+
+    mount_appshell_page(app)
+
     @app.get("/crew.css")
     async def crew_css() -> Any:
         if chrome.is_file():
@@ -1386,13 +1394,22 @@ def create_app(
 
 def main() -> None:
     import argparse
+    import json
+    import sys
 
     import uvicorn
+
+    from CortexOS.crew.appshell_host import decide_bind
 
     parser = argparse.ArgumentParser(description="Cortex Crew server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
+
+    bind = decide_bind(args.host)
+    if not bind.get("allowed"):
+        sys.stdout.write(json.dumps(bind, indent=2) + "\n")
+        raise SystemExit(2)
 
     settings = load_settings()
     port = args.port or settings.port

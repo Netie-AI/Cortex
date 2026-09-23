@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/crew.css" />
 </head>
 <body>
-  <div class="appshell" id="appshell">
+  <div class="appshell" id="appshell" data-host-path="/appshell" data-public-host="https://app.netie.ai/appshell">
     <nav class="appshell__nav" id="shellNav" aria-label="AppShell">
       <button class="appshell__menu" id="shellMenu" type="button" title="Open AppShell nav">Menu</button>
       <button class="appshell__brand" type="button" data-nav="home">Cortex</button>
@@ -1639,53 +1639,57 @@
     }
 
     async function boot() {
-      const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt, composer, ladder] = await Promise.all([
-        api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
-        api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
-        api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
-        api("/crew/tickets").catch(() => ({ tickets: [] })),
-        api("/crew/desk").catch(() => null),
-        api("/crew/skills").catch(() => []),
-        api("/v1/belt").catch(() => api("/crew/belt").catch(() => null)),
-        api("/crew/commands").catch(() => ({ commands: [], mentions: [] })),
-        api("/crew/approvals").catch(() => ({ mode: "one-off", allow: {}, session: {}, circuit: {} }))
-      ]);
-      state.commands = composer.commands || [];
-      state.mentions = composer.mentions || [];
-      state.approvals = ladder;
-      renderRoles(roles || []);
-      state.skills = skills || [];
-      renderSkills(state.skills);
-      state.keyFields = keys.fields || [];
-      renderKeyForm(state.keyFields, keys.status || {});
-      setProvider(prov.active, prov.chain, prov.chosen);
-      paintUsage((health && health.usage) || (desk && desk.usage));
-      const ov = health.openvault || {};
-      const eng = health.engine || {};
-      $("engine").textContent = [
-        eng.ok ? ("engine " + (eng.url || "ok")) : ("engine offline"),
-        ov.ok ? ("vault " + (ov.url || "ok")) : ("vault down"),
-        health.computer_control ? "computer-control master on" : "computer-control master off"
-      ].join(" - ");
-      state.mcp = mcp;
-      renderMcp();
-      state.plugins = plugs || [];
-      renderPlugins();
-      renderRoutines(routines || []);
-      renderTickets(tickets || {});
-      await loadAssign();
-      renderDesk(desk);
-      renderBelt(belt);
-      renderLadder();
-      state.spaces = spaces;
-      if (!state.spaces.length) {
-        const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title: "General" }) });
-        state.spaces = [created];
+      try {
+        const [prov, spaces, mcp, health, roles, keys, plugs, routines, tickets, desk, skills, belt, composer, ladder] = await Promise.all([
+          api("/crew/providers"), api("/crew/spaces"), api("/crew/mcp"), api("/crew/health"),
+          api("/crew/roles").catch(() => []), api("/crew/keys").catch(() => ({ fields: [], status: {} })),
+          api("/crew/connectors").catch(() => []), api("/crew/routines").catch(() => []),
+          api("/crew/tickets").catch(() => ({ tickets: [] })),
+          api("/crew/desk").catch(() => null),
+          api("/crew/skills").catch(() => []),
+          api("/v1/belt").catch(() => api("/crew/belt").catch(() => null)),
+          api("/crew/commands").catch(() => ({ commands: [], mentions: [] })),
+          api("/crew/approvals").catch(() => ({ mode: "one-off", allow: {}, session: {}, circuit: {} }))
+        ]);
+        state.commands = composer.commands || [];
+        state.mentions = composer.mentions || [];
+        state.approvals = ladder;
+        renderRoles(roles || []);
+        state.skills = skills || [];
+        renderSkills(state.skills);
+        state.keyFields = keys.fields || [];
+        renderKeyForm(state.keyFields, keys.status || {});
+        setProvider(prov.active, prov.chain, prov.chosen);
+        paintUsage((health && health.usage) || (desk && desk.usage));
+        const ov = health.openvault || {};
+        const eng = health.engine || {};
+        $("engine").textContent = [
+          eng.ok ? ("engine " + (eng.url || "ok")) : ("engine offline"),
+          ov.ok ? ("vault " + (ov.url || "ok")) : ("vault down"),
+          health.computer_control ? "computer-control master on" : "computer-control master off"
+        ].join(" - ");
+        state.mcp = mcp;
+        renderMcp();
+        state.plugins = plugs || [];
+        renderPlugins();
+        renderRoutines(routines || []);
+        renderTickets(tickets || {});
+        await loadAssign();
+        renderDesk(desk);
+        renderBelt(belt);
+        renderLadder();
+        state.spaces = spaces;
+        if (!state.spaces.length) {
+          const created = await api("/crew/spaces", { method: "POST", body: JSON.stringify({ title: "General" }) });
+          state.spaces = [created];
+        }
+        renderSpaces();
+        await selectSpace(state.spaces[0].id);
+        setInterval(refreshBelt, 4000);
+      } catch (err) {
+        toast((err && err.message) || "Crew converse APIs unavailable on this host path", "bad");
       }
-      renderSpaces();
-      await selectSpace(state.spaces[0].id);
       await initShell();
-      setInterval(refreshBelt, 4000);
     }
     async function refreshBelt() {
       try {
