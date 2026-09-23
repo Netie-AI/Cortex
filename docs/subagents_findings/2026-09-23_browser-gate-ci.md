@@ -37,4 +37,4 @@ Skip-as-pass: an optional dependency missing in CI turns a security test into a 
 
 ## Verified vs assumed
 - Verified locally: gate fails/skips/passes as above; full suite with `CORTEX_BROWSER_GATE=required`: 2195 passed / 12 skipped / 4 xfailed.
-- Assumed until CI runs: `playwright install --with-deps chromium` succeeds on the GitHub ubuntu runner, and the 4 other playwright-dependent tests (reliability/discovery) pass there as they do locally. The next CI run on #235 is the proof.
+- Verified in CI: run 35900463029 on 54c6a48, step "Browser gate (Chromium for Crew dialog tests)" succeeded and Pytest reported `2199 passed, 10 skipped` (was `2190 passed, 16 skipped` on 21f5d84). The browser tests now run on the GitHub runner.
