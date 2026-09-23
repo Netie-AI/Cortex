@@ -223,6 +223,8 @@ def palette() -> list[dict[str, str]]:
 
 
 def catalog(*, engine_url: str) -> dict[str, Any]:
+    from CortexOS.crew import appshell_host as host
+
     return {
         "ok": True,
         "law": "brains=Cortex keys=OpenVault launch=Control chat-spawn=Crew canvas=Constructor",
@@ -230,6 +232,7 @@ def catalog(*, engine_url: str) -> dict[str, Any]:
         "nav": [dict(item) for item in NAV],
         "apps": apps(engine_url=engine_url),
         "palette": palette(),
+        "host": host.catalog_stamp(),
         "control": {
             "url": control_url(),
             "display_only": True,

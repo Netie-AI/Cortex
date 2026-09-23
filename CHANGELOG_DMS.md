@@ -2,6 +2,22 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## APPSHELL-BUYER-REACH documented host path for Control+Crew -- 2026-09-23
+
+Cortex #237 (parent #236). AppShell buyer path is the existing Netie host
+`https://app.netie.ai/appshell` (same host as Constructor `/cortex`, not a
+new name) and engine `GET /appshell`. Reuses #195 chrome and #232 facts
+leftover. Crew `GET /crew/appshell/host` is the law;
+`GET /crew/appshell/host/live` GET-proves with OpenVault leave-machine
+fail-closed. Non-loopback bind asks `action=leave`
+`destination=appshell-host`. Tunnel `:8020` leftover is NOT buyer COMPLETE.
+Does not invent CI live-host green, RELEASE, product COMPLETE, CoT/#212
+COMPLETE, or a second vault. Control stays GET F-0030 -- never POST
+run/goal/route/secrets. Off freeze #4/#41-#44. Did not seat #197-#200.
+Did not start/kill `:8020`/`:5000`. Residual: platform must route
+`/appshell` + `/crew/appshell*` on `app.netie.ai` if the live proxy only
+maps `/cortex`; live DNS is founder/platform, not this CI.
+
 ## CORTEX-COT-CLIMB covering increment (G1 plan + exact vs gold) — 2026-09-23
 
 Cortex #212 covering increment after leftover honesty. Insights
