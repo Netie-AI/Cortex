@@ -1652,6 +1652,32 @@ class CrewRuntime:
                 [],
             ),
             spec(
+                "ws_read_xlsx",
+                "Read an Excel workbook (.xlsx/.xlsm) as data: tab-separated cell values via "
+                "openpyxl, read-only. Same jail as ws_read: an absolute path needs a folder "
+                "grant. Never opens or drives the Excel window; do not click Excel to read it.",
+                {
+                    "path": {"type": "string"},
+                    "sheet": {"type": "string", "description": "sheet name; default first"},
+                    "offset": {"type": "integer", "description": "start row, 0-based"},
+                    "limit": {"type": "integer", "description": "max rows"},
+                },
+                ["path"],
+            ),
+            spec(
+                "attach_window",
+                "Attach to an already-open window the operator granted for this space "
+                "(title + pid as UACC list_windows shows it). Verifies the window is live "
+                "via list_windows and returns a read handle. Never launches, starts or "
+                "reopens OneNote, Word, a PDF viewer or Explorer: if it is not open, it "
+                "refuses and the operator opens it. Not a click; clicks still confirm.",
+                {
+                    "title": {"type": "string"},
+                    "pid": {"type": "integer"},
+                },
+                ["title", "pid"],
+            ),
+            spec(
                 "cortex_insights",
                 "AI-for-database ask. Ranks ontology where+importance first, then constrained"
                 " DMS trials. generate=true runs NL then ontology then FreeRoute SQL then"
@@ -2084,7 +2110,12 @@ class CrewRuntime:
             text = str(closed[-1]["content"]) if closed else f"Closed {canon}."
             return text
 
-        if name in {"ws_ls", "ws_read", "ws_write", "ws_edit", "ws_glob"}:
+        if name == "attach_window":
+            text = await self._attach_window(ctx, args)
+            self._persist_tool(ctx, row, name, args, text)
+            return text
+
+        if name in {"ws_ls", "ws_read", "ws_write", "ws_edit", "ws_glob", "ws_read_xlsx"}:
             from CortexOS.crew import workspace as ws_mod
 
             ws = ws_mod.workspace_for(
@@ -2099,6 +2130,13 @@ class CrewRuntime:
                 elif name == "ws_read":
                     text = ws.read(
                         str(args.get("path") or ""),
+                        offset=int(args.get("offset") or 0),
+                        limit=int(args.get("limit") or 200),
+                    )
+                elif name == "ws_read_xlsx":
+                    text = ws.read_xlsx(
+                        str(args.get("path") or ""),
+                        sheet=str(args.get("sheet") or "") or None,
                         offset=int(args.get("offset") or 0),
                         limit=int(args.get("limit") or 200),
                     )
@@ -2488,6 +2526,65 @@ class CrewRuntime:
         self._handle(verifier).task = task
         ctx.tasks.add(task)
         task.add_done_callback(ctx.tasks.discard)
+
+    # -- EPIC-GRANT-04: attach an already-open granted window --------------
+
+    async def _attach_window(self, ctx: RunContext, args: dict[str, Any]) -> str:
+        """Verify a window grant against a live UACC ``list_windows`` and hand
+        back a read handle. The one MCP tool this path may call is
+        ``granted_reach.ATTACH_TOOL``; nothing here launches, arms or enables."""
+        from CortexOS.crew import granted_reach as reach_mod
+
+        title = str(args.get("title") or "").strip()
+        raw_pid = args.get("pid")
+        pid = None if isinstance(raw_pid, bool) else raw_pid
+        try:
+            pid = int(pid) if pid is not None else None
+        except (TypeError, ValueError):
+            pid = None
+        if not title or pid is None or pid <= 0:
+            return f"DENIED: {reach_mod.missing_window_grant(title, pid)}"
+        grant = next(
+            (
+                g
+                for g in self.session_grants.grants_for(ctx.space_id)
+                if g.get("kind") == "window"
+                and g.get("decision") == "allow"
+                and int(g.get("pid") or 0) == pid
+                and reach_mod.titles_match(g.get("title"), title)
+            ),
+            None,
+        )
+        if grant is None:
+            return f"DENIED: {reach_mod.missing_window_grant(title, pid)}"
+        server = reach_mod.ATTACH_SERVER
+        client = self.mcp.clients.get(server)
+        if client is None:
+            return (
+                f"DENIED: {reach_mod.RULE_WINDOW}: MCP server '{server}' is not catalogued, "
+                "so no window can be verified; nothing was launched"
+            )
+        # Same floor as every capture tool: master switch, then arming. Neither
+        # is flipped here; a refusal says which one is missing.
+        decision, reason = policy.decide(
+            reach_mod.ATTACH_TOOL,
+            server=server,
+            armed=bool(client.spec.armed),
+            master_on=self.mcp.master_on,
+        )
+        if decision != policy.ALLOW:
+            return f"DENIED: {reach_mod.RULE_WINDOW}: {reason}; nothing was launched"
+        await self.mcp.ensure_ready(server)
+        try:
+            outcome = await client.call(reach_mod.ATTACH_TOOL, {})
+        except (RuntimeError, TimeoutError, OSError) as exc:
+            return f"DENIED: {reach_mod.RULE_WINDOW}: {server}.{reach_mod.ATTACH_TOOL} failed: {exc}"
+        if outcome.startswith("TOOL ERROR"):
+            return f"DENIED: {reach_mod.RULE_WINDOW}: {outcome}"
+        live = reach_mod.find_live_window(reach_mod.parse_windows(outcome), title, pid)
+        if live is None:
+            return f"DENIED: {reach_mod.window_not_live(title, pid)}"
+        return reach_mod.render_attached(grant, live)
 
     # -- confirm gate ------------------------------------------------------
 

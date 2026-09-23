@@ -78,6 +78,13 @@ INTERNAL_TOOLS = frozenset(
         "ws_write",
         "ws_edit",
         "ws_glob",
+        # EPIC-GRANT-04: Excel as data (openpyxl, never the Excel UI) and a
+        # verify-only attach to an already-open granted window. Both are reads
+        # against a session grant; neither is an MCP mutation, so neither takes
+        # the per-call confirm. attach_window's one UACC call (list_windows) is
+        # gated by ``decide`` like any capture tool inside the runtime.
+        "ws_read_xlsx",
+        "attach_window",
     }
 )
 
@@ -87,7 +94,8 @@ INTERNAL_TOOLS = frozenset(
 # confirm above, so a click or type_text still walks the CONFIRM ladder with a
 # grant present. Writes outside the space folder stay refused: an Allow on a
 # laptop folder was asked as a read, and nothing in the catalog says "modify".
-GRANT_READ_TOOLS = frozenset({"ws_ls", "ws_read", "ws_glob"})
+# EPIC-GRANT-04 adds ws_read_xlsx (a workbook opened as data) to the read set.
+GRANT_READ_TOOLS = frozenset({"ws_ls", "ws_read", "ws_glob", "ws_read_xlsx"})
 GRANT_WRITE_TOOLS = frozenset({"ws_write", "ws_edit"})
 
 REACH_READ = "read"

@@ -14,6 +14,14 @@ grant. A cancelled grant and another session's grant admit nothing. Reads only
 because an Allow on a laptop folder was asked as a read. Every refusal names
 the rule (R-0011) and the grant that was missing, so the transcript says why
 nothing happened instead of reading as a hang.
+
+EPIC-GRANT-04 (#205): a granted read needs no second per-read confirm (the
+``ws_*`` tools never took one; ``policy.decide`` returns allow for
+crew-internal tools). Two additions on the granted path: a browser history
+database (Chrome/Edge ``History``, Firefox ``places.sqlite``) is refused even
+inside an Allow-ed folder because v1 has no grant kind for it, and
+``read_xlsx`` opens a granted workbook as data through ``openpyxl`` (never the
+Excel UI). Both rules live in ``granted_reach.py``; the jail only applies them.
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ import re
 from pathlib import Path, PurePath
 from typing import Any, Protocol
 
+from CortexOS.crew import granted_reach
 from CortexOS.crew.policy import REACH_READ, REACH_WRITE
 from CortexOS.crew.session_grants import GrantRefused
 
@@ -128,6 +137,11 @@ class SpaceWorkspace:
                 f"{RULE}: '{rel}' refused: its real path (links followed) is not under "
                 f"the granted folder {folder}"
             ) from exc
+        # EPIC-GRANT-04: the folder grant admits the folder, not the browser's
+        # history inside it. Checked on the resolved name so a link named
+        # anything else that points at History is refused the same way.
+        if granted_reach.is_history_database(candidate.name):
+            raise WorkspaceError(granted_reach.history_refusal(rel, candidate.name))
         return candidate
 
     # ---- tools ------------------------------------------------------------
@@ -162,6 +176,23 @@ class SpaceWorkspace:
         chunk = lines[start:stop]
         header = f"# {rel} lines {start + 1}-{start + len(chunk)} of {len(lines)}\n"
         return header + "\n".join(chunk)
+
+    def read_xlsx(
+        self,
+        rel: str,
+        *,
+        sheet: str | None = None,
+        offset: int = 0,
+        limit: int = granted_reach.XLSX_ROWS,
+    ) -> str:
+        """EPIC-GRANT-04: a workbook opened as data (openpyxl, read-only, values
+        only). Same jail as ``read``: relative stays in the space, absolute needs
+        a folder grant. Never drives the Excel UI."""
+        path = self.resolve(rel, reach=REACH_READ)
+        try:
+            return granted_reach.read_xlsx(path, rel, sheet=sheet, offset=offset, limit=limit)
+        except granted_reach.ReachRefused as exc:
+            raise WorkspaceError(str(exc)) from exc
 
     def write(self, rel: str, content: str) -> str:
         if not (rel or "").strip() or (rel or "").strip() in {".", "./"}:
