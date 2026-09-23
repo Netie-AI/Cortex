@@ -72,6 +72,7 @@ def test_public_map_cites_baseline_and_is_not_complete() -> None:
     assert body["like_with_like_corpus"] == cot_climb.LIKE_WITH_LIKE_CORPUS
     assert body["issue_227_complete"] is False
     assert "INCOMPLETE" in body["leftover"]
+    assert "covering" in body["leftover"]
     assert body["live_5000_ci"] is False
     base = body["measured_baseline"]
     assert base["gen"] == "57.69%"
@@ -199,6 +200,7 @@ async def test_think_then_valid_sql_abstains_no_numbers(
     assert env["climb"]["final"] == DECISION_TERMINATE
     assert env["climb"]["g1"]["horizon"] == 3
     assert env["climb"]["think_consumed"] is True
+    assert env["climb"]["g1_consumed"] is True
     assert env["measured_baseline"]["exact"] == "38.46%"
     assert env["measured_baseline"]["gen"] == "57.69%"
 
@@ -220,6 +222,7 @@ async def test_improve_retries_after_off_ontology_sql(
     kinds = [row["kind"] for row in env["climb"]["steps"]]
     assert kinds.count("generate") == 2
     assert kinds.count("think") >= 2
+    assert env["climb"]["prior_sql_consumed"] is True
     assert env["values"] == []
     assert env["complete"] is False
 
@@ -320,6 +323,9 @@ async def test_measure_reports_coverage_vs_baseline_not_a_better_percent(
     assert report["this_run"]["validated"] == 2
     assert report["this_run"]["wrong"] == 0
     assert report["this_run"]["gen"] == "40.00%"
+    assert report["this_run"]["exact"] == "0.00%"
+    assert report["this_run"]["gold_n"] == 0
+    assert report["this_run"]["exact_matched"] == 0
     assert report["vs_baseline"]["baseline_gen"] == "57.69%"
     assert report["vs_baseline"]["this_run_gen"] == "40.00%"
     assert report["this_run"]["gen"] != "57.69%"
@@ -365,9 +371,12 @@ async def test_think_text_is_consumed_in_sql_prompt(
     )
     assert env["status"] == "ABSTAIN"
     assert env["climb"]["think_consumed"] is True
+    assert env["climb"]["g1_consumed"] is True
     assert prompts
     assert "THINK" in prompts[0]
     assert "count distinct sku" in prompts[0].lower()
+    assert "G1 cFSM PLAN" in prompts[0]
+    assert "step_1" in prompts[0]
     assert "gen_cfsm" in prompts[0]
     assert "langgraph" not in prompts[0].lower()
 
@@ -391,6 +400,11 @@ async def test_pinned_26_is_like_with_like_without_inventing_percent(
     assert report["vs_baseline"]["improved"] is False
     assert report["vs_baseline"]["this_run_gen"] == "0.00%"
     assert report["vs_baseline"]["this_run_gen"] != "57.69%"
+    assert report["this_run"]["exact"] == "0.00%"
+    assert report["this_run"]["exact"] != "38.46%"
+    assert report["vs_baseline"]["this_run_exact"] == "0.00%"
+    assert report["this_run"]["exact_matched"] == 0
+    assert report["this_run"]["gold_n"] >= 1
     assert report["complete"] is False
     assert report["status"] == "INCOMPLETE"
     assert report["replaces_baseline"] is False
@@ -429,4 +443,150 @@ async def test_insights_generate_exposes_climb_on_the_envelope(
     assert "999" not in text
     assert climb.get("measured_baseline", {}).get("gen") == "57.69%"
     assert env["generative"]["validator"].startswith("static sqlglot guardrail")
+    assert climb.get("g1_consumed") is True
+
+
+@pytest.mark.asyncio
+async def test_g1_plan_is_consumed_in_think_prompt(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _armed(monkeypatch)
+    think_prompts: list[str] = []
+
+    async def fake(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, kwargs
+        if purpose == "think":
+            think_prompts.append(prompt)
+            return {
+                "ok": True,
+                "text": "Use inventory sku. No numbers.",
+                "identity": "cortex:crew:think",
+                "route": {"label": "deepseek", "model": "deepseek-chat"},
+            }
+        return {
+            "ok": True,
+            "text": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "deepseek", "model": "deepseek-chat"},
+        }
+
+    env = await cot_climb.climb("how many skus", _ranking(), complete=fake)
+    assert env["status"] == "ABSTAIN"
+    assert env["climb"]["g1_consumed"] is True
+    assert think_prompts
+    assert "G1 cFSM PLAN" in think_prompts[0]
+    assert "step_1" in think_prompts[0]
+    assert "langgraph" not in think_prompts[0].lower()
+    assert env["complete"] is False
+    assert env["climb"]["complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_improve_think_consumes_prior_sql_and_route(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _armed(monkeypatch)
+    think_prompts: list[str] = []
+    leftover = [
+        "SELECT secret FROM payroll",
+        "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+    ]
+
+    async def fake(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        _ = messages, kwargs
+        if purpose == "think":
+            think_prompts.append(prompt)
+            return {
+                "ok": True,
+                "text": "Use inventory sku. No numbers.",
+                "identity": "cortex:crew:think",
+                "route": {"label": "deepseek", "model": "deepseek-chat"},
+            }
+        body = leftover.pop(0) if leftover else "SELECT secret FROM payroll"
+        return {
+            "ok": True,
+            "text": body,
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "deepseek", "model": "deepseek-chat"},
+        }
+
+    env = await cot_climb.climb("how many skus", _ranking(), complete=fake)
+    assert env["status"] == "ABSTAIN"
+    assert env["climb"]["prior_sql_consumed"] is True
+    assert len(think_prompts) >= 2
+    assert "PRIOR SQL" in think_prompts[1]
+    assert "payroll" in think_prompts[1].lower()
+    assert "G1 route_step" in think_prompts[1]
+    assert env["values"] == []
+    assert env["complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_exact_scores_certified_gold_without_replacing_baseline(
+    crew_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _armed(monkeypatch)
+    ranking = _ranking()
+    gold = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+    hit = await cot_climb.measure_climb(
+        [
+            {
+                "id": "cq_sku_count",
+                "intent": "How many SKUs do we have in inventory?",
+                "ranking": ranking,
+                "expected_sql": gold,
+                "complete": _script(gold),
+            }
+        ]
+    )
+    assert hit["complete"] is False
+    assert hit["status"] == "INCOMPLETE"
+    assert hit["like_with_like"] is False
+    assert hit["replaces_baseline"] is False
+    assert hit["invented_better"] is False
+    assert hit["issue_212_complete"] is False
+    assert hit["this_run"]["n"] == 1
+    assert hit["this_run"]["validated"] == 1
+    assert hit["this_run"]["wrong"] == 0
+    assert hit["this_run"]["gen"] == "100.00%"
+    assert hit["this_run"]["exact"] == "100.00%"
+    assert hit["this_run"]["exact_matched"] == 1
+    assert hit["this_run"]["gold_n"] == 1
+    assert hit["vs_baseline"]["this_run_exact"] != "38.46%"
+    assert hit["vs_baseline"]["improved"] is False
+    assert hit["this_run"]["exact"] != "38.46%"
+    assert "99.95" not in str(hit)
+
+    miss = await cot_climb.measure_climb(
+        [
+            {
+                "id": "cq_sku_count",
+                "intent": "How many SKUs do we have in inventory?",
+                "ranking": ranking,
+                "expected_sql": gold,
+                "complete": _script("SELECT sku FROM inventory"),
+            }
+        ]
+    )
+    assert miss["this_run"]["validated"] == 1
+    assert miss["this_run"]["gen"] == "100.00%"
+    assert miss["this_run"]["exact"] == "0.00%"
+    assert miss["this_run"]["exact_matched"] == 0
+    assert miss["like_with_like"] is False
+    assert miss["vs_baseline"]["improved"] is False
+    assert miss["complete"] is False
+    assert miss["this_run"]["exact"] != "38.46%"
+
+
+def test_public_map_leftover_stays_incomplete_covering() -> None:
+    body = cot_climb.public_map()
+    assert "INCOMPLETE" in body["leftover"]
+    assert "exact" in body["leftover"].lower() or "G1" in body["leftover"]
+    assert body["complete"] is False
+    assert body["issue_212_complete"] is False
+    gold = cot_climb.certified_gold_sql()
+    assert "cq_sku_count" in gold
+    assert cot_climb.sql_exact("", gold["cq_sku_count"]) is False
+    assert cot_climb.sql_exact(gold["cq_sku_count"], gold["cq_sku_count"]) is True
+
 

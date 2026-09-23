@@ -15,6 +15,30 @@
 > Suite 2122 passed / 13 skipped / 4 xfailed. OpenAPI check not run here
 > (needs `.[full]`); crew routes are not contract routes. Not a GitHub CI claim.
 
+> **2026-09-23 (CORTEX-COT-CLIMB covering):** Cortex #212 covering increment
+> after leftover honesty @ c6df0d7c. Think-path consumes the G1
+> `generate_ir` plan in think/SQL; improve re-thinks with prior SQL +
+> `route_step`. `measure_climb` now reports this_run.exact vs certified
+> gold (fixture exact 0.00% / pinned-26 empty exact 0.00%) -- does not
+> invent 38.46% or a better %. Unarmed still fail-closed REFUSE (no
+> invent-green CoT); validated SQL stays ABSTAIN. Status INCOMPLETE; #212
+> stays OPEN. Reuses gen_cfsm G1 + dag_runner. JEPA proxy. Off freeze
+> #4/#41-#44. Did not start/kill `:5000` or `:8020`. Not a GitHub CI
+> claim. Not COMPLETE. Did not dual-own #223/#224/#225 or close #227.
+
+> **2026-09-23 (CREW-8020-FACTS):** Cortex #232 leftover from EPIC-CREW #116 +
+> CREW-SCALE-BUILD #210 @ c0385603. Memory list/save/search/export stays
+> `facts.md` (survives Clear chat). AppShell Memory now focuses
+> `#memoryPanel` and re-renders the painted HUD (R-0001). Founder-restart
+> prove is `GET /crew/facts-prove/live` (or `python -m CortexOS.crew.facts_prove`):
+> GET-only, never kills `:8020` (R-0015). Host-down / `CREW_LIVE_PROBES=0`
+> is `NOT_PROVEN` -- not invent CI live-host green, not RELEASE, not
+> product COMPLETE. CoT leftover #212 stays OPEN/INCOMPLETE. Off freeze
+> #4/#41-#44. Did not seat #197-#200. Did not widen Liberty #222-#225.
+> Local `pytest tests/test_crew/test_facts_prove.py -q` **11 passed**.
+> Full `pytest tests/test_crew -q` **371 passed**. This environment live
+> `:8020` was `URLError` / `NOT_PROVEN`.
+
 > **2026-09-21 (CORTEX-COT-CLIMB leftover):** Cortex #212 leftover honesty
 > gap. Product path still `generate=true` via `cot_climb` on FreeRoute.
 > Think text is now consumed in the SQL prompt; improve re-thinks with the
@@ -134,6 +158,20 @@
 > baseline only. Reuses gen_cfsm + dag_runner G1; does not clone them. Off
 > freeze #4/#41-#44. Did not start/kill `:8020` or claim live `:5000` CI.
 > Local `pytest tests/test_crew -q` **287 passed**. Not a GitHub CI claim.
+
+> **2026-09-12 (CREW-SCALE-BUILD):** Operator `/scale n | Name, Name` seats
+> existing idle teammates across ready fetched issues (never one agent per
+> issue): a job-named teammate is spawned only while `max_agents_per_space`
+> still leaves a writer + verifier slot; the rest is queued with a visible
+> reason. `/build owner/repo#n | Name | verify cmd` binds one ticket with skill
+> build and a verifier whose criteria name the command (default
+> `python -m pytest tests/test_crew -q`, asserted equal to the pack). Bare
+> `/build` still loads the pack. HUD Build per ready issue + Scale button;
+> `POST /crew/tickets/build|scale`. A verifier skipped at the cap is a visible
+> DENIED in the transcript, not silence; verifier rows are never writers.
+> Local binds only; CLAIMS.json and GitHub assignees untouched. Control stays
+> display-only. Off freeze #4/#41-#44. Did not start/kill `:8020`. Local
+> `pytest tests/test_crew -q` **289 passed**. Not a GitHub CI claim.
 
 > **2026-09-07 (CREW-INSIGHTS):** Cortex #196 ask+ontology spine. Intent retrieves
 > ontology **where** (object/table locations) and **importance** (ranked metrics /

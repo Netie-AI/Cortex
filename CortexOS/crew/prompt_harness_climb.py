@@ -448,6 +448,7 @@ async def run_harness(
                 "baseline_exact": "38.46%",
                 "baseline_wrong": 0,
                 "this_run_gen": this_gen,
+                "this_run_exact": str(this_run.get("exact") or "0.00%"),
                 "like_with_like": like,
                 "improved": bool(vs.get("improved")),
                 "note": str(

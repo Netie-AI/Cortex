@@ -296,8 +296,10 @@ async def test_measure_reports_fixture_vs_baseline_not_a_better_percent(
     assert out["this_run"]["validated"] == 2
     assert out["this_run"]["wrong"] == 0
     assert out["this_run"]["gen"] == "40.00%"
+    assert out["this_run"]["exact"] == "0.00%"
     assert out["vs_baseline"]["baseline_gen"] == "57.69%"
     assert out["vs_baseline"]["this_run_gen"] == "40.00%"
+    assert out["vs_baseline"]["this_run_exact"] == "0.00%"
     assert out["vs_baseline"]["improved"] is False
     assert out["this_run"]["gen"] != "57.69%"
     assert "99.95" not in str(out)
@@ -419,6 +421,9 @@ async def test_pinned_26_like_with_like_stays_incomplete(
     assert out["this_run"]["n"] == 26
     assert out["this_run"]["gen"] == "0.00%"
     assert out["this_run"]["gen"] != "57.69%"
+    assert out["this_run"]["exact"] == "0.00%"
+    assert out["this_run"]["exact"] != "38.46%"
+    assert out["vs_baseline"]["this_run_exact"] == "0.00%"
     assert out["vs_baseline"]["improved"] is False
     assert out["complete"] is False
     assert out["status"] == "INCOMPLETE"

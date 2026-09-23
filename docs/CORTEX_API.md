@@ -57,3 +57,6 @@ lent.
 - `cot_climb` is INCOMPLETE. Fixture coverage is not a replacement for the
   DMS #180 baseline. Like-with-like requires the pinned 26 ids @ `d2f116a6`;
   a 5-item fixture is not that corpus. Think is consumed in the SQL prompt.
+  Covering increment: G1 plan consumed in think; this_run.exact scores
+  certified gold when present and stays 0.00% on empty complete -- never
+  invent 38.46%.

@@ -442,6 +442,8 @@ button { cursor: pointer; }
 }
 .belt__body { flex: 1; overflow: auto; padding: 0 0.55rem 0.7rem; }
 .block { margin: 0.65rem 0; }
+#memoryPanel { scroll-margin-top: 0.4rem; }
+.block--focus { outline: 1px solid var(--live); outline-offset: 2px; }
 .block h2 {
   margin: 0 0 0.3rem;
   font-size: 0.62rem;
