@@ -128,9 +128,9 @@ def create_app() -> Any:
         from packs.dms.constructor_routes import register_constructor_routes
 
         register_constructor_routes(app)
-        from CortexOS.crew.appshell_host_routes import mount_engine_appshell
+        from packs.dms.appshell_host import register_appshell_host_routes
 
-        mount_engine_appshell(app)
+        register_appshell_host_routes(app)
         try:
             from CortexOS.api.a2a_routes import register_a2a_routes
 

@@ -26,6 +26,7 @@ UI = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "ui" / "index.h
 HOST_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "appshell_host.py"
 ROUTES_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "appshell_host_routes.py"
 API_APP = Path(__file__).resolve().parents[2] / "CortexOS" / "api" / "app.py"
+PACK_HOST = Path(__file__).resolve().parents[2] / "packs" / "dms" / "appshell_host.py"
 SERVER_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "server.py"
 
 
@@ -333,6 +334,7 @@ def test_module_does_not_kill_ports_or_paste_analogs() -> None:
     source = HOST_PY.read_text(encoding="utf-8")
     routes = ROUTES_PY.read_text(encoding="utf-8")
     api = API_APP.read_text(encoding="utf-8")
+    pack = PACK_HOST.read_text(encoding="utf-8")
     server = SERVER_PY.read_text(encoding="utf-8")
     assert "os.kill" not in source
     assert "SIGTERM" not in source
@@ -345,7 +347,9 @@ def test_module_does_not_kill_ports_or_paste_analogs() -> None:
     assert "R-0015" in source
     assert "method=\"POST\"" not in source
     assert "Request(url, method=\"GET\")" in source or 'method="GET"' in source
-    assert "mount_engine_appshell" in api
+    assert "CortexOS.crew" not in api
+    assert "register_appshell_host_routes" in api
+    assert "mount_engine_appshell" in pack
     assert "decide_bind" in server
     assert "include_in_schema=False" in routes
     assert "Display only F-0030" in source
