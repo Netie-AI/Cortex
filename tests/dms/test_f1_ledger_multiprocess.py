@@ -21,11 +21,17 @@ ENTRIES_PER_PROCESS = 25
 # sqlite3 directly. Started as `python -c` so it is spawn-safe on Windows and
 # does not require the test module to be importable by name.
 _WORKER = """
-import sys
+import os, sys, time
 from packs.dms.audit.ledger import append
-db, worker, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+db, worker, n, go = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+deadline = time.monotonic() + 60
+while not os.path.exists(go):  # start barrier: all workers append at once
+    if time.monotonic() > deadline:
+        sys.exit("start barrier never opened")
+    time.sleep(0.005)
 for i in range(n):
     append(f"proc-{worker}", "multiprocess.event", {"worker": worker, "i": i}, db_path=db)
+    time.sleep(0.001)  # yield so the file lock changes hands between appends
 """
 
 
@@ -34,9 +40,10 @@ def _spawn_workers(db: Path, count: int, per_worker: int) -> list[subprocess.Com
     env.pop("DMS_LEDGER_DSN", None)  # force the SQLite path in every child
     env["DMS_OPS_DB"] = str(db)
     env["PYTHONUTF8"] = "1"
+    go = db.with_name(db.name + ".go")
     procs = [
         subprocess.Popen(
-            [sys.executable, "-c", _WORKER, str(db), str(w), str(per_worker)],
+            [sys.executable, "-c", _WORKER, str(db), str(w), str(per_worker), str(go)],
             cwd=str(ROOT),
             env=env,
             stdout=subprocess.PIPE,
@@ -45,6 +52,10 @@ def _spawn_workers(db: Path, count: int, per_worker: int) -> list[subprocess.Com
         )
         for w in range(count)
     ]
+    # Open the barrier only after every interpreter has started, so the
+    # appends genuinely contend on SQLite's file lock instead of running in
+    # the staggered order process start-up would give them.
+    go.touch()
     results = []
     for p in procs:
         out, err = p.communicate(timeout=300)
@@ -102,3 +113,10 @@ def test_four_processes_append_25_each_yield_gap_free_verified_chain(tmp_path, m
         assert e.event_type == "multiprocess.event"
         per_worker[e.payload["worker"]] += 1
     assert per_worker == {str(w): ENTRIES_PER_PROCESS for w in range(PROCESSES)}
+
+    # The proof only means something if the writers actually contended: the
+    # rows must interleave across processes, not land as four serial blocks.
+    switches = sum(
+        1 for a, b in zip(entries[:-1], entries[1:], strict=True) if a.payload["worker"] != b.payload["worker"]
+    )
+    assert switches >= 10, f"only {switches} worker switches in {total} rows; writers did not contend"
