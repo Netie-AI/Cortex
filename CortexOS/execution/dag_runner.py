@@ -559,7 +559,15 @@ def _gate_batch_cost(
     the whole batch against the ledger total at the moment the batch starts,
     and refuses the batch before any sibling spends. Fail closed: a batch is
     refused as a whole, never partially.
+
+    ``batch`` must already exclude nodes that will be replayed from the step
+    journal: a replay spends 0 MYR, and its original cost is already in the
+    ledger total this gate reads, so counting it again would refuse a resumed
+    run that fits its ceiling (verifier finding on #243). ``run_dag`` filters
+    with ``_will_replay`` before calling; an empty batch passes.
     """
+    if not batch:
+        return
     projected_total = sum(estimate_node_cost(node, router, context) for node in batch)
     if not ledger.enforce_ceiling(context.run_id, wf, projected_additional_myr=projected_total):
         ids = ", ".join(node.id for node in batch)
@@ -615,6 +623,20 @@ async def run_dag(
         context.set_default("_on_event", emit)
     abort = should_abort if callable(should_abort) else None
     cap = max(1, int(max_parallel)) if max_parallel else None
+
+    def _will_replay(node: DSLNode) -> bool:
+        """True when ``_one`` will serve this node from the step journal at 0 MYR.
+
+        Same lookup and the same fail-safe as ``_one``: a journal fault reads as
+        "not cached", so the node is gated and then executed as if fresh.
+        """
+        if not (journal_on and resume):
+            return False
+        try:
+            cached = step_journal.get_cached(context.run_id, _journal_step_key(node))
+        except Exception:
+            return False
+        return isinstance(cached, dict)
 
     async def _one(node: DSLNode) -> tuple[DSLNode, NodeResult]:
         if emit is not None:
@@ -698,7 +720,8 @@ async def run_dag(
             break
         if wf is not None:
             for node in layer:
-                _gate_cost(node, context, router, ledger, wf)
+                if not _will_replay(node):
+                    _gate_cost(node, context, router, ledger, wf)
         if parallel and len(layer) > 1:
             batches = [layer]
             if cap and len(layer) > cap:
@@ -708,8 +731,10 @@ async def run_dag(
                     break
                 if wf is not None:
                     # Re-gated per batch: the ledger total now includes the
-                    # previous batch's actual spend.
-                    _gate_batch_cost(batch, context, router, ledger, wf)
+                    # previous batch's actual spend. Replayed nodes cost 0 and
+                    # are already counted in that total, so they are left out.
+                    fresh = [n for n in batch if not _will_replay(n)]
+                    _gate_batch_cost(fresh, context, router, ledger, wf)
                 for node, nr in await asyncio.gather(*(_one(n) for n in batch)):
                     context.update_with_node(node.id, nr)
                     result.outputs[node.id] = nr
