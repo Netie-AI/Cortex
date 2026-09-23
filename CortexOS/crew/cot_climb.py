@@ -9,13 +9,16 @@ Think-path loop:
   -> ontology validate -> gen_cfsm.route_step -> improve or stop.
 
 Reuses G1 already on tip: ``generate_ir`` / ``compile_ir`` / ``execute_cfsm``
-(``dag_runner``) / ``route_step`` / ``collapse_score``. JEPA stays the cosine
-proxy (PARKING_LOT P21). Unarmed is fail-closed: no invented CoT, no SQL, no
+(``dag_runner``) / ``route_step`` / ``collapse_score``. The compiled G1 node
+plan is consumed in think/SQL prompts (not a sidecar stamp only). Improve
+re-thinks with prior SQL + route_step. JEPA stays the cosine proxy
+(PARKING_LOT P21). Unarmed is fail-closed REFUSE: no invented CoT, no SQL, no
 values. Validated SQL is ABSTAIN (not executed). Never CERTIFIED. Never
 COMPLETE. DMS #180 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 is the frozen
 baseline; this module does not replace it with a better %. Like-with-like is
 the pinned 26 ids from that covering SHA -- not a 5-item fixture, not a
-label-only n==26. Think text is consumed in the SQL prompt; improve re-thinks.
+label-only n==26. this_run.exact scores against certified gold SQL when the
+case id / expected_sql is present; missing gold is not invented 38.46%.
 """
 
 from __future__ import annotations
@@ -108,12 +111,17 @@ def public_map() -> dict[str, Any]:
         "like_with_like_corpus": LIKE_WITH_LIKE_CORPUS,
         "like_with_like_n": DMS_180_N,
         "leftover": (
-            "think consumed in SQL prompt; improve re-thinks; like-with-like only "
-            "when pinned 26 ids @ d2f116a6; still INCOMPLETE"
+            "covering: exact vs certified gold + G1 plan consumed in think; "
+            "like-with-like only when pinned 26 ids @ d2f116a6; still INCOMPLETE"
         ),
         "jepa": "proxy cosine via gen_cfsm.collapse_score; no trained path named",
         "gencfsm": (
-            "reuse generate_ir, compile_ir, execute_cfsm/dag_runner, route_step"
+            "reuse generate_ir, compile_ir, execute_cfsm/dag_runner, route_step; "
+            "G1 plan consumed in think/SQL"
+        ),
+        "exact": (
+            "this_run.exact vs certified gold when id/expected_sql present; "
+            "never invent 38.46%"
         ),
         "freeroute": "consume crew.freeroute public API only; unarmed fail-closed",
         "prompt_harness": (
@@ -178,6 +186,51 @@ def like_with_like(corpus: str, ids: Sequence[str]) -> bool:
     )
 
 
+def normalize_sql(sql: str) -> str:
+    """Stdlib fold for exact compare. Not a second SQL engine."""
+    return " ".join((sql or "").replace(";", " ").split()).strip().lower()
+
+
+def sql_exact(got: str, gold: str) -> bool:
+    """Exact only when both sides exist. Empty SQL is never an exact hit."""
+    if not (got or "").strip() or not (gold or "").strip():
+        return False
+    return normalize_sql(got) == normalize_sql(gold)
+
+
+_GOLD: dict[str, str] | None = None
+
+
+def certified_gold_sql() -> dict[str, str]:
+    """Certified query gold from the DMS pack YAML. Does not import packs.*."""
+    global _GOLD
+    if _GOLD is not None:
+        return _GOLD
+    from CortexOS.crew import insights as insights_mod
+
+    doc = insights_mod._read_yaml(
+        insights_mod._pack_dir() / "semantic" / "certified_queries.yaml"
+    )
+    out: dict[str, str] = {}
+    for row in doc.get("certified") or []:
+        if not isinstance(row, Mapping):
+            continue
+        cid = str(row.get("id") or "").strip()
+        sql = str(row.get("sql") or "").strip()
+        if cid and sql:
+            out[cid] = sql
+    _GOLD = out
+    return out
+
+
+def gold_sql_for(case_id: str, expected_sql: str = "") -> str:
+    """Case expected_sql wins. Else certified YAML by id. Never invent gold."""
+    pinned = (expected_sql or "").strip()
+    if pinned:
+        return pinned
+    return certified_gold_sql().get(str(case_id or "").strip(), "")
+
+
 def curated_intents() -> list[dict[str, str]]:
     """Pinned #180 intents. No scores. Ranking filled at measure time."""
     return [{"id": i, "intent": q} for i, q in DMS_180_CURATED]
@@ -228,23 +281,50 @@ def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+def _g1_plan_lines(g1: Mapping[str, Any] | None) -> list[str]:
+    plan = list((g1 or {}).get("plan") or [])
+    if not plan:
+        return []
+    lines = [
+        "G1 cFSM PLAN (reuse generate_ir/compile_ir/dag_runner; not a second engine):"
+    ]
+    for row in plan:
+        if not isinstance(row, Mapping):
+            continue
+        nid = str(row.get("id") or "")
+        kind = str(row.get("kind") or "")
+        if nid:
+            lines.append(f"- {nid}: {kind}")
+    return lines
+
+
 def _think_prompt(
     intent: str,
     ranking: Mapping[str, Any],
     *,
     critique: str = "",
     ideas: Sequence[str] | None = None,
+    g1: Mapping[str, Any] | None = None,
+    prior_sql: str = "",
+    decision: str = "",
 ) -> str:
     lines = [
         "Think which ontology tables and metrics answer the intent.",
         "Do not emit SQL. Do not invent warehouse numbers, keys, or live CI.",
         "ONTOLOGY:",
         *_ontology_lines(ranking),
+        *_g1_plan_lines(g1),
         f"INTENT: {intent}",
     ]
     idea_lines = _idea_lines(ideas)
     if idea_lines:
         lines.extend(["", "DISTILL IDEAS (Netie-native; not a second engine):", *idea_lines])
+    if prior_sql.strip():
+        lines.extend(
+            ["", "PRIOR SQL (improve this; do not copy numbers):", prior_sql.strip()[:1500]]
+        )
+    if decision.strip():
+        lines.append("G1 route_step: " + decision.strip())
     if critique.strip():
         lines.extend(
             ["", "PRIOR REFUSAL (improve the plan, do not emit SQL):", critique.strip()]
@@ -259,10 +339,12 @@ def _sql_prompt(
     critique: str = "",
     think: str = "",
     ideas: Sequence[str] | None = None,
+    g1: Mapping[str, Any] | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
         *_ontology_lines(ranking),
+        *_g1_plan_lines(g1),
         "",
         f"INTENT: {intent}",
     ]
@@ -292,15 +374,24 @@ def coverage_report(
     n = len(outcomes)
     validated = sum(1 for row in outcomes if row.get("valid"))
     wrong = sum(1 for row in outcomes if row.get("wrong"))
+    exact_hit = sum(1 for row in outcomes if row.get("exact"))
+    gold_n = sum(1 for row in outcomes if row.get("gold"))
     gen_label = _pct(validated, n)
+    exact_label = _pct(exact_hit, n)
     ids = [str(row.get("id") or "") for row in outcomes]
     like = like_with_like(corpus, ids)
-    improved = False
+    gen_improved = False
+    exact_improved = False
     if like and wrong == 0:
         try:
-            improved = float(gen_label.rstrip("%")) > 57.69
+            gen_improved = float(gen_label.rstrip("%")) > 57.69
         except ValueError:
-            improved = False
+            gen_improved = False
+        try:
+            exact_improved = float(exact_label.rstrip("%")) > 38.46
+        except ValueError:
+            exact_improved = False
+    improved = gen_improved or exact_improved
     this_corpus = (
         LIKE_WITH_LIKE_CORPUS
         if like
@@ -320,6 +411,9 @@ def coverage_report(
             "validated": validated,
             "wrong": wrong,
             "gen": gen_label,
+            "exact": exact_label,
+            "exact_matched": exact_hit,
+            "gold_n": gold_n,
             "corpus": this_corpus,
             "like_with_like": like,
         },
@@ -328,6 +422,7 @@ def coverage_report(
             "baseline_exact": "38.46%",
             "baseline_wrong": 0,
             "this_run_gen": gen_label,
+            "this_run_exact": exact_label,
             "like_with_like": like,
             "improved": improved,
             "note": (
@@ -397,6 +492,8 @@ def _climb_meta(**extra: Any) -> dict[str, Any]:
         "replaces_baseline": False,
         "invented_better": False,
         "think_consumed": False,
+        "g1_consumed": False,
+        "prior_sql_consumed": False,
         "steps": [],
         "final": None,
         "g1": None,
@@ -405,9 +502,22 @@ def _climb_meta(**extra: Any) -> dict[str, Any]:
     return body
 
 
+def _ir_plan(ir: Mapping[str, Any]) -> list[dict[str, str]]:
+    plan: list[dict[str, str]] = []
+    for node in ir.get("nodes") or []:
+        if not isinstance(node, Mapping):
+            continue
+        nid = str(node.get("id") or "")
+        if not nid:
+            continue
+        plan.append({"id": nid, "kind": str(node.get("kind") or "")})
+    return plan
+
+
 async def _g1_skeleton(intent: str, run_id: str) -> dict[str, Any]:
     """Reuse G1 GENERATE -> COMPILE -> dag_runner execute. Not a model call."""
     ir = generate_ir(intent, HORIZON)
+    plan = _ir_plan(ir)
     compiled = compile_ir(ir)
     if not compiled["ok"]:
         return {
@@ -416,6 +526,7 @@ async def _g1_skeleton(intent: str, run_id: str) -> dict[str, Any]:
             "errors": compiled.get("errors") or [],
             "horizon": HORIZON,
             "node_count": len(ir.get("nodes") or []),
+            "plan": plan,
         }
     try:
         report = await execute_cfsm(
@@ -429,6 +540,7 @@ async def _g1_skeleton(intent: str, run_id: str) -> dict[str, Any]:
             "stage": "execute",
             "errors": [f"execute:{exc}"],
             "horizon": HORIZON,
+            "plan": plan,
         }
     return {
         "ok": bool(report.get("ok")),
@@ -437,6 +549,7 @@ async def _g1_skeleton(intent: str, run_id: str) -> dict[str, Any]:
         "horizon": report.get("horizon") or HORIZON,
         "node_count": report.get("node_count"),
         "errors": report.get("errors") or [],
+        "plan": plan,
     }
 
 
@@ -496,12 +609,15 @@ async def climb(
     runner = complete or fr.complete
     columns = _ranked_columns(ranking)
     idea_list = _idea_lines(ideas)
+    g1_consumed = bool(_g1_plan_lines(g1))
+    prior_sql_consumed = False
+    last_sql = ""
     steps: list[dict[str, Any]] = []
     think_text = ""
     think = await _call_runner(
         runner,
         purpose="think",
-        prompt=_think_prompt(text, ranking, ideas=idea_list),
+        prompt=_think_prompt(text, ranking, ideas=idea_list, g1=g1),
         bearer=bearer,
     )
     if not think.get("ok"):
@@ -512,7 +628,12 @@ async def climb(
             identity=think.get("identity") or identity,
             route=think.get("route"),
             stamp=think.get("stamp"),
-            climb=_climb_meta(final="THINK_REFUSE", g1=g1, steps=steps),
+            climb=_climb_meta(
+                final="THINK_REFUSE",
+                g1=g1,
+                steps=steps,
+                g1_consumed=g1_consumed,
+            ),
             refuse_reason=str(think.get("refused") or "FreeRoute think refused"),
         )
     think_text = str(think.get("text") or "")
@@ -523,6 +644,7 @@ async def climb(
             "purpose": "think",
             "ok": True,
             "decision": DECISION_CONTINUE,
+            "g1_consumed": g1_consumed,
         }
     )
 
@@ -542,7 +664,12 @@ async def climb(
         except Exception:  # noqa: BLE001 - journal is optional on this consumer
             journal = None
         sql_prompt = _sql_prompt(
-            text, ranking, critique=critique, think=think_text, ideas=idea_list
+            text,
+            ranking,
+            critique=critique,
+            think=think_text,
+            ideas=idea_list,
+            g1=g1,
         )
         if journal is not None:
             with journal as stamps:
@@ -572,12 +699,15 @@ async def climb(
                     g1=g1,
                     steps=steps,
                     think_consumed=bool(think_text),
+                    g1_consumed=g1_consumed,
+                    prior_sql_consumed=prior_sql_consumed,
                 ),
                 refuse_reason=str(gen.get("refused") or "FreeRoute generative_ask refused"),
             )
 
         sql = fr.extract_sql(str(gen.get("text") or ""))
         checked = fr.validate_sql(sql or "", allowed, columns=columns)
+        last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
 
@@ -634,6 +764,8 @@ async def climb(
                     steps=steps,
                     attempts=step,
                     think_consumed=True,
+                    g1_consumed=g1_consumed,
+                    prior_sql_consumed=prior_sql_consumed,
                 ),
             )
         if granted in (DECISION_FORCE_AUDIT,) or step >= HORIZON:
@@ -648,7 +780,13 @@ async def climb(
                 runner,
                 purpose="think",
                 prompt=_think_prompt(
-                    text, ranking, critique=critique, ideas=idea_list
+                    text,
+                    ranking,
+                    critique=critique,
+                    ideas=idea_list,
+                    g1=g1,
+                    prior_sql=last_sql,
+                    decision=str(granted),
                 ),
                 bearer=bearer,
             )
@@ -665,10 +803,13 @@ async def climb(
                         g1=g1,
                         steps=steps,
                         think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
                     ),
                     refuse_reason=str(think.get("refused") or "FreeRoute think refused"),
                 )
             think_text = str(think.get("text") or think_text)
+            prior_sql_consumed = prior_sql_consumed or bool(last_sql)
             steps.append(
                 {
                     "step": step,
@@ -676,6 +817,7 @@ async def climb(
                     "purpose": "think",
                     "ok": True,
                     "decision": DECISION_CONTINUE,
+                    "prior_sql_consumed": bool(last_sql),
                 }
             )
             continue
@@ -692,6 +834,8 @@ async def climb(
             steps=steps,
             attempts=HORIZON,
             think_consumed=bool(think_text),
+            g1_consumed=g1_consumed,
+            prior_sql_consumed=prior_sql_consumed,
         ),
         refuse_reason=(
             "CoT/route/improve exhausted horizon without ontology-valid SQL: "
@@ -730,12 +874,19 @@ async def measure_climb(
             ideas=idea_list,
         )
         wrong = bool(out.get("values")) or out.get("status") == "CERTIFIED"
+        gold = gold_sql_for(
+            str(case.get("id") or ""),
+            str(case.get("expected_sql") or ""),
+        )
+        exact = sql_exact(str(out.get("sql") or ""), gold)
         outcomes.append(
             {
                 "id": case.get("id") or "",
                 "ok": bool(out.get("ok")),
                 "valid": bool(out.get("valid")),
                 "wrong": wrong,
+                "exact": exact,
+                "gold": bool(gold),
                 "status": out.get("status"),
                 "final": (out.get("climb") or {}).get("final"),
             }

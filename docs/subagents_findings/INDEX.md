@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-23 | cortex-cot-climb-covering | cot, climb, covering, exact, g1, freeroute, #212 | Covering increment: G1 plan consumed in think; this_run.exact vs certified gold. INCOMPLETE; #212 OPEN. | `2026-09-23_cortex-cot-climb-covering.md` |
 | 2026-09-23 | crew-8020-facts | crew, facts.md, memory, 8020, survive-clear, scale, build, #232 | Memory nav paints facts.md; survive-clear asserted; live :8020 prove fail-closed NOT_PROVEN. No invent CI green. | `2026-09-23_crew-8020-facts.md` |
 | 2026-09-21 | cortex-cot-climb-leftover | cot, climb, leftover, like-with-like, #212, #227 | Think consumed in SQL; like-with-like is pinned 26 ids @ d2f116a6. INCOMPLETE; #212 OPEN. | `2026-09-21_cortex-cot-climb-leftover.md` |
 | 2026-09-18 | prompt-harness-climb | prompt, harness, climb, freeroute, distill, #227 | Prompt+harness measures CoT/gen vs #180 on FreeRoute free/normal. Distill ideas-only. INCOMPLETE; #212 stays OPEN. | `2026-09-18_prompt-harness-climb.md` |

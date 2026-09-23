@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-COT-CLIMB covering increment (G1 plan + exact vs gold) — 2026-09-23
+
+Cortex #212 covering increment after leftover honesty. Insights
+`generate=true` CoT/route/improve now consumes the G1 `generate_ir` plan
+in think/SQL prompts and re-thinks with prior SQL + `route_step`.
+`measure_climb` reports this_run gen **and** exact vs frozen DMS #180
+(gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6). Exact uses certified
+YAML gold when id/expected_sql is present; empty complete stays 0.00%
+exact -- not invented 38.46%. Fixture 40.00% gen / 0.00% exact is not
+like-with-like. Status INCOMPLETE; #212 stays OPEN. Unarmed fail-closed
+REFUSE. Reuses gen_cfsm G1 + dag_runner. JEPA proxy. Off freeze
+#4/#41-#44. Local focused tests only. Not a GitHub CI claim. Not COMPLETE.
+
 ## CREW-8020-FACTS facts.md HUD + fail-closed live :8020 prove — 2026-09-23
 
 Cortex #232 leftover from closed EPIC-CREW #116 + merged PR #210 @
