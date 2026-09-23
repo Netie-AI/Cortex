@@ -564,7 +564,7 @@ def _gate_batch_cost(
     journal: a replay spends 0 MYR, and its original cost is already in the
     ledger total this gate reads, so counting it again would refuse a resumed
     run that fits its ceiling (verifier finding on #243). ``run_dag`` filters
-    with ``_will_replay`` before calling; an empty batch passes.
+    with the same journal lookup ``_one`` then uses; an empty batch passes.
     """
     if not batch:
         return
@@ -624,34 +624,33 @@ async def run_dag(
     abort = should_abort if callable(should_abort) else None
     cap = max(1, int(max_parallel)) if max_parallel else None
 
-    def _will_replay(node: DSLNode) -> bool:
-        """True when ``_one`` will serve this node from the step journal at 0 MYR.
+    def _journal_lookup(node: DSLNode) -> tuple[str, Any]:
+        """One step-journal lookup per node execution: ``(key, cached)``.
 
-        Same lookup and the same fail-safe as ``_one``: a journal fault reads as
-        "not cached", so the node is gated and then executed as if fresh.
+        The batch cost gate and ``_one`` share the result, so the decision to
+        replay a node (0 MYR, not gated) and the decision actually taken at
+        execution can never disagree (verifier finding on #243). Journal
+        faults must never fail a run: a fault reads as "not cached", so the
+        node is gated and executed as if fresh.
         """
-        if not (journal_on and resume):
-            return False
+        if not journal_on:
+            return "", None
         try:
-            cached = step_journal.get_cached(context.run_id, _journal_step_key(node))
+            jkey = _journal_step_key(node)
+            return jkey, (step_journal.get_cached(context.run_id, jkey) if resume else None)
         except Exception:
-            return False
-        return isinstance(cached, dict)
+            return "", None
 
-    async def _one(node: DSLNode) -> tuple[DSLNode, NodeResult]:
+    async def _one(
+        node: DSLNode, lookup: tuple[str, Any] | None = None
+    ) -> tuple[DSLNode, NodeResult]:
         if emit is not None:
             emit({"type": "node_start", "node": node.id, "kind": str(node.type), **_node_meta(node)})
 
         # Content-addressed replay: a run resumed under its original run_id skips
         # the nodes it already finished. Journal faults must never fail a run.
-        jkey = ""
-        cached = None
+        jkey, cached = lookup if lookup is not None else _journal_lookup(node)
         if journal_on:
-            try:
-                jkey = _journal_step_key(node)
-                cached = step_journal.get_cached(context.run_id, jkey) if resume else None
-            except Exception:
-                jkey, cached = "", None
             if isinstance(cached, dict):
                 nr = NodeResult(
                     node_id=node.id,
@@ -720,8 +719,7 @@ async def run_dag(
             break
         if wf is not None:
             for node in layer:
-                if not _will_replay(node):
-                    _gate_cost(node, context, router, ledger, wf)
+                _gate_cost(node, context, router, ledger, wf)
         if parallel and len(layer) > 1:
             batches = [layer]
             if cap and len(layer) > cap:
@@ -729,13 +727,15 @@ async def run_dag(
             for batch in batches:
                 if abort and abort():
                     break
+                # One journal lookup per node, shared by the gate and _one.
+                lookups = {n.id: _journal_lookup(n) for n in batch}
                 if wf is not None:
                     # Re-gated per batch: the ledger total now includes the
                     # previous batch's actual spend. Replayed nodes cost 0 and
                     # are already counted in that total, so they are left out.
-                    fresh = [n for n in batch if not _will_replay(n)]
+                    fresh = [n for n in batch if not isinstance(lookups[n.id][1], dict)]
                     _gate_batch_cost(fresh, context, router, ledger, wf)
-                for node, nr in await asyncio.gather(*(_one(n) for n in batch)):
+                for node, nr in await asyncio.gather(*(_one(n, lookups[n.id]) for n in batch)):
                     context.update_with_node(node.id, nr)
                     result.outputs[node.id] = nr
         else:

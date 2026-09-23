@@ -40,7 +40,9 @@ class SpyAdapter(LLMAdapter):
     async def complete(self, req) -> AdapterResponse:  # type: ignore[no-untyped-def]
         self.calls.append(req.prompt)
         await asyncio.sleep(0)
-        return AdapterResponse(content="ok", prompt_tokens=10, completion_tokens=20, latency_ms=1, raw={})
+        return AdapterResponse(
+            content="ok", prompt_tokens=10, completion_tokens=20, latency_ms=1, raw={}
+        )
 
     def cost_myr(self, prompt_tokens: int, completion_tokens: int) -> float:
         del prompt_tokens, completion_tokens
@@ -197,7 +199,9 @@ async def test_no_ceiling_parallel_is_ungated():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resume_max_parallel", [None, 2])
-async def test_resume_gates_only_nodes_that_will_not_be_replayed(tmp_path, monkeypatch, resume_max_parallel):
+async def test_resume_gates_only_nodes_that_will_not_be_replayed(
+    tmp_path, monkeypatch, resume_max_parallel
+):
     """Verifier finding on #243: a resumed run that fits its ceiling must complete.
 
     Run 1 (ceiling 2.0, max_parallel=2): batch [s1, s2] spends 2.0, [s3] is
@@ -299,3 +303,97 @@ async def test_resume_still_refuses_when_remaining_work_breaches_ceiling(tmp_pat
     assert isinstance(excinfo.value, WorkflowCostCeilingExceeded)
     rows = [r for r in ledger.records_for_run(run_id) if r.node_id in SIBLINGS]
     assert sorted(r.node_id for r in rows) == ["s1", "s2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parallel", [False, True])
+async def test_per_layer_gate_still_sees_every_node_including_replays(
+    tmp_path, monkeypatch, parallel
+):
+    """Acceptance 3 (verifier round 2 on #243): the per-layer ``_gate_cost`` loop
+    is exactly today's, for every node in the layer, replayed or not. Only the
+    new batch gate leaves replays out, so parallel=False gating is unchanged."""
+    from netie.execution import dag_runner, step_journal
+
+    monkeypatch.setattr(step_journal, "DEFAULT_DB", tmp_path / "journal.db")
+    monkeypatch.setenv("CORTEX_STEP_JOURNAL", "1")
+    spy, router, ledger = _setup()
+    run_id = f"run_layer_gate_{parallel}"
+    with pytest.raises(WorkflowCostCeilingExceeded):
+        await run_dag(
+            _three_sibling_dag(),
+            ExecutionContext(run_id),
+            router,
+            ledger,
+            workflow_cost_ceiling_myr=2.0,
+            parallel=True,
+            max_parallel=2,
+        )
+
+    gated: list[str] = []
+    real_gate = dag_runner._gate_cost
+    monkeypatch.setattr(
+        dag_runner,
+        "_gate_cost",
+        lambda node, *a, **k: (gated.append(node.id), real_gate(node, *a, **k))[1],
+    )
+    await run_dag(
+        _three_sibling_dag(),
+        ExecutionContext(run_id),
+        router,
+        ledger,
+        workflow_cost_ceiling_myr=3.0,
+        parallel=parallel,
+        resume=True,
+    )
+    assert [g for g in gated if g in SIBLINGS] == list(SIBLINGS)
+
+
+@pytest.mark.asyncio
+async def test_replay_decision_is_one_lookup_shared_by_gate_and_execution(tmp_path, monkeypatch):
+    """Verifier round 2 on #243: the gate and ``_one`` must not look the journal
+    up separately. A journal that answers once and then faults would otherwise
+    let the gate exempt a node as "replayed" while ``_one`` executes it fresh
+    and ungated. With one shared lookup the replay is honoured and nothing
+    extra is spent."""
+    from netie.execution import step_journal
+
+    monkeypatch.setattr(step_journal, "DEFAULT_DB", tmp_path / "journal.db")
+    monkeypatch.setenv("CORTEX_STEP_JOURNAL", "1")
+    spy, router, ledger = _setup()
+    run_id = "run_one_lookup"
+    with pytest.raises(WorkflowCostCeilingExceeded):
+        await run_dag(
+            _three_sibling_dag(),
+            ExecutionContext(run_id),
+            router,
+            ledger,
+            workflow_cost_ceiling_myr=2.0,
+            parallel=True,
+            max_parallel=2,
+        )
+    spy.calls.clear()
+
+    real_get = step_journal.get_cached
+    seen: dict[str, int] = {}
+
+    def flaky_get(rid, key):  # type: ignore[no-untyped-def]
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > 1:
+            raise RuntimeError("journal fault on a second lookup")
+        return real_get(rid, key)
+
+    monkeypatch.setattr(step_journal, "get_cached", flaky_get)
+    res = await run_dag(
+        _three_sibling_dag(),
+        ExecutionContext(run_id),
+        router,
+        ledger,
+        workflow_cost_ceiling_myr=3.0,
+        parallel=True,
+        resume=True,
+    )
+    assert spy.calls == ["sibling s3"]
+    assert res.outputs["s1"].cost_myr == 0.0 and res.outputs["s2"].cost_myr == 0.0
+    assert ledger.total_cost(run_id) == pytest.approx(3.0)
+    assert seen and all(n == 1 for n in seen.values())
