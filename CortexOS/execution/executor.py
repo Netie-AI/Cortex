@@ -8,6 +8,7 @@ from netie.routing.adapters.base import AdapterRequest, AdapterResponse
 from netie.routing.cost_ledger import CostLedger, NodeExecutionRecord, now_utc
 from netie.routing.tiers import Tier
 from netie.routing.token_estimate import estimate_prompt_tokens
+from netie.security.redact_port import RedactionFailed, redact_prompt_text
 
 
 @dataclass(slots=True)
@@ -88,6 +89,37 @@ async def invoke_routed_completion(
             model=routed.model,
             cost_myr=0.0,
         )
+
+    # GH-01: every non-T0 call passes system + prompt through the active redactor
+    # before cost estimation and before the adapter. Fail closed: a redactor that
+    # raises records status=error and re-raises; the adapter is never reached.
+    try:
+        adapter_req = replace(
+            adapter_req,
+            system=redact_prompt_text(adapter_req.system),
+            prompt=redact_prompt_text(adapter_req.prompt),
+        )
+    except RedactionFailed as exc:
+        failed_at = now_utc()
+        await ledger.add(
+            NodeExecutionRecord(
+                run_id=run_id,
+                node_id=node_id,
+                tier=routed.tier.value,
+                model=routed.model,
+                latency_ms=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_myr=0.0,
+                cache_hit=False,
+                started_at=failed_at,
+                ended_at=failed_at,
+                status="error",
+                ceiling_myr=ceiling,
+                error=str(exc),
+            )
+        )
+        raise
 
     prompt_blob = f"{adapter_req.system}\n{adapter_req.prompt}"
     est_prompt_tokens = estimate_prompt_tokens(

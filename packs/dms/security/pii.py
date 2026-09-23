@@ -1,22 +1,26 @@
-"""PII detection and redaction for LLM prompt choke-point (F7)."""
+"""PII detection and redaction for LLM prompt choke-point (F7).
+
+The identity, email and card patterns are owned by the engine port
+(``CortexOS/security/redact_port.py``, GH-01) so the DAG choke-point and this
+pack redact with the same rule. Packs may import the engine; the engine never
+imports packs. This module keeps its public API (``PiiSpan``, ``detect``,
+``redact_for_prompt``) and adds the broad phone pattern on top, which the
+engine default deliberately leaves out.
+"""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
-# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter
-_NRIC = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
+from CortexOS.security import redact_port as _port
 
-# Email (RFC5322 simplified)
-_EMAIL = re.compile(
-    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
-)
-
-# Credit card: 13–19 digits with optional separators
-_CREDIT_CARD = re.compile(
-    r"\b(?:\d{4}[-\s]?){3}\d{1,4}\b|\b\d{13,19}\b",
-)
+_NRIC = _port.NRIC
+_MYKAD = _port.MYKAD
+_EMAIL = _port.EMAIL
+_CREDIT_CARD = _port.CREDIT_CARD
+_detect_spans = _port.detect_spans
+_apply_spans = _port.apply_spans
 
 # Phone: international/local with optional country code and separators
 _PHONE = re.compile(
@@ -25,6 +29,7 @@ _PHONE = re.compile(
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("nric", _NRIC),
+    ("mykad", _MYKAD),
     ("credit_card", _CREDIT_CARD),
     ("email", _EMAIL),
     ("phone", _PHONE),
@@ -41,37 +46,12 @@ class PiiSpan:
 
 def detect(text: str) -> list[PiiSpan]:
     """Return non-overlapping PII spans found in *text*."""
-    spans: list[PiiSpan] = []
-    for kind, pattern in _PATTERNS:
-        for match in pattern.finditer(text):
-            spans.append(
-                PiiSpan(
-                    start=match.start(),
-                    end=match.end(),
-                    kind=kind,
-                    text=match.group(0),
-                )
-            )
-    spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
-    merged: list[PiiSpan] = []
-    cursor = -1
-    for span in spans:
-        if span.start >= cursor:
-            merged.append(span)
-            cursor = span.end
-    return merged
+    return [
+        PiiSpan(start=s.start, end=s.end, kind=s.kind, text=s.text)
+        for s in _detect_spans(text, _PATTERNS)
+    ]
 
 
 def redact_for_prompt(text: str) -> str:
     """Replace detected PII with typed placeholders before any LLM prompt."""
-    spans = detect(text)
-    if not spans:
-        return text
-    parts: list[str] = []
-    cursor = 0
-    for span in spans:
-        parts.append(text[cursor : span.start])
-        parts.append(f"[REDACTED:{span.kind}]")
-        cursor = span.end
-    parts.append(text[cursor:])
-    return "".join(parts)
+    return _apply_spans(text, _detect_spans(text, _PATTERNS))
