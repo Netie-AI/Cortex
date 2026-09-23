@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from .tiers import Tier
+from .tiers import TIER_ORDER, Tier
 
 
 @dataclass(slots=True)
@@ -87,11 +87,52 @@ class JudgmentModel:
                 confidence=rules.confidence,
                 reason=f"{answer.backend} abstained ({answer.abstain_reason}); rules fallback: {rules.reason}",
             )
+        backend_tier = Tier(answer.choice)
+        backend_reason = f"{answer.backend} choice (calibrated={answer.calibrated})"
+        floored = self.apply_rules_floor(req, backend_tier)
+        if floored is None:
+            return JudgmentDecision(
+                tier=backend_tier,
+                confidence=answer.confidence,
+                reason=backend_reason,
+            )
+        floor_tier, floor_reason = floored
         return JudgmentDecision(
-            tier=Tier(answer.choice),
+            tier=floor_tier,
             confidence=answer.confidence,
-            reason=f"{answer.backend} choice (calibrated={answer.calibrated})",
+            reason=(
+                f"{answer.backend} choice {backend_tier.value} (calibrated={answer.calibrated}) "
+                f"overridden by {floor_reason}: {floor_tier.value}"
+            ),
         )
+
+    def apply_rules_floor(self, req: JudgmentRequest, chosen: Tier) -> tuple[Tier, str] | None:
+        """Deterministic rules trump any backend choice.
+
+        Returns ``(tier, override_name)`` when the choice must change, else
+        ``None``. The floors only ever raise a tier; the one pin (deterministic
+        low-tier tasks) forces T0 because those requests never reach a model.
+        Mirrors the first three branches of ``rules_decide`` so the two paths
+        cannot drift apart.
+        """
+        req_type = req.request_type.lower().strip()
+        text = req.content.lower()
+
+        if req_type in {"embedding", "intent_classify", "sentiment"}:
+            if chosen == Tier.T0:
+                return None
+            return Tier.T0, "deterministic low-tier pin"
+
+        floor: Tier | None = None
+        name = ""
+        if "birthday" in req_type or "birthday" in text:
+            floor, name = Tier.T3, "birthday quality floor"
+        elif self._contains_legal_terms(text):
+            floor, name = Tier.T2, "legal/financial floor"
+
+        if floor is None or TIER_ORDER[chosen] >= TIER_ORDER[floor]:
+            return None
+        return floor, name
 
     @staticmethod
     def _state_for(req: JudgmentRequest) -> dict[str, Any]:
