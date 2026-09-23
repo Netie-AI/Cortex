@@ -30,6 +30,7 @@ from CortexOS.crew.keys import status as keys_status
 from CortexOS.crew.mcp_client import MCPManager
 from CortexOS.crew.queue import JobQueue
 from CortexOS.crew.runtime import CrewRuntime
+from CortexOS.crew.session_grants import SessionGrantBook
 from CortexOS.crew.shell import CrewShell
 from CortexOS.crew.store import CrewStore
 from CortexOS.crew.wakes import WakeBoard, conveyor
@@ -127,6 +128,7 @@ class CrewApp:
             self.settings.mcp_config_path, self.settings.master_computer_control
         )
         self.approvals = ApprovalBook(self.settings.data_dir / "approvals.json")
+        self.session_grants = SessionGrantBook(self.settings.data_dir / "session_grants.json")
         self.runtime = CrewRuntime(
             self.store,
             self.bus,
@@ -1020,9 +1022,11 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     from CortexOS.crew.liberty_routes import mount_liberty
     from CortexOS.crew.prompt_harness_routes import mount_prompt_harness
+    from CortexOS.crew.session_grants import mount_session_grants
 
     mount_liberty(router)
     mount_prompt_harness(router)
+    mount_session_grants(router, crew.session_grants)
 
     @router.get("/identity")
     async def cortex_identity() -> dict[str, Any]:
