@@ -50,7 +50,7 @@ class ModelRouter:
             Tier.T2: "qwen2.5-32b-instruct",
             Tier.T3: "claude-sonnet",
         }
-        self.judgment_model = judgment_model or JudgmentModel()
+        self.judgment_model = judgment_model or JudgmentModel.from_env()
         self.adapter_registry = adapter_registry or default_adapter_registry(vllm_base_url=vllm_base_url)
 
     def route(self, req: ModelRequest) -> RoutedModelCall:

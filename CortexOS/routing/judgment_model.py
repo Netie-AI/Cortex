@@ -1,5 +1,9 @@
+from __future__ import annotations
+
+import os
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 from .tiers import Tier
 
@@ -24,7 +28,10 @@ class JudgmentDecision:
 class JudgmentModel:
     """
     Rules-first judgment model.
-    V1 can add DistilBERT probabilities and map them to tiers.
+
+    Opt-in calibrated path: pass ``decision_backend`` (a ``CortexOS.decision``
+    backend) or set ``CORTEX_KEV_URL`` and construct via ``from_env()``. With no
+    backend, ``decide()`` is the unchanged rules-v0 cascade.
     """
 
     LEGAL_TERMS: tuple[str, ...] = (
@@ -39,7 +46,66 @@ class JudgmentModel:
         "rpgt",
     )
 
+    def __init__(
+        self,
+        decision_backend: Any | None = None,
+        *,
+        abstain_threshold: float | None = None,
+        check_order: bool = True,
+    ) -> None:
+        self.decision_backend = decision_backend
+        self.abstain_threshold = abstain_threshold
+        self.check_order = check_order
+
+    @classmethod
+    def from_env(cls) -> JudgmentModel:
+        """Rules-v0 unless ``CORTEX_KEV_URL`` names a loopback kev server."""
+        from CortexOS.decision.backends import KEV_URL_ENV, KevHttpBackend
+
+        url = os.environ.get(KEV_URL_ENV, "").strip()
+        if not url:
+            return cls()
+        return cls(decision_backend=KevHttpBackend(url))
+
     def decide(self, req: JudgmentRequest) -> JudgmentDecision:
+        if self.decision_backend is None:
+            return self.rules_decide(req)
+        from CortexOS.decision.backends import tier_question
+        from CortexOS.decision.decide import decide
+
+        answer = decide(
+            tier_question(),
+            self._state_for(req),
+            self.decision_backend,
+            abstain_threshold=self.abstain_threshold,
+            check_order=self.check_order,
+        )
+        if answer.abstain or answer.choice is None:
+            rules = self.rules_decide(req)
+            return JudgmentDecision(
+                tier=rules.tier,
+                confidence=rules.confidence,
+                reason=f"{answer.backend} abstained ({answer.abstain_reason}); rules fallback: {rules.reason}",
+            )
+        return JudgmentDecision(
+            tier=Tier(answer.choice),
+            confidence=answer.confidence,
+            reason=f"{answer.backend} choice (calibrated={answer.calibrated})",
+        )
+
+    @staticmethod
+    def _state_for(req: JudgmentRequest) -> dict[str, Any]:
+        return {
+            "request_type": req.request_type,
+            "content": req.content,
+            "context_size": req.context_size,
+            "prior_tier_failures": req.prior_tier_failures,
+            "user_tier_budget": req.user_tier_budget.value,
+            "is_vip": req.is_vip,
+        }
+
+    def rules_decide(self, req: JudgmentRequest) -> JudgmentDecision:
+        """The rules-v0 cascade. Confidence here is a constant, not a probability."""
         req_type = req.request_type.lower().strip()
         text = req.content.lower()
 
