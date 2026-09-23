@@ -81,6 +81,31 @@ INTERNAL_TOOLS = frozenset(
     }
 )
 
+# EPIC-GRANT-02: a session folder grant (``session_grants.py``, decision allow)
+# widens ONLY the workspace jail, and only for these read tools. It is not an
+# approval: it never touches the master switch, arming, or the per-call
+# confirm above, so a click or type_text still walks the CONFIRM ladder with a
+# grant present. Writes outside the space folder stay refused: an Allow on a
+# laptop folder was asked as a read, and nothing in the catalog says "modify".
+GRANT_READ_TOOLS = frozenset({"ws_ls", "ws_read", "ws_glob"})
+GRANT_WRITE_TOOLS = frozenset({"ws_write", "ws_edit"})
+
+REACH_READ = "read"
+REACH_WRITE = "write"
+REACH_NONE = "none"
+
+
+def grant_reach(tool: str) -> str:
+    """What a session folder grant may admit for this tool: ``read`` (ls / read /
+    glob into an Allow-ed folder), ``write`` (never outside the space), ``none``
+    (grants are irrelevant; MCP tools go through ``decide``)."""
+    if tool in GRANT_READ_TOOLS:
+        return REACH_READ
+    if tool in GRANT_WRITE_TOOLS:
+        return REACH_WRITE
+    return REACH_NONE
+
+
 ALLOW = "allow"
 CONFIRM = "confirm"
 DENY = "deny"

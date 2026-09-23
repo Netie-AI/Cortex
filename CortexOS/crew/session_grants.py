@@ -18,9 +18,12 @@ by ``session_id`` and dies with the process. ``persist=true`` writes the grant
 to ``data/crew/session_grants.json`` (same convention as ``approvals.json``).
 A refusal raises ``GrantRefused`` and leaves both stores unchanged.
 
-Jail expansion (reaching a granted folder) is EPIC-GRANT-02, not here. The
-all-apps backdoor, cloud upload, auto-launch, unattended Act, second mouse,
-fill-form and Excel Copilot paste stay out of scope.
+Jail expansion (reaching a granted folder) is EPIC-GRANT-02: it lives in
+``CortexOS/crew/workspace.py`` and calls ``granted_folder_for`` here, so there
+is one store and one path normaliser. Every row carries ``destination`` and the
+only value this engine can write is ``local``. The all-apps backdoor, cloud
+upload, auto-launch, unattended Act, second mouse, fill-form and Excel Copilot
+paste stay out of scope.
 
 No ``from __future__ import annotations`` (FastAPI route module rule); the
 pydantic body model is hoisted to module level.
@@ -47,6 +50,11 @@ KINDS = frozenset({KIND_FOLDER, KIND_WINDOW, KIND_OFFICE_FILE})
 DECISION_ALLOW = "allow"
 DECISION_CANCEL = "cancel"
 DECISIONS = frozenset({DECISION_ALLOW, DECISION_CANCEL})
+
+# EPIC-GRANT-02: every grant row says where files go. The only destination
+# this engine has is the device itself; no off-device path is built here, so
+# a row can never carry anything else (a stale file cannot smuggle one in).
+DESTINATION_LOCAL = "local"
 
 # Named Office documents only. Not .exe/.lnk/.bat: the catalog is files to
 # read, not programs to launch (auto-launch is out of scope).
@@ -247,6 +255,35 @@ class SessionGrantBook:
             if r["kind"] == KIND_FOLDER and r["decision"] == DECISION_ALLOW
         ]
 
+    def granted_folder_for(self, session_id: str, path: Any) -> str | None:
+        """EPIC-GRANT-02 jail lookup. ``path`` must already be the resolved real
+        path (symlinks followed by the caller that touches the filesystem).
+        Returns the folder this session granted ``allow`` that equals the path or
+        is one of its parents, else ``None``. Comparison is component-wise (the
+        same ``_parents`` / ``_key`` the office_file rule uses), so ``D:\\work``
+        never admits ``D:\\work-evil``. A cancelled folder is not in the set;
+        another session's folder is not in the set. Raises ``GrantRefused`` for a
+        path that is not even a catalog candidate (drive root, ``/``, the profile
+        root, ``..``, device prefix) so the caller can say why."""
+        sid = self._session_id(session_id)
+        normalised = normalise_folder(path, self.profile_roots)
+        windows_style = _is_windows_style(normalised)
+        with self._lock:
+            folders = self._granted_folders(sid)
+        candidates = [normalised, *_parents(normalised, windows_style)]
+        keys = {_key(c, windows_style): c for c in candidates}
+        for folder in folders:
+            hit = keys.get(_key(folder, _is_windows_style(folder)))
+            if hit is not None and _is_windows_style(folder) == windows_style:
+                return folder
+        return None
+
+    def is_path_granted(self, session_id: str, path: Any) -> bool:
+        try:
+            return self.granted_folder_for(session_id, path) is not None
+        except GrantRefused:
+            return False
+
     # ---- write ------------------------------------------------------------
 
     def record(
@@ -301,6 +338,7 @@ class SessionGrantBook:
             "decision": decision,
             "persist": persist,
             "scope": "persisted" if persist else "session",
+            "destination": DESTINATION_LOCAL,
             "created_at": _now(),
             "seq": next(self._seq),
         }
@@ -353,6 +391,7 @@ class SessionGrantBook:
             kept = [r for r in rows if _row_ok(r)]
             for r in kept:
                 r["seq"] = next(self._seq)
+                r["destination"] = DESTINATION_LOCAL
             if kept:
                 self._persisted[str(sid)] = kept
 

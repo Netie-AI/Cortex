@@ -30,6 +30,7 @@ from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.events import EventBus
 from CortexOS.crew.llm import LLMError, LLMResult, ToolCall
 from CortexOS.crew.mcp_client import MCPManager
+from CortexOS.crew.session_grants import SessionGrantBook
 from CortexOS.crew.store import CrewStore
 
 # Colors follow the Constructor desk roster (CortexOS/connectors/agents.py).
@@ -165,6 +166,7 @@ class CrewRuntime:
         bridge: EngineBridge,
         llm_chat: Any = None,
         approvals: ApprovalBook | None = None,
+        session_grants: SessionGrantBook | None = None,
     ) -> None:
         self.store = store
         self.bus = bus
@@ -172,6 +174,11 @@ class CrewRuntime:
         self.mcp = mcp
         self.bridge = bridge
         self.approvals = approvals or ApprovalBook()
+        # EPIC-GRANT-02: the jail widens only into folders this book holds with
+        # decision allow. The grant session is the space: the UI records grants
+        # with session_id = space id, and the tool path looks them up the same
+        # way. An in-memory book with no rows means nothing outside the space.
+        self.session_grants = session_grants or SessionGrantBook()
         self._llm = llm_chat or llm_mod.chat
         self._handles: dict[str, AgentHandle] = {}
         self.switch = a2a.Switchboard()
@@ -1600,14 +1607,18 @@ class CrewRuntime:
             ),
             spec(
                 "ws_ls",
-                "List files in this space's jailed workspace. Paths cannot escape the jail. "
+                "List files in this space's jailed workspace. Relative paths cannot escape "
+                "the jail. An absolute laptop path works only inside a folder the operator "
+                "granted Allow for this space; anything else is refused with the reason. "
                 "Use this to keep ticket notes and patches. Do not write the Cortex engine tree.",
                 {"path": {"type": "string", "description": "relative path; default ."}},
                 [],
             ),
             spec(
                 "ws_read",
-                "Read a file from this space's jailed workspace. Escape attempts are denied.",
+                "Read a file from this space's jailed workspace. Escape attempts are denied. "
+                "An absolute laptop path is read only inside a folder the operator granted "
+                "Allow for this space.",
                 {
                     "path": {"type": "string"},
                     "offset": {"type": "integer", "description": "start line, 0-based"},
@@ -1618,6 +1629,7 @@ class CrewRuntime:
             spec(
                 "ws_write",
                 "Write a file in this space's jailed workspace. Creates parents. Size-capped. "
+                "Never writes outside the space folder, granted or not. "
                 "Does not touch CLAIMS.json or merge PRs.",
                 {"path": {"type": "string"}, "content": {"type": "string"}},
                 ["path", "content"],
@@ -1634,7 +1646,8 @@ class CrewRuntime:
             ),
             spec(
                 "ws_glob",
-                "Find files in this space's jailed workspace by glob pattern.",
+                "Find files in this space's jailed workspace by glob pattern. An absolute "
+                "pattern searches only inside a folder the operator granted Allow for this space.",
                 {"pattern": {"type": "string"}},
                 [],
             ),
@@ -2074,7 +2087,12 @@ class CrewRuntime:
         if name in {"ws_ls", "ws_read", "ws_write", "ws_edit", "ws_glob"}:
             from CortexOS.crew import workspace as ws_mod
 
-            ws = ws_mod.workspace_for(self.settings.data_dir, ctx.space_id)
+            ws = ws_mod.workspace_for(
+                self.settings.data_dir,
+                ctx.space_id,
+                grants=self.session_grants,
+                session_id=ctx.space_id,
+            )
             try:
                 if name == "ws_ls":
                     text = ws.ls(str(args.get("path") or "."))

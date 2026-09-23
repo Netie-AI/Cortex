@@ -137,6 +137,7 @@ class CrewApp:
             self.bridge,
             llm_chat=llm_chat,
             approvals=self.approvals,
+            session_grants=self.session_grants,
         )
         self.shell = CrewShell(self.settings)
         self.wakes = WakeBoard()
