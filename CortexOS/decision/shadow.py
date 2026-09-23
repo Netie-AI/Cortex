@@ -14,7 +14,10 @@ Guarantees:
 - nothing here raises into the routing path: backend failures become a
   ``degraded`` row, and a file that cannot be written is counted, not raised;
 - no raw prompt text is written: the state dict is reduced to ``state_hash``
-  (reused from ``decision_log``) before anything reaches the file;
+  (reused from ``decision_log``) before anything reaches the file, and the
+  backend's ``cause`` / ``abstain_reason`` are reduced to a fixed category
+  vocabulary (``cause_category``) so exception text, which can echo whatever
+  kev put in its response body, never reaches the file either;
 - ``summary()`` never claims an agreement rate below ``MIN_N`` rows as a
   metric: it reports n and flags ``sufficient=False``.
 
@@ -25,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +45,66 @@ DEFAULT_FILENAME = "tier_shadow.jsonl"
 MIN_N = 300
 
 _FORBIDDEN_KEYS = frozenset({"content", "prompt", "system", "state"})
+
+# Cause vocabulary. A backend failure string is ``"<head>: <detail>"`` where the
+# detail is frequently ``str(exc)`` — and ``str(exc)`` for a parse failure quotes
+# the offending value, which is whatever kev put in its response body, which a
+# misbehaving kev can fill from the prompt it was sent. Only a head from this
+# table, plus a detail that is a bare Python identifier (an exception class
+# name) for the heads that carry one, is ever written. Everything else is
+# collapsed to the head alone, or to ``"other"``.
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_HTTP_CAUSE = re.compile(r"^http \d{3}$")
+_RAISED_CAUSE = re.compile(r"^raised ([A-Za-z_][A-Za-z0-9_]*)$")
+_CONFIDENCE_REASON = re.compile(r"^confidence \d+\.\d+ < threshold \d+\.\d+$")
+_HEADS_WITH_TYPE_NAME = frozenset({"transport"})
+_HEADS_BARE = frozenset({"parse", "invalid json", "transport", "unknown"})
+OTHER_CAUSE = "other"
+
+
+def cause_category(cause: str | None) -> str | None:
+    """Reduce a backend ``cause`` to a fixed category. Never returns free text.
+
+    ``"parse: could not convert string to float: '<prompt>'"`` becomes ``"parse"``;
+    ``"transport: ReadTimeout"`` and ``"raised RuntimeError"`` keep the exception
+    class name because it is an identifier, not a message; ``"http 500"`` and
+    ``"unknown"`` pass as they are; anything unrecognised becomes ``"other"``.
+    """
+    if cause is None:
+        return None
+    text = str(cause).strip()
+    if _HTTP_CAUSE.match(text):
+        return text
+    if _RAISED_CAUSE.match(text):
+        return text
+    head, _, detail = text.partition(":")
+    head, detail = head.strip(), detail.strip()
+    if head in _HEADS_WITH_TYPE_NAME and _IDENT.match(detail):
+        return f"{head}: {detail}"
+    if head in _HEADS_BARE:
+        return head
+    return OTHER_CAUSE
+
+
+def abstain_reason_category(reason: str | None, *, degraded: bool, cause: str | None) -> str | None:
+    """Reduce an ``abstain_reason`` to a fixed category. Never returns free text.
+
+    A degraded answer's reason is ``"degraded: <cause>"`` and carries the same
+    detail as the cause, so it is rebuilt from ``cause_category``. The two
+    non-degraded reasons ``decide`` produces are fixed templates over numbers and
+    pass through; anything else becomes ``"other"``.
+    """
+    if degraded:
+        return f"degraded: {cause_category(cause) or 'unknown'}"
+    if reason is None:
+        return None
+    text = str(reason).strip()
+    if text.startswith("order_sensitive:"):
+        return "order_sensitive"
+    if _CONFIDENCE_REASON.match(text):
+        return text
+    return OTHER_CAUSE
+
 
 _lock = threading.Lock()
 _write_failures = 0
@@ -174,6 +238,11 @@ class ShadowEvaluator:
         order_sensitive: bool,
         calibrated: bool,
     ) -> dict[str, Any]:
+        # cause and abstain_reason are reduced to a fixed vocabulary here, at the
+        # only point where backend text meets the file: str(exc) from a parse
+        # failure quotes the value kev returned, and kev's body can echo the prompt.
+        cause_cat = cause_category(cause)
+        reason_cat = abstain_reason_category(abstain_reason, degraded=degraded, cause=cause)
         return {
             "schema_version": SCHEMA_VERSION,
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -185,9 +254,9 @@ class ShadowEvaluator:
             "kev_probs": kev_probs,
             "kev_confidence": kev_confidence,
             "abstain": abstain,
-            "abstain_reason": abstain_reason,
+            "abstain_reason": reason_cat,
             "degraded": degraded,
-            "cause": cause,
+            "cause": cause_cat,
             "order_sensitive": order_sensitive,
             "calibrated": calibrated,
             # agree is only true when kev produced a choice that matches the served tier;

@@ -391,3 +391,94 @@ class _Fixed:
         self.calls += 1
         scores = tuple(0.91 if label == self.choice else 0.03 for label in question.labels)
         return RawDecision(scores=scores, is_logits=False, calibrated=True, backend=self.name)
+
+
+@respx.mock
+def test_shadow_kev_echoing_prompt_into_body_never_reaches_file(monkeypatch, shadow_file):
+    """A kev whose response body carries the prompt must not leak it via cause.
+
+    ``float("<prompt>")`` fails with a message that quotes the value, and the
+    backend's ``parse: {exc}`` cause used to be copied into the row verbatim.
+    """
+    monkeypatch.setenv("CORTEX_KEV_URL", KEV)
+    monkeypatch.setenv("CORTEX_KEV_SHADOW", "1")
+
+    def echo(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        probs = {"T0": body["state"]["content"], "T1": 0.1, "T2": 0.1, "T3": 0.1}
+        return httpx.Response(200, json={"answers": {"q": {"type": "choice", "probabilities": probs}}})
+
+    respx.post(ENDPOINT).mock(side_effect=echo)
+    jm = JudgmentModel.from_env()
+    req = JudgmentRequest(request_type="chat", content=f"{SECRET} hello")
+    assert _same(jm.decide(req), JudgmentModel().rules_decide(req))
+
+    text = shadow_file.read_text(encoding="utf-8")
+    assert SECRET not in text
+    assert "could not convert" not in text
+    rows = read_rows(shadow_file)
+    assert len(rows) == 1
+    assert rows[0]["degraded"] is True
+    assert rows[0]["abstain"] is True
+    assert rows[0]["cause"] == "parse"
+    assert rows[0]["abstain_reason"] == "degraded: parse"
+    assert rows[0]["agree"] is False
+    assert shadow.write_failures() == 0
+
+
+@respx.mock
+def test_shadow_invalid_json_body_echoing_prompt_never_reaches_file(monkeypatch, shadow_file):
+    monkeypatch.setenv("CORTEX_KEV_URL", KEV)
+    monkeypatch.setenv("CORTEX_KEV_SHADOW", "1")
+
+    def echo(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        return httpx.Response(200, content=body["state"]["content"].encode("utf-8"))
+
+    respx.post(ENDPOINT).mock(side_effect=echo)
+    jm = JudgmentModel.from_env()
+    req = JudgmentRequest(request_type="chat", content=f"{SECRET} hello")
+    assert _same(jm.decide(req), JudgmentModel().rules_decide(req))
+    text = shadow_file.read_text(encoding="utf-8")
+    assert SECRET not in text
+    rows = read_rows(shadow_file)
+    assert rows[0]["degraded"] is True
+    assert rows[0]["cause"] == "invalid json"
+
+
+@pytest.mark.parametrize(
+    "cause, expected",
+    [
+        (None, None),
+        ("parse: could not convert string to float: 'secret hello'", "parse"),
+        ("invalid json: Expecting value: line 1 column 1 (char 0) secret", "invalid json"),
+        ("transport: ReadTimeout", "transport: ReadTimeout"),
+        ("transport: not an identifier secret", "transport"),
+        ("http 500", "http 500"),
+        ("raised RuntimeError", "raised RuntimeError"),
+        ("raised secret text", "other"),
+        ("unknown", "unknown"),
+        ("secret free text", "other"),
+        ("parse", "parse"),
+    ],
+)
+def test_cause_category_is_a_fixed_vocabulary(cause, expected):
+    assert shadow.cause_category(cause) == expected
+    out = shadow.cause_category(cause)
+    assert out is None or "secret" not in out
+
+
+@pytest.mark.parametrize(
+    "reason, degraded, cause, expected",
+    [
+        (None, False, None, None),
+        ("degraded: parse: 'secret'", True, "parse: 'secret'", "degraded: parse"),
+        ("degraded: raised RuntimeError", True, "raised RuntimeError", "degraded: raised RuntimeError"),
+        (None, True, None, "degraded: unknown"),
+        ("order_sensitive: argmax changed under reversed option order", False, None, "order_sensitive"),
+        ("confidence 0.400 < threshold 0.600", False, None, "confidence 0.400 < threshold 0.600"),
+        ("secret free text", False, None, "other"),
+    ],
+)
+def test_abstain_reason_category_is_a_fixed_vocabulary(reason, degraded, cause, expected):
+    assert shadow.abstain_reason_category(reason, degraded=degraded, cause=cause) == expected

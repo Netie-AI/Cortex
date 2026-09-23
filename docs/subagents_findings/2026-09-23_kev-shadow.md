@@ -28,7 +28,12 @@ There was no observation-only path and no agreement artifact.
   abstain_reason, degraded, cause, order_sensitive, calibrated, agree}` and appends it.
   `state_hash` is reused from `decision_log` (KEV-LOG, not touched). A backend that
   raises is a degraded row with `cause="raised <ExcName>"`; the exception text is not
-  written. `append_row` refuses rows carrying `content`, `prompt`, `system` or `state`
+  written. `cause` and `abstain_reason` are reduced by `cause_category()` /
+  `abstain_reason_category()` to a fixed vocabulary (`parse`, `invalid json`,
+  `transport: <ExcName>`, `http NNN`, `raised <ExcName>`, `unknown`, `other`;
+  `degraded: <that>`, `order_sensitive`, `confidence X < threshold Y`) before the row
+  is built, so no `str(exc)` ever reaches the file (verifier finding, below).
+  `append_row` refuses rows carrying `content`, `prompt`, `system` or `state`
   and counts write failures (`write_failures()`, `last_write_error()`) instead of
   raising. `read_rows()` and `summary(path, min_n=300)` read the artifact back.
   Env: `CORTEX_KEV_SHADOW` (truthy = 1/true/yes/on), `CORTEX_KEV_SHADOW_PATH` override.
@@ -68,7 +73,11 @@ serve. Class: "evaluation coupled to serving". No invariant was broken on base.
   raises `RuntimeError`, and an unwritable log path all leave the served decision
   identical; failures are counted, not raised.
 - No raw prompt text in the log: a planted secret is put in `content`; the test greps
-  the file for the secret and for `content`. Rows carry `state_hash` only.
+  the file for the secret and for `content`. Rows carry `state_hash` only. Two further
+  tests point a respx kev at the same secret and make it echo `state.content` back in
+  the response body (as a probability value, and as a non-JSON body); both grep the
+  file for the secret and assert the row is `degraded=True` with `cause="parse"` /
+  `"invalid json"`.
 - No metric below n=300: `summary()` reports `sufficient=False` under `min_n`; the
   agreement rate is still computed so an operator can watch it climb, but it is
   flagged, and this finding claims no number.
@@ -93,9 +102,45 @@ serve. Class: "evaluation coupled to serving". No invariant was broken on base.
 - `check_order=True` means two kev calls per decision (the PRD's "shadow doubles kev
   calls" risk); the test asserts exactly `2 * len(REQUESTS)` calls.
 
+## Verifier findings (round 1, addressed)
+
+**Blocking: raw prompt text could reach `tier_shadow.jsonl` via `cause` and
+`abstain_reason`.** `KevHttpBackend.evaluate` returns `RawDecision.failure(name,
+f"parse: {exc}")` (backends.py:148) and `f"invalid json: {exc}"` (:144); `str(exc)`
+for `float("<text>")` quotes the value, and the value is whatever kev put in its
+response body. `build_row` copied `answer.cause` and `answer.abstain_reason` into the
+row verbatim, and `_FORBIDDEN_KEYS` checks key names only. Reproduced with the
+verifier's probe (`/tmp/kevprobe/probe.py`, a respx kev that echoes
+`state.content` into a probability): `LEAK in shadow file: True`, row `cause` =
+`"parse: could not convert string to float: 'PLANTED-SECRET-XYZ hello'"`. The served
+decision was still the rules' (T1, `heuristic routing fallback`); only the log leaked.
+KEV-LOG's `decision_log.py` does not write `cause`, so 93a4275 introduced it.
+
+Fix (`CortexOS/decision/shadow.py`): `cause_category()` reduces any cause to a fixed
+vocabulary and `abstain_reason_category()` does the same for the reason, both applied
+in `_row`, the one point where backend text meets the file. Only an exception *class
+name* survives (`transport: ReadTimeout`, `raised RuntimeError`), and only when the
+detail is a bare identifier; `parse: ...` and `invalid json: ...` lose their detail
+entirely; `http NNN` and `unknown` pass; anything unrecognised is `other`. The
+existing `cause_fragment` assertions (`transport: ReadTimeout`, `http 500`, `parse`)
+and `cause == "raised RuntimeError"` are unchanged and still pass.
+
+Tests added (`tests/test_decision/test_shadow.py`):
+`test_shadow_kev_echoing_prompt_into_body_never_reaches_file` (probability echo),
+`test_shadow_invalid_json_body_echoing_prompt_never_reaches_file` (raw body echo),
+and parametrised unit tests over both categorisers. Before the fix (shadow.py stashed
+back to 93a4275) the two echo tests fail on `assert SECRET not in text` with the
+secret visible in `cause`; after it they pass and the probe prints
+`LEAK in shadow file: False`.
+
 ## Verified vs assumed
 
 VERIFIED:
+- Round 2: `tests/test_decision/` 78 passed (22 + 20 new shadow tests + the rest);
+  ruff clean on `CortexOS`, `tests/contract`, `tests/test_decision`; `mypy
+  CortexOS/decision/shadow.py` clean; `lint-imports` 3 kept, 0 broken;
+  `tests/contract` 95 passed; full suite 2328 passed, 13 skipped, 4 xfailed, exit 0
+  (exit code read from the run's own output file, not through a pipe).
 - New tests: 22 pass on the change. With `CortexOS/routing/judgment_model.py`
   copied aside and replaced by `git show ca1d573:CortexOS/routing/judgment_model.py`
   (then restored), 17 of 22 fail: the disagreement/agreement rows, the router path,
@@ -124,6 +169,12 @@ ASSUMED:
 
 ## Not done
 
+- `request_type` is written verbatim, as `decision_log.py` (KEV-LOG) already does
+  (decision_log.py:143). It is an engine-set routing category (`chat`,
+  `intent_classify`), not prompt text; a caller that puts free text in it would see
+  it in both logs. The verifier probe exercises this and it is unchanged here because
+  it is not a crossing this commit introduced and the two logs must keep matching
+  on it. Bounding it to a known set would be a joint KEV-LOG/KEV-SHADOW change.
 - No agreement number: the shadow log has n=0 rows here.
 - No serve cutover, no threshold tuning, no calibration join over the shadow rows
   (KEV-CALIB reads the decision log; joining shadow rows by `state_hash` is a follow-up).
