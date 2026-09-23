@@ -75,3 +75,13 @@ def test_automatable_share_respects_error_budget():
     # 50% budget: all four (1/4 error) qualify
     assert automatable_share(rows, labels, error_budget=0.5) == pytest.approx(1.0)
     assert automatable_share([], []) == 0.0
+
+
+
+def test_automatable_share_never_cuts_inside_a_tie_group():
+    """A threshold cannot split tied confidences, so the share is the same
+    whatever order the tied rows arrive in (coordinator fix on #247)."""
+    rows = [[0.1, 0.9]] * 4
+    good_first = automatable_share(rows, [1, 1, 1, 0], error_budget=0.0)
+    bad_first = automatable_share(rows, [0, 1, 1, 1], error_budget=0.0)
+    assert good_first == bad_first == 0.0

@@ -130,7 +130,7 @@ def _kv(stdout: str) -> dict[str, str]:
 
 
 def _assert_no_metrics(stdout: str) -> None:
-    for banned in ("ece_", "brier", "T=", "implied_threshold", "automatable_share"):
+    for banned in ("ece_", "brier", "T=", "p_sufficient_threshold", "serve_automation"):
         assert banned not in stdout, f"{banned!r} printed on an INSUFFICIENT report:\n{stdout}"
 
 
@@ -212,8 +212,9 @@ def test_overconfident_log_fits_temperature_above_one(log_file: Path):
     assert 0.0 <= float(kv["brier_raw"]) <= 1.0
     assert float(kv["brier_scaled"]) < float(kv["brier_raw"])
     for budget in ("0.02", "0.05", "0.10"):
-        assert f"automatable_share budget={budget} share=" in proc.stdout
-    assert "implied_threshold=" in proc.stdout
+        assert f"serve_automation budget={budget} share=" in proc.stdout
+    assert "p_sufficient_threshold=" in proc.stdout
+    assert "P(sufficient) scale" in proc.stdout
     assert "INSUFFICIENT" not in proc.stdout
     assert "CORTEX_DECISION_ABSTAIN_THRESHOLD untouched" in proc.stdout
 
@@ -596,3 +597,62 @@ def test_report_never_changes_threshold_or_served_decision(
     after = JudgmentModel().decide(req)
     assert after == before
     assert after.tier.value == "T1" and after.confidence == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# serve_automation measures "serve without escalation", tie-safe (coordinator
+# fix for verifier round 2 on #247)
+# ---------------------------------------------------------------------------
+
+
+def _automation(stdout: str) -> dict[str, tuple[float, str]]:
+    out: dict[str, tuple[float, str]] = {}
+    for line in stdout.splitlines():
+        if line.startswith("serve_automation budget="):
+            parts = dict(p.split("=", 1) for p in line.split()[1:])
+            out[parts["budget"]] = (float(parts["share"]), parts["p_sufficient_threshold"])
+    return out
+
+
+def test_mostly_failing_served_tier_is_not_reported_automatable(log_file: Path):
+    """Served tier said 0.2 and then failed 90% of the time. Predicting the
+    failure correctly is not an automated serve: nothing may be claimed
+    automatable at any budget, and no threshold is printed."""
+    _write(log_file, _synthetic(400, p_served=0.2, negatives=360))
+    proc = _run_report("--log", str(log_file))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    auto = _automation(proc.stdout)
+    assert set(auto) == {"0.02", "0.05", "0.10"}
+    for share, thr in auto.values():
+        assert share == 0.0 and thr == "none", proc.stdout
+
+
+def test_serve_automation_output_does_not_depend_on_append_order(log_file: Path, tmp_path: Path):
+    """Rules-v0 emits discrete probabilities, so ties are normal. The same
+    rows appended in a different order must print the same shares and
+    thresholds, and serving p >= threshold must stay within the budget."""
+    import json
+    import random
+
+    rows = _synthetic(400, p_served=0.9, negatives=40) + _synthetic(200, p_served=0.6, negatives=10, seed=5)
+    for i, r in enumerate(rows):
+        r["node_id"] = f"n{i}"
+    _write(log_file, rows)
+    first = _run_report("--log", str(log_file))
+    shuffled = list(rows)
+    random.Random(3).shuffle(shuffled)
+    other = tmp_path / "shuffled.jsonl"
+    other.write_text("".join(json.dumps(r) + "\n" for r in shuffled), encoding="utf-8")
+    second = _run_report("--log", str(other))
+    assert first.returncode == second.returncode == 0, first.stdout + second.stdout
+    a, b = _automation(first.stdout), _automation(second.stdout)
+    assert a == b
+
+    from netie.decision.calibration import serve_automation
+
+    p = [0.9] * 100 + [0.6] * 100
+    y = [1] * 95 + [0] * 5 + [1] * 60 + [0] * 40
+    share, thr = serve_automation(p, y, 0.05)
+    assert (share, thr) == (0.5, 0.9)
+    served = [yy for pp, yy in zip(p, y, strict=True) if pp >= thr]
+    assert served.count(0) / len(served) <= 0.05

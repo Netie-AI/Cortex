@@ -32,11 +32,10 @@ if str(ROOT) not in sys.path[:1]:
 
 from CortexOS.decision import decision_log  # noqa: E402
 from CortexOS.decision.calibration import (  # noqa: E402
-    automatable_share,
     brier,
-    choice_confidence,
     ece,
     fit_temperature,
+    serve_automation,
     softmax,
 )
 from CortexOS.decision.labels import LabelSet, build_labels, scoreboard_predicates  # noqa: E402
@@ -63,18 +62,6 @@ def _read_ledger_jsonl(path: Path) -> list[dict]:
             if isinstance(obj, dict):
                 rows.append(obj)
     return rows
-
-
-def implied_threshold(
-    prob_rows: list[list[float]], labels: list[int], error_budget: float
-) -> float | None:
-    """Confidence of the last decision inside the automatable prefix, or None when none is."""
-    share = automatable_share(prob_rows, labels, error_budget)
-    if share <= 0.0:
-        return None
-    confidences = sorted((choice_confidence(row) for row in prob_rows), reverse=True)
-    k = int(round(share * len(prob_rows)))
-    return confidences[max(0, min(k, len(confidences)) - 1)]
 
 
 def print_header(labelled: LabelSet, log_path: Path, out=sys.stdout) -> None:
@@ -120,12 +107,18 @@ def report(labelled: LabelSet, log_path: Path, out=sys.stdout) -> int:
     print(f"ece_scaled={ece(scaled_rows, labels):.4f}", file=out)
     print(f"brier_raw={brier(raw_rows, labels):.4f}", file=out)
     print(f"brier_scaled={brier(scaled_rows, labels):.4f}", file=out)
+    p_sufficient = [row[1] for row in scaled_rows]
+    print(
+        "serve_automation_note=share of served decisions that could skip escalation; "
+        "a served tier that proved insufficient is always an error; "
+        "threshold is on the P(sufficient) scale, not CORTEX_DECISION_ABSTAIN_THRESHOLD's",
+        file=out,
+    )
     for budget in ERROR_BUDGETS:
-        share = automatable_share(scaled_rows, labels, budget)
-        threshold = implied_threshold(scaled_rows, labels, budget)
+        share, threshold = serve_automation(p_sufficient, labels, budget)
         thr = "none" if threshold is None else f"{threshold:.4f}"
         print(
-            f"automatable_share budget={budget:.2f} share={share:.4f} implied_threshold={thr}",
+            f"serve_automation budget={budget:.2f} share={share:.4f} p_sufficient_threshold={thr}",
             file=out,
         )
     print("config_written=none (CORTEX_DECISION_ABSTAIN_THRESHOLD untouched)", file=out)

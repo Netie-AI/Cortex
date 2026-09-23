@@ -110,14 +110,37 @@ def choice_confidence(probs: Probs) -> float:
     return max(0.0, min(1.0, (p_max - 1.0 / k) / (1.0 - 1.0 / k)))
 
 
+def _budget_prefix(scored: list[tuple[float, bool]], error_budget: float) -> int:
+    """Size of the largest confidence-ordered prefix whose error rate is <= budget.
+
+    The prefix may only end at the end of a group of equal scores: a
+    threshold cannot separate tied decisions, so a cut inside a tie group
+    would depend on the order rows happened to be appended, and the threshold
+    reported for it would not reproduce that error rate.
+    """
+    scored = sorted(scored, key=lambda t: t[0], reverse=True)
+    best = n = errors = 0
+    i = 0
+    while i < len(scored):
+        j = i
+        while j < len(scored) and scored[j][0] == scored[i][0]:
+            errors += 0 if scored[j][1] else 1
+            j += 1
+        n = j
+        if errors / n <= error_budget:
+            best = n
+        i = j
+    return best
+
+
 def automatable_share(
     prob_rows: Sequence[Probs], labels: Sequence[int], error_budget: float = 0.05
 ) -> float:
     """Share of decisions that can be automated within ``error_budget``.
 
     Decisions are ordered by descending confidence; the returned value is the
-    size of the largest prefix whose empirical error rate is <= the budget,
-    divided by the total count.
+    size of the largest prefix (ending on a tie-group boundary) whose empirical
+    error rate is <= the budget, divided by the total count.
     """
     if not prob_rows:
         return 0.0
@@ -127,12 +150,28 @@ def automatable_share(
     for row, y in zip(prob_rows, labels, strict=True):
         pred = max(range(len(row)), key=lambda k: row[k])
         scored.append((choice_confidence(row), pred == y))
-    scored.sort(key=lambda t: t[0], reverse=True)
-    best = 0
-    errors = 0
-    for i, (_, correct) in enumerate(scored, start=1):
-        if not correct:
-            errors += 1
-        if errors / i <= error_budget:
-            best = i
-    return best / len(scored)
+    return _budget_prefix(scored, error_budget) / len(scored)
+
+
+def serve_automation(
+    p_sufficient: Sequence[float], labels: Sequence[int], error_budget: float = 0.05
+) -> tuple[float, float | None]:
+    """How many served decisions could skip escalation within ``error_budget``.
+
+    For the question "is the served tier sufficient?" an automated decision
+    means serving without escalation, which is correct only when the label is
+    1. Rows are ranked by P(sufficient); a row with label 0 is an error no
+    matter what was predicted. Returns ``(share, threshold)`` where serving
+    exactly the rows with ``p >= threshold`` reproduces that share with an
+    error rate <= the budget, or ``(0.0, None)`` when no threshold does.
+    """
+    if not p_sufficient:
+        return 0.0, None
+    if not 0.0 <= error_budget <= 1.0:
+        raise ValueError("error_budget must be in [0, 1]")
+    scored = [(float(p), y == 1) for p, y in zip(p_sufficient, labels, strict=True)]
+    k = _budget_prefix(scored, error_budget)
+    if k == 0:
+        return 0.0, None
+    threshold = sorted((p for p, _ in scored), reverse=True)[k - 1]
+    return k / len(scored), threshold
