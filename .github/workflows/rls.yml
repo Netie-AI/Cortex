@@ -45,9 +45,10 @@ jobs:
           pip install -e ".[dev,api,dms,postgres]"
       - name: RLS deny proof
         run: pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short
-      - name: Postgres ledger proof (chain, 20-way concurrency, append-only trigger)
+      - name: Postgres ledger proof (chain, 20-way concurrency, append-only trigger, migrated 001+002 schema)
         run: >-
-          pytest tests/dms/test_f1_ledger.py -k postgres -q --tb=short -rA
+          pytest tests/dms/test_f1_ledger.py tests/dms/test_f1_ledger_pg_migrated_schema.py
+          -k postgres -q --tb=short -rA
           -p no:cacheprovider --junitxml=ledger-pg-junit.xml
       - name: Postgres ledger tests must be PASSED, never SKIPPED
         # pytest exits 0 when every selected test is skipped (for example when the
@@ -63,6 +64,7 @@ jobs:
               "test_postgres_chain_append_and_verify_ok",
               "test_postgres_concurrent_appends_consistent",
               "test_postgres_append_only_trigger",
+              "test_postgres_migrated_schema_chain_verifies",
           }
           names = {c.get("name") for c in cases}
           skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
