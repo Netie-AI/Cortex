@@ -542,6 +542,34 @@ def _gate_cost(
         )
 
 
+def _gate_batch_cost(
+    batch: list[DSLNode],
+    context: ExecutionContext,
+    router: ModelRouter,
+    ledger: CostLedger,
+    wf: float,
+) -> None:
+    """Cumulative gate for a parallel batch (GH-03, issue #243).
+
+    Siblings in a batch run under ``asyncio.gather``; each one's own ceiling
+    check in ``invoke_routed_completion`` reads a ledger total the other
+    siblings have not added to yet, because ``ledger.add`` runs after the
+    adapter call. So the per-node gate lets N siblings, each projected just
+    under the remaining budget, all pass. This gate sums the projection over
+    the whole batch against the ledger total at the moment the batch starts,
+    and refuses the batch before any sibling spends. Fail closed: a batch is
+    refused as a whole, never partially.
+    """
+    projected_total = sum(estimate_node_cost(node, router, context) for node in batch)
+    if not ledger.enforce_ceiling(context.run_id, wf, projected_additional_myr=projected_total):
+        ids = ", ".join(node.id for node in batch)
+        raise WorkflowCostCeilingExceeded(
+            f"Workflow {context.run_id}: parallel batch [{ids}] projected "
+            f"{projected_total:.6f} MYR on top of {ledger.total_cost(context.run_id):.6f} MYR "
+            f"spent would breach {wf} MYR ceiling"
+        )
+
+
 async def run_dag(
     dag: AgenticDSLProgram,
     context: ExecutionContext,
@@ -678,6 +706,10 @@ async def run_dag(
             for batch in batches:
                 if abort and abort():
                     break
+                if wf is not None:
+                    # Re-gated per batch: the ledger total now includes the
+                    # previous batch's actual spend.
+                    _gate_batch_cost(batch, context, router, ledger, wf)
                 for node, nr in await asyncio.gather(*(_one(n) for n in batch)):
                     context.update_with_node(node.id, nr)
                     result.outputs[node.id] = nr
