@@ -112,8 +112,14 @@ _write_failures = 0
 _last_write_error: str | None = None
 
 
+_SHADOW_OFF = frozenset({"", "0", "false", "no", "off"})
+
+
 def shadow_enabled() -> bool:
-    return os.environ.get(SHADOW_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    """Fail safe toward watching: any value other than an explicit off enables
+    shadow. A typo ("y", "2", "enabled") must never fall through to letting
+    kev serve live traffic when the operator only meant to observe it."""
+    return os.environ.get(SHADOW_ENV, "").strip().lower() not in _SHADOW_OFF
 
 
 def shadow_path() -> Path:
@@ -342,7 +348,10 @@ def summary(path: Path | None = None, *, min_n: int = MIN_N) -> dict[str, Any]:
     agree = sum(
         1
         for r in rows
-        if r.get("agree") is True and r.get("abstain") is not True and r.get("degraded") is not True
+        if r.get("agree") is True
+        and r.get("abstain") is not True
+        and r.get("degraded") is not True
+        and r.get("order_sensitive") is not True
     )
     degraded = sum(1 for r in rows if r.get("degraded") is True)
     abstained = sum(1 for r in rows if r.get("abstain") is True and r.get("degraded") is not True)

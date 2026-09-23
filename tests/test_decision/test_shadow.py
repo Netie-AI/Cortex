@@ -292,7 +292,7 @@ def test_shadow_unset_with_url_installs_serving_backend(monkeypatch, shadow_file
     assert not shadow_file.exists()
 
 
-@pytest.mark.parametrize("value", ["0", "false", "", "no"])
+@pytest.mark.parametrize("value", ["0", "false", "", "no", "OFF", " off "])
 def test_shadow_falsy_values_do_not_enable(monkeypatch, shadow_file, value):
     monkeypatch.setenv("CORTEX_KEV_SHADOW", value)
     monkeypatch.delenv("CORTEX_KEV_URL", raising=False)
@@ -557,3 +557,24 @@ def test_non_finite_kev_numbers_are_dropped_and_file_stays_strict_json(monkeypat
     row = json.loads(lines[0], parse_constant=strict)
     assert row["kev_probs"] is None and row["kev_confidence"] is None
     assert row["agree"] is False
+
+
+
+@pytest.mark.parametrize("value", ["1", "y", "2", "enabled", "True"])
+def test_shadow_typo_values_watch_and_never_serve(monkeypatch, shadow_file, value):
+    """Verifier note on #248: '2', 'enabled' and 'y' used to fall through to a
+    SERVING kev. Anything but an explicit off must mean shadow."""
+    monkeypatch.setenv("CORTEX_KEV_URL", KEV)
+    monkeypatch.setenv("CORTEX_KEV_SHADOW", value)
+    jm = JudgmentModel.from_env()
+    assert jm.decision_backend is None, f"{value!r} let kev serve"
+    assert jm.shadow is not None
+
+
+def test_summary_never_counts_order_sensitive_rows_as_agreeing(tmp_path):
+    path = tmp_path / "shadow.jsonl"
+    path.write_text(
+        json.dumps({"agree": True, "abstain": False, "degraded": False, "order_sensitive": True}) + "\n",
+        encoding="utf-8",
+    )
+    assert summary(path, min_n=1)["agree"] == 0

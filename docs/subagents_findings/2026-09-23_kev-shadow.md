@@ -191,3 +191,11 @@ ASSUMED:
 Proof: the 4 new tests all fail on 55dfafa's `shadow.py` and pass here. Full suite 2332 passed, 13 skipped, 4 xfailed (exit 0). ruff and lint-imports exit 0.
 
 Nonblocking and still open: shadow runs synchronously on the serving path, and `check_order` makes 2 kev calls per decision. A hung kev can therefore add up to about 10 s per decision (the 5 s timeout, twice) while shadow is on. It is opt-in and documented; making it asynchronous is a follow-up.
+
+## Round 3 (independent verify PASS on 6b9cca1; coordinator acted on two notes)
+
+The independent verifier passed 6b9cca1. It ran 14 kev echo modes (secret never reached the file), served decisions equal to `rules_decide` including the floors, 1600 concurrent decisions, and summary at n=0, 299 and 300. Two of its nonblocking notes were fail-unsafe, so they are fixed:
+- **Typo let kev serve.** `CORTEX_KEV_SHADOW=y`, `2` or `enabled` fell through to a SERVING kev. `shadow_enabled()` now fails safe toward watching: anything but an explicit off (`""`, `0`, `false`, `no`, `off`) enables shadow.
+- **order_sensitive rows.** A row flagged `order_sensitive` never counts as agreeing in `summary()`. Live rows cannot reach that state, because `decide` abstains; this is defense in depth against forged or old rows.
+- Tests: the 4 new cases fail on 6b9cca1 and pass here. Full suite exit 0.
+- Still open (nonblocking): synchronous shadow latency (up to about 10 s per decision against a slow kev while shadow is on), and the unlocked `observations` counter.
