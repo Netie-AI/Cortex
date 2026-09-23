@@ -124,12 +124,13 @@ def test_shadow_serves_rules_and_logs_disagreement_per_decision(monkeypatch, sha
     assert "stamp duty" not in text
     assert "content" not in json.loads(text.splitlines()[0])
 
-    s = summary(shadow_file)
+    s = summary(shadow_file, min_n=1)
     assert s["n"] == len(REQUESTS)
     assert s["agree"] == 0
     assert s["degraded"] == 0
     assert s["agreement_rate"] == 0.0
-    assert s["sufficient"] is False
+    default = summary(shadow_file)
+    assert default["sufficient"] is False and default["agreement_rate"] is None
 
 
 @respx.mock
@@ -168,7 +169,7 @@ def test_shadow_agreement_row_when_kev_matches(monkeypatch, shadow_file):
     assert _same(jm.decide(req), JudgmentModel().rules_decide(req))
     rows = read_rows(shadow_file)
     assert len(rows) == 1 and rows[0]["agree"] is True and rows[0]["kev_choice"] == "T1"
-    assert summary(shadow_file)["agreement_rate"] == 1.0
+    assert summary(shadow_file, min_n=1)["agreement_rate"] == 1.0
 
 
 # --- acceptance: kev down, slow, degraded or raising ---------------------------
@@ -211,7 +212,7 @@ def test_shadow_kev_failure_serves_identical_rules_and_records_degraded(
         assert row["kev_probs"] is None
         assert row["kev_confidence"] is None
         assert cause_fragment in row["cause"]
-    s = summary(shadow_file)
+    s = summary(shadow_file, min_n=1)
     assert s["degraded"] == len(REQUESTS)
     assert s["agreement_rate"] == 0.0
     assert shadow.write_failures() == 0
@@ -355,10 +356,11 @@ def test_summary_counts_and_skips_malformed_lines(tmp_path):
         json.dumps({"agree": True, "degraded": False, "abstain": False}),
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    s = summary(path)
+    s = summary(path, min_n=1)
     assert (s["n"], s["agree"], s["degraded"], s["abstained"]) == (4, 2, 1, 1)
     assert s["agreement_rate"] == pytest.approx(0.5)
-    assert s["sufficient"] is False
+    default = summary(path)
+    assert default["sufficient"] is False and default["agreement_rate"] is None
     assert summary(path, min_n=4)["sufficient"] is True
 
 
@@ -482,3 +484,76 @@ def test_cause_category_is_a_fixed_vocabulary(cause, expected):
 )
 def test_abstain_reason_category_is_a_fixed_vocabulary(reason, degraded, cause, expected):
     assert shadow.abstain_reason_category(reason, degraded=degraded, cause=cause) == expected
+
+
+
+# --- coordinator fix for verifier round 2 on #248 ----------------------------
+
+
+@respx.mock
+def test_abstaining_kev_whose_argmax_matches_rules_does_not_agree(monkeypatch, shadow_file):
+    """A kev that abstains did not answer. Its argmax happening to equal the
+    served tier must not count as agreement, or the cutover number is inflated."""
+    monkeypatch.setenv("CORTEX_KEV_URL", KEV)
+    monkeypatch.setenv("CORTEX_KEV_SHADOW", "1")
+    monkeypatch.setenv("CORTEX_DECISION_ABSTAIN_THRESHOLD", "0.99")
+
+    def low_confidence_match(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_answer(_rules_state(json.loads(request.content)).value))
+
+    respx.post(ENDPOINT).mock(side_effect=low_confidence_match)
+    jm = JudgmentModel.from_env()
+    req = JudgmentRequest(request_type="chat", content="hello")
+    assert _same(jm.decide(req), JudgmentModel().rules_decide(req))
+    rows = read_rows(shadow_file)
+    assert len(rows) == 1
+    assert rows[0]["abstain"] is True and rows[0]["kev_choice"] == rows[0]["rules_tier"]
+    assert rows[0]["agree"] is False
+    s = summary(shadow_file, min_n=1)
+    assert s["agree"] == 0 and s["agreement_rate"] == 0.0
+
+
+def test_summary_gives_no_rate_below_min_n(tmp_path):
+    path = tmp_path / "shadow.jsonl"
+    path.write_text(
+        "".join(json.dumps({"agree": True, "abstain": False, "degraded": False}) + "\n" for _ in range(7)),
+        encoding="utf-8",
+    )
+    s = summary(path)
+    assert s["n"] == 7 and s["agree"] == 7
+    assert s["agreement_rate"] is None and s["sufficient"] is False
+    assert summary(path, min_n=7)["agreement_rate"] == 1.0
+
+
+def test_summary_ignores_stale_agree_flag_on_abstaining_rows(tmp_path):
+    path = tmp_path / "shadow.jsonl"
+    path.write_text(
+        json.dumps({"agree": True, "abstain": True, "degraded": False}) + "\n"
+        + json.dumps({"agree": True, "abstain": False, "degraded": True}) + "\n",
+        encoding="utf-8",
+    )
+    assert summary(path, min_n=1)["agree"] == 0
+
+
+@respx.mock
+def test_non_finite_kev_numbers_are_dropped_and_file_stays_strict_json(monkeypatch, shadow_file):
+    """kev's parser accepts NaN; the shadow row must not carry it, and the
+    file must parse under a strict JSON reader."""
+    monkeypatch.setenv("CORTEX_KEV_URL", KEV)
+    monkeypatch.setenv("CORTEX_KEV_SHADOW", "1")
+    probs = ",".join(f'"{t}": NaN' for t in TIERS)
+    body = ('{"answers": {"q": {"type": "choice", "choice": "T1", "confidence": NaN, '
+            '"probabilities": {' + probs + '}}}}').encode()
+    respx.post(ENDPOINT).mock(return_value=httpx.Response(200, content=body))
+    jm = JudgmentModel.from_env()
+    req = JudgmentRequest(request_type="chat", content="hello")
+    assert _same(jm.decide(req), JudgmentModel().rules_decide(req))
+
+    def strict(token: str) -> None:
+        raise ValueError(f"non-standard JSON token {token}")
+
+    lines = shadow_file.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0], parse_constant=strict)
+    assert row["kev_probs"] is None and row["kev_confidence"] is None
+    assert row["agree"] is False

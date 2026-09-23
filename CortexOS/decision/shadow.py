@@ -27,6 +27,7 @@ Nothing here imports ``packs.*``.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -241,6 +242,17 @@ class ShadowEvaluator:
         # cause and abstain_reason are reduced to a fixed vocabulary here, at the
         # only point where backend text meets the file: str(exc) from a parse
         # failure quotes the value kev returned, and kev's body can echo the prompt.
+        # kev's parser accepts NaN (NaN < 0 and sum <= 0 are both False); a
+        # non-finite number is not a probability, and json would write a
+        # non-standard NaN/Infinity token, so drop it rather than log it.
+        if kev_probs is not None and not all(_finite(v) for v in kev_probs.values()):
+            # confidence and choice derived from non-finite probabilities are
+            # meaningless too (decide() turns NaN into confidence 1.0).
+            kev_probs = None
+            kev_confidence = None
+            kev_choice = None
+        if kev_confidence is not None and not _finite(kev_confidence):
+            kev_confidence = None
         cause_cat = cause_category(cause)
         reason_cat = abstain_reason_category(abstain_reason, degraded=degraded, cause=cause)
         return {
@@ -261,7 +273,9 @@ class ShadowEvaluator:
             "calibrated": calibrated,
             # agree is only true when kev produced a choice that matches the served tier;
             # a degraded or abstaining kev did not agree, it did not answer.
-            "agree": kev_choice is not None and kev_choice == served,
+            "agree": (
+                kev_choice is not None and not abstain and not degraded and kev_choice == served
+            ),
         }
 
 
@@ -271,7 +285,9 @@ def append_row(row: dict[str, Any], path: Path | None = None) -> bool:
         for key in _FORBIDDEN_KEYS:
             if key in row:
                 raise ValueError(f"shadow row must not carry {key!r}")
-        line = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
+        line = json.dumps(
+            row, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False, allow_nan=False
+        )
         target = path if path is not None else shadow_path()
         with _lock:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -303,18 +319,31 @@ def read_rows(path: Path | None = None) -> list[dict[str, Any]]:
     return out
 
 
+def _finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def summary(path: Path | None = None, *, min_n: int = MIN_N) -> dict[str, Any]:
     """Agreement rate, n and degraded count over the shadow log.
 
     ``agreement_rate`` is the share of all rows (degraded and abstaining rows
     included, since those are decisions kev failed to make) whose kev choice
-    matched the served rules tier. It is ``None`` when there are no rows.
-    ``sufficient`` is False below ``min_n`` rows; a caller must not present the
-    rate as a metric in that case.
+    matched the served rules tier. It is ``None`` below ``min_n`` rows (and
+    when there are none), so no caller can present it as a metric too early;
+    ``agree`` and ``n`` are still returned as raw counts.
     """
     rows = read_rows(path)
     n = len(rows)
-    agree = sum(1 for r in rows if r.get("agree") is True)
+    # Recomputed from the row's own flags: an abstaining or degraded kev never
+    # counts as agreeing, whatever an older row's ``agree`` field says.
+    agree = sum(
+        1
+        for r in rows
+        if r.get("agree") is True and r.get("abstain") is not True and r.get("degraded") is not True
+    )
     degraded = sum(1 for r in rows if r.get("degraded") is True)
     abstained = sum(1 for r in rows if r.get("abstain") is True and r.get("degraded") is not True)
     order_sensitive = sum(1 for r in rows if r.get("order_sensitive") is True)
@@ -324,7 +353,8 @@ def summary(path: Path | None = None, *, min_n: int = MIN_N) -> dict[str, Any]:
         "degraded": degraded,
         "abstained": abstained,
         "order_sensitive": order_sensitive,
-        "agreement_rate": (agree / n) if n else None,
+        # No rate below min_n: an agreement number at n=7 reads as evidence.
+        "agreement_rate": (agree / n) if n >= min_n and n else None,
         "min_n": min_n,
         "sufficient": n >= min_n,
     }

@@ -178,3 +178,16 @@ ASSUMED:
 - No agreement number: the shadow log has n=0 rows here.
 - No serve cutover, no threshold tuning, no calibration join over the shadow rows
   (KEV-CALIB reads the decision log; joining shadow rows by `state_hash` is a follow-up).
+
+## Verifier round 2 (coordinator fix)
+
+- **Blocker: an abstaining kev counted as agreeing.** `agree` was `kev_choice == served`, so a kev that abstained (low confidence) but whose argmax matched the rules tier counted as agreement. That inflates the agreement rate the cutover would be judged on, and it contradicts the module's own comment.
+  - Fix: `agree` also requires `not abstain and not degraded`.
+  - `summary()` recomputes agreement from the row flags, so a stale `agree` on an abstaining or degraded row never counts.
+- **No rate below MIN_N.** `summary()` now returns `agreement_rate=None` below `min_n` (300 by default). Raw `n` and `agree` counts are still returned, so no caller can present a rate at n=7.
+  - The ticket's existing tests that read a rate at small n now pass `min_n=1` explicitly and also assert the default withholds it.
+- **NaN from kev.** The parser accepts NaN, and `decide()` turned NaN probabilities into `confidence=1.0`. Non-finite probabilities now drop `kev_probs`, `kev_confidence` and `kev_choice`. The file is written with `allow_nan=False` and parses under a strict JSON reader.
+
+Proof: the 4 new tests all fail on 55dfafa's `shadow.py` and pass here. Full suite 2332 passed, 13 skipped, 4 xfailed (exit 0). ruff and lint-imports exit 0.
+
+Nonblocking and still open: shadow runs synchronously on the serving path, and `check_order` makes 2 kev calls per decision. A hung kev can therefore add up to about 10 s per decision (the 5 s timeout, twice) while shadow is on. It is opt-in and documented; making it asynchronous is a follow-up.
