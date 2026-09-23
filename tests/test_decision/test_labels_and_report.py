@@ -63,7 +63,9 @@ def _entry(
         "status": status,
         "error_class": error_class,
         "cost_myr": 0.0,
-        "state_hash": decision_log.state_hash({"content": f"{SECRET} {i}", "request_type": "plain_review"}),
+        "state_hash": decision_log.state_hash(
+            {"content": f"{SECRET} {i}", "request_type": "plain_review"}
+        ),
         "context_size": 10,
         "prior_tier_failures": 0,
         "user_tier_budget": "T3",
@@ -255,6 +257,8 @@ def test_infra_errors_are_excluded_and_counted(log_file: Path):
     assert labelled.negatives == 10
     for cls, count in infra:
         assert labelled.excluded[f"infra:{cls}"] == count
+    assert sum(labelled.excluded.values()) == 15
+    assert labelled.n + sum(labelled.excluded.values()) == labelled.total_entries
     assert not any(r.label == 0 and r.run_id.startswith("run_10") for r in labelled.rows)
 
     proc = _run_report("--log", str(log_file))
@@ -287,13 +291,239 @@ def test_rows_without_probabilities_are_excluded_not_guessed(log_file: Path):
     assert f"excluded {labels.EXCLUDE_UNKNOWN_STATUS}=1" in proc.stdout
 
 
+def test_provider_availability_errors_are_infra_not_label_zero(log_file: Path):
+    """litellm raises these from the adapters; an outage window must not become false negatives."""
+    provider = [
+        "RateLimitError",
+        "ServiceUnavailableError",
+        "InternalServerError",
+        "BadGatewayError",
+        "APIError",
+        "APIConnectionError",
+        "OverloadedError",
+        "HTTPStatusError",
+        "Timeout",
+    ]
+    for cls in provider:
+        assert labels.is_infra_error(cls), cls
+    # content / validation failures stay label 0
+    for cls in (
+        "ValueError",
+        "JSONSchemaValidationError",
+        "ContextWindowExceededError",
+        "BadRequestError",
+    ):
+        assert not labels.is_infra_error(cls), cls
+
+    entries = _synthetic(50, p_served=0.8, negatives=5)
+    i = 2000
+    for cls in provider:
+        for _ in range(4):
+            entries.append(_entry(i, p_served=0.8, status="error", error_class=cls))
+            i += 1
+    back = _write(log_file, entries)
+
+    labelled = labels.build_labels(back)
+    assert labelled.total_entries == 50 + 4 * len(provider)
+    assert labelled.n == 50
+    assert labelled.negatives == 5
+    for cls in provider:
+        assert labelled.excluded[f"infra:{cls}"] == 4
+    assert sum(labelled.excluded.values()) == 4 * len(provider)
+
+    proc = _run_report("--log", str(log_file))
+    assert proc.returncode == 2
+    assert "class_balance sufficient=45 insufficient=5" in proc.stdout
+    assert "excluded infra:RateLimitError=4" in proc.stdout
+    assert "excluded infra:ServiceUnavailableError=4" in proc.stdout
+
+
 # ---------------------------------------------------------------------------
 # joins: ledger status overrides the log's own status; scoreboard predicates
 # ---------------------------------------------------------------------------
 
 
+def _ledger_row(run_id: str, node_id: str, status: str, error: str | None = None) -> dict:
+    return {"run_id": run_id, "node_id": node_id, "status": status, "error": error}
+
+
+def _write_ledger(path: Path, rows: list[dict]) -> Path:
+    import json
+
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return path
+
+
+def test_multi_step_node_pairs_each_attempt_with_its_own_ledger_record(
+    log_file: Path, tmp_path: Path
+):
+    """agent_task calls invoke_routed_completion once per step under the same (run_id, node_id).
+
+    Three successful steps followed by a ReadTimeout must yield three 1s and one
+    infra exclusion, never three 0s taken from the last ledger record.
+    """
+    steps = [
+        _entry(0, p_served=0.7, run_id="r1", node_id="agent"),
+        _entry(1, p_served=0.7, run_id="r1", node_id="agent"),
+        _entry(2, p_served=0.7, run_id="r1", node_id="agent"),
+        _entry(
+            3, p_served=0.7, run_id="r1", node_id="agent", status="error", error_class="ReadTimeout"
+        ),
+    ]
+    back = _write(log_file, steps)
+    ledger_rows = [
+        _ledger_row("r1", "agent", "ok"),
+        _ledger_row("r1", "agent", "ok"),
+        _ledger_row("r1", "agent", "ok"),
+        _ledger_row("r1", "agent", "error", "timed out"),
+    ]
+
+    labelled = labels.build_labels(back, ledger_records=ledger_rows)
+    assert labelled.total_entries == 4
+    assert labelled.n == 3
+    assert labelled.negatives == 0
+    assert [(r.label, r.source) for r in labelled.rows] == [(1, "ledger_status")] * 3
+    assert labelled.excluded == {"infra:ReadTimeout": 1}
+
+    proc = _run_report(
+        "--log",
+        str(log_file),
+        "--ledger-jsonl",
+        str(_write_ledger(tmp_path / "ledger.jsonl", ledger_rows)),
+    )
+    assert proc.returncode == 2
+    assert "class_balance sufficient=3 insufficient=0" in proc.stdout
+    assert "excluded infra:ReadTimeout=1" in proc.stdout
+
+
+def test_failure_then_success_keeps_the_failure(log_file: Path, tmp_path: Path):
+    """A genuine failure followed by a successful retry must not be erased by the last record."""
+    back = _write(
+        log_file,
+        [
+            _entry(
+                0,
+                p_served=0.7,
+                run_id="r1",
+                node_id="agent",
+                status="error",
+                error_class="ValueError",
+            ),
+            _entry(1, p_served=0.7, run_id="r1", node_id="agent"),
+        ],
+    )
+    ledger_rows = [
+        _ledger_row("r1", "agent", "error", "bad output"),
+        _ledger_row("r1", "agent", "ok"),
+    ]
+
+    labelled = labels.build_labels(back, ledger_records=ledger_rows)
+    assert [(r.label, r.source) for r in labelled.rows] == [
+        (0, "ledger_status"),
+        (1, "ledger_status"),
+    ]
+    assert labelled.negatives == 1
+
+    proc = _run_report(
+        "--log",
+        str(log_file),
+        "--ledger-jsonl",
+        str(_write_ledger(tmp_path / "ledger.jsonl", ledger_rows)),
+    )
+    assert proc.returncode == 2
+    assert "class_balance sufficient=1 insufficient=1" in proc.stdout
+
+
+def test_ledger_infra_error_text_is_excluded_not_label_zero(log_file: Path, tmp_path: Path):
+    """The ledger holds str(exc); an ok log row paired with a ledger timeout is infra, not 0."""
+    back = _write(
+        log_file,
+        [
+            _entry(0, p_served=0.7, run_id="r1", node_id="n"),
+            _entry(1, p_served=0.7, run_id="r2", node_id="n"),
+            _entry(2, p_served=0.7, run_id="r3", node_id="n"),
+        ],
+    )
+    ledger_rows = [
+        _ledger_row("r1", "n", "error", "ReadTimeout: timed out"),
+        _ledger_row("r2", "n", "error", "litellm.RateLimitError: 429 Too Many Requests"),
+        _ledger_row("r3", "n", "error", "bad output on line 500"),
+    ]
+    labelled = labels.build_labels(back, ledger_records=ledger_rows)
+    assert labelled.excluded[labels.EXCLUDE_INFRA_LEDGER] == 2
+    assert [(r.run_id, r.label) for r in labelled.rows] == [("r3", 0)]
+
+    proc = _run_report(
+        "--log",
+        str(log_file),
+        "--ledger-jsonl",
+        str(_write_ledger(tmp_path / "ledger.jsonl", ledger_rows)),
+    )
+    assert proc.returncode == 2
+    assert f"excluded {labels.EXCLUDE_INFRA_LEDGER}=2" in proc.stdout
+    assert "class_balance sufficient=0 insufficient=1" in proc.stdout
+
+
+def test_mismatched_ledger_count_is_ambiguous_not_last_status(log_file: Path, tmp_path: Path):
+    """Two log rows, one ledger record: nothing says which attempt it belongs to."""
+    back = _write(
+        log_file,
+        [
+            _entry(0, p_served=0.7, run_id="r1", node_id="agent"),
+            _entry(1, p_served=0.7, run_id="r1", node_id="agent"),
+            _entry(2, p_served=0.7, run_id="r9", node_id="agent"),
+        ],
+    )
+    ledger_rows = [_ledger_row("r1", "agent", "error", "bad output")]
+
+    labelled = labels.build_labels(back, ledger_records=ledger_rows)
+    assert labelled.excluded[labels.EXCLUDE_AMBIGUOUS_LEDGER_JOIN] == 2
+    assert [(r.run_id, r.label, r.source) for r in labelled.rows] == [("r9", 1, "log_status")]
+
+    proc = _run_report(
+        "--log",
+        str(log_file),
+        "--ledger-jsonl",
+        str(_write_ledger(tmp_path / "ledger.jsonl", ledger_rows)),
+    )
+    assert proc.returncode == 2
+    assert f"excluded {labels.EXCLUDE_AMBIGUOUS_LEDGER_JOIN}=2" in proc.stdout
+    assert "class_balance sufficient=1 insufficient=0" in proc.stdout
+
+
+def test_cost_ceiling_rows_do_not_consume_a_ledger_record(log_file: Path):
+    """CostCeilingExceeded raises before ledger.add, so its log row has no ledger record."""
+    back = _write(
+        log_file,
+        [
+            _entry(0, p_served=0.7, run_id="r1", node_id="agent"),
+            _entry(
+                1,
+                p_served=0.7,
+                run_id="r1",
+                node_id="agent",
+                status="error",
+                error_class="CostCeilingExceeded",
+            ),
+            _entry(2, p_served=0.7, run_id="r1", node_id="agent"),
+        ],
+    )
+    ledger_rows = [
+        _ledger_row("r1", "agent", "ok"),
+        _ledger_row("r1", "agent", "error", "bad output"),
+    ]
+    labelled = labels.build_labels(back, ledger_records=ledger_rows)
+    assert labelled.excluded == {"infra:CostCeilingExceeded": 1}
+    assert [(r.label, r.source) for r in labelled.rows] == [
+        (1, "ledger_status"),
+        (0, "ledger_status"),
+    ]
+
+
 def test_ledger_status_overrides_log_status(log_file: Path, tmp_path: Path):
-    back = _write(log_file, [_entry(1, p_served=0.8, status="ok"), _entry(2, p_served=0.8, status="ok")])
+    back = _write(
+        log_file, [_entry(1, p_served=0.8, status="ok"), _entry(2, p_served=0.8, status="ok")]
+    )
     ledger_rows = [{"run_id": "run_1", "node_id": "j1", "status": "error", "error": "bad output"}]
 
     labelled = labels.build_labels(back, ledger_records=ledger_rows)
@@ -304,13 +534,17 @@ def test_ledger_status_overrides_log_status(log_file: Path, tmp_path: Path):
     assert by_run["run_2"].source == "log_status"
 
     ledger_path = tmp_path / "ledger.jsonl"
-    ledger_path.write_text('{"run_id":"run_1","node_id":"j1","status":"error","error":"bad output"}\n')
+    ledger_path.write_text(
+        '{"run_id":"run_1","node_id":"j1","status":"error","error":"bad output"}\n'
+    )
     proc = _run_report("--log", str(log_file), "--ledger-jsonl", str(ledger_path))
     assert proc.returncode == 2
     assert "class_balance sufficient=1 insufficient=1" in proc.stdout
 
 
-def test_scoreboard_predicates_label_ok_rows(log_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_scoreboard_predicates_label_ok_rows(
+    log_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     from netie.execution import scoreboard
 
     db = tmp_path / "scoreboard.db"
@@ -344,7 +578,9 @@ def test_scoreboard_predicates_label_ok_rows(log_file: Path, tmp_path: Path, mon
 # ---------------------------------------------------------------------------
 
 
-def test_report_never_changes_threshold_or_served_decision(log_file: Path, monkeypatch: pytest.MonkeyPatch):
+def test_report_never_changes_threshold_or_served_decision(
+    log_file: Path, monkeypatch: pytest.MonkeyPatch
+):
     _write(log_file, _synthetic(400, p_served=0.95, negatives=80))
     monkeypatch.setenv(ABSTAIN_THRESHOLD_ENV, "0.42")
     before_threshold = default_abstain_threshold()

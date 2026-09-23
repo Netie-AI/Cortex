@@ -18,13 +18,24 @@ Outcome sources, in this order of authority:
 1. ledger status for ``(run_id, node_id)`` when supplied (``node_executions``
    rows or ``NodeExecutionRecord`` objects), else the status the log row
    carries (both are written by the same call site in
-   ``invoke_routed_completion``);
+   ``invoke_routed_completion``). A key is not unique: ``agent_task`` calls
+   ``invoke_routed_completion`` once per step with the same ``run_id`` and
+   ``node.id``, so one log row and one ledger record land per attempt. The
+   join is therefore ordinal: the nth log row for a key is paired with the nth
+   ledger record for that key, in append order. Log rows whose error class
+   never reaches the ledger (cost ceilings raise before ``ledger.add``) are
+   skipped in that count. When the counts still differ the key is ambiguous
+   and every one of its rows is excluded as ``ambiguous_ledger_join``, never
+   labelled from the last record;
 2. scoreboard ``predicates_pass`` for ``run_id`` where present: a failed
    predicate marks an ``ok`` node insufficient, a passed one confirms it.
 
 Infrastructure failures (cost ceiling, workflow cost ceiling, redaction,
-transport, timeout) say nothing about the tier. They are never labelled ``0``;
-they are excluded and counted by reason so the report can print them.
+transport, timeout, provider availability such as 429/500/502/503 and auth)
+say nothing about the tier. They are never labelled ``0``; they are excluded
+and counted by reason so the report can print them. The check is applied to
+the log row's own ``error_class`` and to the paired ledger record's error text
+(the ledger stores ``str(exc)``, not a class name).
 
 Fail closed: a row without probabilities, without a served-tier probability,
 or with an unknown status is excluded and counted, never guessed. Nothing here
@@ -34,6 +45,7 @@ imports ``packs.*`` and nothing here reads prompt text (the log has none).
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -61,16 +73,81 @@ INFRA_ERROR_CLASSES: frozenset[str] = frozenset(
         "ConnectionResetError",
         "BrokenPipeError",
         "CancelledError",
+        # litellm / provider availability: the adapters call litellm.acompletion
+        # directly, so these class names reach decision_log.build_entry as-is.
+        "RateLimitError",
+        "ServiceUnavailableError",
+        "InternalServerError",
+        "BadGatewayError",
+        "APIError",
+        "APIConnectionError",
+        "APIStatusError",
+        "OverloadedError",
+        "HTTPStatusError",
+        "Timeout",
+        "AuthenticationError",
+        "PermissionDeniedError",
+        "BudgetExceededError",
+        "MidStreamFallbackError",
     }
 )
-#: Substrings that mark an error class as transport/timeout even when unlisted.
-_INFRA_SUBSTRINGS: tuple[str, ...] = ("Timeout", "Transport", "Connect")
+#: Substrings that mark an error class as infrastructure even when unlisted.
+_INFRA_SUBSTRINGS: tuple[str, ...] = (
+    "Timeout",
+    "Transport",
+    "Connect",
+    "RateLimit",
+    "Overloaded",
+    "ServiceUnavailable",
+    "InternalServer",
+    "BadGateway",
+    "Unavailable",
+)
+#: Lower-case fragments of ``str(exc)`` in the ledger ``error`` column that
+#: describe infrastructure. Matched case-insensitively against the paired
+#: ledger record when the log row's own class did not already exclude it.
+_INFRA_TEXT_FRAGMENTS: tuple[str, ...] = (
+    "timeout",
+    "timed out",
+    "connection",
+    "connect",
+    "rate limit",
+    "ratelimit",
+    "rate_limit",
+    "too many requests",
+    "overloaded",
+    "service unavailable",
+    "internal server error",
+    "bad gateway",
+    "cost ceiling",
+    "ceiling",
+    "redaction",
+    "unauthorized",
+    "authentication",
+    "ratelimiterror",
+    "serviceunavailableerror",
+    "internalservererror",
+    "badgatewayerror",
+    "apiconnectionerror",
+)
+#: HTTP availability codes only when introduced as a status/code, never a bare
+#: number ("bad output on line 500" is a content failure).
+_INFRA_STATUS_CODE_RE = re.compile(
+    r"\b(?:status(?: code)?|code|http|error)[:=\s]*(?:429|500|502|503)\b", re.I
+)
+#: Error classes that raise *before* ``ledger.add`` in ``invoke_routed_completion``,
+#: so their log row has no ledger record and must not consume one in the join.
+_NO_LEDGER_RECORD_CLASSES: frozenset[str] = frozenset(
+    {"CostCeilingExceeded", "WorkflowCostCeilingExceeded"}
+)
 
 EXCLUDE_NO_PROBABILITIES = "no_probabilities"
 EXCLUDE_NO_SERVED_PROBABILITY = "no_served_tier_probability"
 EXCLUDE_UNKNOWN_STATUS = "unknown_status"
 EXCLUDE_MISSING_KEY = "missing_run_or_node_id"
+EXCLUDE_AMBIGUOUS_LEDGER_JOIN = "ambiguous_ledger_join"
 EXCLUDE_INFRA_PREFIX = "infra:"
+EXCLUDE_INFRA_LEDGER = "infra:ledger_error"
 
 LABEL_SUFFICIENT = 1
 LABEL_INSUFFICIENT = 0
@@ -137,12 +214,29 @@ def is_infra_error(error_class: str | None) -> bool:
     return any(s in error_class for s in _INFRA_SUBSTRINGS)
 
 
-def ledger_status_index(records: Iterable[Any] | None) -> dict[tuple[str, str], tuple[str, str | None]]:
-    """``{(run_id, node_id): (status, error)}`` from ledger rows or ``NodeExecutionRecord`` objects.
+def is_infra_error_text(error: str | None) -> bool:
+    """True when a ledger ``error`` string (``str(exc)``) describes infrastructure."""
+    if not error:
+        return False
+    low = error.lower()
+    if any(frag in low for frag in _INFRA_TEXT_FRAGMENTS):
+        return True
+    return _INFRA_STATUS_CODE_RE.search(error) is not None
 
-    The last record for a key wins, matching the order the ledger appends in.
+
+LedgerRecord = tuple[str, str | None]
+LedgerIndex = dict[tuple[str, str], list[LedgerRecord]]
+
+
+def ledger_status_index(records: Iterable[Any] | None) -> LedgerIndex:
+    """``{(run_id, node_id): [(status, error), ...]}`` in append order.
+
+    Every record for a key is kept, in the order the ledger appended it, so
+    ``build_labels`` can pair the nth log row for a key with the nth ledger
+    record. Nothing collapses to the last status: a multi-step node whose last
+    attempt timed out must not relabel its earlier successful attempts.
     """
-    index: dict[tuple[str, str], tuple[str, str | None]] = {}
+    index: LedgerIndex = {}
     if records is None:
         return index
     for rec in records:
@@ -152,11 +246,18 @@ def ledger_status_index(records: Iterable[Any] | None) -> dict[tuple[str, str], 
             continue
         status = get("status")
         error = get("error")
-        index[(str(run_id), str(node_id))] = (
-            str(status) if status is not None else "",
-            str(error) if error is not None else None,
+        index.setdefault((str(run_id), str(node_id)), []).append(
+            (
+                str(status) if status is not None else "",
+                str(error) if error is not None else None,
+            )
         )
     return index
+
+
+def _consumes_ledger_record(entry: Mapping[str, Any]) -> bool:
+    """False for log rows whose error raised before ``ledger.add`` (no ledger row exists)."""
+    return str(entry.get("error_class") or "") not in _NO_LEDGER_RECORD_CLASSES
 
 
 def scoreboard_predicates(db_path: Path | str) -> dict[str, bool]:
@@ -205,10 +306,16 @@ def _served_probability(entry: Mapping[str, Any]) -> float | None:
 def label_entry(
     entry: Mapping[str, Any],
     *,
-    ledger: Mapping[tuple[str, str], tuple[str, str | None]] | None = None,
+    ledger_record: LedgerRecord | None = None,
     predicates: Mapping[str, bool] | None = None,
 ) -> tuple[LabelledRow | None, str | None]:
-    """Label one decision-log row. Returns ``(row, None)`` or ``(None, exclusion_reason)``."""
+    """Label one decision-log row. Returns ``(row, None)`` or ``(None, exclusion_reason)``.
+
+    ``ledger_record`` is the ``(status, error)`` ledger record already paired
+    with this row by ``build_labels`` (the same attempt, not the last record
+    for the key). When given, its status is the authority and its error text
+    is checked for infrastructure before it can turn the row into a ``0``.
+    """
     run_id, node_id = entry.get("run_id"), entry.get("node_id")
     if not run_id or not node_id:
         return None, EXCLUDE_MISSING_KEY
@@ -220,9 +327,11 @@ def label_entry(
 
     status = str(entry.get("status") or "")
     source = "log_status"
-    if ledger and key in ledger:
-        status, _ledger_error = ledger[key]
+    if ledger_record is not None:
+        status, ledger_error = ledger_record
         source = "ledger_status"
+        if status == "error" and is_infra_error_text(ledger_error):
+            return None, EXCLUDE_INFRA_LEDGER
     if status not in {"ok", "error"}:
         return None, EXCLUDE_UNKNOWN_STATUS
 
@@ -261,12 +370,39 @@ def build_labels(
     ledger_records: Iterable[Any] | None = None,
     predicates: Mapping[str, bool] | None = None,
 ) -> LabelSet:
-    """Join decision-log ``entries`` with ledger status and scoreboard predicates."""
+    """Join decision-log ``entries`` with ledger status and scoreboard predicates.
+
+    The ledger join is ordinal per ``(run_id, node_id)``: the nth log row that
+    can have a ledger record is paired with the nth ledger record. A key whose
+    counts differ is ambiguous and all of its rows are excluded as
+    ``ambiguous_ledger_join``; the last record never stands in for every attempt.
+    """
     ledger = ledger_status_index(ledger_records)
+    entry_list = list(entries)
     out = LabelSet()
-    for entry in entries:
+
+    # First pass: how many log rows per key expect a ledger record.
+    expected: Counter[tuple[str, str]] = Counter()
+    for entry in entry_list:
+        run_id, node_id = entry.get("run_id"), entry.get("node_id")
+        if run_id and node_id and _consumes_ledger_record(entry):
+            expected[(str(run_id), str(node_id))] += 1
+    ambiguous = {key for key in expected if key in ledger and len(ledger[key]) != expected[key]}
+
+    seen: Counter[tuple[str, str]] = Counter()
+    for entry in entry_list:
         out.total_entries += 1
-        row, reason = label_entry(entry, ledger=ledger, predicates=predicates)
+        run_id, node_id = entry.get("run_id"), entry.get("node_id")
+        key = (str(run_id), str(node_id)) if run_id and node_id else None
+        record: LedgerRecord | None = None
+        if key is not None and key in ledger:
+            if key in ambiguous:
+                out.excluded[EXCLUDE_AMBIGUOUS_LEDGER_JOIN] += 1
+                continue
+            if _consumes_ledger_record(entry):
+                record = ledger[key][seen[key]]
+                seen[key] += 1
+        row, reason = label_entry(entry, ledger_record=record, predicates=predicates)
         if row is None:
             out.excluded[reason or "unknown"] += 1
         else:
@@ -275,6 +411,8 @@ def build_labels(
 
 
 __all__ = [
+    "EXCLUDE_AMBIGUOUS_LEDGER_JOIN",
+    "EXCLUDE_INFRA_LEDGER",
     "EXCLUDE_INFRA_PREFIX",
     "EXCLUDE_MISSING_KEY",
     "EXCLUDE_NO_PROBABILITIES",
@@ -287,6 +425,7 @@ __all__ = [
     "LabelledRow",
     "build_labels",
     "is_infra_error",
+    "is_infra_error_text",
     "label_entry",
     "ledger_status_index",
     "scoreboard_predicates",
