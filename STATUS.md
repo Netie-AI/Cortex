@@ -1,6 +1,18 @@
 # STATUS.md
 **Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
 
+> **2026-09-23 (EPIC-GRANT-04):** PR #235 (draft). #205. Granted
+> `ws_ls/read/glob` already ran without a per-read confirm (crew-internal
+> tools); a test now pins that. New `attach_window`: window grant (pid +
+> normalised title) verified against one live UACC `list_windows` behind
+> master + arming; only `list_windows` is ever called, nothing launches
+> (R-0015). New `ws_read_xlsx`: granted workbook read as data (openpyxl
+> read_only, 2 MiB cap), no Excel UI. Browser history DBs refused even
+> inside a grant. Click/type still CONFIRM. Real UACC result shape assumed
+> (json pid/title, text fallback). HT2/HT3/HT4 founder gates PENDING.
+> Suite 2195 passed / 12 skipped / 4 xfailed. EPIC-GRANT 01-04 code complete;
+> human gates HT1-HT4 open.
+
 > **2026-09-23 (EPIC-GRANT-02 + EPIC-GRANT-03):** PR #235 (draft, held for
 > founder review). GRANT-02 (#203): `ws_ls/read/glob` leave the space only
 > into a folder this space granted allow (grant session_id = Crew space id);
