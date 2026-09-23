@@ -1,6 +1,18 @@
 # STATUS.md
 **Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
 
+> **2026-09-23 (GRANT-WIRE + BROWSER-GATE-CI):** PR #235 (draft).
+> GRANT-WIRE: a `ws_*` read refused only for a missing folder grant now
+> raises `GrantMissing`; runtime emits one `access_ask` on the existing SSE
+> bus and the page opens the GRANT-03 dialog for that folder (one open ask
+> per space+folder). Never-grantable refusals (root, `/`, profile root,
+> `..`, History DB, writes) ask nothing. No auto-retry; confirm unchanged.
+> BROWSER-GATE-CI: CI was green with the dialog browser tests skipped (no
+> playwright). CI now installs Chromium; `CORTEX_BROWSER_GATE=required`
+> makes a skip fail. Fixed a boot race (state.spaceId overwritten under
+> load, 2/6 -> 0/12). Suite 2203 passed / 12 skipped / 4 xfailed.
+> HT1-HT4 founder gates still PENDING.
+
 > **2026-09-23 (EPIC-GRANT-04):** PR #235 (draft). #205. Granted
 > `ws_ls/read/glob` already ran without a per-read confirm (crew-internal
 > tools); a test now pins that. New `attach_window`: window grant (pid +
