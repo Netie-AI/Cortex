@@ -22,18 +22,25 @@ database (Chrome/Edge ``History``, Firefox ``places.sqlite``) is refused even
 inside an Allow-ed folder because v1 has no grant kind for it, and
 ``read_xlsx`` opens a granted workbook as data through ``openpyxl`` (never the
 Excel UI). Both rules live in ``granted_reach.py``; the jail only applies them.
+
+GRANT-WIRE (#204): the one refusal a founder can lift, "no folder grant covers
+this path", is raised as ``GrantMissing`` (a ``WorkspaceError`` subclass) and
+carries the folder to ask for, so the runtime can raise the GRANT-03 Allow /
+Cancel dialog without matching message text. A refusal that can never be
+granted (a write, ``..``, a drive root, ``/``, the profile root, a history
+database, a missing book) stays a plain ``WorkspaceError`` and asks nothing.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import re
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Protocol
 
 from CortexOS.crew import granted_reach
 from CortexOS.crew.policy import REACH_READ, REACH_WRITE
-from CortexOS.crew.session_grants import GrantRefused
+from CortexOS.crew.session_grants import GrantRefused, normalise_folder
 
 MAX_BYTES = 256 * 1024
 MAX_LIST = 200
@@ -46,6 +53,21 @@ _WILD = ("*", "?", "[")
 
 class WorkspaceError(ValueError):
     """Path or size refused. The agent must report this, not retry blindly."""
+
+
+class GrantMissing(WorkspaceError):
+    """GRANT-WIRE: refused only because no folder grant covers the path.
+
+    ``folder`` is the folder the founder could Allow (the typed path itself
+    when it is a directory, else its parent) after GRANT-01 normalisation, or
+    ``None`` when that folder can never be a grant (drive root, ``/``, the
+    profile root), in which case nothing should be asked. The message still
+    carries the R-0011 reason for the transcript.
+    """
+
+    def __init__(self, message: str, *, folder: str | None) -> None:
+        super().__init__(message)
+        self.folder = folder
 
 
 class GrantLookup(Protocol):
@@ -121,12 +143,15 @@ class SpaceWorkspace:
             ) from exc
         if folder is None:
             # The real path is not echoed: naming a link's target would leak a
-            # filename from a folder that was never granted.
-            raise WorkspaceError(
+            # filename from a folder that was never granted. GRANT-WIRE: this is
+            # the one refusal an Allow can lift, so it names the folder to ask for
+            # (from the typed path, never the resolved one).
+            raise GrantMissing(
                 f"{RULE}: '{rel}' is outside the space folder and no folder grant with "
                 "decision allow covers its real path (links followed) in this session; "
                 "missing grant: folder allow for that path or a parent. Ask the operator "
-                "to Allow the folder first"
+                "to Allow the folder first",
+                folder=self._ask_folder(text, candidate),
             )
         # Second net on a different mechanism: the real path must sit under the
         # granted folder as the filesystem sees it, not only as strings compare.
@@ -143,6 +168,23 @@ class SpaceWorkspace:
         if granted_reach.is_history_database(candidate.name):
             raise WorkspaceError(granted_reach.history_refusal(rel, candidate.name))
         return candidate
+
+    def _ask_folder(self, text: str, candidate: Path) -> str | None:
+        """The folder an Allow would have to cover: the typed path when it is a
+        directory (ls / glob head), else the directory containing it. Normalised
+        by the GRANT-01 rule; ``None`` when that rule refuses it (drive root,
+        ``/``, the profile root), because such a folder can never be granted."""
+        if candidate.is_dir():
+            folder = text
+        else:
+            windows_style = bool(_DRIVE_RE.match(text)) or "\\" in text
+            pure: PurePath = PureWindowsPath(text) if windows_style else PurePosixPath(text)
+            folder = str(pure.parent)
+        roots = getattr(self.grants, "profile_roots", None)
+        try:
+            return normalise_folder(folder, roots)
+        except GrantRefused:
+            return None
 
     # ---- tools ------------------------------------------------------------
 

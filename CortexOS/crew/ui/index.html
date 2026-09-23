@@ -1818,6 +1818,12 @@
           if (data.text) { state.draft += data.text; paintDraft(); }
           $("runStatus").textContent = "streaming";
         });
+        src.addEventListener("access_ask", (ev) => {
+          // GRANT-WIRE (#204): a ws_* read refused only for a missing folder grant.
+          let data = null;
+          try { data = JSON.parse(ev.data); } catch (e) { data = null; }
+          if (data) accessAskFromEvent(data);
+        });
         src.addEventListener("resync", (ev) => {
           let dropped = 0;
           try { dropped = (JSON.parse(ev.data) || {}).dropped || 0; } catch (e) { dropped = 0; }
@@ -2133,6 +2139,25 @@
       return next;
     }
     window.crewAskAccess = crewAskAccess;
+    // GRANT-WIRE (#204): the runtime emits one "access_ask" SSE event per ws_* read
+    // refused only because no folder grant covers the path. It raises the dialog
+    // for that folder; at most one open ask per (space, folder), a repeat while it
+    // is open is ignored. Nothing retries: the agent may re-issue the read itself.
+    const accessAskOpen = new Set();
+    function accessAskFromEvent(data) {
+      const folder = String((data && data.folder) || "").trim();
+      const spaceId = String((data && data.space_id) || state.spaceId || "").trim();
+      if (!folder || !spaceId) return false;
+      const key = spaceId + "\n" + folder;
+      if (accessAskOpen.has(key)) return false;
+      accessAskOpen.add(key);
+      const reason = String((data && data.reason) || "").trim() || ("Crew asked to read " + folder + ".");
+      crewAskAccess({ session_id: spaceId, reason, folders: [folder] })
+        .catch(() => "cancel")
+        .then(() => accessAskOpen.delete(key));
+      return true;
+    }
+    window.crewAccessAskFromEvent = accessAskFromEvent;
     $("accessAskAllow").onclick = () => accessAskSettle("allow");
     $("accessAskCancel").onclick = () => {
       const p = accessAskState.pending;

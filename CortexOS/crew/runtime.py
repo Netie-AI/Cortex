@@ -152,6 +152,26 @@ class RunContext:
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
 
+# GRANT-WIRE (#204): the SSE event that raises the GRANT-03 Allow / Cancel dialog
+# when a ws_* read is refused only because no folder grant covers the path.
+ACCESS_ASK_EVENT = "access_ask"
+
+
+def access_ask_payload(
+    space_id: str, folder: str, tool: str, args: dict[str, Any], row: dict[str, Any] | None
+) -> dict[str, Any]:
+    """What the founder is asked. ``folder`` is already GRANT-01 normalised; the
+    typed path is repeated so the reason says what the agent was after."""
+    wanted = str(args.get("path") or args.get("pattern") or "").strip()
+    who = str((row or {}).get("name") or "An agent")
+    reason = (
+        f"{who} asked {tool} on '{wanted}' and no folder grant covers it in this session. "
+        "Allow reads of this folder for this session? Nothing is read until you Allow, "
+        "and Cancel leaves it refused."
+    )
+    return {"space_id": space_id, "folder": folder, "reason": reason, "tool": tool}
+
+
 def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", name)[:64]
 
@@ -2152,6 +2172,14 @@ class CrewRuntime:
                     text = ws.glob(str(args.get("pattern") or "*"))
             except (ws_mod.WorkspaceError, TypeError, ValueError) as exc:
                 text = ws_mod.as_error(exc)
+                if isinstance(exc, ws_mod.GrantMissing) and exc.folder:
+                    # GRANT-WIRE (#204): the one refusal an Allow can lift raises
+                    # the GRANT-03 dialog. One event per refusal; nothing retries.
+                    self.bus.emit(
+                        ctx.space_id,
+                        ACCESS_ASK_EVENT,
+                        access_ask_payload(ctx.space_id, exc.folder, name, args, row),
+                    )
             self._persist_tool(ctx, row, name, args, text)
             return text
 
