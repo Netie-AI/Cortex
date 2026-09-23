@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CREW-8020-FACTS facts.md HUD + fail-closed live :8020 prove — 2026-09-23
+
+Cortex #232 leftover from closed EPIC-CREW #116 + merged PR #210 @
+c0385603. Memory list/save/search/export markdown via `facts.md` still
+survives Clear chat. AppShell Memory nav now scrolls to `#memoryPanel`
+and paints facts.md + body (R-0001). `GET /crew/facts-prove` is the
+display law; `GET /crew/facts-prove/live` / `python -m CortexOS.crew.facts_prove`
+GET-probes live `:8020` after founder restart. Host-down is `NOT_PROVEN`.
+Does not start or kill `:8020` (R-0015). Does not invent CI live-host
+green, RELEASE, product COMPLETE, CoT/#212 COMPLETE, or trained JEPA.
+Off freeze #4/#41-#44. Did not seat #197-#200. Buyer Control+Crew may
+still be FAR.
+
 ## CORTEX-COT-CLIMB leftover honesty gap — 2026-09-21
 
 Cortex #212 leftover. CoT/route/improve on Insights `generate=true`

@@ -209,7 +209,7 @@
           </div>
           <div id="agents" class="empty empty--orb">No agents yet.</div>
         </div>
-        <div class="block">
+        <div class="block" id="memoryPanel">
           <h2>Memory</h2>
           <div class="scope-row" id="memScopes">
             <button class="scope-chip on" type="button" data-scope="space">space</button>
@@ -217,7 +217,7 @@
             <button class="scope-chip" type="button" data-scope="agent">agent</button>
             <button class="scope-chip" type="button" data-scope="run">run</button>
           </div>
-          <p class="hint">space|user|agent|run collections persist as markdown. Survives Clear chat. Recall payloads are untrusted. Not orders.</p>
+          <p class="hint">space|user|agent|run collections persist as markdown (facts.md). Survives Clear chat. Memory nav paints this panel. Recall payloads are untrusted. Not orders.</p>
           <input id="memSearch" placeholder="search facts" />
           <div class="life-spawn">
             <input id="memName" placeholder="name" />
@@ -1450,6 +1450,15 @@
       if (focus === "assign") {
         $("workPane").hidden = true; $("ticketPane").hidden = false;
         $("tabWork").classList.remove("on"); $("tabTickets").classList.add("on");
+      }
+      if (focus === "memory") {
+        const panel = $("memoryPanel");
+        document.querySelectorAll(".block--focus").forEach((el) => el.classList.remove("block--focus"));
+        if (panel) {
+          panel.classList.add("block--focus");
+          if (panel.scrollIntoView) panel.scrollIntoView({ block: "nearest" });
+        }
+        renderMemory();
       }
     }
     function goNav(id, fromHash) {

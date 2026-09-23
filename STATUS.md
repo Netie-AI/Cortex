@@ -1,5 +1,18 @@
 # STATUS.md
-**Last updated:** 2026-09-21 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**; CREW-SCALE-BUILD
+**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**; CREW-8020-FACTS
+
+> **2026-09-23 (CREW-8020-FACTS):** Cortex #232 leftover from EPIC-CREW #116 +
+> CREW-SCALE-BUILD #210 @ c0385603. Memory list/save/search/export stays
+> `facts.md` (survives Clear chat). AppShell Memory now focuses
+> `#memoryPanel` and re-renders the painted HUD (R-0001). Founder-restart
+> prove is `GET /crew/facts-prove/live` (or `python -m CortexOS.crew.facts_prove`):
+> GET-only, never kills `:8020` (R-0015). Host-down / `CREW_LIVE_PROBES=0`
+> is `NOT_PROVEN` -- not invent CI live-host green, not RELEASE, not
+> product COMPLETE. CoT leftover #212 stays OPEN/INCOMPLETE. Off freeze
+> #4/#41-#44. Did not seat #197-#200. Did not widen Liberty #222-#225.
+> Local `pytest tests/test_crew/test_facts_prove.py -q` **11 passed**.
+> Full `pytest tests/test_crew -q` **371 passed**. This environment live
+> `:8020` was `URLError` / `NOT_PROVEN`.
 
 > **2026-09-21 (CORTEX-COT-CLIMB leftover):** Cortex #212 leftover honesty
 > gap. Product path still `generate=true` via `cot_climb` on FreeRoute.
