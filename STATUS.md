@@ -1,5 +1,16 @@
 # STATUS.md
-**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+
+> **2026-09-23 (CORTEX-COT-CLIMB covering):** Cortex #212 covering increment
+> after leftover honesty @ c6df0d7c. Think-path consumes the G1
+> `generate_ir` plan in think/SQL; improve re-thinks with prior SQL +
+> `route_step`. `measure_climb` now reports this_run.exact vs certified
+> gold (fixture exact 0.00% / pinned-26 empty exact 0.00%) -- does not
+> invent 38.46% or a better %. Unarmed still fail-closed REFUSE (no
+> invent-green CoT); validated SQL stays ABSTAIN. Status INCOMPLETE; #212
+> stays OPEN. Reuses gen_cfsm G1 + dag_runner. JEPA proxy. Off freeze
+> #4/#41-#44. Did not start/kill `:5000` or `:8020`. Not a GitHub CI
+> claim. Not COMPLETE. Did not dual-own #223/#224/#225 or close #227.
 
 > **2026-09-23 (CREW-8020-FACTS):** Cortex #232 leftover from EPIC-CREW #116 +
 > CREW-SCALE-BUILD #210 @ c0385603. Memory list/save/search/export stays
