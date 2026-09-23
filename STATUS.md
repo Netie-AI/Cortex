@@ -1,6 +1,20 @@
 # STATUS.md
 **Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
 
+> **2026-09-23 (EPIC-GRANT-02 + EPIC-GRANT-03):** PR #235 (draft, held for
+> founder review). GRANT-02 (#203): `ws_ls/read/glob` leave the space only
+> into a folder this space granted allow (grant session_id = Crew space id);
+> check on the resolved real path, component-wise, plus a second
+> relative_to net. Prefix trap, `..`, symlink, cancel, other space, drive
+> root, `/`, profile root, ungranted AppData refused with R-0011 reason.
+> Writes outside the space stay refused. Click/type still CONFIRM;
+> `CORTEX_COMPUTER_CONTROL` untouched. Leading `/` now means outside the
+> space. Residual: resolve-then-read TOCTOU. GRANT-03 (#204): native
+> Allow/Cancel dialog `window.crewAskAccess`, textContent only, persist=false,
+> Escape = Cancel; no runtime path calls it yet. HT1 founder walk PENDING.
+> Browser tests need python playwright (importorskip with loud reason if
+> absent). Suite 2179 passed / 12 skipped / 4 xfailed. GRANT-04 unblocked, not started.
+
 > **2026-09-23 (KEV-DECIDE + EPIC-GRANT-01):** PR #235. KEV-DECIDE:
 > `CortexOS/decision/` is a kev-shaped (jaredpalmer/kev) noul/choice/score
 > decision port with stdlib calibration (temperature, Brier, ECE,
