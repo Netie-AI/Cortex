@@ -17,6 +17,7 @@ a human gate and is not claimed here.
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import threading
@@ -153,18 +154,27 @@ def served(settings, crew_env, monkeypatch: pytest.MonkeyPatch) -> Iterator[Simp
         thread.join(10)
 
 
+def browser_gate_unavailable(reason: str) -> None:
+    """Skip locally, but fail where CI declares the browser gate required: a
+    green run that silently skipped the dialog's security tests is not a pass."""
+    if os.environ.get("CORTEX_BROWSER_GATE") == "required":
+        pytest.fail(f"CORTEX_BROWSER_GATE=required but {reason}")
+    pytest.skip(reason)
+
+
 @pytest.fixture(scope="module")
 def browser():
-    playwright = pytest.importorskip(
-        "playwright.sync_api", reason="python-playwright not installed: browser gate NOT run"
-    )
-    from playwright.sync_api import Error as PlaywrightError
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        browser_gate_unavailable("python-playwright not installed: browser gate NOT run")
 
-    with playwright.sync_playwright() as pw:
+    with sync_playwright() as pw:
         try:
             chromium = pw.chromium.launch()
         except PlaywrightError as exc:  # pragma: no cover - environment dependent
-            pytest.skip(f"Chromium could not launch: browser gate NOT run: {exc}")
+            browser_gate_unavailable(f"Chromium could not launch: browser gate NOT run: {exc}")
         try:
             yield chromium
         finally:
@@ -188,6 +198,9 @@ def page(browser, served):
     pg.on("dialog", lambda d: (alerts.append(d.message), d.dismiss()))
     pg.goto(served.base + "/")
     pg.wait_for_function("typeof window.crewAskAccess === 'function'")
+    # boot() selects the first space asynchronously; a test that sets
+    # state.spaceId before boot finishes would be overwritten under load.
+    pg.wait_for_function("state.spaceId !== null")
     try:
         yield SimpleNamespace(
             pg=pg,
