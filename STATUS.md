@@ -11,7 +11,8 @@
 > product COMPLETE. CoT leftover #212 stays OPEN/INCOMPLETE. Off freeze
 > #4/#41-#44. Did not seat #197-#200. Did not widen Liberty #222-#225.
 > Local `pytest tests/test_crew/test_facts_prove.py -q` **11 passed**.
-> This environment live `:8020` was `URLError` / `NOT_PROVEN`.
+> Full `pytest tests/test_crew -q` **371 passed**. This environment live
+> `:8020` was `URLError` / `NOT_PROVEN`.
 
 > **2026-09-21 (CORTEX-COT-CLIMB leftover):** Cortex #212 leftover honesty
 > gap. Product path still `generate=true` via `cot_climb` on FreeRoute.
