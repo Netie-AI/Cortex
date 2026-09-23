@@ -40,6 +40,7 @@ from CortexOS.crew.server import create_app
 from CortexOS.crew.session_grants import SessionGrantBook
 from CortexOS.crew.workspace import GrantMissing, WorkspaceError, workspace_for
 from tests.test_crew.conftest import FakeLLM, wait_run_done
+from tests.test_crew.test_session_grant_dialog import browser_gate_unavailable
 
 URL = "/crew/session-grants"
 PROFILE_WIN = r"C:\Users\ops"
@@ -293,16 +294,19 @@ def served(settings, crew_env, monkeypatch: pytest.MonkeyPatch) -> Iterator[Simp
 
 @pytest.fixture(scope="module")
 def browser():
-    playwright = pytest.importorskip(
-        "playwright.sync_api", reason="python-playwright not installed: browser gate NOT run"
-    )
-    from playwright.sync_api import Error as PlaywrightError
+    # Same gate as test_session_grant_dialog.py: skip locally, fail where CI
+    # sets CORTEX_BROWSER_GATE=required, so the two files behave identically.
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        browser_gate_unavailable("python-playwright not installed: browser gate NOT run")
 
-    with playwright.sync_playwright() as pw:
+    with sync_playwright() as pw:
         try:
             chromium = pw.chromium.launch()
         except PlaywrightError as exc:  # pragma: no cover - environment dependent
-            pytest.skip(f"Chromium could not launch: browser gate NOT run: {exc}")
+            browser_gate_unavailable(f"Chromium could not launch: browser gate NOT run: {exc}")
         try:
             yield chromium
         finally:
@@ -324,6 +328,9 @@ def page(browser, served):
     )
     pg.goto(served.base + "/")
     pg.wait_for_function("typeof window.crewAskAccess === 'function'")
+    # boot() selects the first space asynchronously; the test reads state.spaceId
+    # and needs the SSE stream for it open before the runtime emits anything.
+    pg.wait_for_function("state.spaceId !== null")
     pg.wait_for_function("() => !!state.spaceId && !!state.source")
     try:
         yield SimpleNamespace(
