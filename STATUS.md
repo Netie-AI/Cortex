@@ -1,6 +1,22 @@
 # STATUS.md
 **Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
 
+> **2026-09-23 (EPIC-GOVERN-HARDEN #240):** PR #235 (draft). Four verified
+> governance holes closed, each built in an isolated worktree and passed by an
+> independent adversarial verifier. GH-01 #241: `invoke_routed_completion`
+> redacts prompt+system through an engine redact port before cost estimate and
+> adapter (NRIC, MyKad, email, card); raising redactor = 0 adapter calls + error
+> row; `pii.py` reuses engine patterns (MyKad added). GH-02 #242: legal/VIP/T0
+> floors apply after a decision-backend choice (closes a KEV-DECIDE bypass).
+> GH-03 #243: parallel batches gated on summed estimates before any sibling
+> spends; one journal lookup shared by gate and replay; sequential gating
+> byte-identical to base. GH-04 #244: SQLite ledger 30 s busy timeout;
+> 4-process contended append proof (>=10 switches asserted); Postgres ledger
+> tests now run in RLS CI and fail if skipped. Residual: estimate-based gate
+> (underestimates can still overspend), MyKad-with-spaces / underscore-adjacent
+> NRIC not matched, kev backend sees unredacted text on loopback, DSL max_tier
+> clamp still bounds legal requests. Next epic queued: EPIC-KEV-LOOP.
+
 > **2026-09-23 (GRANT-WIRE + BROWSER-GATE-CI):** PR #235 (draft).
 > GRANT-WIRE: a `ws_*` read refused only for a missing folder grant now
 > raises `GrantMissing`; runtime emits one `access_ask` on the existing SSE
