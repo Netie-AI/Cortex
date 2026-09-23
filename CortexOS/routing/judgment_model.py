@@ -52,24 +52,44 @@ class JudgmentModel:
         *,
         abstain_threshold: float | None = None,
         check_order: bool = True,
+        shadow: Any | None = None,
     ) -> None:
         self.decision_backend = decision_backend
         self.abstain_threshold = abstain_threshold
         self.check_order = check_order
+        # KEV-SHADOW: a ``CortexOS.decision.shadow.ShadowEvaluator`` that is asked
+        # beside the rules and never serves. Only consulted when no serving
+        # backend is configured.
+        self.shadow = shadow
 
     @classmethod
     def from_env(cls) -> JudgmentModel:
-        """Rules-v0 unless ``CORTEX_KEV_URL`` names a loopback kev server."""
+        """Rules-v0 unless ``CORTEX_KEV_URL`` names a loopback kev server.
+
+        With ``CORTEX_KEV_SHADOW=1`` as well, the rules keep serving and kev is
+        evaluated beside them (KEV-SHADOW); the served decision is unchanged.
+        """
         from CortexOS.decision.backends import KEV_URL_ENV, KevHttpBackend
 
         url = os.environ.get(KEV_URL_ENV, "").strip()
         if not url:
             return cls()
-        return cls(decision_backend=KevHttpBackend(url))
+        backend = KevHttpBackend(url)
+        from CortexOS.decision.shadow import ShadowEvaluator, shadow_enabled
+
+        if shadow_enabled():
+            return cls(shadow=ShadowEvaluator(backend))
+        return cls(decision_backend=backend)
 
     def decide(self, req: JudgmentRequest) -> JudgmentDecision:
         if self.decision_backend is None:
-            return self.rules_decide(req)
+            rules = self.rules_decide(req)
+            if self.shadow is not None:
+                try:
+                    self.shadow.observe(self._state_for(req), rules.tier)
+                except Exception:  # shadow is observation only; never touches the served answer
+                    pass
+            return rules
         from CortexOS.decision.backends import tier_question
         from CortexOS.decision.decide import decide
 
