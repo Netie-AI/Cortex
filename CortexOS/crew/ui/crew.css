@@ -658,6 +658,60 @@ button { cursor: pointer; }
 .takeover__actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.85rem; }
 .takeover__actions .deny { color: var(--dead); border: 1px solid var(--dead); }
 
+/* EPIC-GRANT-03 session access ask: list + reason + Cancel / Allow. Live tokens only. */
+.access-ask {
+  width: min(34rem, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--desk);
+  color: var(--ink);
+  border: 1px solid var(--hitl);
+  padding: 1rem 1.1rem;
+  font-family: var(--font);
+  font-size: 1rem;
+}
+.access-ask::backdrop { background: var(--scrim); }
+.access-ask h2 { margin: 0.4rem 0 0.4rem; font-size: 1.05rem; }
+.access-ask__why { margin: 0 0 0.55rem; color: var(--ink); font-size: 0.85rem; line-height: 1.45; }
+.access-ask__why:empty { display: none; }
+.access-ask__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--well);
+}
+.access-ask__item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font: 0.72rem/1.4 var(--mono);
+  word-break: break-all;
+}
+.access-ask__item:last-child { border-bottom: 0; }
+.access-ask__kind {
+  flex: none;
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--lease);
+  padding: 0 0.28rem;
+}
+.access-ask__what { flex: 1; min-width: 0; color: var(--ink); }
+.access-ask__dest { color: var(--hitl); }
+.access-ask__item--refused .access-ask__what { color: var(--dead); text-decoration: line-through; }
+.access-ask__item--refused .access-ask__kind { color: var(--dead); border-color: var(--dead); }
+.access-ask__reason { display: block; color: var(--dead); font-size: 0.62rem; }
+.access-ask__local { margin: 0.6rem 0 0; color: var(--ok); font-size: 0.8rem; }
+.access-ask__note { margin: 0.25rem 0 0; color: var(--hitl); font-size: 0.8rem; }
+.access-ask__refused { margin-top: 0.5rem; }
+.access-ask__actions button:disabled { opacity: 0.55; cursor: progress; }
+
 .scrim {
   position: fixed;
   inset: 0;

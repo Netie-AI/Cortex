@@ -280,6 +280,23 @@
       </div>
     </div>
   </div>
+  <!-- EPIC-GRANT-03 (#204): session access ask over GET/POST /crew/session-grants.
+       Native dialog: showModal traps focus, Escape is Cancel, focus returns on close.
+       Paths and window titles are painted with textContent only (a title is attacker text).
+       v1 is session-only: every POST carries persist=false. Store is EPIC-GRANT-01; no second store. -->
+  <dialog class="access-ask" id="accessAsk" role="dialog" aria-modal="true" aria-labelledby="accessAskTitle" aria-describedby="accessAskWhy accessAskLocal">
+    <p class="takeover__kicker">Session access</p>
+    <h2 id="accessAskTitle">Crew asks to read these on this device for this session</h2>
+    <p class="access-ask__why" id="accessAskWhy"></p>
+    <ul class="access-ask__items" id="accessAskItems" aria-label="Exact paths and window titles"></ul>
+    <p class="access-ask__local" id="accessAskLocal">Files stay on this device. Allow grants reads only, for this session; nothing is written outside the space and nothing here is uploaded.</p>
+    <p class="access-ask__note" id="accessAskNote" hidden></p>
+    <div class="warn access-ask__refused" id="accessAskRefused" role="alert" hidden></div>
+    <div class="takeover__actions access-ask__actions">
+      <button class="ghost deny" id="accessAskCancel" type="button">Cancel</button>
+      <button class="ok" id="accessAskAllow" type="button">Allow for this session</button>
+    </div>
+  </dialog>
   <div class="scrim scrim--palette" id="palette">
     <div class="palette">
       <div class="palette__query">
@@ -1952,6 +1969,190 @@
       const id = $("takeover").dataset.id;
       if (id) decide(id, false, false);
     };
+
+    // EPIC-GRANT-03 (#204): session access ask. One dialog, one store (GRANT-01).
+    // window.crewAskAccess({session_id, reason, folders, windows, files, destination})
+    //   -> Promise<"allow" | "cancel">. session_id defaults to state.spaceId (GRANT-02
+    //   checks grants by space id). Every item is POSTed to /crew/session-grants
+    //   with the founder's decision and persist=false (v1 is session-only). A 4xx
+    //   is painted inline on that item; nothing is silently dropped. Cancel never
+    //   posts allow. Escape is Cancel. Paths and titles go through textContent only.
+    const ACCESS_ASK_URL = "/crew/session-grants";
+    const accessAskState = { queue: Promise.resolve(), pending: null, returnTo: null };
+    function accessAskItems(req) {
+      const dest = (v) => {
+        const d = String(v ?? "").trim();
+        return d && d.toLowerCase() !== "local" && d.toLowerCase() !== "this device" ? d : "";
+      };
+      const shared = dest(req.destination);
+      const items = [];
+      (req.folders || []).forEach((f) => {
+        const o = typeof f === "string" ? { path: f } : (f || {});
+        items.push({ kind: "folder", path: String(o.path ?? ""), destination: dest(o.destination) || shared });
+      });
+      (req.files || []).forEach((f) => {
+        const o = typeof f === "string" ? { path: f } : (f || {});
+        items.push({ kind: "office_file", path: String(o.path ?? ""), destination: dest(o.destination) || shared });
+      });
+      (req.windows || []).forEach((w) => {
+        const o = w || {};
+        items.push({ kind: "window", title: String(o.title ?? ""), pid: o.pid, destination: dest(o.destination) || shared });
+      });
+      return items;
+    }
+    function accessAskLabel(item) {
+      if (item.kind === "window") return item.title + "  (window, pid " + String(item.pid ?? "?") + ")";
+      return item.path;
+    }
+    function accessAskPaint(req, items) {
+      $("accessAskWhy").textContent = String(req.reason ?? "").trim();
+      const list = $("accessAskItems");
+      list.textContent = "";
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.className = "access-ask__item";
+        const kind = document.createElement("span");
+        kind.className = "access-ask__kind";
+        kind.textContent = item.kind === "office_file" ? "file" : item.kind;
+        const what = document.createElement("span");
+        what.className = "access-ask__what";
+        what.textContent = accessAskLabel(item);
+        li.appendChild(kind);
+        li.appendChild(what);
+        if (item.destination) {
+          const dest = document.createElement("span");
+          dest.className = "access-ask__dest";
+          dest.textContent = "to " + item.destination;
+          li.appendChild(dest);
+        }
+        item.node = li;
+        list.appendChild(li);
+      });
+      const named = items.filter((i) => i.destination).length;
+      const note = $("accessAskNote");
+      note.hidden = !named;
+      note.textContent = named
+        ? named + " item(s) name a cloud worker destination shown above. Everything else stays on this device."
+        : "";
+      const refused = $("accessAskRefused");
+      refused.hidden = true;
+      refused.textContent = "";
+      $("accessAskAllow").hidden = false;
+      $("accessAskAllow").disabled = false;
+      $("accessAskCancel").disabled = false;
+      $("accessAskCancel").textContent = "Cancel";
+    }
+    function accessAskBody(sessionId, item, decision) {
+      const body = { session_id: sessionId, kind: item.kind, decision, persist: false };
+      if (item.kind === "window") { body.title = item.title; body.pid = item.pid; }
+      else body.path = item.path;
+      return body;
+    }
+    async function accessAskPost(sessionId, items, decision) {
+      const refused = [];
+      for (const item of items) {
+        try {
+          await api(ACCESS_ASK_URL, { method: "POST", body: JSON.stringify(accessAskBody(sessionId, item, decision)) });
+        } catch (err) {
+          refused.push({ item, reason: String((err && err.message) || "refused") });
+        }
+      }
+      return refused;
+    }
+    function accessAskPaintRefusals(refused) {
+      refused.forEach(({ item, reason }) => {
+        if (!item.node) return;
+        item.node.classList.add("access-ask__item--refused");
+        const why = document.createElement("span");
+        why.className = "access-ask__reason";
+        why.textContent = "refused: " + reason;
+        item.node.appendChild(why);
+      });
+      const box = $("accessAskRefused");
+      box.textContent = refused.length + " item(s) refused by the grant store and not granted. Close to continue.";
+      box.hidden = false;
+    }
+    function accessAskClose() {
+      const dlg = $("accessAsk");
+      if (dlg.open) dlg.close();
+      const back = accessAskState.returnTo;
+      accessAskState.returnTo = null;
+      if (back && typeof back.focus === "function" && document.contains(back)) back.focus();
+    }
+    async function accessAskSettle(decision) {
+      const p = accessAskState.pending;
+      if (!p || p.busy) return;
+      p.busy = true;
+      $("accessAskAllow").disabled = true;
+      $("accessAskCancel").disabled = true;
+      const refused = await accessAskPost(p.sessionId, p.items, decision);
+      const result = {
+        decision,
+        granted: p.items.filter((i) => !refused.some((r) => r.item === i)).map((i) => accessAskBody(p.sessionId, i, decision)),
+        refused: refused.map((r) => Object.assign(accessAskBody(p.sessionId, r.item, decision), { reason: r.reason })),
+      };
+      window.crewAskAccess.last = result;
+      const finish = () => {
+        accessAskState.pending = null;
+        accessAskClose();
+        p.resolve(decision);
+      };
+      // Cancel never waits on the store: a refusal to record a cancel grants nothing,
+      // so it is toasted and kept in crewAskAccess.last, and the dialog closes.
+      // Allow holds the dialog open so a refused item is seen before continuing.
+      if (!refused.length || decision === "cancel" || !$("accessAsk").open) {
+        refused.forEach((r) => toast("Access item refused: " + r.reason, "bad"));
+        finish();
+        return;
+      }
+      accessAskPaintRefusals(refused);
+      $("accessAskAllow").hidden = true;
+      const cancel = $("accessAskCancel");
+      cancel.disabled = false;
+      cancel.textContent = "Close";
+      cancel.focus();
+      p.busy = false;
+      p.closeOnly = true;
+      p.finish = finish;
+    }
+    function crewAskAccess(req) {
+      const request = req || {};
+      const run = () => new Promise((resolve) => {
+        const items = accessAskItems(request);
+        // GRANT-02 keys grants by the Crew space id, so that is the default session_id.
+        const sessionId = String(request.session_id || state.spaceId || "").trim();
+        accessAskState.pending = { sessionId, items, resolve, busy: false, closeOnly: false };
+        accessAskPaint(request, items);
+        accessAskState.returnTo = document.activeElement;
+        const dlg = $("accessAsk");
+        if (!dlg.open) dlg.showModal();
+        $("accessAskCancel").focus();
+      });
+      const next = accessAskState.queue.then(run, run);
+      accessAskState.queue = next.catch(() => {});
+      return next;
+    }
+    window.crewAskAccess = crewAskAccess;
+    $("accessAskAllow").onclick = () => accessAskSettle("allow");
+    $("accessAskCancel").onclick = () => {
+      const p = accessAskState.pending;
+      if (p && p.closeOnly && p.finish) { p.finish(); return; }
+      accessAskSettle("cancel");
+    };
+    $("accessAsk").addEventListener("cancel", (e) => {
+      e.preventDefault();
+      const p = accessAskState.pending;
+      if (!p) return;
+      if (p.closeOnly && p.finish) { p.finish(); return; }
+      accessAskSettle("cancel");
+    });
+    $("accessAsk").addEventListener("close", () => {
+      // Closed by the platform (Escape when the cancel event was not cancelable): still a Cancel.
+      const p = accessAskState.pending;
+      if (!p) return;
+      if (p.closeOnly && p.finish) { p.finish(); return; }
+      accessAskSettle("cancel");
+    });
     $("input").addEventListener("input", () => { growInput(); refreshSuggest(); });
     $("input").addEventListener("keydown", (e) => {
       if (! $("suggest").hidden && state.suggest.length) {
