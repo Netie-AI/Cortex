@@ -202,7 +202,7 @@ _GOLD: dict[str, str] | None = None
 
 
 def certified_gold_sql() -> dict[str, str]:
-    """Certified query gold from the DMS pack YAML. Does not import packs.*."""
+    """Certified query gold from the DMS pack YAML. Pack modules stay unimported."""
     global _GOLD
     if _GOLD is not None:
         return _GOLD
@@ -455,12 +455,14 @@ def _envelope(
     stamp: Any = None,
     check: str = "",
     validator: str = "",
+    extracted_sql: str = "",
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "ok": ok,
         "status": status,
         "phase": "generate",
         "sql": sql,
+        "extracted_sql": extracted_sql or None,
         "valid": valid,
         "values": [],
         "identity": identity,
@@ -706,6 +708,7 @@ async def climb(
             )
 
         sql = fr.extract_sql(str(gen.get("text") or ""))
+        extracted = str(sql or "").strip()
         checked = fr.validate_sql(sql or "", allowed, columns=columns)
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
@@ -751,6 +754,7 @@ async def climb(
                 route=gen.get("route"),
                 stamp=gen.get("stamp"),
                 sql=str(checked.get("sql") or ""),
+                extracted_sql=extracted,
                 valid=True,
                 tables=list(checked.get("tables") or []),
                 check=str(checked.get("check") or ""),
@@ -878,7 +882,8 @@ async def measure_climb(
             str(case.get("id") or ""),
             str(case.get("expected_sql") or ""),
         )
-        exact = sql_exact(str(out.get("sql") or ""), gold)
+        got = str(out.get("extracted_sql") or out.get("sql") or "")
+        exact = sql_exact(got, gold)
         outcomes.append(
             {
                 "id": case.get("id") or "",
