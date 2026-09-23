@@ -1,5 +1,19 @@
 # STATUS.md
-**Last updated:** 2026-09-21 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+
+> **2026-09-23 (KEV-DECIDE + EPIC-GRANT-01):** PR #235. KEV-DECIDE:
+> `CortexOS/decision/` is a kev-shaped (jaredpalmer/kev) noul/choice/score
+> decision port with stdlib calibration (temperature, Brier, ECE,
+> automatable share at 5% error budget). Opt-in behind `JudgmentModel` via
+> `CORTEX_KEV_URL` (loopback only); default rules-v0 path unchanged.
+> Rules backend stamps `calibrated=false`; kev errors degrade with cause.
+> No live kev run (respx only); 0.5 abstain threshold untuned (no dev set).
+> No Jev integration or numbers claimed. EPIC-GRANT-01 (#202): store only,
+> `GET|POST /crew/session-grants` for folder / window / office_file
+> Allow|Cancel; drive, UNC, profile roots and `..` refused 4xx with store
+> unchanged; persist unset is session-only. No laptop reach (GRANT-02 later).
+> Suite 2122 passed / 13 skipped / 4 xfailed. OpenAPI check not run here
+> (needs `.[full]`); crew routes are not contract routes. Not a GitHub CI claim.
 
 > **2026-09-21 (CORTEX-COT-CLIMB leftover):** Cortex #212 leftover honesty
 > gap. Product path still `generate=true` via `cot_climb` on FreeRoute.
