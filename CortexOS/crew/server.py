@@ -684,6 +684,22 @@ def build_router(crew: CrewApp) -> APIRouter:
             raise HTTPException(404, "unknown space")
         return crew.runtime.clear_chat(space_id)
 
+    @router.get("/facts-prove")
+    async def facts_prove_map() -> dict[str, Any]:
+        """CREW-8020-FACTS law. HUD chrome from served index. Not live-host green."""
+        from CortexOS.crew import facts_prove as facts_prove_mod
+
+        html_path = crew.settings.ui_dir / "index.html"
+        html = html_path.read_text(encoding="utf-8") if html_path.is_file() else ""
+        return facts_prove_mod.public_map(html)
+
+    @router.get("/facts-prove/live")
+    async def facts_prove_live() -> dict[str, Any]:
+        """Founder-restart GET probe of live :8020. Fail-closed if down. Never kills."""
+        from CortexOS.crew import facts_prove as facts_prove_mod
+
+        return facts_prove_mod.probe_live()
+
     @router.get("/spaces/{space_id}/events")
     async def events(space_id: str, after: int = -1) -> StreamingResponse:
         """Live events for one space, resumable by message seq.
