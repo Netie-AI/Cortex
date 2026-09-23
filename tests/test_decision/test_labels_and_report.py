@@ -130,7 +130,7 @@ def _kv(stdout: str) -> dict[str, str]:
 
 
 def _assert_no_metrics(stdout: str) -> None:
-    for banned in ("ece_", "brier", "T=", "p_sufficient_threshold", "serve_automation"):
+    for banned in ("ece_", "brier", "T=", "_threshold=", "serve_automation"):
         assert banned not in stdout, f"{banned!r} printed on an INSUFFICIENT report:\n{stdout}"
 
 
@@ -213,8 +213,8 @@ def test_overconfident_log_fits_temperature_above_one(log_file: Path):
     assert float(kv["brier_scaled"]) < float(kv["brier_raw"])
     for budget in ("0.02", "0.05", "0.10"):
         assert f"serve_automation budget={budget} share=" in proc.stdout
-    assert "p_sufficient_threshold=" in proc.stdout
-    assert "P(sufficient) scale" in proc.stdout
+    assert "p_raw_threshold=" in proc.stdout and "p_scaled_threshold=" in proc.stdout
+    assert "raw P(sufficient)" in proc.stdout
     assert "INSUFFICIENT" not in proc.stdout
     assert "CORTEX_DECISION_ABSTAIN_THRESHOLD untouched" in proc.stdout
 
@@ -610,7 +610,7 @@ def _automation(stdout: str) -> dict[str, tuple[float, str]]:
     for line in stdout.splitlines():
         if line.startswith("serve_automation budget="):
             parts = dict(p.split("=", 1) for p in line.split()[1:])
-            out[parts["budget"]] = (float(parts["share"]), parts["p_sufficient_threshold"])
+            out[parts["budget"]] = (float(parts["share"]), parts["p_raw_threshold"])
     return out
 
 
@@ -648,7 +648,7 @@ def test_serve_automation_output_does_not_depend_on_append_order(log_file: Path,
     a, b = _automation(first.stdout), _automation(second.stdout)
     assert a == b
 
-    from netie.decision.calibration import serve_automation
+    from CortexOS.decision.calibration import serve_automation
 
     p = [0.9] * 100 + [0.6] * 100
     y = [1] * 95 + [0] * 5 + [1] * 60 + [0] * 40
@@ -656,3 +656,44 @@ def test_serve_automation_output_does_not_depend_on_append_order(log_file: Path,
     assert (share, thr) == (0.5, 0.9)
     served = [yy for pp, yy in zip(p, y, strict=True) if pp >= thr]
     assert served.count(0) / len(served) <= 0.05
+
+
+def test_printed_thresholds_reproduce_share_and_budget_on_both_scales(log_file: Path):
+    """Verifier round 3 on #247: rounding the printed threshold dropped the tie
+    group sitting at it. Parse what the report prints, re-serve p >= printed on
+    the raw and the scaled scale, and require the printed share within budget."""
+    import math
+
+    from CortexOS.decision.calibration import softmax
+
+    groups = [(0.995, 100, 3), (0.9005, 200, 0), (0.5, 100, 60)]
+    rows: list[dict] = []
+    for p_served, n, bad in groups:
+        rows += _synthetic(n, p_served=p_served, negatives=bad, seed=len(rows) + 1)
+    for i, r in enumerate(rows):
+        r["node_id"] = f"g{i}"
+    _write(log_file, rows)
+    proc = _run_report("--log", str(log_file))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    t = float(_kv(proc.stdout)["T"])
+
+    raw = [p for p, n, _ in groups for _ in range(n)]
+    labels = [0] * 0
+    for _, n, bad in groups:
+        labels += [0] * bad + [1] * (n - bad)
+    scaled = [softmax([math.log(1 - p), math.log(p)], t)[1] for p in raw]
+    for line in proc.stdout.splitlines():
+        if not line.startswith("serve_automation budget="):
+            continue
+        parts = dict(x.split("=", 1) for x in line.split()[1:])
+        budget, share = float(parts["budget"]), float(parts["share"])
+        for scale, values in (("p_raw_threshold", raw), ("p_scaled_threshold", scaled)):
+            if parts[scale] == "none":
+                assert share == 0.0
+                continue
+            thr = float(parts[scale])
+            # 1e-12 absorbs float-path noise between this recomputation and the
+            # report's; the rounding bug it guards against moved thr by ~1e-5.
+            served = [y for v, y in zip(values, labels, strict=True) if v >= thr - 1e-12]
+            assert len(served) / len(values) == pytest.approx(share, abs=1e-4), (scale, line)
+            assert served.count(0) / len(served) <= budget + 1e-12, (scale, line)

@@ -77,7 +77,6 @@ def test_automatable_share_respects_error_budget():
     assert automatable_share([], []) == 0.0
 
 
-
 def test_automatable_share_never_cuts_inside_a_tie_group():
     """A threshold cannot split tied confidences, so the share is the same
     whatever order the tied rows arrive in (coordinator fix on #247)."""

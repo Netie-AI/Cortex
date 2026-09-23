@@ -10,8 +10,9 @@ scoreboard predicates through ``CortexOS.decision.labels`` and prints:
   threshold claim`` and exit code 2, with no ECE, Brier, T or threshold
   printed;
 - otherwise: fitted T (on ``log p`` pseudo-logits, stated as such), ECE, Brier,
-  and the automatable share at error budgets 0.02, 0.05 and 0.10 with the
-  implied confidence threshold for each.
+  and serve_automation at error budgets 0.02, 0.05 and 0.10: the share of
+  served decisions that could skip escalation, with the exact raw and
+  T-scaled P(sufficient) thresholds that reproduce it.
 
 This script reports. It never writes config and never touches
 ``CORTEX_DECISION_ABSTAIN_THRESHOLD``. Moving the threshold is a founder
@@ -102,23 +103,36 @@ def report(labelled: LabelSet, log_path: Path, out=sys.stdout) -> int:
     scaled_rows = [softmax(row, temperature) for row in logit_rows]
 
     print("temperature_note=fitted on log(p) pseudo-logits; the backend returns probabilities, not logits", file=out)
-    print(f"T={temperature:.4f}", file=out)
+    print(f"T={temperature!r}", file=out)
     print(f"ece_raw={ece(raw_rows, labels):.4f}", file=out)
     print(f"ece_scaled={ece(scaled_rows, labels):.4f}", file=out)
     print(f"brier_raw={brier(raw_rows, labels):.4f}", file=out)
     print(f"brier_scaled={brier(scaled_rows, labels):.4f}", file=out)
-    p_sufficient = [row[1] for row in scaled_rows]
+    # Temperature scaling is strictly monotone in p, so the served prefix, and
+    # therefore the share, is the same on the raw and the scaled scale. The
+    # raw threshold is the one an operator compares against the backend's own
+    # P(served tier); both are printed exactly (repr), because rounding can
+    # drop a whole tie group at the threshold and break the budget.
+    p_raw = [row[1] for row in raw_rows]
+    p_scaled = [row[1] for row in scaled_rows]
     print(
         "serve_automation_note=share of served decisions that could skip escalation; "
         "a served tier that proved insufficient is always an error; "
-        "threshold is on the P(sufficient) scale, not CORTEX_DECISION_ABSTAIN_THRESHOLD's",
+        f"serve when raw P(sufficient) >= p_raw_threshold (backend scale), equivalently "
+        f"T-scaled P(sufficient) >= p_scaled_threshold (T={temperature!r}); "
+        "neither is on CORTEX_DECISION_ABSTAIN_THRESHOLD's scale",
         file=out,
     )
     for budget in ERROR_BUDGETS:
-        share, threshold = serve_automation(p_sufficient, labels, budget)
-        thr = "none" if threshold is None else f"{threshold:.4f}"
+        share, raw_thr = serve_automation(p_raw, labels, budget)
+        scaled_share, scaled_thr = serve_automation(p_scaled, labels, budget)
+        if share != scaled_share:  # pragma: no cover - monotonicity guard, fail loud
+            raise RuntimeError(f"raw and scaled prefixes differ at budget {budget}: {share} vs {scaled_share}")
+        raw_s = "none" if raw_thr is None else repr(raw_thr)
+        scaled_s = "none" if scaled_thr is None else repr(scaled_thr)
         print(
-            f"serve_automation budget={budget:.2f} share={share:.4f} p_sufficient_threshold={thr}",
+            f"serve_automation budget={budget:.2f} share={share:.4f} "
+            f"p_raw_threshold={raw_s} p_scaled_threshold={scaled_s}",
             file=out,
         )
     print("config_written=none (CORTEX_DECISION_ABSTAIN_THRESHOLD untouched)", file=out)
