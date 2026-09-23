@@ -16,6 +16,10 @@ from typing import Any
 
 GENESIS_HASH = "0" * 64
 _LOCK = threading.Lock()
+# Cross-process writers wait on SQLITE_BUSY for this long before failing.
+# The module _LOCK only serialises threads in one process; BEGIN IMMEDIATE
+# plus this busy timeout is what serialises separate OS processes.
+SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
 _POSTGRES_MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "002_ledger_postgres.sql"
 _pg_engine = None
 _pg_engine_dsn: str | None = None
@@ -98,9 +102,16 @@ def compute_entry_hash(seq: int, prev_hash: str, payload: dict[str, Any], create
 def _connect(db_path: Path | str) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(path), check_same_thread=False)
+    con = sqlite3.connect(
+        str(path),
+        timeout=SQLITE_BUSY_TIMEOUT_SECONDS,
+        check_same_thread=False,
+    )
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    # Explicit so the value is observable via `PRAGMA busy_timeout` and does not
+    # depend on the sqlite3 module default (5s), which fails cross-process writers.
+    con.execute(f"PRAGMA busy_timeout = {int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)}")
     return con
 
 

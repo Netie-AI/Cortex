@@ -1,4 +1,5 @@
 # Postgres RLS proof (F7 remainder / C-SEC-2) — fails closed without a green DSN job.
+# GH-04 (#244): also runs the Postgres ledger tests and fails if any is skipped.
 name: RLS Proof
 
 on:
@@ -44,3 +45,36 @@ jobs:
           pip install -e ".[dev,api,dms,postgres]"
       - name: RLS deny proof
         run: pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short
+      - name: Postgres ledger proof (chain, 20-way concurrency, append-only trigger)
+        run: >-
+          pytest tests/dms/test_f1_ledger.py -k postgres -q --tb=short -rA
+          -p no:cacheprovider --junitxml=ledger-pg-junit.xml
+      - name: Postgres ledger tests must be PASSED, never SKIPPED
+        # pytest exits 0 when every selected test is skipped (for example when the
+        # DSN is unset or sqlalchemy is missing). This step turns that into a failure
+        # so the proof cannot silently degrade into "0 ran, job green".
+        run: |
+          python - <<'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse("ledger-pg-junit.xml").getroot()
+          cases = list(root.iter("testcase"))
+          expected = {
+              "test_postgres_chain_append_and_verify_ok",
+              "test_postgres_concurrent_appends_consistent",
+              "test_postgres_append_only_trigger",
+          }
+          names = {c.get("name") for c in cases}
+          skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
+          failed = [c.get("name") for c in cases if c.find("failure") is not None or c.find("error") is not None]
+          missing = sorted(expected - names)
+          print(f"ran={sorted(names)} skipped={skipped} failed={failed} missing={missing}")
+          if missing or skipped or failed:
+              print("FAIL: Postgres ledger proof did not run to PASSED", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {len(cases)} Postgres ledger tests PASSED")
+          EOF
+      - name: Multi-process SQLite ledger proof
+        env:
+          DMS_LEDGER_DSN: ""
+        run: pytest tests/dms/test_f1_ledger_multiprocess.py -q --tb=short -p no:cacheprovider
