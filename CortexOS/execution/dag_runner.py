@@ -694,6 +694,11 @@ async def run_dag(
                 return node, nr
 
         started_at = now_utc()
+        # Per-attempt watermark (#252): the guard in ensure_node_record only
+        # counts rows appended after this point, so an LLM row written during
+        # this attempt is not doubled, while a retry of a node that failed
+        # earlier on this worker (same-ledger resume) still records its own row.
+        rows_before = ledger.node_record_count(context.run_id, node.id)
         try:
             nr = await execute_node(node, context, router, ledger, workflow_cost_ceiling_myr=wf_val)
         except Exception as exc:
@@ -703,8 +708,9 @@ async def run_dag(
             # audit trail. llm_judged rows are owned by invoke_routed_completion
             # (ok and error rows on spend; no row on a pre-spend refusal such as
             # CostCeilingExceeded, which tests/test_execution pins), so every
-            # other kind writes its error row here. ensure_node_record's guard
-            # keeps an agent_task that already logged an LLM row to one row.
+            # other kind writes its error row here. ensure_node_record's
+            # per-attempt guard keeps an agent_task that already logged an LLM
+            # row during this attempt to one row.
             # A ledger fault must not mask the original exception.
             if node.type != NodeType.LLM_JUDGED:
                 try:
@@ -717,6 +723,7 @@ async def run_dag(
                         status="error",
                         error=format_node_error(exc),
                         started_at=started_at,
+                        dedupe_after=rows_before,
                     )
                 except Exception:
                     pass
@@ -728,6 +735,7 @@ async def run_dag(
             cost_myr=float(nr.cost_myr),
             ceiling_myr=wf if wf is not None else None,
             started_at=started_at,
+            dedupe_after=rows_before,
         )
         if jkey:
             try:

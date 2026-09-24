@@ -117,6 +117,14 @@ class CostLedger:
     def has_node_record(self, run_id: str, node_id: str) -> bool:
         return any(r.run_id == run_id and r.node_id == node_id for r in self._records)
 
+    def node_record_count(self, run_id: str, node_id: str) -> int:
+        """Rows this worker holds for ``(run_id, node_id)``; an attempt's watermark.
+
+        Take it before an attempt and pass it to ``ensure_node_record`` as
+        ``dedupe_after`` so the guard only sees rows written during that attempt.
+        """
+        return sum(1 for r in self._records if r.run_id == run_id and r.node_id == node_id)
+
     async def ensure_node_record(
         self,
         run_id: str,
@@ -129,6 +137,7 @@ class CostLedger:
         error: str | None = None,
         started_at: datetime | None = None,
         cache_hit: bool = False,
+        dedupe_after: int | None = None,
     ) -> None:
         """Write a ledger row when a node finished without ``invoke_routed_completion``.
 
@@ -136,11 +145,22 @@ class CostLedger:
         attempt. ``status`` is ``ok`` for a completed node, ``error`` for one
         that raised (``error`` carries the class and truncated message, see
         :func:`format_node_error`), and ``replayed`` for a node served from the
-        step journal at 0 MYR. The ``has_node_record`` guard is what keeps the
-        LLM path, which writes its own ok/error rows through ``add``, from
-        being doubled here.
+        step journal at 0 MYR.
+
+        De-duplication is per attempt, not per node. With ``dedupe_after`` (the
+        :meth:`node_record_count` taken before the attempt started) the row is
+        skipped only when a row for this node was appended *during* the attempt,
+        which is how the LLM path (``invoke_routed_completion`` writes its own
+        ok/error rows through ``add``) is kept to one row per attempt, while a
+        retry of a node that failed earlier on this worker still gets its own
+        row. Without ``dedupe_after`` the guard is whole-history
+        (``has_node_record``): used for journal replays, where a worker that
+        already holds the node's original row must not add a second one.
         """
-        if self.has_node_record(run_id, node_id):
+        if dedupe_after is None:
+            if self.has_node_record(run_id, node_id):
+                return
+        elif self.node_record_count(run_id, node_id) > dedupe_after:
             return
         ended = now_utc()
         started = started_at if started_at is not None else ended

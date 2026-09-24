@@ -3,7 +3,7 @@
 - **Date:** 2026-09-24
 - **Keywords:** dag_runner, run_dag, cost_ledger, node_executions, ensure_node_record, error row, replayed, step journal, resume, asyncio.gather, audit trail, labels, build_labels, ledger_status_index, ambiguous_ledger_join, kev_calibration_report, H2-COST-NODE-ALL, EPIC-KEV-LOOP, EPIC-HARDEN-2
 - **Main idea:** `run_dag` wrote a `node_executions` row for a non-LLM node only after it succeeded, so a failed run's audit trail was missing the node that failed, and a resumed worker recorded nothing for nodes it served from the step journal. Now every kind writes exactly one row per attempt: `ok` on success, `error` (class plus truncated message) when it raises, `replayed` at 0 MYR on a journal replay. A parallel batch settles every sibling before re-raising, so a failed layer leaves one row per node.
-- **Verify:** `python -m pytest tests/test_execution/test_cost_node_all.py -q -p no:cacheprovider` (14 tests) then `python -m pytest tests/ -q -p no:cacheprovider`
+- **Verify:** `python -m pytest tests/test_execution/test_cost_node_all.py -q -p no:cacheprovider` (17 tests) then `python -m pytest tests/ -q -p no:cacheprovider`
 - **Does not prove:** any Postgres-backed ledger behaviour (in-process `CostLedger` only; the insert SQL is unchanged and `status`/`error` are existing columns); a row for an `llm_judged` node refused before spend (see "Not done"); cross-worker de-duplication of replay rows (a fresh worker writes a `replayed` row even when Postgres already holds the original `ok` row, by design: the replay is evidence of the resume, not a second attempt, and every label consumer must drop it; see "Verifier findings addressed").
 - **Cite:** issue #252 acceptance criteria; epic #249; `docs/subagents_findings/2026-09-23_gh-03.md` (replay exemption and the one-lookup rule this ticket builds on).
 
@@ -43,7 +43,7 @@ Pass on base (5), kept as regression guards for the "never two rows" and no-fals
 
 `CortexOS/routing/cost_ledger.py`:
 
-- `ensure_node_record` gained keyword-only `status="ok"`, `error=None`, `started_at=None`, `cache_hit=False`. Defaults keep every existing caller byte-for-byte equivalent (`tests/test_execution/test_cost_ledger_and_executor.py::test_ensure_node_record_skips_when_llm_already_wrote` still passes). `latency_ms` is now derived from `started_at` when given, 0 otherwise. The `has_node_record` guard is unchanged and is what keeps the LLM path to one row.
+- `ensure_node_record` gained keyword-only `status="ok"`, `error=None`, `started_at=None`, `cache_hit=False`. Defaults keep every existing caller byte-for-byte equivalent (`tests/test_execution/test_cost_ledger_and_executor.py::test_ensure_node_record_skips_when_llm_already_wrote` still passes). `latency_ms` is now derived from `started_at` when given, 0 otherwise. The `has_node_record` guard kept the LLM path to one row; round 3 below narrows it to one attempt (`dedupe_after`), because a whole-history guard dropped a retry's row.
 - New `ERROR_MAX_CHARS = 500` and `format_node_error(exc, *, limit)`: `ClassName: message`, truncated with a trailing `...`. Module-level, no new imports.
 
 `CortexOS/execution/dag_runner.py`:
@@ -97,6 +97,38 @@ Swap/run/restore record: `3 failed, 11 passed` with the base file, `14 passed` a
 **Gates after the fix.** Full suite `2375 passed, 13 skipped, 4 xfailed` (2372 + 3 new); `ruff check CortexOS packages/cortex_contract scripts tests/packaging tests/contract tests/test_execution/test_cost_node_all.py` clean; `lint-imports` 3 kept, 0 broken; `tests/contract` + `tests/test_decision` 206 passed; `mypy CortexOS/decision/labels.py` clean; `scripts/check_versions.py` OK. `tests/test_decision/test_labels_and_report.py` (#245's own gate) unmodified and green.
 
 **Does not prove.** That every other consumer of `node_executions` filters `replayed`: `CostLedger.total_cost` is unaffected (0 MYR), and `kev_calibration_report` is the only label consumer today. Any new reader that counts rows as attempts must import `LEDGER_NON_ATTEMPT_STATUSES`.
+
+## Judge finding addressed (round 3): dedupe per attempt, not per node
+
+**Claim.** On a same-worker resume (`POST /api/workflows/resume` in `CortexOS/api/workflow_routes.py` reuses `app.state.ledger` and the same `run_id`), a node that failed and then succeeds on the retry keeps only its stale `error` row: the retry's `ok` row is dropped, because `ensure_node_record` skipped whenever `has_node_record(run_id, node_id)` was true over the node's *whole* history. Base (275fe13) wrote no error row, so its retry's `ok` row landed; 6df1d09/3fd00ca made the audit trail say the node failed when it succeeded.
+
+**Expected vs actual.**
+- Expected: one row per attempt. Parallel tool layer with `t2` raising, then a same-ledger resume after the failure is cleared: `t2` rows `[error (attempt 1), ok (attempt 2)]`; `t1`/`t3`/`emit` one `ok` each (replays on the worker that holds the originals add nothing). A second consecutive failure: two `error` rows.
+- Actual on 3fd00ca (new tests run against `git show 3fd00ca:` of `dag_runner.py` and `cost_ledger.py`): `t2 == [('error', '_BoomTool: tool t2 exploded')]` (no ok row, while the run returned t2's retry output), and `[('error', '_BoomTool: first')]` for the double failure (second error lost).
+- Actual after: exactly the expected rows.
+
+**Root cause.** The de-duplication key was `(run_id, node_id)` but the thing being de-duplicated is an *attempt*. The guard existed to stop the dag_runner's row doubling the row `invoke_routed_completion` writes during the same attempt; applied over whole history it also swallowed later attempts. Class: idempotency key coarser than the event it guards.
+
+**Fix.**
+- `CostLedger.node_record_count(run_id, node_id)` (new) and `ensure_node_record(..., dedupe_after: int | None = None)`. With `dedupe_after` the write is skipped only when the node's row count has grown past the watermark, i.e. a row was appended *during this attempt*. Without it the whole-history guard is unchanged (default for existing callers and for replays).
+- `dag_runner._one` takes `rows_before = ledger.node_record_count(...)` right after `started_at`, before `execute_node`, and passes `dedupe_after=rows_before` on both the ok and the error write. The replay write keeps the whole-history guard: a worker holding the original row adds nothing; a fresh worker records `replayed`.
+- Design decision: a row-count watermark instead of the suggested `dedupe_since=started_at` timestamp. Same semantics, but it does not depend on the wall clock: with coarse clock resolution (Windows) a fast retry could share `started_at` with the previous attempt's row and be skipped again, and a clock step backwards would do the same. `_records` is append-only, so the count is monotonic per worker. Nodes with the same `node_id` never run concurrently within one run, so the watermark cannot be advanced by a sibling.
+
+**KEV-CALIB pairing.** `build_labels` pairs ordinally per `(run_id, node_id)`; multiple rows per node are its normal case (one per attempt). The LEDGER_NON_ATTEMPT_STATUSES filter from round 2 is kept. New test `test_llm_node_retry_on_same_ledger_has_one_row_per_attempt`: an `llm_judged` node fails (executor error row), is resumed on the same ledger and succeeds: rows `[j1 error, j1 ok, emit ok]`, `adapter.calls == 2`, total 0.5 MYR, and two decision-log rows label as `[(j1, 0), (j1, 1)]` with nothing excluded. It passes on 3fd00ca too (the executor, not the dag_runner, owns LLM rows); it is the regression guard that the narrower guard does not double an LLM attempt. `tests/test_decision` green.
+
+**Tests** (3 new, 17 total in `tests/test_execution/test_cost_node_all.py`):
+
+| Test | On 3fd00ca |
+|---|---|
+| `test_same_ledger_resume_after_failed_tool_records_error_then_ok` | FAIL: `[('error', ...)] == [('error', ...), ('ok', None)]` |
+| `test_same_ledger_resume_that_fails_again_records_two_error_rows` | FAIL: `[('error', '_BoomTool: first')] == [... ('error', '_BoomTool: second')]` |
+| `test_llm_node_retry_on_same_ledger_has_one_row_per_attempt` | pass (regression guard, see above) |
+
+Swap/run/restore: `2 failed, 15 passed` with 3fd00ca's two source files, `17 passed` after restore.
+
+**Gates.** Full suite `2378 passed, 13 skipped, 4 xfailed` (rc=0); `ruff check` on the four changed code/test files clean; `lint-imports` 3 kept, 0 broken (rc=0); `tests/contract` 95 passed (rc=0); `tests/test_decision` + this file 128 passed; `mypy` no errors in `cost_ledger.py`/`dag_runner.py`; `scripts/check_versions.py` OK.
+
+**Verified vs assumed.** Verified in-process (`CostLedger` without an engine) by driving `run_dag` twice on one ledger with `resume=True`, which is what the resume route does with `app.state.ledger`. Assumed: the HTTP route itself adds nothing that changes this (not exercised end to end here); with a Postgres engine the watermark counts only this worker's in-process rows, which is what the guard needs (it only has to see rows written during the current attempt by this same process).
 
 ## Root-cause class
 

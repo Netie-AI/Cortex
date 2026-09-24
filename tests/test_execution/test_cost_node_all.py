@@ -549,3 +549,126 @@ def test_kev_calibration_report_counts_a_resumed_node_with_replay_rows(tmp_path)
     assert "n=1" in lines, proc.stdout + proc.stderr
     assert "excluded none=0" in lines, proc.stdout + proc.stderr
     assert not any(line.startswith("excluded ambiguous_ledger_join") for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# Judge finding (#252): de-duplication is per attempt, not per node. A
+# same-worker resume (POST /api/workflows/resume reuses app.state.ledger and
+# the run_id) re-executes a node that failed; its retry must get its own row
+# next to the earlier error row, never be swallowed by it.
+# ---------------------------------------------------------------------------
+
+
+def _rows_by_node(ledger: CostLedger, run_id: str) -> dict[str, list[tuple[str, str | None]]]:
+    out: dict[str, list[tuple[str, str | None]]] = {}
+    for r in ledger.records_for_run(run_id):
+        out.setdefault(r.node_id, []).append((r.status, r.error))
+    return out
+
+
+def _journal_on(tmp_path, monkeypatch) -> None:
+    from netie.execution import step_journal
+
+    monkeypatch.setattr(step_journal, "DEFAULT_DB", tmp_path / "journal.db")
+    monkeypatch.setenv("CORTEX_STEP_JOURNAL", "1")
+
+
+@pytest.mark.asyncio
+async def test_same_ledger_resume_after_failed_tool_records_error_then_ok(tmp_path, monkeypatch):
+    _journal_on(tmp_path, monkeypatch)
+    run_id = "run_retry_ok"
+    ledger = CostLedger()
+
+    _patch_tools(monkeypatch, {"t2": _BoomTool("tool t2 exploded")})
+    with pytest.raises(_BoomTool):
+        await run_dag(
+            _tool_layer_dag(), ExecutionContext(run_id), _router(), ledger, parallel=True
+        )
+
+    # The failure is cleared; the same worker resumes the same run_id.
+    calls = _patch_tools(monkeypatch, {})
+    res = await run_dag(
+        _tool_layer_dag(), ExecutionContext(run_id), _router(), ledger, parallel=True, resume=True
+    )
+
+    # The run completes and t2's output is the retry's, not a replay.
+    assert set(res.outputs) == {*TOOLS, "emit"}
+    assert res.outputs["t2"].output == {"ok": True, "tool": "t2"}
+    assert calls == ["t2"], "t1/t3 are served from the journal, only t2 re-runs"
+
+    rows = _rows_by_node(ledger, run_id)
+    # One row per attempt: the failed attempt keeps its error row and the
+    # successful retry adds its ok row.
+    assert rows["t2"] == [("error", "_BoomTool: tool t2 exploded"), ("ok", None)]
+    # Replayed siblings keep their single original row on this worker.
+    assert rows["t1"] == [("ok", None)]
+    assert rows["t3"] == [("ok", None)]
+    assert rows["emit"] == [("ok", None)]
+    assert ledger.total_cost(run_id) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_same_ledger_resume_that_fails_again_records_two_error_rows(tmp_path, monkeypatch):
+    _journal_on(tmp_path, monkeypatch)
+    run_id = "run_retry_err"
+    ledger = CostLedger()
+
+    _patch_tools(monkeypatch, {"t2": _BoomTool("first")})
+    with pytest.raises(_BoomTool, match="first"):
+        await run_dag(
+            _tool_layer_dag(), ExecutionContext(run_id), _router(), ledger, parallel=True
+        )
+    _patch_tools(monkeypatch, {"t2": _BoomTool("second")})
+    with pytest.raises(_BoomTool, match="second"):
+        await run_dag(
+            _tool_layer_dag(),
+            ExecutionContext(run_id),
+            _router(),
+            ledger,
+            parallel=True,
+            resume=True,
+        )
+
+    rows = _rows_by_node(ledger, run_id)
+    assert rows["t2"] == [("error", "_BoomTool: first"), ("error", "_BoomTool: second")]
+    assert rows["t1"] == [("ok", None)]
+    assert rows["t3"] == [("ok", None)]
+    assert "emit" not in rows
+
+
+@pytest.mark.asyncio
+async def test_llm_node_retry_on_same_ledger_has_one_row_per_attempt(tmp_path, monkeypatch):
+    """The executor owns LLM rows; the per-attempt guard must neither double a
+    row within an attempt nor drop the retry's row. The KEV label join pairs
+    the two attempts ordinally with their two decision-log rows."""
+    from netie.decision.labels import build_labels
+
+    _journal_on(tmp_path, monkeypatch)
+    run_id = "run_llm_retry"
+    ledger = CostLedger()
+    adapter = _Adapter(fail=True)
+
+    with pytest.raises(RuntimeError, match="provider down"):
+        await run_dag(_llm_dag(), ExecutionContext(run_id), _llm_router(adapter), ledger)
+    adapter.fail = False
+    res = await run_dag(
+        _llm_dag(), ExecutionContext(run_id), _llm_router(adapter), ledger, resume=True
+    )
+
+    assert adapter.calls == 2
+    assert res.outputs["j1"].output["content"] == "ok"
+    rows = ledger.records_for_run(run_id)
+    assert [(r.node_id, r.status) for r in rows] == [("j1", "error"), ("j1", "ok"), ("emit", "ok")]
+    assert ledger.total_cost(run_id) == pytest.approx(0.5)
+
+    # Two attempts, two log rows, two ledger rows: paired, never ambiguous.
+    entries = [
+        {**_decision_entry(run_id), "status": "error", "error": "bad output"},
+        _decision_entry(run_id),
+    ]
+    labelled = build_labels(entries, ledger_records=rows)
+    assert dict(labelled.excluded) == {}
+    assert [(r.node_id, r.label, r.source) for r in labelled.rows] == [
+        ("j1", 0, "ledger_status"),
+        ("j1", 1, "ledger_status"),
+    ]
