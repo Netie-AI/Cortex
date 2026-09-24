@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 Role = Literal["viewer", "steward", "admin"]
 
@@ -134,3 +134,29 @@ def require_role(min_role: Role):
         return caller
 
     return _dep
+
+
+class DmsRequestAuthorizer:
+    """The DMS implementation of the engine's request authorizer port (TRUST-01).
+
+    Same rules as :func:`get_caller` and :func:`require_role`, so an engine route
+    gated through ``CortexOS.security.auth_port`` accepts exactly the keys and
+    roles a DMS route accepts, including ``DMS_AUTH_DISABLED``.
+    """
+
+    async def authorize(self, request: Request, min_role: str) -> Caller:
+        caller = await get_caller(
+            x_api_key=request.headers.get("X-API-Key"),
+            authorization=request.headers.get("Authorization"),
+        )
+        return await require_role(min_role)(caller)  # type: ignore[arg-type]
+
+
+def register_request_authorizer() -> None:
+    """Hand the engine our authorizer (the arrow points packs -> CortexOS)."""
+    from CortexOS.security.auth_port import register_authorizer
+
+    register_authorizer(DmsRequestAuthorizer())
+
+
+register_request_authorizer()

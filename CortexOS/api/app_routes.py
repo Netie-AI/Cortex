@@ -10,10 +10,11 @@ import base64
 import binascii
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from CortexOS.execution import app_package, app_store, humanize
+from CortexOS.security.auth_port import require_role
 
 
 class ImportBody(BaseModel):
@@ -57,8 +58,16 @@ def _fail(status: int, code: str) -> None:
     raise HTTPException(status_code=status, detail=humanize.explain(code))
 
 
+# TRUST-01 (#257): every route is gated through the engine's auth port. Reads
+# need viewer, drafts and lifecycle housekeeping need steward, and anything that
+# reads the host filesystem, lets code run, or destroys an app needs admin.
+_VIEWER = [Depends(require_role("viewer"))]
+_STEWARD = [Depends(require_role("steward"))]
+_ADMIN = [Depends(require_role("admin"))]
+
+
 def register_app_routes(app: Any) -> None:
-    @app.post("/api/apps/import")
+    @app.post("/api/apps/import", dependencies=_STEWARD)
     async def import_app(body: ImportBody) -> dict[str, Any]:
         try:
             data = base64.b64decode(body.zip_base64, validate=True)
@@ -70,7 +79,7 @@ def register_app_routes(app: Any) -> None:
         out["app"] = _humanize(out.get("app"))
         return out
 
-    @app.post("/api/apps/import-folder")
+    @app.post("/api/apps/import-folder", dependencies=_ADMIN)
     async def import_app_folder(body: ImportFolderBody) -> dict[str, Any]:
         """Point at a project folder — no zipping, no base64, no encoding step."""
         out = app_store.import_folder(body.path, name=body.name)
@@ -79,17 +88,17 @@ def register_app_routes(app: Any) -> None:
         out["app"] = _humanize(out.get("app"))
         return out
 
-    @app.get("/api/apps")
+    @app.get("/api/apps", dependencies=_VIEWER)
     async def list_apps() -> dict[str, Any]:
         app_store.init()
         return {"ok": True, "apps": [_humanize(a) for a in app_store.list_apps()]}
 
-    @app.get("/api/apps/{app_id}")
+    @app.get("/api/apps/{app_id}", dependencies=_VIEWER)
     async def get_app(app_id: str) -> dict[str, Any]:
         app_store.init()
         return {"ok": True, "app": _humanize(_found(app_store.get_app(app_id)))}
 
-    @app.post("/api/apps/{app_id}/approve")
+    @app.post("/api/apps/{app_id}/approve", dependencies=_ADMIN)
     async def approve_app(app_id: str) -> dict[str, Any]:
         app_store.init()
         _found(app_store.get_app(app_id))
@@ -98,7 +107,7 @@ def register_app_routes(app: Any) -> None:
             raise HTTPException(status_code=409, detail=str(out.get("error")))
         return out
 
-    @app.post("/api/apps/{app_id}/reject")
+    @app.post("/api/apps/{app_id}/reject", dependencies=_STEWARD)
     async def reject_app(app_id: str, body: RejectBody | None = None) -> dict[str, Any]:
         app_store.init()
         _found(app_store.get_app(app_id))
@@ -107,7 +116,7 @@ def register_app_routes(app: Any) -> None:
             raise HTTPException(status_code=409, detail=str(out.get("error")))
         return out
 
-    @app.post("/api/apps/{app_id}/rescan")
+    @app.post("/api/apps/{app_id}/rescan", dependencies=_STEWARD)
     async def rescan_app(app_id: str) -> dict[str, Any]:
         app_store.init()
         _found(app_store.get_app(app_id))
@@ -116,7 +125,7 @@ def register_app_routes(app: Any) -> None:
             raise HTTPException(status_code=409, detail=str(out.get("error")))
         return out
 
-    @app.post("/api/apps/{app_id}/start")
+    @app.post("/api/apps/{app_id}/start", dependencies=_ADMIN)
     async def start_app(app_id: str) -> dict[str, Any]:
         app_store.init()
         _found(app_store.get_app(app_id))
@@ -126,7 +135,7 @@ def register_app_routes(app: Any) -> None:
         out["app"] = _humanize(out.get("app"))
         return out
 
-    @app.post("/api/apps/{app_id}/stop")
+    @app.post("/api/apps/{app_id}/stop", dependencies=_STEWARD)
     async def stop_app(app_id: str) -> dict[str, Any]:
         app_store.init()
         _found(app_store.get_app(app_id))
@@ -135,7 +144,7 @@ def register_app_routes(app: Any) -> None:
             raise HTTPException(status_code=409, detail=str(out.get("error")))
         return out
 
-    @app.post("/api/apps/{app_id}/dockerize")
+    @app.post("/api/apps/{app_id}/dockerize", dependencies=_STEWARD)
     async def dockerize_app(app_id: str) -> dict[str, Any]:
         """Write a Dockerfile for an app that doesn't ship one — one click to
         make it hostable. Never overwrites an author's own Dockerfile."""
@@ -147,7 +156,7 @@ def register_app_routes(app: Any) -> None:
         out["app"] = _humanize(out.get("app"))
         return out
 
-    @app.delete("/api/apps/{app_id}")
+    @app.delete("/api/apps/{app_id}", dependencies=_ADMIN)
     async def delete_app(app_id: str) -> dict[str, Any]:
         app_store.init()
         _found(app_store.get_app(app_id))

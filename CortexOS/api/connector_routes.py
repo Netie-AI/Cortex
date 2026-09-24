@@ -10,14 +10,24 @@ No from __future__ import annotations (FastAPI). No packs imports (C2).
 """
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from CortexOS.connectors import agents, computer_control, cursor_session, workspaces
 from CortexOS.connectors.dispatch import dispatch as run_dispatch
+from CortexOS.security.auth_port import require_role
 
-router = APIRouter(prefix="/api/connectors", tags=["connectors"])
+# TRUST-01 (#257): the whole router needs at least viewer, through the engine's
+# auth port (no packs import). Routes that dispatch work need steward, and
+# driving the host's mouse and keyboard needs admin.
+router = APIRouter(
+    prefix="/api/connectors",
+    tags=["connectors"],
+    dependencies=[Depends(require_role("viewer"))],
+)
+_STEWARD = [Depends(require_role("steward"))]
+_ADMIN = [Depends(require_role("admin"))]
 
 
 class DispatchIn(BaseModel):
@@ -214,7 +224,7 @@ def get_agent_messages(agent_id: str) -> dict[str, Any]:
     return {"agent": agent, "messages": agents.messages(agent_id)}
 
 
-@router.post("/agents/{agent_id}/messages")
+@router.post("/agents/{agent_id}/messages", dependencies=_STEWARD)
 def post_agent_message(agent_id: str, body: AgentPostIn) -> dict[str, Any]:
     try:
         return agents.post(agent_id, body.text, kind=body.kind)
@@ -229,7 +239,7 @@ def computer_control_status() -> dict[str, Any]:
     return computer_control.probe()
 
 
-@router.post("/computer-control/invoke")
+@router.post("/computer-control/invoke", dependencies=_ADMIN)
 def computer_control_invoke(body: ComputerControlIn) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if body.x is not None:
@@ -244,7 +254,7 @@ def computer_control_invoke(body: ComputerControlIn) -> dict[str, Any]:
     return out
 
 
-@router.post("/dispatch")
+@router.post("/dispatch", dependencies=_STEWARD)
 def dispatch(req: DispatchIn) -> dict[str, Any]:
     try:
         return run_dispatch(req.text, kind=req.kind, workspace=req.workspace)
@@ -259,7 +269,7 @@ def list_chats() -> dict[str, Any]:
     return {"chats": cursor_session.get_port().list_chats()}
 
 
-@router.post("/cursor/chats")
+@router.post("/cursor/chats", dependencies=_STEWARD)
 def open_chat(req: OpenChatIn) -> dict[str, Any]:
     try:
         workspaces.get(req.workspace)
@@ -278,7 +288,7 @@ def get_messages(chat_id: str) -> dict[str, Any]:
     return {"chat_id": chat_id, "messages": msgs}
 
 
-@router.post("/cursor/chats/{chat_id}/instruct")
+@router.post("/cursor/chats/{chat_id}/instruct", dependencies=_STEWARD)
 def instruct(chat_id: str, req: InstructIn) -> dict[str, Any]:
     try:
         chat = cursor_session.get_port().instruct(chat_id, req.instruction)
