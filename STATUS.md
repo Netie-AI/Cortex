@@ -1,6 +1,22 @@
 # STATUS.md
 **Last updated:** 2026-09-24 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
 
+> **2026-09-24 (EPIC-TRUST-01 #256):** PR #235 (draft). #257 TRUST-01: engine
+> auth port (pack registers the authorizer; CortexOS imports no packs) gates
+> every /api/apps and /api/connectors route by role; no key 401, low role 403,
+> no authorizer 503; unchanged for sufficient roles. #258 TRUST-02: engine
+> failure with require_grounding abstains (no warehouse rows). #259 TRUST-03:
+> ABSTAIN envelopes carry no sources or drillthrough. #260 TRUST-04: orphaned
+> runs reaped on loop start as "interrupted, resumable"; resume replays. #261
+> TRUST-05: scripts/check_junit_all_passed.py guards every RLS proof step (an
+> all-skipped step now fails; replayed locally on Postgres 16). #262 TRUST-06:
+> EXIF-GPS strip test runs without piexif and asserts the stored photo.
+> Residual: default auth is still fail-open (public demo keys accepted when
+> DMS_API_KEYS unset; founder decision), operator desk HTML sends no key,
+> viewer reads show host paths, get_task/activity do not reap. Queued: auth for
+> routines/workflows/goals/DMS writes/contract ledger. Suite 2832 passed /
+> 12 skipped / 4 xfailed.
+
 > **2026-09-24 (EPIC-HARDEN-2 #249):** PR #235 (draft). Six residuals closed,
 > each passed by an independent adversarial verifier (four needed a judge-model
 > escalation). #250 PII redacted before routing and in the cost gate; NRIC/MyKad
