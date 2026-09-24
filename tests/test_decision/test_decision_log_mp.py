@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -37,6 +38,7 @@ _MP_WORKER = """
 import json, os, sys, threading, time
 from netie.decision import decision_log
 proc, threads, n, go = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+open(go + ".ready." + proc, "w").close()  # imported and ready; the parent opens the gate once all are
 deadline = time.monotonic() + 60
 while not os.path.exists(go):
     if time.monotonic() > deadline:
@@ -51,6 +53,7 @@ def run(t):
         if decision_log.append({"run_id": f"p{proc}-t{t}", "node_id": str(i), "proc": proc, "thread": t, "i": i,
                                 "pad": "x" * (i % 7) * 40}):
             ok += 1
+        time.sleep(0.001)  # yield so other writers take the file between appends, even under load
     results[t] = ok
 ts = [threading.Thread(target=run, args=(t,)) for t in range(threads)]
 for th in ts: th.start()
@@ -189,7 +192,16 @@ def test_four_processes_eight_threads_each_write_every_line_whole(tmp_path: Path
         )
         for p in range(PROCESSES)
     ]
-    go.touch()  # start barrier: every interpreter is up, now they all append at once
+    # Two-phase start barrier: wait until every interpreter has imported the
+    # module and signalled ready, then open the gate so they append together.
+    # Touching the gate right after Popen let the first process to finish
+    # importing write most of its lines alone (3 switches in 800 under load).
+    deadline = time.monotonic() + 120
+    while not all((tmp_path / f"go.ready.{p}").exists() for p in range(PROCESSES)):
+        assert time.monotonic() < deadline, "workers never signalled ready"
+        assert all(p.poll() is None for p in procs), "a worker exited before the barrier"
+        time.sleep(0.01)
+    go.touch()
     results = [p.communicate(timeout=300) for p in procs]
     failed = [(p.args[3], p.returncode, err) for p, (_, err) in zip(procs, results, strict=True) if p.returncode != 0]
     assert not failed, "worker(s) failed:\n" + "\n".join(f"[proc {w}] rc={rc}\n{err}" for w, rc, err in failed)
