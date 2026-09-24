@@ -1,0 +1,85 @@
+# H2-COST-NODE-ALL: every DAG node kind writes a ledger row, including on failure (#252)
+
+- **Date:** 2026-09-24
+- **Keywords:** dag_runner, run_dag, cost_ledger, node_executions, ensure_node_record, error row, replayed, step journal, resume, asyncio.gather, audit trail, H2-COST-NODE-ALL, EPIC-HARDEN-2
+- **Main idea:** `run_dag` wrote a `node_executions` row for a non-LLM node only after it succeeded, so a failed run's audit trail was missing the node that failed, and a resumed worker recorded nothing for nodes it served from the step journal. Now every kind writes exactly one row per attempt: `ok` on success, `error` (class plus truncated message) when it raises, `replayed` at 0 MYR on a journal replay. A parallel batch settles every sibling before re-raising, so a failed layer leaves one row per node.
+- **Verify:** `python -m pytest tests/test_execution/test_cost_node_all.py -q -p no:cacheprovider` (11 tests) then `python -m pytest tests/ -q -p no:cacheprovider`
+- **Does not prove:** any Postgres-backed ledger behaviour (in-process `CostLedger` only; the insert SQL is unchanged and `status`/`error` are existing columns); a row for an `llm_judged` node refused before spend (see "Not done"); cross-worker de-duplication of replay rows (a fresh worker writes a `replayed` row even when Postgres already holds the original `ok` row, by design: they are two attempts).
+- **Cite:** issue #252 acceptance criteria; epic #249; `docs/subagents_findings/2026-09-23_gh-03.md` (replay exemption and the one-lookup rule this ticket builds on).
+
+## Expected vs actual
+
+- Expected (issue #252): when a non-LLM node raises, exactly one `node_executions` row with `status='error'` and the error class/message (truncated) is written, then the exception is re-raised unchanged. A node replayed from the step journal is recorded as `replayed` at 0 MYR, never as a fresh ok spend. No node ever gets two rows for one attempt. GH-03's parallel gate and its tests stay green unmodified.
+- Actual before (baseline 275fe13), reproduced with the new tests swapped against the base files:
+  - deterministic_rule without a ruleset raises `ValueError`; `records_for_run` holds `[('dref', 'ok')]` only, no row for `chk`.
+  - three parallel tool_call siblings with `t2` raising: `records_for_run` holds `t1` and `t3` only (`KeyError: 't2'` when the test looks for its row). With the whole layer in one batch, `asyncio.gather` re-raised on the first failure and `t3` was still in flight; the run had already raised by the time its row landed (`['t1', 't3'] == ['t1', 't2', 't3']` failed).
+  - a fresh worker resuming a completed run: `records_for_run` is `[]`; the replayed nodes leave nothing in that worker's ledger.
+- Actual after: the same runs raise the same exception type and message, and the ledger holds one row per node that ran: `[('dref', 'ok'), ('chk', 'error')]` with `error='ValueError: Node 'chk': deterministic_rule requires ruleset'`, `tier='deterministic'`, `cost_myr=0.0`, `ceiling_myr` equal to the workflow ceiling; `{t1: ok, t2: error, t3: ok}` for the parallel layer, no emit row; `[('dref', 'replayed'), ('emit', 'replayed')]` with `cost_myr=0.0`, `cache_hit=True` and a run total of 0.0 for the fresh worker.
+
+## Repro
+
+```
+git show 275fe13:CortexOS/execution/dag_runner.py > CortexOS/execution/dag_runner.py
+git show 275fe13:CortexOS/routing/cost_ledger.py > CortexOS/routing/cost_ledger.py
+python -m pytest tests/test_execution/test_cost_node_all.py -q -p no:cacheprovider
+# 6 failed, 5 passed
+git checkout CortexOS/execution/dag_runner.py CortexOS/routing/cost_ledger.py
+```
+
+Fail on base (6):
+
+| Test | Failure on 275fe13 |
+|---|---|
+| `test_deterministic_rule_that_raises_writes_one_error_row_and_reraises` | `assert 0 == 1` (no row for `chk`) |
+| `test_error_text_is_class_plus_message_truncated` | `ImportError: cannot import name 'ERROR_MAX_CHARS'` (imported inside the test so the file still collects) |
+| `test_parallel_layer_with_one_failing_tool_call_has_one_row_per_node[None]` | `KeyError: 't2'` |
+| `test_parallel_layer_with_one_failing_tool_call_has_one_row_per_node[2]` | `KeyError: 't2'` |
+| `test_parallel_batch_settles_every_sibling_before_raising` | `['t1', 't3'] == ['t1', 't2', 't3']` |
+| `test_resumed_run_on_fresh_worker_records_replays_at_zero_cost` | `[] == [('dref', 'replayed'), ('emit', 'replayed')]` |
+
+Pass on base (5), kept as regression guards for the "never two rows" and no-false-positive acceptance: `test_resumed_run_on_same_worker_keeps_one_row_per_node` (a same-process resume must not double the original rows now that replays write), `test_llm_node_failure_keeps_the_single_executor_error_row` and `test_llm_node_success_keeps_the_single_executor_ok_row` (the new error path must not add a second row to the LLM path), and `test_healthy_run_of_every_non_llm_kind_has_only_ok_rows[False|True]` (document_ref, three tool_call siblings, rag_retrieve, rag_rerank, rag_answer, a2a_call and emit all complete with one `ok` row each; the no-false-positive corpus).
+
+## What changed
+
+`CortexOS/routing/cost_ledger.py`:
+
+- `ensure_node_record` gained keyword-only `status="ok"`, `error=None`, `started_at=None`, `cache_hit=False`. Defaults keep every existing caller byte-for-byte equivalent (`tests/test_execution/test_cost_ledger_and_executor.py::test_ensure_node_record_skips_when_llm_already_wrote` still passes). `latency_ms` is now derived from `started_at` when given, 0 otherwise. The `has_node_record` guard is unchanged and is what keeps the LLM path to one row.
+- New `ERROR_MAX_CHARS = 500` and `format_node_error(exc, *, limit)`: `ClassName: message`, truncated with a trailing `...`. Module-level, no new imports.
+
+`CortexOS/execution/dag_runner.py`:
+
+- `_one` takes `started_at = now_utc()` before `execute_node`. On success the existing `ensure_node_record` call passes it through, so ok rows for non-LLM nodes now carry a real latency instead of 0.
+- On exception, after the existing `node_error` event and before the unchanged `raise`, every kind except `llm_judged` writes an error row via `ensure_node_record(status="error", error=format_node_error(exc), tier=_node_tier_label(node), cost_myr=0.0, ceiling_myr=wf)`. The write is wrapped in `try/except Exception: pass` so a ledger fault can never replace the original exception. `llm_judged` is excluded because `invoke_routed_completion` owns its rows: it writes ok and error rows on spend and deliberately writes none on a pre-spend refusal (`CostCeilingExceeded`, asserted by GH-03's `test_sequential_keeps_per_node_gate_behaviour`, and `OutboundNotSendable`, asserted by `test_dag_runner.py::test_outbound_node_blocked_when_not_sendable`; both are outside this ticket's write targets and must stay green). For `agent_task`, which logs LLM rows under the same node id, the guard keeps it to one row.
+- On a journal replay, `ensure_node_record(status="replayed", cost_myr=0.0, cache_hit=True)` is called before the `node_done` event, also fault-tolerant. Because it goes through the guard, a worker that already holds the original `ok` row (same-process resume, which is what GH-03's resume tests exercise) adds nothing, and a fresh worker records the replay at 0 MYR.
+- The parallel branch now runs `asyncio.gather(..., return_exceptions=True)`, then re-raises the first exception in batch order. Before, `gather` re-raised on the first failure while the other siblings kept running detached, so their rows could land after the run had raised, and the audit trail of a failed batch depended on scheduling. GH-03's batch gate and its `_journal_lookup` sharing are untouched; the eight tests in `test_parallel_cost_ceiling.py` pass unmodified.
+- `_TIER_LABELS` / `_node_tier_label(node)` map a node kind to the tier label its success path would have reported (`deterministic`, `emit`, `tool`, `rag`, `a2a`, `agent`), used only for error rows because a node that raised never returned a `NodeResult`.
+
+`tests/test_execution/test_cost_node_all.py` (new, 11 tests). Every test asserts on the run result and `records_for_run`. The tool_call tests monkeypatch `netie.execution.tool_runner.run_tool_call` so a named tool raises and the rest return an ok payload; nothing touches the F1 ledger or the real tool allowlist. The resume tests point `step_journal.DEFAULT_DB` at `tmp_path`.
+
+## Root-cause class
+
+Incomplete audit coverage on the failure path: the ledger write sat after the call that could raise, so the write was skipped exactly when it mattered. Same class for replays: the write depended on the in-process cache holding a row from a previous process. Fixed by making the row write unconditional per attempt (ok, error or replayed) and de-duplicated by the existing guard, not by adding a second ledger.
+
+## Which invariant applies
+
+- One ledger: rows still go through `CostLedger.add`; no new hash chain, no new table, no new columns. `status` and `error` are existing `node_executions` columns (`CortexOS/db/sql/node_executions.sql`, not touched).
+- Fail closed, in the audit sense: a node that raises now leaves evidence; the exception itself is re-raised unchanged so no caller sees a different outcome.
+- Do-not-touch respected: `executor.py`, `model_router.py`, `judgment_model.py`, `CortexOS/db/sql/**`, `tests/contract/**`, `tests/invariants/**`, `.importlinter`, `contract/**` unchanged. `dag_runner.py` gained no new module imports beyond two names from `cost_ledger`, which it already imported from; `lint-imports` 3 kept, 0 broken.
+
+## Verified vs assumed
+
+Verified:
+- The three acceptance scenarios and the truncation rule, on the fixed files (11 passed) and against the base files (6 failed, 5 passed, table above).
+- Full suite: 2372 passed, 13 skipped, 4 xfailed (baseline 2361 passed + 11 new). `ruff check` clean on the three changed files. `mypy`: 41 errors in 26 files, all pre-existing, none in the changed files (a first cut had one new error on the `gather` result narrowing; fixed with an explicit typed list). `lint-imports`: 3 kept, 0 broken. `tests/contract`: 95 passed. `tests/test_execution/`: all green including the manifest corpus.
+- GH-03 tests (`test_parallel_cost_ceiling.py`, 8) and `test_dag_runner.py` (8) unmodified and green.
+
+Assumed:
+- Postgres insert of `status='replayed'` works: the column is `TEXT NOT NULL` with no check constraint, and the insert SQL is unchanged, but no Postgres run was made here.
+- A `replayed` row from a fresh worker alongside the original `ok` row in Postgres is the intended shape (two attempts, two rows). `fetch_records_for_run` merges on `(node_id, started_at)`, so the two are distinguishable.
+- The no-false-positive corpus covers every non-LLM kind the issue lists except `deterministic_rule` on its success path, which `test_dag_runner.py` already covers with `spa_v1.yaml`.
+
+## Not done
+
+- An `llm_judged` node that raises before `invoke_routed_completion` (a `tier_pair` `ValueError`, or `OutboundNotSendable`) still leaves no row. Writing one would break the existing pre-spend-refusal convention pinned by tests outside this ticket's write targets; if that convention is to change it needs its own ticket touching `executor.py`.
+- No event emitted for the replay row beyond the existing `node_done` with `replayed: True`.
+- Pre-existing `mypy` errors (41) are outside this ticket.

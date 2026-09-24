@@ -125,27 +125,42 @@ class CostLedger:
         tier: str,
         cost_myr: float = 0.0,
         ceiling_myr: float | None = None,
+        status: str = "ok",
+        error: str | None = None,
+        started_at: datetime | None = None,
+        cache_hit: bool = False,
     ) -> None:
-        """Write a ledger row when a node finished without ``invoke_routed_completion``."""
+        """Write a ledger row when a node finished without ``invoke_routed_completion``.
+
+        H2-COST-NODE-ALL (#252): every DAG node kind gets exactly one row per
+        attempt. ``status`` is ``ok`` for a completed node, ``error`` for one
+        that raised (``error`` carries the class and truncated message, see
+        :func:`format_node_error`), and ``replayed`` for a node served from the
+        step journal at 0 MYR. The ``has_node_record`` guard is what keeps the
+        LLM path, which writes its own ok/error rows through ``add``, from
+        being doubled here.
+        """
         if self.has_node_record(run_id, node_id):
             return
-        ts = now_utc()
+        ended = now_utc()
+        started = started_at if started_at is not None else ended
+        latency_ms = max(0, int((ended - started).total_seconds() * 1000))
         await self.add(
             NodeExecutionRecord(
                 run_id=run_id,
                 node_id=node_id,
                 tier=tier,
                 model="none",
-                latency_ms=0,
+                latency_ms=latency_ms,
                 prompt_tokens=0,
                 completion_tokens=0,
                 cost_myr=round(cost_myr, 6),
-                cache_hit=False,
-                started_at=ts,
-                ended_at=ts,
-                status="ok",
+                cache_hit=cache_hit,
+                started_at=started,
+                ended_at=ended,
+                status=status,
                 ceiling_myr=ceiling_myr,
-                error=None,
+                error=error,
             )
         )
 
@@ -206,3 +221,14 @@ class CostLedger:
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+ERROR_MAX_CHARS = 500
+
+
+def format_node_error(exc: BaseException, *, limit: int = ERROR_MAX_CHARS) -> str:
+    """``ClassName: message`` truncated to ``limit`` characters for the ``error`` column."""
+    text = f"{type(exc).__name__}: {exc}"
+    if len(text) > limit:
+        return text[: max(0, limit - 3)] + "..."
+    return text

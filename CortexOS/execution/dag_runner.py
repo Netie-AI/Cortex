@@ -19,7 +19,7 @@ from netie.fabrication.dag_compiler import DAGCompiler
 from netie.fabrication.dsl_parser import AgenticDSLProgram, DSLNode, NodeType
 from netie.personality.timing import is_sendable_now
 from netie.routing.adapters.base import AdapterRequest
-from netie.routing.cost_ledger import CostLedger
+from netie.routing.cost_ledger import CostLedger, format_node_error, now_utc
 from netie.routing.tiers import Tier
 from netie.routing.token_estimate import estimate_prompt_tokens
 
@@ -662,6 +662,23 @@ async def run_dag(
                     tier=str(cached.get("tier") or "cached"),
                     cost_myr=0.0,  # replay spends nothing; original cost is in the journal
                 )
+                # H2-COST-NODE-ALL (#252): a resumed worker whose ledger holds no
+                # row for this node records the replay at 0 MYR, never as a
+                # fresh ok spend. When this worker already holds the original
+                # row (same-process resume) the guard in ensure_node_record
+                # keeps it to one row per node.
+                try:
+                    await ledger.ensure_node_record(
+                        context.run_id,
+                        node.id,
+                        tier=nr.tier,
+                        cost_myr=0.0,
+                        ceiling_myr=wf if wf is not None else None,
+                        status="replayed",
+                        cache_hit=True,
+                    )
+                except Exception:
+                    pass
                 if emit is not None:
                     emit(
                         {
@@ -676,11 +693,33 @@ async def run_dag(
                     )
                 return node, nr
 
+        started_at = now_utc()
         try:
             nr = await execute_node(node, context, router, ledger, workflow_cost_ceiling_myr=wf_val)
         except Exception as exc:
             if emit is not None:
                 emit({"type": "node_error", "node": node.id, "error": str(exc)[:300], **_node_meta(node)})
+            # H2-COST-NODE-ALL (#252): the failed node is part of the run's
+            # audit trail. llm_judged rows are owned by invoke_routed_completion
+            # (ok and error rows on spend; no row on a pre-spend refusal such as
+            # CostCeilingExceeded, which tests/test_execution pins), so every
+            # other kind writes its error row here. ensure_node_record's guard
+            # keeps an agent_task that already logged an LLM row to one row.
+            # A ledger fault must not mask the original exception.
+            if node.type != NodeType.LLM_JUDGED:
+                try:
+                    await ledger.ensure_node_record(
+                        context.run_id,
+                        node.id,
+                        tier=_node_tier_label(node),
+                        cost_myr=0.0,
+                        ceiling_myr=wf if wf is not None else None,
+                        status="error",
+                        error=format_node_error(exc),
+                        started_at=started_at,
+                    )
+                except Exception:
+                    pass
             raise
         await ledger.ensure_node_record(
             context.run_id,
@@ -688,6 +727,7 @@ async def run_dag(
             tier=nr.tier,
             cost_myr=float(nr.cost_myr),
             ceiling_myr=wf if wf is not None else None,
+            started_at=started_at,
         )
         if jkey:
             try:
@@ -739,7 +779,19 @@ async def run_dag(
                     # are already counted in that total, so they are left out.
                     fresh = [n for n in batch if not isinstance(lookups[n.id][1], dict)]
                     _gate_batch_cost(fresh, context, router, ledger, wf)
-                for node, nr in await asyncio.gather(*(_one(n, lookups[n.id]) for n in batch)):
+                # H2-COST-NODE-ALL (#252): settle every sibling before raising,
+                # so a failed batch leaves one ledger row per node instead of
+                # siblings still running detached after the run has ended. The
+                # first failure in batch order is re-raised unchanged.
+                settled = await asyncio.gather(
+                    *(_one(n, lookups[n.id]) for n in batch), return_exceptions=True
+                )
+                done: list[tuple[DSLNode, NodeResult]] = []
+                for item in settled:
+                    if isinstance(item, BaseException):
+                        raise item
+                    done.append(item)
+                for node, nr in done:
                     context.update_with_node(node.id, nr)
                     result.outputs[node.id] = nr
         else:
@@ -750,6 +802,25 @@ async def run_dag(
                 context.update_with_node(node.id, nr)
                 result.outputs[node.id] = nr
     return result
+
+
+_TIER_LABELS: dict[NodeType, str] = {
+    NodeType.DETERMINISTIC_RULE: "deterministic",
+    NodeType.DOCUMENT_REF: "deterministic",
+    NodeType.EMIT: "emit",
+    NodeType.TOOL_CALL: "tool",
+    NodeType.RAG_RETRIEVE: "rag",
+    NodeType.RAG_RERANK: "rag",
+    NodeType.RAG_ANSWER: "rag",
+    NodeType.A2A_CALL: "a2a",
+    NodeType.AGENT_TASK: "agent",
+    NodeType.LLM_JUDGED: "llm",
+}
+
+
+def _node_tier_label(node: DSLNode) -> str:
+    """Tier label for a node that raised before it could report one."""
+    return _TIER_LABELS.get(node.type, str(node.type))
 
 
 def _node_meta(node: DSLNode) -> dict[str, Any]:
