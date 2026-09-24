@@ -11,8 +11,10 @@ scoreboard predicates through ``CortexOS.decision.labels`` and prints:
   printed;
 - otherwise: fitted T (on ``log p`` pseudo-logits, stated as such), ECE, Brier,
   and serve_automation at error budgets 0.02, 0.05 and 0.10: the share of
-  served decisions that could skip escalation, with the exact raw and
-  T-scaled P(sufficient) thresholds that reproduce it.
+  served decisions that could skip escalation, with the exact raw
+  P(sufficient) threshold that reproduces it (the raw scale is the source of
+  truth) and the T-scaled one, or ``inexact`` when float rounding in the
+  scaling means no scaled threshold serves exactly the same rows.
 
 This script reports. It never writes config and never touches
 ``CORTEX_DECISION_ABSTAIN_THRESHOLD``. Moving the threshold is a founder
@@ -108,33 +110,53 @@ def report(labelled: LabelSet, log_path: Path, out=sys.stdout) -> int:
     print(f"ece_scaled={ece(scaled_rows, labels):.4f}", file=out)
     print(f"brier_raw={brier(raw_rows, labels):.4f}", file=out)
     print(f"brier_scaled={brier(scaled_rows, labels):.4f}", file=out)
-    # Temperature scaling is strictly monotone in p, so the served prefix, and
-    # therefore the share, is the same on the raw and the scaled scale. The
-    # raw threshold is the one an operator compares against the backend's own
-    # P(served tier); both are printed exactly (repr), because rounding can
-    # drop a whole tie group at the threshold and break the budget.
+    # The raw scale is the source of truth: the served prefix is computed once,
+    # on the backend's own P(sufficient). Temperature scaling is monotone in
+    # exact arithmetic but not in floats: at small T distinct raw values can
+    # saturate to the same scaled value (or a tie order can flip), so the
+    # scaled scale is never re-ranked. Its threshold is derived from prefix
+    # membership and printed only when serving scaled >= it reproduces exactly
+    # the raw prefix; otherwise it is reported ``inexact``, never guessed.
+    # Thresholds are printed exactly (repr), because rounding can drop a whole
+    # tie group at the threshold and break the budget.
     p_raw = [row[1] for row in raw_rows]
     p_scaled = [row[1] for row in scaled_rows]
     print(
         "serve_automation_note=share of served decisions that could skip escalation; "
         "a served tier that proved insufficient is always an error; "
-        f"serve when raw P(sufficient) >= p_raw_threshold (backend scale), equivalently "
-        f"T-scaled P(sufficient) >= p_scaled_threshold (T={temperature!r}); "
+        "the prefix is computed on the raw scale (source of truth): "
+        f"serve when raw P(sufficient) >= p_raw_threshold (backend scale); "
+        f"T-scaled P(sufficient) >= p_scaled_threshold (T={temperature!r}) serves the same rows "
+        "unless it reads inexact; "
         "neither is on CORTEX_DECISION_ABSTAIN_THRESHOLD's scale",
         file=out,
     )
     for budget in ERROR_BUDGETS:
         share, raw_thr = serve_automation(p_raw, labels, budget)
-        scaled_share, scaled_thr = serve_automation(p_scaled, labels, budget)
-        if share != scaled_share:  # pragma: no cover - monotonicity guard, fail loud
-            raise RuntimeError(f"raw and scaled prefixes differ at budget {budget}: {share} vs {scaled_share}")
-        raw_s = "none" if raw_thr is None else repr(raw_thr)
-        scaled_s = "none" if scaled_thr is None else repr(scaled_thr)
+        inexact_reason = None
+        if raw_thr is None:
+            raw_s = scaled_s = "none"
+        else:
+            raw_s = repr(raw_thr)
+            prefix = {i for i, p in enumerate(p_raw) if p >= raw_thr}
+            scaled_thr = min(p_scaled[i] for i in prefix)
+            served_scaled = {i for i, p in enumerate(p_scaled) if p >= scaled_thr}
+            if served_scaled == prefix:
+                scaled_s = repr(scaled_thr)
+            else:
+                scaled_s = "inexact"
+                inexact_reason = (
+                    f"serving T-scaled >= {scaled_thr!r} would serve {len(served_scaled)} rows, "
+                    f"not the {len(prefix)} rows of the raw prefix: T-scaling collapsed or "
+                    "reordered distinct raw values in floating point; use p_raw_threshold"
+                )
         print(
             f"serve_automation budget={budget:.2f} share={share:.4f} "
             f"p_raw_threshold={raw_s} p_scaled_threshold={scaled_s}",
             file=out,
         )
+        if inexact_reason is not None:
+            print(f"serve_automation_scaled_note budget={budget:.2f} {inexact_reason}", file=out)
     print("config_written=none (CORTEX_DECISION_ABSTAIN_THRESHOLD untouched)", file=out)
     return EXIT_OK
 

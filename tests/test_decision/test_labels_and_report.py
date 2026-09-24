@@ -697,3 +697,64 @@ def test_printed_thresholds_reproduce_share_and_budget_on_both_scales(log_file: 
             served = [y for v, y in zip(values, labels, strict=True) if v >= thr - 1e-12]
             assert len(served) / len(values) == pytest.approx(share, abs=1e-4), (scale, line)
             assert served.count(0) / len(served) <= budget + 1e-12, (scale, line)
+
+
+def test_float_collapse_under_small_t_reports_inexact_scaled_threshold_not_a_crash(log_file: Path):
+    """Verifier round 4 on #247: T-scaling is monotone in exact math but not in
+    floats. This log is underconfident, so T is fitted near its 0.05 floor and
+    raw 0.9999999 and 0.999999 both saturate to scaled 1.0. The report used to
+    rank the scaled scale separately, get a different share at budget 0.02 and
+    raise (exit 1, traceback, no serve_automation lines). The raw scale is the
+    source of truth: the raw threshold must reproduce share and budget, and the
+    scaled one is printed only when it serves exactly the same rows."""
+    import math
+
+    from CortexOS.decision.calibration import softmax
+
+    groups = [(0.9999999, 60, 0), (0.999999, 60, 10), (0.8, 300, 0), (0.2, 300, 300)]
+    rows: list[dict] = []
+    for p_served, n, bad in groups:
+        rows += _synthetic(n, p_served=p_served, negatives=bad, seed=len(rows) + 7)
+    for i, r in enumerate(rows):
+        r["node_id"] = f"c{i}"
+    _write(log_file, rows)
+    proc = _run_report("--log", str(log_file))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+    t = float(_kv(proc.stdout)["T"])
+    assert t < 0.1, proc.stdout
+
+    raw = [p for p, n, _ in groups for _ in range(n)]
+    labels: list[int] = []
+    for _, n, bad in groups:
+        labels += [0] * bad + [1] * (n - bad)
+    scaled = [softmax([math.log(1 - p), math.log(p)], t)[1] for p in raw]
+    assert scaled[0] == scaled[60] == 1.0  # the collapse this test is about
+
+    lines = {}
+    for line in proc.stdout.splitlines():
+        if line.startswith("serve_automation budget="):
+            parts = dict(x.split("=", 1) for x in line.split()[1:])
+            lines[parts["budget"]] = parts
+    assert set(lines) == {"0.02", "0.05", "0.10"}, proc.stdout
+    # budget 0.02: only the 0.9999999 group fits on the raw scale.
+    assert lines["0.02"]["share"] == f"{60 / 720:.4f}"
+    assert lines["0.02"]["p_raw_threshold"] == repr(0.9999999)
+    assert lines["0.02"]["p_scaled_threshold"] == "inexact", proc.stdout
+    assert "serve_automation_scaled_note budget=0.02 " in proc.stdout
+    assert "use p_raw_threshold" in proc.stdout
+    for budget_s, parts in lines.items():
+        budget, share = float(budget_s), float(parts["share"])
+        assert parts["p_raw_threshold"] != "none", parts
+        thr = float(parts["p_raw_threshold"])
+        served = [y for v, y in zip(raw, labels, strict=True) if v >= thr]
+        assert len(served) / len(raw) == pytest.approx(share, abs=1e-4), parts
+        assert served.count(0) / len(served) <= budget, parts
+        if parts["p_scaled_threshold"] == "inexact":
+            continue
+        sthr = float(parts["p_scaled_threshold"])
+        served_s = [y for v, y in zip(scaled, labels, strict=True) if v >= sthr - 1e-12]
+        assert len(served_s) / len(raw) == pytest.approx(share, abs=1e-4), parts
+        assert served_s.count(0) / len(served_s) <= budget, parts
+    # the scaled threshold is exact whenever the prefix is not split by the collapse
+    assert lines["0.05"]["p_scaled_threshold"] not in ("inexact", "none"), proc.stdout
