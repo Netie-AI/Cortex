@@ -24,9 +24,12 @@ Outcome sources, in this order of authority:
    join is therefore ordinal: the nth log row for a key is paired with the nth
    ledger record for that key, in append order. Log rows whose error class
    never reaches the ledger (cost ceilings raise before ``ledger.add``) are
-   skipped in that count. When the counts still differ the key is ambiguous
-   and every one of its rows is excluded as ``ambiguous_ledger_join``, never
-   labelled from the last record;
+   skipped in that count. Ledger rows with ``status='replayed'`` (a resumed
+   worker serving a node from the step journal, H2-COST-NODE-ALL #252) are
+   not attempts: a replay makes no routing decision and writes no log row,
+   so the index drops them before the join. When the counts still differ
+   the key is ambiguous and every one of its rows is excluded as
+   ``ambiguous_ledger_join``, never labelled from the last record;
 2. scoreboard ``predicates_pass`` for ``run_id`` where present: a failed
    predicate marks an ``ok`` node insufficient, a passed one confirms it.
 
@@ -140,6 +143,11 @@ _INFRA_STATUS_CODE_RE = re.compile(
 _NO_LEDGER_RECORD_CLASSES: frozenset[str] = frozenset(
     {"CostCeilingExceeded", "WorkflowCostCeilingExceeded"}
 )
+#: Ledger statuses that record no attempt of their own. ``replayed`` is
+#: written by ``dag_runner`` when a resumed worker serves a node from the
+#: step journal (#252): no adapter call, no routing decision, no log row.
+#: Such rows must never consume a log row in the ordinal join.
+LEDGER_NON_ATTEMPT_STATUSES: frozenset[str] = frozenset({"replayed"})
 
 EXCLUDE_NO_PROBABILITIES = "no_probabilities"
 EXCLUDE_NO_SERVED_PROBABILITY = "no_served_tier_probability"
@@ -235,6 +243,10 @@ def ledger_status_index(records: Iterable[Any] | None) -> LedgerIndex:
     ``build_labels`` can pair the nth log row for a key with the nth ledger
     record. Nothing collapses to the last status: a multi-step node whose last
     attempt timed out must not relabel its earlier successful attempts.
+
+    Records whose status is in ``LEDGER_NON_ATTEMPT_STATUSES`` (``replayed``)
+    are dropped: a journal replay is not an attempt and has no log row to pair
+    with, so keeping it would make every resumed node ambiguous.
     """
     index: LedgerIndex = {}
     if records is None:
@@ -245,6 +257,8 @@ def ledger_status_index(records: Iterable[Any] | None) -> LedgerIndex:
         if run_id is None or node_id is None:
             continue
         status = get("status")
+        if str(status) in LEDGER_NON_ATTEMPT_STATUSES:
+            continue
         error = get("error")
         index.setdefault((str(run_id), str(node_id)), []).append(
             (
@@ -421,6 +435,7 @@ __all__ = [
     "INFRA_ERROR_CLASSES",
     "LABEL_INSUFFICIENT",
     "LABEL_SUFFICIENT",
+    "LEDGER_NON_ATTEMPT_STATUSES",
     "LabelSet",
     "LabelledRow",
     "build_labels",

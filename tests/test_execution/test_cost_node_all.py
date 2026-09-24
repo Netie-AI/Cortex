@@ -416,3 +416,136 @@ async def test_healthy_run_of_every_non_llm_kind_has_only_ok_rows(monkeypatch, p
     assert sorted(r.node_id for r in rows) == sorted(expected)
     assert all(r.status == "ok" and r.error is None and r.cost_myr == 0.0 for r in rows)
     assert ledger.total_cost(run_id) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Verifier finding (#252): replay rows must not break the KEV label join.
+# A fresh worker resuming a run writes a ``replayed`` row next to the
+# original ``ok`` row in node_executions. The llm_judged node made one
+# routing decision (one decision-log entry), so ``build_labels`` must still
+# label it rather than exclude the key as ``ambiguous_ledger_join``.
+# ---------------------------------------------------------------------------
+
+
+def _decision_entry(run_id: str, node_id: str = "j1") -> dict:
+    return {
+        "run_id": run_id,
+        "node_id": node_id,
+        "status": "ok",
+        "tier": "T3",
+        "probabilities": {"T3": 0.9},
+        "served_tier": "T3",
+        "backend": "x",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resumed_llm_run_on_fresh_worker_still_labels_its_one_decision(tmp_path, monkeypatch):
+    from netie.decision.labels import build_labels
+    from netie.execution import step_journal
+
+    monkeypatch.setattr(step_journal, "DEFAULT_DB", tmp_path / "journal.db")
+    monkeypatch.setenv("CORTEX_STEP_JOURNAL", "1")
+    run_id = "run_llm_resume_labels"
+    adapter = _Adapter(fail=False)
+
+    first = CostLedger()
+    await run_dag(_llm_dag(), ExecutionContext(run_id), _llm_router(adapter), first)
+    second = CostLedger()
+    res2 = await run_dag(
+        _llm_dag(), ExecutionContext(run_id), _llm_router(adapter), second, resume=True
+    )
+
+    # One real attempt, served from the journal on resume.
+    assert adapter.calls == 1
+    assert res2.outputs["j1"].output["content"] == "ok"
+    # What node_executions holds across the two workers.
+    db_rows = first.records_for_run(run_id) + second.records_for_run(run_id)
+    assert [(r.node_id, r.status) for r in db_rows] == [
+        ("j1", "ok"),
+        ("emit", "ok"),
+        ("j1", "replayed"),
+        ("emit", "replayed"),
+    ]
+
+    labelled = build_labels([_decision_entry(run_id)], ledger_records=db_rows)
+    assert dict(labelled.excluded) == {}
+    assert [(r.run_id, r.node_id, r.label, r.source) for r in labelled.rows] == [
+        (run_id, "j1", 1, "ledger_status")
+    ]
+    assert labelled.rows[0].p_served == pytest.approx(0.9)
+
+
+def test_replayed_ledger_row_never_consumes_a_decision_log_row():
+    from netie.decision.labels import build_labels
+
+    entry = _decision_entry("r_unit")
+    rows = [
+        {"run_id": "r_unit", "node_id": "j1", "status": "ok", "error": None},
+        {"run_id": "r_unit", "node_id": "j1", "status": "replayed", "error": None},
+    ]
+    labelled = build_labels([entry], ledger_records=rows)
+    assert dict(labelled.excluded) == {}
+    assert [(r.node_id, r.label) for r in labelled.rows] == [("j1", 1)]
+
+    # Order-independent: replay row first, then the original.
+    labelled = build_labels([entry], ledger_records=list(reversed(rows)))
+    assert dict(labelled.excluded) == {}
+    assert [(r.node_id, r.label) for r in labelled.rows] == [("j1", 1)]
+
+    # A replay never stands in for the attempt: an errored attempt plus a
+    # replay row still labels from the error, never from the replay.
+    err_rows = [
+        {"run_id": "r_unit", "node_id": "j1", "status": "error", "error": "bad output"},
+        {"run_id": "r_unit", "node_id": "j1", "status": "replayed", "error": None},
+    ]
+    labelled = build_labels([entry], ledger_records=err_rows)
+    assert dict(labelled.excluded) == {}
+    assert [(r.node_id, r.label) for r in labelled.rows] == [("j1", 0)]
+
+    # Two real attempts against one log row is still ambiguous (unchanged).
+    two_ok = rows[:1] * 2
+    labelled = build_labels([entry], ledger_records=two_ok)
+    assert labelled.rows == []
+    assert dict(labelled.excluded) == {"ambiguous_ledger_join": 1}
+
+
+def test_kev_calibration_report_counts_a_resumed_node_with_replay_rows(tmp_path):
+    """The operator-facing report reads node_executions as JSONL; a replayed
+    row next to the original ok row must not drop the node from ``n``."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "kev_calibration_report.py"
+    log = tmp_path / "decisions.jsonl"
+    log.write_text(json.dumps(_decision_entry("r_report")) + "\n", encoding="utf-8")
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(
+        "\n".join(
+            json.dumps(r)
+            for r in [
+                {"run_id": "r_report", "node_id": "j1", "status": "ok", "error": None},
+                {"run_id": "r_report", "node_id": "emit", "status": "ok", "error": None},
+                {"run_id": "r_report", "node_id": "j1", "status": "replayed", "error": None},
+                {"run_id": "r_report", "node_id": "emit", "status": "replayed", "error": None},
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [sys.executable, str(script), "--log", str(log), "--ledger-jsonl", str(ledger)],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        env=dict(os.environ),
+        check=False,
+    )
+    lines = proc.stdout.splitlines()
+    assert "entries_read=1" in lines, proc.stdout + proc.stderr
+    assert "n=1" in lines, proc.stdout + proc.stderr
+    assert "excluded none=0" in lines, proc.stdout + proc.stderr
+    assert not any(line.startswith("excluded ambiguous_ledger_join") for line in lines)

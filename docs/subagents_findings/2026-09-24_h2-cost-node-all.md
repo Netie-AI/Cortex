@@ -1,10 +1,10 @@
 # H2-COST-NODE-ALL: every DAG node kind writes a ledger row, including on failure (#252)
 
 - **Date:** 2026-09-24
-- **Keywords:** dag_runner, run_dag, cost_ledger, node_executions, ensure_node_record, error row, replayed, step journal, resume, asyncio.gather, audit trail, H2-COST-NODE-ALL, EPIC-HARDEN-2
+- **Keywords:** dag_runner, run_dag, cost_ledger, node_executions, ensure_node_record, error row, replayed, step journal, resume, asyncio.gather, audit trail, labels, build_labels, ledger_status_index, ambiguous_ledger_join, kev_calibration_report, H2-COST-NODE-ALL, EPIC-KEV-LOOP, EPIC-HARDEN-2
 - **Main idea:** `run_dag` wrote a `node_executions` row for a non-LLM node only after it succeeded, so a failed run's audit trail was missing the node that failed, and a resumed worker recorded nothing for nodes it served from the step journal. Now every kind writes exactly one row per attempt: `ok` on success, `error` (class plus truncated message) when it raises, `replayed` at 0 MYR on a journal replay. A parallel batch settles every sibling before re-raising, so a failed layer leaves one row per node.
-- **Verify:** `python -m pytest tests/test_execution/test_cost_node_all.py -q -p no:cacheprovider` (11 tests) then `python -m pytest tests/ -q -p no:cacheprovider`
-- **Does not prove:** any Postgres-backed ledger behaviour (in-process `CostLedger` only; the insert SQL is unchanged and `status`/`error` are existing columns); a row for an `llm_judged` node refused before spend (see "Not done"); cross-worker de-duplication of replay rows (a fresh worker writes a `replayed` row even when Postgres already holds the original `ok` row, by design: they are two attempts).
+- **Verify:** `python -m pytest tests/test_execution/test_cost_node_all.py -q -p no:cacheprovider` (14 tests) then `python -m pytest tests/ -q -p no:cacheprovider`
+- **Does not prove:** any Postgres-backed ledger behaviour (in-process `CostLedger` only; the insert SQL is unchanged and `status`/`error` are existing columns); a row for an `llm_judged` node refused before spend (see "Not done"); cross-worker de-duplication of replay rows (a fresh worker writes a `replayed` row even when Postgres already holds the original `ok` row, by design: the replay is evidence of the resume, not a second attempt, and every label consumer must drop it; see "Verifier findings addressed").
 - **Cite:** issue #252 acceptance criteria; epic #249; `docs/subagents_findings/2026-09-23_gh-03.md` (replay exemption and the one-lookup rule this ticket builds on).
 
 ## Expected vs actual
@@ -55,6 +55,48 @@ Pass on base (5), kept as regression guards for the "never two rows" and no-fals
 - `_TIER_LABELS` / `_node_tier_label(node)` map a node kind to the tier label its success path would have reported (`deterministic`, `emit`, `tool`, `rag`, `a2a`, `agent`), used only for error rows because a node that raised never returned a `NodeResult`.
 
 `tests/test_execution/test_cost_node_all.py` (new, 11 tests). Every test asserts on the run result and `records_for_run`. The tool_call tests monkeypatch `netie.execution.tool_runner.run_tool_call` so a named tool raises and the rest return an ok payload; nothing touches the F1 ledger or the real tool allowlist. The resume tests point `step_journal.DEFAULT_DB` at `tmp_path`.
+
+## Verifier findings addressed (round 2)
+
+### F1: `replayed` rows broke the KEV calibration label join
+
+**Claim.** `build_labels` (`CortexOS/decision/labels.py`, EPIC-KEV-LOOP #245) pairs decision-log rows with `node_executions` rows ordinally per `(run_id, node_id)`, and `ledger_status_index` kept every row regardless of status. An `llm_judged` node that ran once (one log row) and was then replayed by a fresh worker (one `ok` row plus one `replayed` row) had counts 1 vs 2 and was excluded as `ambiguous_ledger_join`. Before this ticket the row was labelled.
+
+**Reproduced.** `/tmp/p252/probe.py` (verifier's probe, run from the worktree with `PYTHONPATH=$PWD`) on 6df1d09:
+
+```
+node_executions rows: [('j1','ok',0.5),('emit','ok',0.0),('j1','replayed',0.0),('emit','replayed',0.0)]
+labels rows 0 excluded {'ambiguous_ledger_join': 1}
+pre-#252 (no replayed row) labels rows 1 excluded {}
+```
+
+Confirmed also through the operator artifact: `scripts/kev_calibration_report.py --log ... --ledger-jsonl ...` with that ledger printed `n=0`, `excluded ambiguous_ledger_join=1`.
+
+**Root cause.** The ordinal join assumes every ledger row for a key is one attempt with one matching log row. A replay is not an attempt: `dag_runner` writes it without calling the adapter, without a routing decision and without a decision-log entry. The two truths in #252 (a replay leaves evidence in the ledger) and #245 (ledger rows are attempts) collided; neither side filtered.
+
+**Fix (root cause, in the join, not the writer).** `CortexOS/decision/labels.py`:
+
+- New `LEDGER_NON_ATTEMPT_STATUSES = frozenset({"replayed"})`, exported.
+- `ledger_status_index` skips any record whose `status` is in that set before building the per-key list, so a replay never consumes a log row and never makes a key ambiguous. Keyed on `status` only: the ledger writes `cache_hit=True` on the same row, but `cache_hit` is not a status and a future cached-but-real call must not be dropped by accident.
+- Module and function docstrings state the rule.
+
+Kept: the replay row itself (0 MYR, `cache_hit=True`, `status='replayed'`) exactly as #252 writes it. The ledger is the audit trail and is right to hold it; the label consumer is the one that must know a replay is not a decision. Not chosen: dropping the row from the ledger (loses the resume audit) or relabelling it `ok` (a false spend row, which `test_resumed_run_on_fresh_worker_records_replays_at_zero_cost` forbids).
+
+**Scope.** `CortexOS/decision/labels.py` was not a listed write target; it is added to this ticket's scope because the regression is caused by this ticket's new status value and the fix is a one-line filter with no other owner (#245 has landed).
+
+**Tests** (in `tests/test_execution/test_cost_node_all.py`, the ticket's test file; 3 new, 14 total):
+
+| Test | Asserts on | On base `labels.py` (`git show 275fe13:CortexOS/decision/labels.py`, identical to 6df1d09's) |
+|---|---|---|
+| `test_resumed_llm_run_on_fresh_worker_still_labels_its_one_decision` | runs `_llm_dag` on ledger 1, resumes on a fresh ledger 2 with the journal, feeds the concatenated rows (`[j1 ok, emit ok, j1 replayed, emit replayed]`) plus the one log entry to `build_labels`; expects `excluded == {}` and one row `(run_id, 'j1', label 1, source 'ledger_status')`, `adapter.calls == 1` | `assert {'ambiguous_ledger_join': 1} == {}` |
+| `test_replayed_ledger_row_never_consumes_a_decision_log_row` | `[ok, replayed]` and `[replayed, ok]` plus one entry -> 1 labelled row; `[error, replayed]` -> label 0 (the replay never stands in for the attempt); `[ok, ok]` plus one entry is still `ambiguous_ledger_join` (existing rule unchanged) | `assert {'ambiguous_ledger_join': 1} == {}` |
+| `test_kev_calibration_report_counts_a_resumed_node_with_replay_rows` | subprocess run of `scripts/kev_calibration_report.py --log --ledger-jsonl` with the four-row ledger; expects `entries_read=1`, `n=1`, `excluded none=0`, no `excluded ambiguous_ledger_join` line | `'n=1' not in [... 'excluded ambiguous_ledger_join=1', ... 'INSUFFICIENT: n=0 < 300 ...']` |
+
+Swap/run/restore record: `3 failed, 11 passed` with the base file, `14 passed` after restore (the swap overwrote the working file, so the fix was re-applied from the diff and the probe re-run: `labels rows 1 excluded {}`).
+
+**Gates after the fix.** Full suite `2375 passed, 13 skipped, 4 xfailed` (2372 + 3 new); `ruff check CortexOS packages/cortex_contract scripts tests/packaging tests/contract tests/test_execution/test_cost_node_all.py` clean; `lint-imports` 3 kept, 0 broken; `tests/contract` + `tests/test_decision` 206 passed; `mypy CortexOS/decision/labels.py` clean; `scripts/check_versions.py` OK. `tests/test_decision/test_labels_and_report.py` (#245's own gate) unmodified and green.
+
+**Does not prove.** That every other consumer of `node_executions` filters `replayed`: `CostLedger.total_cost` is unaffected (0 MYR), and `kev_calibration_report` is the only label consumer today. Any new reader that counts rows as attempts must import `LEDGER_NON_ATTEMPT_STATUSES`.
 
 ## Root-cause class
 
