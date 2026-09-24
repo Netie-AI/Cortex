@@ -13,6 +13,7 @@ OpenVault + FreeBuild lane, never this module.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 import threading
@@ -175,8 +176,59 @@ def list_apps() -> list[dict[str, Any]]:
     return user + hosted
 
 
+# T2-RESP (#263): limits on an uploaded archive, checked before anything is
+# written to disk. Module-level so an operator (or a test) can tune them. The
+# byte and entry caps match the folder import, so both paths gate the same.
+MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 2000
+
+
+def _member_name_is_safe(name: str) -> bool:
+    """A member path must stay relative and inside the extraction root.
+
+    Checked on the raw name, independent of the host OS, so a Windows-style
+    name is refused on POSIX too.
+    """
+    if not name or "\x00" in name:
+        return False
+    norm = name.replace("\\", "/")
+    if norm.startswith("/") or re.match(r"^[A-Za-z]:", norm):
+        return False
+    return ".." not in norm.split("/")
+
+
+def check_archive(data: bytes) -> str | None:
+    """Return an error code when the archive breaks a limit, else ``None``.
+
+    Reads only the central directory. The declared uncompressed sizes bound
+    what extraction can write (``zipfile`` stops each member at its declared
+    size and verifies the CRC), so capping their sum caps the disk used.
+    """
+    import io
+    import zipfile
+
+    if len(data) > MAX_ARCHIVE_BYTES:
+        return "archive_too_large"
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            members = zf.infolist()
+    except Exception as exc:  # noqa: BLE001 - any unreadable archive is refused
+        return f"invalid_zip:{type(exc).__name__}"
+    if len(members) > MAX_ARCHIVE_ENTRIES:
+        return "archive_too_many_entries"
+    if sum(max(0, int(m.file_size)) for m in members) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+        return "archive_too_large"
+    if any(not _member_name_is_safe(m.filename) for m in members):
+        return "archive_unsafe_path"
+    return None
+
+
 def import_zip_bytes(data: bytes, *, name: str | None = None) -> dict[str, Any]:
     """Any zip in → gated record out. Never trusts the archive."""
+    refused = check_archive(data)
+    if refused is not None:
+        return {"ok": False, "error": refused}
     init()
     app_id = "app-" + uuid.uuid4().hex[:8]
     incoming = APPS_ROOT / "incoming" / app_id
@@ -188,7 +240,7 @@ def import_zip_bytes(data: bytes, *, name: str | None = None) -> dict[str, Any]:
     except Exception as exc:
         shutil.rmtree(incoming, ignore_errors=True)
         zip_path.unlink(missing_ok=True)
-        return {"ok": False, "error": f"invalid_zip:{exc}"}
+        return {"ok": False, "error": f"invalid_zip:{type(exc).__name__}"}
     zip_path.unlink(missing_ok=True)
 
     report = app_package.ship_gate(incoming)

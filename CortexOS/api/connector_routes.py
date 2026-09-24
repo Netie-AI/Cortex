@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from CortexOS.api.app_routes import scrub_host_paths
 from CortexOS.connectors import agents, computer_control, cursor_session, workspaces
 from CortexOS.connectors.dispatch import dispatch as run_dispatch
 from CortexOS.security.auth_port import require_role
@@ -28,6 +29,42 @@ router = APIRouter(
 )
 _STEWARD = [Depends(require_role("steward"))]
 _ADMIN = [Depends(require_role("admin"))]
+
+
+# T2-RESP (#263): a workspace's host directory never leaves the engine, even for
+# an authorized viewer. The catalog keeps ``present`` and ``env`` (which variable
+# to set), so an operator can still see and fix a missing workspace.
+_WORKSPACE_PATH_KEYS = frozenset({"root", "windows_default", "workspace_root"})
+
+
+def _workspace_roots() -> list[str]:
+    try:
+        return [str(w.get("root") or "") for w in workspaces.catalog()]
+    except Exception:  # noqa: BLE001 - redaction still covers the engine's own roots
+        return []
+
+
+def _public(value: Any, *, error_text: bool = False) -> Any:
+    """Engine-generated connector payloads without host paths.
+
+    Message and chat text is what a caller typed, so it is returned as written;
+    only the engine-built fields (workspace rows, dispatch results, the probe,
+    error details) are redacted here.
+    """
+    return scrub_host_paths(
+        value,
+        drop_keys=_WORKSPACE_PATH_KEYS,
+        extra_roots=_workspace_roots(),
+        error_text=error_text,
+    )
+
+
+def _not_found(exc: KeyError) -> HTTPException:
+    return HTTPException(status_code=404, detail=_public(str(exc), error_text=True))
+
+
+def _bad_request(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=400, detail=_public(str(exc), error_text=True))
 
 
 class DispatchIn(BaseModel):
@@ -207,7 +244,7 @@ pick('constructor');
 
 @router.get("/workspaces")
 def list_workspaces() -> dict[str, Any]:
-    return {"workspaces": workspaces.catalog(), "orchestrator": "cortex"}
+    return dict(_public({"workspaces": workspaces.catalog(), "orchestrator": "cortex"}))
 
 
 @router.get("/agents")
@@ -220,23 +257,26 @@ def get_agent_messages(agent_id: str) -> dict[str, Any]:
     try:
         agent = agents.get(agent_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _not_found(exc) from exc
     return {"agent": agent, "messages": agents.messages(agent_id)}
 
 
 @router.post("/agents/{agent_id}/messages", dependencies=_STEWARD)
 def post_agent_message(agent_id: str, body: AgentPostIn) -> dict[str, Any]:
     try:
-        return agents.post(agent_id, body.text, kind=body.kind)
+        out = agents.post(agent_id, body.text, kind=body.kind)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _not_found(exc) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise _bad_request(exc) from exc
+    out = dict(out)
+    out["dispatch"] = _public(out.get("dispatch"))
+    return out
 
 
 @router.get("/computer-control")
 def computer_control_status() -> dict[str, Any]:
-    return computer_control.probe()
+    return dict(_public(computer_control.probe()))
 
 
 @router.post("/computer-control/invoke", dependencies=_ADMIN)
@@ -250,18 +290,19 @@ def computer_control_invoke(body: ComputerControlIn) -> dict[str, Any]:
         kwargs["text"] = body.text
     out = computer_control.invoke(body.action, **kwargs)
     if not out.get("ok"):
-        raise HTTPException(status_code=403, detail=out)
-    return out
+        raise HTTPException(status_code=403, detail=_public(out))
+    return dict(_public(out))
 
 
 @router.post("/dispatch", dependencies=_STEWARD)
 def dispatch(req: DispatchIn) -> dict[str, Any]:
     try:
-        return run_dispatch(req.text, kind=req.kind, workspace=req.workspace)
+        out = run_dispatch(req.text, kind=req.kind, workspace=req.workspace)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise _bad_request(exc) from exc
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _not_found(exc) from exc
+    return dict(_public(out))
 
 
 @router.get("/cursor/chats")
@@ -274,7 +315,7 @@ def open_chat(req: OpenChatIn) -> dict[str, Any]:
     try:
         workspaces.get(req.workspace)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _not_found(exc) from exc
     chat_id = cursor_session.get_port().open_chat(req.workspace, req.task)
     return {"id": chat_id, "workspace": req.workspace, "new_cursor_chat": True}
 
@@ -284,7 +325,7 @@ def get_messages(chat_id: str) -> dict[str, Any]:
     try:
         msgs = cursor_session.get_port().messages(chat_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _not_found(exc) from exc
     return {"chat_id": chat_id, "messages": msgs}
 
 
@@ -293,7 +334,7 @@ def instruct(chat_id: str, req: InstructIn) -> dict[str, Any]:
     try:
         chat = cursor_session.get_port().instruct(chat_id, req.instruction)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _not_found(exc) from exc
     return {"chat_id": chat_id, "status": chat.get("status"), "messages": chat.get("messages")}
 
 
