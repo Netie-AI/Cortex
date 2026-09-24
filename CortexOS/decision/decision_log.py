@@ -13,6 +13,14 @@ Fail open on the write, fail closed on the content:
 - ``CORTEX_DECISION_LOG_PATH`` overrides the default
   ``data_path("engine", "tier_decisions.jsonl")`` (gitignored runtime state).
 
+Concurrency (H2-DLOG-MP, #255). Each line is one ``os.write`` on a descriptor
+opened with ``O_APPEND``: POSIX positions every append at end-of-file atomically
+and a single write of a short line lands whole, so concurrent processes and
+threads never tear or interleave lines. No file lock is taken. The process-local
+``threading.Lock`` only serialises the failure counters, and it is re-created in
+a forked child (``os.register_at_fork(after_in_child=...)``) so a child never
+inherits a lock a writer thread in the parent was holding at fork time.
+
 Confidence and probabilities are recorded when they can be obtained without a
 second backend call: the rules-v0 model is pure and cheap, so it is re-evaluated
 here; a live decision backend is not re-asked (that would double kev traffic),
@@ -45,6 +53,35 @@ _FORBIDDEN_STATE_KEYS = frozenset({"content", "prompt", "system"})
 _lock = threading.Lock()
 _write_failures = 0
 _last_write_error: str | None = None
+
+_OPEN_FLAGS = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+
+
+def _reset_lock_after_fork() -> None:
+    """Give the child a fresh, unheld lock; the parent's may be held by another thread."""
+    global _lock
+    _lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):  # POSIX; Windows never forks
+    os.register_at_fork(after_in_child=_reset_lock_after_fork)
+
+
+def _write_line(path: Path, line: str) -> None:
+    """One O_APPEND ``os.write`` per line: atomic against other processes and threads.
+
+    The lock is deliberately not held here: the kernel serialises O_APPEND
+    writes across processes, which a process-local lock cannot do, and holding
+    it across the syscall is what deadlocked forked children before #255.
+    """
+    data = (line + "\n").encode("utf-8")
+    fd = os.open(path, _OPEN_FLAGS, 0o644)
+    try:
+        written = os.write(fd, data)
+        if written != len(data):  # short write: the line is torn, count it
+            raise OSError(f"short write: {written} of {len(data)} bytes")
+    finally:
+        os.close(fd)
 
 
 def enabled() -> bool:
@@ -177,10 +214,8 @@ def append(entry: dict[str, Any]) -> bool:
                 raise ValueError(f"decision log entry must not carry {key!r}")
         line = json.dumps(entry, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
         path = log_path()
-        with _lock:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_line(path, line)
         return True
     except Exception as exc:
         with _lock:
