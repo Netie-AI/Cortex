@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
+import time
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -26,6 +28,12 @@ _LOOP: asyncio.AbstractEventLoop | None = None
 _LOOP_THREAD: threading.Thread | None = None
 _LOCK = threading.Lock()
 _HARDWARE: dict[str, Any] = {}
+# Rows created or started before this instant belong to an earlier engine
+# process. Module import precedes every create_run this process makes (only
+# this module creates runs), so no live run of ours can predate it.
+_PROCESS_STARTED_AT = time.time()
+_REAPED_ONCE = False
+_log = logging.getLogger(__name__)
 
 
 def set_hardware(hw: Mapping[str, Any] | None) -> None:
@@ -54,7 +62,35 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
         t.start()
         _LOOP = loop
         _LOOP_THREAD = t
+        _reap_orphans_locked()
         return loop
+
+
+def _reap_orphans_locked() -> list[str]:
+    """Reconcile runs an earlier engine process left 'queued'/'running'.
+
+    Caller holds ``_LOCK`` so ``_ACTIVE`` cannot change underneath. A store
+    fault is logged and swallowed: failing to reap must never stop a new run
+    from starting.
+    """
+    global _REAPED_ONCE
+    _REAPED_ONCE = True
+    try:
+        reaped = workflow_store.reap_orphans(set(_ACTIVE), _PROCESS_STARTED_AT)
+    except Exception:
+        _log.warning("workflow orphan reap failed", exc_info=True)
+        return []
+    if reaped:
+        _log.info("reaped %d orphaned workflow run(s): %s", len(reaped), ", ".join(reaped))
+    return reaped
+
+
+def _reap_orphans_once() -> None:
+    """Reap on the first read of this process too, so the runs panel stops
+    listing a dead run as active even before any run has started."""
+    with _LOCK:
+        if not _REAPED_ONCE:
+            _reap_orphans_locked()
 
 
 def list_workflows() -> list[dict[str, Any]]:
@@ -287,6 +323,7 @@ def _panel_task(run: dict[str, Any]) -> dict[str, Any]:
 
 
 def snapshot() -> dict[str, Any]:
+    _reap_orphans_once()
     active = workflow_store.list_runs(limit=40, status="active")
     finished_raw = [
         r
@@ -341,6 +378,9 @@ def _make_on_event(run_id: str):
             )
             if ev.get("phase"):
                 workflow_store.phase_started(run_id, str(ev["phase"]))
+        elif et == "node_done" and ev.get("replayed"):
+            # Journal replay: restore the agent row without re-counting tokens.
+            workflow_store.agent_replayed(run_id, node)
         elif et == "node_done":
             tel = ev.get("telemetry") if isinstance(ev.get("telemetry"), dict) else {}
             # EMIT joins have no telemetry — skip agent_finished for them.
@@ -501,6 +541,9 @@ def resume(
     being re-run, so a run that died in its last phase does not pay for the
     phases that already succeeded (distill: Claude Code workflow resume).
     """
+    # A restart leaves the dead run 'running'; reconcile before judging it,
+    # or the first Resume after a crash is refused as "still active".
+    _reap_orphans_once()
     run = workflow_store.get_run(run_id)
     if not run:
         return {"ok": False, "error": f"unknown run: {run_id}"}

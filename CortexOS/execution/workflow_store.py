@@ -17,7 +17,7 @@ import queue
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -301,6 +301,76 @@ def request_cancel(run_id: str) -> bool:
         )
     publish(run_id, {"type": "run_finished", "status": "stopped", "error": "cancelled"})
     return True
+
+
+ORPHAN_ERROR = (
+    "interrupted: the engine stopped while this run was active; "
+    "resumable (Resume replays the steps it already finished)"
+)
+
+
+def reap_orphans(active_ids: Iterable[str], started_before: float) -> list[str]:
+    """Mark runs a previous engine process left 'queued'/'running' as interrupted.
+
+    A run is only reaped when it is not in ``active_ids`` (this process's live
+    runs) AND it started (or, if never started, was created) strictly before
+    ``started_before``, the reaping process's start time. A row this process
+    created is therefore never touched, so a live run cannot be reaped by its
+    own engine. The terminal status is 'error', which ``resume()`` accepts and
+    the runs panel lists as finished rather than active. Returns the reaped ids;
+    with no orphans nothing is written.
+    """
+    init()
+    keep = {str(i) for i in active_ids}
+    now = time.time()
+    reaped: list[str] = []
+    with _lock, _conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM wf_runs WHERE status IN ('queued','running') "
+            "AND COALESCE(started_at, created_at, 0) < ?",
+            (float(started_before),),
+        ).fetchall()
+        for row in rows:
+            run_id = row["id"]
+            if run_id in keep:
+                continue
+            cur = conn.execute(
+                "UPDATE wf_runs SET status='error', error=?, finished_at=? "
+                "WHERE id=? AND status IN ('queued','running')",
+                (ORPHAN_ERROR, now, run_id),
+            )
+            if not cur.rowcount:
+                continue
+            conn.execute(
+                "UPDATE wf_phases SET status='error', finished_at=? "
+                "WHERE run_id=? AND status='running'",
+                (now, run_id),
+            )
+            conn.execute(
+                "UPDATE wf_agents SET status='error', error=?, finished_at=? "
+                "WHERE run_id=? AND status='running'",
+                ("interrupted", now, run_id),
+            )
+            reaped.append(run_id)
+    for run_id in reaped:
+        publish(run_id, {"type": "run_finished", "status": "error", "error": ORPHAN_ERROR})
+    return reaped
+
+
+def agent_replayed(run_id: str, node_id: str) -> None:
+    """A resumed run replayed this agent from the step journal.
+
+    Restores the row to 'done' (``agent_started`` flipped it to 'running')
+    without re-adding its tokens or cost, which the original attempt already
+    counted, and tells live listeners the node was replayed, not re-run.
+    """
+    init()
+    with _lock, _conn() as conn:
+        conn.execute(
+            "UPDATE wf_agents SET status='done', error='', finished_at=? WHERE run_id=? AND node_id=?",
+            (time.time(), run_id, node_id),
+        )
+    publish(run_id, {"type": "agent_replayed", "node": node_id, "replayed": True})
 
 
 def is_cancelled(run_id: str) -> bool:
