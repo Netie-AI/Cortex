@@ -110,6 +110,47 @@ sys.exit(3 if hung else 0)
 """
 
 
+# The parent holds the module lock at fork time, standing in for a writer
+# thread that is inside the failure-counting critical section when another
+# thread forks. The log path is a directory so every append fails and must
+# take the lock to count the failure. Without the os.register_at_fork reset
+# the child inherits a lock nobody in the child can ever release, and its
+# first append() blocks forever. Exit codes: 0 fresh lock and counters work;
+# 2 the failure was not counted; 3 reset did not clear it; 4 append raised.
+_HELD_LOCK_FORK_WORKER = """
+import os, sys, time
+from netie.decision import decision_log
+timeout = float(sys.argv[1])
+decision_log.reset_write_failures()
+decision_log._lock.acquire()  # a writer thread is inside the counter section at fork time
+pid = os.fork()
+if pid == 0:
+    try:
+        ok = decision_log.append({"run_id": "child", "node_id": "0"})
+        if ok or decision_log.write_failures() != 1 or decision_log.last_write_error() is None:
+            os._exit(2)
+        decision_log.reset_write_failures()
+        os._exit(0 if decision_log.write_failures() == 0 else 3)
+    except BaseException:
+        os._exit(4)
+deadline = time.monotonic() + timeout
+status = None
+while time.monotonic() < deadline:
+    wpid, status = os.waitpid(pid, os.WNOHANG)
+    if wpid == pid:
+        break
+    time.sleep(0.01)
+else:
+    os.kill(pid, 9)
+    os.waitpid(pid, 0)
+    print("child HUNG on the lock inherited across fork")
+    sys.exit(3)
+code = os.waitstatus_to_exitcode(status)
+print("child exit %d" % code)
+sys.exit(code)
+"""
+
+
 def _env(log: Path) -> dict[str, str]:
     env = dict(os.environ)
     env[decision_log.PATH_ENV] = str(log)
@@ -215,6 +256,37 @@ def test_fork_while_threads_write_child_finishes_its_appends(tmp_path: Path):
     assert any(e["run_id"].startswith("parent-") for e in entries[first_child:]), (
         "no parent line after the first child line: the fork did not race the writers"
     )
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "fork") or not hasattr(os, "register_at_fork"),
+    reason="H2-DLOG-MP held-lock fork test needs POSIX os.fork/os.register_at_fork; "
+    "the after_in_child lock reset is NOT verified on this platform",
+)
+def test_child_forked_while_lock_is_held_gets_a_fresh_lock_and_working_counters(tmp_path: Path):
+    """Acceptance line 1: the child resets the lock via os.register_at_fork.
+
+    The other tests never take the lock on the write path any more, so they
+    pass with the at-fork hook deleted. This one forks with the lock held and
+    forces the child onto the only remaining locked path (failure counting);
+    the child's exit code is the served result. Deleting the hook hangs it.
+    """
+    blocker = tmp_path / "engine" / "tier_decisions.jsonl"
+    blocker.mkdir(parents=True)  # a directory where the file must be: every append fails
+    proc = subprocess.run(
+        [sys.executable, "-c", _HELD_LOCK_FORK_WORKER, str(CHILD_TIMEOUT_S)],
+        cwd=str(ROOT),
+        env=_env(blocker),
+        capture_output=True,
+        text=True,
+        timeout=CHILD_TIMEOUT_S + 60,
+    )
+    assert proc.returncode == 0, (
+        f"rc={proc.returncode}: child forked while the log lock was held did not finish "
+        f"(register_at_fork reset missing or counters broken)\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
+    )
+    assert proc.stdout.strip().splitlines()[-1] == "child exit 0", proc.stdout
+    assert blocker.is_dir() and not any(blocker.iterdir()), "nothing may be written under the blocking directory"
 
 
 def test_eight_threads_on_an_unwritable_path_never_raise_and_every_failure_is_counted(
