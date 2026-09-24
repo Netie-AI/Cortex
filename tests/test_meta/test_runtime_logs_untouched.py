@@ -3,7 +3,7 @@
 ``data/engine/tier_decisions.jsonl`` and ``data/engine/tier_shadow.jsonl`` are
 the files KEV-CALIB reads as real outcomes. Every test here asserts the artifact
 an operator would inspect: the size and mtime (or absence) of both real files,
-snapshotted at session start by ``tests/conftest.py``, and the JSONL rows that
+snapshotted at session start by the ``tests/runtime_log_isolation.py`` plugin, and the JSONL rows that
 the routed DAG / shadow evaluation actually wrote to the per-test tmp path.
 """
 
@@ -30,7 +30,7 @@ from netie.routing.tiers import Tier
 KEV = "http://127.0.0.1:8787"
 
 # The real runtime files, resolved as the engine resolves them and independent
-# of the conftest fixture, so the DAG / shadow tests below fail on base for the
+# of the isolation plugin, so the DAG / shadow tests below fail on base for the
 # real reason (a row landed in data/engine) and not for a missing fixture.
 REAL_FILES = {
     name: data_path("engine", name) for name in (decision_log.DEFAULT_FILENAME, shadow.DEFAULT_FILENAME)
@@ -118,6 +118,12 @@ def test_fixture_env_names_match_the_engine_modules(runtime_log_guard):
     assert runtime_log_guard.env[shadow.PATH_ENV] == shadow.DEFAULT_FILENAME
     assert runtime_log_guard.files == REAL_FILES
     assert runtime_log_guard.snapshot() == _snapshot()
+
+
+def test_isolation_plugin_is_registered_for_the_whole_suite(request):
+    """The plugin is loaded through ``addopts`` in pyproject.toml, not only when named."""
+    assert request.config.pluginmanager.has_plugin("tests.runtime_log_isolation")
+    assert "-p tests.runtime_log_isolation" in " ".join(request.config.getini("addopts"))
 
 
 def test_runtime_files_unchanged_since_session_start(runtime_log_guard):
@@ -218,3 +224,29 @@ def test_disabled_log_still_writes_nothing(monkeypatch):
     monkeypatch.setenv(decision_log.ENABLE_ENV, "0")
     assert decision_log.enabled() is False
     assert not decision_log.log_path().exists()
+
+
+@pytest.fixture
+def own_log_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
+    """A test's own (non-autouse) fixture that sets both paths."""
+    mine = tmp_path / "fixture_owned" / "decisions.jsonl"
+    my_shadow = tmp_path / "fixture_owned" / "shadow.jsonl"
+    monkeypatch.setenv(decision_log.PATH_ENV, str(mine))
+    monkeypatch.setenv(shadow.PATH_ENV, str(my_shadow))
+    return mine, my_shadow
+
+
+@pytest.mark.asyncio
+async def test_path_set_by_a_test_fixture_is_not_overridden(own_log_paths, tmp_path: Path):
+    mine, my_shadow = own_log_paths
+    assert decision_log.log_path() == mine
+    assert shadow.shadow_path() == my_shadow
+    await run_dag(
+        _dag(),
+        ExecutionContext("run_fixture_owned", seed={"customer": "x"}),
+        _router(),
+        CostLedger(),
+        workflow_cost_ceiling_myr=None,
+    )
+    assert [r["run_id"] for r in _rows(mine)] == ["run_fixture_owned"]
+    assert not (tmp_path / "runtime_logs" / decision_log.DEFAULT_FILENAME).exists()
