@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from CortexOS.execution import enterprise_goal, humanize, seeker
+from CortexOS.security.auth_port import require_role
 
 
 class GoalBody(BaseModel):
@@ -61,12 +62,24 @@ def _found(goal: dict[str, Any] | None) -> dict[str, Any]:
     return goal
 
 
+# T2-CTRL-A (#263): every route is gated through the engine's auth port, the
+# same dependency TRUST-01 put on /api/apps. Reads and the
+# classify-only OSR probe need viewer. Seeking (records a seek and an audit
+# row), proposal outcomes and commitment writes need steward. Writing the bound
+# enterprise goal (its hard constraints and autonomy level govern what the
+# engine may do on its own) and compacting telemetry (deletes raw rows) need
+# admin.
+_VIEWER = [Depends(require_role("viewer"))]
+_STEWARD = [Depends(require_role("steward"))]
+_ADMIN = [Depends(require_role("admin"))]
+
+
 def register_goal_routes(app: Any) -> None:
-    @app.get("/api/goals")
+    @app.get("/api/goals", dependencies=_VIEWER)
     async def list_goals() -> dict[str, Any]:
         return {"ok": True, "goals": enterprise_goal.list_goals()}
 
-    @app.post("/api/goals")
+    @app.post("/api/goals", dependencies=_ADMIN)
     async def create_goal(body: GoalBody) -> dict[str, Any]:
         out = enterprise_goal.create_goal(
             body.statement,
@@ -80,27 +93,27 @@ def register_goal_routes(app: Any) -> None:
             raise HTTPException(status_code=400, detail=humanize.explain(str(out.get("error"))))
         return out
 
-    @app.get("/api/goals/{goal_id}")
+    @app.get("/api/goals/{goal_id}", dependencies=_VIEWER)
     async def get_goal(goal_id: str) -> dict[str, Any]:
         return {"ok": True, "goal": _found(enterprise_goal.get_goal(goal_id))}
 
-    @app.patch("/api/goals/{goal_id}")
+    @app.patch("/api/goals/{goal_id}", dependencies=_ADMIN)
     async def patch_goal(goal_id: str, body: GoalPatchBody) -> dict[str, Any]:
         _found(enterprise_goal.get_goal(goal_id))
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
         return {"ok": True, "goal": enterprise_goal.update_goal(goal_id, **fields)}
 
-    @app.delete("/api/goals/{goal_id}")
+    @app.delete("/api/goals/{goal_id}", dependencies=_ADMIN)
     async def delete_goal(goal_id: str) -> dict[str, Any]:
         _found(enterprise_goal.get_goal(goal_id))
         return {"ok": enterprise_goal.delete_goal(goal_id)}
 
-    @app.get("/api/goals/{goal_id}/seeks")
+    @app.get("/api/goals/{goal_id}/seeks", dependencies=_VIEWER)
     async def goal_seeks(goal_id: str) -> dict[str, Any]:
         _found(enterprise_goal.get_goal(goal_id))
         return {"ok": True, "seeks": enterprise_goal.list_seeks(goal_id)}
 
-    @app.post("/api/goals/{goal_id}/outcome")
+    @app.post("/api/goals/{goal_id}/outcome", dependencies=_STEWARD)
     async def proposal_outcome(goal_id: str, body: OutcomeBody) -> dict[str, Any]:
         """What the user did with a proposal — this is what the ranking learns from."""
         _found(enterprise_goal.get_goal(goal_id))
@@ -109,13 +122,13 @@ def register_goal_routes(app: Any) -> None:
             raise HTTPException(status_code=400, detail=humanize.explain(str(out.get("error"))))
         return out
 
-    @app.get("/api/commitments")
+    @app.get("/api/commitments", dependencies=_VIEWER)
     async def list_commitments(status: str = "open", limit: int = 50) -> dict[str, Any]:
         from CortexOS.execution import commitments
 
         return {"ok": True, "commitments": commitments.list_commitments(status, limit)}
 
-    @app.post("/api/commitments/scan")
+    @app.post("/api/commitments/scan", dependencies=_STEWARD)
     async def scan_commitments(body: ScanBody) -> dict[str, Any]:
         """Find commitments in text. Extract-and-store only — never executes it."""
         from CortexOS.execution import commitments
@@ -127,7 +140,7 @@ def register_goal_routes(app: Any) -> None:
             raise HTTPException(status_code=400, detail=humanize.explain(str(out.get("error"))))
         return out
 
-    @app.post("/api/commitments/{cid}/close")
+    @app.post("/api/commitments/{cid}/close", dependencies=_STEWARD)
     async def close_commitment(cid: str) -> dict[str, Any]:
         from CortexOS.execution import commitments
 
@@ -136,7 +149,7 @@ def register_goal_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail=humanize.explain("unknown_commitment"))
         return {"ok": True, "commitment": record}
 
-    @app.post("/api/commitments/{cid}/dismiss")
+    @app.post("/api/commitments/{cid}/dismiss", dependencies=_STEWARD)
     async def dismiss_commitment(cid: str) -> dict[str, Any]:
         from CortexOS.execution import commitments
 
@@ -145,7 +158,7 @@ def register_goal_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail=humanize.explain("unknown_commitment"))
         return {"ok": True, "commitment": record}
 
-    @app.get("/api/engine/telemetry")
+    @app.get("/api/engine/telemetry", dependencies=_VIEWER)
     async def engine_telemetry(goal_id: str = "", limit: int = 25) -> dict[str, Any]:
         """Run history as numbers — safe to display, contains no user content."""
         from CortexOS.execution import action_event, action_value
@@ -161,20 +174,20 @@ def register_goal_routes(app: Any) -> None:
             "daily": action_event.daily(family or None),
         }
 
-    @app.post("/api/engine/telemetry/compact")
+    @app.post("/api/engine/telemetry/compact", dependencies=_ADMIN)
     async def engine_telemetry_compact() -> dict[str, Any]:
         from CortexOS.execution import action_event
 
         return action_event.compact()
 
-    @app.get("/api/goals/{goal_id}/values")
+    @app.get("/api/goals/{goal_id}/values", dependencies=_VIEWER)
     async def goal_values(goal_id: str) -> dict[str, Any]:
         from CortexOS.execution import action_value
 
         goal = _found(enterprise_goal.get_goal(goal_id))
         return {"ok": True, "values": action_value.table(action_value.goal_family(goal))}
 
-    @app.post("/api/engine/osr")
+    @app.post("/api/engine/osr", dependencies=_VIEWER)
     async def engine_osr(body: OsrBody) -> dict[str, Any]:
         """Classify-only: which band does this work fall into, and why?"""
         from CortexOS.execution import osr
@@ -188,7 +201,7 @@ def register_goal_routes(app: Any) -> None:
             return out
         return {"ok": True, **osr.classify(body.text)}
 
-    @app.post("/api/engine/seek")
+    @app.post("/api/engine/seek", dependencies=_STEWARD)
     async def engine_seek(body: SeekBody | None = None) -> dict[str, Any]:
         payload = body or SeekBody()
         out = seeker.seek(payload.goal_id, trigger=payload.trigger, limit=payload.limit)
