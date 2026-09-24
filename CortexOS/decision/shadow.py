@@ -19,18 +19,30 @@ Guarantees:
   vocabulary (``cause_category``) so exception text, which can echo whatever
   kev put in its response body, never reaches the file either;
 - ``summary()`` never claims an agreement rate below ``MIN_N`` rows as a
-  metric: it reports n and flags ``sufficient=False``.
+  metric: it reports n and flags ``sufficient=False``;
+- (H2-SHADOW-ASYNC, #253) the evaluation never runs on the serving path.
+  ``observe`` puts the observation on a bounded queue and returns at once; a
+  single daemon worker asks kev and appends the row. A full queue drops the
+  observation and counts it (``dropped()``, and ``summary()["dropped"]`` once
+  any were dropped); it never blocks and never raises. ``flush(timeout)``
+  drains the queue for readers and at interpreter exit. ``read_rows``,
+  ``summary``, ``write_failures`` and ``last_write_error`` flush first, so a
+  reader sees every observation made before it asked.
 
 Nothing here imports ``packs.*``.
 """
 
 from __future__ import annotations
 
+import atexit
 import json
 import math
 import os
+import queue
 import re
 import threading
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -110,6 +122,18 @@ def abstain_reason_category(reason: str | None, *, degraded: bool, cause: str | 
 _lock = threading.Lock()
 _write_failures = 0
 _last_write_error: str | None = None
+_dropped = 0
+
+QUEUE_ENV = "CORTEX_KEV_SHADOW_QUEUE"
+DEFAULT_QUEUE_SIZE = 256
+GRACE_ENV = "CORTEX_KEV_SHADOW_GRACE"
+# Seconds ``observe`` may wait for an *idle* worker to finish this one
+# observation. A healthy loopback kev answers in a few ms, so the row is on
+# disk in decision order before the decision is served. A slow kev costs at
+# most this once: the next observation finds a backlog and does not wait.
+DEFAULT_GRACE = 0.1
+EXIT_FLUSH_TIMEOUT = 10.0
+FLUSH_TIMEOUT = 30.0
 
 
 _SHADOW_OFF = frozenset({"", "0", "false", "no", "off"})
@@ -130,10 +154,15 @@ def shadow_path() -> Path:
 
 
 def write_failures() -> int:
+    """Write failures so far. Flushes first: a failure is only known once the
+    worker has tried the append, and a reader asking for it wants the count
+    for the observations it has already made."""
+    flush()
     return _write_failures
 
 
 def last_write_error() -> str | None:
+    flush()
     return _last_write_error
 
 
@@ -144,6 +173,17 @@ def reset_write_failures() -> None:
         _last_write_error = None
 
 
+def dropped() -> int:
+    """Observations dropped because the queue was full, process-wide."""
+    return _dropped
+
+
+def reset_dropped() -> None:
+    global _dropped
+    with _lock:
+        _dropped = 0
+
+
 def _record_failure(exc: BaseException, where: str) -> None:
     global _write_failures, _last_write_error
     with _lock:
@@ -151,12 +191,217 @@ def _record_failure(exc: BaseException, where: str) -> None:
         _last_write_error = f"{where}: {type(exc).__name__}: {exc}"
 
 
+def _record_drop() -> None:
+    global _dropped
+    with _lock:
+        _dropped += 1
+
+
+def queue_size() -> int:
+    raw = os.environ.get(QUEUE_ENV, "").strip()
+    if not raw:
+        return DEFAULT_QUEUE_SIZE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_QUEUE_SIZE
+
+
+def grace_seconds() -> float:
+    raw = os.environ.get(GRACE_ENV, "").strip()
+    if not raw:
+        return DEFAULT_GRACE
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_GRACE
+    return value if math.isfinite(value) and value > 0 else 0.0
+
+
+class ShadowWorker:
+    """One daemon thread draining a bounded queue of shadow observations.
+
+    ``submit(fn)`` returns True when queued and False when the queue is full,
+    without blocking either way. The thread is started lazily on first submit
+    and restarted if it ever died, so a worker created at import time costs no
+    thread until shadow is used. Items run one at a time in FIFO order, which
+    keeps the file's row order equal to decision order for a single caller.
+
+    ``flush(timeout)`` waits until every submitted item has finished (not just
+    been dequeued) or the timeout passes, and returns whether it drained.
+    """
+
+    def __init__(self, maxsize: int | None = None) -> None:
+        self.maxsize = maxsize if maxsize is not None else queue_size()
+        self.dropped = 0
+        self._init_state()
+
+    def _init_state(self) -> None:
+        self._queue: queue.Queue[Callable[[], None]] = queue.Queue(maxsize=self.maxsize)
+        self._cv = threading.Condition()
+        self._pending = 0
+        self._thread: threading.Thread | None = None
+
+    def _ensure_thread(self) -> None:
+        with self._cv:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(target=self._run, name="kev-shadow", daemon=True)
+            self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            try:
+                item()
+            except BaseException as exc:  # the worker must outlive any failure
+                try:
+                    _record_failure(exc, "worker")
+                except Exception:
+                    pass
+            finally:
+                with self._cv:
+                    self._pending -= 1
+                    self._cv.notify_all()
+
+    def submit(self, fn: Callable[[], None], *, grace: float = 0.0) -> bool:
+        """Queue ``fn``. Never blocks on the queue, never raises. False means
+        it was dropped.
+
+        With ``grace > 0`` and no other item pending, waits up to ``grace``
+        seconds for ``fn`` to finish; behind a backlog it returns at once, so a
+        stalled worker can never cost callers more than one grace in a row.
+        """
+        done = threading.Event()
+
+        def run() -> None:
+            try:
+                fn()
+            finally:
+                done.set()
+
+        with self._cv:
+            self._pending += 1
+            idle = self._pending == 1
+        try:
+            self._queue.put_nowait(run)
+        except queue.Full:
+            with self._cv:
+                self._pending -= 1
+                self.dropped += 1
+                self._cv.notify_all()
+            _record_drop()
+            return False
+        except Exception as exc:  # never reaches the serving path
+            with self._cv:
+                self._pending -= 1
+                self._cv.notify_all()
+            _record_failure(exc, "submit")
+            return False
+        try:
+            self._ensure_thread()
+        except Exception as exc:  # thread limits, interpreter shutdown
+            _record_failure(exc, "thread")
+            return True
+        if idle and grace > 0:
+            done.wait(grace)
+        return True
+
+    def pending(self) -> int:
+        with self._cv:
+            return self._pending
+
+    def flush(self, timeout: float | None = FLUSH_TIMEOUT) -> bool:
+        """Wait for every submitted item to finish. True when drained in time."""
+        with self._cv:
+            if self._pending == 0:
+                return True
+            thread = self._thread
+        if thread is None or not thread.is_alive():
+            # Nothing will drain the queue unless a thread exists; start one.
+            try:
+                self._ensure_thread()
+            except Exception as exc:
+                _record_failure(exc, "thread")
+                return False
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        with self._cv:
+            while self._pending > 0:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    return False
+                self._cv.wait(remaining)
+            return True
+
+    def _after_fork_in_child(self) -> None:
+        # The worker thread does not survive a fork; queued closures belong to
+        # the parent. Start clean so the child never waits on work nobody runs
+        # and never inherits a lock a parent thread held at the fork.
+        self._init_state()
+
+
+_worker = ShadowWorker()
+
+
+def default_worker() -> ShadowWorker:
+    return _worker
+
+
+def flush(timeout: float | None = FLUSH_TIMEOUT) -> bool:
+    """Drain the process-wide shadow queue. True when every observation made
+    before the call has been evaluated and appended (or counted as failed)."""
+    return _worker.flush(timeout)
+
+
+def _flush_at_exit() -> None:
+    try:
+        _worker.flush(EXIT_FLUSH_TIMEOUT)
+    except Exception:
+        pass
+
+
+atexit.register(_flush_at_exit)
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=lambda: _worker._after_fork_in_child())
+
+
+def _with_persistent_client(backend: Any) -> Any:
+    """Give a clientless ``KevHttpBackend`` one persistent HTTP client.
+
+    ``httpx.post`` builds a client, and with it a TLS context, on every call:
+    measured at 55 to 80 ms each, so two calls per observation cost more than
+    the whole grace budget before kev has answered anything. The worker is one
+    thread and asks kev serially, so one client serves every observation. Any
+    other backend, or one that already carries a client, is returned as is.
+    """
+    try:
+        from .backends import KevHttpBackend
+    except Exception:
+        return backend
+    if not isinstance(backend, KevHttpBackend) or getattr(backend, "_client", None) is not None:
+        return backend
+    try:
+        import httpx
+
+        return KevHttpBackend(
+            backend.base_url,
+            model=backend.model,
+            timeout_s=backend.timeout_s,
+            server_calibrated=backend.server_calibrated,
+            client=httpx.Client(),
+        )
+    except Exception:
+        return backend
+
+
 class ShadowEvaluator:
     """Evaluates a decision backend beside the rules and logs agreement.
 
-    ``observe(state, rules_tier)`` returns the row it wrote (or tried to write)
-    and never raises. The backend is asked through ``decide(check_order=True)``
-    so order sensitivity is recorded, which is two backend calls per decision.
+    ``observe(state, rules_tier)`` queues the evaluation on the worker and
+    returns at once, never raising; the row is appended by the worker. The
+    backend is asked through ``decide(check_order=True)`` so order sensitivity
+    is recorded, which is two backend calls per decision, off the serving path.
     """
 
     def __init__(
@@ -165,11 +410,17 @@ class ShadowEvaluator:
         *,
         abstain_threshold: float | None = None,
         path: Path | None = None,
+        worker: ShadowWorker | None = None,
+        grace: float | None = None,
     ) -> None:
-        self.backend = backend
+        self.backend = _with_persistent_client(backend)
         self.abstain_threshold = abstain_threshold
         self._path = path
+        self.worker = worker if worker is not None else _worker
+        self.grace = grace if grace is not None else grace_seconds()
+        self._count_lock = threading.Lock()
         self.observations = 0
+        self.dropped = 0
 
     @property
     def backend_name(self) -> str:
@@ -178,16 +429,46 @@ class ShadowEvaluator:
     def path(self) -> Path:
         return self._path if self._path is not None else shadow_path()
 
-    def observe(self, state: dict[str, Any], rules_tier: Any) -> dict[str, Any] | None:
-        """Evaluate the backend on ``state`` and append one row. Never raises."""
+    def observe(self, state: dict[str, Any], rules_tier: Any) -> bool:
+        """Queue the evaluation of ``state``. Never blocks on kev, never raises.
+
+        True means the observation was queued; False means the queue was full
+        and it was dropped (counted). When the worker is idle the call waits at
+        most ``self.grace`` seconds for the row, so a fast kev leaves it on disk
+        before the decision is served; otherwise the row becomes visible after
+        ``flush()``, which ``read_rows`` and ``summary`` call for you.
+        """
+        try:
+            target = self.path()
+        except Exception as exc:
+            _record_failure(exc, "path")
+            return False
+
+        def work() -> None:
+            self._evaluate_and_append(state, rules_tier, target)
+
+        try:
+            queued = self.worker.submit(work, grace=self.grace)
+        except Exception as exc:  # bookkeeping must never reach the routing path
+            _record_failure(exc, "submit")
+            return False
+        if not queued:
+            with self._count_lock:
+                self.dropped += 1
+        return queued
+
+    def flush(self, timeout: float | None = FLUSH_TIMEOUT) -> bool:
+        return self.worker.flush(timeout)
+
+    def _evaluate_and_append(self, state: dict[str, Any], rules_tier: Any, target: Path) -> None:
         try:
             row = self.build_row(state, rules_tier)
-        except Exception as exc:  # bookkeeping must never reach the routing path
+        except Exception as exc:
             _record_failure(exc, "build")
-            return None
-        append_row(row, self.path())
-        self.observations += 1
-        return row
+            return
+        append_row(row, target)
+        with self._count_lock:
+            self.observations += 1
 
     def build_row(self, state: dict[str, Any], rules_tier: Any) -> dict[str, Any]:
         from .backends import tier_question
@@ -306,7 +587,12 @@ def append_row(row: dict[str, Any], path: Path | None = None) -> bool:
 
 
 def read_rows(path: Path | None = None) -> list[dict[str, Any]]:
-    """Read the shadow log back. Malformed lines are skipped, not raised."""
+    """Read the shadow log back. Malformed lines are skipped, not raised.
+
+    Flushes the process-wide worker first, so every observation queued before
+    the call is on disk (or counted as a failure) before the file is read.
+    """
+    flush()
     target = path if path is not None else shadow_path()
     if not target.exists():
         return []
@@ -340,6 +626,12 @@ def summary(path: Path | None = None, *, min_n: int = MIN_N) -> dict[str, Any]:
     matched the served rules tier. It is ``None`` below ``min_n`` rows (and
     when there are none), so no caller can present it as a metric too early;
     ``agree`` and ``n`` are still returned as raw counts.
+
+    ``dropped`` (observations the bounded queue refused, process-wide, see
+    ``dropped()``) is reported once any were dropped. It is a count of
+    decisions this process never evaluated, so it belongs beside ``n``; it is
+    absent when zero because the summary shape with no drops is frozen by the
+    existing readers.
     """
     rows = read_rows(path)
     n = len(rows)
@@ -356,7 +648,7 @@ def summary(path: Path | None = None, *, min_n: int = MIN_N) -> dict[str, Any]:
     degraded = sum(1 for r in rows if r.get("degraded") is True)
     abstained = sum(1 for r in rows if r.get("abstain") is True and r.get("degraded") is not True)
     order_sensitive = sum(1 for r in rows if r.get("order_sensitive") is True)
-    return {
+    out: dict[str, Any] = {
         "n": n,
         "agree": agree,
         "degraded": degraded,
@@ -367,6 +659,9 @@ def summary(path: Path | None = None, *, min_n: int = MIN_N) -> dict[str, Any]:
         "min_n": min_n,
         "sufficient": n >= min_n,
     }
+    if _dropped:
+        out["dropped"] = _dropped
+    return out
 
 
 def _tier_value(tier: Any) -> str:
