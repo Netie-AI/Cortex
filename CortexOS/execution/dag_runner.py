@@ -228,11 +228,15 @@ def _price_one_call(
         provider=node.provider,
         metadata={"is_vip": bool(context.get("is_vip", False))},
     )
+    # H2-PII-EDGE (#250): the cost gate routes too, so the judgment model and
+    # its decision backend must see placeholders here as well. Fails closed.
+    from netie.execution.executor import adapter_token_estimate_family, redact_for_routing
+
+    model_req = redact_for_routing(model_req)
     routed = router.route(model_req)
     if routed.tier == Tier.T0:
         return 0.0
-    blob = f"{node.system or ''}\n{prompt}"
-    from netie.execution.executor import adapter_token_estimate_family
+    blob = f"{node.system or ''}\n{model_req.prompt}"
 
     est_prompt = estimate_prompt_tokens(
         blob,

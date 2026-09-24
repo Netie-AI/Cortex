@@ -41,6 +41,29 @@ def adapter_token_estimate_family(provider: str) -> str | None:
     return None
 
 
+def redact_for_routing(model_req: ModelRequest) -> ModelRequest:
+    """The request ``ModelRouter.route`` may be handed: ``prompt`` run through the active redactor.
+
+    H2-PII-EDGE (#250): every ``router.route`` call in the engine goes through
+    this helper, so ``JudgmentModel.decide`` and any decision backend behind it
+    (a kev POST included) only ever see placeholders. That covers the execution
+    path (``invoke_routed_completion``) and the pre-execution cost gate
+    (``dag_runner._price_one_call``, run whenever a workflow cost ceiling is
+    set), which GH-01 and the first cut of #250 both missed.
+
+    Fail closed: a redactor that raises propagates :class:`RedactionFailed` and
+    nothing is routed. The one exception is ``max_tier == T0``: no model can
+    ever be called, so the request is routed on an empty prompt instead of
+    failing (nothing leaves the process either way).
+    """
+    try:
+        return replace(model_req, prompt=redact_prompt_text(model_req.prompt))
+    except RedactionFailed:
+        if model_req.max_tier == Tier.T0:
+            return replace(model_req, prompt="")
+        raise
+
+
 def _decision_state(model_req: ModelRequest) -> dict[str, Any]:
     """The JudgmentModel state dict for ``model_req``, built exactly as ``route()`` does."""
     return JudgmentModel._state_for(
@@ -123,9 +146,11 @@ async def invoke_routed_completion(
     # placeholders. GH-01 (#241) redacted after ``route()``, which left the
     # raw prompt in ``JudgmentRequest.content``. The router is given the same
     # redacted text the adapter will receive (every caller in this repo builds
-    # both requests from one ``prompt`` string), so the raw ``model_req.prompt``
-    # never reaches a backend by any path. Fail closed: a redactor that raises
-    # records status=error and re-raises; neither the router nor the adapter is
+    # both requests from one ``prompt`` string), so on this path the raw
+    # ``model_req.prompt`` never reaches a backend. The other ``route()`` call
+    # in the engine, the pre-execution cost gate, goes through
+    # ``redact_for_routing`` above. Fail closed: a redactor that raises records
+    # status=error and re-raises; neither the router nor the adapter is
     # reached. The one exception is ``max_tier == T0``: no model can be called,
     # so the request is routed on an empty prompt instead of failing (nothing
     # leaves the process either way).

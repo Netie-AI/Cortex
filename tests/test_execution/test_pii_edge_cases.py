@@ -26,10 +26,10 @@ import httpx
 import pytest
 from netie.decision.backends import KevHttpBackend
 from netie.decision.models import ChoiceQuestion, Question, RawDecision
-from netie.execution.dag_runner import ExecutionContext, run_dag
+from netie.execution.dag_runner import ExecutionContext, estimate_node_cost, run_dag
 from netie.execution.executor import invoke_routed_completion
 from netie.execution.model_router import BIG_API_PLACEHOLDER, ModelRequest, ModelRouter
-from netie.fabrication.dsl_parser import parse_dsl
+from netie.fabrication.dsl_parser import DSLNode, parse_dsl
 from netie.result import Ok
 from netie.routing.adapters.base import AdapterRequest, AdapterResponse, LLMAdapter
 from netie.routing.cost_ledger import CostLedger
@@ -368,6 +368,153 @@ async def test_run_dag_backend_sees_only_placeholders() -> None:
     assert [r.status for r in ledger.records_for_run("run_dag_route") if r.node_id == "j1"] == ["ok"]
 
 
+# ---------------------------------------------------------------------------
+# 2b. The pre-execution cost gate routes too (verifier finding on #250)
+#
+# ``run_dag`` with a finite ``workflow_cost_ceiling_myr`` prices every node
+# through ``_price_one_call`` -> ``router.route`` BEFORE ``invoke_routed_completion``
+# runs. That is a second path into the judgment model and its decision backend.
+# ---------------------------------------------------------------------------
+
+
+def _kev_judgment_model(posted: list[dict[str, Any]], choice: str = "T1") -> JudgmentModel:
+    def handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content.decode("utf-8")))
+        probs = {t: (0.97 if t == choice else 0.01) for t in ("T0", "T1", "T2", "T3")}
+        return httpx.Response(200, json={"answers": {"q": {"probabilities": probs}}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return JudgmentModel(decision_backend=KevHttpBackend("http://127.0.0.1:9", client=client), abstain_threshold=0.0)
+
+
+@pytest.mark.asyncio
+async def test_run_dag_cost_gate_backend_sees_only_placeholders() -> None:
+    """With a workflow ceiling the router is asked twice (gate, then execution); both must be redacted."""
+    spy = SpyAdapter()
+    backend = SpyDecisionBackend(Tier.T1)
+    jm = SpyJudgmentModel(decision_backend=backend, abstain_threshold=0.0)
+    ledger = CostLedger()
+    ctx = ExecutionContext("run_gate_route", seed={"customer": RAW_MIX})
+    dag = _pii_dag(prompt="Review: {customer}")
+
+    res = await run_dag(dag, ctx, _router(spy, jm), ledger, workflow_cost_ceiling_myr=50.0)
+
+    assert len(jm.requests) == 2, "cost gate + execution each route once"
+    assert len(backend.states) >= 2
+    for req in jm.requests:
+        assert "[REDACTED:nric]" in req.content
+        assert "[REDACTED:mykad]" in req.content
+        assert req.content == spy.requests[0].prompt
+    for raw in RAW_VALUES:
+        assert all(raw not in req.content for req in jm.requests)
+        assert all(raw not in json.dumps(s, ensure_ascii=False) for s in backend.states)
+        assert raw not in res.outputs["j1"].output["content"]
+    assert [r.status for r in ledger.records_for_run("run_gate_route") if r.node_id == "j1"] == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_run_dag_cost_gate_kev_posts_only_placeholders() -> None:
+    """The wire artifact under a workflow ceiling: every kev POST body, gate call included."""
+    posted: list[dict[str, Any]] = []
+    spy = SpyAdapter()
+    ledger = CostLedger()
+    ctx = ExecutionContext("run_gate_kev", seed={"customer": RAW_MIX})
+    dag = _pii_dag(prompt="Review: {customer}")
+
+    res = await run_dag(dag, ctx, _router(spy, _kev_judgment_model(posted)), ledger, workflow_cost_ceiling_myr=50.0)
+
+    assert len(posted) >= 2, "gate and execution must both have asked kev"
+    for body in posted:
+        wire = json.dumps(body, ensure_ascii=False)
+        for raw in RAW_VALUES:
+            assert raw not in wire
+        assert "[REDACTED:nric]" in body["state"]["content"]
+        assert body["state"]["content"] == spy.requests[0].prompt
+    assert "S1234567D" not in res.outputs["j1"].output["content"]
+
+
+def _agent_task_node(prompt: str) -> DSLNode:
+    return DSLNode(
+        id="a1",
+        kind="agent_task",
+        prompt=prompt,
+        system="agent",
+        provider=BIG_API_PLACEHOLDER,
+        max_tokens=50,
+        annotations={"effort": "medium", "max_steps": 3},
+    )
+
+
+def _t0_judged_node(prompt: str) -> DSLNode:
+    return DSLNode(
+        id="t0",
+        kind="llm_judged",
+        prompt=prompt,
+        system="",
+        provider=BIG_API_PLACEHOLDER,
+        max_tokens=50,
+        default_tier="T0",
+        max_tier="T0",
+    )
+
+
+def test_estimate_node_cost_agent_task_routes_redacted_prompt() -> None:
+    """The AGENT_TASK branch prices through the same call, so the backend sees placeholders there too."""
+    backend = SpyDecisionBackend(Tier.T1)
+    jm = SpyJudgmentModel(decision_backend=backend, abstain_threshold=0.0)
+    ctx = ExecutionContext("run_agent_gate", seed={"customer": RAW_MIX})
+
+    cost = estimate_node_cost(_agent_task_node("Handle: {customer}"), _router(SpyAdapter(), jm), ctx)
+
+    assert cost > 0.0
+    assert len(jm.requests) == 1
+    assert "[REDACTED:nric]" in jm.requests[0].content
+    for raw in RAW_VALUES:
+        assert raw not in jm.requests[0].content
+        assert all(raw not in json.dumps(s, ensure_ascii=False) for s in backend.states)
+
+
+@pytest.mark.asyncio
+async def test_run_dag_cost_gate_raising_redactor_fails_closed() -> None:
+    """A raising redactor aborts the run inside the gate: nothing is routed, priced, called or ledgered."""
+    spy = SpyAdapter()
+    backend = SpyDecisionBackend(Tier.T1)
+    jm = SpyJudgmentModel(decision_backend=backend, abstain_threshold=0.0)
+    ledger = CostLedger()
+    ctx = ExecutionContext("run_gate_broken", seed={"customer": RAW_MIX})
+    dag = _pii_dag(prompt="Review: {customer}")
+
+    def broken(text: str) -> str:
+        raise RuntimeError("ner backend unavailable")
+
+    register_redactor(broken)
+    with pytest.raises(RedactionFailed):
+        await run_dag(dag, ctx, _router(spy, jm), ledger, workflow_cost_ceiling_myr=50.0)
+
+    assert jm.requests == []
+    assert backend.states == []
+    assert spy.requests == []
+    assert ledger.records_for_run("run_gate_broken") == []
+    assert "j1" not in ctx
+
+
+def test_estimate_node_cost_t0_max_tier_with_raising_redactor_prices_zero() -> None:
+    """max_tier T0 can never call a model: priced at 0.0 and the router sees an empty prompt, not raw text."""
+    backend = SpyDecisionBackend(Tier.T0)
+    jm = SpyJudgmentModel(decision_backend=backend, abstain_threshold=0.0)
+    ctx = ExecutionContext("run_agent_t0", seed={"customer": RAW_MIX})
+
+    def broken(text: str) -> str:
+        raise RuntimeError("must not leak")
+
+    register_redactor(broken)
+    cost = estimate_node_cost(_t0_judged_node("Handle: {customer}"), _router(SpyAdapter(), jm), ctx)
+
+    assert cost == 0.0
+    assert [r.content for r in jm.requests] == [""]
+    assert all("S1234567D" not in json.dumps(s) for s in backend.states)
+
+
 @pytest.mark.asyncio
 async def test_kev_http_backend_posts_only_placeholders(monkeypatch: pytest.MonkeyPatch) -> None:
     """The wire artifact: the JSON body a KevHttpBackend POSTs to the loopback server."""
@@ -541,7 +688,11 @@ async def test_registered_redactor_output_is_what_the_router_sees() -> None:
 
 def test_redact_port_and_executor_import_no_packs() -> None:
     root = Path(__file__).resolve().parents[2]
-    for rel in ("CortexOS/security/redact_port.py", "CortexOS/execution/executor.py"):
+    for rel in (
+        "CortexOS/security/redact_port.py",
+        "CortexOS/execution/executor.py",
+        "CortexOS/execution/dag_runner.py",
+    ):
         tree = ast.parse((root / rel).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
