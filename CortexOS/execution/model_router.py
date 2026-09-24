@@ -114,6 +114,8 @@ class ModelRouter:
         # (a backend chose higher). Refuse when the *required* tier is above the
         # cap; when the cap satisfies the floor, the clamp below still lands at
         # or above it, so nothing is served under the floor either way.
+        # ``floor_tier`` is only what the deterministic rule forces (legal T2,
+        # VIP T2); heuristic context-size/retry uplift above it keeps the clamp.
         required = getattr(decision, "floor_tier", None) or decision.tier
         if floor is not None and TIER_ORDER[required] > TIER_ORDER[req.max_tier]:
             refusal = TierFloorAboveCap(

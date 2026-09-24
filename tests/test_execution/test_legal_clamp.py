@@ -469,7 +469,12 @@ NON_LEGAL_CORPUS: tuple[str, ...] = (
     "the contractual style guide is attached",
     "the spanish class starts at eight",
     "legally_blonde is a movie title",
-    "spa_day is a calendar tag",
+    "the spacecraft_launch window opened",
+    "set illegalMove to false in the chess engine",
+    "contractorName is a required field",
+    "the loanerCar record was updated",
+    "SpaceStation telemetry is delayed",
+    "the paralegal_team channel is muted",
     "loanwords from malay in english",
     "agree on the meeting time",
     "the tenureship program launches next quarter",
@@ -484,6 +489,7 @@ def test_non_legal_corpus_has_at_least_thirty_prompts():
 @pytest.mark.parametrize("prompt", NON_LEGAL_CORPUS)
 def test_non_legal_prompt_is_not_floored(prompt: str):
     jm = JudgmentModel()
+    assert jm._contains_legal_terms(prompt) is False
     assert jm._contains_legal_terms(prompt.lower()) is False
     d = jm.rules_decide(JudgmentRequest("chat", prompt))
     assert d.tier == Tier.T1
@@ -566,3 +572,169 @@ def test_refusal_error_names_floor_judged_tier_and_cap():
         "legal/financial floor requires T2 for request 'chat' but the node caps max_tier at T1; "
         "refusing to serve below the floor"
     )
+
+
+# --- Verifier round 3, finding 1: structured prompts still floor --------------------
+#
+# The word-boundary regex treated ``_`` as a word character and could not see a
+# camelCase boundary, so ``loan_agreement`` and ``LoanAgreement`` fell through to
+# T1: the floor failed OPEN on prompts the substring base floored. Tokens are now
+# split on every non-alphanumeric character and on case/digit boundaries.
+
+STRUCTURED_LEGAL_CORPUS: tuple[str, ...] = (
+    # snake_case
+    "run loan_agreement_review now",
+    "compute stamp_duty_calc for the unit",
+    "open spa_form for the buyer",
+    "validate the nric_number field",
+    "rpgt_rate for 2026",
+    "legal_hold on the account",
+    # camelCase / PascalCase
+    "call LoanAgreement.review()",
+    "compute stampDutyCalc",
+    "render SpaForm",
+    "render SPAForm",
+    "the SPAs are attached",
+    "check contractTerms",
+    "tenureYears is 30",
+    "legalReview pending",
+    # kebab-case
+    "loan-agreement.pdf",
+    "stamp-duty-calc",
+    # dotted
+    "config.legal.review = true",
+    "doc.agreement.signed",
+    # digits glued
+    "loan2024 schedule",
+    # JSON keys
+    '{"loan_agreement": "draft"}',
+    '{"loanAgreement": {"status": "draft"}}',
+    '{"stampDuty": 1200}',
+    '{"spa_ref": "S-1"}',
+)
+
+
+@pytest.mark.parametrize("prompt", STRUCTURED_LEGAL_CORPUS)
+def test_structured_legal_prompt_is_floored_to_t2(prompt: str):
+    d = JudgmentModel().rules_decide(JudgmentRequest("chat", prompt))
+    assert d.tier == Tier.T2
+    assert d.floor == "legal/financial floor"
+    assert d.floor_tier == Tier.T2
+
+
+@pytest.mark.parametrize("prompt", STRUCTURED_LEGAL_CORPUS)
+def test_structured_legal_prompt_in_t1_node_is_refused(prompt: str):
+    spy = SpyAdapter()
+    router = _router(spy)
+    routed = router.route(ModelRequest(request_type="chat", prompt=prompt, default_tier=Tier.T1, max_tier=Tier.T1))
+    assert isinstance(routed.adapter, FloorRefusalAdapter)
+    assert routed.reason.startswith("refused: legal/financial floor requires T2")
+    assert routed.adapter is not spy
+
+
+@pytest.mark.parametrize("prompt", STRUCTURED_LEGAL_CORPUS)
+def test_structured_legal_prompt_floors_a_t0_backend(prompt: str):
+    jm = JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T0), abstain_threshold=0.0)
+    d = jm.decide(JudgmentRequest(request_type="chat", content=prompt))
+    assert d.tier == Tier.T2
+    assert d.floor == "legal/financial floor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("node_id", "prompt"),
+    [("sn1", "review loan_agreement_v2"), ("cc1", "review LoanAgreement"), ("js1", '{"stamp_duty_calc": 1}')],
+)
+async def test_dag_structured_legal_prompt_in_t1_node_is_refused(node_id: str, prompt: str):
+    await _assert_dag_refused_below_legal_floor(node_id, prompt, None)
+
+
+@pytest.mark.parametrize("term", JudgmentModel.LEGAL_TERMS)
+def test_every_legal_term_matches_in_snake_camel_and_json(term: str):
+    jm = JudgmentModel()
+    snake = term.replace(" ", "_")
+    camel = "".join(w.capitalize() for w in term.split())
+    assert jm._contains_legal_terms(f"x_{snake}_id")
+    assert jm._contains_legal_terms(f"get{camel}Value")
+    assert jm._contains_legal_terms(f'{{"{snake}": 1}}')
+    # Glued inside a longer lowercase word it is still not the term.
+    assert not jm._contains_legal_terms(f"x_{snake.replace('_', '')}ology_id")
+
+
+def test_token_match_boundaries_named_in_the_issue():
+    jm = JudgmentModel()
+    for hit in ("SPA", "spa_form", "SpaForm", "legal", "loan", "contract"):
+        assert jm._contains_legal_terms(hit), hit
+    for miss in ("space", "spacecraft", "illegal", "loaner", "contractor"):
+        assert not jm._contains_legal_terms(miss), miss
+
+
+# --- Verifier round 3, finding 2: the VIP floor excludes heuristic uplift -----------
+#
+# ``floor_tier`` was the final VIP tier, which already includes the context-size
+# (and retry) uplift, so a large VIP prompt judged T3 in a ``max_tier=T2`` node was
+# refused. The VIP rule forces T2; uplift above it is heuristic and keeps the clamp.
+
+_LARGE = "summarise the meeting notes " * 120  # > 2500 chars, no legal term
+
+
+def test_vip_large_prompt_decision_keeps_t3_but_floor_is_t2():
+    d = JudgmentModel().rules_decide(JudgmentRequest("chat", _LARGE, context_size=len(_LARGE), is_vip=True))
+    assert d.tier == Tier.T3
+    assert d.floor == "vip floor"
+    assert d.floor_tier == Tier.T2
+
+
+def test_vip_prior_failure_decision_floor_is_t2():
+    d = JudgmentModel().rules_decide(JudgmentRequest("chat", "hello", prior_tier_failures=1, is_vip=True))
+    assert d.tier == Tier.T3
+    assert d.floor_tier == Tier.T2
+
+
+@pytest.mark.asyncio
+async def test_dag_vip_large_prompt_in_t2_node_is_clamped_to_t2_not_refused():
+    spy = SpyAdapter()
+    router = _router(spy)
+    ledger = CostLedger()
+    dag = _one_node_dag("v2", _LARGE, max_tier="T2")
+
+    res = await run_dag(
+        dag,
+        ExecutionContext("run_clamp_vip_large", {"is_vip": True}),
+        router,
+        ledger,
+        workflow_cost_ceiling_myr=None,
+    )
+
+    assert res.outputs["v2"].tier == "T2"
+    assert res.outputs["v2"].output["content"] == "ok"
+    rows = [r for r in ledger.records() if r.node_id == "v2"]
+    assert len(rows) == 1 and rows[0].status == "ok" and rows[0].tier == "T2"
+    assert len(spy.requests) == 1
+    assert spy.requests[0].model == router.tier_models[Tier.T2]
+
+
+@pytest.mark.asyncio
+async def test_dag_vip_large_prompt_in_t1_node_is_refused_at_the_vip_floor():
+    """Below the VIP floor itself still refuses, and names T2 (the floor), not T3."""
+    spy = SpyAdapter()
+    router = _router(spy)
+    ledger = CostLedger()
+    dag = _one_node_dag("v3", _LARGE, max_tier="T1")
+
+    with pytest.raises(TierFloorAboveCap) as ei:
+        await run_dag(
+            dag,
+            ExecutionContext("run_clamp_vip_large_t1", {"is_vip": True}),
+            router,
+            ledger,
+            workflow_cost_ceiling_myr=None,
+        )
+
+    assert ei.value.floor == "vip floor"
+    assert ei.value.judged_tier == Tier.T2
+    assert ei.value.max_tier == Tier.T1
+    assert "vip floor requires T2" in str(ei.value)
+    assert spy.requests == []
+    rows = [r for r in ledger.records() if r.node_id == "v3"]
+    assert len(rows) == 1 and rows[0].status == "error" and rows[0].tier == "T2"

@@ -58,6 +58,9 @@ class JudgmentModel:
 
     LEGAL_FLOOR = "legal/financial floor"
     VIP_FLOOR = "vip floor"
+    # What each deterministic safety floor forces, excluding heuristic uplift.
+    LEGAL_FLOOR_TIER = Tier.T2
+    VIP_FLOOR_TIER = Tier.T2
     # Floors that must never be served below. A DSL ``max_tier`` under one of
     # these is refused by ``ModelRouter.route`` (H2-LEGAL-CLAMP, #251). The
     # birthday quality floor and the heuristic context-size tier keep the clamp.
@@ -169,8 +172,8 @@ class JudgmentModel:
         req_type = req.request_type.lower().strip()
         if req_type in {"embedding", "intent_classify", "sentiment"}:
             return None
-        if self._contains_legal_terms(req.content.lower()):
-            return Tier.T2, self.LEGAL_FLOOR
+        if self._contains_legal_terms(req.content):
+            return self.LEGAL_FLOOR_TIER, self.LEGAL_FLOOR
         return None
 
     def apply_rules_floor(self, req: JudgmentRequest, chosen: Tier) -> tuple[Tier, str] | None:
@@ -194,8 +197,8 @@ class JudgmentModel:
         name = ""
         if "birthday" in req_type or "birthday" in text:
             floor, name = Tier.T3, "birthday quality floor"
-        elif self._contains_legal_terms(text):
-            floor, name = Tier.T2, self.LEGAL_FLOOR
+        elif self._contains_legal_terms(req.content):
+            floor, name = self.LEGAL_FLOOR_TIER, self.LEGAL_FLOOR
 
         if floor is None or TIER_ORDER[chosen] >= TIER_ORDER[floor]:
             return None
@@ -224,23 +227,23 @@ class JudgmentModel:
             # Birthday is a quality floor and keeps the clamp on its own; but a
             # legal term in the same prompt still carries the T2 safety floor,
             # so a T1 cap refuses rather than serving the loan review at T1.
-            if self._contains_legal_terms(text):
+            if self._contains_legal_terms(req.content):
                 return JudgmentDecision(
                     tier=Tier.T3,
                     confidence=0.95,
                     reason="birthday rapport quality path; financial/legal terms detected",
                     floor=self.LEGAL_FLOOR,
-                    floor_tier=Tier.T2,
+                    floor_tier=self.LEGAL_FLOOR_TIER,
                 )
             return JudgmentDecision(tier=Tier.T3, confidence=0.95, reason="birthday rapport quality path")
 
-        if self._contains_legal_terms(text):
+        if self._contains_legal_terms(req.content):
             return JudgmentDecision(
                 tier=Tier.T2,
                 confidence=0.92,
                 reason="financial/legal terms detected",
                 floor=self.LEGAL_FLOOR,
-                floor_tier=Tier.T2,
+                floor_tier=self.LEGAL_FLOOR_TIER,
             )
 
         tier = Tier.T1 if req.context_size <= 2500 else Tier.T2
@@ -250,21 +253,39 @@ class JudgmentModel:
 
         if req.is_vip:
             tier = Tier.T2 if tier == Tier.T1 else Tier.T3
+            # The VIP safety floor is the rule's minimum, T2 (the bump from the
+            # T1 base), never the heuristic context-size/retry uplift on top of
+            # it. A large VIP prompt in a max_tier=T2 node is clamped to T2, not
+            # refused; only a cap below T2 refuses (verifier finding 2, #251).
             return JudgmentDecision(
-                tier=tier, confidence=0.7, reason="heuristic routing fallback", floor=self.VIP_FLOOR, floor_tier=tier
+                tier=tier,
+                confidence=0.7,
+                reason="heuristic routing fallback",
+                floor=self.VIP_FLOOR,
+                floor_tier=self.VIP_FLOOR_TIER,
             )
 
         return JudgmentDecision(tier=tier, confidence=0.7, reason="heuristic routing fallback")
 
     def _contains_legal_terms(self, text: str) -> bool:
-        """Whole-word, case-insensitive match of ``LEGAL_TERMS`` (H2-LEGAL-CLAMP, #251).
+        """Token-level, case-insensitive match of ``LEGAL_TERMS`` (H2-LEGAL-CLAMP, #251).
 
-        ``spa`` is the Sale and Purchase Agreement acronym as a word, never the
-        inside of ``space``; ``legal`` never matches ``illegal``; ``contract``
-        never matches ``contractor``. A plain plural (``contracts``) still
-        matches. Multi-word phrases match across any run of whitespace.
+        ``text`` is split into tokens on every non-alphanumeric character
+        (including ``_``) and on camelCase/PascalCase/letter-digit boundaries,
+        then lowercased; see ``legal_tokens``. A single-word term matches a
+        token, a phrase matches consecutive tokens, and the last token may carry
+        a plain plural ``s``. So ``spa`` matches ``SPA``, ``spa_form`` and
+        ``SpaForm`` but never ``space``; ``legal`` never matches ``illegal``;
+        ``contract`` never matches ``contractor``; ``loan_agreement``,
+        ``LoanAgreement`` and ``stamp-duty`` all match. Pass the original-case
+        text so camelCase boundaries survive; lowercased text still matches
+        separator-delimited terms.
         """
-        return _legal_terms_pattern(tuple(self.LEGAL_TERMS)).search(text) is not None
+        tokens = legal_tokens(text)
+        if not tokens:
+            return False
+        phrases = _term_phrases(tuple(self.LEGAL_TERMS))
+        return any(_matches_at(tokens, i, phrase) for phrase in phrases for i in range(len(tokens)))
 
     @staticmethod
     def big_api_request_types() -> Iterable[str]:
@@ -278,22 +299,43 @@ class JudgmentModel:
         )
 
 
-_LEGAL_PATTERNS: dict[tuple[str, ...], re.Pattern[str]] = {}
+# Order matters. An all-caps run followed by a lowercase ``s`` is a pluralised
+# acronym (``SPAs``, ``NRICs``); an all-caps run followed by Capital+lower is an
+# acronym before a PascalCase word (``SPAForm`` -> ``SPA``, ``Form``); then a
+# capitalised or lowercase word, a bare caps run, a digit run, and any other
+# (non-ASCII) letter run.
+_TOKEN_RE = re.compile(r"[A-Z]{2,}s(?![a-z])|[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+|[^\W\d_]+")
 
 
-def _legal_terms_pattern(terms: tuple[str, ...]) -> re.Pattern[str]:
-    """Compile ``terms`` into one word-bounded alternation, cached per term tuple.
+def legal_tokens(text: str) -> list[str]:
+    """Lowercased word tokens of ``text`` for legal-term matching.
 
-    A term is bounded by anything that is not a word character, so ``spa``
-    does not match ``space``, ``legal`` does not match ``illegal``, ``loan``
-    does not match ``loaner`` and ``contract`` does not match ``contractor``.
-    Hyphenated compounds such as ``sub-contract`` still match (fail closed).
-    Whitespace inside a phrase matches any whitespace run, so ``stamp  duty``
-    still matches ``stamp duty``.
+    Splits on every non-alphanumeric character (whitespace, punctuation, ``_``,
+    ``-``, ``.``, JSON quotes) and on camelCase, PascalCase, acronym and
+    letter/digit boundaries: ``loan_agreement``, ``LoanAgreement``,
+    ``stampDutyCalc``, ``SPAForm``, ``loan2024`` each yield their words.
     """
-    pattern = _LEGAL_PATTERNS.get(terms)
-    if pattern is None:
-        alternatives = "|".join(re.escape(t.strip().lower()).replace("\\ ", r"\s+") for t in terms if t.strip())
-        pattern = re.compile(rf"(?<!\w)(?:{alternatives})s?(?!\w)", re.IGNORECASE)
-        _LEGAL_PATTERNS[terms] = pattern
-    return pattern
+    return [t.lower() for t in _TOKEN_RE.findall(text)]
+
+
+_TERM_PHRASES: dict[tuple[str, ...], tuple[tuple[str, ...], ...]] = {}
+
+
+def _term_phrases(terms: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    """Each term as its token sequence (``"stamp duty"`` -> ``("stamp", "duty")``), cached."""
+    phrases = _TERM_PHRASES.get(terms)
+    if phrases is None:
+        phrases = tuple(p for p in (tuple(legal_tokens(t)) for t in terms) if p)
+        _TERM_PHRASES[terms] = phrases
+    return phrases
+
+
+def _matches_at(tokens: list[str], i: int, phrase: tuple[str, ...]) -> bool:
+    """``phrase`` occupies ``tokens[i:]``; the last token may add a plural ``s``."""
+    n = len(phrase)
+    if i + n > len(tokens):
+        return False
+    if any(tokens[i + k] != phrase[k] for k in range(n - 1)):
+        return False
+    last = tokens[i + n - 1]
+    return last == phrase[-1] or last == phrase[-1] + "s"
