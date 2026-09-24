@@ -129,6 +129,45 @@ def _is_abstain_signal(data: dict[str, Any]) -> bool:
     } or layer in {"abstain", "blocked", "refused"}
 
 
+def _resolved_badge(data: dict[str, Any]) -> Badge | None:
+    """Badge the customer will actually see, read from the settled provenance.
+
+    ``_is_abstain_signal`` only knows the raw engine tokens. A badge the flat
+    map does not recognise (``document``, ``catalog``, ...) still resolves to
+    Badge.ABSTAIN in ``_provenance_from_flat``, so the enrichment step has to
+    ask the resolved provenance, not the raw token, before it fills sources or
+    mints a drillthrough token. Returns None when provenance is unreadable.
+    """
+    prov = data.get("provenance")
+    raw: Any
+    if isinstance(prov, Provenance):
+        raw = prov.badge
+    elif isinstance(prov, dict):
+        raw = prov.get("badge")
+    else:
+        raw = getattr(prov, "badge", None)
+    if isinstance(raw, Badge):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return Badge(raw.lower())
+        except ValueError:
+            return None
+    return None
+
+
+def _is_not_confident(data: dict[str, Any]) -> bool:
+    """True when the envelope must carry no sources and no drillthrough.
+
+    Fail closed: either a raw abstain/blocked token or a resolved provenance
+    badge of ABSTAIN/BLOCKED disqualifies the answer from listing warehouse
+    tables as its sources.
+    """
+    if _is_abstain_signal(data):
+        return True
+    return _resolved_badge(data) in {Badge.ABSTAIN, Badge.BLOCKED}
+
+
 def _provenance_from_flat(data: dict[str, Any]) -> Provenance:
     """Build provenance from answer_engine flat fields — never invent SESSION on abstain."""
     route = str(data.get("route") or "").lower()
@@ -213,13 +252,18 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = [assumptions.strip()]
     elif not isinstance(assumptions, list):
         data["assumptions"] = []
-    if _is_abstain_signal(data):
+    # TRUST-03: decide from the badge the customer receives, not only the raw
+    # tokens. An unmapped badge ('document', 'catalog') is Badge.ABSTAIN by the
+    # time provenance is settled, and an ABSTAIN envelope must never list
+    # warehouse tables as its sources or carry a drillthrough token.
+    not_confident = _is_not_confident(data)
+    if not_confident:
         data["contributing_sources"] = []
     elif not data.get("contributing_sources"):
         data["contributing_sources"] = _contributing_sources(data)
     sql = data.get("sql_used")
     # Never mint drillthrough for abstain/blocked answers.
-    if _is_abstain_signal(data):
+    if not_confident:
         data["drillthrough_token"] = None
         data["sql_used"] = None
     elif isinstance(sql, str) and sql.strip() and not data.get("drillthrough_token"):
