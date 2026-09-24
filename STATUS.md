@@ -1,5 +1,20 @@
 # STATUS.md
-**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+**Last updated:** 2026-09-24 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+
+> **2026-09-24 (EPIC-HARDEN-2 #249):** PR #235 (draft). Six residuals closed,
+> each passed by an independent adversarial verifier (four needed a judge-model
+> escalation). #250 PII redacted before routing and in the cost gate; NRIC/MyKad
+> edge forms (NFKC). #251 legal terms matched as tokens (spa != space, but
+> LoanAgreement floors); a deterministic floor above a node max_tier refuses
+> with a typed error. #252 one ledger row per attempt for every node kind,
+> including non-LLM failures and replays. #253 shadow runs off the serving
+> path (bounded queue, drops counted). #254 runtime logs isolated by a pytest
+> plugin (tests/conftest.py untouched: #215 guard). #255 decision log
+> fork-safe, O_APPEND lines, contended multi-process proof (two-phase
+> barrier). KEV-CALIB r4: raw scale is the source of truth; scaled threshold
+> prints `inexact` instead of crashing on float collapse (3000-log fuzz, 0
+> crashes). Suite 2775 passed / 13 skipped / 4 xfailed; the full suite leaves
+> data/engine/tier_{decisions,shadow}.jsonl absent. mypy 40 (was 41).
 
 > **2026-09-23 (EPIC-KEV-LOOP #245):** PR #235 (draft). Tier decisions can now
 > learn from outcomes without hand labels. KEV-LOG #246: append-only
