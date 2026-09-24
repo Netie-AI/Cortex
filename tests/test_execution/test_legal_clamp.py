@@ -174,6 +174,154 @@ async def test_dag_legal_floor_with_t0_backend_in_t1_node_is_refused():
     assert len(rows) == 1 and rows[0].status == "error"
 
 
+class UniformScoreBackend:
+    """Decision backend whose scores are flat, so ``decide`` abstains (order_sensitive)."""
+
+    name = "stub-uniform"
+
+    def evaluate(self, question: Question, state: object) -> RawDecision:
+        del state
+        assert isinstance(question, ChoiceQuestion)
+        n = len(question.labels)
+        return RawDecision(scores=tuple([1.0 / n] * n), is_logits=False, calibrated=True, backend=self.name)
+
+
+async def _assert_dag_refused_below_legal_floor(node_id: str, prompt: str, jm: JudgmentModel | None) -> None:
+    spy = SpyAdapter()
+    router = _router(spy, jm)
+    ledger = CostLedger()
+    dag = _one_node_dag(node_id, prompt, max_tier="T1")
+
+    with pytest.raises(TierFloorAboveCap) as ei:
+        await run_dag(dag, ExecutionContext(f"run_clamp_{node_id}"), router, ledger, workflow_cost_ceiling_myr=None)
+
+    exc = ei.value
+    assert exc.floor == "legal/financial floor"
+    assert exc.judged_tier == Tier.T2
+    assert exc.max_tier == Tier.T1
+    assert "refusing to serve below the floor" in str(exc)
+    # No adapter call was made: the T1 model never saw the loan review.
+    assert spy.requests == []
+    rows = [r for r in ledger.records() if r.node_id == node_id]
+    assert len(rows) == 1
+    assert rows[0].status == "error"
+    assert rows[0].tier == "T2"
+    assert rows[0].cost_myr == 0.0
+    assert rows[0].error is not None and "legal/financial floor" in rows[0].error
+
+
+@pytest.mark.asyncio
+async def test_dag_legal_floor_with_t2_backend_in_t1_node_is_refused():
+    """Verifier finding on #251: a backend already at the floor still carries it.
+
+    ``apply_rules_floor`` returns ``None`` when the choice is at or above T2, and
+    the decision used to leave ``floor=None``, so the router clamped the loan
+    review to T1 and served it with a green ``ok`` row.
+    """
+    await _assert_dag_refused_below_legal_floor(
+        "kev2", "review this loan agreement", JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T2))
+    )
+
+
+@pytest.mark.asyncio
+async def test_dag_legal_floor_with_t3_backend_in_t1_node_is_refused():
+    await _assert_dag_refused_below_legal_floor(
+        "kev3", "review this loan agreement", JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T3))
+    )
+
+
+@pytest.mark.asyncio
+async def test_dag_legal_floor_survives_backend_abstain_in_t1_node():
+    """Verifier finding on #251: the rules fallback after an abstain kept its tier but dropped its floor."""
+    jm = JudgmentModel(decision_backend=UniformScoreBackend(), abstain_threshold=0.9)
+    d = jm.decide(JudgmentRequest(request_type="chat", content="review this loan agreement"))
+    assert "abstained" in d.reason and "rules fallback" in d.reason
+    await _assert_dag_refused_below_legal_floor("kevabs", "review this loan agreement", jm)
+
+
+@pytest.mark.asyncio
+async def test_dag_birthday_plus_legal_in_t1_node_is_refused():
+    """Verifier finding on #251: the birthday branch shadowed the legal floor.
+
+    ``rules_decide`` returned the birthday quality floor (``floor=None``) for any
+    prompt that also had legal terms, so the loan review was clamped to T1.
+    """
+    await _assert_dag_refused_below_legal_floor("bday", "birthday card, then review this loan agreement", None)
+
+
+@pytest.mark.asyncio
+async def test_dag_birthday_plus_legal_with_t3_backend_in_t1_node_is_refused():
+    await _assert_dag_refused_below_legal_floor(
+        "bdaykev",
+        "birthday card, then review this loan agreement",
+        JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T3)),
+    )
+
+
+@pytest.mark.parametrize(
+    "jm",
+    [
+        JudgmentModel(),
+        JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T0), abstain_threshold=0.0),
+        JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T3), abstain_threshold=0.0),
+        JudgmentModel(decision_backend=UniformScoreBackend(), abstain_threshold=0.9),
+    ],
+    ids=["rules", "backend_t0", "backend_t3", "backend_abstain"],
+)
+def test_birthday_plus_legal_decision_carries_legal_floor(jm: JudgmentModel):
+    d = jm.decide(JudgmentRequest(request_type="chat", content="birthday card, then review this loan agreement"))
+    assert d.floor == "legal/financial floor"
+    assert d.floor_tier == Tier.T2
+    assert TIER_ORDER[d.tier] >= TIER_ORDER[Tier.T2]
+
+
+# --- Floor at or under the cap: served at or above the floor, never refused ---------
+
+
+@pytest.mark.asyncio
+async def test_dag_t3_backend_on_legal_prompt_in_t2_node_is_clamped_to_t2_not_refused():
+    """The cap satisfies the floor, so the backend overflow keeps the clamp (no false refusal)."""
+    spy = SpyAdapter()
+    router = _router(spy, JudgmentModel(decision_backend=FixedChoiceBackend(Tier.T3), abstain_threshold=0.0))
+    ledger = CostLedger()
+    dag = _one_node_dag("k2", "review this loan agreement", max_tier="T2")
+
+    res = await run_dag(dag, ExecutionContext("run_clamp_kev_t2cap"), router, ledger, workflow_cost_ceiling_myr=None)
+
+    assert res.outputs["k2"].tier == "T2"
+    rows = [r for r in ledger.records() if r.node_id == "k2"]
+    assert len(rows) == 1 and rows[0].status == "ok" and rows[0].tier == "T2"
+    assert len(spy.requests) == 1
+    assert spy.requests[0].model == router.tier_models[Tier.T2]
+
+
+@pytest.mark.asyncio
+async def test_dag_birthday_only_prompt_in_t1_node_keeps_the_clamp():
+    """Birthday without legal terms is a quality floor: still served at the cap."""
+    spy = SpyAdapter()
+    router = _router(spy)
+    ledger = CostLedger()
+    dag = _one_node_dag("b1", "write a birthday card for my aunt", max_tier="T1")
+
+    res = await run_dag(dag, ExecutionContext("run_clamp_bday_only"), router, ledger, workflow_cost_ceiling_myr=None)
+
+    assert res.outputs["b1"].tier == "T1"
+    rows = [r for r in ledger.records() if r.node_id == "b1"]
+    assert len(rows) == 1 and rows[0].status == "ok" and rows[0].tier == "T1"
+    assert len(spy.requests) == 1
+    assert spy.requests[0].model == router.tier_models[Tier.T1]
+
+
+@pytest.mark.parametrize("choice", [Tier.T2, Tier.T3])
+def test_backend_at_or_above_floor_on_legal_prompt_keeps_choice_and_floor(choice: Tier):
+    jm = JudgmentModel(decision_backend=FixedChoiceBackend(choice), abstain_threshold=0.0)
+    d = jm.decide(JudgmentRequest(request_type="chat", content="review this loan agreement"))
+    assert d.tier == choice
+    assert d.reason == "stub-fixed choice (calibrated=True)"
+    assert d.floor == "legal/financial floor"
+    assert d.floor_tier == Tier.T2
+
+
 # --- DAG: no false positive; ordinary prompts are served ----------------------------
 
 

@@ -29,6 +29,10 @@ class JudgmentDecision:
     # ``ModelRouter`` refuses (instead of clamping) when a floored tier exceeds
     # the node's ``max_tier``. One of ``JudgmentModel.SAFETY_FLOORS``.
     floor: str | None = None
+    # The tier that floor requires. ``tier`` may sit above it (a backend chose
+    # higher); the router refuses only when *this* exceeds the cap, and clamps
+    # the rest. ``None`` whenever ``floor`` is ``None``.
+    floor_tier: Tier | None = None
 
 
 class JudgmentModel:
@@ -115,19 +119,31 @@ class JudgmentModel:
         )
         if answer.abstain or answer.choice is None:
             rules = self.rules_decide(req)
+            # The rules fallback keeps its floor (verifier finding on #251): an
+            # abstained legal prompt is refused below T2, not clamped.
             return JudgmentDecision(
                 tier=rules.tier,
                 confidence=rules.confidence,
                 reason=f"{answer.backend} abstained ({answer.abstain_reason}); rules fallback: {rules.reason}",
+                floor=rules.floor,
+                floor_tier=rules.floor_tier,
             )
         backend_tier = Tier(answer.choice)
         backend_reason = f"{answer.backend} choice (calibrated={answer.calibrated})"
+        # Whether a safety floor applies is a property of the request, not of
+        # where the backend's choice landed. A T2 or T3 choice on a legal prompt
+        # carries the floor too, so a T1 cap refuses instead of clamping under it.
+        safety = self.safety_floor_for(req)
+        floor_name = safety[1] if safety else None
+        floor_tier_required = safety[0] if safety else None
         floored = self.apply_rules_floor(req, backend_tier)
         if floored is None:
             return JudgmentDecision(
                 tier=backend_tier,
                 confidence=answer.confidence,
                 reason=backend_reason,
+                floor=floor_name,
+                floor_tier=floor_tier_required,
             )
         floor_tier, floor_reason = floored
         return JudgmentDecision(
@@ -137,8 +153,25 @@ class JudgmentModel:
                 f"{answer.backend} choice {backend_tier.value} (calibrated={answer.calibrated}) "
                 f"overridden by {floor_reason}: {floor_tier.value}"
             ),
-            floor=floor_reason if floor_reason in self.SAFETY_FLOORS else None,
+            floor=floor_name,
+            floor_tier=floor_tier_required,
         )
+
+    def safety_floor_for(self, req: JudgmentRequest) -> tuple[Tier, str] | None:
+        """The safety floor the request's content triggers, whatever tier was chosen.
+
+        ``(Tier.T2, LEGAL_FLOOR)`` when the content has legal/financial terms,
+        including alongside ``birthday`` (the birthday quality floor may raise
+        the tier further, but never removes the legal floor). ``None`` for the
+        T0 pin (those requests never reach a model) and for plain content. The
+        VIP floor is rules-only and is stamped by ``rules_decide``.
+        """
+        req_type = req.request_type.lower().strip()
+        if req_type in {"embedding", "intent_classify", "sentiment"}:
+            return None
+        if self._contains_legal_terms(req.content.lower()):
+            return Tier.T2, self.LEGAL_FLOOR
+        return None
 
     def apply_rules_floor(self, req: JudgmentRequest, chosen: Tier) -> tuple[Tier, str] | None:
         """Deterministic rules trump any backend choice.
@@ -188,11 +221,26 @@ class JudgmentModel:
             return JudgmentDecision(tier=Tier.T0, confidence=0.99, reason="deterministic low-tier task")
 
         if "birthday" in req_type or "birthday" in text:
+            # Birthday is a quality floor and keeps the clamp on its own; but a
+            # legal term in the same prompt still carries the T2 safety floor,
+            # so a T1 cap refuses rather than serving the loan review at T1.
+            if self._contains_legal_terms(text):
+                return JudgmentDecision(
+                    tier=Tier.T3,
+                    confidence=0.95,
+                    reason="birthday rapport quality path; financial/legal terms detected",
+                    floor=self.LEGAL_FLOOR,
+                    floor_tier=Tier.T2,
+                )
             return JudgmentDecision(tier=Tier.T3, confidence=0.95, reason="birthday rapport quality path")
 
         if self._contains_legal_terms(text):
             return JudgmentDecision(
-                tier=Tier.T2, confidence=0.92, reason="financial/legal terms detected", floor=self.LEGAL_FLOOR
+                tier=Tier.T2,
+                confidence=0.92,
+                reason="financial/legal terms detected",
+                floor=self.LEGAL_FLOOR,
+                floor_tier=Tier.T2,
             )
 
         tier = Tier.T1 if req.context_size <= 2500 else Tier.T2
@@ -203,7 +251,7 @@ class JudgmentModel:
         if req.is_vip:
             tier = Tier.T2 if tier == Tier.T1 else Tier.T3
             return JudgmentDecision(
-                tier=tier, confidence=0.7, reason="heuristic routing fallback", floor=self.VIP_FLOOR
+                tier=tier, confidence=0.7, reason="heuristic routing fallback", floor=self.VIP_FLOOR, floor_tier=tier
             )
 
         return JudgmentDecision(tier=tier, confidence=0.7, reason="heuristic routing fallback")

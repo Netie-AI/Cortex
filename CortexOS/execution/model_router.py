@@ -110,17 +110,22 @@ class ModelRouter:
         # at the cap. Heuristic tiers (no floor) keep the clamp below. getattr so
         # a duck-typed judgment model without the field still routes as before.
         floor = getattr(decision, "floor", None)
-        if floor is not None and TIER_ORDER[decision.tier] > TIER_ORDER[req.max_tier]:
+        # The floor requires ``floor_tier``; the judged tier may sit above it
+        # (a backend chose higher). Refuse when the *required* tier is above the
+        # cap; when the cap satisfies the floor, the clamp below still lands at
+        # or above it, so nothing is served under the floor either way.
+        required = getattr(decision, "floor_tier", None) or decision.tier
+        if floor is not None and TIER_ORDER[required] > TIER_ORDER[req.max_tier]:
             refusal = TierFloorAboveCap(
                 request_type=req.request_type,
                 floor=floor,
-                judged_tier=decision.tier,
+                judged_tier=required,
                 max_tier=req.max_tier,
             )
             return RoutedModelCall(
-                tier=decision.tier,
-                provider=self._resolve_provider(req.provider, decision.tier),
-                model=self.tier_models[decision.tier],
+                tier=required,
+                provider=self._resolve_provider(req.provider, required),
+                model=self.tier_models[required],
                 reason=f"refused: {refusal} ({decision.reason})",
                 adapter=FloorRefusalAdapter(refusal),
             )
