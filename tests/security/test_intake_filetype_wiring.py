@@ -91,7 +91,8 @@ def test_photo_intake_rejects_exe(lake_home, monkeypatch):
 
     client = TestClient(create_app())
     r = client.post("/dms/items/estimate-dims",
-                    json={"photo": base64.b64encode(MZ_EXE).decode()})
+                    json={"photo": base64.b64encode(MZ_EXE).decode()},
+                    headers={"X-API-Key": "dms-demo-steward-key"})
     assert r.status_code == 415                                  # D4 route half
     assert "rejected" in str(r.json().get("detail", ""))
 
