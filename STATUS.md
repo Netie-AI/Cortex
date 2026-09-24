@@ -1,6 +1,22 @@
 # STATUS.md
 **Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
 
+> **2026-09-23 (EPIC-KEV-LOOP #245):** PR #235 (draft). Tier decisions can now
+> learn from outcomes without hand labels. KEV-LOG #246: append-only
+> `data/engine/tier_decisions.jsonl` from `invoke_routed_completion` (ok,
+> error, T0), state_hash only, never raises. KEV-CALIB #247: labels join
+> log + ledger per attempt (infra/provider errors excluded and counted);
+> `scripts/kev_calibration_report.py` prints INSUFFICIENT and exits 2 below
+> n=300 or <30 negatives, else T, ECE, Brier and serve_automation with exact
+> raw and T-scaled P(sufficient) thresholds (tie-safe; fixed a 90%-failing
+> tier previously reported "100% automatable"). KEV-SHADOW #248:
+> CORTEX_KEV_SHADOW keeps rules serving, logs kev agreement; any value but an
+> explicit off means watch (a typo can never let kev serve); no agreement
+> rate below n=300. Residual: shadow is synchronous (slow kev adds latency
+> while shadow is on); decision log not tested multi-process; the test suite
+> writes synthetic rows to the runtime log (filter or conftest follow-up).
+> Serve cutover stays a founder decision gated on the report.
+
 > **2026-09-23 (EPIC-GOVERN-HARDEN #240):** PR #235 (draft). Four verified
 > governance holes closed, each built in an isolated worktree and passed by an
 > independent adversarial verifier. GH-01 #241: `invoke_routed_completion`
