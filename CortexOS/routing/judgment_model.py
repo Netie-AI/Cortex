@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,11 @@ class JudgmentDecision:
     tier: Tier
     confidence: float
     reason: str
+    # H2-LEGAL-CLAMP (#251): the deterministic safety floor that produced
+    # ``tier``, or ``None`` when the tier came from a heuristic or a backend.
+    # ``ModelRouter`` refuses (instead of clamping) when a floored tier exceeds
+    # the node's ``max_tier``. One of ``JudgmentModel.SAFETY_FLOORS``.
+    floor: str | None = None
 
 
 class JudgmentModel:
@@ -45,6 +51,13 @@ class JudgmentModel:
         "nric",
         "rpgt",
     )
+
+    LEGAL_FLOOR = "legal/financial floor"
+    VIP_FLOOR = "vip floor"
+    # Floors that must never be served below. A DSL ``max_tier`` under one of
+    # these is refused by ``ModelRouter.route`` (H2-LEGAL-CLAMP, #251). The
+    # birthday quality floor and the heuristic context-size tier keep the clamp.
+    SAFETY_FLOORS: frozenset[str] = frozenset({LEGAL_FLOOR, VIP_FLOOR})
 
     def __init__(
         self,
@@ -124,6 +137,7 @@ class JudgmentModel:
                 f"{answer.backend} choice {backend_tier.value} (calibrated={answer.calibrated}) "
                 f"overridden by {floor_reason}: {floor_tier.value}"
             ),
+            floor=floor_reason if floor_reason in self.SAFETY_FLOORS else None,
         )
 
     def apply_rules_floor(self, req: JudgmentRequest, chosen: Tier) -> tuple[Tier, str] | None:
@@ -148,7 +162,7 @@ class JudgmentModel:
         if "birthday" in req_type or "birthday" in text:
             floor, name = Tier.T3, "birthday quality floor"
         elif self._contains_legal_terms(text):
-            floor, name = Tier.T2, "legal/financial floor"
+            floor, name = Tier.T2, self.LEGAL_FLOOR
 
         if floor is None or TIER_ORDER[chosen] >= TIER_ORDER[floor]:
             return None
@@ -177,7 +191,9 @@ class JudgmentModel:
             return JudgmentDecision(tier=Tier.T3, confidence=0.95, reason="birthday rapport quality path")
 
         if self._contains_legal_terms(text):
-            return JudgmentDecision(tier=Tier.T2, confidence=0.92, reason="financial/legal terms detected")
+            return JudgmentDecision(
+                tier=Tier.T2, confidence=0.92, reason="financial/legal terms detected", floor=self.LEGAL_FLOOR
+            )
 
         tier = Tier.T1 if req.context_size <= 2500 else Tier.T2
 
@@ -186,11 +202,21 @@ class JudgmentModel:
 
         if req.is_vip:
             tier = Tier.T2 if tier == Tier.T1 else Tier.T3
+            return JudgmentDecision(
+                tier=tier, confidence=0.7, reason="heuristic routing fallback", floor=self.VIP_FLOOR
+            )
 
         return JudgmentDecision(tier=tier, confidence=0.7, reason="heuristic routing fallback")
 
     def _contains_legal_terms(self, text: str) -> bool:
-        return any(term in text for term in self.LEGAL_TERMS)
+        """Whole-word, case-insensitive match of ``LEGAL_TERMS`` (H2-LEGAL-CLAMP, #251).
+
+        ``spa`` is the Sale and Purchase Agreement acronym as a word, never the
+        inside of ``space``; ``legal`` never matches ``illegal``; ``contract``
+        never matches ``contractor``. A plain plural (``contracts``) still
+        matches. Multi-word phrases match across any run of whitespace.
+        """
+        return _legal_terms_pattern(tuple(self.LEGAL_TERMS)).search(text) is not None
 
     @staticmethod
     def big_api_request_types() -> Iterable[str]:
@@ -202,3 +228,24 @@ class JudgmentModel:
             "listing_copy_polisher",
             "eval_judge",
         )
+
+
+_LEGAL_PATTERNS: dict[tuple[str, ...], re.Pattern[str]] = {}
+
+
+def _legal_terms_pattern(terms: tuple[str, ...]) -> re.Pattern[str]:
+    """Compile ``terms`` into one word-bounded alternation, cached per term tuple.
+
+    A term is bounded by anything that is not a word character, so ``spa``
+    does not match ``space``, ``legal`` does not match ``illegal``, ``loan``
+    does not match ``loaner`` and ``contract`` does not match ``contractor``.
+    Hyphenated compounds such as ``sub-contract`` still match (fail closed).
+    Whitespace inside a phrase matches any whitespace run, so ``stamp  duty``
+    still matches ``stamp duty``.
+    """
+    pattern = _LEGAL_PATTERNS.get(terms)
+    if pattern is None:
+        alternatives = "|".join(re.escape(t.strip().lower()).replace("\\ ", r"\s+") for t in terms if t.strip())
+        pattern = re.compile(rf"(?<!\w)(?:{alternatives})s?(?!\w)", re.IGNORECASE)
+        _LEGAL_PATTERNS[terms] = pattern
+    return pattern
