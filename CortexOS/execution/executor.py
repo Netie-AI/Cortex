@@ -24,6 +24,16 @@ class RoutedCompletionOutcome:
     cost_myr: float
 
 
+@dataclass(frozen=True, slots=True)
+class _UnroutedCall:
+    """Stands in for ``RoutedModelCall`` in the ledger/decision-log when redaction fails before ``route()``."""
+
+    tier: Tier
+    provider: str
+    model: str
+    reason: str
+
+
 def adapter_token_estimate_family(provider: str) -> str | None:
     """Map resolved provider keys to estimator mode (tiktoken only for OpenAI-family)."""
     if provider == "openai":
@@ -103,11 +113,63 @@ async def invoke_routed_completion(
     3. Gates on ``ledger.enforce_ceiling(..., projected_additional_myr=projected)`` BEFORE the call
     4. Persist actual cost to Postgres (when engine configured) + update in-run cache via ``ledger.add``.
     """
-    routed = router.route(model_req)
     ceiling = effective_cost_ceiling(
         workflow_cost_ceiling_myr,
         node_cost_ceiling_myr if node_cost_ceiling_myr is not None else model_req.cost_ceiling_myr,
     )
+
+    # H2-PII-EDGE (#250): redact BEFORE routing, so the judgment model and any
+    # decision backend behind it (kev over HTTP included) only ever see
+    # placeholders. GH-01 (#241) redacted after ``route()``, which left the
+    # raw prompt in ``JudgmentRequest.content``. The router is given the same
+    # redacted text the adapter will receive (every caller in this repo builds
+    # both requests from one ``prompt`` string), so the raw ``model_req.prompt``
+    # never reaches a backend by any path. Fail closed: a redactor that raises
+    # records status=error and re-raises; neither the router nor the adapter is
+    # reached. The one exception is ``max_tier == T0``: no model can be called,
+    # so the request is routed on an empty prompt instead of failing (nothing
+    # leaves the process either way).
+    try:
+        adapter_req = replace(
+            adapter_req,
+            system=redact_prompt_text(adapter_req.system),
+            prompt=redact_prompt_text(adapter_req.prompt),
+        )
+        model_req = replace(model_req, prompt=adapter_req.prompt)
+    except RedactionFailed as exc:
+        if model_req.max_tier == Tier.T0:
+            model_req = replace(model_req, prompt="")
+            adapter_req = replace(adapter_req, system="", prompt="")
+        else:
+            failed_at = now_utc()
+            unrouted = _UnroutedCall(
+                tier=model_req.default_tier,
+                provider=model_req.provider or "",
+                model="",
+                reason="redaction failed before routing",
+            )
+            await ledger.add(
+                NodeExecutionRecord(
+                    run_id=run_id,
+                    node_id=node_id,
+                    tier=unrouted.tier.value,
+                    model=unrouted.model,
+                    latency_ms=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    cost_myr=0.0,
+                    cache_hit=False,
+                    started_at=failed_at,
+                    ended_at=failed_at,
+                    status="error",
+                    ceiling_myr=ceiling,
+                    error=str(exc),
+                )
+            )
+            _log_decision(router, model_req, unrouted, run_id=run_id, node_id=node_id, status="error", error=exc)
+            raise
+
+    routed = router.route(model_req)
 
     if routed.tier == Tier.T0:
         started_at = now_utc()
@@ -143,38 +205,7 @@ async def invoke_routed_completion(
             cost_myr=0.0,
         )
 
-    # GH-01: every non-T0 call passes system + prompt through the active redactor
-    # before cost estimation and before the adapter. Fail closed: a redactor that
-    # raises records status=error and re-raises; the adapter is never reached.
-    try:
-        adapter_req = replace(
-            adapter_req,
-            system=redact_prompt_text(adapter_req.system),
-            prompt=redact_prompt_text(adapter_req.prompt),
-        )
-    except RedactionFailed as exc:
-        failed_at = now_utc()
-        await ledger.add(
-            NodeExecutionRecord(
-                run_id=run_id,
-                node_id=node_id,
-                tier=routed.tier.value,
-                model=routed.model,
-                latency_ms=0,
-                prompt_tokens=0,
-                completion_tokens=0,
-                cost_myr=0.0,
-                cache_hit=False,
-                started_at=failed_at,
-                ended_at=failed_at,
-                status="error",
-                ceiling_myr=ceiling,
-                error=str(exc),
-            )
-        )
-        _log_decision(router, model_req, routed, run_id=run_id, node_id=node_id, status="error", error=exc)
-        raise
-
+    # GH-01: cost estimation and the adapter see the redacted system + prompt.
     prompt_blob = f"{adapter_req.system}\n{adapter_req.prompt}"
     est_prompt_tokens = estimate_prompt_tokens(
         prompt_blob,

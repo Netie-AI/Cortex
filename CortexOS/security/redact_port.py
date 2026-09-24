@@ -20,28 +20,44 @@ Fail-closed rules (issue #241):
 
 The pattern table is public so ``packs/dms/security/pii.py`` can reuse it
 instead of carrying a second copy of the same rule.
+
+Edge cases (H2-PII-EDGE, issue #250):
+
+* Identity numbers use digit lookarounds instead of ``\b``. ``\b`` treats ``_``
+  as a word character, so ``user_S1234567D`` and ``S1234567D_x`` slipped
+  through; a letter or underscore next to the number is now allowed, only a
+  digit still blocks the match (so a 13+ digit run is not split into a MyKad).
+* A MyKad may be written with dashes, spaces or nothing, as long as both
+  separators agree (``900101 14 5678`` is redacted, ``900101-14 5678`` is not).
+* Fullwidth digits and letters (``Ｓ１２３４５６７Ｄ``) are folded to ASCII before
+  matching. The fold is width-preserving (one code point in, one out), so the
+  spans still index the caller's original text and everything outside a
+  redacted span comes back byte-identical.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter
-NRIC = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
+# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter. Digits on either
+# side would make it part of a longer number; letters and ``_`` do not.
+NRIC = re.compile(r"(?<!\d)[STFGM]\d{7}[A-Z](?!\d)", re.IGNORECASE)
 
 # Malaysian MyKad: YYMMDD-PB-#### (place-of-birth code 01-16, 21-59, 60-68,
-# 71-72, 74-79, 82-93, 98-99). Dashes optional; both forms must be separated
-# from other digits so a 13+ digit card number is not split into a MyKad.
+# 71-72, 74-79, 82-93, 98-99). Separator is a dash, a space or nothing, and the
+# second separator must equal the first. Both ends must be separated from other
+# digits so a 13+ digit card number is not split into a MyKad.
 MYKAD = re.compile(
-    r"(?<![\dA-Za-z])"
+    r"(?<!\d)"
     r"\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
-    r"(?:-?)"
+    r"(?P<sep>[- ]?)"
     r"(?:0[1-9]|1[0-6]|2[1-9]|[345]\d|6[0-8]|7[124-9]|8[2-9]|9[0-3]|9[89])"
-    r"(?:-?)"
+    r"(?P=sep)"
     r"\d{4}"
-    r"(?![\dA-Za-z])"
+    r"(?!\d)"
 )
 
 # Email (RFC5322 simplified)
@@ -69,14 +85,36 @@ class RedactSpan:
     text: str
 
 
+def fold_for_matching(text: str) -> str:
+    """NFKC-fold *text* one code point at a time, keeping its length.
+
+    Fullwidth ``Ｓ`` becomes ``S`` and ``１`` becomes ``1`` so the ASCII patterns
+    see them. A code point whose NFKC form is not exactly one code point (a
+    ligature, a squared unit) is left as is, so ``len(result) == len(text)``
+    and any span found in the result indexes *text* unchanged.
+    """
+    if text.isascii():
+        return text
+    out: list[str] = []
+    for ch in text:
+        folded = unicodedata.normalize("NFKC", ch)
+        out.append(folded if len(folded) == 1 else ch)
+    return "".join(out)
+
+
 def detect_spans(
     text: str, patterns: tuple[tuple[str, re.Pattern[str]], ...] = ENGINE_PATTERNS
 ) -> list[RedactSpan]:
-    """Return non-overlapping spans for *patterns* in *text* (earliest, then longest)."""
+    """Return non-overlapping spans for *patterns* in *text* (earliest, then longest).
+
+    Matching runs on :func:`fold_for_matching` of *text*; the spans (and their
+    ``text``) refer to the original so :func:`apply_spans` can splice it.
+    """
+    folded = fold_for_matching(text)
     spans: list[RedactSpan] = []
     for kind, pattern in patterns:
-        for match in pattern.finditer(text):
-            spans.append(RedactSpan(match.start(), match.end(), kind, match.group(0)))
+        for match in pattern.finditer(folded):
+            spans.append(RedactSpan(match.start(), match.end(), kind, text[match.start() : match.end()]))
     spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
     merged: list[RedactSpan] = []
     cursor = -1
@@ -176,6 +214,7 @@ __all__ = [
     "clear_redactor",
     "default_redact",
     "detect_spans",
+    "fold_for_matching",
     "redact_prompt_text",
     "register_redactor",
     "registered_redactor",
