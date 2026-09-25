@@ -132,9 +132,10 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "CortexOS/crew/mcp_client.py",
         "CortexOS/dms/answer_engine.py",
         "CortexOS/dms/l2_generation.py",
-        # #269 ROUTER-1 owns store schema / _write_row / _stats / pick in
-        # CortexOS/integrations/freeroute.py. Arming + RouteStamp served_*
-        # stay #272. Do not put crew/freeroute.py back on this allow.
+        # Union: leftover #215 ban + #273 store/pick seat. #272 carves the
+        # core slice below when freeroute_ov_local.py is present. Do not
+        # put crew/freeroute.py back on this allow.
+        "CortexOS/integrations/freeroute.py",
         "CortexOS/integrations/openvault_client.py",
         "packs/dms/generative/l2_adapter.py",
         "packs/dms/generative/sql_generator.py",

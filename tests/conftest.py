@@ -154,6 +154,10 @@ _CORTEX_272_LINT_REQUIRED = (
     "test_local_only_drops_cloud_served_answer_text",
     "test_local_spendable_hop_arms_without_pooled_cloud_keys",
     "test_served_fields_come_from_response_not_requested_model",
+    "test_local_only_unavailable_local_unreachable",
+    "test_local_only_unavailable_local_model_not_loaded",
+    "test_local_only_unavailable_local_base_url_not_loopback",
+    "test_local_only_sealed_is_403_openvault_vault_sealed",
 )
 
 

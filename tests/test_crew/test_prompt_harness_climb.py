@@ -210,7 +210,9 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
         "CortexOS/crew/freeroute.py",
         "CortexOS/crew/liberty_seek.py",
         "CortexOS/crew/liberty_routes.py",
-        # #269 ROUTER-1 owns the FreeRoute store schema/_write_row/_stats/pick.
+        # Union: leftover freeze ban + #273 store/pick seat. #272 carves
+        # integrations/freeroute.py when the LOCAL-1 adapter is present.
+        "CortexOS/integrations/freeroute.py",
         "CortexOS/execution/distill_harness.py",
         "CortexOS/dms/answer_engine.py",
         "packages/cortex_contract/execution.py",
