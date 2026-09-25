@@ -16,11 +16,14 @@ has no effect: refusing unknown keys is now the only behaviour.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Final, Literal
 
 from fastapi import Depends, Header, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 Role = Literal["viewer", "steward", "admin"]
 
@@ -76,8 +79,25 @@ def parse_api_keys(source: str | None = None) -> dict[str, Caller]:
         key = key.strip()
         if role not in _ROLE_RANK or not key:
             continue
+        if _is_unusable_key(key):
+            # A template placeholder or a key that was once published is known to
+            # everyone; accepting it would reopen the fail-open default by copy-paste.
+            logger.warning("DMS_API_KEYS: ignoring a %s key that is a placeholder or a published value", role)
+            continue
         mapping[key] = Caller(role=role, actor=f"api_{role}")  # type: ignore[arg-type]
     return mapping
+
+
+# Values that shipped publicly (the removed demo fallback) and the template
+# placeholder prefix. Neither may ever authenticate anyone.
+_PUBLISHED_KEYS: Final[frozenset[str]] = frozenset(
+    {"dms-demo-viewer-key", "dms-demo-steward-key", "dms-demo-admin-key"}
+)
+_PLACEHOLDER_PREFIX: Final[str] = "replace_with"
+
+
+def _is_unusable_key(key: str) -> bool:
+    return key in _PUBLISHED_KEYS or key.lower().startswith(_PLACEHOLDER_PREFIX)
 
 
 def extract_api_key(

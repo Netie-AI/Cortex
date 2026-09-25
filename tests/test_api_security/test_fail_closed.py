@@ -531,3 +531,41 @@ def test_desk_in_a_browser_asks_once_and_sends_the_key_on_every_call(monkeypatch
         rate_limit.reset_limiter()
         cursor_session.reset_for_tests()
         agents.reset_for_tests()
+
+
+# --- coordinator fix on verify round 1: copied placeholders and published values never authenticate ---
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [
+        "viewer:REPLACE_WITH_RANDOM_VIEWER_KEY;steward:REPLACE_WITH_RANDOM_STEWARD_KEY;admin:REPLACE_WITH_RANDOM_ADMIN_KEY",
+        "viewer:dms-demo-viewer-key;steward:dms-demo-steward-key;admin:dms-demo-admin-key",
+        "admin:replace_with_anything",
+    ],
+)
+def test_template_placeholders_and_published_values_never_authenticate(configured):
+    """A deploy that copies secrets/dms.env.example.yaml unchanged, or pastes the
+    old published demo values, must not get a working key."""
+    from packs.dms.security.api_auth import parse_api_keys
+
+    assert parse_api_keys(configured) == {}
+
+
+def test_example_template_keys_parse_to_nothing():
+    import re
+    from pathlib import Path
+
+    from packs.dms.security.api_auth import parse_api_keys
+
+    text = (Path(__file__).resolve().parents[2] / "secrets" / "dms.env.example.yaml").read_text(encoding="utf-8")
+    m = re.search(r'^DMS_API_KEYS:\s*"([^"]*)"', text, re.M)
+    assert m, "DMS_API_KEYS line missing from the template"
+    assert parse_api_keys(m.group(1)) == {}
+
+
+def test_real_keys_next_to_a_placeholder_still_work():
+    from packs.dms.security.api_auth import parse_api_keys
+
+    got = parse_api_keys("viewer:REPLACE_WITH_RANDOM_VIEWER_KEY;admin:9f3c1e7a-real-admin")
+    assert list(got) == ["9f3c1e7a-real-admin"] and got["9f3c1e7a-real-admin"].role == "admin"

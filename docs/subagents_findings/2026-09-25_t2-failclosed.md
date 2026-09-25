@@ -69,3 +69,11 @@ Fail on base (the 19 changed non-test source files swapped for `git show 110f349
 - Anyone running `Dockerfile.core` or `Dockerfile.full` must now pass `DMS_API_KEYS` or `OPENVAULT_BASE_URL` at run time.
 - Local demo users: the first run of `SETUP_ONCE.ps1` or `demo/run_demo.ps1` creates `data/local/demo_api_keys.env`; delete it to rotate. An already-running `next dev` must be restarted to pick the keys up.
 - Out of scope and untouched: `/v1/contract/*` auth (separate ticket), ledger append actor, Crew and `/dms/query` credential spending, keys outside OpenVault, and the OpenVault verify endpoint gap.
+
+## Coordinator fix after verify round 1 (2026-09-25)
+
+The verifier passed 0310f14, with one nonblocking note that belongs to the same failure class as this ticket: `secrets/dms.env.example.yaml` ships `admin:REPLACE_WITH_RANDOM_ADMIN_KEY`, and `parse_api_keys` accepted it as a working admin key. A deploy that copies the template unchanged would get a publicly known admin key. Pasting the old published demo values into `DMS_API_KEYS` explicitly would do the same.
+
+Fix: `parse_api_keys` skips any key that starts with `replace_with` (case-insensitive) or that equals one of the three formerly published demo values, and logs a warning naming the role. Real keys configured next to a placeholder still work.
+
+Tests: `test_template_placeholders_and_published_values_never_authenticate` (3 cases), `test_example_template_keys_parse_to_nothing` and `test_real_keys_next_to_a_placeholder_still_work`. All 5 fail on 0310f14 and pass here. The full suite passed with exit 0.
