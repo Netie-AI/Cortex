@@ -1,0 +1,206 @@
+"""Isolated OpenVault LOCAL-1 field adapter (Cortex #272).
+
+OpenVault#71 merged on OpenVault main at ``edead3c4``
+(https://github.com/Netie-AI/OpenVault/pull/71). Confirmed names
+(no PENDING): ``local_qwen``, ``served_provider``, ``served_model``,
+``served_local``, ``local_only``, ``local_reason``, HTTP 503
+``openvault_local_only_unavailable`` with ``error.reason``, HTTP 403
+``openvault_vault_sealed``.
+
+``served_local`` and ``local_only`` are true only for the JSON boolean
+``true``. ``"true"``, ``1``, ``null``, and missing are not local / not
+local-only (fail-closed). ``local_reason`` is ``""`` or one of
+``local_unreachable``, ``local_model_not_loaded``,
+``local_base_url_not_loopback``.
+
+PENDING extras Cortex does not read: ``X-OpenVault-Served-*`` headers,
+SSE ``served_*`` copies, internal ``ProviderSpec.local_hop`` /
+``tier="local"``.
+
+Ceiling: merged, local not proven until a served run shows
+``served_local=true`` on every call.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from typing import Any
+
+# OpenVault#71 confirmed wire names.
+SERVED_PROVIDER = "served_provider"
+SERVED_MODEL = "served_model"
+SERVED_LOCAL = "served_local"
+LOCAL_ONLY_REQUEST = "local_only"
+LOCAL_ARMING_REASON = "local_reason"
+
+# OpenVault#71 local-only refusal. Sealed stays 403 / openvault_vault_sealed.
+LOCAL_ONLY_UNAVAILABLE_TYPE = "openvault_local_only_unavailable"
+VAULT_SEALED_TYPE = "openvault_vault_sealed"
+LOCAL_REASON_UNREACHABLE = "local_unreachable"
+LOCAL_REASON_MODEL_NOT_LOADED = "local_model_not_loaded"
+LOCAL_REASON_NOT_LOOPBACK = "local_base_url_not_loopback"
+LOCAL_UNAVAILABLE_REASONS = frozenset(
+    {
+        LOCAL_REASON_UNREACHABLE,
+        LOCAL_REASON_MODEL_NOT_LOADED,
+        LOCAL_REASON_NOT_LOOPBACK,
+    }
+)
+LOCAL_PROVIDER_ID = "local_qwen"
+
+MISSING_PROVIDER = "OpenVault response omitted served_provider"
+MISSING_MODEL = "OpenVault response omitted served_model"
+MISSING_LOCAL = "OpenVault response omitted served_local"
+NOT_LOCAL = "OpenVault served_local is not true"
+
+
+def _as_mapping(data: Any) -> Mapping[str, Any]:
+    return data if isinstance(data, Mapping) else {}
+
+
+def _error_object(data: Any) -> Mapping[str, Any]:
+    err = _as_mapping(data).get("error")
+    return err if isinstance(err, Mapping) else {}
+
+
+def json_true(value: Any) -> bool:
+    """OV#71: only the JSON boolean ``true`` counts. ``\"true\"`` / ``1`` do not."""
+    return value is True
+
+
+def local_only_flag(data: Any) -> bool:
+    """True only when ``local_only`` is the JSON boolean ``true``."""
+    return json_true(_as_mapping(data).get(LOCAL_ONLY_REQUEST))
+
+
+def served_from_response(data: Any) -> tuple[str | None, str | None, bool, str]:
+    """Read OV#71 stamp fields. Missing => null/false plus a named reason.
+
+    Never infers from a requested or OpenAI-compat ``model`` value.
+    """
+    body = _as_mapping(data)
+    reasons: list[str] = []
+
+    raw_provider = body.get(SERVED_PROVIDER)
+    if isinstance(raw_provider, str) and raw_provider.strip():
+        provider: str | None = raw_provider.strip()
+    else:
+        provider = None
+        reasons.append(MISSING_PROVIDER)
+
+    raw_model = body.get(SERVED_MODEL)
+    if isinstance(raw_model, str) and raw_model.strip():
+        model: str | None = raw_model.strip()
+    else:
+        model = None
+        reasons.append(MISSING_MODEL)
+
+    if SERVED_LOCAL not in body:
+        local = False
+        reasons.append(MISSING_LOCAL)
+    elif json_true(body.get(SERVED_LOCAL)):
+        local = True
+    else:
+        local = False
+        reasons.append(NOT_LOCAL)
+
+    return provider, model, local, "; ".join(reasons)
+
+
+def hop_reported_local(row: Any) -> bool:
+    """True only when the row sets served_local to the JSON boolean true.
+
+    Never inferred from provider id or model name. ``\"true\"`` / ``1`` fail closed.
+    """
+    return json_true(_as_mapping(row).get(SERVED_LOCAL))
+
+
+def local_only_request_fields() -> dict[str, Any]:
+    """Body fragment sent when CORTEX_FREEROUTE_LOCAL_ONLY=1 (OV#71)."""
+    return {LOCAL_ONLY_REQUEST: True}
+
+
+def local_arming_reason(data: Any) -> str:
+    """OV#71 ``local_reason``: ``\"\"`` or one of the three named values."""
+    raw = _as_mapping(data).get(LOCAL_ARMING_REASON)
+    if not isinstance(raw, str):
+        return ""
+    val = raw.strip()
+    if val in LOCAL_UNAVAILABLE_REASONS:
+        return val
+    return ""
+
+
+def chat_error_fields(data: Any) -> tuple[str, str]:
+    """Return ``(error.type, error.reason)`` from an OpenVault chat error body."""
+    err = _error_object(data)
+    raw_type = err.get("type")
+    raw_reason = err.get("reason")
+    typ = raw_type.strip() if isinstance(raw_type, str) and raw_type.strip() else ""
+    reason = raw_reason.strip() if isinstance(raw_reason, str) and raw_reason.strip() else ""
+    return typ, reason
+
+
+def local_only_unavailable(data: Any) -> str:
+    """Named OV#71 local-only refusal reason, or '' when this is not that shape."""
+    typ, reason = chat_error_fields(data)
+    if typ != LOCAL_ONLY_UNAVAILABLE_TYPE:
+        return ""
+    return reason if reason in LOCAL_UNAVAILABLE_REASONS else reason
+
+
+def vault_sealed_error(data: Any) -> bool:
+    typ, _reason = chat_error_fields(data)
+    return typ == VAULT_SEALED_TYPE
+
+
+def count_local_spendable(
+    hops: Iterable[Any] | None,
+    specs: Iterable[Any] | None,
+    catalogue_ids: set[str] | frozenset[str],
+) -> int:
+    """How many catalogue ids OpenVault marked local (hop or spendable spec)."""
+    found: set[str] = set()
+    for spec in specs or ():
+        if not isinstance(spec, Mapping):
+            continue
+        pid = str(spec.get("id") or "").strip()
+        if pid in catalogue_ids and hop_reported_local(spec):
+            found.add(pid)
+    for hop in hops or ():
+        if not isinstance(hop, Mapping):
+            continue
+        pid = str(hop.get("provider") or "").strip()
+        if pid in catalogue_ids and hop_reported_local(hop):
+            found.add(pid)
+    return len(found)
+
+
+__all__ = [
+    "LOCAL_ARMING_REASON",
+    "LOCAL_ONLY_REQUEST",
+    "LOCAL_ONLY_UNAVAILABLE_TYPE",
+    "LOCAL_PROVIDER_ID",
+    "LOCAL_REASON_MODEL_NOT_LOADED",
+    "LOCAL_REASON_NOT_LOOPBACK",
+    "LOCAL_REASON_UNREACHABLE",
+    "LOCAL_UNAVAILABLE_REASONS",
+    "MISSING_LOCAL",
+    "MISSING_MODEL",
+    "MISSING_PROVIDER",
+    "NOT_LOCAL",
+    "SERVED_LOCAL",
+    "SERVED_MODEL",
+    "SERVED_PROVIDER",
+    "VAULT_SEALED_TYPE",
+    "chat_error_fields",
+    "count_local_spendable",
+    "hop_reported_local",
+    "json_true",
+    "local_arming_reason",
+    "local_only_flag",
+    "local_only_request_fields",
+    "local_only_unavailable",
+    "served_from_response",
+    "vault_sealed_error",
+]

@@ -1097,6 +1097,44 @@ def decide_plan_source(*, generated_sql: str | None, engine_answer: bool) -> str
     return PLAN_SOURCE_OTHER
 
 
+def _route_stamp_for_fingerprint(
+    envelope: dict[str, Any],
+    gen: dict[str, Any] | None = None,
+) -> Any:
+    """RouteStamp for Insights served_* copy. Never uses requested / served / route.model."""
+    from CortexOS.integrations import freeroute as core
+
+    raw = None
+    if isinstance(gen, dict):
+        raw = gen.get("stamp")
+    if raw is None:
+        attached = envelope.get("generative")
+        if isinstance(attached, dict):
+            raw = attached.get("stamp")
+    if isinstance(raw, core.RouteStamp):
+        return raw
+    if not isinstance(raw, dict):
+        return None
+    if not any(
+        key in raw
+        for key in ("served_provider", "served_model", "served_local", "served_reason")
+    ):
+        return None
+    provider = raw.get("served_provider")
+    model = raw.get("served_model")
+    return core.RouteStamp(
+        call_id=str(raw.get("call_id") or ""),
+        task=str(raw.get("task") or "insights"),
+        requested="",
+        served_provider=(
+            provider.strip() if isinstance(provider, str) and provider.strip() else None
+        ),
+        served_model=model.strip() if isinstance(model, str) and model.strip() else None,
+        served_local=raw.get("served_local") is True,
+        served_reason=str(raw.get("served_reason") or ""),
+    )
+
+
 def stamp_plan_source(
     envelope: dict[str, Any],
     gen: dict[str, Any] | None = None,
@@ -1119,7 +1157,7 @@ def stamp_plan_source(
         attached["plan_source"] = source
     from CortexOS.integrations import freeroute as core
 
-    return core.stamp_router_fingerprint(envelope)
+    return core.stamp_router_fingerprint(envelope, _route_stamp_for_fingerprint(envelope, gen))
 
 
 async def generative_ask(

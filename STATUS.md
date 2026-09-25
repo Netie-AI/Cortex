@@ -1,5 +1,20 @@
 # STATUS.md
-**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#272 LOCAL-1 local not proven**; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+
+> **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
+> Arming accepts an OpenVault-reported local spendable hop. RouteStamp
+> `served_provider` / `served_model` / `served_local` come from the
+> response only. `CORTEX_FREEROUTE_LOCAL_ONLY=1` refuse-and-drop, no
+> cloud fallback. Insights served_* copy the served RouteStamp (empty
+> stamp stays null/false plus a reason). Stubbed transport only.
+> OpenVault#71 merged at `edead3c4` confirms local_qwen,
+> served_provider/served_model/served_local/local_only/local_reason,
+> 503 `openvault_local_only_unavailable` plus a named local_reason,
+> and 403 `openvault_vault_sealed`. served_local/local_only are JSON
+> boolean true only. Headers/SSE copies stay PENDING. Did not edit
+> #269/#273 store/pick. Ceiling: merged, **local not proven**. Not
+> PASS. Not COMPLETE. Did not close #272. Off freeze #4/#41-#44.
+> Rebased onto #273 / OV#71 `edead3c4`.
 
 > **2026-09-25 (CORTEX-269-ROUTER-1):** Cortex #269 ROUTER-1. FreeRoute
 > store is additive: prompt/completion/total tokens + split tag
