@@ -11,7 +11,7 @@ so every case here pins one edge of that swap:
 - a provider refusal is named, never poisons the OpenVault credential cache,
   and never falls back to another provider inside the call.
 
-No live network: ``urllib.request.urlopen`` (as direct_providers sees it) is a
+No live network: ``direct_providers._urlopen`` (its one network call) is a
 recorder, OpenVault reads are a recorder that answers unreachable, and any
 socket connect fails the test. The developer's real provider keys are removed;
 the keys below are fake and short enough that ``freeroute.redact`` leaves them
@@ -81,10 +81,10 @@ MSGS = [{"role": "user", "content": "how many skus are in stock"}]
 class _Resp:
     def __init__(self, status: int, payload: bytes) -> None:
         self.status = status
-        self._payload = payload
+        self._body = io.BytesIO(payload)
 
-    def read(self) -> bytes:
-        return self._payload
+    def read(self, n: int = -1) -> bytes:
+        return self._body.read(n)
 
     def __enter__(self) -> _Resp:
         return self
@@ -94,7 +94,7 @@ class _Resp:
 
 
 class FakeNet:
-    """``urllib.request.urlopen`` stand-in. Records every request; never connects."""
+    """``direct_providers._urlopen`` stand-in. Records every request; never connects."""
 
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
@@ -194,7 +194,7 @@ def no_sockets(monkeypatch):
 @pytest.fixture(autouse=True)
 def net(monkeypatch) -> FakeNet:
     fake = FakeNet()
-    monkeypatch.setattr(direct_providers.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(direct_providers, "_urlopen", fake)
     return fake
 
 
@@ -366,6 +366,12 @@ def test_each_provider_gets_its_own_env_key_and_never_the_ov_token(
 ) -> None:
     pin, url, key_env = ROUTES[label]
     out = fr.complete("t", MSGS, pin=pin, bearer=bearer)
+    if bearer is not None:
+        # A relayed caller never spends the operator's env keys (security review P1-A).
+        assert out.ok is False
+        assert out.reason == f"FreeRoute not armed: {direct_providers.RELAY_REFUSED}"
+        assert net.requests == [] and vault.calls == []
+        return
     assert out.ok is True, out.reason
     assert len(net.requests) == 1
     sent = net.requests[0]
@@ -450,7 +456,9 @@ def test_provider_auth_refusal_does_not_touch_openvault_credential_state(
     assert noted == []
     assert fr._rejected == {}
     # Switch the opt-in off: OpenVault arming must not inherit a provider refusal.
+    # The opt-in is latched per process, so a restart (reset) is what re-reads it.
     monkeypatch.delenv(direct_providers.TRANSPORT_ENV)
+    direct_providers.reset_opt_in()
     fp = fr.fingerprint(OV_TOKEN)
     assert fr._rejection(openvault_client.openvault_base_url(), fp) == ""
     arm = fr.arming(fresh=True)
@@ -596,6 +604,7 @@ def test_leave_gate_allows_only_under_the_opt_in(monkeypatch, keys, net, gate) -
             monkeypatch.delenv(direct_providers.TRANSPORT_ENV)
         else:
             monkeypatch.setenv(direct_providers.TRANSPORT_ENV, value)
+        direct_providers.reset_opt_in()  # the opt-in is latched per process
         before = len(gate)
         allowed, why = fr.leave_gate()
         assert allowed is False and why == "vault is sealed"

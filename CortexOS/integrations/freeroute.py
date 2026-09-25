@@ -25,7 +25,10 @@ The one exception is an explicit operator opt-in, ``CORTEX_MODEL_TRANSPORT=env-d
 and the transport then come from provider keys in the process env, and every
 stamp reads ``NOT OpenVault FreeRoute (env-direct)`` so the custody change is
 visible on every answer. ``CORTEX_FREEROUTE=0`` still switches the layer off in
-this mode. Unset, nothing in this module changes.
+this mode. The operator's env keys serve in-process callers only: a relayed
+caller (``bearer`` given) is refused, never spent on. The opt-in is latched at
+first read per process (:func:`reset` forgets it). Unset, nothing in this
+module changes.
 
 Measured route. OpenVault treats the requested model as a preference: it walks
 hops in its own order and a hop that does not carry the requested id serves its
@@ -87,7 +90,12 @@ _STATUS_REASONS: dict[int, str] = {
 }
 
 _REDACT = re.compile(
-    r"(ov_[A-Za-z0-9_\-]+|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]+|[A-Za-z0-9_\-]{32,})"
+    r"(ov_[A-Za-z0-9_\-]+|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]+"
+    # Partial provider keys (NVIDIA nvapi-, Google AIza, Cerebras csk-) echoed
+    # back in an env-direct error are shorter than the catch-all below.
+    # Masked forms (``nvapi-****abcd``) count too, so the tail is any non-space.
+    r"|\b(?:nvapi-|AIza|csk-)[^\s\"',;)]*"
+    r"|[A-Za-z0-9_\-]{32,})"
 )
 
 _lock = threading.Lock()
@@ -142,9 +150,14 @@ def _token() -> str:
 
 
 def child_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Copy of ``env`` without the Cortex OpenVault key, for any subprocess."""
+    """Copy of ``env`` without the Cortex OpenVault key or any env-direct provider key.
+
+    For any subprocess: a child never inherits a credential this layer spends.
+    """
     out = dict(os.environ if env is None else env)
     out.pop(TOKEN_ENV, None)
+    for name in direct_providers.KEY_ENVS:
+        out.pop(name, None)
     return out
 
 
@@ -439,15 +452,20 @@ def _vault_refusal(vault: _Vault, url: str) -> Arming:
     )
 
 
-def _direct_arming() -> Arming:
-    """Env-direct opt-in: armed from provider keys in the process env. No OpenVault."""
+def _direct_arming(*, relay: bool = False) -> Arming:
+    """Env-direct opt-in: armed from provider keys in the process env. No OpenVault.
+
+    ``relay``: the caller is relayed over HTTP. The operator's env keys serve
+    in-process callers only, so that is a named refusal.
+    """
     found = direct_providers.configured()
     off = _switched_off()
-    if off or not found:
+    if off or relay or not found:
         envs = ", ".join(n for p in direct_providers.PROVIDERS for n in p.key_envs)
         return Arming(
             armed=False,
             reason=off
+            or (direct_providers.RELAY_REFUSED if relay else "")
             or f"{direct_providers.TRANSPORT_ENV}=env-direct but no provider key is set ({envs})",
             url=direct_providers.URL,
             checked_at=time.time(),
@@ -468,13 +486,14 @@ def _direct_arming() -> Arming:
         catalogue=catalogue,
         checked_at=time.time(),
         custody=direct_providers.CUSTODY,
+        local_reason=direct_providers.CLOUD_ONLY,
     )
 
 
 def arming(*, fresh: bool = False, timeout: float = 1.5, bearer: str | None = None) -> Arming:
     """Is FreeRoute spendable for this credential? First failing rule wins, named."""
     if direct_providers.enabled():
-        return _direct_arming()
+        return _direct_arming(relay=bearer is not None)
     url = openvault_client.openvault_base_url()
     relay = bearer is not None
     token = _token() if bearer is None else bearer.strip()
@@ -507,9 +526,13 @@ def arming(*, fresh: bool = False, timeout: float = 1.5, bearer: str | None = No
 
 
 def peek() -> Arming:
-    """Last arming for the Cortex credential. No network."""
+    """Last arming for the Cortex credential. No network.
+
+    Under env-direct this is the arming :func:`complete` would use for an
+    in-process caller (latched mode, kill switch, keys), never OpenVault custody.
+    """
     if direct_providers.enabled():
-        return _direct_arming()  # env only; never report OpenVault custody here
+        return _direct_arming()
     key = (openvault_client.openvault_base_url(), fingerprint(_token()))
     with _lock:
         got = _last_arming.get(key)
@@ -945,6 +968,8 @@ class RouteStamp:
     error: str = ""
     impl: str = IMPL
     credential: str = ""
+    # The leave-machine decision this call went out under ("" = not a leave call).
+    leave_gate: str = ""
     measured_n: int = 0
     measured_score: float | None = None
     served_provider: str | None = None
@@ -1086,13 +1111,45 @@ def complete(
     """One FreeRoute call. Never raises. Refusals are named and stamped."""
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
+    direct = direct_providers.enabled()
     credential = (
-        "process-env provider key" if direct_providers.enabled()
+        "process-env provider key" if direct and bearer is None
+        else "relayed caller (refused: env-direct)" if direct
         else "cortex api_key" if bearer is None and _token()
         else "relayed bearer" if bearer else "loopback tier (unattributed)"
     )
     if not arm.armed:
-        return Completion(ok=False, reason=f"FreeRoute not armed: {arm.reason}")
+        reason = f"FreeRoute not armed: {arm.reason}"
+        if direct and bearer is not None:
+            # Stamped so the envelope names the refusal and says NOT OpenVault.
+            stamp = RouteStamp(
+                call_id=uuid.uuid4().hex,
+                task=task,
+                requested="",
+                error=reason,
+                credential=credential,
+                impl=direct_providers.IMPL,
+            )
+            _journal_add(stamp)
+            return Completion(ok=False, stamp=stamp, reason=reason)
+        return Completion(ok=False, reason=reason)
+    if direct and local_only_enabled():
+        reason = (
+            f"{LOCAL_ONLY_ENV}=1: {direct_providers.CLOUD_ONLY}; "
+            "no local hop and no cloud fallback"
+        )
+        stamp = RouteStamp(
+            call_id=uuid.uuid4().hex,
+            task=task,
+            requested="",
+            error=reason,
+            credential=credential,
+            impl=direct_providers.IMPL,
+            served_local=False,
+            served_reason=direct_providers.CLOUD_ONLY,
+        )
+        _journal_add(stamp)
+        return Completion(ok=False, stamp=stamp, reason=reason, text="")
     if local_only_enabled() and arm.local_spendable_hops <= 0:
         named = arm.local_reason
         extra = (
@@ -1116,15 +1173,22 @@ def complete(
         )
         _journal_add(stamp)
         return Completion(ok=False, stamp=stamp, reason=reason, text="")
+    leave_decision = ""
     if egress == "leave":
         allowed, why = leave_gate()
         if not allowed:
             reason = f"OpenVault leave-machine gate denied: {why}"
             stamp = RouteStamp(
-                call_id=uuid.uuid4().hex, task=task, requested="", error=reason, credential=credential
+                call_id=uuid.uuid4().hex,
+                task=task,
+                requested="",
+                error=reason,
+                credential=credential,
+                leave_gate=f"denied: {why}",
             )
             _journal_add(stamp)
             return Completion(ok=False, stamp=stamp, reason=reason)
+        leave_decision = why
 
     chosen = pick(task, arm, pin=pin, pin_source=pin_source)
     body: dict[str, Any] = {
@@ -1167,6 +1231,7 @@ def complete(
         latency_ms=latency_ms,
         impl=impl,
         credential=credential,
+        leave_gate=leave_decision,
         measured_n=chosen.measured_n,
         measured_score=chosen.measured_score,
     )
@@ -1203,10 +1268,10 @@ def complete(
         if not usable:
             reason = f"FreeRoute answer unusable for {task} (served {stamp.served or 'unknown'})"
     else:
-        direct = impl == direct_providers.IMPL
+        direct_wire = impl == direct_providers.IMPL
         base = (
             f"env-direct provider answered HTTP {status}"
-            if direct
+            if direct_wire
             else _STATUS_REASONS.get(int(status), f"OpenVault answered HTTP {status}")
         )
         detail = _error_message(data)
@@ -1215,7 +1280,7 @@ def complete(
         # model asked for; only other failures (500, 504, ...) count against it.
         scored = int(status) not in _STATUS_REASONS
         # A provider 401 in env-direct says nothing about the OpenVault credential.
-        if int(status) in (401, 403) and not direct:
+        if int(status) in (401, 403) and not direct_wire:
             if int(status) == 401:
                 note_rejected(_credential_fp(bearer), reason, url=arm.url)
             else:
@@ -1398,7 +1463,9 @@ def public_status(task: str | None = None) -> dict[str, Any]:
 
 
 def reset() -> None:
-    """Drop in-process caches (arming, rejections, verification). The store stays."""
+    """Drop in-process caches (arming, rejections, verification, the latched
+    env-direct opt-in). The store stays."""
+    direct_providers.reset_opt_in()
     with _lock:
         _arming_cache.clear()
         _vault_cache.clear()
