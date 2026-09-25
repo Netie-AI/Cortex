@@ -20,6 +20,12 @@ LOCAL_MODEL = "qwen2.5-1.5b"
 CLOUD_ANSWER = "CLOUD-ANSWER-MUST-BE-DROPPED-272"
 
 
+@pytest.fixture(autouse=True)
+def drop_local_only_env(monkeypatch) -> None:
+    """Root conftest does not own CORTEX_FREEROUTE_LOCAL_ONLY. Clear it here."""
+    monkeypatch.delenv("CORTEX_FREEROUTE_LOCAL_ONLY", raising=False)
+
+
 def _install_local_hop(fake, *, pooled: int = 0, local_reason: str = "") -> None:
     fake.pooled = pooled
     fake.catalogue = {LOCAL_PROVIDER: [LOCAL_MODEL]}

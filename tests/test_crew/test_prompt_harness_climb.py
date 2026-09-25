@@ -210,17 +210,11 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
         "CortexOS/crew/freeroute.py",
         "CortexOS/crew/liberty_seek.py",
         "CortexOS/crew/liberty_routes.py",
-        # Union: leftover freeze ban + #273 store/pick seat. #272 carves
-        # integrations/freeroute.py when the LOCAL-1 adapter is present.
-        "CortexOS/integrations/freeroute.py",
+        # #269 ROUTER-1 owns the FreeRoute store schema/_write_row/_stats/pick.
         "CortexOS/execution/distill_harness.py",
         "CortexOS/dms/answer_engine.py",
         "packages/cortex_contract/execution.py",
     }
-    # #272 LOCAL-1 is seated for the core arming/stamp/LOCAL_ONLY slice.
-    # Freeze / liberty / contract / crew adapter files stay banned.
-    if (ROOT / "CortexOS" / "integrations" / "freeroute_ov_local.py").is_file():
-        banned.discard("CortexOS/integrations/freeroute.py")
     overlap = sorted(names & banned)
     assert overlap == [], f"dual-write of frozen/other-seat files: {overlap}"
 
