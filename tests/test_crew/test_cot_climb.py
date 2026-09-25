@@ -127,8 +127,8 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
     banned = {
         "CortexOS/crew/freeroute.py",
         "CortexOS/crew/openvault.py",
-        "CortexOS/crew/config.py",
-        "CortexOS/crew/llm.py",
+        # crew/config.py and crew/llm.py: founder override 2026-09-25 (PR #235)
+        # so the Crew chain can spend GEMINI/NVIDIA/Cerebras env keys.
         "CortexOS/crew/mcp_client.py",
         "CortexOS/dms/answer_engine.py",
         "CortexOS/dms/l2_generation.py",
