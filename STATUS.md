@@ -1,5 +1,22 @@
 # STATUS.md
-**Last updated:** 2026-09-24 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+
+> **2026-09-25 (EPIC-TRUST-02 #263 + T2-FAILCLOSED):** PR #235 (draft). Role
+> gates through the TRUST-01 auth port on routines/goals/race (CTRL-A),
+> workflows/DAG-run/activity with caller-derived actor and reap-on-read
+> (CTRL-B), DMS query/chat/warehouse/tasks with caller-derived approver
+> (DMS), and no absolute host paths in app/connector responses plus archive
+> import limits (RESP). T2-FAILCLOSED (founder decision 2026-09-25): no
+> built-in demo-key fallback; with no keys configured every gated request is
+> 401 (503 with no authorizer); no shipped Dockerfile sets DMS_AUTH_DISABLED
+> (local opt-in only, loud startup warning); published keys removed from
+> SETUP_ONCE.ps1 and the secrets template; local demo generates per-install
+> keys into gitignored data/local/; template placeholders and the formerly
+> published values never authenticate; operator desk is a no-data shell that
+> sends the operator key. Tests get keys from a pytest plugin (tests/conftest.py
+> untouched). Not executed here: pwsh scripts, Next UI, UI e2e. Merge gate
+> (founder): FAILCLOSED on tip + CI green; DMS Studio must call with a real
+> OpenVault key first. Suite 2993 passed / 12 skipped / 4 xfailed.
 
 > **2026-09-24 (EPIC-TRUST-01 #256):** PR #235 (draft). #257 TRUST-01: engine
 > auth port (pack registers the authorizer; CortexOS imports no packs) gates
