@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from CortexOS.insights import keys as insight_keys
+from CortexOS.integrations import direct_providers
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -60,6 +61,17 @@ def _caller_refused(purpose: str) -> JSONResponse:
     }
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
+
+
+async def _env_direct_caller_ok(request: Request) -> bool:
+    """True when the engine auth port grants the caller at least ``viewer``."""
+    from CortexOS.security import auth_port
+
+    try:
+        principal = await auth_port.resolve_authorizer().authorize(request, "viewer")
+    except Exception:  # noqa: BLE001 - 401/403/no authorizer all refuse
+        return False
+    return auth_port.role_at_least(str(getattr(principal, "role", "") or ""), "viewer")
 
 
 def _served_stamp(envelope: dict[str, Any]) -> Any:
@@ -288,7 +300,12 @@ async def execute_insights(
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     bearer: str | None = None
-    if body.generate:
+    if body.generate and direct_providers.enabled():
+        # env-direct spends the operator's own provider keys, so the caller must
+        # authenticate through the engine auth port; nothing is relayed.
+        if not await _env_direct_caller_ok(request):
+            return _caller_refused("generative_ask")
+    elif body.generate:
         armed = await freeroute_mod.run_core(freeroute_mod.arming)
         if armed.get("armed"):
             bearer = insight_keys.relay_bearer(

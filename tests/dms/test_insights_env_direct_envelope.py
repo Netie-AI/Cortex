@@ -18,6 +18,7 @@ The provider key below is fake; the developer's real keys are removed.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import socket
 import threading
@@ -46,10 +47,10 @@ KEY_ENVS = (
 class _Resp:
     def __init__(self, payload: bytes) -> None:
         self.status = 200
-        self._payload = payload
+        self._body = io.BytesIO(payload)
 
-    def read(self) -> bytes:
-        return self._payload
+    def read(self, n: int = -1) -> bytes:
+        return self._body.read(n)
 
     def __enter__(self) -> _Resp:
         return self
@@ -130,6 +131,8 @@ def no_vault_no_sockets(monkeypatch, env_direct) -> None:
 def provider(monkeypatch) -> FakeProvider:
     fake = FakeProvider()
     monkeypatch.setattr(direct_providers.urllib.request, "urlopen", fake)
+    # The transport sends through its no-redirect opener (``_urlopen``).
+    monkeypatch.setattr(direct_providers, "_urlopen", fake, raising=False)
     return fake
 
 

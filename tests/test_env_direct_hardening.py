@@ -178,19 +178,67 @@ def test_insights_relayed_bearer_spends_no_operator_key(monkeypatch, tmp_path, d
             headers={"Authorization": "Bearer ov_x"},
         )
     assert net.requests == [], "a relayed caller spent the operator's env provider keys"
-    assert res.status_code == 200, res.text
+    # env-direct: an unauthenticated caller is refused before any generate.
+    assert res.status_code == 401, res.text
     body = res.json()
     assert body["status"] == "REFUSE"
     assert body["values"] == []
     assert body.get("rows", []) in ([], None)
     raw = json.dumps(body)
-    assert RELAY in raw
-    gen = body["generative"]
-    assert gen["ok"] is False and gen["values"] == []
-    assert RELAY in json.dumps(gen)
     for value in KEYS.values():
         assert value not in raw
     assert "ov_x" not in raw
+
+
+def _insights_app(monkeypatch, tmp_path):
+    monkeypatch.setenv("CREW_OPENVAULT", "1")
+    monkeypatch.setenv("CREW_ALLOW_OLLAMA", "0")
+    monkeypatch.setenv("PACK", "dms")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "viewer:sk-viewer-test;steward:sk-steward-test;admin:sk-admin-test")
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    from CortexOS.api.app import create_app
+    from packs.dms.security.rate_limit import reset_limiter
+
+    reset_limiter(per_minute=240)
+    return create_app()
+
+
+def test_insights_authenticated_caller_is_served_by_env_direct(monkeypatch, tmp_path, direct, keys, net) -> None:
+    """A caller the engine auth port admits (DMS sends X-API-Key) is served from env keys."""
+    from fastapi.testclient import TestClient
+
+    with TestClient(_insights_app(monkeypatch, tmp_path), client=("10.0.0.5", 5555)) as remote:
+        res = remote.post(
+            "/v1/insights",
+            json={"intent": "how many skus are in stock", "ask": False, "generate": True},
+            headers={"X-API-Key": "sk-steward-test", "Authorization": "Bearer sk-steward-test"},
+        )
+    assert res.status_code == 200, res.text
+    assert net.requests, "an authenticated caller got no model call under env-direct"
+    assert all(any(r["url"].startswith(p.base) for p in direct_providers.PROVIDERS) for r in net.requests)
+    body = res.json()
+    raw = json.dumps(body)
+    # The fake model answers "SELECT 1", which cannot satisfy the ontology, so the
+    # envelope must refuse honestly rather than stamp success.
+    assert body["status"] == "REFUSE" and body["values"] == []
+    assert body.get("badge") != "green"
+    for value in KEYS.values():
+        assert value not in raw
+    assert "sk-steward-test" not in raw
+
+
+def test_insights_wrong_api_key_is_refused_under_env_direct(monkeypatch, tmp_path, direct, keys, net) -> None:
+    from fastapi.testclient import TestClient
+
+    with TestClient(_insights_app(monkeypatch, tmp_path), client=("10.0.0.5", 5555)) as remote:
+        res = remote.post(
+            "/v1/insights",
+            json={"intent": "how many skus are in stock", "ask": False, "generate": True},
+            headers={"X-API-Key": "sk-not-a-key"},
+        )
+    assert res.status_code == 401, res.text
+    assert net.requests == []
 
 
 @pytest.mark.parametrize("bearer", ["ov_relayedcaller_xyz", ""])
