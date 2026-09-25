@@ -273,6 +273,7 @@ class InsightsIn(BaseModel):
     intent: str
     ask: bool = True
     generate: bool = False
+    query_plan: dict[str, Any] | None = None
 
 
 class FreeRouteIn(BaseModel):
@@ -1044,6 +1045,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             generate=body.generate,
             shell_public=crew.shell.public(),
             bearer=bearer,
+            query_plan=body.query_plan,
         )
         return result
 

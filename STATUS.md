@@ -1,5 +1,17 @@
 # STATUS.md
-**Last updated:** 2026-09-23 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+
+> **2026-09-25 (CORTEX-211-NARROW plan_source):** Cortex #211 NARROW covering
+> swap. Insights generative-ask now stamps `plan_source=ontology_plan` only
+> when this answer's SQL is NL then ontology plan then FreeRoute SQL then
+> validate (`query_sql` only on that stamp). EngineBridge L0/L1, unarmed
+> REFUSE, and off-ontology SQL stamp `other`. Request `mode=ontology_plan`
+> is not copied. Root cause: Cortex never emitted `plan_source`/`query_sql`,
+> so DMS #231 scored `other` (0/52). PASS-honest-INCOMPLETE -- no live Studio
+> re-prove. Reuses #196 Insights + FreeRoute arming. Unarmed fail-closed.
+> Off freeze #4/#41-#44. Did not dual-own #235/#239. Did not close #211.
+> HTTP InsightsAskIn stays the frozen OpenAPI 1.2.0 shape (no extra
+> query_plan/mode fields; extra JSON ignored). Contract json not regenerated.
 
 > **2026-09-23 (CORTEX-COT-CLIMB covering):** Cortex #212 covering increment
 > after leftover honesty @ c6df0d7c. Think-path consumes the G1

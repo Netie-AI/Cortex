@@ -62,6 +62,7 @@ def test_law_is_certified_abstain_refuse_and_names_consumers(api_client) -> None
     assert body["measured_baseline"]["exact"] == "38.46%"
     assert body["measured_baseline"]["wrong"] == 0
     assert "not COMPLETE" in body["scale"]
+    assert "ontology_plan only when" in body["plan_source"]
     raw = json.dumps(body)
     assert "LIVE_KEY" not in raw
     assert "ov_" not in raw
@@ -133,7 +134,12 @@ def test_unknown_intent_refuses_without_invented_numbers(api_client) -> None:
 def test_generate_unarmed_refuses_and_does_not_invent_numbers(api_client) -> None:
     res = api_client.post(
         "/v1/insights",
-        json={"intent": "how many skus", "ask": False, "generate": True},
+        json={
+            "intent": "how many skus",
+            "ask": False,
+            "generate": True,
+            "mode": "ontology_plan",
+        },
     )
     assert res.status_code == 200, res.text
     body = res.json()
@@ -152,6 +158,9 @@ def test_generate_unarmed_refuses_and_does_not_invent_numbers(api_client) -> Non
     assert "999" not in (body.get("answer") or "")
     climb = body["generative"].get("climb") or {}
     assert climb.get("complete") is False
+    assert body["plan_source"] != "ontology_plan"
+    assert body.get("plan_source") == "other"
+    assert "query_sql" not in body
 
 
 def test_question_alias_matches_intent(api_client) -> None:
@@ -206,7 +215,10 @@ def test_certified_ask_uses_local_bridge_and_returns_rows(api_client, monkeypatc
         return _certified_engine()
 
     monkeypatch.setattr(LocalEngineBridge, "ask", fake_ask)
-    res = api_client.post("/v1/insights", json={"intent": "how many skus", "ask": True})
+    res = api_client.post(
+        "/v1/insights",
+        json={"intent": "how many skus", "ask": True, "mode": "ontology_plan"},
+    )
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["status"] == "CERTIFIED"
@@ -215,6 +227,8 @@ def test_certified_ask_uses_local_bridge_and_returns_rows(api_client, monkeypatc
     assert body["validation"]["include"]
     assert body["api"]["consumer"] == "dms"
     assert body["api"]["stable"] == "POST /v1/insights"
+    assert body["plan_source"] != "ontology_plan"
+    assert body.get("plan_source") == "other"
 
 
 def test_armed_generate_without_caller_key_is_401(armed_openvault, monkeypatch, tmp_path) -> None:
