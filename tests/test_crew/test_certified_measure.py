@@ -1,45 +1,54 @@
-"""GEN-CERTIFIED-MEASURE-01: a certified formula that resolves the ask is law.
+"""GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is served, not re-derived.
 
 dms#231 F3: on cq_supplier_ranking the model wrote its own risk formula and
 the static gate validated it, so DMS executed a plausible ranking built on an
-invented weight. Generate must compute the certified expression or abstain
-with ``certified_measure_not_used:<id>`` -- a 200, never a figure, never a 5xx.
-Assertions are on the HTTP envelope (status/badge/answer/values) and on the
-rows the returned SQL produces; SQL checks are only in addition.
+invented weight. Now, when the ask resolves to a certified measure, Cortex
+serves the certified SQL as stored (only a declared top-N may change) and does
+not call the model; an ask the certified query cannot express abstains with
+``certified_measure_cannot_express:<what>``. Every test goes through
+``POST /v1/insights`` and asserts the envelope (status/badge/answer/values/
+plan_source/served_reason) and the rows the returned SQL produces.
 """
 
 from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterator
 from typing import Any
 
+import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
 from CortexOS.crew import cot_climb, insights
 from packs.dms.security.rate_limit import reset_limiter
+from tests.test_crew.conftest import FakeLLM
 
 RANK_Q = "Rank suppliers by combined risk and lead time score"
-MISS = "certified_measure_not_used:cq_supplier_ranking"
 INVENTED = (
-    "SELECT supplier_id, ROUND(risk_score * 0.5 + lead_time_days * 0.5, 3) AS score "
-    "FROM suppliers ORDER BY score DESC LIMIT 10"
+    "SELECT supplier_id, ROUND(risk_score * 0.5 + lead_time_days * 0.5, 3) AS ranking_score "
+    "FROM suppliers ORDER BY ranking_score DESC LIMIT 10"
 )
-# Certified expression, reordered and table-qualified: still the certified measure.
-CERTIFIED_REWRITE = (
-    "SELECT s.supplier_id, "
-    "ROUND(s.lead_time_days / 60.0 * 0.35 + s.risk_score * 0.65, 3) AS ranking_score "
-    "FROM suppliers s "
-    "ORDER BY ranking_score DESC, risk_score DESC, lead_time_days DESC LIMIT 10"
-)
+CANNOT = "certified_measure_cannot_express"
+
+# The six certified measures (outer SELECT computes arithmetic) and the ask
+# that resolves to each one.
+MEASURES = {
+    "cq_supplier_ranking": RANK_Q,
+    "cq_sales_top5_value": "Top 5 selling SKUs by revenue",
+    "cq_spend_by_country": "What is our total spend by supplier country?",
+    "cq_stock_value_by_category": "What is total stock value by category?",
+    "cq_capacity_utilisation": "Show warehouse capacity utilisation",
+    "cq_top3_category_sales": "show top 3 category sales",
+}
 
 
 def _stub(sql: str, prompts: list[str]) -> Any:
     async def fake(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
         _ = messages, kwargs
+        prompts.append(f"{purpose}:{prompt or ''}")
         if purpose == "generative_ask":
-            prompts.append(prompt or "")
             return {
                 "ok": True,
                 "text": sql,
@@ -70,86 +79,248 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     return TestClient(create_app(), client=("127.0.0.1", 5555))
 
 
-def _ask(client: TestClient, monkeypatch: pytest.MonkeyPatch, q: str, sql: str) -> tuple[Any, list[str]]:
+@pytest.fixture
+def crew_client(
+    settings: Any, crew_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
+    """POST /crew/insights: the HTTP route that carries a caller-typed query_plan."""
+    from CortexOS.crew import freeroute as fr
+    from CortexOS.crew.server import create_app
+
+    monkeypatch.setattr(
+        fr,
+        "arming",
+        lambda: {"ok": True, "armed": True, "detail": "vault-armed", "live_5000_ci": False},
+    )
+    with TestClient(create_app(settings, llm_chat=FakeLLM()), client=("127.0.0.1", 5555)) as tc:
+        yield tc
+
+
+def _ask(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    q: str,
+    sql: str,
+    query_plan: dict[str, Any] | None = None,
+) -> tuple[Any, list[str]]:
     from CortexOS.crew import freeroute as fr
 
     prompts: list[str] = []
     monkeypatch.setattr(fr, "complete", _stub(sql, prompts))
-    res = client.post("/v1/insights", json={"intent": q, "ask": False, "generate": True})
+    body: dict[str, Any] = {"intent": q, "ask": False, "generate": True}
+    path = "/v1/insights"
+    if query_plan is not None:
+        body["query_plan"] = query_plan
+        path = "/crew/insights"  # /v1/insights takes no query_plan
+    res = client.post(path, json=body)
     return res, prompts
 
 
-def _suppliers_rows(sql: str) -> list[tuple[Any, ...]]:
-    import duckdb
-
+def _lake() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE suppliers (supplier_id VARCHAR, supplier_name VARCHAR, country VARCHAR, "
+        "risk_score DOUBLE, lead_time_days INTEGER)"
+    )
+    con.execute(
+        "INSERT INTO suppliers VALUES ('S1','a','MY',0.9,10),('S2','b','SG',0.2,55),"
+        "('S3','c','MY',0.5,30),('S4','d','TH',0.7,5),('S5','e','SG',0.1,60),('S6','f','MY',0.3,50)"
+    )
+    con.execute(
+        "CREATE TABLE inventory (sku VARCHAR, category VARCHAR, supplier_id VARCHAR, "
+        "location_id VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE)"
+    )
+    con.execute(
+        "INSERT INTO inventory VALUES ('K1','CHEM','S1','L1',10,2.5),('K2','FOOD','S2','L1',4,10),"
+        "('K3','CHEM','S3','L2',7,3),('K4','FOOD','S4','L2',1,100),('K5','PACK','S5','L3',50,1),"
+        "('K6','PACK','S6','L3',3,9),('K7','TOOL','S1','L1',2,4)"
+    )
+    con.execute(
+        "CREATE TABLE transactions (txn_id VARCHAR, sku VARCHAR, location_id VARCHAR, "
+        "txn_type VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE)"
+    )
+    con.execute(
+        "INSERT INTO transactions VALUES ('T1','K1','L1','OUT',5,2.5),('T2','K2','L1','OUT',1,10),"
+        "('T3','K3','L2','IN',70,3),('T4','K4','L2','OUT',2,100),('T5','K5','L3','OUT',9,1),"
+        "('T6','K6','L3','OUT',1,9),('T7','K1','L1','OUT',3,2.5),('T8','K7','L1','OUT',1,4)"
+    )
+    con.execute(
+        "CREATE TABLE locations (location_id VARCHAR, location_code VARCHAR, "
+        "current_load_kg DOUBLE, capacity_kg DOUBLE)"
+    )
+    con.execute(
+        "INSERT INTO locations VALUES ('L1','A',333,1000),('L2','B',1,3),('L3','C',77.7,90)"
+    )
+    return con
+
+
+def _rows(sql: str) -> list[tuple[Any, ...]]:
+    con = _lake()
     try:
-        con.execute(
-            "CREATE TABLE suppliers (supplier_id VARCHAR, risk_score DOUBLE, lead_time_days INTEGER)"
-        )
-        con.execute(
-            "INSERT INTO suppliers VALUES ('S1', 0.9, 10), ('S2', 0.2, 55), "
-            "('S3', 0.5, 30), ('S4', 0.7, 5), ('S5', 0.1, 60)"
-        )
         return [tuple(r) for r in con.execute(sql).fetchall()]
     finally:
         con.close()
 
 
-def test_invented_formula_is_a_named_200_abstain_not_an_answer(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    res, prompts = _ask(client, monkeypatch, RANK_Q, INVENTED)
-    assert res.status_code == 200, res.text
-    body = res.json()
+def _no_digits(answer: str, reason: str) -> bool:
+    return not re.search(r"\d", answer.replace(reason, ""))
+
+
+def _assert_served(body: dict[str, Any], mid: str, prompts: list[str]) -> str:
+    # Validated, not executed in crew: DMS runs query_sql. No figure from Cortex here.
     assert body["status"] == "ABSTAIN"
     assert body["badge"] == "abstain"
     assert body["values"] == []
-    assert body["refuse_reason"] == MISS
-    assert MISS in body["answer"]
-    assert not re.search(r"\d", body["answer"].replace(MISS, "")), body["answer"]
-    # Nothing for DMS to execute: no query_sql, not labelled ontology_plan.
-    assert "query_sql" not in body
-    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
-    assert body["generative"]["ok"] is False
-    assert body["generative"]["refuse_reason"] == MISS
-    assert any(u.get("why") == MISS for u in body["validation"]["unsure"])
+    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    assert f"Served certified query {mid}" in body["answer"]
+    assert body["served_provider"] is None and body["served_model"] is None
+    assert body["served_reason"].startswith(f"certified_query:{mid}")
+    assert body["generative"]["check"] == f"certified_query:{mid}"
+    assert body["generative"]["route"] is None
+    assert prompts == []  # the model was never called for this ask
     text = insights.render_tool_text(body)
-    assert "status: ABSTAIN" in text
-    # The model was shown the certified expression and retried within the horizon.
-    assert prompts and all("CERTIFIED MEASURE cq_supplier_ranking" in p for p in prompts)
-    assert len(prompts) == cot_climb.HORIZON
+    assert f"certified_query:{mid}" in text
+    return str(body["query_sql"])
 
 
-def test_certified_expression_passes_and_rows_equal_the_oracle(
+@pytest.mark.parametrize("mid", sorted(MEASURES))
+def test_certified_measure_is_served_and_rows_equal_the_oracle(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mid: str
+) -> None:
+    # The model would invent a formula; it is never asked.
+    res, prompts = _ask(client, monkeypatch, MEASURES[mid], INVENTED)
+    assert res.status_code == 200, res.text
+    sql = _assert_served(res.json(), mid, prompts)
+    oracle = cot_climb.gold_sql_for(mid)
+    assert sql == oracle
+    got, want = _rows(sql), _rows(oracle)
+    assert got
+    if "ORDER BY" in oracle.upper():
+        assert got == want
+    else:
+        assert Counter(got) == Counter(want)
+
+
+def test_invented_formula_is_not_what_dms_executes(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    res, _ = _ask(client, monkeypatch, RANK_Q, CERTIFIED_REWRITE)
+    """dms#231 F3: the invented weight ranks differently; DMS gets the certified rows."""
+    oracle = _rows(cot_climb.gold_sql_for("cq_supplier_ranking"))
+    assert Counter(_rows(INVENTED)) != Counter(oracle)
+    res, prompts = _ask(client, monkeypatch, RANK_Q.upper() + "?", INVENTED)
+    assert res.status_code == 200, res.text
+    sql = _assert_served(res.json(), "cq_supplier_ranking", prompts)
+    assert _rows(sql) == oracle
+    assert "0.65" in sql and "0.5 " not in sql  # in addition to the rows
+
+
+@pytest.mark.parametrize(
+    ("q", "what"),
+    [
+        (RANK_Q + " with equal weights", "terms(with equal weights)"),
+        ("What is total stock value by category in warehouse A?", "terms(in warehouse a)"),
+        ("Top 5 selling SKUs by revenue this month", "terms(this month)"),
+        ("Show warehouse capacity utilisation for cold storage", "terms(for cold storage)"),
+    ],
+)
+def test_extra_ask_the_certified_query_cannot_express_is_a_named_abstain(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, q: str, what: str
+) -> None:
+    res, prompts = _ask(client, monkeypatch, q, INVENTED)
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["status"] == "ABSTAIN"  # validated, not executed in crew
+    reason = f"{CANNOT}:{what}"
+    assert body["status"] == "ABSTAIN"
+    assert body["badge"] == "abstain"
     assert body["values"] == []
-    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
-    sql = body["query_sql"]
-    oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
-    got_rows = _suppliers_rows(sql)
-    want_rows = _suppliers_rows(oracle)
-    assert got_rows and Counter(got_rows) == Counter(want_rows)
+    assert body["refuse_reason"] == reason
+    assert reason in body["answer"]
+    assert _no_digits(body["answer"], reason), body["answer"]
+    assert "query_sql" not in body  # nothing for DMS to execute
+    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert any(u.get("why") == reason for u in body["validation"]["unsure"])
+    assert prompts == []  # the model did not improvise the extra filter
 
 
-def test_invented_formula_rows_are_wrong_so_the_gate_is_load_bearing() -> None:
-    """The case the grain guard cannot catch: right grain, wrong values."""
-    oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
-    assert Counter(_suppliers_rows(INVENTED)) != Counter(_suppliers_rows(oracle))
+@pytest.mark.parametrize(
+    ("q", "plan", "what"),
+    [
+        (
+            MEASURES["cq_stock_value_by_category"],
+            {"measure": "stock_value_myr", "filters": [["location", "location_code", "WH-A"]]},
+            "filter",
+        ),
+        (
+            MEASURES["cq_stock_value_by_category"],
+            {"measure": "stock_value_myr", "group_by": [["product", "sku"]]},
+            "grain(sku)",
+        ),
+        (
+            MEASURES["cq_capacity_utilisation"],
+            {"measure": "utilisation_pct", "keep_gt": 90.0},
+            "keep_gt",
+        ),
+        (
+            MEASURES["cq_capacity_utilisation"],
+            {"measure": "utilisation_pct", "limit": 2},
+            "limit(2)",
+        ),
+        (
+            MEASURES["cq_sales_top5_value"],
+            {"measure": "outbound_value_myr", "group_by": [["product", "sku"]], "limit": 3},
+            "limit(3)",
+        ),
+    ],
+)
+def test_typed_plan_the_certified_query_cannot_express_is_a_named_abstain(
+    crew_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    q: str,
+    plan: dict[str, Any],
+    what: str,
+) -> None:
+    res, prompts = _ask(crew_client, monkeypatch, q, INVENTED, query_plan=plan)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    reason = f"{CANNOT}:{what}"
+    assert body["status"] == "ABSTAIN"
+    assert body["values"] == []
+    assert body["refuse_reason"] == reason
+    assert reason in body["answer"]
+    assert "query_sql" not in body
+    assert prompts == []
 
 
-def test_no_certified_measure_behaves_as_before(
+def test_declared_top_n_is_the_only_parameter_applied(
+    crew_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cq_supplier_ranking declares LIMIT 10; a typed limit 3 is its first three rows."""
+    plan = {"measure": "risk", "group_by": [["supplier", "supplier_id"]], "limit": 3}
+    res, prompts = _ask(crew_client, monkeypatch, RANK_Q, INVENTED, query_plan=plan)
+    assert res.status_code == 200, res.text
+    sql = _assert_served(res.json(), "cq_supplier_ranking", prompts)
+    oracle = _rows(cot_climb.gold_sql_for("cq_supplier_ranking"))
+    assert _rows(sql) == oracle[:3]
+
+
+def test_matching_plan_and_dms_default_limit_serve_unchanged(
+    crew_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = {"measure": "stock_value_myr", "group_by": [["product", "category"]], "limit": 50}
+    res, prompts = _ask(
+        crew_client, monkeypatch, MEASURES["cq_stock_value_by_category"], INVENTED, query_plan=plan
+    )
+    assert res.status_code == 200, res.text
+    sql = _assert_served(res.json(), "cq_stock_value_by_category", prompts)
+    assert Counter(_rows(sql)) == Counter(
+        _rows(cot_climb.gold_sql_for("cq_stock_value_by_category"))
+    )
+
+
+def test_no_certified_measure_keeps_the_generate_path(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No certified formula resolves 'how many skus': prompt and envelope unchanged.
-
-    Passes on main@27f79ea too; that is the point (behaviour pin, not a new rule).
-    """
+    """'how many skus' resolves to no certified measure: the model's SQL, as before."""
     res, prompts = _ask(
         client, monkeypatch, "how many skus", "SELECT COUNT(DISTINCT sku) * 1 AS n FROM inventory"
     )
@@ -159,9 +330,27 @@ def test_no_certified_measure_behaves_as_before(
     assert body["values"] == []
     assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
     assert "count(distinct sku) * 1" in body["query_sql"].lower()
+    assert _rows(body["query_sql"]) == [(7,)]
     assert body["generative"]["ok"] is True
-    assert len(prompts) == 1
-    assert "CERTIFIED MEASURE" not in prompts[0]
+    assert not str(body["generative"]["check"]).startswith("certified_query")
+    assert any(p.startswith("generative_ask:") for p in prompts)
+
+
+def test_certified_lookup_that_is_not_a_measure_keeps_the_generate_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cq_cold_storage is a plain lookup, not a measure: out of this ticket's scope."""
+    res, prompts = _ask(
+        client,
+        monkeypatch,
+        "Which locations are cold storage?",
+        "SELECT location_code FROM locations WHERE location_code = 'A'",
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    assert body["generative"]["check"] != "certified_query:cq_cold_storage"
+    assert any(p.startswith("generative_ask:") for p in prompts)
 
 
 def test_generate_exception_is_a_named_200_abstain(
@@ -181,152 +370,5 @@ def test_generate_exception_is_a_named_200_abstain(
     assert body["badge"] == "abstain"
     assert body["values"] == []
     assert body["refuse_reason"] == "generative_error:KeyError"
+    assert _no_digits(body["answer"], "generative_error:KeyError")
     assert "query_sql" not in body
-
-
-CERT = "ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3)"
-HALF = "ROUND(risk_score * 0.5 + lead_time_days * 0.5, 3)"
-# Verifier probes P1-P4 and P10: the certified expression is somewhere in the
-# tree, but the answer is ranked by an invented formula (or reversed).
-BYPASS = {
-    "where_only": (
-        f"SELECT supplier_id, {HALF} AS ranking_score FROM suppliers "
-        f"WHERE {CERT} IS NOT NULL ORDER BY ranking_score DESC LIMIT 10"
-    ),
-    "projected_but_ordered_by_invented": (
-        f"SELECT supplier_id, {CERT} AS ranking_score FROM suppliers "
-        "ORDER BY risk_score * 0.5 + lead_time_days * 0.5 DESC LIMIT 3"
-    ),
-    "dead_case_branch": (
-        f"SELECT supplier_id, CASE WHEN 1 = 0 THEN {CERT} ELSE {HALF} END AS ranking_score "
-        "FROM suppliers ORDER BY ranking_score DESC LIMIT 10"
-    ),
-    "unused_subquery_column": (
-        f"SELECT supplier_id, {HALF} AS ranking_score FROM "
-        f"(SELECT *, {CERT} AS x FROM suppliers) t ORDER BY ranking_score DESC LIMIT 10"
-    ),
-    "extra_invented_column": (
-        f"SELECT supplier_id, {CERT} AS ranking_score, {HALF} AS alt FROM suppliers "
-        "ORDER BY ranking_score DESC LIMIT 10"
-    ),
-    "reversed_ranking": (
-        f"SELECT supplier_id, {CERT} AS ranking_score FROM suppliers "
-        "ORDER BY ranking_score ASC LIMIT 10"
-    ),
-    "not_ranked_by_measure": (
-        f"SELECT supplier_id, {CERT} AS ranking_score FROM suppliers "
-        "ORDER BY supplier_id LIMIT 10"
-    ),
-}
-
-
-@pytest.mark.parametrize("name", sorted(BYPASS))
-def test_certified_expression_hidden_elsewhere_is_still_a_named_abstain(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, name: str
-) -> None:
-    sql = BYPASS[name]
-    oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
-    # The bypass is load-bearing: its ranked rows are not the oracle's.
-    assert _suppliers_rows(sql) != _suppliers_rows(oracle)
-    res, _ = _ask(client, monkeypatch, RANK_Q, sql)
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["status"] == "ABSTAIN"
-    assert body["badge"] == "abstain"
-    assert body["values"] == []
-    assert body["refuse_reason"] == MISS
-    assert "query_sql" not in body
-    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
-    assert not re.search(r"\d", body["answer"].replace(MISS, "")), body["answer"]
-
-
-# Same measure, different spelling: numeric literal, regrouping, ordinal ORDER
-# BY, outer ROUND dropped, alias through a CTE. None of these may be refused.
-EQUIVALENT = {
-    "cq_supplier_ranking": [
-        "SELECT supplier_id, ROUND(risk_score * 0.65 + lead_time_days / 60 * 0.35, 3) AS s "
-        "FROM suppliers ORDER BY s DESC LIMIT 10",
-        "SELECT supplier_id, ROUND(0.65 * risk_score + 0.35 * lead_time_days / 60.0, 3) AS s "
-        "FROM suppliers ORDER BY 2 DESC, risk_score DESC LIMIT 10",
-        "WITH r AS (SELECT supplier_id, risk_score * 0.65 + lead_time_days * 0.35 / 60 AS s "
-        "FROM suppliers) SELECT supplier_id, s FROM r ORDER BY s DESC LIMIT 10",
-    ],
-    "cq_capacity_utilisation": [
-        "SELECT location_code, ROUND(current_load_kg / capacity_kg * 100, 1) AS pct FROM locations",
-        "SELECT location_code, current_load_kg * 100.0 / capacity_kg AS pct FROM locations "
-        "ORDER BY pct DESC",
-    ],
-    "cq_sales_top5_value": [
-        "SELECT sku, SUM(quantity_kg * unit_cost_myr) AS v FROM transactions "
-        "WHERE txn_type = 'OUT' GROUP BY sku ORDER BY v DESC, sku ASC LIMIT 5",
-        "SELECT sku, ROUND(SUM(unit_cost_myr * quantity_kg), 2) FROM transactions "
-        "WHERE txn_type = 'OUT' GROUP BY sku ORDER BY 2 DESC LIMIT 5",
-    ],
-    "cq_stock_value_by_category": [
-        "SELECT category, SUM(unit_cost_myr * quantity_kg) AS v FROM inventory GROUP BY category",
-        "SELECT category, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS v FROM inventory "
-        "GROUP BY category ORDER BY v DESC",
-    ],
-    "cq_spend_by_country": [
-        "SELECT s.country, SUM(i.unit_cost_myr * i.quantity_kg) AS spend FROM inventory i "
-        "JOIN suppliers s ON i.supplier_id = s.supplier_id GROUP BY s.country ORDER BY spend DESC",
-    ],
-    "cq_top3_category_sales": [
-        "WITH c AS (SELECT DISTINCT sku, category FROM inventory) "
-        "SELECT c.category, SUM(t.unit_cost_myr * t.quantity_kg) AS v FROM transactions t "
-        "JOIN c ON t.sku = c.sku WHERE t.txn_type = 'OUT' GROUP BY c.category "
-        "ORDER BY v DESC LIMIT 3",
-    ],
-}
-# A different quantity over the same columns: must miss.
-DIFFERENT = {
-    "cq_supplier_ranking": [
-        "SELECT supplier_id, ROUND(risk_score * 0.35 + lead_time_days / 60.0 * 0.65, 3) AS s "
-        "FROM suppliers ORDER BY s DESC LIMIT 10",
-    ],
-    "cq_capacity_utilisation": [
-        "SELECT location_code, ROUND(capacity_kg / current_load_kg * 100, 1) AS pct FROM locations",
-    ],
-    "cq_sales_top5_value": [
-        "SELECT sku, SUM(quantity_kg) * SUM(unit_cost_myr) AS v FROM transactions "
-        "WHERE txn_type = 'OUT' GROUP BY sku ORDER BY v DESC LIMIT 5",
-    ],
-    "cq_stock_value_by_category": [
-        "SELECT category, AVG(quantity_kg * unit_cost_myr) AS v FROM inventory GROUP BY category",
-    ],
-}
-
-
-def _measure_for(mid: str) -> dict[str, Any]:
-    ranking = {"certified": [{"id": mid, "importance": {"score": 25}}]}
-    measure = cot_climb.certified_measure(ranking)
-    assert measure and measure["id"] == mid
-    return measure
-
-
-def test_every_bound_certified_gold_passes_its_own_gate() -> None:
-    """The 9 affected curated asks: the certified SQL itself is never refused."""
-    bound = []
-    for _cid, intent in cot_climb.DMS_180_CURATED:
-        measure = cot_climb.certified_measure(insights.retrieve_ontology(intent))
-        if measure:
-            bound.append(measure["id"])
-            gold = cot_climb.gold_sql_for(measure["id"])
-            assert cot_climb.certified_measure_miss(gold, measure) == "", measure["id"]
-    assert "cq_supplier_ranking" in bound
-
-
-@pytest.mark.parametrize(
-    ("mid", "sql"), [(m, s) for m, rows in EQUIVALENT.items() for s in rows]
-)
-def test_equivalent_spelling_is_not_refused(mid: str, sql: str) -> None:
-    assert cot_climb.certified_measure_miss(sql, _measure_for(mid)) == ""
-
-
-@pytest.mark.parametrize(
-    ("mid", "sql"), [(m, s) for m, rows in DIFFERENT.items() for s in rows]
-)
-def test_different_quantity_is_refused(mid: str, sql: str) -> None:
-    assert cot_climb.certified_measure_miss(sql, _measure_for(mid)) == (
-        f"{cot_climb.CERTIFIED_MEASURE_MISS}:{mid}"
-    )
