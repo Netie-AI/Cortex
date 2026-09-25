@@ -28,6 +28,11 @@ Envelope status is **CERTIFIED | ABSTAIN | REFUSE**. Numbers are never invented.
 validate. Validated SQL is **ABSTAIN**, never CERTIFIED. Unarmed FreeRoute is
 **REFUSE**.
 
+`plan_source` is a producer stamp for DMS Studio. `ontology_plan` only when
+this answer's SQL came from that generate path. Otherwise `other`. A request
+`mode=ontology_plan` is not copied onto the stamp. `query_sql` is set only
+alongside honest `ontology_plan`. This does not re-prove live DMS #231.
+
 ## Key posture (local vs cloud)
 
 OpenVault is the only vault. Cortex does not store provider secrets. Callers

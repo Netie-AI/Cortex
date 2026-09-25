@@ -122,6 +122,11 @@ async def test_certified_envelope_has_include_exclude_unsure() -> None:
     assert "exclude:" in text
     assert "unsure:" in text
     assert "12" in text
+    assert env["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert env["plan_source"] != insights.PLAN_SOURCE_ONTOLOGY
+    assert "query_sql" not in env
+    assert "plan_source: other" in text
+    assert "plan_source: ontology_plan" not in text
 
 
 @pytest.mark.asyncio
@@ -183,6 +188,8 @@ async def test_ontology_only_does_not_call_engine() -> None:
     assert env["ontology"]["locations"]
     assert bridge.asked == []
     assert env["values"] == []
+    assert env["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert env["plan_source"] != insights.PLAN_SOURCE_ONTOLOGY
 
 
 @pytest.mark.asyncio
@@ -223,6 +230,7 @@ def test_http_ontology_then_refuse_offline(client) -> None:
     assert law["measured_baseline"]["gen"] == "57.69%"
     assert law["measured_baseline"]["wrong"] == 0
     assert "cot_climb" in law["generate"]
+    assert "ontology_plan only when" in law["plan_source"]
     assert law["cot_climb"]["complete"] is False
     assert law["cot_climb"]["status"] == "INCOMPLETE"
     assert law["cot_climb"]["issue_212_complete"] is False
@@ -318,8 +326,12 @@ async def test_generate_unarmed_fail_closed_no_invented_numbers(crew_env) -> Non
     reason = (env.get("answer") or "") + str(env.get("generative"))
     assert "unarmed" in reason.lower() or "invent-green" in reason.lower() or "CREW_OPENVAULT" in reason
     assert "999" not in env["answer"]
+    assert env["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert env["plan_source"] != insights.PLAN_SOURCE_ONTOLOGY
+    assert "query_sql" not in env
     text = insights.render_tool_text(env)
     assert "status: REFUSE" in text
+    assert "plan_source: ontology_plan" not in text
 
 
 @pytest.mark.asyncio
@@ -369,9 +381,13 @@ async def test_generate_armed_sql_abstain_no_numbers(monkeypatch) -> None:
     assert "999" not in env["answer"]
     assert "999" not in str(env["values"])
     assert bridge.asked == []
+    assert env["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    assert env["query_sql"]
+    assert "inventory" in env["query_sql"].lower()
     text = insights.render_tool_text(env)
     assert "status: ABSTAIN" in text
     assert "freeroute:" in text
+    assert "plan_source: ontology_plan" in text
     assert "999" not in text
 
 
@@ -405,6 +421,7 @@ async def test_generate_rejects_off_ontology_sql(monkeypatch) -> None:
     assert env["status"] == "REFUSE"
     assert env["values"] == []
     assert env["generative"]["ok"] is False
+    assert env["plan_source"] != insights.PLAN_SOURCE_ONTOLOGY
     assert "payroll" in str(env["generative"]["refuse_reason"]).lower() or "outside" in str(
         env.get("answer") or ""
     ).lower() or "outside" in str(env["generative"]["refuse_reason"]).lower()
@@ -443,6 +460,12 @@ async def test_generate_plus_ask_attaches_sql_to_certified(monkeypatch) -> None:
     assert env["generative"]["sql"]
     assert any(row.get("id") == "generative_sql" for row in env["validation"]["unsure"])
     assert bridge.asked
+    assert env["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert env["plan_source"] != insights.PLAN_SOURCE_ONTOLOGY
+    assert "query_sql" not in env
+    text = insights.render_tool_text(env)
+    assert "12" in text
+    assert "plan_source: ontology_plan" not in text
 
 
 # -- #211 follow-up G6: the generate validator is the engine guardrail, not a regex --
