@@ -144,6 +144,15 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "tests/freeroute_fake.py",
         "tests/test_freeroute_core.py",
     }
+    # #272 LOCAL-1 is the seated writer for arming / RouteStamp / LOCAL_ONLY.
+    # The leftover #215 ban still covers crew adapters, openvault_client,
+    # and the #269 store/pick tests (test_freeroute_core.py).
+    if (ROOT / "CortexOS" / "integrations" / "freeroute_ov_local.py").is_file():
+        banned -= {
+            "CortexOS/integrations/freeroute.py",
+            "tests/conftest.py",
+            "tests/freeroute_fake.py",
+        }
     overlap = sorted(_diff_names_vs_main() & banned)
     assert overlap == [], f"dual-write of #215 FreeRoute files: {overlap}"
     # server.py may gain unrelated crew routes (liberty seek #223). The
