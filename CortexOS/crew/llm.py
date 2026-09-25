@@ -19,6 +19,7 @@ or a dead connector refuses with a reason. There is no walk to the next host.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Awaitable, Callable
@@ -35,6 +36,9 @@ class ToolCall:
     id: str
     name: str
     args: dict[str, Any]
+    #: Set when the model sent arguments that are not a JSON object. The
+    #: runtime returns this to the model instead of running the tool with {}.
+    args_error: str = ""
 
 
 @dataclass
@@ -46,6 +50,9 @@ class LLMResult:
     completion_tokens: int | None = None
     cost_usd: float | None = None
     model: str = ""
+    #: The host's separate reasoning channel (``reasoning_content``), if any.
+    #: Kimi on NIM sometimes ends a turn with text only here and no content.
+    reasoning: str = ""
 
 
 @dataclass(frozen=True)
@@ -341,13 +348,102 @@ def _api_key(model: str) -> str | None:
 
 
 def _parse_args(raw: str | None) -> dict[str, Any]:
-    if not raw:
-        return {}
+    return _parse_args_checked(raw)[0]
+
+
+def _parse_args_checked(raw: Any) -> tuple[dict[str, Any], str]:
+    """Tool arguments as a dict plus a reason when they were not usable.
+
+    Models sometimes wrap the JSON in a code fence or send a trailing comma.
+    Unwrapping a fence is lossless; anything else that is not a JSON object is
+    reported back, because running the tool with ``{}`` silently does the
+    wrong thing (reads '.', searches nothing) and the model never learns why.
+    """
+    if isinstance(raw, dict):
+        return raw, ""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return {}, ""
+    text = str(raw).strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
     try:
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {}
-    except (TypeError, ValueError):
-        return {}
+        parsed = json.loads(text)
+    except (TypeError, ValueError) as exc:
+        return {}, f"arguments were not valid JSON ({exc}): {str(raw)[:200]}"
+    if not isinstance(parsed, dict):
+        return {}, f"arguments must be a JSON object, got {type(parsed).__name__}"
+    return parsed, ""
+
+
+def _tool_call(call_id: str, name: str, raw: Any) -> ToolCall:
+    args, err = _parse_args_checked(raw)
+    return ToolCall(id=call_id, name=name, args=args, args_error=err)
+
+
+# Same-host retry on a provider rate limit. This is not a fallback: the same
+# route and model are asked again after a pause, and the final error says how
+# many attempts were made. Only raised before any text has streamed.
+# Measured 2026-09-25 on a shared NVIDIA NIM key: two retries over ~11s still
+# lost 4 of 15 eval turns to 429; the per-minute window needs ~40s of patience.
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_BACKOFF_S = (3.0, 10.0, 25.0)
+
+
+def _strip_cache_control(model: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop ``cache_control`` markers for Gemini AI Studio.
+
+    litellm turns the marker into an explicit ``cachedContents`` create, which
+    the free tier refuses outright (HTTP 429 "TotalCachedContentStorageTokens
+    PerModelFreeTier limit=0", measured 2026-09-25): every turn failed before
+    the model ran. Gemini already caches a repeated prefix implicitly, so the
+    marker buys nothing there. Other hosts keep it.
+    """
+    if not str(model).startswith("gemini/"):
+        return messages
+    if not any("cache_control" in m for m in messages):
+        return messages
+    return [{k: v for k, v in m.items() if k != "cache_control"} for m in messages]
+
+
+def _is_hard_quota(exc: BaseException) -> bool:
+    """A 429 that seconds of backoff cannot clear: a zero quota, or a per-day
+    quota that is spent (Gemini free tier: ``GenerateRequestsPerDay...``).
+    Retrying those only adds ~40s before the same refusal."""
+    text = " ".join(str(exc).split()).lower()
+    return (
+        "limit=0," in text
+        or "limit: 0," in text
+        or "limit=0 " in text
+        or "perday" in text
+    )
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    if type(exc).__name__ == "RateLimitError":
+        return True
+    status = getattr(exc, "status_code", None)
+    return status == 429
+
+
+def _describe_failure(exc: BaseException) -> str:
+    """One readable reason. Provider bodies are long JSON; keep the head."""
+    status = getattr(exc, "status_code", None)
+    kind = type(exc).__name__
+    hint = ""
+    if _is_rate_limited(exc):
+        hint = "rate limited or out of quota (HTTP 429)"
+    elif status == 401 or kind == "AuthenticationError":
+        hint = "key rejected (HTTP 401)"
+    elif status == 402:
+        hint = "payment required (HTTP 402)"
+    elif status == 404 or kind == "NotFoundError":
+        hint = "model not found on this host (HTTP 404)"
+    elif kind in {"Timeout", "APITimeoutError"} or isinstance(exc, TimeoutError):
+        hint = "timed out"
+    detail = " ".join(str(exc).split())[:300]
+    return f"{kind}: {hint + ' - ' if hint else ''}{detail}"
 
 
 async def chat(
@@ -370,7 +466,7 @@ async def chat(
         litellm = _litellm()
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": _strip_cache_control(model, messages),
             "max_tokens": max_tokens,
             "timeout": timeout,
             "num_retries": 1,
@@ -382,14 +478,42 @@ async def chat(
         key = _api_key(model)
         if key:
             kwargs["api_key"] = key
-        if stream_cb is None:
-            response = await litellm.acompletion(**kwargs)
-            return _from_response(litellm, response, model)
-        return await _streamed(litellm, kwargs, model, stream_cb)
     except LLMError:
         raise
     except Exception as exc:  # noqa: BLE001 - every provider fails differently
-        raise LLMError(f"model call failed ({model}): {type(exc).__name__}: {exc}") from exc
+        raise LLMError(f"model call failed ({model}): {_describe_failure(exc)}") from exc
+
+    emitted = False
+
+    async def _cb(text: str) -> None:
+        nonlocal emitted
+        emitted = True
+        assert stream_cb is not None
+        await stream_cb(text)
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            if stream_cb is None:
+                response = await litellm.acompletion(**kwargs)
+                return _from_response(litellm, response, model)
+            return await _streamed(litellm, kwargs, model, _cb)
+        except LLMError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - every provider fails differently
+            if (
+                _is_rate_limited(exc)
+                and not _is_hard_quota(exc)
+                and not emitted
+                and attempt <= RATE_LIMIT_RETRIES
+            ):
+                await asyncio.sleep(RATE_LIMIT_BACKOFF_S[min(attempt, len(RATE_LIMIT_BACKOFF_S)) - 1])
+                continue
+            tries = f" after {attempt} attempts" if attempt > 1 else ""
+            raise LLMError(
+                f"model call failed ({model}){tries}: {_describe_failure(exc)}"
+            ) from exc
 
 
 def _from_response(litellm: Any, response: Any, model: str) -> LLMResult:
@@ -398,11 +522,7 @@ def _from_response(litellm: Any, response: Any, model: str) -> LLMResult:
     calls: list[ToolCall] = []
     for tc in getattr(message, "tool_calls", None) or []:
         calls.append(
-            ToolCall(
-                id=tc.id or f"call_{len(calls)}",
-                name=tc.function.name or "",
-                args=_parse_args(tc.function.arguments),
-            )
+            _tool_call(tc.id or f"call_{len(calls)}", tc.function.name or "", tc.function.arguments)
         )
     usage = getattr(response, "usage", None)
     cost: float | None = None
@@ -418,6 +538,7 @@ def _from_response(litellm: Any, response: Any, model: str) -> LLMResult:
         completion_tokens=getattr(usage, "completion_tokens", None),
         cost_usd=cost,
         model=model,
+        reasoning=str(getattr(message, "reasoning_content", None) or ""),
     )
 
 
@@ -428,8 +549,10 @@ async def _streamed(
     stream_cb: Callable[[str], Awaitable[None]],
 ) -> LLMResult:
     text_parts: list[str] = []
+    reasoning_parts: list[str] = []
     # tool-call fragments arrive keyed by index; args come as string shards
     pending: dict[int, dict[str, str]] = {}
+    alias: dict[int | None, int] = {}
     finish = ""
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -450,10 +573,23 @@ async def _streamed(
         if getattr(delta, "content", None):
             text_parts.append(delta.content)
             await stream_cb(delta.content)
+        thought = getattr(delta, "reasoning_content", None)
+        if isinstance(thought, str) and thought:
+            reasoning_parts.append(thought)
         for tc in getattr(delta, "tool_calls", None) or []:
-            slot = pending.setdefault(tc.index or 0, {"id": "", "name": "", "args": ""})
-            if getattr(tc, "id", None):
-                slot["id"] = tc.id
+            raw_idx = getattr(tc, "index", None)
+            new_id = getattr(tc, "id", None) or ""
+            # Some hosts omit the index or stamp every parallel call index 0.
+            # A fresh id on an occupied slot is a fresh call; chunks without
+            # an id continue whichever call that raw index last pointed at.
+            # Otherwise two calls merge into "web_searchweb_search" / "{..}{..}".
+            key = alias.get(raw_idx, raw_idx if raw_idx is not None else 0)
+            if new_id and key in pending and pending[key]["id"] not in {"", new_id}:
+                key = max(pending) + 1
+            alias[raw_idx] = key
+            slot = pending.setdefault(key, {"id": "", "name": "", "args": ""})
+            if new_id:
+                slot["id"] = new_id
             fn = getattr(tc, "function", None)
             if fn is not None:
                 if getattr(fn, "name", None):
@@ -462,7 +598,7 @@ async def _streamed(
                     slot["args"] += fn.arguments
 
     calls = [
-        ToolCall(id=slot["id"] or f"call_{i}", name=slot["name"], args=_parse_args(slot["args"]))
+        _tool_call(slot["id"] or f"call_{i}", slot["name"], slot["args"])
         for i, slot in sorted(pending.items())
     ]
     return LLMResult(
@@ -473,4 +609,5 @@ async def _streamed(
         completion_tokens=completion_tokens,
         cost_usd=None,
         model=model,
+        reasoning="".join(reasoning_parts),
     )

@@ -85,6 +85,12 @@ INTERNAL_TOOLS = frozenset(
         # gated by ``decide`` like any capture tool inside the runtime.
         "ws_read_xlsx",
         "attach_window",
+        # Research tools: a keyless public web read (results come back inside
+        # the untrusted-payload wrapper) and a pure arithmetic evaluator.
+        # Neither touches the desktop, the workspace or a secret.
+        "web_search",
+        "web_fetch",
+        "calc",
     }
 )
 
