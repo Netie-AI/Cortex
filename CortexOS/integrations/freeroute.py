@@ -20,6 +20,12 @@ FreeRoute. A hop is local only when OpenVault marks ``served_local`` true;
 Cortex never infers that from a model name. Anything else is a named refusal
 (R-0011).
 
+The one exception is an explicit operator opt-in, ``CORTEX_MODEL_TRANSPORT=env-direct``
+(see :mod:`CortexOS.integrations.direct_providers`): arming, the leave decision
+and the transport then come from provider keys in the process env, and every
+stamp reads ``NOT OpenVault FreeRoute (env-direct)`` so the custody change is
+visible on every answer. Unset, nothing in this module changes.
+
 Measured route. OpenVault treats the requested model as a preference: it walks
 hops in its own order and a hop that does not carry the requested id serves its
 own first catalogued model. So every call records requested AND served, validity
@@ -44,7 +50,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from CortexOS.integrations import freeroute_ov_local, openvault_client
+from CortexOS.integrations import direct_providers, freeroute_ov_local, openvault_client
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
@@ -198,6 +204,7 @@ class Arming:
     probed: bool = True
     local_spendable_hops: int = 0
     local_reason: str = ""
+    custody: str = "openvault"
 
     def public(self) -> dict[str, Any]:
         return {
@@ -209,7 +216,7 @@ class Arming:
             "spendable_hops": self.spendable_hops,
             "hops": [dict(h) for h in self.hops_public],
             "probed": self.probed,
-            "custody": "openvault",
+            "custody": self.custody,
             "local_only": local_only_enabled(),
             "local_reason": self.local_reason,
         }
@@ -423,8 +430,40 @@ def _vault_refusal(vault: _Vault, url: str) -> Arming:
     )
 
 
+def _direct_arming() -> Arming:
+    """Env-direct opt-in: armed from provider keys in the process env. No OpenVault."""
+    found = direct_providers.configured()
+    if not found:
+        envs = ", ".join(n for p in direct_providers.PROVIDERS for n in p.key_envs)
+        return Arming(
+            armed=False,
+            reason=f"{direct_providers.TRANSPORT_ENV}=env-direct but no provider key is set ({envs})",
+            url=direct_providers.URL,
+            checked_at=time.time(),
+            custody=direct_providers.CUSTODY,
+        )
+    hops = tuple(
+        {"provider": p.label, "parked": False, "key_env": name, "served_local": False}
+        for p, name, _ in found
+    )
+    catalogue = tuple((p.label, tuple(f"{p.label}:{m}" for m in models)) for p, _, models in found)
+    labels = ", ".join(f"{p.label} via {name}" for p, name, _ in found)
+    return Arming(
+        armed=True,
+        reason=f"armed env-direct (NOT OpenVault): {labels}",
+        url=direct_providers.URL,
+        spendable_hops=len(hops),
+        hops_public=hops,
+        catalogue=catalogue,
+        checked_at=time.time(),
+        custody=direct_providers.CUSTODY,
+    )
+
+
 def arming(*, fresh: bool = False, timeout: float = 1.5, bearer: str | None = None) -> Arming:
     """Is FreeRoute spendable for this credential? First failing rule wins, named."""
+    if direct_providers.enabled():
+        return _direct_arming()
     url = openvault_client.openvault_base_url()
     relay = bearer is not None
     token = _token() if bearer is None else bearer.strip()
@@ -466,6 +505,12 @@ def peek() -> Arming:
 
 def leave_gate() -> tuple[bool, str]:
     """OpenVault leave-machine gate for payloads that carry schema off the box."""
+    if direct_providers.enabled():
+        # The operator's explicit opt-in is the leave decision in this mode.
+        return True, (
+            f"ok:leave by operator opt-in {direct_providers.TRANSPORT_ENV}=env-direct "
+            "(OpenVault gate not consulted)"
+        )
     try:
         from CortexOS.integrations import openvault_gate
 
@@ -820,7 +865,8 @@ def candidates(arm: Arming, *, pin: str = "", pin_source: str = "") -> tuple[tup
             if model not in found:
                 found.append(model)
     if found:
-        return tuple(found[:MAX_CANDIDATES]), "live hops x OpenVault catalogue"
+        where = "OpenVault" if arm.custody == "openvault" else "env-direct"
+        return tuple(found[:MAX_CANDIDATES]), f"live hops x {where} catalogue"
     return ("auto",), "delegated to OpenVault (not measured by Cortex)"
 
 
@@ -989,6 +1035,8 @@ def _transport() -> tuple[Callable[..., Any], str]:
     override = _transport_var.get()
     if override is not None:
         return override
+    if direct_providers.enabled():
+        return direct_providers.request_json, direct_providers.IMPL
     return openvault_client.request_json, IMPL
 
 
@@ -1026,7 +1074,8 @@ def complete(
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
     credential = (
-        "cortex api_key" if bearer is None and _token()
+        "process-env provider key" if direct_providers.enabled()
+        else "cortex api_key" if bearer is None and _token()
         else "relayed bearer" if bearer else "loopback tier (unattributed)"
     )
     if not arm.armed:
@@ -1140,13 +1189,19 @@ def complete(
         if not usable:
             reason = f"FreeRoute answer unusable for {task} (served {stamp.served or 'unknown'})"
     else:
-        base = _STATUS_REASONS.get(int(status), f"OpenVault answered HTTP {status}")
+        direct = impl == direct_providers.IMPL
+        base = (
+            f"env-direct provider answered HTTP {status}"
+            if direct
+            else _STATUS_REASONS.get(int(status), f"OpenVault answered HTTP {status}")
+        )
         detail = _error_message(data)
         reason = f"{base}: {detail}" if detail else base
         # Refusals about custody, budget or the hop pool say nothing about the
         # model asked for; only other failures (500, 504, ...) count against it.
         scored = int(status) not in _STATUS_REASONS
-        if int(status) in (401, 403):
+        # A provider 401 in env-direct says nothing about the OpenVault credential.
+        if int(status) in (401, 403) and not direct:
             if int(status) == 401:
                 note_rejected(_credential_fp(bearer), reason, url=arm.url)
             else:
@@ -1306,7 +1361,11 @@ def public_status(task: str | None = None) -> dict[str, Any]:
     learn = learn_state()
     store = store_state()
     return {
-        "layer": "OpenVault FreeRoute (one Cortex model layer)",
+        "layer": (
+            "env-direct provider keys (NOT OpenVault)"
+            if direct_providers.enabled()
+            else "OpenVault FreeRoute (one Cortex model layer)"
+        ),
         "impl": _transport()[1],
         "arming": arm.public(),
         "identity": identity(),
