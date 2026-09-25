@@ -16,8 +16,12 @@ not invented:
   in OpenVault order regardless of the requested model; a hop serves the
   requested id only when its provider catalogues it, otherwise its own first
   model (providers.py resolve_model). Refusals: 403 openvault_vault_sealed,
-  503 openvault_no_keys, 400 openvault_non_retryable, 502
+  503 openvault_no_keys, 503 openvault_local_only_unavailable
+  (error.reason one of local_unreachable / local_model_not_loaded /
+  local_base_url_not_loopback), 400 openvault_non_retryable, 502
   openvault_fallback_exhausted, 401 from vault/auth.py resolve_caller.
+  OpenVault#71 wire names: served_provider, served_model, served_local,
+  local_only, local_reason. PENDING extras (headers / SSE copies) unused.
 """
 
 from __future__ import annotations
@@ -28,8 +32,15 @@ from typing import Any
 DEFAULT_BASE = "http://127.0.0.1:5000"
 
 
-def hop(provider: str, priority: int, *, circuit: str = "closed", parked: bool = False) -> dict[str, Any]:
-    return {
+def hop(
+    provider: str,
+    priority: int,
+    *,
+    circuit: str = "closed",
+    parked: bool = False,
+    served_local: bool | None = None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
         "key_id": f"kid-{provider}-{priority}-do-not-serve-this-row-id",
         "label": f"{provider.upper()}_API_KEY",
         "provider": provider,
@@ -43,6 +54,10 @@ def hop(provider: str, priority: int, *, circuit: str = "closed", parked: bool =
         "park_until": 1893456000.0 if parked else None,
         "park_reason": "quota" if parked else None,
     }
+    # OpenVault#71 hop field served_local. Omitted unless set.
+    if served_local is not None:
+        row["served_local"] = served_local
+    return row
 
 
 CATALOGUE: dict[str, list[str]] = {
@@ -65,6 +80,8 @@ class FakeOpenVault:
         self.pooled: Any = 3
         self.hops: list[dict[str, Any]] = [hop("groq", 10), hop("cerebras", 40)]
         self.catalogue: dict[str, list[str]] = {k: list(v) for k, v in CATALOGUE.items()}
+        self.local_providers: set[str] = set()
+        self.local_reason: str = ""
         self.identities: dict[str, str] = {}
         self.ratelimit_status = 200
         self.replies: deque[tuple[int, dict[str, Any] | None]] = deque()
@@ -82,15 +99,29 @@ class FakeOpenVault:
         tool_calls: list[dict[str, Any]] | None = None,
         error_type: str = "",
         message: str = "",
+        error_reason: str = "",
+        served_provider: str | None = None,
+        served_model: str | None = None,
+        served_local: bool | None = None,
     ) -> FakeOpenVault:
         if status != 200:
-            self.replies.append((status, {"error": {"message": message or error_type, "type": error_type}}))
+            err: dict[str, Any] = {"message": message or error_type, "type": error_type}
+            if error_reason:
+                err["reason"] = error_reason
+            self.replies.append((status, {"error": err}))
             return self
         body: dict[str, Any] = {"choices": [{"message": {"role": "assistant", "content": content}}]}
         if tool_calls:
             body["choices"][0]["message"]["tool_calls"] = tool_calls
         if model is not None:
             body["model"] = model
+        # OpenVault#71 confirmed chat fields.
+        if served_provider is not None:
+            body["served_provider"] = served_provider
+        if served_model is not None:
+            body["served_model"] = served_model
+        if served_local is not None:
+            body["served_local"] = served_local
         self.replies.append((200, body))
         return self
 
@@ -145,18 +176,28 @@ class FakeOpenVault:
         if route == "/api/freeroute/status":
             if self.status_code != 200:
                 return self.status_code, None
-            return 200, {
+            spendable: list[dict[str, Any]] = []
+            for pid, models in self.catalogue.items():
+                spec: dict[str, Any] = {
+                    "id": pid,
+                    "chat_models": list(models),
+                    "openai_compatible": True,
+                }
+                if pid in self.local_providers:
+                    spec["served_local"] = True
+                spendable.append(spec)
+            status_body: dict[str, Any] = {
                 "ok": True,
                 "surface": "freeroute",
                 "sealed": self.sealed,
                 "pooled_key_count": self.pooled,
                 "hops": [dict(h) for h in self.hops],
-                "spendable": [
-                    {"id": pid, "chat_models": list(models), "openai_compatible": True}
-                    for pid, models in self.catalogue.items()
-                ],
+                "spendable": spendable,
                 "spendable_count": len(self.catalogue),
             }
+            if self.local_reason:
+                status_body["local_reason"] = self.local_reason
+            return 200, status_body
         if route == "/api/freeroute/ratelimit":
             if self.ratelimit_status != 200:
                 return self.ratelimit_status, {"detail": "refused"}

@@ -19,8 +19,9 @@ def _assert_unproven_served(env: dict[str, Any], *, requested: str = "") -> None
     assert env["served_model"] is None
     assert env["served_local"] is False
     reason = str(env.get("served_reason") or "")
-    assert "272" in reason
-    assert "not inferred" in reason.lower()
+    pending = "272" in reason and "not inferred" in reason.lower()
+    omitted = "omitted served_provider" in reason
+    assert pending or omitted, reason
     dumped = json.dumps(env)
     if requested:
         assert env["served_model"] != requested

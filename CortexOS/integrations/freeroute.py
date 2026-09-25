@@ -13,9 +13,12 @@ loopback tier. OpenVault verifies the bearer itself; no header Cortex writes
 about itself carries authority (KB A-0009).
 
 Armed means ``GET /api/freeroute/status`` says: reachable, ``sealed`` is False,
-``pooled_key_count`` > 0, and at least one pooled hop is a spendable provider.
-Process-env provider keys, a local Ollama, ``/api/keys`` rows and ``/api/healthz``
-never arm FreeRoute. Anything else is a named refusal (R-0011).
+and either ``pooled_key_count`` > 0 with a spendable hop, or OpenVault reports
+a LOCAL spendable hop (Cortex #272 / OpenVault#71). Process-env provider keys,
+a process-local Ollama, ``/api/keys`` rows and ``/api/healthz`` never arm
+FreeRoute. A hop is local only when OpenVault marks ``served_local`` true;
+Cortex never infers that from a model name. Anything else is a named refusal
+(R-0011).
 
 Measured route. OpenVault treats the requested model as a preference: it walks
 hops in its own order and a hop that does not carry the requested id serves its
@@ -41,7 +44,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from CortexOS.integrations import openvault_client
+from CortexOS.integrations import freeroute_ov_local, openvault_client
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
@@ -49,6 +52,7 @@ MODELS_ENV = "CORTEX_FREEROUTE_MODELS"
 STORE_ENV = "CORTEX_FREEROUTE_SCOREBOARD"
 LEARN_ENV = "CORTEX_FREEROUTE_LEARN"
 SWITCH_ENV = "CORTEX_FREEROUTE"
+LOCAL_ONLY_ENV = "CORTEX_FREEROUTE_LOCAL_ONLY"
 
 ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
@@ -176,6 +180,8 @@ class _Vault:
     pooled_keys: int | None = None
     hops: tuple[dict[str, Any], ...] = ()
     catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    local_spendable_hops: int = 0
+    local_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -190,6 +196,8 @@ class Arming:
     catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
     checked_at: float = 0.0
     probed: bool = True
+    local_spendable_hops: int = 0
+    local_reason: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -202,6 +210,8 @@ class Arming:
             "hops": [dict(h) for h in self.hops_public],
             "probed": self.probed,
             "custody": "openvault",
+            "local_only": local_only_enabled(),
+            "local_reason": self.local_reason,
         }
 
 
@@ -213,6 +223,11 @@ def unarmed(reason: str, *, url: str | None = None, probed: bool = True) -> Armi
         checked_at=time.time(),
         probed=probed,
     )
+
+
+def local_only_enabled() -> bool:
+    """True only for ``CORTEX_FREEROUTE_LOCAL_ONLY=1``. Fail-closed; no cloud fallback."""
+    return (os.environ.get(LOCAL_ONLY_ENV) or "").strip() == "1"
 
 
 def _hop_parked(hop: Mapping[str, Any]) -> bool:
@@ -236,26 +251,22 @@ def _read_vault(url: str, timeout: float) -> _Vault:
             "OpenVault vault is sealed; unseal it in OpenVault (Cortex never holds the passphrase)",
             sealed=True,
         )
-    pooled = body.get("pooled_key_count")
-    if isinstance(pooled, bool) or not isinstance(pooled, int) or pooled <= 0:
-        return _Vault(
-            False,
-            "OpenVault pools no keys for FreeRoute; add keys in OpenVault",
-            sealed=False,
-            pooled_keys=pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None,
-        )
     catalogue: dict[str, tuple[str, ...]] = {}
+    raw_specs: list[dict[str, Any]] = []
     for spec in body.get("spendable") or []:
         if not isinstance(spec, dict):
             continue
+        raw_specs.append(spec)
         pid = str(spec.get("id") or "").strip()
         models = tuple(str(m) for m in (spec.get("chat_models") or []) if str(m).strip())
         if pid and pid != "cortex" and models:
             catalogue[pid] = models
+    raw_hops: list[dict[str, Any]] = []
     hops: list[dict[str, Any]] = []
     for hop in body.get("hops") or []:
         if not isinstance(hop, dict):
             continue
+        raw_hops.append(hop)
         hops.append(
             {
                 "provider": str(hop.get("provider") or ""),
@@ -265,21 +276,37 @@ def _read_vault(url: str, timeout: float) -> _Vault:
             }
         )
     spendable = [h for h in hops if h["provider"] in catalogue]
-    if not spendable:
+    local_n = freeroute_ov_local.count_local_spendable(raw_hops, raw_specs, set(catalogue))
+    local_reason = freeroute_ov_local.local_arming_reason(body)
+    pooled = body.get("pooled_key_count")
+    pooled_keys = pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None
+    pooled_ok = pooled_keys is not None and pooled_keys > 0
+    if not pooled_ok and local_n <= 0:
+        return _Vault(
+            False,
+            "OpenVault pools no keys for FreeRoute; add keys in OpenVault",
+            sealed=False,
+            pooled_keys=pooled_keys,
+            local_reason=local_reason,
+        )
+    if not spendable and local_n <= 0:
         return _Vault(
             False,
             "OpenVault has no spendable FreeRoute hop (pooled rows are not provider keys)",
             sealed=False,
-            pooled_keys=pooled,
+            pooled_keys=pooled_keys,
             hops=tuple(hops),
+            local_reason=local_reason,
         )
     return _Vault(
         True,
         "",
         sealed=False,
-        pooled_keys=pooled,
+        pooled_keys=pooled_keys,
         hops=tuple(hops),
         catalogue=tuple(sorted(catalogue.items())),
+        local_spendable_hops=local_n,
+        local_reason=local_reason,
     )
 
 
@@ -376,6 +403,8 @@ def _armed_from(vault: _Vault, url: str, mode: str) -> Arming:
         hops_public=vault.hops,
         catalogue=vault.catalogue,
         checked_at=time.time(),
+        local_spendable_hops=vault.local_spendable_hops,
+        local_reason=vault.local_reason,
     )
 
 
@@ -389,6 +418,8 @@ def _vault_refusal(vault: _Vault, url: str) -> Arming:
         spendable_hops=0,
         hops_public=vault.hops,
         checked_at=time.time(),
+        local_spendable_hops=vault.local_spendable_hops,
+        local_reason=vault.local_reason,
     )
 
 
@@ -857,6 +888,10 @@ class RouteStamp:
     credential: str = ""
     measured_n: int = 0
     measured_score: float | None = None
+    served_provider: str | None = None
+    served_model: str | None = None
+    served_local: bool = False
+    served_reason: str = ""
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -996,6 +1031,28 @@ def complete(
     )
     if not arm.armed:
         return Completion(ok=False, reason=f"FreeRoute not armed: {arm.reason}")
+    if local_only_enabled() and arm.local_spendable_hops <= 0:
+        named = arm.local_reason
+        extra = (
+            f" ({freeroute_ov_local.LOCAL_ONLY_UNAVAILABLE_TYPE} {named})"
+            if named in freeroute_ov_local.LOCAL_UNAVAILABLE_REASONS
+            else ""
+        )
+        reason = (
+            f"{LOCAL_ONLY_ENV}=1: OpenVault reports no local spendable hop "
+            f"(no cloud fallback){extra}"
+        )
+        stamp = RouteStamp(
+            call_id=uuid.uuid4().hex,
+            task=task,
+            requested="",
+            error=reason,
+            credential=credential,
+            served_local=False,
+            served_reason=named or "OpenVault reported no local spendable hop",
+        )
+        _journal_add(stamp)
+        return Completion(ok=False, stamp=stamp, reason=reason, text="")
     if egress == "leave":
         allowed, why = leave_gate()
         if not allowed:
@@ -1018,6 +1075,8 @@ def complete(
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
+    if local_only_enabled():
+        body.update(freeroute_ov_local.local_only_request_fields())
 
     send, impl = _transport()
     started = time.monotonic()
@@ -1053,6 +1112,13 @@ def complete(
     usage: dict[str, Any] = {}
     scored = False
     reason = ""
+    provider, served_model, is_local, served_reason = freeroute_ov_local.served_from_response(
+        data if isinstance(data, dict) else None
+    )
+    stamp.served_provider = provider
+    stamp.served_model = served_model
+    stamp.served_local = is_local
+    stamp.served_reason = served_reason
     if status == 200 and isinstance(data, dict):
         stamp.served = str(data.get("model") or "")
         stamp.honored = _same_model(chosen.requested, stamp.served)
@@ -1087,6 +1153,44 @@ def complete(
                 with _lock:
                     _arming_cache.clear()
                     _vault_cache.clear()
+    if local_only_enabled():
+        err_type, err_reason = freeroute_ov_local.chat_error_fields(
+            data if isinstance(data, dict) else None
+        )
+        if status == 403 and err_type == freeroute_ov_local.VAULT_SEALED_TYPE:
+            reason = f"{LOCAL_ONLY_ENV}=1: {freeroute_ov_local.VAULT_SEALED_TYPE}"
+            text = ""
+            message = {}
+            stamp.usable = False
+        elif status == 503 and err_type == freeroute_ov_local.LOCAL_ONLY_UNAVAILABLE_TYPE:
+            named = (
+                err_reason
+                if err_reason in freeroute_ov_local.LOCAL_UNAVAILABLE_REASONS
+                else err_reason
+            )
+            reason = (
+                f"{LOCAL_ONLY_ENV}=1: {freeroute_ov_local.LOCAL_ONLY_UNAVAILABLE_TYPE}"
+                + (f" ({named})" if named else "")
+            )
+            text = ""
+            message = {}
+            stamp.usable = False
+        elif status != 200:
+            reason = (
+                f"{LOCAL_ONLY_ENV}=1: OpenVault could not honour local-only"
+                + (f" ({reason})" if reason else "")
+            )
+            text = ""
+            message = {}
+            stamp.usable = False
+        elif not stamp.served_local:
+            reason = (
+                f"{LOCAL_ONLY_ENV}=1: OpenVault did not serve locally"
+                + (f" ({stamp.served_reason})" if stamp.served_reason else "")
+            )
+            text = ""
+            message = {}
+            stamp.usable = False
     stamp.error = reason
     _write_row(
         stamp,
@@ -1150,15 +1254,35 @@ def store_state() -> dict[str, Any]:
     }
 
 
-def router_fingerprint() -> dict[str, Any]:
-    """Insights setup fields. served_* stay unproven until #272; never guessed."""
+def router_fingerprint(stamp: RouteStamp | None = None) -> dict[str, Any]:
+    """Insights setup fields. served_* copy a RouteStamp or stay unproven.
+
+    Never inferred from requested / served / route.model. Empty stamp (no
+    provider, no model, not local, empty reason) keeps SERVED_PENDING_272.
+    """
     learn = learn_state()
     store = store_state()
+    if stamp is None:
+        served_provider: str | None = None
+        served_model: str | None = None
+        served_local = False
+        served_reason = SERVED_PENDING_272
+    else:
+        served_provider = stamp.served_provider
+        served_model = stamp.served_model
+        served_local = bool(stamp.served_local)
+        empty = (
+            served_provider is None
+            and served_model is None
+            and served_local is False
+            and not (stamp.served_reason or "").strip()
+        )
+        served_reason = SERVED_PENDING_272 if empty else stamp.served_reason
     return {
-        "served_provider": None,
-        "served_model": None,
-        "served_local": False,
-        "served_reason": SERVED_PENDING_272,
+        "served_provider": served_provider,
+        "served_model": served_model,
+        "served_local": served_local,
+        "served_reason": served_reason,
         "learn_enabled": learn["learn_enabled"],
         "learn_source": learn["learn_source"],
         "route_store_id": store["id"],
@@ -1167,8 +1291,11 @@ def router_fingerprint() -> dict[str, Any]:
     }
 
 
-def stamp_router_fingerprint(envelope: dict[str, Any]) -> dict[str, Any]:
-    envelope.update(router_fingerprint())
+def stamp_router_fingerprint(
+    envelope: dict[str, Any],
+    stamp: RouteStamp | None = None,
+) -> dict[str, Any]:
+    envelope.update(router_fingerprint(stamp))
     return envelope
 
 
@@ -1215,6 +1342,7 @@ __all__ = [
     "Completion",
     "IMPL",
     "LEARN_ENV",
+    "LOCAL_ONLY_ENV",
     "MASKING_STATE",
     "Pick",
     "RouteStamp",
@@ -1235,6 +1363,7 @@ __all__ = [
     "last_line",
     "learn_state",
     "leave_gate",
+    "local_only_enabled",
     "note_rejected",
     "note_verdict",
     "peek",
