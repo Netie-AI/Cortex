@@ -1,5 +1,20 @@
 # STATUS.md
-**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+
+> **2026-09-25 (CORTEX-269-ROUTER-1):** Cortex #269 ROUTER-1. FreeRoute
+> store is additive: prompt/completion/total tokens + split tag
+> (train/heldout/product/benchmark). `_rows`/`_stats` used by `pick`
+> exclude shadow, held-out, and benchmark (pick rule unchanged).
+> Insights stamps `served_provider`/`served_model`=null and
+> `served_local`=false with a #272 reason -- never inferred from the
+> requested model. Setup fingerprint: `learn_enabled` + `learn_source`
+> (env|default), `route_store_id`. Baseline script refuses unless
+> `CORTEX_FREEROUTE_LEARN` is explicit and `arming()` is armed with
+> spendable_hops > 0; writes the arming reason either way; records
+> masking=off; does not invent numbers. Masking-off must never be
+> compared with masking-on. Stubbed transport only. Did not change LEARN
+> default. Did not touch arming / RouteStamp served_* (#272). Off freeze
+> #4/#41-#44. Did not close #269. No PASS/COMPLETE claim.
 
 > **2026-09-25 (CORTEX-211-NARROW plan_source):** Cortex #211 NARROW covering
 > swap. Insights generative-ask now stamps `plan_source=ontology_plan` only

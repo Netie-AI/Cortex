@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-09-25 | cortex-269-router1 | freeroute, router, held-out, shadow, split, token cost, insights, #269 | Additive token/split store; shadow/heldout/benchmark never train pick; Insights served_* unproven until #272; baseline refuses unless LEARN is explicit. | `2026-09-25_cortex-269-router1.md` |
 | 2026-09-25 | cortex-211-narrow-plan-source | insights, plan_source, ontology_plan, generative-ask, #211, #231 | Insights stamps plan_source=ontology_plan only for validated ontology generate SQL. Missing stamp was why Studio scored other. | `2026-09-25_cortex-211-narrow-plan-source.md` |
 | 2026-09-23 | cortex-cot-climb-covering | cot, climb, covering, exact, g1, freeroute, #212 | Covering increment: G1 plan consumed in think; this_run.exact vs certified gold. INCOMPLETE; #212 OPEN. | `2026-09-23_cortex-cot-climb-covering.md` |
 | 2026-09-23 | crew-8020-facts | crew, facts.md, memory, 8020, survive-clear, scale, build, #232 | Memory nav paints facts.md; survive-clear asserted; live :8020 prove fail-closed NOT_PROVEN. No invent CI green. | `2026-09-23_crew-8020-facts.md` |
