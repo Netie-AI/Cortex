@@ -231,353 +231,6 @@ def gold_sql_for(case_id: str, expected_sql: str = "") -> str:
     return certified_gold_sql().get(str(case_id or "").strip(), "")
 
 
-# GEN-CERTIFIED-MEASURE-01: a certified formula that resolves the ask is law.
-# retrieve_ontology scores a certified phrase contained in the intent at >= 25
-# (20 + 5 L0 bonus). Token overlap alone scores far lower and does not bind.
-CERTIFIED_MEASURE_MISS = "certified_measure_not_used"
-_PHRASE_CERTIFIED = 25
-
-
-def _measure_sql(mid: str, pack_dir: Any = None) -> str:
-    from CortexOS.crew import insights as insights_mod
-
-    base = insights_mod._pack_dir(pack_dir)
-    doc = insights_mod._read_yaml(base / "semantic" / "certified_queries.yaml")
-    for row in doc.get("certified") or []:
-        if isinstance(row, Mapping) and str(row.get("id") or "").strip() == mid:
-            return str(row.get("sql") or "")
-    return ""
-
-
-_ARITH_TYPES: tuple[str, ...] = ("Add", "Sub", "Mul", "Div", "Neg")
-_WRAPPERS: tuple[str, ...] = ("Round", "Cast", "TryCast", "Alias", "Paren")
-_AGG = {"Sum": "sum", "Avg": "avg", "Min": "min", "Max": "max", "Count": "count"}
-_EVAL_ROWS = 5
-_EVAL_TRIALS = 3
-
-
-class _NoEval(Exception):
-    """The subtree has a node the numeric evaluator does not model."""
-
-
-def _canon(node: Any) -> Any:
-    """Parens, table qualifiers and literal spelling (60 vs 60.0) dropped.
-
-    The tree still encodes precedence. Operands of + and * are ordered, so a
-    swap is not a miss. Used only where numeric evaluation cannot decide.
-    """
-    from sqlglot import exp
-
-    out = node.copy()
-    while True:
-        parens = list(out.find_all(exp.Paren))
-        if not parens:
-            break
-        for paren in parens:
-            if paren is out:
-                out = paren.this
-            else:
-                paren.replace(paren.this)
-    for col in list(out.find_all(exp.Column)):
-        col.set("table", None)
-    for lit in list(out.find_all(exp.Literal)):
-        if not lit.is_string:
-            try:
-                lit.set("this", repr(float(lit.this)))
-            except (TypeError, ValueError):
-                pass
-    for node in reversed(list(out.walk())):
-        if isinstance(node, (exp.Add, exp.Mul)):
-            left, right = node.this, node.expression
-            if left is not None and right is not None and left.sql() > right.sql():
-                node.set("this", right)
-                node.set("expression", left)
-    return out
-
-
-def _peel(node: Any) -> Any:
-    """Outer ROUND / CAST / alias / parens: presentation, not the measure."""
-    while node is not None and type(node).__name__ in _WRAPPERS:
-        node = node.this
-    return node
-
-
-def _col_vector(name: str, trial: int) -> list[float]:
-    import hashlib
-
-    seed = hashlib.sha256(f"{name.lower()}|{trial}".encode()).digest()
-    # Values in [1, 97): nonzero, so division is defined on both sides.
-    return [1.0 + (seed[i] * 256 + seed[i + 1]) % 9600 / 100.0 for i in range(0, 2 * _EVAL_ROWS, 2)]
-
-
-def _eval(node: Any, trial: int) -> list[float]:
-    """Vector value of an arithmetic/aggregate tree over deterministic columns."""
-    from sqlglot import exp
-
-    kind = type(node).__name__
-    if isinstance(node, exp.Paren):
-        return _eval(node.this, trial)
-    if isinstance(node, exp.Column):
-        return _col_vector(node.name, trial)
-    if isinstance(node, exp.Literal):
-        if node.is_string:
-            raise _NoEval(kind)
-        return [float(node.this)] * _EVAL_ROWS
-    if isinstance(node, exp.Neg):
-        return [-v for v in _eval(node.this, trial)]
-    if isinstance(node, (exp.Add, exp.Sub, exp.Mul, exp.Div)):
-        left = _eval(node.this, trial)
-        right = _eval(node.expression, trial)
-        if isinstance(node, exp.Add):
-            return [a + b for a, b in zip(left, right, strict=True)]
-        if isinstance(node, exp.Sub):
-            return [a - b for a, b in zip(left, right, strict=True)]
-        if isinstance(node, exp.Mul):
-            return [a * b for a, b in zip(left, right, strict=True)]
-        if any(b == 0 for b in right):
-            raise _NoEval("div0")
-        return [a / b for a, b in zip(left, right, strict=True)]  # DuckDB '/' is float
-    if isinstance(node, exp.Round):
-        digits = node.args.get("decimals")
-        places = int(_eval(digits, trial)[0]) if digits is not None else 0
-        return [round(v, places) for v in _eval(node.this, trial)]
-    if isinstance(node, exp.Cast) and node.to.is_type(*exp.DataType.REAL_TYPES):
-        return _eval(node.this, trial)
-    if kind in _AGG:
-        if node.args.get("distinct") or isinstance(node.this, (exp.Star, exp.Distinct)):
-            raise _NoEval(kind)
-        vals = _eval(node.this, trial)
-        agg = {
-            "sum": sum(vals),
-            "avg": sum(vals) / len(vals),
-            "min": min(vals),
-            "max": max(vals),
-            "count": float(len(vals)),
-        }[_AGG[kind]]
-        return [agg] * _EVAL_ROWS
-    raise _NoEval(kind)
-
-
-def _same_measure(got: Any, want: Any) -> bool:
-    """Same value on every row: numeric check, structural fallback.
-
-    An outer ROUND/CAST is presentation and is ignored on both sides; any inner
-    ROUND is evaluated. 60 vs 60.0, regrouped chains, x/y*100 vs 100.0*x/y are
-    the same measure. CASE, subqueries, window functions are not modelled and
-    fall back to exact structure after canonicalisation.
-    """
-    import math
-
-    a, b = _peel(got), _peel(want)
-    if a is None or b is None:
-        return False
-    try:
-        for trial in range(_EVAL_TRIALS):
-            va, vb = _eval(a, trial), _eval(b, trial)
-            if not all(math.isclose(x, y, rel_tol=1e-9, abs_tol=1e-12) for x, y in zip(va, vb, strict=True)):
-                return False
-        return True
-    except _NoEval:
-        return bool(_canon(a) == _canon(b))
-    except (ArithmeticError, ValueError, TypeError):
-        return False
-
-
-def _derived_over(node: Any, cols: set[str]) -> bool:
-    """Computed (not a bare column) and reads one of the measure's source columns."""
-    from sqlglot import exp
-
-    if node is None:
-        return False
-    bare = _peel(node)
-    if isinstance(bare, exp.Column):
-        return False
-    return any(c.name.lower() in cols for c in node.find_all(exp.Column))
-
-
-def _inner_aliases(stmt: Any) -> dict[str, Any]:
-    """Alias name -> expression, from CTEs and derived tables the query reads."""
-    from sqlglot import exp
-
-    out: dict[str, Any] = {}
-    selects = [s for s in stmt.find_all(exp.Select) if s is not stmt]
-    # Deepest first so outer layers can resolve through inner ones.
-    for sub in reversed(selects):
-        for proj in sub.expressions:
-            if isinstance(proj, exp.Alias) and proj.alias:
-                out[proj.alias.lower()] = _resolve(proj.this, out)
-    return out
-
-
-def _resolve(node: Any, aliases: Mapping[str, Any], depth: int = 0) -> Any:
-    """Substitute alias references with the expression they name."""
-    from sqlglot import exp
-
-    if node is None or depth > 8 or not aliases:
-        return node
-    out = node.copy()
-    if isinstance(out, exp.Column) and out.name.lower() in aliases:
-        return _resolve(aliases[out.name.lower()].copy(), aliases, depth + 1)
-    for col in list(out.find_all(exp.Column)):
-        name = col.name.lower()
-        if name in aliases and col is not out:
-            col.replace(_resolve(aliases[name].copy(), aliases, depth + 1))
-    return out
-
-
-def _outer_measure_view(sql: str) -> dict[str, Any] | None:
-    """Outer projections and ORDER BY keys, aliases resolved. None if unparsable."""
-    import sqlglot
-    from sqlglot import exp
-
-    try:
-        stmt = sqlglot.parse_one(sql or "", read="duckdb")
-    except Exception:  # noqa: BLE001 - cannot prove the measure is used
-        return None
-    if not isinstance(stmt, exp.Select):
-        return None
-    inner = _inner_aliases(stmt)
-    projections: list[Any] = []
-    outer_alias: dict[str, Any] = dict(inner)
-    starred = False
-    for proj in stmt.expressions:
-        if isinstance(proj, exp.Star) or (
-            isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star)
-        ):
-            starred = True
-            projections.extend(v for v in inner.values())
-            continue
-        body = proj.this if isinstance(proj, exp.Alias) else proj
-        resolved = _resolve(body, inner)
-        projections.append(resolved)
-        if isinstance(proj, exp.Alias) and proj.alias:
-            outer_alias[proj.alias.lower()] = resolved
-    order: list[tuple[Any, bool]] = []
-    ordered = stmt.args.get("order")
-    for key in ordered.expressions if ordered is not None else []:
-        target = key.this
-        # ORDER BY 2: the ordinal names a projection, not the literal 2.
-        # With a star the ordinal's column is unknown here, so it stays a literal.
-        if (
-            not starred
-            and isinstance(target, exp.Literal)
-            and not target.is_string
-            and target.this.isdigit()
-        ):
-            pos = int(target.this) - 1
-            target = projections[pos] if 0 <= pos < len(projections) else target
-            order.append((target, bool(key.args.get("desc"))))
-            continue
-        order.append((_resolve(target, outer_alias), bool(key.args.get("desc"))))
-    return {"projections": projections, "order": order}
-
-
-def certified_measure(
-    ranking: Mapping[str, Any], *, pack_dir: Any = None
-) -> dict[str, Any] | None:
-    """The certified formula that resolves this ask, or None.
-
-    Only the top certified query whose verified question (or synonym) is a
-    phrase inside the intent binds, and only when its SELECT computes a formula
-    (arithmetic). A plain column or COUNT is not a formula the model could
-    invent differently. Loose metric synonyms do not bind. Once bound, the
-    certified formula is law for that ask: a user-supplied alternative
-    weighting ("with equal weights") abstains rather than being answered.
-    """
-    from sqlglot import exp
-
-    picks: list[tuple[int, str]] = []
-    for row in ranking.get("certified") or []:
-        if not isinstance(row, Mapping):
-            continue
-        mid = str(row.get("id") or "").strip()
-        score = int((row.get("importance") or {}).get("score") or 0)
-        if mid and score >= _PHRASE_CERTIFIED:
-            picks.append((-score, mid))
-    if not picks:
-        return None
-    mid = sorted(picks)[0][1]
-    sql = _measure_sql(mid, pack_dir)
-    view = _outer_measure_view(sql) if sql.strip() else None
-    if view is None:
-        return None
-    arith = tuple(getattr(exp, n) for n in _ARITH_TYPES)
-    exprs = [p for p in view["projections"] if any(isinstance(n, arith) for n in p.walk())]
-    if not exprs:
-        return None
-    cols = {c.name.lower() for e in exprs for c in e.find_all(exp.Column)}
-    rank: dict[str, Any] | None = None
-    if view["order"]:
-        first, desc = view["order"][0]
-        if any(_same_measure(first, e) for e in exprs):
-            rank = {"desc": desc}
-    return {
-        "id": mid,
-        "expressions": [e.sql(dialect="duckdb") for e in exprs],
-        "source_columns": sorted(cols),
-        "rank": rank,
-    }
-
-
-def certified_measure_miss(sql: str, measure: Mapping[str, Any] | None) -> str:
-    """'' when ``sql`` answers with the certified measure; else the named reason.
-
-    Presence anywhere in the tree is not enough (a WHERE, a dead CASE branch
-    or an unused subquery column can carry it while the answer is invented).
-    The outer SELECT must:
-    - project every certified expression (directly or through an alias);
-    - project no other computed value over the measure's source columns;
-    - order by nothing computed over those columns except the measure;
-    - when the certified query ranks by the measure, rank by it first, same
-      direction. Bare-column tie-breakers are allowed.
-    """
-    if not measure:
-        return ""
-    import sqlglot
-
-    reason = f"{CERTIFIED_MEASURE_MISS}:{measure.get('id')}"
-    view = _outer_measure_view(sql)
-    if view is None:
-        return reason
-    wants = [
-        sqlglot.parse_one(f"SELECT {t}", read="duckdb").expressions[0]
-        for t in measure.get("expressions") or []
-    ]
-    if not wants:
-        return ""
-    cols = {str(c).lower() for c in measure.get("source_columns") or []}
-
-    def is_measure(node: Any) -> bool:
-        return any(_same_measure(node, w) for w in wants)
-
-    projections = view["projections"]
-    for want in wants:
-        if not any(_same_measure(p, want) for p in projections):
-            return reason
-    for proj in projections:
-        if _derived_over(proj, cols) and not is_measure(proj):
-            return reason
-    order = view["order"]
-    for key, _desc in order:
-        if _derived_over(key, cols) and not is_measure(key):
-            return reason
-    rank = measure.get("rank")
-    if rank:
-        if not order or not is_measure(order[0][0]) or order[0][1] != bool(rank.get("desc")):
-            return reason
-    return ""
-
-
-def _measure_lines(measure: Mapping[str, Any] | None) -> list[str]:
-    if not measure:
-        return []
-    return [
-        f"CERTIFIED MEASURE {measure.get('id')} (use this exact expression; "
-        "do not write your own formula):",
-        *[f"- {e}" for e in measure.get("expressions") or []],
-    ]
-
-
 def curated_intents() -> list[dict[str, str]]:
     """Pinned #180 intents. No scores. Ranking filled at measure time."""
     return [{"id": i, "intent": q} for i, q in DMS_180_CURATED]
@@ -688,7 +341,6 @@ def _sql_prompt(
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
     query_plan: Mapping[str, Any] | None = None,
-    certified: Mapping[str, Any] | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
@@ -696,7 +348,6 @@ def _sql_prompt(
         *_g1_plan_lines(g1),
         "",
         f"INTENT: {intent}",
-        *_measure_lines(certified),
     ]
     if isinstance(query_plan, Mapping):
         measure = str(query_plan.get("measure") or "").strip()
@@ -923,14 +574,8 @@ async def climb(
     bearer: str | None = None,
     ideas: Sequence[str] | None = None,
     query_plan: Mapping[str, Any] | None = None,
-    pack_dir: Any = None,
 ) -> dict[str, Any]:
-    """CoT/route/improve through FreeRoute. Fail-closed when unarmed.
-
-    When a certified formula resolves the ask, SQL that does not compute it is
-    rejected like any other gate miss; exhausting the horizon on that miss is a
-    named ABSTAIN (``certified_measure_not_used:<id>``), never an invented formula.
-    """
+    """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
 
     text = (intent or "").strip()
@@ -977,7 +622,6 @@ async def climb(
         )
     runner = complete or fr.complete
     columns = _ranked_columns(ranking)
-    measure = certified_measure(ranking, pack_dir=pack_dir)
     idea_list = _idea_lines(ideas)
     g1_consumed = bool(_g1_plan_lines(g1))
     prior_sql_consumed = False
@@ -1041,7 +685,6 @@ async def climb(
             ideas=idea_list,
             g1=g1,
             query_plan=query_plan,
-            certified=measure,
         )
         if journal is not None:
             with journal as stamps:
@@ -1080,10 +723,6 @@ async def climb(
         sql = fr.extract_sql(str(gen.get("text") or ""))
         extracted = str(sql or "").strip()
         checked = fr.validate_sql(sql or "", allowed, columns=columns)
-        if checked.get("ok"):
-            miss = certified_measure_miss(str(checked.get("sql") or ""), measure)
-            if miss:
-                checked = {**checked, "ok": False, "reason": miss, "check": "refused"}
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
@@ -1201,23 +840,6 @@ async def climb(
             continue
         break
 
-    if measure and last_reason.startswith(CERTIFIED_MEASURE_MISS + ":"):
-        return _envelope(
-            ok=False,
-            status="ABSTAIN",
-            arm=arm,
-            identity=identity,
-            climb=_climb_meta(
-                final="CERTIFIED_MEASURE_NOT_USED",
-                g1=g1,
-                steps=steps,
-                attempts=len([s for s in steps if s.get("kind") == "generate"]),
-                think_consumed=bool(think_text),
-                g1_consumed=g1_consumed,
-                prior_sql_consumed=prior_sql_consumed,
-            ),
-            refuse_reason=last_reason,
-        )
     return _envelope(
         ok=False,
         status="REFUSE",

@@ -193,7 +193,9 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         ),
         "plan_source": (
             "ontology_plan only when this answer's SQL is NL then ontology "
-            "plan then FreeRoute SQL then validate. Else other. Request "
+            "plan then FreeRoute SQL then validate, or NL then ontology then "
+            "the certified query that ontology resolved (served as stored; "
+            "served_reason names it; no model called). Else other. Request "
             "mode=ontology_plan is not a stamp. Never bind_plan here."
         ),
         "cot_climb": _cot_public_map(),
@@ -1078,6 +1080,8 @@ VALIDATOR = "static sqlglot guardrail: not EXPLAINed, not manifest-enforced, not
 
 def _generative_unsure_why(gen: dict[str, Any] | None = None) -> str:
     check = str((gen or {}).get("check") or "table scope")
+    if check.startswith("certified_query:"):
+        return f"served {check} as stored (no model called); not executed in crew"
     return f"FreeRoute SQL passed the {VALIDATOR} ({check}); not executed in crew"
 
 
@@ -1216,15 +1220,19 @@ async def generative_ask(
     ``complete`` and ``validate_sql`` only. ``query_plan`` is a caller-typed
     ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
-    from CortexOS.crew import cot_climb
+    from CortexOS.crew import certified_serve, cot_climb
+
+    # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
+    # served as stored (or the ask abstains by name); the model is not asked to
+    # re-derive a formula that is already law.
+    hit = certified_serve.resolve(intent, ranking, query_plan=query_plan, pack_dir=pack_dir)
+    if hit is not None:
+        if hit["action"] == "serve":
+            return certified_serve.served_envelope(hit)
+        return certified_serve.abstain_envelope(hit)
 
     out = await cot_climb.climb(
-        intent,
-        ranking,
-        complete=complete,
-        bearer=bearer,
-        query_plan=query_plan,
-        pack_dir=pack_dir,
+        intent, ranking, complete=complete, bearer=bearer, query_plan=query_plan
     )
     if out.get("ok"):
         check = str(out.get("check") or "")

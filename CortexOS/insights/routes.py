@@ -69,7 +69,16 @@ def stamp_api(
     from CortexOS.integrations import freeroute as core
 
     out = dict(envelope)
+    # run_insights already stamped served_* from the RouteStamp that produced
+    # the answer (or a certified query's reason); refresh setup fields only.
+    served = {
+        k: out[k]
+        for k in ("served_provider", "served_model", "served_local", "served_reason")
+        if k in out
+    }
     core.stamp_router_fingerprint(out)
+    if "served_reason" in served:
+        out.update(served)
     out["api"] = {
         "stable": STABLE_ASK,
         "alias": alias,
