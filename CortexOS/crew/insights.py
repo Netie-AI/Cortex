@@ -41,6 +41,20 @@ LAW = (
 
 STATUSES = ("CERTIFIED", "ABSTAIN", "REFUSE")
 MAX_TRIALS = 3
+# Producer stamp for DMS Studio (plan_source_from_payload). Missing -> other.
+PLAN_SOURCE_ONTOLOGY = "ontology_plan"
+PLAN_SOURCE_BIND = "bind_plan"
+PLAN_SOURCE_OTHER = "other"
+PLAN_SOURCES = frozenset(
+    {PLAN_SOURCE_ONTOLOGY, PLAN_SOURCE_BIND, PLAN_SOURCE_OTHER}
+)
+_SELECT_SQL = re.compile(r"(?is)^\s*(with|select)\b")
+_ENGINE_LAYERS = frozenset(
+    {"certified", "governed_metric", "query_skill", "l0", "l1", "governed"}
+)
+_ENGINE_BADGES = frozenset(
+    {"certified", "governed_metric", "query_skill", "l0", "l1", "governed"}
+)
 
 # Engine badges this spine will certify. L2/generated is free-form: refuse.
 _CERTIFY_BADGES = frozenset(
@@ -174,6 +188,11 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
             "then FreeRoute validate; complete=False. Consumers: POST /v1/insights "
             "{generate:true} (same run_insights)."
         ),
+        "plan_source": (
+            "ontology_plan only when this answer's SQL is NL then ontology "
+            "plan then FreeRoute SQL then validate. Else other. Request "
+            "mode=ontology_plan is not a stamp. Never bind_plan here."
+        ),
         "cot_climb": _cot_public_map(),
         "prompt_harness": _prompt_harness_public_map(),
         "identity": "GET /crew/identity (keys stay in OpenVault custody)",
@@ -191,7 +210,8 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
             "metrics are which data is more important. Then ask. Generative-ask "
             "needs a model: OpenVault FreeRoute only, fail-closed if unarmed. "
             "generate=true runs CoT/route/improve via cot_climb; not COMPLETE. "
-            "Do not skip to SQL or export."
+            "plan_source=ontology_plan only when generate SQL came from that "
+            "ontology plan. Do not skip to SQL or export."
         ),
         "measured_baseline": {
             "cite": "DMS #180 Formal GREEN @ d2f116a6",
@@ -937,22 +957,24 @@ def _refuse(
         unused_trials=list(trials or []),
         extra_unsure=[{"id": "refuse", "kind": "gate", "why": reason}],
     )
-    return {
-        "ok": False,
-        "status": "REFUSE",
-        "phase": "ask" if trials is not None else ranking.get("phase") or "ontology",
-        "intent": intent,
-        "answer": reason,
-        "badge": env.get("badge") or "refused",
-        "audit_id": env.get("audit_id"),
-        "values": [],
-        "ontology": ranking,
-        "trials": trials or [],
-        "validation": validation,
-        "law": LAW,
-        "export_runtime": export_runtime_hint(shell_public),
-        "scale": "1GB to 10TB is a design target only; not COMPLETE",
-    }
+    return stamp_plan_source(
+        {
+            "ok": False,
+            "status": "REFUSE",
+            "phase": "ask" if trials is not None else ranking.get("phase") or "ontology",
+            "intent": intent,
+            "answer": reason,
+            "badge": env.get("badge") or "refused",
+            "audit_id": env.get("audit_id"),
+            "values": [],
+            "ontology": ranking,
+            "trials": trials or [],
+            "validation": validation,
+            "law": LAW,
+            "export_runtime": export_runtime_hint(shell_public),
+            "scale": "1GB to 10TB is a design target only; not COMPLETE",
+        }
+    )
 
 
 def _abstain(
@@ -1034,24 +1056,130 @@ def _ranked_columns(ranking: dict[str, Any]) -> dict[str, list[str]]:
     return out
 
 
+def normalize_plan_source(raw: Any) -> str:
+    """Unknown or missing is other. Request mode is not an input."""
+    val = str(raw or "").strip().lower()
+    return val if val in PLAN_SOURCES else PLAN_SOURCE_OTHER
+
+
+def generated_ontology_sql(gen: dict[str, Any] | None) -> str | None:
+    """SELECT from NL -> ontology ranking -> FreeRoute -> validate. Else None."""
+    if not isinstance(gen, dict):
+        return None
+    if not gen.get("ok") or not gen.get("valid"):
+        return None
+    sql = str(gen.get("sql") or "").strip()
+    if not sql or not _SELECT_SQL.match(sql):
+        return None
+    return sql
+
+
+def engine_answered(envelope: dict[str, Any]) -> bool:
+    """True when the customer answer came from EngineBridge L0/L1, not generate SQL."""
+    if str(envelope.get("status") or "") == "CERTIFIED":
+        return True
+    if envelope.get("phase") == "ask":
+        return True
+    layer = str(envelope.get("layer") or "").strip().lower()
+    badge = str(envelope.get("badge") or "").strip().lower()
+    return layer in _ENGINE_LAYERS or badge in _ENGINE_BADGES
+
+
+def decide_plan_source(*, generated_sql: str | None, engine_answer: bool) -> str:
+    """ontology_plan only when this answer's SQL is the validated ontology generate.
+
+    A caller ``mode=ontology_plan`` is not read here. Always returning
+    ``ontology_plan`` is the relabel-everything shortcut the non-plan test kills.
+    Cortex never emits bind_plan (that is a DMS offline slot binder).
+    """
+    if generated_sql and not engine_answer:
+        return PLAN_SOURCE_ONTOLOGY
+    return PLAN_SOURCE_OTHER
+
+
+def _route_stamp_for_fingerprint(
+    envelope: dict[str, Any],
+    gen: dict[str, Any] | None = None,
+) -> Any:
+    """RouteStamp for Insights served_* copy. Never uses requested / served / route.model."""
+    from CortexOS.integrations import freeroute as core
+
+    raw = None
+    if isinstance(gen, dict):
+        raw = gen.get("stamp")
+    if raw is None:
+        attached = envelope.get("generative")
+        if isinstance(attached, dict):
+            raw = attached.get("stamp")
+    if isinstance(raw, core.RouteStamp):
+        return raw
+    if not isinstance(raw, dict):
+        return None
+    if not any(
+        key in raw
+        for key in ("served_provider", "served_model", "served_local", "served_reason")
+    ):
+        return None
+    provider = raw.get("served_provider")
+    model = raw.get("served_model")
+    return core.RouteStamp(
+        call_id=str(raw.get("call_id") or ""),
+        task=str(raw.get("task") or "insights"),
+        requested="",
+        served_provider=(
+            provider.strip() if isinstance(provider, str) and provider.strip() else None
+        ),
+        served_model=model.strip() if isinstance(model, str) and model.strip() else None,
+        served_local=raw.get("served_local") is True,
+        served_reason=str(raw.get("served_reason") or ""),
+    )
+
+
+def stamp_plan_source(
+    envelope: dict[str, Any],
+    gen: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Producer stamp. query_sql is set only alongside honest ontology_plan."""
+    attached = envelope.get("generative")
+    sql = generated_ontology_sql(gen)
+    if sql is None and isinstance(attached, dict):
+        sql = generated_ontology_sql(attached)
+    source = decide_plan_source(
+        generated_sql=sql,
+        engine_answer=engine_answered(envelope),
+    )
+    envelope["plan_source"] = source
+    if source == PLAN_SOURCE_ONTOLOGY and sql:
+        envelope["query_sql"] = sql
+    else:
+        envelope.pop("query_sql", None)
+    if isinstance(attached, dict):
+        attached["plan_source"] = source
+    from CortexOS.integrations import freeroute as core
+
+    return core.stamp_router_fingerprint(envelope, _route_stamp_for_fingerprint(envelope, gen))
+
+
 async def generative_ask(
     intent: str,
     ranking: dict[str, Any],
     *,
     complete: Any | None = None,
     bearer: str | None = None,
+    query_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
     ``bearer`` is the HTTP caller's own OpenVault key (or ``""`` for the
     loopback tier); ``None`` spends Cortex's credential for in-process callers.
     Arming/pick/identity stay on the #215 FreeRoute adapter; this consumes
-    ``complete`` and ``validate_sql`` only.
+    ``complete`` and ``validate_sql`` only. ``query_plan`` is a caller-typed
+    ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
     from CortexOS.crew import cot_climb
 
     out = await cot_climb.climb(
-        intent, ranking, complete=complete, bearer=bearer
+        intent, ranking, complete=complete, bearer=bearer, query_plan=query_plan
     )
     if out.get("ok"):
         check = str(out.get("check") or "")
@@ -1064,7 +1192,7 @@ async def generative_ask(
 
 def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> dict[str, Any]:
     if not gen:
-        return envelope
+        return stamp_plan_source(envelope, None)
     envelope["generative"] = {
         "ok": bool(gen.get("ok")),
         "sql": gen.get("sql"),
@@ -1098,7 +1226,7 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
                 "why": str(gen.get("refuse_reason")),
             }
         )
-    return envelope
+    return stamp_plan_source(envelope, gen)
 
 
 async def run_insights(
@@ -1111,6 +1239,7 @@ async def run_insights(
     shell_public: dict[str, Any] | None = None,
     pack_dir: Path | str | None = None,
     bearer: str | None = None,
+    query_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
 
@@ -1130,11 +1259,13 @@ async def run_insights(
             "intent": "",
             "law": "Ontology first.",
         }
-        return _refuse(
-            intent="",
-            ranking=empty,
-            reason="empty intent",
-            shell_public=shell_public,
+        return stamp_plan_source(
+            _refuse(
+                intent="",
+                ranking=empty,
+                reason="empty intent",
+                shell_public=shell_public,
+            )
         )
 
     ranking = retrieve_ontology(text, pack_dir=pack_dir)
@@ -1147,7 +1278,9 @@ async def run_insights(
                 reason="no ontology path or metric for intent",
                 shell_public=shell_public,
             )
-        gen = await generative_ask(text, ranking, complete=complete, bearer=bearer)
+        gen = await generative_ask(
+            text, ranking, complete=complete, bearer=bearer, query_plan=query_plan
+        )
         if not gen.get("ok"):
             return _attach_generative(
                 _refuse(
@@ -1196,20 +1329,22 @@ async def run_insights(
             )
 
     if not ask:
-        return {
-            "ok": bool(ranking.get("ok")),
-            "status": None,
-            "phase": "ontology",
-            "intent": text,
-            "ontology": ranking,
-            "answer": ranking.get("law"),
-            "values": [],
-            "validation": None,
-            "law": LAW,
-            "export_runtime": export_runtime_hint(shell_public),
-            "scale": "1GB to 10TB is a design target only; not COMPLETE",
-            "refuse_reason": ranking.get("refuse_reason") or "",
-        }
+            return stamp_plan_source(
+                {
+                    "ok": bool(ranking.get("ok")),
+                    "status": None,
+                    "phase": "ontology",
+                    "intent": text,
+                    "ontology": ranking,
+                    "answer": ranking.get("law"),
+                    "values": [],
+                    "validation": None,
+                    "law": LAW,
+                    "export_runtime": export_runtime_hint(shell_public),
+                    "scale": "1GB to 10TB is a design target only; not COMPLETE",
+                    "refuse_reason": ranking.get("refuse_reason") or "",
+                }
+            )
 
     if not ranking.get("ok"):
         return _attach_generative(
@@ -1356,6 +1491,7 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         f"{r.get('id')}: {r.get('why')}" for r in (validation.get("unsure") or [])[:6]
     ) or "none"
     status = envelope.get("status") or "ONTOLOGY"
+    source = envelope.get("plan_source") or PLAN_SOURCE_OTHER
     gen = envelope.get("generative") or {}
     gen_line = ""
     if gen:
@@ -1374,9 +1510,19 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         climb: dict[str, Any] = climb_raw if isinstance(climb_raw, dict) else {}
         if climb:
             gen_line += f"\nclimb: {climb.get('final') or 'none'} complete=False"
+    fp_line = (
+        f"\nserved_provider: {envelope.get('served_provider')}\n"
+        f"served_model: {envelope.get('served_model')}\n"
+        f"served_local: {envelope.get('served_local')}\n"
+        f"served_reason: {envelope.get('served_reason') or ''}\n"
+        f"learn_enabled: {envelope.get('learn_enabled')}\n"
+        f"learn_source: {envelope.get('learn_source') or ''}\n"
+        f"route_store_id: {envelope.get('route_store_id') or ''}"
+    )
     return (
         f"status: {status}\n"
         f"phase: {envelope.get('phase')}\n"
+        f"plan_source: {source}\n"
         f"where: {top_where}\n"
         f"importance: {top_imp}\n"
         f"answer: {envelope.get('answer') or ''}\n"
@@ -1387,4 +1533,5 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         f"export: prefer {BACKEND_CF_COMPUTER} (Excel/PPT deferred)\n"
         f"scale: 1GB to 10TB is a design target only; not COMPLETE"
         f"{gen_line}"
+        f"{fp_line}"
     )

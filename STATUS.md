@@ -116,6 +116,48 @@
 > Suite 2122 passed / 13 skipped / 4 xfailed. OpenAPI check not run here
 > (needs `.[full]`); crew routes are not contract routes. Not a GitHub CI claim.
 
+> **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
+> Arming accepts an OpenVault-reported local spendable hop. RouteStamp
+> `served_provider` / `served_model` / `served_local` come from the
+> response only. `CORTEX_FREEROUTE_LOCAL_ONLY=1` refuse-and-drop, no
+> cloud fallback. Insights served_* copy the served RouteStamp (empty
+> stamp stays null/false plus a reason). Stubbed transport only.
+> OpenVault#71 merged at `edead3c4` confirms local_qwen,
+> served_provider/served_model/served_local/local_only/local_reason,
+> 503 `openvault_local_only_unavailable` plus a named local_reason,
+> and 403 `openvault_vault_sealed`. served_local/local_only are JSON
+> boolean true only. Headers/SSE copies stay PENDING. Did not edit
+> #269/#273 store/pick. Ceiling: merged, **local not proven**. Not
+> PASS. Not COMPLETE. Did not close #272. Off freeze #4/#41-#44.
+> Rebased onto #273 / OV#71 `edead3c4`.
+
+> **2026-09-25 (CORTEX-269-ROUTER-1):** Cortex #269 ROUTER-1. FreeRoute
+> store is additive: prompt/completion/total tokens + split tag
+> (train/heldout/product/benchmark). `_rows`/`_stats` used by `pick`
+> exclude shadow, held-out, and benchmark (pick rule unchanged).
+> Insights stamps `served_provider`/`served_model`=null and
+> `served_local`=false with a #272 reason -- never inferred from the
+> requested model. Setup fingerprint: `learn_enabled` + `learn_source`
+> (env|default), `route_store_id`. Baseline script refuses unless
+> `CORTEX_FREEROUTE_LEARN` is explicit and `arming()` is armed with
+> spendable_hops > 0; writes the arming reason either way; records
+> masking=off; does not invent numbers. Masking-off must never be
+> compared with masking-on. Stubbed transport only. Did not change LEARN
+> default. Did not touch arming / RouteStamp served_* (#272). Off freeze
+> #4/#41-#44. Did not close #269. No PASS/COMPLETE claim.
+
+> **2026-09-25 (CORTEX-211-NARROW plan_source):** Cortex #211 NARROW covering
+> swap. Insights generative-ask now stamps `plan_source=ontology_plan` only
+> when this answer's SQL is NL then ontology plan then FreeRoute SQL then
+> validate (`query_sql` only on that stamp). EngineBridge L0/L1, unarmed
+> REFUSE, and off-ontology SQL stamp `other`. Request `mode=ontology_plan`
+> is not copied. Root cause: Cortex never emitted `plan_source`/`query_sql`,
+> so DMS #231 scored `other` (0/52). PASS-honest-INCOMPLETE -- no live Studio
+> re-prove. Reuses #196 Insights + FreeRoute arming. Unarmed fail-closed.
+> Off freeze #4/#41-#44. Did not dual-own #235/#239. Did not close #211.
+> HTTP InsightsAskIn stays the frozen OpenAPI 1.2.0 shape (no extra
+> query_plan/mode fields; extra JSON ignored). Contract json not regenerated.
+
 > **2026-09-23 (CORTEX-COT-CLIMB covering):** Cortex #212 covering increment
 > after leftover honesty @ c6df0d7c. Think-path consumes the G1
 > `generate_ir` plan in think/SQL; improve re-thinks with prior SQL +

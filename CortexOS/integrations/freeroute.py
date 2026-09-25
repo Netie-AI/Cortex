@@ -13,9 +13,12 @@ loopback tier. OpenVault verifies the bearer itself; no header Cortex writes
 about itself carries authority (KB A-0009).
 
 Armed means ``GET /api/freeroute/status`` says: reachable, ``sealed`` is False,
-``pooled_key_count`` > 0, and at least one pooled hop is a spendable provider.
-Process-env provider keys, a local Ollama, ``/api/keys`` rows and ``/api/healthz``
-never arm FreeRoute. Anything else is a named refusal (R-0011).
+and either ``pooled_key_count`` > 0 with a spendable hop, or OpenVault reports
+a LOCAL spendable hop (Cortex #272 / OpenVault#71). Process-env provider keys,
+a process-local Ollama, ``/api/keys`` rows and ``/api/healthz`` never arm
+FreeRoute. A hop is local only when OpenVault marks ``served_local`` true;
+Cortex never infers that from a model name. Anything else is a named refusal
+(R-0011).
 
 Measured route. OpenVault treats the requested model as a preference: it walks
 hops in its own order and a hop that does not carry the requested id serves its
@@ -41,7 +44,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from CortexOS.integrations import openvault_client
+from CortexOS.integrations import freeroute_ov_local, openvault_client
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
@@ -49,6 +52,7 @@ MODELS_ENV = "CORTEX_FREEROUTE_MODELS"
 STORE_ENV = "CORTEX_FREEROUTE_SCOREBOARD"
 LEARN_ENV = "CORTEX_FREEROUTE_LEARN"
 SWITCH_ENV = "CORTEX_FREEROUTE"
+LOCAL_ONLY_ENV = "CORTEX_FREEROUTE_LOCAL_ONLY"
 
 ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
@@ -89,8 +93,27 @@ _store_error: dict[str, str] = {}
 
 _journal_var: ContextVar[list[RouteStamp] | None] = ContextVar("freeroute_journal", default=None)
 _shadow_var: ContextVar[bool] = ContextVar("freeroute_shadow", default=False)
+_split_var: ContextVar[str] = ContextVar("freeroute_split", default="product")
 _transport_var: ContextVar[tuple[Callable[..., Any], str] | None] = ContextVar(
     "freeroute_transport", default=None
+)
+
+SPLIT_TRAIN = "train"
+SPLIT_HELDOUT = "heldout"
+SPLIT_PRODUCT = "product"
+SPLIT_BENCHMARK = "benchmark"
+SPLITS = frozenset({SPLIT_TRAIN, SPLIT_HELDOUT, SPLIT_PRODUCT, SPLIT_BENCHMARK})
+NON_LEARNING_SPLITS = frozenset({SPLIT_HELDOUT, SPLIT_BENCHMARK})
+# pick() reads through _stats/_rows. Shadow, held-out, and benchmark rows
+# never train. Do not drop this filter to make a query pass.
+_LEARNING_FILTER_SQL = (
+    "shadow = 0 AND IFNULL(split, 'product') NOT IN ('heldout', 'benchmark')"
+)
+# Cortex #268 (masking) is not this slice. Record the setup; do not compare.
+MASKING_STATE = "off"
+SERVED_PENDING_272 = (
+    "served_provider/served_model/served_local wait for Cortex #272 LOCAL-1; "
+    "not inferred from requested model or OpenVault chat model name"
 )
 
 
@@ -157,6 +180,8 @@ class _Vault:
     pooled_keys: int | None = None
     hops: tuple[dict[str, Any], ...] = ()
     catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    local_spendable_hops: int = 0
+    local_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -171,6 +196,8 @@ class Arming:
     catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
     checked_at: float = 0.0
     probed: bool = True
+    local_spendable_hops: int = 0
+    local_reason: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -183,6 +210,8 @@ class Arming:
             "hops": [dict(h) for h in self.hops_public],
             "probed": self.probed,
             "custody": "openvault",
+            "local_only": local_only_enabled(),
+            "local_reason": self.local_reason,
         }
 
 
@@ -194,6 +223,11 @@ def unarmed(reason: str, *, url: str | None = None, probed: bool = True) -> Armi
         checked_at=time.time(),
         probed=probed,
     )
+
+
+def local_only_enabled() -> bool:
+    """True only for ``CORTEX_FREEROUTE_LOCAL_ONLY=1``. Fail-closed; no cloud fallback."""
+    return (os.environ.get(LOCAL_ONLY_ENV) or "").strip() == "1"
 
 
 def _hop_parked(hop: Mapping[str, Any]) -> bool:
@@ -217,26 +251,22 @@ def _read_vault(url: str, timeout: float) -> _Vault:
             "OpenVault vault is sealed; unseal it in OpenVault (Cortex never holds the passphrase)",
             sealed=True,
         )
-    pooled = body.get("pooled_key_count")
-    if isinstance(pooled, bool) or not isinstance(pooled, int) or pooled <= 0:
-        return _Vault(
-            False,
-            "OpenVault pools no keys for FreeRoute; add keys in OpenVault",
-            sealed=False,
-            pooled_keys=pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None,
-        )
     catalogue: dict[str, tuple[str, ...]] = {}
+    raw_specs: list[dict[str, Any]] = []
     for spec in body.get("spendable") or []:
         if not isinstance(spec, dict):
             continue
+        raw_specs.append(spec)
         pid = str(spec.get("id") or "").strip()
         models = tuple(str(m) for m in (spec.get("chat_models") or []) if str(m).strip())
         if pid and pid != "cortex" and models:
             catalogue[pid] = models
+    raw_hops: list[dict[str, Any]] = []
     hops: list[dict[str, Any]] = []
     for hop in body.get("hops") or []:
         if not isinstance(hop, dict):
             continue
+        raw_hops.append(hop)
         hops.append(
             {
                 "provider": str(hop.get("provider") or ""),
@@ -246,21 +276,37 @@ def _read_vault(url: str, timeout: float) -> _Vault:
             }
         )
     spendable = [h for h in hops if h["provider"] in catalogue]
-    if not spendable:
+    local_n = freeroute_ov_local.count_local_spendable(raw_hops, raw_specs, set(catalogue))
+    local_reason = freeroute_ov_local.local_arming_reason(body)
+    pooled = body.get("pooled_key_count")
+    pooled_keys = pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None
+    pooled_ok = pooled_keys is not None and pooled_keys > 0
+    if not pooled_ok and local_n <= 0:
+        return _Vault(
+            False,
+            "OpenVault pools no keys for FreeRoute; add keys in OpenVault",
+            sealed=False,
+            pooled_keys=pooled_keys,
+            local_reason=local_reason,
+        )
+    if not spendable and local_n <= 0:
         return _Vault(
             False,
             "OpenVault has no spendable FreeRoute hop (pooled rows are not provider keys)",
             sealed=False,
-            pooled_keys=pooled,
+            pooled_keys=pooled_keys,
             hops=tuple(hops),
+            local_reason=local_reason,
         )
     return _Vault(
         True,
         "",
         sealed=False,
-        pooled_keys=pooled,
+        pooled_keys=pooled_keys,
         hops=tuple(hops),
         catalogue=tuple(sorted(catalogue.items())),
+        local_spendable_hops=local_n,
+        local_reason=local_reason,
     )
 
 
@@ -357,6 +403,8 @@ def _armed_from(vault: _Vault, url: str, mode: str) -> Arming:
         hops_public=vault.hops,
         catalogue=vault.catalogue,
         checked_at=time.time(),
+        local_spendable_hops=vault.local_spendable_hops,
+        local_reason=vault.local_reason,
     )
 
 
@@ -370,6 +418,8 @@ def _vault_refusal(vault: _Vault, url: str) -> Arming:
         spendable_hops=0,
         hops_public=vault.hops,
         checked_at=time.time(),
+        local_spendable_hops=vault.local_spendable_hops,
+        local_reason=vault.local_reason,
     )
 
 
@@ -443,7 +493,20 @@ def store_path() -> Path:
 
 
 def _learning() -> bool:
+    # Default stays 1 when unset (founder decision; not this slice).
     return (os.environ.get(LEARN_ENV) or "1").strip() != "0"
+
+
+def learn_state() -> dict[str, Any]:
+    """Effective CORTEX_FREEROUTE_LEARN plus whether it came from env or default."""
+    if LEARN_ENV not in os.environ:
+        return {"learn_enabled": _learning(), "learn_source": "default"}
+    return {"learn_enabled": _learning(), "learn_source": "env"}
+
+
+def _normalize_split(raw: str | None) -> str:
+    val = (raw or "").strip().lower()
+    return val if val in SPLITS else SPLIT_PRODUCT
 
 
 _SCHEMA = """
@@ -459,11 +522,31 @@ CREATE TABLE IF NOT EXISTS routes (
     latency_ms REAL NOT NULL,
     impl TEXT NOT NULL,
     shadow INTEGER NOT NULL,
-    ts REAL NOT NULL
+    ts REAL NOT NULL,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    total_tokens INTEGER,
+    split TEXT NOT NULL DEFAULT 'product'
 );
 CREATE INDEX IF NOT EXISTS routes_task_requested ON routes(task, requested, ts);
 CREATE INDEX IF NOT EXISTS routes_task_served ON routes(task, served, ts);
 """
+
+_ADDITIVE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("prompt_tokens", "INTEGER"),
+    ("completion_tokens", "INTEGER"),
+    ("total_tokens", "INTEGER"),
+    ("split", "TEXT NOT NULL DEFAULT 'product'"),
+)
+
+
+def _apply_schema(con: sqlite3.Connection) -> None:
+    """Create-if-missing, then ALTER ADD only. Never DROP / rename / retype."""
+    con.executescript(_SCHEMA)
+    existing = {row[1] for row in con.execute("PRAGMA table_info(routes)")}
+    for name, decl in _ADDITIVE_COLUMNS:
+        if name not in existing:
+            con.execute(f"ALTER TABLE routes ADD COLUMN {name} {decl}")
 
 
 def _note_store_error(exc: BaseException) -> None:
@@ -480,20 +563,26 @@ _store_lock = threading.RLock()
 _initialized: set[str] = set()
 
 
+def _init_file(path: Path) -> None:
+    """Schema + WAL + additive columns once per path."""
+    key = str(path)
+    if key in _initialized:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(key, timeout=5.0)
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        _apply_schema(con)
+        con.commit()
+    finally:
+        con.close()
+    _initialized.add(key)
+
+
 def _open_for_write(path: Path) -> sqlite3.Connection:
     """Schema and WAL once per path (both need an exclusive lock), then plain inserts."""
-    key = str(path)
-    if key not in _initialized:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(key, timeout=5.0)
-        try:
-            con.execute("PRAGMA journal_mode=WAL")
-            con.executescript(_SCHEMA)
-            con.commit()
-        finally:
-            con.close()
-        _initialized.add(key)
-    return sqlite3.connect(key, timeout=5.0)
+    _init_file(path)
+    return sqlite3.connect(str(path), timeout=5.0)
 
 
 @contextmanager
@@ -510,6 +599,8 @@ def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
             if not path.is_file():
                 yield None
                 return
+            with _store_lock:
+                _init_file(path)
             con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
         yield con
         if write:
@@ -524,14 +615,46 @@ def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
             _store_lock.release()
 
 
-def _write_row(stamp: RouteStamp, *, scored: bool) -> None:
+def _usage_tokens(
+    usage: Mapping[str, Any] | None,
+) -> tuple[int | None, int | None, int | None]:
+    """Prompt / completion / total from the provider usage object. Not USD."""
+
+    def _int(key: str) -> int | None:
+        if not usage:
+            return None
+        val = usage.get(key)
+        if isinstance(val, bool) or not isinstance(val, int | float):
+            return None
+        return int(val)
+
+    prompt = _int("prompt_tokens")
+    completion = _int("completion_tokens")
+    total = _int("total_tokens")
+    if total is None and (prompt is not None or completion is not None):
+        total = int(prompt or 0) + int(completion or 0)
+    return prompt, completion, total
+
+
+def _write_row(
+    stamp: RouteStamp,
+    *,
+    scored: bool,
+    usage: Mapping[str, Any] | None = None,
+    split: str = SPLIT_PRODUCT,
+) -> None:
     if not _learning():
         return
+    prompt_tokens, completion_tokens, total_tokens = _usage_tokens(usage)
     with _connect(write=True) as con:
         if con is None:
             return
         con.execute(
-            "INSERT OR REPLACE INTO routes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO routes ("
+            "call_id, task, requested, served, status, usable, scored, verdict, "
+            "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
+            "total_tokens, split"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 stamp.call_id,
                 stamp.task,
@@ -545,11 +668,16 @@ def _write_row(stamp: RouteStamp, *, scored: bool) -> None:
                 stamp.impl,
                 1 if _shadow_var.get() else 0,
                 time.time(),
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                _normalize_split(split),
             ),
         )
 
 
 def _rows(task: str) -> list[sqlite3.Row]:
+    """Learning rows only. Shadow / held-out / benchmark never train pick()."""
     with _connect(write=False) as con:
         if con is None:
             return []
@@ -557,7 +685,9 @@ def _rows(task: str) -> list[sqlite3.Row]:
         try:
             return list(
                 con.execute(
-                    "SELECT * FROM routes WHERE task = ? ORDER BY ts DESC LIMIT ?",
+                    "SELECT * FROM routes WHERE task = ? AND "
+                    + _LEARNING_FILTER_SQL
+                    + " ORDER BY ts DESC LIMIT ?",
                     (task, SCORE_WINDOW * MAX_CANDIDATES),
                 )
             )
@@ -591,7 +721,24 @@ class ModelStats:
     score: float | None = None
     scored_n: int = 0
     mean_latency_ms: float = 0.0
+    mean_cost: float | None = None
     ineligible: str = ""
+
+
+def _row_cost(row: Mapping[str, Any]) -> float | None:
+    """Token cost from stored provider usage. Not USD; never invented."""
+    keys = row.keys() if hasattr(row, "keys") else ()
+    total = row["total_tokens"] if "total_tokens" in keys else None
+    if total is not None:
+        try:
+            return float(total)
+        except (TypeError, ValueError):
+            return None
+    prompt = row["prompt_tokens"] if "prompt_tokens" in keys else None
+    completion = row["completion_tokens"] if "completion_tokens" in keys else None
+    if prompt is None and completion is None:
+        return None
+    return float(prompt or 0) + float(completion or 0)
 
 
 def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
@@ -617,6 +764,13 @@ def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
         st.scored = len(scored)
         if scored:
             st.mean_latency_ms = round(sum(float(r["latency_ms"]) for r in scored) / len(scored), 1)
+            costs = []
+            for row in scored:
+                cost = _row_cost(row)
+                if cost is not None:
+                    costs.append(cost)
+            if costs:
+                st.mean_cost = round(sum(costs) / len(costs), 1)
         # Validity belongs to the model that answered. OpenVault may serve a
         # different one than was asked for, and two requested ids can share a
         # served model, so scoring by request would grade the wrong subject.
@@ -734,6 +888,10 @@ class RouteStamp:
     credential: str = ""
     measured_n: int = 0
     measured_score: float | None = None
+    served_provider: str | None = None
+    served_model: str | None = None
+    served_local: bool = False
+    served_reason: str = ""
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -765,14 +923,16 @@ class Completion:
 
 
 @contextmanager
-def journal(*, shadow: bool = False) -> Iterator[list[RouteStamp]]:
+def journal(*, shadow: bool = False, split: str | None = None) -> Iterator[list[RouteStamp]]:
     """Collect every stamp written inside this block (threads via copy_context)."""
     stamps: list[RouteStamp] = []
     token = _journal_var.set(stamps)
     shadow_token = _shadow_var.set(shadow)
+    split_token = _split_var.set(_normalize_split(split))
     try:
         yield stamps
     finally:
+        _split_var.reset(split_token)
         _shadow_var.reset(shadow_token)
         _journal_var.reset(token)
 
@@ -860,6 +1020,7 @@ def complete(
     egress: str = "",
     tools: list[dict[str, Any]] | None = None,
     bearer: str | None = None,
+    split: str = "",
 ) -> Completion:
     """One FreeRoute call. Never raises. Refusals are named and stamped."""
     task = (task or "unnamed").strip()
@@ -870,6 +1031,28 @@ def complete(
     )
     if not arm.armed:
         return Completion(ok=False, reason=f"FreeRoute not armed: {arm.reason}")
+    if local_only_enabled() and arm.local_spendable_hops <= 0:
+        named = arm.local_reason
+        extra = (
+            f" ({freeroute_ov_local.LOCAL_ONLY_UNAVAILABLE_TYPE} {named})"
+            if named in freeroute_ov_local.LOCAL_UNAVAILABLE_REASONS
+            else ""
+        )
+        reason = (
+            f"{LOCAL_ONLY_ENV}=1: OpenVault reports no local spendable hop "
+            f"(no cloud fallback){extra}"
+        )
+        stamp = RouteStamp(
+            call_id=uuid.uuid4().hex,
+            task=task,
+            requested="",
+            error=reason,
+            credential=credential,
+            served_local=False,
+            served_reason=named or "OpenVault reported no local spendable hop",
+        )
+        _journal_add(stamp)
+        return Completion(ok=False, stamp=stamp, reason=reason, text="")
     if egress == "leave":
         allowed, why = leave_gate()
         if not allowed:
@@ -892,6 +1075,8 @@ def complete(
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
+    if local_only_enabled():
+        body.update(freeroute_ov_local.local_only_request_fields())
 
     send, impl = _transport()
     started = time.monotonic()
@@ -927,6 +1112,13 @@ def complete(
     usage: dict[str, Any] = {}
     scored = False
     reason = ""
+    provider, served_model, is_local, served_reason = freeroute_ov_local.served_from_response(
+        data if isinstance(data, dict) else None
+    )
+    stamp.served_provider = provider
+    stamp.served_model = served_model
+    stamp.served_local = is_local
+    stamp.served_reason = served_reason
     if status == 200 and isinstance(data, dict):
         stamp.served = str(data.get("model") or "")
         stamp.honored = _same_model(chosen.requested, stamp.served)
@@ -961,8 +1153,51 @@ def complete(
                 with _lock:
                     _arming_cache.clear()
                     _vault_cache.clear()
+    if local_only_enabled():
+        err_type, err_reason = freeroute_ov_local.chat_error_fields(
+            data if isinstance(data, dict) else None
+        )
+        if status == 403 and err_type == freeroute_ov_local.VAULT_SEALED_TYPE:
+            reason = f"{LOCAL_ONLY_ENV}=1: {freeroute_ov_local.VAULT_SEALED_TYPE}"
+            text = ""
+            message = {}
+            stamp.usable = False
+        elif status == 503 and err_type == freeroute_ov_local.LOCAL_ONLY_UNAVAILABLE_TYPE:
+            named = (
+                err_reason
+                if err_reason in freeroute_ov_local.LOCAL_UNAVAILABLE_REASONS
+                else err_reason
+            )
+            reason = (
+                f"{LOCAL_ONLY_ENV}=1: {freeroute_ov_local.LOCAL_ONLY_UNAVAILABLE_TYPE}"
+                + (f" ({named})" if named else "")
+            )
+            text = ""
+            message = {}
+            stamp.usable = False
+        elif status != 200:
+            reason = (
+                f"{LOCAL_ONLY_ENV}=1: OpenVault could not honour local-only"
+                + (f" ({reason})" if reason else "")
+            )
+            text = ""
+            message = {}
+            stamp.usable = False
+        elif not stamp.served_local:
+            reason = (
+                f"{LOCAL_ONLY_ENV}=1: OpenVault did not serve locally"
+                + (f" ({stamp.served_reason})" if stamp.served_reason else "")
+            )
+            text = ""
+            message = {}
+            stamp.usable = False
     stamp.error = reason
-    _write_row(stamp, scored=scored)
+    _write_row(
+        stamp,
+        scored=scored,
+        usage=usage,
+        split=split or _split_var.get(),
+    )
     _journal_add(stamp)
     return Completion(
         ok=status == 200 and stamp.usable,
@@ -999,10 +1234,77 @@ def scoreboard(task: str | None = None) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def store_state() -> dict[str, Any]:
+    """Route-store id at call time: row count plus a hash of call_ids. No secrets."""
+    path = store_path()
+    empty = {"id": "n=0:empty", "row_count": 0, "sha256": "", "path": str(path)}
+    if not path.is_file():
+        return empty
+    with _connect(write=False) as con:
+        if con is None:
+            return empty
+        rows = list(con.execute("SELECT call_id FROM routes ORDER BY ts, call_id"))
+    n = len(rows)
+    digest = hashlib.sha256("\n".join(r[0] for r in rows).encode("utf-8")).hexdigest()[:16] if n else ""
+    return {
+        "id": f"n={n}:{digest}" if n else "n=0:empty",
+        "row_count": n,
+        "sha256": digest,
+        "path": str(path),
+    }
+
+
+def router_fingerprint(stamp: RouteStamp | None = None) -> dict[str, Any]:
+    """Insights setup fields. served_* copy a RouteStamp or stay unproven.
+
+    Never inferred from requested / served / route.model. Empty stamp (no
+    provider, no model, not local, empty reason) keeps SERVED_PENDING_272.
+    """
+    learn = learn_state()
+    store = store_state()
+    if stamp is None:
+        served_provider: str | None = None
+        served_model: str | None = None
+        served_local = False
+        served_reason = SERVED_PENDING_272
+    else:
+        served_provider = stamp.served_provider
+        served_model = stamp.served_model
+        served_local = bool(stamp.served_local)
+        empty = (
+            served_provider is None
+            and served_model is None
+            and served_local is False
+            and not (stamp.served_reason or "").strip()
+        )
+        served_reason = SERVED_PENDING_272 if empty else stamp.served_reason
+    return {
+        "served_provider": served_provider,
+        "served_model": served_model,
+        "served_local": served_local,
+        "served_reason": served_reason,
+        "learn_enabled": learn["learn_enabled"],
+        "learn_source": learn["learn_source"],
+        "route_store_id": store["id"],
+        "route_store": store,
+        "masking_state": MASKING_STATE,
+    }
+
+
+def stamp_router_fingerprint(
+    envelope: dict[str, Any],
+    stamp: RouteStamp | None = None,
+) -> dict[str, Any]:
+    envelope.update(router_fingerprint(stamp))
+    return envelope
+
+
 def public_status(task: str | None = None) -> dict[str, Any]:
     arm = arming()
     models, source = candidates(arm) if arm.armed else ((), "")
     stats = _stats(task, list(models)) if task and models else {}
+    learn = learn_state()
+    store = store_state()
     return {
         "layer": "OpenVault FreeRoute (one Cortex model layer)",
         "impl": _transport()[1],
@@ -1011,10 +1313,14 @@ def public_status(task: str | None = None) -> dict[str, Any]:
         "candidates": list(models),
         "candidate_source": source,
         "measured": {m: asdict(s) for m, s in stats.items()},
+        "measured_excludes": ["shadow", "heldout", "benchmark"],
         "scoreboard": scoreboard(task),
         "store": str(store_path()),
         "store_error": store_error(),
-        "learning": _learning(),
+        "learning": learn["learn_enabled"],
+        "learn_source": learn["learn_source"],
+        "route_store_id": store["id"],
+        "masking_state": MASKING_STATE,
     }
 
 
@@ -1035,8 +1341,16 @@ __all__ = [
     "Arming",
     "Completion",
     "IMPL",
+    "LEARN_ENV",
+    "LOCAL_ONLY_ENV",
+    "MASKING_STATE",
     "Pick",
     "RouteStamp",
+    "SERVED_PENDING_272",
+    "SPLIT_BENCHMARK",
+    "SPLIT_HELDOUT",
+    "SPLIT_PRODUCT",
+    "SPLIT_TRAIN",
     "TOKEN_ENV",
     "arming",
     "auth_headers",
@@ -1047,7 +1361,9 @@ __all__ = [
     "identity",
     "journal",
     "last_line",
+    "learn_state",
     "leave_gate",
+    "local_only_enabled",
     "note_rejected",
     "note_verdict",
     "peek",
@@ -1055,9 +1371,12 @@ __all__ = [
     "public_status",
     "redact",
     "reset",
+    "router_fingerprint",
     "scoreboard",
+    "stamp_router_fingerprint",
     "store_error",
     "store_path",
+    "store_state",
     "unarmed",
     "use_transport",
 ]

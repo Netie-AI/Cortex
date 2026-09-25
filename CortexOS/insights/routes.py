@@ -46,17 +46,18 @@ def _peer_host(request: Request) -> str:
 
 
 def _caller_refused(purpose: str) -> JSONResponse:
-    return JSONResponse(
-        {
-            "ok": False,
-            "status": "REFUSE",
-            "purpose": purpose,
-            "refused": insight_keys.CALLER_KEY_RULE,
-            "values": [],
-            "live_5000_ci": False,
-        },
-        status_code=401,
-    )
+    from CortexOS.integrations import freeroute as core
+
+    body = {
+        "ok": False,
+        "status": "REFUSE",
+        "purpose": purpose,
+        "refused": insight_keys.CALLER_KEY_RULE,
+        "values": [],
+        "live_5000_ci": False,
+    }
+    core.stamp_router_fingerprint(body)
+    return JSONResponse(body, status_code=401)
 
 
 def stamp_api(
@@ -65,7 +66,10 @@ def stamp_api(
     consumer: str = "dms",
     alias: str | None = None,
 ) -> dict[str, Any]:
+    from CortexOS.integrations import freeroute as core
+
     out = dict(envelope)
+    core.stamp_router_fingerprint(out)
     out["api"] = {
         "stable": STABLE_ASK,
         "alias": alias,

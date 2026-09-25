@@ -340,6 +340,7 @@ def _sql_prompt(
     think: str = "",
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
+    query_plan: Mapping[str, Any] | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
@@ -348,6 +349,16 @@ def _sql_prompt(
         "",
         f"INTENT: {intent}",
     ]
+    if isinstance(query_plan, Mapping):
+        measure = str(query_plan.get("measure") or "").strip()
+        if measure:
+            lines.append(f"ONTOLOGY PLAN measure={measure}")
+            group_by = query_plan.get("group_by")
+            if group_by:
+                lines.append("group_by=" + str(group_by)[:240])
+            filters = query_plan.get("filters")
+            if filters:
+                lines.append("filters=" + str(filters)[:240])
     if think.strip():
         lines.extend(["", "THINK (use this plan; do not copy numbers):", think.strip()[:2000]])
     idea_lines = _idea_lines(ideas)
@@ -562,6 +573,7 @@ async def climb(
     complete: Any | None = None,
     bearer: str | None = None,
     ideas: Sequence[str] | None = None,
+    query_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
@@ -672,6 +684,7 @@ async def climb(
             think=think_text,
             ideas=idea_list,
             g1=g1,
+            query_plan=query_plan,
         )
         if journal is not None:
             with journal as stamps:

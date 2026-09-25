@@ -2,6 +2,62 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-272 LOCAL-1 served_* + local hop arming + LOCAL_ONLY — 2026-09-25
+
+Cortex #272 LOCAL-1 (FreeRoute region only). `arming()` may accept an
+OpenVault-reported local spendable hop (no process Ollama client).
+`RouteStamp` gains `served_provider` / `served_model` / `served_local`
+from the OpenVault response only -- never inferred from the requested
+model. Missing field is null/false plus a named reason.
+`CORTEX_FREEROUTE_LOCAL_ONLY=1` is fail-closed: restriction is sent on
+the call; a non-local or unhonoured response drops the answer text and
+never falls back to cloud. Insights `served_*` come from the served
+RouteStamp (empty stamp stays null/false plus a reason). OpenVault field
+mapping is isolated in `freeroute_ov_local.py`. OpenVault#71 merged at
+`edead3c4` confirms `local_qwen`, `served_provider`, `served_model`,
+`served_local`, `local_only`, `local_reason`, HTTP 503
+`openvault_local_only_unavailable` with `error.reason`, and 403
+`openvault_vault_sealed`. `served_local` / `local_only` are true only
+for JSON boolean `true` (`"true"` / `1` / null / missing fail-closed).
+`local_reason` is `""` or one of `local_unreachable` /
+`local_model_not_loaded` / `local_base_url_not_loopback`. PENDING
+leftovers: `X-OpenVault-Served-*` headers, SSE copies, `tier=local`.
+Did not edit the #269/#273 store / `_write_row` / `_stats` / `pick`
+region. No direct local model client. No second vault. No LIVE_KEY
+rotate. Ceiling: merged, local not proven until a live run shows
+`served_local=true` on every call. Refs #272. Off freeze #4/#41-#44.
+Rebased onto #273 / OV#71 `edead3c4`.
+
+## CORTEX-269-ROUTER-1 route store + fingerprint — 2026-09-25
+
+Cortex #269 ROUTER-1. Additive route-store columns for provider token
+usage and a `split` tag. Shadow, held-out, and benchmark rows do not
+train `pick` (`_rows`/`_stats` filter; pick ranking unchanged). Insights
+answers carry `served_provider`/`served_model`=null, `served_local`=false
+with a #272 reason, plus `learn_enabled`/`learn_source`/`route_store_id`.
+Never inferred from the requested model. Baseline script refuses unless
+`CORTEX_FREEROUTE_LEARN` is set and `arming()` is armed with
+`spendable_hops > 0`; writes the arming reason either way; does not invent
+baseline numbers; no live number counts until prove is armed. LEARN
+default unchanged. Did not touch arming logic or RouteStamp served_*
+(#272). Did not touch #235/#211/#265/#267/#268/#270/#272 or freeze
+#4/#41-#44. Did not close #269. No PASS.
+
+## CORTEX-211-NARROW honest plan_source=ontology_plan — 2026-09-25
+
+Cortex #211 NARROW covering swap. Studio generative-ask on Insights now
+emits `plan_source=ontology_plan` only when SQL came from NL -> ontology
+plan -> FreeRoute SQL -> validate. Non-plan answers (EngineBridge L0/L1
+CERTIFIED, unarmed REFUSE, invalid SQL) stamp `other` and never
+`ontology_plan`. Request `mode=ontology_plan` is not a stamp. `query_sql`
+is set only alongside honest `ontology_plan` so DMS cannot infer from a
+relabel. Reuses closed #196 Insights spine + FreeRoute arming. Unarmed
+fail-closed. No second vault. No DMS SoT edits. No OV LIVE_KEY rotate.
+PASS-honest-INCOMPLETE: no live DMS #231 re-prove (nearness is Studio
+ontology_plan > 39/52 WRONG=0). Off freeze #4/#41-#44. Did not close #211.
+HTTP `InsightsAskIn` stays the frozen OpenAPI shape (no `query_plan`/`mode`
+fields). Extra JSON is ignored; `plan_source` is never copied from `mode`.
+
 ## CORTEX-COT-CLIMB covering increment (G1 plan + exact vs gold) — 2026-09-23
 
 Cortex #212 covering increment after leftover honesty. Insights
