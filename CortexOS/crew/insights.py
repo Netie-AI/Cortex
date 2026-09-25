@@ -18,6 +18,7 @@ Keys stay on the OpenVault-armed Crew engine bridge. No second vault.
 from __future__ import annotations
 
 import contextvars
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from CortexOS.ontology.registry import load_link_types, load_object_types, pack_
 _model_calls: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
     "insights_model_calls", default=None
 )
+_log = logging.getLogger(__name__)
 
 LAW = (
     "Intent then ontology (where to get data + which data is more important) "
@@ -1388,6 +1390,8 @@ async def _run_insights(
                 pack_dir=pack_dir,
             )
         except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
+            # The caller sees a named abstain; operators still see the bug.
+            _log.exception("generative_ask raised; answering a named ABSTAIN")
             reason = f"generative_error:{type(exc).__name__}"
             gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
         if not gen.get("ok") and gen.get("status") == "ABSTAIN":

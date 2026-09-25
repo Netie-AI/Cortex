@@ -182,3 +182,151 @@ def test_generate_exception_is_a_named_200_abstain(
     assert body["values"] == []
     assert body["refuse_reason"] == "generative_error:KeyError"
     assert "query_sql" not in body
+
+
+CERT = "ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3)"
+HALF = "ROUND(risk_score * 0.5 + lead_time_days * 0.5, 3)"
+# Verifier probes P1-P4 and P10: the certified expression is somewhere in the
+# tree, but the answer is ranked by an invented formula (or reversed).
+BYPASS = {
+    "where_only": (
+        f"SELECT supplier_id, {HALF} AS ranking_score FROM suppliers "
+        f"WHERE {CERT} IS NOT NULL ORDER BY ranking_score DESC LIMIT 10"
+    ),
+    "projected_but_ordered_by_invented": (
+        f"SELECT supplier_id, {CERT} AS ranking_score FROM suppliers "
+        "ORDER BY risk_score * 0.5 + lead_time_days * 0.5 DESC LIMIT 3"
+    ),
+    "dead_case_branch": (
+        f"SELECT supplier_id, CASE WHEN 1 = 0 THEN {CERT} ELSE {HALF} END AS ranking_score "
+        "FROM suppliers ORDER BY ranking_score DESC LIMIT 10"
+    ),
+    "unused_subquery_column": (
+        f"SELECT supplier_id, {HALF} AS ranking_score FROM "
+        f"(SELECT *, {CERT} AS x FROM suppliers) t ORDER BY ranking_score DESC LIMIT 10"
+    ),
+    "extra_invented_column": (
+        f"SELECT supplier_id, {CERT} AS ranking_score, {HALF} AS alt FROM suppliers "
+        "ORDER BY ranking_score DESC LIMIT 10"
+    ),
+    "reversed_ranking": (
+        f"SELECT supplier_id, {CERT} AS ranking_score FROM suppliers "
+        "ORDER BY ranking_score ASC LIMIT 10"
+    ),
+    "not_ranked_by_measure": (
+        f"SELECT supplier_id, {CERT} AS ranking_score FROM suppliers "
+        "ORDER BY supplier_id LIMIT 10"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(BYPASS))
+def test_certified_expression_hidden_elsewhere_is_still_a_named_abstain(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    sql = BYPASS[name]
+    oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
+    # The bypass is load-bearing: its ranked rows are not the oracle's.
+    assert _suppliers_rows(sql) != _suppliers_rows(oracle)
+    res, _ = _ask(client, monkeypatch, RANK_Q, sql)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "ABSTAIN"
+    assert body["badge"] == "abstain"
+    assert body["values"] == []
+    assert body["refuse_reason"] == MISS
+    assert "query_sql" not in body
+    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert not re.search(r"\d", body["answer"].replace(MISS, "")), body["answer"]
+
+
+# Same measure, different spelling: numeric literal, regrouping, ordinal ORDER
+# BY, outer ROUND dropped, alias through a CTE. None of these may be refused.
+EQUIVALENT = {
+    "cq_supplier_ranking": [
+        "SELECT supplier_id, ROUND(risk_score * 0.65 + lead_time_days / 60 * 0.35, 3) AS s "
+        "FROM suppliers ORDER BY s DESC LIMIT 10",
+        "SELECT supplier_id, ROUND(0.65 * risk_score + 0.35 * lead_time_days / 60.0, 3) AS s "
+        "FROM suppliers ORDER BY 2 DESC, risk_score DESC LIMIT 10",
+        "WITH r AS (SELECT supplier_id, risk_score * 0.65 + lead_time_days * 0.35 / 60 AS s "
+        "FROM suppliers) SELECT supplier_id, s FROM r ORDER BY s DESC LIMIT 10",
+    ],
+    "cq_capacity_utilisation": [
+        "SELECT location_code, ROUND(current_load_kg / capacity_kg * 100, 1) AS pct FROM locations",
+        "SELECT location_code, current_load_kg * 100.0 / capacity_kg AS pct FROM locations "
+        "ORDER BY pct DESC",
+    ],
+    "cq_sales_top5_value": [
+        "SELECT sku, SUM(quantity_kg * unit_cost_myr) AS v FROM transactions "
+        "WHERE txn_type = 'OUT' GROUP BY sku ORDER BY v DESC, sku ASC LIMIT 5",
+        "SELECT sku, ROUND(SUM(unit_cost_myr * quantity_kg), 2) FROM transactions "
+        "WHERE txn_type = 'OUT' GROUP BY sku ORDER BY 2 DESC LIMIT 5",
+    ],
+    "cq_stock_value_by_category": [
+        "SELECT category, SUM(unit_cost_myr * quantity_kg) AS v FROM inventory GROUP BY category",
+        "SELECT category, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS v FROM inventory "
+        "GROUP BY category ORDER BY v DESC",
+    ],
+    "cq_spend_by_country": [
+        "SELECT s.country, SUM(i.unit_cost_myr * i.quantity_kg) AS spend FROM inventory i "
+        "JOIN suppliers s ON i.supplier_id = s.supplier_id GROUP BY s.country ORDER BY spend DESC",
+    ],
+    "cq_top3_category_sales": [
+        "WITH c AS (SELECT DISTINCT sku, category FROM inventory) "
+        "SELECT c.category, SUM(t.unit_cost_myr * t.quantity_kg) AS v FROM transactions t "
+        "JOIN c ON t.sku = c.sku WHERE t.txn_type = 'OUT' GROUP BY c.category "
+        "ORDER BY v DESC LIMIT 3",
+    ],
+}
+# A different quantity over the same columns: must miss.
+DIFFERENT = {
+    "cq_supplier_ranking": [
+        "SELECT supplier_id, ROUND(risk_score * 0.35 + lead_time_days / 60.0 * 0.65, 3) AS s "
+        "FROM suppliers ORDER BY s DESC LIMIT 10",
+    ],
+    "cq_capacity_utilisation": [
+        "SELECT location_code, ROUND(capacity_kg / current_load_kg * 100, 1) AS pct FROM locations",
+    ],
+    "cq_sales_top5_value": [
+        "SELECT sku, SUM(quantity_kg) * SUM(unit_cost_myr) AS v FROM transactions "
+        "WHERE txn_type = 'OUT' GROUP BY sku ORDER BY v DESC LIMIT 5",
+    ],
+    "cq_stock_value_by_category": [
+        "SELECT category, AVG(quantity_kg * unit_cost_myr) AS v FROM inventory GROUP BY category",
+    ],
+}
+
+
+def _measure_for(mid: str) -> dict[str, Any]:
+    ranking = {"certified": [{"id": mid, "importance": {"score": 25}}]}
+    measure = cot_climb.certified_measure(ranking)
+    assert measure and measure["id"] == mid
+    return measure
+
+
+def test_every_bound_certified_gold_passes_its_own_gate() -> None:
+    """The 9 affected curated asks: the certified SQL itself is never refused."""
+    bound = []
+    for _cid, intent in cot_climb.DMS_180_CURATED:
+        measure = cot_climb.certified_measure(insights.retrieve_ontology(intent))
+        if measure:
+            bound.append(measure["id"])
+            gold = cot_climb.gold_sql_for(measure["id"])
+            assert cot_climb.certified_measure_miss(gold, measure) == "", measure["id"]
+    assert "cq_supplier_ranking" in bound
+
+
+@pytest.mark.parametrize(
+    ("mid", "sql"), [(m, s) for m, rows in EQUIVALENT.items() for s in rows]
+)
+def test_equivalent_spelling_is_not_refused(mid: str, sql: str) -> None:
+    assert cot_climb.certified_measure_miss(sql, _measure_for(mid)) == ""
+
+
+@pytest.mark.parametrize(
+    ("mid", "sql"), [(m, s) for m, rows in DIFFERENT.items() for s in rows]
+)
+def test_different_quantity_is_refused(mid: str, sql: str) -> None:
+    assert cot_climb.certified_measure_miss(sql, _measure_for(mid)) == (
+        f"{cot_climb.CERTIFIED_MEASURE_MISS}:{mid}"
+    )

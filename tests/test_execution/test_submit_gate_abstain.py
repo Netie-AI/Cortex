@@ -76,3 +76,36 @@ def test_explain_refusal_over_http_is_not_a_5xx(
     detail = res.json()["detail"]
     assert detail["code"] == "sql_gate_abstain"
     assert "last_audit_date" in detail["message"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT CAST(code AS INTEGER) AS n FROM suppliers",
+        "SELECT CAST(risk_score * 1e40 AS INTEGER) AS n FROM suppliers",
+    ],
+)
+def test_runtime_engine_error_over_http_is_not_a_5xx(
+    verifier, issuer, lake, monkeypatch, tmp_path, sql  # noqa: F811
+) -> None:
+    """SQL that passes EXPLAIN but fails at run time (bad cast, overflow)."""
+    import duckdb
+
+    con = duckdb.connect(str(lake))
+    con.execute("ALTER TABLE suppliers ADD COLUMN code VARCHAR")
+    con.execute("UPDATE suppliers SET code = 'abc'")
+    con.close()
+    result = submit_mod.submit_request(_request(issuer, sql))
+    assert result.ok is False
+    assert result.status == submit_mod.SQL_RUNTIME_ERROR
+    assert result.output is None
+
+    monkeypatch.setenv("PACK", "dms")
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    from CortexOS.api.app import create_app
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    res = client.post("/v1/contract/submit", json=_request(issuer, sql).model_dump(mode="json"))
+    assert res.status_code == 403, res.text
+    assert res.json()["detail"]["code"] == "sql_runtime_error"
