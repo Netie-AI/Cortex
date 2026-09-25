@@ -145,3 +145,53 @@ def mock_sentence_transformer(monkeypatch):
             monkeypatch.setattr(f"{mod_name}.SentenceTransformer", MockTransformer)
 
     return MockTransformer
+
+
+# Cortex #272 comment 5829081052: these three must run in push lint-type-test
+# against the stubbed OpenVault. No skip marker, no xfail. If they do not
+# pass, the session is Formal NOT GREEN.
+_CORTEX_272_LINT_REQUIRED = (
+    "test_local_only_drops_cloud_served_answer_text",
+    "test_local_spendable_hop_arms_without_pooled_cloud_keys",
+    "test_served_fields_come_from_response_not_requested_model",
+)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Print the #272 gate trio by name so a -q CI log still proves they passed."""
+    items = list(getattr(session, "items", []) or [])
+    if not any("test_freeroute_local.py" in (getattr(i, "nodeid", "") or "") for i in items):
+        return
+    reporter = session.config.pluginmanager.getplugin("terminalreporter")
+    if reporter is None:
+        return
+
+    def _ids(key: str) -> list[str]:
+        return [str(getattr(rep, "nodeid", "") or "") for rep in reporter.stats.get(key, [])]
+
+    passed, skipped, xfailed, failed = (
+        _ids("passed"),
+        _ids("skipped"),
+        _ids("xfailed"),
+        _ids("failed"),
+    )
+    missing: list[str] = []
+    reporter.write_sep("-", "CORTEX-272 LOCAL-1 lint-type-test proof")
+    for short in _CORTEX_272_LINT_REQUIRED:
+        hit_pass = next((n for n in passed if n.endswith(short) or f"::{short}" in n), "")
+        if hit_pass and not any(short in n for n in skipped + xfailed + failed):
+            reporter.write_line(f"CORTEX-272 lint-type-test PASSED {hit_pass}")
+            continue
+        state = (
+            "skipped"
+            if any(short in n for n in skipped)
+            else "xfailed"
+            if any(short in n for n in xfailed)
+            else "failed"
+            if any(short in n for n in failed)
+            else "not-passed"
+        )
+        reporter.write_line(f"CORTEX-272 lint-type-test {state.upper()} {short}")
+        missing.append(short)
+    if missing:
+        session.exitstatus = 1
