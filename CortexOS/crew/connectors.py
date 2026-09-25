@@ -13,6 +13,8 @@ import os
 import urllib.request
 from typing import Any
 
+from CortexOS.crew.keys import KEY_ENVS
+
 # Rakazo emulator slugs plus GROK_SYNC inherit map.
 _ROWS: tuple[dict[str, str], ...] = (
     {"slug": "openvault", "name": "OpenVault", "layer": "keys / FreeRoute", "probe": "http://127.0.0.1:5000/api/healthz"},
@@ -37,7 +39,8 @@ _API_ROWS: tuple[dict[str, str], ...] = (
     {"slug": "deepseek", "name": "DeepSeek", "layer": "API / inference", "env": "DEEPSEEK_API_KEY"},
     {"slug": "xai", "name": "xAI / Grok", "layer": "API / inference", "env": "XAI_API_KEY"},
     {"slug": "groq", "name": "Groq", "layer": "API / inference", "env": "GROQ_API_KEY"},
-    {"slug": "google", "name": "Google AI", "layer": "API / inference", "env": "GOOGLE_API_KEY"},
+    {"slug": "google", "name": "Google AI", "layer": "API / inference", "env": "GEMINI_API_KEY"},
+    {"slug": "nvidia", "name": "NVIDIA NIM", "layer": "API / inference", "env": "NVIDIA_API_KEY"},
     {"slug": "cerebras", "name": "Cerebras", "layer": "API / inference", "env": "CEREBRAS_API_KEY"},
     {"slug": "mistral", "name": "Mistral", "layer": "API / inference", "env": "MISTRAL_API_KEY"},
 )
@@ -142,11 +145,14 @@ def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dic
             )
         )
     for row in _API_ROWS:
-        env_key = row["env"]
-        env_ok = bool(os.environ.get(env_key, "").strip())
+        label = "openai-compatible" if row["slug"] == "openai" else row["slug"]
+        # Same env names, same order, as the provider chain (keys.KEY_ENVS).
+        names = KEY_ENVS.get(label, (row["env"],))
+        hit = next((n for n in names if os.environ.get(n, "").strip()), "")
+        env_key = hit or " / ".join(names)
+        env_ok = bool(hit)
         if row["slug"] == "openai" and not env_ok:
             env_ok = bool(os.environ.get("CREW_OPENAI_BASE_URL", "").strip())
-        label = "openai-compatible" if row["slug"] == "openai" else row["slug"]
         vault_row = sources.get(label)
         vault_on = bool(vault_row and vault_row.get("enabled"))
         vault_off = bool(vault_row and not vault_row.get("enabled"))

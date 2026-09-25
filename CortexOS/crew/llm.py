@@ -2,10 +2,11 @@
 
 One entry point, :func:`chat`, used by every agent. The model string decides
 the host (``anthropic/claude-sonnet-5``, ``openrouter/...``, ``deepseek/...``,
-``openai/...`` with an optional base URL, ``ollama/...``) so the crew runs on
-a Claude API key, a cheap API, any OpenAI-compatible gateway, or a local
-model without code changes. litellm is imported lazily - tests fake this
-module and never pay its import, and the server only pays it on first use.
+``gemini/...``, ``nvidia_nim/...``, ``openai/...`` with an optional base URL,
+``ollama/...``) so the crew runs on a Claude API key, a cheap API, any
+OpenAI-compatible gateway, or a local model without code changes. litellm is
+imported lazily - tests fake this module and never pay its import, and the
+server only pays it on first use.
 
 Failures raise :class:`LLMError` with a human-readable reason; the runtime
 persists that reason into the transcript instead of retrying another provider
@@ -19,6 +20,7 @@ or a dead connector refuses with a reason. There is no walk to the next host.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -73,6 +75,8 @@ _PROVIDER_ALIASES = {
     "vault": "openvault",
     "google": "google",
     "gemini": "google",
+    "nvidia_nim": "nvidia",
+    "nim": "nvidia",
 }
 
 _MODEL_PREFIX_TO_LABEL = {
@@ -85,6 +89,9 @@ _MODEL_PREFIX_TO_LABEL = {
     "groq": "groq",
     "gemini": "google",
     "google": "google",
+    # "nvidia/..." is a NIM model namespace, not a litellm prefix; only the
+    # litellm prefix names the host.
+    "nvidia_nim": "nvidia",
     "cerebras": "cerebras",
     "mistral": "mistral",
     "ollama": "ollama",
@@ -318,6 +325,21 @@ def _litellm() -> Any:
     return litellm
 
 
+def _api_key(model: str) -> str | None:
+    """The env key the chain stamped for this host, handed to litellm.
+
+    Only hosts in ``keys.KEY_PREFIXES`` are listed: litellm would otherwise
+    read a different env name (or none) than the one the chain named. Every
+    other host keeps litellm's own env lookup. The value goes to litellm only,
+    never into a result, a route or an error.
+    """
+    from CortexOS.crew.keys import KEY_PREFIXES, key_env
+
+    label = KEY_PREFIXES.get(str(model).split("/", 1)[0].lower())
+    name = key_env(label) if label else ""
+    return os.environ[name].strip() if name else None
+
+
 def _parse_args(raw: str | None) -> dict[str, Any]:
     if not raw:
         return {}
@@ -357,6 +379,9 @@ async def chat(
             kwargs["tools"] = tools
         if api_base:
             kwargs["api_base"] = api_base
+        key = _api_key(model)
+        if key:
+            kwargs["api_key"] = key
         if stream_cb is None:
             response = await litellm.acompletion(**kwargs)
             return _from_response(litellm, response, model)

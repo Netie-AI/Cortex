@@ -38,10 +38,17 @@ def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GMAIL_IMAP_USER",
         "GMAIL_APP_PASSWORD",
         "GROQ_API_KEY",
+        "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
+        "NVIDIA_API_KEY",
+        "NVIDIA_NIM_API_KEY",
         "CEREBRAS_API_KEY",
         "MISTRAL_API_KEY",
         "CREW_PROVIDER",
+        "CREW_GOOGLE_MODEL",
+        "CREW_NVIDIA_MODEL",
+        "CREW_NVIDIA_BASE_URL",
+        "CREW_CEREBRAS_MODEL",
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("CREW_MODEL", "test/fake-model")
