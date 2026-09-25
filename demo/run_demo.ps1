@@ -106,7 +106,12 @@ if ($envFile -and (Import-EnvLocal -Path $envFile)) {
 
 $env:PYTHONPATH = $Root
 $env:PACK = "dms"
-$env:DMS_API_KEYS = "viewer:dms-demo-viewer-key;steward:dms-demo-steward-key;admin:dms-demo-admin-key"
+# Per-install random API keys shared by the engine and the UI (T2-FAILCLOSED).
+# Generated on first run into the gitignored data\local\demo_api_keys.env; the
+# UI (next dev, started below) inherits NEXT_PUBLIC_DMS_*_KEY from this process.
+. (Join-Path $Root "scripts\demo_keys.ps1")
+$KeyFile = Initialize-DemoApiKeys -Root $Root
+Write-Ok "Demo API keys loaded from $KeyFile"
 
 $Python = Resolve-PythonExe -RepoRoot $Root
 

@@ -1,6 +1,8 @@
 const { test, expect } = require("@playwright/test");
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+// T2-FAILCLOSED (#263): the key comes from the environment, never from source.
+const VIEWER_KEY = process.env.NEXT_PUBLIC_DMS_VIEWER_KEY || process.env.DMS_E2E_API_KEY || "";
 
 /**
  * Reliability steps for Cortex Find Skills:
@@ -23,7 +25,7 @@ test.describe("Cortex discovery reliability", () => {
     test.skip(!health.ok(), "API not running");
     const res = await request.post(`${API}/api/discovery/find-skills`, {
       data: { goal: "playwright e2e testing", top_k: 5 },
-      headers: { "X-API-Key": "dms-demo-viewer-key" },
+      headers: { "X-API-Key": VIEWER_KEY },
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -37,7 +39,7 @@ test.describe("Cortex discovery reliability", () => {
     test.skip(!health.ok(), "API not running");
     const res = await request.post(`${API}/mcp/call`, {
       data: { name: "find_skills", arguments: { goal: "github mcp", top_k: 3 } },
-      headers: { "X-API-Key": "dms-demo-viewer-key" },
+      headers: { "X-API-Key": VIEWER_KEY },
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();

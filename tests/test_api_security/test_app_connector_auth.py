@@ -116,7 +116,8 @@ def _app_routes(tmp_path) -> list[tuple[str, str, Any, str]]:
 
 
 _CONNECTOR_ROUTES: list[tuple[str, str, Any, str]] = [
-    ("GET", "/api/connectors", None, "viewer"),
+    # GET /api/connectors itself is the static desk shell, served without a key
+    # (T2-FAILCLOSED, #263); tests/test_api_security/test_fail_closed.py covers it.
     ("GET", "/api/connectors/workspaces", None, "viewer"),
     ("GET", "/api/connectors/agents", None, "viewer"),
     ("GET", "/api/connectors/agents/constructor/messages", None, "viewer"),
@@ -195,6 +196,11 @@ def test_connector_routes_refuse_without_key_or_with_low_role_and_change_nothing
     assert _connector_state() == before
 
 
+# The one ungated path: the operator desk's static HTML shell (no data, no
+# paths). Exempted by exact method and path, never by prefix.
+_DESK_SHELL = ("GET", "/api/connectors")
+
+
 def test_every_registered_app_and_connector_route_is_gated(env):
     """A route added later without the gate fails here, not in production."""
     client = env["client"]
@@ -206,6 +212,8 @@ def test_every_registered_app_and_connector_route_is_gated(env):
             "{chat_id}", "c1"
         )
         for method in sorted(m.upper() for m in ops):
+            if (method, path) == _DESK_SHELL:
+                continue
             seen += 1
             res = client.request(method, concrete, json={})
             assert res.status_code == 401, (method, path, res.status_code)

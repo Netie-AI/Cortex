@@ -69,6 +69,8 @@ data/lakehouse/
 data/ingest_drop/
 data/samples/*.xlsx
 CortexOS/data/
+# Per-install local demo API keys (scripts/demo_keys.ps1, T2-FAILCLOSED #263).
+data/local/
 
 # AirGPT/Vertex working mirrors + runtime artifacts live OUTSIDE this repo
 # (AirGPT app root = D:/AirGPT, its own git). The in-tree mirror carries a live

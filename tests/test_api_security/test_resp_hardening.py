@@ -169,7 +169,8 @@ def _app_routes(tmp_path: Path) -> list[tuple[str, str, Any, str, int]]:
 
 
 _CONNECTOR_ROUTES: list[tuple[str, str, Any, str, int]] = [
-    ("GET", "/api/connectors", None, "viewer", 200),
+    # GET /api/connectors is the static desk shell, served without a key
+    # (T2-FAILCLOSED, #263); tests/test_api_security/test_fail_closed.py covers it.
     ("GET", "/api/connectors/workspaces", None, "viewer", 200),
     ("GET", "/api/connectors/agents", None, "viewer", 200),
     ("GET", "/api/connectors/agents/constructor/messages", None, "viewer", 200),

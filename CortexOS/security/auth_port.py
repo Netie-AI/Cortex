@@ -27,6 +27,7 @@ the response the route gave before the gate existed.
 from __future__ import annotations
 
 import importlib
+import logging
 from typing import Any, Final, Protocol, runtime_checkable
 
 from fastapi import HTTPException, Request
@@ -110,6 +111,41 @@ def _load_active_pack() -> None:
         return
 
 
+def startup_warnings() -> list[str]:
+    """What the app should log loudly at startup about request authorization.
+
+    Resolves the authorizer (importing the active pack once) and asks it for its
+    own warnings through an optional ``startup_warnings()`` method, so the pack
+    can report an explicit auth bypass without the engine knowing its env names.
+    An authorizer without that method contributes nothing; it is not part of the
+    :class:`RequestAuthorizer` protocol. No authorizer at all is itself a warning,
+    because every gated engine route will then refuse with 503.
+    """
+    try:
+        authorizer = resolve_authorizer()
+    except AuthorizerNotRegistered:
+        return [
+            "No request authorizer is registered: every gated engine route will "
+            "refuse with 503 until the active pack registers one."
+        ]
+    hook = getattr(authorizer, "startup_warnings", None)
+    if not callable(hook):
+        return []
+    try:
+        return [str(w) for w in (hook() or [])]
+    except Exception:  # noqa: BLE001 - a broken hook must not stop the app starting
+        return ["The request authorizer could not report its startup state."]
+
+
+def log_startup_warnings(logger: logging.Logger | None = None) -> list[str]:
+    """Log each :func:`startup_warnings` entry at WARNING and return them."""
+    log = logger or logging.getLogger("CortexOS.security.auth")
+    warnings = startup_warnings()
+    for text in warnings:
+        log.warning("SECURITY WARNING: %s", text)
+    return warnings
+
+
 def role_at_least(have: str, need: str) -> bool:
     return _ROLE_RANK.get(have, -1) >= _ROLE_RANK.get(need, len(ROLES))
 
@@ -146,9 +182,11 @@ __all__ = [
     "ROLES",
     "RequestAuthorizer",
     "clear_authorizer",
+    "log_startup_warnings",
     "register_authorizer",
     "registered_authorizer",
     "require_role",
     "resolve_authorizer",
     "role_at_least",
+    "startup_warnings",
 ]

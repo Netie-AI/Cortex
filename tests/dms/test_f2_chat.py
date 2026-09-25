@@ -71,7 +71,7 @@ def test_chat_api_routes(ops_db):
     netie.config._cached_config = None
     app = create_app()
     # T2-DMS (#263): chat routes are role-gated; send a steward key.
-    client = TestClient(app, headers={"X-API-Key": "dms-demo-steward-key"})
+    client = TestClient(app, headers={"X-API-Key": "pytest-steward-key"})
 
     res = client.post(
         "/dms/threads",

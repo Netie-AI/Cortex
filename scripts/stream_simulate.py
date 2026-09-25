@@ -8,6 +8,7 @@ Run: python -m scripts.stream_simulate --stream sensors --rate 50 --seconds 10
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import time
 
@@ -63,7 +64,11 @@ def main() -> None:
     ap.add_argument("--rate", type=int, default=50, help="events per second")
     ap.add_argument("--seconds", type=int, default=10)
     ap.add_argument("--url", default=None, help="POST to a running API instead of in-process")
-    ap.add_argument("--api-key", default="dms-demo-steward-key")
+    ap.add_argument(
+        "--api-key",
+        default=os.environ.get("DMS_API_KEY", ""),
+        help="steward key for --url (default: $DMS_API_KEY; no key ships with Cortex)",
+    )
     args = ap.parse_args()
 
     if args.url:

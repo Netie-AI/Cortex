@@ -6,11 +6,12 @@ import TopBar from "./TopBar";
 import ApiOfflineBanner from "./ApiOfflineBanner";
 import ProgressBar from "./ProgressBar";
 import { useApiHealth } from "../hooks/useApiHealth";
-import { fetchTables } from "../lib/api";
+import { fetchTables, missingApiKeyMessage } from "../lib/api";
 
 function ShellInner({ children, loading = false }) {
   const { online, checked } = useApiHealth();
   const [indexedRows, setIndexedRows] = useState("—");
+  const keyMessage = missingApiKeyMessage();
 
   useEffect(() => {
     if (!online) {
@@ -31,6 +32,11 @@ function ShellInner({ children, loading = false }) {
       <div className="cx-main-wrap">
         <ProgressBar active={loading} />
         {checked && !online && <ApiOfflineBanner show />}
+        {keyMessage && (
+          <div className="cx-offline-banner" role="alert" data-testid="api-key-missing">
+            {keyMessage}
+          </div>
+        )}
         <TopBar indexedRows={indexedRows} apiOnline={online} />
         <main className="cx-content">{children}</main>
       </div>

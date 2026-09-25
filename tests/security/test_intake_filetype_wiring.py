@@ -57,14 +57,14 @@ def test_ingest_api_denies_spoofed_exe_before_write(lake_home, monkeypatch):
     client = TestClient(create_app())
     body = {"filename": "report.csv", "content_b64": base64.b64encode(MZ_EXE).decode()}
     r = client.post("/dms/ingest/file", json=body,
-                    headers={"X-API-Key": "dms-demo-steward-key"})
+                    headers={"X-API-Key": "pytest-steward-key"})
     assert r.status_code == 415
     assert not (drop / "report.csv").exists()                    # D1: never touched disk
 
     ok_body = {"filename": "clean.csv",
                "content_b64": base64.b64encode(b"id,v\n1,a\n").decode()}
     ok = client.post("/dms/ingest/file", json=ok_body,
-                     headers={"X-API-Key": "dms-demo-steward-key"})
+                     headers={"X-API-Key": "pytest-steward-key"})
     assert ok.status_code == 200 and ok.json()["status"] == "loaded"
 
 
@@ -92,7 +92,7 @@ def test_photo_intake_rejects_exe(lake_home, monkeypatch):
     client = TestClient(create_app())
     r = client.post("/dms/items/estimate-dims",
                     json={"photo": base64.b64encode(MZ_EXE).decode()},
-                    headers={"X-API-Key": "dms-demo-steward-key"})
+                    headers={"X-API-Key": "pytest-steward-key"})
     assert r.status_code == 415                                  # D4 route half
     assert "rejected" in str(r.json().get("detail", ""))
 

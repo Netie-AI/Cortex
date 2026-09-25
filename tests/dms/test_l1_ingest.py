@@ -95,12 +95,12 @@ def test_upload_api_rbac_and_ledger(lake_home, monkeypatch):
 
     # viewer forbidden, steward allowed
     assert client.post("/dms/ingest/file", json=body,
-                       headers={"X-API-Key": "dms-demo-viewer-key"}).status_code == 403
+                       headers={"X-API-Key": "pytest-viewer-key"}).status_code == 403
     r = client.post("/dms/ingest/file", json=body,
-                    headers={"X-API-Key": "dms-demo-steward-key"})
+                    headers={"X-API-Key": "pytest-steward-key"})
     assert r.status_code == 200 and r.json()["status"] == "loaded"
 
-    led = client.get("/dms/ingest/ledger", headers={"X-API-Key": "dms-demo-viewer-key"})
+    led = client.get("/dms/ingest/ledger", headers={"X-API-Key": "pytest-viewer-key"})
     assert led.status_code == 200
     assert any(e["filename"] == "up.csv" for e in led.json()["entries"])
 
@@ -118,7 +118,7 @@ def test_upload_rejects_path_traversal(lake_home, monkeypatch):
 
     client = TestClient(create_app())
     body = {"filename": "../../evil.csv", "content_b64": base64.b64encode(b"x\n1\n").decode()}
-    r = client.post("/dms/ingest/file", json=body, headers={"X-API-Key": "dms-demo-steward-key"})
+    r = client.post("/dms/ingest/file", json=body, headers={"X-API-Key": "pytest-steward-key"})
     # sanitized to a safe name and ingested inside the drop dir, not written up a level
     assert r.status_code == 200
     assert "evil" in (r.json()["table"] or "")

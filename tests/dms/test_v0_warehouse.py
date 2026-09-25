@@ -194,7 +194,7 @@ def test_qr_label_endpoint(ops_db):
     netie.config._cached_config = None
     app = create_app()
     # T2-DMS (#263): warehouse reads are role-gated; send a viewer key.
-    client = TestClient(app, headers={"X-API-Key": "dms-demo-viewer-key"})
+    client = TestClient(app, headers={"X-API-Key": "pytest-viewer-key"})
     res = client.get(f"/dms/warehouse/locations/{bin_loc['id']}/qr-label")
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"

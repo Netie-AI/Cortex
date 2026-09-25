@@ -170,23 +170,23 @@ def test_agent_api_rbac(lake_home):
         },
     }
     assert client.post("/dms/agents", json=body,
-                       headers={"X-API-Key": "dms-demo-viewer-key"}).status_code == 403
+                       headers={"X-API-Key": "pytest-viewer-key"}).status_code == 403
     created = client.post("/dms/agents", json=body,
-                          headers={"X-API-Key": "dms-demo-steward-key"})
+                          headers={"X-API-Key": "pytest-steward-key"})
     assert created.status_code == 200
 
-    listed = client.get("/dms/agents", headers={"X-API-Key": "dms-demo-viewer-key"})
+    listed = client.get("/dms/agents", headers={"X-API-Key": "pytest-viewer-key"})
     assert listed.status_code == 200
     assert any(a["agent_id"] == "api-watcher" for a in listed.json()["agents"])
 
     ran = client.post("/dms/agents/api-watcher/run",
-                      headers={"X-API-Key": "dms-demo-steward-key"})
+                      headers={"X-API-Key": "pytest-steward-key"})
     assert ran.status_code == 200
     assert ran.json()["status"] == "pending_approval"
     run_id = ran.json()["run_id"]
 
     approved = client.post(f"/dms/agents/runs/{run_id}/approve",
-                           headers={"X-API-Key": "dms-demo-steward-key"})
+                           headers={"X-API-Key": "pytest-steward-key"})
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
 

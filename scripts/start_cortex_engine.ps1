@@ -97,8 +97,14 @@ if (Test-Path $PidFile) {
 $env:PACK = $Pack
 if (-not $env:DMS_AUTH_DISABLED) {
     if (-not $env:DMS_API_KEYS) {
-        $env:DMS_API_KEYS = "viewer:dms-demo-viewer-key;steward:dms-demo-steward-key;admin:dms-demo-admin-key"
+        # No key ships with Cortex (T2-FAILCLOSED). Use this install's random
+        # local keys, generated once into the gitignored data\local\demo_api_keys.env.
+        . (Join-Path $Root "scripts\demo_keys.ps1")
+        $KeyFile = Initialize-DemoApiKeys -Root $Root
+        Write-Host "DMS_API_KEYS: local per-install keys from $KeyFile" -ForegroundColor Gray
     }
+} else {
+    Write-Warning "DMS_AUTH_DISABLED is set: API authentication is OFF (local development only)."
 }
 
 Set-Content -Path $UrlHint -Value $ApiUrl -Encoding utf8
