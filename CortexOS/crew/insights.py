@@ -17,6 +17,7 @@ Keys stay on the OpenVault-armed Crew engine bridge. No second vault.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from CortexOS.crew.config import BACKEND_CF_COMPUTER
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
+
+_log = logging.getLogger(__name__)
 
 LAW = (
     "Intent then ontology (where to get data + which data is more important) "
@@ -1330,6 +1333,8 @@ async def run_insights(
                 pack_dir=pack_dir,
             )
         except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
+            # The caller sees a named abstain; operators still see the bug.
+            _log.exception("generative_ask raised; answering a named ABSTAIN")
             reason = f"generative_error:{type(exc).__name__}"
             gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
         if not gen.get("ok") and gen.get("status") == "ABSTAIN":
