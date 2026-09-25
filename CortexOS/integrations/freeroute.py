@@ -68,6 +68,12 @@ ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
 INELIGIBLE_S = 60.0
 EXPLORE_REQUESTS = 2
+# Across-call cooldown: a candidate whose most recent call (any task, any
+# split) was a rate-limit / budget / no-hop refusal is skipped for this long
+# when another eligible candidate exists. Not a score and not training data.
+COOLDOWN_ENV = "CORTEX_FREEROUTE_COOLDOWN_S"
+COOLDOWN_S = 30.0
+COOLDOWN_STATUSES = frozenset({429, 402, 503})
 SCORE_WINDOW = 200
 MAX_CANDIDATES = 6
 PER_PROVIDER = 2
@@ -804,6 +810,66 @@ class ModelStats:
     mean_latency_ms: float = 0.0
     mean_cost: float | None = None
     ineligible: str = ""
+    cooling: str = ""
+    cooling_until: float = 0.0
+
+
+def _cooldown_s() -> float:
+    raw = (os.environ.get(COOLDOWN_ENV) or "").strip()
+    if not raw:
+        return COOLDOWN_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return COOLDOWN_S
+    return value if value >= 0.0 else COOLDOWN_S
+
+
+def _cool_key(model: str) -> str:
+    """env-direct refusals are per provider (one key, one quota); else per model."""
+    provider, _ = direct_providers.split_id(model)
+    return f"provider:{provider.label}" if provider is not None else model
+
+
+def _cooling(models: list[str], now: float) -> dict[str, tuple[float, str]]:
+    """Most recent call per cool key across every task and split.
+
+    Read-only fact about the provider right now (was it just refused?), never a
+    validity score, so the learning filter does not apply: a 429 met during a
+    benchmark or shadow call is still a 429. Retry-After is not stored, so the
+    window is ``COOLDOWN_S`` (``CORTEX_FREEROUTE_COOLDOWN_S``).
+    """
+    window = _cooldown_s()
+    if window <= 0.0 or not models:
+        return {}
+    wanted = {_cool_key(m) for m in models}
+    latest: dict[str, tuple[float, int]] = {}
+    with _connect(write=False) as con:
+        if con is None:
+            return {}
+        try:
+            rows = list(
+                con.execute(
+                    "SELECT requested, status, ts FROM routes WHERE ts >= ? ORDER BY ts DESC",
+                    (now - window,),
+                )
+            )
+        except sqlite3.Error as exc:
+            _note_store_error(exc)
+            return {}
+    for requested, status, ts in rows:
+        key = _cool_key(str(requested or ""))
+        if key in wanted and key not in latest:
+            latest[key] = (float(ts), int(status))
+    out: dict[str, tuple[float, str]] = {}
+    for model in models:
+        hit = latest.get(_cool_key(model))
+        if hit is None or hit[1] not in COOLDOWN_STATUSES:
+            continue
+        until = hit[0] + window
+        if until > now:
+            out[model] = (until, f"HTTP {hit[1]} {round(now - hit[0], 1)}s ago")
+    return out
 
 
 def _row_cost(row: Mapping[str, Any]) -> float | None:
@@ -869,6 +935,9 @@ def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
         ):
             st.ineligible = f"last 3 calls refused (HTTP {last3[0]['status']})"
         out[model] = st
+    for model, (until, why) in _cooling(models, now).items():
+        out[model].cooling = why
+        out[model].cooling_until = until
     return out
 
 
@@ -921,6 +990,30 @@ def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick
             source,
             models,
         )
+    warm = [m for m in eligible if not stats[m].cooling]
+    cooling = [m for m in eligible if stats[m].cooling]
+    cool_note = (
+        "; cooling (skipped): "
+        + ", ".join(f"{m} ({stats[m].cooling})" for m in cooling)
+        if cooling
+        else ""
+    )
+    if not warm:
+        now = time.time()
+        order_c = {m: i for i, m in enumerate(models)}
+        soonest = min(cooling, key=lambda m: (stats[m].cooling_until, order_c[m]))
+        st = stats[soonest]
+        left = max(0.0, st.cooling_until - now)
+        return Pick(
+            soonest,
+            f"every eligible candidate cooling after a refusal; trying {soonest}, "
+            f"whose cooldown ends first ({st.cooling}, {left:.1f}s left)",
+            source,
+            models,
+            st.scored_n,
+            st.score,
+        )
+    eligible = warm
     for model in eligible:
         st = stats[model]
         if st.requests < EXPLORE_REQUESTS:
@@ -928,7 +1021,7 @@ def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick
             note = f"; ineligible: {', '.join(skipped)}" if skipped else ""
             return Pick(
                 model,
-                f"exploring {model} ({st.requests}/{EXPLORE_REQUESTS} requests) among {len(models)}{note}",
+                f"exploring {model} ({st.requests}/{EXPLORE_REQUESTS} requests) among {len(models)}{note}{cool_note}",
                 source,
                 models,
                 st.scored_n,
@@ -936,7 +1029,9 @@ def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick
             )
     ranked = [m for m in eligible if stats[m].score is not None]
     if not ranked:
-        return Pick(eligible[0], f"no scored route yet; trying {eligible[0]}", source, models)
+        return Pick(
+            eligible[0], f"no scored route yet; trying {eligible[0]}{cool_note}", source, models
+        )
     order = {m: i for i, m in enumerate(models)}
     best = min(
         ranked,
@@ -946,6 +1041,7 @@ def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick
     reason = f"measured best validity {st.score} over n={st.scored_n} among {len(ranked)} scored"
     if st.served_most and not _same_model(best, st.served_most) and (st.honored_rate or 0.0) < 0.5:
         reason += f"; not honored (served {st.served_most})"
+    reason += cool_note
     return Pick(best, reason, source, models, st.scored_n, st.score)
 
 

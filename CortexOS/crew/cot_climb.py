@@ -156,12 +156,83 @@ async def _call_runner(
     purpose: str,
     prompt: str,
     bearer: str | None,
+    pick: Any = None,
 ) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"purpose": purpose, "prompt": prompt, "bearer": bearer}
+    if pick is not None:
+        kwargs["pick"] = pick
     try:
-        out = await runner(None, purpose=purpose, prompt=prompt, bearer=bearer)
+        out = await runner(None, **kwargs)
     except TypeError:
         out = await runner(None, purpose=purpose, prompt=prompt)
     return out if isinstance(out, dict) else {}
+
+
+def _route_model(out: Mapping[str, Any]) -> str:
+    route = out.get("route")
+    return str(route.get("model") or "") if isinstance(route, Mapping) else ""
+
+
+def _new_pin_trace() -> dict[str, Any]:
+    return {"model": "", "label": "", "from_step": None, "events": []}
+
+
+def _pin_from(out: Mapping[str, Any], step: int, trace: dict[str, Any]) -> Any:
+    """Pin the provider/model that answered ``step`` for the rest of this question.
+
+    One question stays on one provider so its steps do not bounce across
+    rate-limited hops. Only an answered call pins; a refused one never does.
+    """
+    if not out.get("ok"):
+        return None
+    route = out.get("route")
+    if not isinstance(route, Mapping):
+        return None
+    model = str(route.get("model") or "").strip()
+    if not model:
+        return None
+    from CortexOS.crew import freeroute as fr
+
+    label = str(route.get("label") or "")
+    why = f"cot_climb pin: step {step} answered on {model}; kept for this question"
+    trace.update({"model": model, "label": label, "from_step": step})
+    trace["events"].append({"step": step, "event": "pinned", "model": model})
+    return fr.RoutePick(label=label, model=model, kind="freeroute", why=why)
+
+
+async def _step_call(
+    runner: Any,
+    *,
+    step: int,
+    purpose: str,
+    prompt: str,
+    bearer: str | None,
+    pin: Any,
+    trace: dict[str, Any],
+) -> tuple[dict[str, Any], Any]:
+    """One climb step, on the pin when there is one.
+
+    A refused pinned call releases the pin and the step is sent once more
+    unpinned, so the FreeRoute picker (and its 429 cooldown) can route it
+    elsewhere. That is a second call, not an in-call fallback. The next
+    answered call pins again.
+    """
+    out = await _call_runner(runner, purpose=purpose, prompt=prompt, bearer=bearer, pick=pin)
+    if pin is not None and not out.get("ok"):
+        trace["events"].append(
+            {
+                "step": step,
+                "event": "released",
+                "model": trace.get("model") or "",
+                "reason": str(out.get("refused") or "refused")[:200],
+            }
+        )
+        trace.update({"model": "", "label": "", "from_step": None})
+        pin = None
+        out = await _call_runner(runner, purpose=purpose, prompt=prompt, bearer=bearer)
+    if pin is None:
+        pin = _pin_from(out, step, trace)
+    return out, pin
 
 
 def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
@@ -229,6 +300,76 @@ def gold_sql_for(case_id: str, expected_sql: str = "") -> str:
     if pinned:
         return pinned
     return certified_gold_sql().get(str(case_id or "").strip(), "")
+
+
+MAX_DEFINITIONS = 4
+
+
+def certified_definitions(
+    intent: str,
+    ranking: Mapping[str, Any],
+    *,
+    pack_dir: Any = None,
+) -> list[str]:
+    """Certified definition text for the metrics the ontology ranking matched.
+
+    The ranking (``insights.retrieve_ontology``) already decided which governed
+    metrics / certified queries the intent matches; this looks their certified
+    SQL up in the pack's semantic YAML (read as data through the engine's
+    ontology registry path, never by importing the pack) plus glossary
+    definitions the intent names, so the model uses the certified formula
+    instead of inventing one. Empty when nothing certified matches.
+    """
+    from CortexOS.crew import insights as insights_mod
+
+    try:
+        base = insights_mod._pack_dir(pack_dir)
+        metrics_doc = insights_mod._read_yaml(base / "semantic" / "metrics.yaml")
+        certified_doc = insights_mod._read_yaml(base / "semantic" / "certified_queries.yaml")
+        layer = insights_mod._read_yaml(base / "semantic_layer.yaml")
+    except (OSError, ValueError):
+        return []
+    sql_by_id: dict[str, tuple[str, str]] = {}
+    for row in certified_doc.get("certified") or []:
+        if isinstance(row, Mapping) and row.get("id") and row.get("sql"):
+            sql_by_id[str(row["id"])] = ("certified query", str(row["sql"]))
+    for row in metrics_doc.get("metrics") or []:
+        if isinstance(row, Mapping) and row.get("id") and row.get("sql"):
+            sql_by_id.setdefault(str(row["id"]), ("governed metric", str(row["sql"])))
+    ranked = list(ranking.get("certified") or []) + list(ranking.get("metrics") or [])
+    ranked.sort(key=lambda r: -int(((r.get("importance") or {}).get("score")) or 0))
+    lines: list[str] = []
+    seen_sql: set[str] = set()
+    for row in ranked:
+        mid = str(row.get("id") or "")
+        hit = sql_by_id.get(mid)
+        if not hit:
+            continue
+        kind, sql = hit
+        folded = " ".join(sql.split())
+        if folded in seen_sql:
+            continue
+        seen_sql.add(folded)
+        lines.append(f"- {kind} {mid}: {folded[:900]}")
+        if len(lines) >= MAX_DEFINITIONS:
+            break
+    low = " ".join((intent or "").lower().split())
+    for row in layer.get("glossary") or []:
+        if not isinstance(row, Mapping):
+            continue
+        term = str(row.get("term") or "").strip()
+        definition = str(row.get("definition") or "").strip()
+        if term and definition and term.lower() in low:
+            table = str(row.get("table") or "")
+            where = f" (table {table})" if table else ""
+            lines.append(f"- glossary '{term}'{where}: {definition}")
+    if not lines:
+        return []
+    return [
+        "CERTIFIED DEFINITIONS (use these formulas and filters exactly; "
+        "do not invent another score or weighting; {name} is a parameter slot):",
+        *lines,
+    ]
 
 
 def curated_intents() -> list[dict[str, str]]:
@@ -307,6 +448,7 @@ def _think_prompt(
     g1: Mapping[str, Any] | None = None,
     prior_sql: str = "",
     decision: str = "",
+    definitions: Sequence[str] | None = None,
 ) -> str:
     lines = [
         "Think which ontology tables and metrics answer the intent.",
@@ -314,6 +456,7 @@ def _think_prompt(
         "ONTOLOGY:",
         *_ontology_lines(ranking),
         *_g1_plan_lines(g1),
+        *(definitions or []),
         f"INTENT: {intent}",
     ]
     idea_lines = _idea_lines(ideas)
@@ -341,14 +484,16 @@ def _sql_prompt(
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    definitions: Sequence[str] | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
         *_ontology_lines(ranking),
         *_g1_plan_lines(g1),
-        "",
-        f"INTENT: {intent}",
     ]
+    if definitions:
+        lines.extend(["", *definitions])
+    lines.extend(["", f"INTENT: {intent}"])
     if isinstance(query_plan, Mapping):
         measure = str(query_plan.get("measure") or "").strip()
         if measure:
@@ -510,6 +655,8 @@ def _climb_meta(**extra: Any) -> dict[str, Any]:
         "steps": [],
         "final": None,
         "g1": None,
+        "pin": None,
+        "definitions_consumed": False,
     }
     body.update(extra)
     return body
@@ -628,11 +775,16 @@ async def climb(
     last_sql = ""
     steps: list[dict[str, Any]] = []
     think_text = ""
-    think = await _call_runner(
+    definitions = certified_definitions(text, ranking)
+    pin_trace = _new_pin_trace()
+    think, pin = await _step_call(
         runner,
+        step=0,
         purpose="think",
-        prompt=_think_prompt(text, ranking, ideas=idea_list, g1=g1),
+        prompt=_think_prompt(text, ranking, ideas=idea_list, g1=g1, definitions=definitions),
         bearer=bearer,
+        pin=None,
+        trace=pin_trace,
     )
     if not think.get("ok"):
         return _envelope(
@@ -647,6 +799,8 @@ async def climb(
                 g1=g1,
                 steps=steps,
                 g1_consumed=g1_consumed,
+                pin=pin_trace,
+                definitions_consumed=bool(definitions),
             ),
             refuse_reason=str(think.get("refused") or "FreeRoute think refused"),
         )
@@ -659,6 +813,7 @@ async def climb(
             "ok": True,
             "decision": DECISION_CONTINUE,
             "g1_consumed": g1_consumed,
+            "model": _route_model(think),
         }
     )
 
@@ -685,21 +840,28 @@ async def climb(
             ideas=idea_list,
             g1=g1,
             query_plan=query_plan,
+            definitions=definitions,
         )
         if journal is not None:
             with journal as stamps:
-                gen = await _call_runner(
+                gen, pin = await _step_call(
                     runner,
+                    step=step,
                     purpose="generative_ask",
                     prompt=sql_prompt,
                     bearer=bearer,
+                    pin=pin,
+                    trace=pin_trace,
                 )
         else:
-            gen = await _call_runner(
+            gen, pin = await _step_call(
                 runner,
+                step=step,
                 purpose="generative_ask",
                 prompt=sql_prompt,
                 bearer=bearer,
+                pin=pin,
+                trace=pin_trace,
             )
         if not gen.get("ok"):
             return _envelope(
@@ -715,6 +877,8 @@ async def climb(
                     steps=steps,
                     think_consumed=bool(think_text),
                     g1_consumed=g1_consumed,
+                    pin=pin_trace,
+                    definitions_consumed=bool(definitions),
                     prior_sql_consumed=prior_sql_consumed,
                 ),
                 refuse_reason=str(gen.get("refused") or "FreeRoute generative_ask refused"),
@@ -727,7 +891,8 @@ async def climb(
         try:
             from CortexOS.integrations import freeroute as core
 
-            core.note_verdict(stamps, "static_valid" if checked.get("ok") else "static_fail")
+            # Credit the call that produced this SQL, not a refused pinned try.
+            core.note_verdict(stamps[-1:], "static_valid" if checked.get("ok") else "static_fail")
         except Exception:  # noqa: BLE001 - scoring miss is not invent-green SQL
             pass
         predicates_pass = bool(checked.get("ok"))
@@ -756,6 +921,7 @@ async def climb(
                 "granted": granted,
                 "reason": last_reason,
                 "think_consumed": bool(think_text),
+                "model": _route_model(gen),
             }
         )
         if predicates_pass:
@@ -782,6 +948,8 @@ async def climb(
                     attempts=step,
                     think_consumed=True,
                     g1_consumed=g1_consumed,
+                    pin=pin_trace,
+                    definitions_consumed=bool(definitions),
                     prior_sql_consumed=prior_sql_consumed,
                 ),
             )
@@ -793,8 +961,9 @@ async def climb(
             DECISION_AUDIT_FAIL,
         ):
             critique = last_reason
-            think = await _call_runner(
+            think, pin = await _step_call(
                 runner,
+                step=step,
                 purpose="think",
                 prompt=_think_prompt(
                     text,
@@ -804,8 +973,11 @@ async def climb(
                     g1=g1,
                     prior_sql=last_sql,
                     decision=str(granted),
+                    definitions=definitions,
                 ),
                 bearer=bearer,
+                pin=pin,
+                trace=pin_trace,
             )
             if not think.get("ok"):
                 return _envelope(
@@ -821,6 +993,8 @@ async def climb(
                         steps=steps,
                         think_consumed=bool(think_text),
                         g1_consumed=g1_consumed,
+                        pin=pin_trace,
+                        definitions_consumed=bool(definitions),
                         prior_sql_consumed=prior_sql_consumed,
                     ),
                     refuse_reason=str(think.get("refused") or "FreeRoute think refused"),
@@ -835,6 +1009,7 @@ async def climb(
                     "ok": True,
                     "decision": DECISION_CONTINUE,
                     "prior_sql_consumed": bool(last_sql),
+                    "model": _route_model(think),
                 }
             )
             continue
@@ -852,6 +1027,8 @@ async def climb(
             attempts=HORIZON,
             think_consumed=bool(think_text),
             g1_consumed=g1_consumed,
+            pin=pin_trace,
+            definitions_consumed=bool(definitions),
             prior_sql_consumed=prior_sql_consumed,
         ),
         refuse_reason=(
