@@ -24,7 +24,8 @@ The one exception is an explicit operator opt-in, ``CORTEX_MODEL_TRANSPORT=env-d
 (see :mod:`CortexOS.integrations.direct_providers`): arming, the leave decision
 and the transport then come from provider keys in the process env, and every
 stamp reads ``NOT OpenVault FreeRoute (env-direct)`` so the custody change is
-visible on every answer. Unset, nothing in this module changes.
+visible on every answer. ``CORTEX_FREEROUTE=0`` still switches the layer off in
+this mode. Unset, nothing in this module changes.
 
 Measured route. OpenVault treats the requested model as a preference: it walks
 hops in its own order and a hop that does not carry the requested id serves its
@@ -346,10 +347,18 @@ def note_rejected(credential_fp: str, reason: str, *, url: str | None = None) ->
         _verified.pop((root, credential_fp), None)
 
 
-def _precheck(url: str, token: str, *, relay: bool) -> str:
-    """Offline refusals in rule order. '' when nothing is wrong yet."""
+def _switched_off() -> str:
+    """The operator kill switch. It stops the model layer whatever the transport."""
     if (os.environ.get(SWITCH_ENV) or "1").strip() == "0":
         return f"{SWITCH_ENV}=0: FreeRoute disabled by the operator (no fallback)"
+    return ""
+
+
+def _precheck(url: str, token: str, *, relay: bool) -> str:
+    """Offline refusals in rule order. '' when nothing is wrong yet."""
+    off = _switched_off()
+    if off:
+        return off
     conflict = openvault_client.openvault_base_url_conflict()
     if conflict:
         return conflict
@@ -433,11 +442,13 @@ def _vault_refusal(vault: _Vault, url: str) -> Arming:
 def _direct_arming() -> Arming:
     """Env-direct opt-in: armed from provider keys in the process env. No OpenVault."""
     found = direct_providers.configured()
-    if not found:
+    off = _switched_off()
+    if off or not found:
         envs = ", ".join(n for p in direct_providers.PROVIDERS for n in p.key_envs)
         return Arming(
             armed=False,
-            reason=f"{direct_providers.TRANSPORT_ENV}=env-direct but no provider key is set ({envs})",
+            reason=off
+            or f"{direct_providers.TRANSPORT_ENV}=env-direct but no provider key is set ({envs})",
             url=direct_providers.URL,
             checked_at=time.time(),
             custody=direct_providers.CUSTODY,
@@ -497,6 +508,8 @@ def arming(*, fresh: bool = False, timeout: float = 1.5, bearer: str | None = No
 
 def peek() -> Arming:
     """Last arming for the Cortex credential. No network."""
+    if direct_providers.enabled():
+        return _direct_arming()  # env only; never report OpenVault custody here
     key = (openvault_client.openvault_base_url(), fingerprint(_token()))
     with _lock:
         got = _last_arming.get(key)
@@ -1097,6 +1110,7 @@ def complete(
             requested="",
             error=reason,
             credential=credential,
+            impl=_transport()[1],
             served_local=False,
             served_reason=named or "OpenVault reported no local spendable hop",
         )
