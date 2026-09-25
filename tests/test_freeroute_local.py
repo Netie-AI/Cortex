@@ -55,8 +55,40 @@ def test_adapter_never_infers_local_from_provider_or_model_name() -> None:
     assert ov_local.hop_reported_local({"served_local": False}) is False
 
 
+def test_served_local_and_local_only_require_json_boolean_true() -> None:
+    """OV#71 edead3c4: only JSON boolean true counts. Fail-closed otherwise."""
+    for value in ("true", 1, None):
+        assert ov_local.json_true(value) is False
+        assert ov_local.hop_reported_local({"served_local": value}) is False
+        assert ov_local.local_only_flag({"local_only": value}) is False
+        provider, model, local, reason = ov_local.served_from_response(
+            {
+                "served_provider": LOCAL_PROVIDER,
+                "served_model": LOCAL_MODEL,
+                "served_local": value,
+            }
+        )
+        assert local is False
+        assert ov_local.NOT_LOCAL in reason
+        assert provider == LOCAL_PROVIDER
+        assert model == LOCAL_MODEL
+    missing_local = ov_local.served_from_response(
+        {"served_provider": LOCAL_PROVIDER, "served_model": LOCAL_MODEL}
+    )
+    assert missing_local[2] is False
+    assert ov_local.MISSING_LOCAL in missing_local[3]
+    assert ov_local.hop_reported_local({}) is False
+    assert ov_local.local_only_flag({}) is False
+    assert ov_local.local_only_flag({"local_only": True}) is True
+    sent = ov_local.local_only_request_fields()
+    assert sent == {"local_only": True}
+    assert sent["local_only"] is True
+    assert ov_local.json_true(True) is True
+
+
 def test_adapter_local_arming_reason_is_pass_through() -> None:
     assert ov_local.local_arming_reason({}) == ""
+    assert ov_local.local_arming_reason({"local_reason": ""}) == ""
     assert ov_local.local_arming_reason({"local_reason": ov_local.LOCAL_REASON_UNREACHABLE}) == (
         ov_local.LOCAL_REASON_UNREACHABLE
     )
@@ -66,6 +98,7 @@ def test_adapter_local_arming_reason_is_pass_through() -> None:
     assert ov_local.local_arming_reason(
         {"local_reason": ov_local.LOCAL_REASON_NOT_LOOPBACK}
     ) == ov_local.LOCAL_REASON_NOT_LOOPBACK
+    assert ov_local.local_arming_reason({"local_reason": "model not loaded"}) == ""
 
 
 def test_adapter_reads_only_explicit_ov71_stamp_names() -> None:
@@ -95,6 +128,17 @@ def test_local_spendable_hop_arms_without_pooled_cloud_keys(armed_openvault) -> 
     assert arm.pooled_keys == 0
     assert arm.public()["local_only"] is False
     assert "armed:" in arm.reason
+
+
+def test_non_boolean_served_local_does_not_arm_local_hop(armed_openvault) -> None:
+    armed_openvault.pooled = 0
+    armed_openvault.catalogue = {LOCAL_PROVIDER: [LOCAL_MODEL]}
+    armed_openvault.local_providers = set()
+    armed_openvault.hops = [armed_openvault.hop(LOCAL_PROVIDER, 1, served_local="true")]
+    arm = fr.arming(fresh=True)
+    assert arm.armed is False
+    assert arm.local_spendable_hops == 0
+    assert "pools no keys" in arm.reason
 
 
 def test_ollama_model_name_without_local_flag_does_not_arm(armed_openvault) -> None:
@@ -389,6 +433,27 @@ def test_local_only_drops_cloud_served_answer_text(armed_openvault, monkeypatch)
     assert len(armed_openvault.chat_calls) == 1
     dumped = json.dumps(out.stamp.public())
     assert CLOUD_ANSWER not in dumped
+
+
+@pytest.mark.parametrize("bogus", ["true", 1, None])
+def test_local_only_drops_when_served_local_is_not_json_true(
+    armed_openvault, monkeypatch, bogus
+) -> None:
+    _install_local_hop(armed_openvault, pooled=0)
+    monkeypatch.setenv("CORTEX_FREEROUTE_LOCAL_ONLY", "1")
+    armed_openvault.reply(
+        CLOUD_ANSWER,
+        model=LOCAL_MODEL,
+        served_provider=LOCAL_PROVIDER,
+        served_model=LOCAL_MODEL,
+        served_local=bogus,
+    )
+    out = fr.complete("t", [{"role": "user", "content": "hi"}])
+    assert out.ok is False
+    assert out.text == ""
+    assert CLOUD_ANSWER not in (out.text or "")
+    assert "CORTEX_FREEROUTE_LOCAL_ONLY=1" in out.reason
+    assert out.stamp is not None and out.stamp.served_local is False
 
 
 def test_local_only_drops_answer_when_served_local_omitted(armed_openvault, monkeypatch) -> None:

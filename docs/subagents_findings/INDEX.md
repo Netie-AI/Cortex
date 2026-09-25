@@ -2,7 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
-| 2026-09-25 | cortex-272-local-1 | freeroute, served_local, LOCAL_ONLY, local_qwen, openvault, #272, #71 | Cortex stamps served_* from OV response; local hop arming; LOCAL_ONLY fail-closed. OV#71 wire names confirmed; local not proven. | `2026-09-25_cortex-272-local-1.md` |
+| 2026-09-25 | cortex-272-local-1 | freeroute, served_local, LOCAL_ONLY, local_qwen, openvault, #272, #71 | Cortex stamps served_* from OV response; local hop arming; LOCAL_ONLY fail-closed. OV#71 edead3c4; JSON boolean true only; local not proven. | `2026-09-25_cortex-272-local-1.md` |
 | 2026-09-25 | cortex-269-router1 | freeroute, router, held-out, shadow, split, token cost, insights, #269 | Additive token/split store; shadow/heldout/benchmark never train pick; Insights served_* unproven until #272; baseline refuses unless LEARN is explicit. | `2026-09-25_cortex-269-router1.md` |
 | 2026-09-25 | cortex-211-narrow-plan-source | insights, plan_source, ontology_plan, generative-ask, #211, #231 | Insights stamps plan_source=ontology_plan only for validated ontology generate SQL. Missing stamp was why Studio scored other. | `2026-09-25_cortex-211-narrow-plan-source.md` |
 | 2026-09-23 | cortex-cot-climb-covering | cot, climb, covering, exact, g1, freeroute, #212 | Covering increment: G1 plan consumed in think; this_run.exact vs certified gold. INCOMPLETE; #212 OPEN. | `2026-09-23_cortex-cot-climb-covering.md` |

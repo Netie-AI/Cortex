@@ -158,6 +158,7 @@ _CORTEX_272_LINT_REQUIRED = (
     "test_local_only_unavailable_local_model_not_loaded",
     "test_local_only_unavailable_local_base_url_not_loopback",
     "test_local_only_sealed_is_403_openvault_vault_sealed",
+    "test_served_local_and_local_only_require_json_boolean_true",
 )
 
 

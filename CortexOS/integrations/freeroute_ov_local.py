@@ -1,15 +1,24 @@
 """Isolated OpenVault LOCAL-1 field adapter (Cortex #272).
 
-OpenVault#71 adopts these wire names exactly: ``served_provider``,
-``served_model``, ``served_local``, ``local_only``, ``local_reason``.
-Those five are no longer PENDING.
+OpenVault#71 merged on OpenVault main at ``edead3c4``
+(https://github.com/Netie-AI/OpenVault/pull/71). Confirmed names
+(no PENDING): ``local_qwen``, ``served_provider``, ``served_model``,
+``served_local``, ``local_only``, ``local_reason``, HTTP 503
+``openvault_local_only_unavailable`` with ``error.reason``, HTTP 403
+``openvault_vault_sealed``.
 
-PENDING OpenVault#71 extras Cortex does not read: ``X-OpenVault-Served-*``
-headers, SSE ``served_*`` copies, internal ``ProviderSpec.local_hop`` /
-``tier="local"``. Do not treat those as Cortex stamp fields.
+``served_local`` and ``local_only`` are true only for the JSON boolean
+``true``. ``"true"``, ``1``, ``null``, and missing are not local / not
+local-only (fail-closed). ``local_reason`` is ``""`` or one of
+``local_unreachable``, ``local_model_not_loaded``,
+``local_base_url_not_loopback``.
 
-Ceiling: local is not proven until a served run shows ``served_local=true``
-on every call.
+PENDING extras Cortex does not read: ``X-OpenVault-Served-*`` headers,
+SSE ``served_*`` copies, internal ``ProviderSpec.local_hop`` /
+``tier="local"``.
+
+Ceiling: merged, local not proven until a served run shows
+``served_local=true`` on every call.
 """
 
 from __future__ import annotations
@@ -54,6 +63,16 @@ def _error_object(data: Any) -> Mapping[str, Any]:
     return err if isinstance(err, Mapping) else {}
 
 
+def json_true(value: Any) -> bool:
+    """OV#71: only the JSON boolean ``true`` counts. ``\"true\"`` / ``1`` do not."""
+    return value is True
+
+
+def local_only_flag(data: Any) -> bool:
+    """True only when ``local_only`` is the JSON boolean ``true``."""
+    return json_true(_as_mapping(data).get(LOCAL_ONLY_REQUEST))
+
+
 def served_from_response(data: Any) -> tuple[str | None, str | None, bool, str]:
     """Read OV#71 stamp fields. Missing => null/false plus a named reason.
 
@@ -79,7 +98,7 @@ def served_from_response(data: Any) -> tuple[str | None, str | None, bool, str]:
     if SERVED_LOCAL not in body:
         local = False
         reasons.append(MISSING_LOCAL)
-    elif body.get(SERVED_LOCAL) is True:
+    elif json_true(body.get(SERVED_LOCAL)):
         local = True
     else:
         local = False
@@ -89,11 +108,11 @@ def served_from_response(data: Any) -> tuple[str | None, str | None, bool, str]:
 
 
 def hop_reported_local(row: Any) -> bool:
-    """True only when the row explicitly sets served_local True.
+    """True only when the row sets served_local to the JSON boolean true.
 
-    Never inferred from provider id or model name.
+    Never inferred from provider id or model name. ``\"true\"`` / ``1`` fail closed.
     """
-    return _as_mapping(row).get(SERVED_LOCAL) is True
+    return json_true(_as_mapping(row).get(SERVED_LOCAL))
 
 
 def local_only_request_fields() -> dict[str, Any]:
@@ -102,9 +121,14 @@ def local_only_request_fields() -> dict[str, Any]:
 
 
 def local_arming_reason(data: Any) -> str:
-    """Pass-through of OpenVault ``local_reason`` (status or hop). Empty when absent."""
+    """OV#71 ``local_reason``: ``\"\"`` or one of the three named values."""
     raw = _as_mapping(data).get(LOCAL_ARMING_REASON)
-    return raw.strip() if isinstance(raw, str) and raw.strip() else ""
+    if not isinstance(raw, str):
+        return ""
+    val = raw.strip()
+    if val in LOCAL_UNAVAILABLE_REASONS:
+        return val
+    return ""
 
 
 def chat_error_fields(data: Any) -> tuple[str, str]:
@@ -172,7 +196,9 @@ __all__ = [
     "chat_error_fields",
     "count_local_spendable",
     "hop_reported_local",
+    "json_true",
     "local_arming_reason",
+    "local_only_flag",
     "local_only_request_fields",
     "local_only_unavailable",
     "served_from_response",

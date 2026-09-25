@@ -7,13 +7,14 @@
 > response only. `CORTEX_FREEROUTE_LOCAL_ONLY=1` refuse-and-drop, no
 > cloud fallback. Insights served_* copy the served RouteStamp (empty
 > stamp stays null/false plus a reason). Stubbed transport only.
-> OpenVault#71 confirms served_provider/served_model/served_local/
-> local_only/local_reason and `local_qwen`. LOCAL_ONLY unavailable is
-> 503 `openvault_local_only_unavailable` plus a named local_reason;
-> sealed stays 403 `openvault_vault_sealed`. Headers/SSE copies stay
-> PENDING. Did not edit #269/#273 store/pick. Ceiling:
-> merged-but-unproven, **local not proven**. Not PASS. Not COMPLETE.
-> Did not close #272. Off freeze #4/#41-#44. Rebased onto #273 / OV#71.
+> OpenVault#71 merged at `edead3c4` confirms local_qwen,
+> served_provider/served_model/served_local/local_only/local_reason,
+> 503 `openvault_local_only_unavailable` plus a named local_reason,
+> and 403 `openvault_vault_sealed`. served_local/local_only are JSON
+> boolean true only. Headers/SSE copies stay PENDING. Did not edit
+> #269/#273 store/pick. Ceiling: merged, **local not proven**. Not
+> PASS. Not COMPLETE. Did not close #272. Off freeze #4/#41-#44.
+> Rebased onto #273 / OV#71 `edead3c4`.
 
 > **2026-09-25 (CORTEX-269-ROUTER-1):** Cortex #269 ROUTER-1. FreeRoute
 > store is additive: prompt/completion/total tokens + split tag
