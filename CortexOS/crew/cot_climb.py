@@ -150,6 +150,34 @@ def _ranked_columns(ranking: Mapping[str, Any]) -> dict[str, list[str]]:
     return out
 
 
+def _warehouse_columns_check(checked: dict[str, Any]) -> dict[str, Any]:
+    """Refuse ontology-valid SQL whose columns the executing warehouse lacks.
+
+    The crew ``validate_sql`` checks against the ontology's column list. When
+    that list drifts from the warehouse that runs the query, the SQL passes
+    here and fails the consumer's EXPLAIN (BinderException). Resolve columns
+    against the serving warehouse's real schema via ``CortexOS.execution``
+    (which owns DuckDB); no warehouse file means the check did not run, and
+    ``check`` says so rather than claiming it.
+    """
+    if not checked.get("ok"):
+        return checked
+    from CortexOS.execution.schema_check import check_generated_sql
+
+    result = check_generated_sql(str(checked.get("sql") or ""))
+    if not result.checked:
+        return {**checked, "check": f"{checked.get('check') or ''}; warehouse columns not checked ({result.detail})"}
+    if result.ok:
+        return {**checked, "check": f"{checked.get('check') or ''}; columns resolved against executing warehouse"}
+    return {
+        "ok": False,
+        "sql": None,
+        "tables": list(checked.get("tables") or []),
+        "reason": "column not in executing warehouse: " + ", ".join(result.violations[:4]),
+        "check": "refused",
+    }
+
+
 async def _call_runner(
     runner: Any,
     *,
@@ -886,7 +914,7 @@ async def climb(
 
         sql = fr.extract_sql(str(gen.get("text") or ""))
         extracted = str(sql or "").strip()
-        checked = fr.validate_sql(sql or "", allowed, columns=columns)
+        checked = _warehouse_columns_check(fr.validate_sql(sql or "", allowed, columns=columns))
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
