@@ -12,6 +12,11 @@ conflicting top-N), the ask is a named ABSTAIN:
 
 Only typed parameters the certified query already declares are applied: today
 that is ``LIMIT`` (top-N) from the caller's ``query_plan``.
+
+The residue check fails closed: a character it cannot read (non-ASCII script,
+full-width Latin, operators such as ``!=``) abstains as ``chars(...)``, a short
+all-caps token (``MY``) is never filler, and an unknown ``query_plan`` key
+abstains as ``plan_key(...)``.
 """
 
 from __future__ import annotations
@@ -36,7 +41,6 @@ _FILLER = frozenset(
         "please",
         "show",
         "me",
-        "us",
         "give",
         "tell",
         "list",
@@ -45,7 +49,6 @@ _FILLER = frozenset(
         "is",
         "are",
         "our",
-        "my",
         "can",
         "could",
         "you",
@@ -55,8 +58,19 @@ _FILLER = frozenset(
         "need",
         "would",
         "like",
+        "hi",
+        "hello",
+        "thanks",
+        "thank",
     }
 )
+# Characters the residue check can see. _norm keeps only [a-z0-9], so any other
+# character (a non-ASCII script, full-width Latin, an operator such as != or <)
+# would vanish before the check; an intent carrying one abstains instead.
+_PLAIN = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789?.,!' \t\n")
+_MAX_LIMIT = 10_000
+# The keys DMS semantic_retrieve.bind_plan emits; each one is checked below.
+_PLAN_KEYS = frozenset({"measure", "group_by", "filters", "keep_gt", "limit"})
 _NUM = re.compile(r"\b\d+\b")
 
 
@@ -105,6 +119,12 @@ def _grain(stmt: Any) -> set[str]:
         for p in (proj.unalias() for proj in stmt.expressions)
         if isinstance(p, exp.Column)
     }
+
+
+def _phrase_chars(row: Mapping[str, Any]) -> set[str]:
+    """Punctuation the certified wording itself uses (e.g. the '-' in high-risk)."""
+    raw = [row.get("question"), *(row.get("synonyms") or [])]
+    return {ch for p in raw for ch in str(p or "") if ch.isascii()}
 
 
 def _limit(stmt: Any) -> int | None:
@@ -168,12 +188,23 @@ def resolve(
         # The ask resolves to a certified lookup/count, not a measure: out of scope.
         return None
 
+    allowed = _PLAIN | _phrase_chars(rows[cid])
+    odd = sorted({ch for ch in intent if ch not in allowed})
+    if odd:
+        return _abstain(cid, "chars(" + "".join(odd)[:20] + ")")
+    # A short all-caps token ("MY", "US", "IS") is a code, never filler.
+    codes = {t.lower() for t in re.findall(r"[A-Za-z0-9]+", intent) if t.isupper() and len(t) <= 3}
+
     residue = re.sub(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", " ", intent_norm, count=1)
-    extra = [w for w in residue.split() if w not in _FILLER]
+    extra = [w for w in residue.split() if w not in _FILLER or w in codes]
     if extra:
         return _abstain(cid, "terms(" + " ".join(extra)[:80] + ")")
 
     plan = query_plan if isinstance(query_plan, Mapping) else {}
+    unknown = sorted(str(k) for k in plan if k not in _PLAN_KEYS)
+    if unknown:
+        # A key this check does not read could carry a filter it would ignore.
+        return _abstain(cid, "plan_key(" + ",".join(unknown)[:60] + ")")
     if plan.get("filters"):
         return _abstain(cid, "filter")
     if plan.get("keep_gt") is not None:
@@ -187,12 +218,10 @@ def resolve(
     raw_limit = plan.get("limit")
     want: int | None = None
     if raw_limit is not None:
-        try:
-            want = int(raw_limit)
-        except (TypeError, ValueError):
+        # Only a plain int in range: a bool, float, string or huge value is not a top-N.
+        if type(raw_limit) is not int or not 0 < raw_limit <= _MAX_LIMIT:
             return _abstain(cid, "limit")
-        if want <= 0:
-            return _abstain(cid, "limit")
+        want = raw_limit
         if want == _DMS_DEFAULT_LIMIT:
             want = None
     have = _limit(stmt)
