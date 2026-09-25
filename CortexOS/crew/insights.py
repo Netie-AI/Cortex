@@ -1117,7 +1117,9 @@ def stamp_plan_source(
         envelope.pop("query_sql", None)
     if isinstance(attached, dict):
         attached["plan_source"] = source
-    return envelope
+    from CortexOS.integrations import freeroute as core
+
+    return core.stamp_router_fingerprint(envelope)
 
 
 async def generative_ask(
@@ -1470,6 +1472,15 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         climb: dict[str, Any] = climb_raw if isinstance(climb_raw, dict) else {}
         if climb:
             gen_line += f"\nclimb: {climb.get('final') or 'none'} complete=False"
+    fp_line = (
+        f"\nserved_provider: {envelope.get('served_provider')}\n"
+        f"served_model: {envelope.get('served_model')}\n"
+        f"served_local: {envelope.get('served_local')}\n"
+        f"served_reason: {envelope.get('served_reason') or ''}\n"
+        f"learn_enabled: {envelope.get('learn_enabled')}\n"
+        f"learn_source: {envelope.get('learn_source') or ''}\n"
+        f"route_store_id: {envelope.get('route_store_id') or ''}"
+    )
     return (
         f"status: {status}\n"
         f"phase: {envelope.get('phase')}\n"
@@ -1484,4 +1495,5 @@ def render_tool_text(envelope: dict[str, Any]) -> str:
         f"export: prefer {BACKEND_CF_COMPUTER} (Excel/PPT deferred)\n"
         f"scale: 1GB to 10TB is a design target only; not COMPLETE"
         f"{gen_line}"
+        f"{fp_line}"
     )

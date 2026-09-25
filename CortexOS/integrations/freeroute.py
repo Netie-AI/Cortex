@@ -89,8 +89,27 @@ _store_error: dict[str, str] = {}
 
 _journal_var: ContextVar[list[RouteStamp] | None] = ContextVar("freeroute_journal", default=None)
 _shadow_var: ContextVar[bool] = ContextVar("freeroute_shadow", default=False)
+_split_var: ContextVar[str] = ContextVar("freeroute_split", default="product")
 _transport_var: ContextVar[tuple[Callable[..., Any], str] | None] = ContextVar(
     "freeroute_transport", default=None
+)
+
+SPLIT_TRAIN = "train"
+SPLIT_HELDOUT = "heldout"
+SPLIT_PRODUCT = "product"
+SPLIT_BENCHMARK = "benchmark"
+SPLITS = frozenset({SPLIT_TRAIN, SPLIT_HELDOUT, SPLIT_PRODUCT, SPLIT_BENCHMARK})
+NON_LEARNING_SPLITS = frozenset({SPLIT_HELDOUT, SPLIT_BENCHMARK})
+# pick() reads through _stats/_rows. Shadow, held-out, and benchmark rows
+# never train. Do not drop this filter to make a query pass.
+_LEARNING_FILTER_SQL = (
+    "shadow = 0 AND IFNULL(split, 'product') NOT IN ('heldout', 'benchmark')"
+)
+# Cortex #268 (masking) is not this slice. Record the setup; do not compare.
+MASKING_STATE = "off"
+SERVED_PENDING_272 = (
+    "served_provider/served_model/served_local wait for Cortex #272 LOCAL-1; "
+    "not inferred from requested model or OpenVault chat model name"
 )
 
 
@@ -443,7 +462,20 @@ def store_path() -> Path:
 
 
 def _learning() -> bool:
+    # Default stays 1 when unset (founder decision; not this slice).
     return (os.environ.get(LEARN_ENV) or "1").strip() != "0"
+
+
+def learn_state() -> dict[str, Any]:
+    """Effective CORTEX_FREEROUTE_LEARN plus whether it came from env or default."""
+    if LEARN_ENV not in os.environ:
+        return {"learn_enabled": _learning(), "learn_source": "default"}
+    return {"learn_enabled": _learning(), "learn_source": "env"}
+
+
+def _normalize_split(raw: str | None) -> str:
+    val = (raw or "").strip().lower()
+    return val if val in SPLITS else SPLIT_PRODUCT
 
 
 _SCHEMA = """
@@ -459,11 +491,31 @@ CREATE TABLE IF NOT EXISTS routes (
     latency_ms REAL NOT NULL,
     impl TEXT NOT NULL,
     shadow INTEGER NOT NULL,
-    ts REAL NOT NULL
+    ts REAL NOT NULL,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    total_tokens INTEGER,
+    split TEXT NOT NULL DEFAULT 'product'
 );
 CREATE INDEX IF NOT EXISTS routes_task_requested ON routes(task, requested, ts);
 CREATE INDEX IF NOT EXISTS routes_task_served ON routes(task, served, ts);
 """
+
+_ADDITIVE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("prompt_tokens", "INTEGER"),
+    ("completion_tokens", "INTEGER"),
+    ("total_tokens", "INTEGER"),
+    ("split", "TEXT NOT NULL DEFAULT 'product'"),
+)
+
+
+def _apply_schema(con: sqlite3.Connection) -> None:
+    """Create-if-missing, then ALTER ADD only. Never DROP / rename / retype."""
+    con.executescript(_SCHEMA)
+    existing = {row[1] for row in con.execute("PRAGMA table_info(routes)")}
+    for name, decl in _ADDITIVE_COLUMNS:
+        if name not in existing:
+            con.execute(f"ALTER TABLE routes ADD COLUMN {name} {decl}")
 
 
 def _note_store_error(exc: BaseException) -> None:
@@ -480,20 +532,26 @@ _store_lock = threading.RLock()
 _initialized: set[str] = set()
 
 
+def _init_file(path: Path) -> None:
+    """Schema + WAL + additive columns once per path."""
+    key = str(path)
+    if key in _initialized:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(key, timeout=5.0)
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        _apply_schema(con)
+        con.commit()
+    finally:
+        con.close()
+    _initialized.add(key)
+
+
 def _open_for_write(path: Path) -> sqlite3.Connection:
     """Schema and WAL once per path (both need an exclusive lock), then plain inserts."""
-    key = str(path)
-    if key not in _initialized:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(key, timeout=5.0)
-        try:
-            con.execute("PRAGMA journal_mode=WAL")
-            con.executescript(_SCHEMA)
-            con.commit()
-        finally:
-            con.close()
-        _initialized.add(key)
-    return sqlite3.connect(key, timeout=5.0)
+    _init_file(path)
+    return sqlite3.connect(str(path), timeout=5.0)
 
 
 @contextmanager
@@ -510,6 +568,8 @@ def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
             if not path.is_file():
                 yield None
                 return
+            with _store_lock:
+                _init_file(path)
             con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
         yield con
         if write:
@@ -524,14 +584,46 @@ def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
             _store_lock.release()
 
 
-def _write_row(stamp: RouteStamp, *, scored: bool) -> None:
+def _usage_tokens(
+    usage: Mapping[str, Any] | None,
+) -> tuple[int | None, int | None, int | None]:
+    """Prompt / completion / total from the provider usage object. Not USD."""
+
+    def _int(key: str) -> int | None:
+        if not usage:
+            return None
+        val = usage.get(key)
+        if isinstance(val, bool) or not isinstance(val, int | float):
+            return None
+        return int(val)
+
+    prompt = _int("prompt_tokens")
+    completion = _int("completion_tokens")
+    total = _int("total_tokens")
+    if total is None and (prompt is not None or completion is not None):
+        total = int(prompt or 0) + int(completion or 0)
+    return prompt, completion, total
+
+
+def _write_row(
+    stamp: RouteStamp,
+    *,
+    scored: bool,
+    usage: Mapping[str, Any] | None = None,
+    split: str = SPLIT_PRODUCT,
+) -> None:
     if not _learning():
         return
+    prompt_tokens, completion_tokens, total_tokens = _usage_tokens(usage)
     with _connect(write=True) as con:
         if con is None:
             return
         con.execute(
-            "INSERT OR REPLACE INTO routes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO routes ("
+            "call_id, task, requested, served, status, usable, scored, verdict, "
+            "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
+            "total_tokens, split"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 stamp.call_id,
                 stamp.task,
@@ -545,11 +637,16 @@ def _write_row(stamp: RouteStamp, *, scored: bool) -> None:
                 stamp.impl,
                 1 if _shadow_var.get() else 0,
                 time.time(),
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                _normalize_split(split),
             ),
         )
 
 
 def _rows(task: str) -> list[sqlite3.Row]:
+    """Learning rows only. Shadow / held-out / benchmark never train pick()."""
     with _connect(write=False) as con:
         if con is None:
             return []
@@ -557,7 +654,9 @@ def _rows(task: str) -> list[sqlite3.Row]:
         try:
             return list(
                 con.execute(
-                    "SELECT * FROM routes WHERE task = ? ORDER BY ts DESC LIMIT ?",
+                    "SELECT * FROM routes WHERE task = ? AND "
+                    + _LEARNING_FILTER_SQL
+                    + " ORDER BY ts DESC LIMIT ?",
                     (task, SCORE_WINDOW * MAX_CANDIDATES),
                 )
             )
@@ -591,7 +690,24 @@ class ModelStats:
     score: float | None = None
     scored_n: int = 0
     mean_latency_ms: float = 0.0
+    mean_cost: float | None = None
     ineligible: str = ""
+
+
+def _row_cost(row: Mapping[str, Any]) -> float | None:
+    """Token cost from stored provider usage. Not USD; never invented."""
+    keys = row.keys() if hasattr(row, "keys") else ()
+    total = row["total_tokens"] if "total_tokens" in keys else None
+    if total is not None:
+        try:
+            return float(total)
+        except (TypeError, ValueError):
+            return None
+    prompt = row["prompt_tokens"] if "prompt_tokens" in keys else None
+    completion = row["completion_tokens"] if "completion_tokens" in keys else None
+    if prompt is None and completion is None:
+        return None
+    return float(prompt or 0) + float(completion or 0)
 
 
 def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
@@ -617,6 +733,13 @@ def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
         st.scored = len(scored)
         if scored:
             st.mean_latency_ms = round(sum(float(r["latency_ms"]) for r in scored) / len(scored), 1)
+            costs = []
+            for row in scored:
+                cost = _row_cost(row)
+                if cost is not None:
+                    costs.append(cost)
+            if costs:
+                st.mean_cost = round(sum(costs) / len(costs), 1)
         # Validity belongs to the model that answered. OpenVault may serve a
         # different one than was asked for, and two requested ids can share a
         # served model, so scoring by request would grade the wrong subject.
@@ -765,14 +888,16 @@ class Completion:
 
 
 @contextmanager
-def journal(*, shadow: bool = False) -> Iterator[list[RouteStamp]]:
+def journal(*, shadow: bool = False, split: str | None = None) -> Iterator[list[RouteStamp]]:
     """Collect every stamp written inside this block (threads via copy_context)."""
     stamps: list[RouteStamp] = []
     token = _journal_var.set(stamps)
     shadow_token = _shadow_var.set(shadow)
+    split_token = _split_var.set(_normalize_split(split))
     try:
         yield stamps
     finally:
+        _split_var.reset(split_token)
         _shadow_var.reset(shadow_token)
         _journal_var.reset(token)
 
@@ -860,6 +985,7 @@ def complete(
     egress: str = "",
     tools: list[dict[str, Any]] | None = None,
     bearer: str | None = None,
+    split: str = "",
 ) -> Completion:
     """One FreeRoute call. Never raises. Refusals are named and stamped."""
     task = (task or "unnamed").strip()
@@ -962,7 +1088,12 @@ def complete(
                     _arming_cache.clear()
                     _vault_cache.clear()
     stamp.error = reason
-    _write_row(stamp, scored=scored)
+    _write_row(
+        stamp,
+        scored=scored,
+        usage=usage,
+        split=split or _split_var.get(),
+    )
     _journal_add(stamp)
     return Completion(
         ok=status == 200 and stamp.usable,
@@ -999,10 +1130,54 @@ def scoreboard(task: str | None = None) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def store_state() -> dict[str, Any]:
+    """Route-store id at call time: row count plus a hash of call_ids. No secrets."""
+    path = store_path()
+    empty = {"id": "n=0:empty", "row_count": 0, "sha256": "", "path": str(path)}
+    if not path.is_file():
+        return empty
+    with _connect(write=False) as con:
+        if con is None:
+            return empty
+        rows = list(con.execute("SELECT call_id FROM routes ORDER BY ts, call_id"))
+    n = len(rows)
+    digest = hashlib.sha256("\n".join(r[0] for r in rows).encode("utf-8")).hexdigest()[:16] if n else ""
+    return {
+        "id": f"n={n}:{digest}" if n else "n=0:empty",
+        "row_count": n,
+        "sha256": digest,
+        "path": str(path),
+    }
+
+
+def router_fingerprint() -> dict[str, Any]:
+    """Insights setup fields. served_* stay unproven until #272; never guessed."""
+    learn = learn_state()
+    store = store_state()
+    return {
+        "served_provider": None,
+        "served_model": None,
+        "served_local": False,
+        "served_reason": SERVED_PENDING_272,
+        "learn_enabled": learn["learn_enabled"],
+        "learn_source": learn["learn_source"],
+        "route_store_id": store["id"],
+        "route_store": store,
+        "masking_state": MASKING_STATE,
+    }
+
+
+def stamp_router_fingerprint(envelope: dict[str, Any]) -> dict[str, Any]:
+    envelope.update(router_fingerprint())
+    return envelope
+
+
 def public_status(task: str | None = None) -> dict[str, Any]:
     arm = arming()
     models, source = candidates(arm) if arm.armed else ((), "")
     stats = _stats(task, list(models)) if task and models else {}
+    learn = learn_state()
+    store = store_state()
     return {
         "layer": "OpenVault FreeRoute (one Cortex model layer)",
         "impl": _transport()[1],
@@ -1011,10 +1186,14 @@ def public_status(task: str | None = None) -> dict[str, Any]:
         "candidates": list(models),
         "candidate_source": source,
         "measured": {m: asdict(s) for m, s in stats.items()},
+        "measured_excludes": ["shadow", "heldout", "benchmark"],
         "scoreboard": scoreboard(task),
         "store": str(store_path()),
         "store_error": store_error(),
-        "learning": _learning(),
+        "learning": learn["learn_enabled"],
+        "learn_source": learn["learn_source"],
+        "route_store_id": store["id"],
+        "masking_state": MASKING_STATE,
     }
 
 
@@ -1035,8 +1214,15 @@ __all__ = [
     "Arming",
     "Completion",
     "IMPL",
+    "LEARN_ENV",
+    "MASKING_STATE",
     "Pick",
     "RouteStamp",
+    "SERVED_PENDING_272",
+    "SPLIT_BENCHMARK",
+    "SPLIT_HELDOUT",
+    "SPLIT_PRODUCT",
+    "SPLIT_TRAIN",
     "TOKEN_ENV",
     "arming",
     "auth_headers",
@@ -1047,6 +1233,7 @@ __all__ = [
     "identity",
     "journal",
     "last_line",
+    "learn_state",
     "leave_gate",
     "note_rejected",
     "note_verdict",
@@ -1055,9 +1242,12 @@ __all__ = [
     "public_status",
     "redact",
     "reset",
+    "router_fingerprint",
     "scoreboard",
+    "stamp_router_fingerprint",
     "store_error",
     "store_path",
+    "store_state",
     "unarmed",
     "use_transport",
 ]

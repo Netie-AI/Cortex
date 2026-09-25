@@ -2,6 +2,21 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-269-ROUTER-1 route store + fingerprint — 2026-09-25
+
+Cortex #269 ROUTER-1. Additive route-store columns for provider token
+usage and a `split` tag. Shadow, held-out, and benchmark rows do not
+train `pick` (`_rows`/`_stats` filter; pick ranking unchanged). Insights
+answers carry `served_provider`/`served_model`=null, `served_local`=false
+with a #272 reason, plus `learn_enabled`/`learn_source`/`route_store_id`.
+Never inferred from the requested model. Baseline script refuses unless
+`CORTEX_FREEROUTE_LEARN` is set and `arming()` is armed with
+`spendable_hops > 0`; writes the arming reason either way; does not invent
+baseline numbers; no live number counts until prove is armed. LEARN
+default unchanged. Did not touch arming logic or RouteStamp served_*
+(#272). Did not touch #235/#211/#265/#267/#268/#270/#272 or freeze
+#4/#41-#44. Did not close #269. No PASS.
+
 ## CORTEX-211-NARROW honest plan_source=ontology_plan — 2026-09-25
 
 Cortex #211 NARROW covering swap. Studio generative-ask on Insights now
