@@ -14,6 +14,8 @@ relabel. Reuses closed #196 Insights spine + FreeRoute arming. Unarmed
 fail-closed. No second vault. No DMS SoT edits. No OV LIVE_KEY rotate.
 PASS-honest-INCOMPLETE: no live DMS #231 re-prove (nearness is Studio
 ontology_plan > 39/52 WRONG=0). Off freeze #4/#41-#44. Did not close #211.
+HTTP `InsightsAskIn` stays the frozen OpenAPI shape (no `query_plan`/`mode`
+fields). Extra JSON is ignored; `plan_source` is never copied from `mode`.
 
 ## CORTEX-COT-CLIMB covering increment (G1 plan + exact vs gold) — 2026-09-23
 

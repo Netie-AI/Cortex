@@ -35,10 +35,6 @@ class InsightsAskIn(BaseModel):
     session_id: str = "demo"
     space_id: str | None = None
     consumer: str = Field(default="dms")
-    # Caller-typed ontology plan (DMS compute_query retry). Not a plan_source stamp.
-    query_plan: dict[str, Any] | None = None
-    # Hint only. Never copied onto plan_source (relabel shortcut).
-    mode: str = ""
 
 
 def resolved_intent(body: InsightsAskIn) -> str:
@@ -160,7 +156,6 @@ async def execute_insights(
         ask=body.ask,
         generate=body.generate,
         bearer=bearer,
-        query_plan=body.query_plan,
     )
     return stamp_api(result, consumer=consumer, alias=alias)
 

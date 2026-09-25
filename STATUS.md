@@ -10,6 +10,8 @@
 > so DMS #231 scored `other` (0/52). PASS-honest-INCOMPLETE -- no live Studio
 > re-prove. Reuses #196 Insights + FreeRoute arming. Unarmed fail-closed.
 > Off freeze #4/#41-#44. Did not dual-own #235/#239. Did not close #211.
+> HTTP InsightsAskIn stays the frozen OpenAPI 1.2.0 shape (no extra
+> query_plan/mode fields; extra JSON ignored). Contract json not regenerated.
 
 > **2026-09-23 (CORTEX-COT-CLIMB covering):** Cortex #212 covering increment
 > after leftover honesty @ c6df0d7c. Think-path consumes the G1
