@@ -1011,6 +1011,42 @@ def _abstain(
     return body
 
 
+def _generative_abstain(
+    *,
+    intent: str,
+    ranking: dict[str, Any],
+    reason: str,
+    shell_public: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Named ABSTAIN for a generate-path gate miss. No SQL, no figure."""
+    validation = _validation(
+        status="ABSTAIN",
+        ranking=ranking,
+        trial=None,
+        envelope={},
+        unused_trials=[],
+        extra_unsure=[{"id": "generative_sql", "kind": "sql", "why": reason}],
+    )
+    return {
+        "ok": True,
+        "status": "ABSTAIN",
+        "phase": "generate",
+        "intent": intent,
+        "answer": f"Abstained ({reason}). No number invented.",
+        "badge": "abstain",
+        "audit_id": None,
+        "values": [],
+        "sql_used": None,
+        "refuse_reason": reason,
+        "ontology": ranking,
+        "trials": [],
+        "validation": validation,
+        "law": LAW,
+        "export_runtime": export_runtime_hint(shell_public),
+        "scale": "1GB to 10TB is a design target only; not COMPLETE",
+    }
+
+
 def _sql_schema_prompt(intent: str, ranking: dict[str, Any]) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
@@ -1167,6 +1203,7 @@ async def generative_ask(
     complete: Any | None = None,
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
+    pack_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
@@ -1179,7 +1216,12 @@ async def generative_ask(
     from CortexOS.crew import cot_climb
 
     out = await cot_climb.climb(
-        intent, ranking, complete=complete, bearer=bearer, query_plan=query_plan
+        intent,
+        ranking,
+        complete=complete,
+        bearer=bearer,
+        query_plan=query_plan,
+        pack_dir=pack_dir,
     )
     if out.get("ok"):
         check = str(out.get("check") or "")
@@ -1278,9 +1320,28 @@ async def run_insights(
                 reason="no ontology path or metric for intent",
                 shell_public=shell_public,
             )
-        gen = await generative_ask(
-            text, ranking, complete=complete, bearer=bearer, query_plan=query_plan
-        )
+        try:
+            gen = await generative_ask(
+                text,
+                ranking,
+                complete=complete,
+                bearer=bearer,
+                query_plan=query_plan,
+                pack_dir=pack_dir,
+            )
+        except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
+            reason = f"generative_error:{type(exc).__name__}"
+            gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
+        if not gen.get("ok") and gen.get("status") == "ABSTAIN":
+            return _attach_generative(
+                _generative_abstain(
+                    intent=text,
+                    ranking=ranking,
+                    reason=str(gen.get("refuse_reason") or "generative_abstain"),
+                    shell_public=shell_public,
+                ),
+                gen,
+            )
         if not gen.get("ok"):
             return _attach_generative(
                 _refuse(

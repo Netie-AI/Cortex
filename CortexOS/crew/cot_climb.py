@@ -231,6 +231,127 @@ def gold_sql_for(case_id: str, expected_sql: str = "") -> str:
     return certified_gold_sql().get(str(case_id or "").strip(), "")
 
 
+# GEN-CERTIFIED-MEASURE-01: a certified formula that resolves the ask is law.
+# retrieve_ontology scores a certified phrase contained in the intent at >= 25
+# (20 + 5 L0 bonus). Token overlap alone scores far lower and does not bind.
+CERTIFIED_MEASURE_MISS = "certified_measure_not_used"
+_PHRASE_CERTIFIED = 25
+
+
+def _measure_sql(mid: str, pack_dir: Any = None) -> str:
+    from CortexOS.crew import insights as insights_mod
+
+    base = insights_mod._pack_dir(pack_dir)
+    doc = insights_mod._read_yaml(base / "semantic" / "certified_queries.yaml")
+    for row in doc.get("certified") or []:
+        if isinstance(row, Mapping) and str(row.get("id") or "").strip() == mid:
+            return str(row.get("sql") or "")
+    return ""
+
+
+def _canon(node: Any) -> Any:
+    """Parens and table qualifiers dropped; the tree still encodes precedence."""
+    from sqlglot import exp
+
+    out = node.copy()
+    while True:
+        parens = list(out.find_all(exp.Paren))
+        if not parens:
+            break
+        for paren in parens:
+            if paren is out:
+                out = paren.this
+            else:
+                paren.replace(paren.this)
+    for col in list(out.find_all(exp.Column)):
+        col.set("table", None)
+    # a * b == b * a: order commutative operands so a reorder is not a miss.
+    for node in reversed(list(out.walk())):
+        if isinstance(node, (exp.Add, exp.Mul)):
+            left, right = node.this, node.expression
+            if left is not None and right is not None and left.sql() > right.sql():
+                node.set("this", right)
+                node.set("expression", left)
+    return out
+
+
+def certified_measure(
+    ranking: Mapping[str, Any], *, pack_dir: Any = None
+) -> dict[str, Any] | None:
+    """The certified formula that resolves this ask, or None.
+
+    Only the top certified query whose verified question (or synonym) is a
+    phrase inside the intent binds, and only when its SELECT computes a formula
+    (arithmetic). A plain column or COUNT is not a formula the model could
+    invent differently. Loose metric synonyms do not bind.
+    """
+    import sqlglot
+    from sqlglot import exp
+
+    picks: list[tuple[int, str]] = []
+    for row in ranking.get("certified") or []:
+        if not isinstance(row, Mapping):
+            continue
+        mid = str(row.get("id") or "").strip()
+        score = int((row.get("importance") or {}).get("score") or 0)
+        if mid and score >= _PHRASE_CERTIFIED:
+            picks.append((-score, mid))
+    if not picks:
+        return None
+    mid = sorted(picks)[0][1]
+    sql = _measure_sql(mid, pack_dir)
+    if not sql.strip():
+        return None
+    try:
+        stmt = sqlglot.parse_one(sql, read="duckdb")
+    except Exception:  # noqa: BLE001 - an unparsable pack SQL binds nothing
+        return None
+    if not isinstance(stmt, exp.Select):
+        return None
+    arith = (exp.Add, exp.Sub, exp.Mul, exp.Div)
+    exprs = [
+        proj.sql(dialect="duckdb")
+        for proj in stmt.expressions
+        if any(isinstance(n, arith) for n in proj.walk())
+    ]
+    if not exprs:
+        return None
+    return {"id": mid, "expressions": exprs}
+
+
+def certified_measure_miss(sql: str, measure: Mapping[str, Any] | None) -> str:
+    """'' when ``sql`` computes every certified expression; else the named reason."""
+    if not measure:
+        return ""
+    import sqlglot
+
+    reason = f"{CERTIFIED_MEASURE_MISS}:{measure.get('id')}"
+    try:
+        stmt = sqlglot.parse_one(sql or "", read="duckdb")
+    except Exception:  # noqa: BLE001 - cannot prove the measure is used
+        return reason
+    if stmt is None:
+        return reason
+    nodes = [_canon(n) for n in stmt.walk()]
+    for text in measure.get("expressions") or []:
+        want = _canon(
+            sqlglot.parse_one(f"SELECT {text}", read="duckdb").expressions[0].unalias()
+        )
+        if not any(type(n) is type(want) and n == want for n in nodes):
+            return reason
+    return ""
+
+
+def _measure_lines(measure: Mapping[str, Any] | None) -> list[str]:
+    if not measure:
+        return []
+    return [
+        f"CERTIFIED MEASURE {measure.get('id')} (use this exact expression; "
+        "do not write your own formula):",
+        *[f"- {e}" for e in measure.get("expressions") or []],
+    ]
+
+
 def curated_intents() -> list[dict[str, str]]:
     """Pinned #180 intents. No scores. Ranking filled at measure time."""
     return [{"id": i, "intent": q} for i, q in DMS_180_CURATED]
@@ -341,6 +462,7 @@ def _sql_prompt(
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    certified: Mapping[str, Any] | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
@@ -348,6 +470,7 @@ def _sql_prompt(
         *_g1_plan_lines(g1),
         "",
         f"INTENT: {intent}",
+        *_measure_lines(certified),
     ]
     if isinstance(query_plan, Mapping):
         measure = str(query_plan.get("measure") or "").strip()
@@ -574,8 +697,14 @@ async def climb(
     bearer: str | None = None,
     ideas: Sequence[str] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    pack_dir: Any = None,
 ) -> dict[str, Any]:
-    """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
+    """CoT/route/improve through FreeRoute. Fail-closed when unarmed.
+
+    When a certified formula resolves the ask, SQL that does not compute it is
+    rejected like any other gate miss; exhausting the horizon on that miss is a
+    named ABSTAIN (``certified_measure_not_used:<id>``), never an invented formula.
+    """
     from CortexOS.crew import freeroute as fr
 
     text = (intent or "").strip()
@@ -622,6 +751,7 @@ async def climb(
         )
     runner = complete or fr.complete
     columns = _ranked_columns(ranking)
+    measure = certified_measure(ranking, pack_dir=pack_dir)
     idea_list = _idea_lines(ideas)
     g1_consumed = bool(_g1_plan_lines(g1))
     prior_sql_consumed = False
@@ -685,6 +815,7 @@ async def climb(
             ideas=idea_list,
             g1=g1,
             query_plan=query_plan,
+            certified=measure,
         )
         if journal is not None:
             with journal as stamps:
@@ -723,6 +854,10 @@ async def climb(
         sql = fr.extract_sql(str(gen.get("text") or ""))
         extracted = str(sql or "").strip()
         checked = fr.validate_sql(sql or "", allowed, columns=columns)
+        if checked.get("ok"):
+            miss = certified_measure_miss(str(checked.get("sql") or ""), measure)
+            if miss:
+                checked = {**checked, "ok": False, "reason": miss, "check": "refused"}
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
@@ -840,6 +975,23 @@ async def climb(
             continue
         break
 
+    if measure and last_reason.startswith(CERTIFIED_MEASURE_MISS + ":"):
+        return _envelope(
+            ok=False,
+            status="ABSTAIN",
+            arm=arm,
+            identity=identity,
+            climb=_climb_meta(
+                final="CERTIFIED_MEASURE_NOT_USED",
+                g1=g1,
+                steps=steps,
+                attempts=len([s for s in steps if s.get("kind") == "generate"]),
+                think_consumed=bool(think_text),
+                g1_consumed=g1_consumed,
+                prior_sql_consumed=prior_sql_consumed,
+            ),
+            refuse_reason=last_reason,
+        )
     return _envelope(
         ok=False,
         status="REFUSE",
