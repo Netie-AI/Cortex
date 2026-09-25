@@ -9,8 +9,8 @@ from __future__ import annotations
 import ipaddress
 from typing import Any
 
+from CortexOS.integrations import direct_providers, openvault_client
 from CortexOS.integrations import freeroute as core
-from CortexOS.integrations import openvault_client
 
 _LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost"})
 _LOCAL_HOP_PROVIDERS = frozenset(
@@ -65,7 +65,11 @@ def relay_bearer(authorization: str, peer_host: str) -> str | None:
 
 
 def key_posture() -> dict[str, Any]:
-    """Local vs cloud key posture from the current FreeRoute arming snapshot."""
+    """Local vs cloud key posture from the current FreeRoute arming snapshot.
+
+    Custody comes from the arming itself: ``openvault`` normally, the
+    env-direct custody string when ``CORTEX_MODEL_TRANSPORT=env-direct``.
+    """
     snap = core.arming()
     local: list[str] = []
     cloud: list[str] = []
@@ -79,9 +83,12 @@ def key_posture() -> dict[str, Any]:
         elif provider not in cloud:
             cloud.append(provider)
     cred = core.identity()
-    return {
+    env_direct = direct_providers.enabled()
+    body: dict[str, Any] = {
         "ok": True,
-        "custody": "openvault",
+        "custody": snap.custody,
+        "transport": direct_providers.IMPL if env_direct else core.IMPL,
+        "process_env_provider_keys": env_direct,
         "second_vault": False,
         "callers_hold_provider_keys": False,
         "live_key_rotate": False,
@@ -108,3 +115,16 @@ def key_posture() -> dict[str, Any]:
             "provider key. live_5000_ci is always false."
         ),
     }
+    if env_direct:
+        # The operator opted out of OpenVault custody. Say so; never claim the vault.
+        body["vault_url_loopback"] = None
+        body["key_envs"] = [str(h.get("key_env") or "") for h in snap.hops_public]
+        body["note"] = (
+            f"{direct_providers.TRANSPORT_ENV}=env-direct: NOT OpenVault custody. "
+            "Provider keys are read from the Cortex process env (operator opt-in) "
+            "and sent by Cortex to each provider; OpenVault is not consulted. "
+            "Callers still do not present raw provider keys. This payload names "
+            "the env vars only, never their values, and never rotates a key. "
+            "live_5000_ci is always false."
+        )
+    return body

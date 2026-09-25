@@ -11,6 +11,8 @@ Lives outside ``CortexOS/api`` so the engine API tree does not import Crew
 No from __future__ import annotations (FastAPI route module rule).
 """
 
+import asyncio
+import contextlib
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -60,6 +62,41 @@ def _caller_refused(purpose: str) -> JSONResponse:
     return JSONResponse(body, status_code=401)
 
 
+def _served_stamp(envelope: dict[str, Any]) -> Any:
+    """The RouteStamp of the model call that served this envelope, or ``None``.
+
+    Read from ``generative.stamp`` (the generate call's own stamp) through the
+    same reader run_insights stamps with, so the HTTP envelope cannot disagree
+    with it. ``None`` (no model call) keeps the #272 pending text.
+    """
+    from CortexOS.crew import insights as insights_mod
+
+    return insights_mod._route_stamp_for_fingerprint(envelope)
+
+
+def _annotate_transport(envelope: dict[str, Any]) -> None:
+    """Say env-direct where the Crew route view still says ``connector: openvault``.
+
+    ``RoutePick.connector`` is fixed in the #215 Crew layer, which this lane does
+    not edit. The stamp's ``impl`` is what actually carried the call, so when it
+    is the env-direct transport the route is re-labelled here, at the API edge.
+    """
+    from CortexOS.integrations import direct_providers
+
+    gen = envelope.get("generative")
+    if not isinstance(gen, dict):
+        return
+    stamp = gen.get("stamp")
+    if not isinstance(stamp, dict) or stamp.get("impl") != direct_providers.IMPL:
+        return
+    route = gen.get("route")
+    if isinstance(route, dict):
+        route = dict(route)
+        route["connector"] = direct_providers.IMPL
+        route["custody"] = direct_providers.CUSTODY
+        gen["route"] = route
+
+
 def stamp_api(
     envelope: dict[str, Any],
     *,
@@ -69,7 +106,10 @@ def stamp_api(
     from CortexOS.integrations import freeroute as core
 
     out = dict(envelope)
-    core.stamp_router_fingerprint(out)
+    if isinstance(out.get("generative"), dict):
+        out["generative"] = dict(out["generative"])
+    _annotate_transport(out)
+    core.stamp_router_fingerprint(out, _served_stamp(out))
     out["api"] = {
         "stable": STABLE_ASK,
         "alias": alias,
@@ -107,8 +147,12 @@ def public_keys_body() -> dict[str, Any]:
 
 def public_identity_body() -> dict[str, Any]:
     from CortexOS.crew import freeroute as freeroute_mod
+    from CortexOS.integrations import direct_providers
 
     body = dict(freeroute_mod.public_identity())
+    if direct_providers.enabled():
+        # Crew's identity view hardcodes openvault; the env-direct opt-in is not that.
+        body["custody"] = direct_providers.CUSTODY
     body["http"] = {
         "stable": "GET /v1/insights/identity",
         "crew": "GET /crew/identity",
@@ -128,6 +172,105 @@ def ontology_body(intent: str) -> dict[str, Any]:
         "law": insights_mod.LAW,
         "live_5000_ci": False,
     }
+
+
+CLIENT_GONE = (
+    "client disconnected before this step; Cortex stopped spending "
+    "(no further model or engine calls)"
+)
+
+
+class DisconnectGuard:
+    """Stop spending once the HTTP caller has gone (DMS abandons at its timeout).
+
+    Starlette does not cancel a handler when the client disconnects, so without
+    this the climb keeps calling providers for an answer nobody will read. A
+    listener task awaits the ASGI ``http.disconnect`` (the body is already
+    read, so nothing else can arrive); the check runs on the event loop before
+    each model call and engine ask. It cannot recall a call already in flight,
+    only refuse the next one.
+
+    ``Request.is_disconnected()`` is not used: it polls with a pre-cancelled
+    scope, and behind a ``BaseHTTPMiddleware`` (the rate limiter) that poll is
+    cancelled before it reaches the server, so it never reports a disconnect.
+    """
+
+    _MAX_STRAY_MESSAGES = 8
+
+    def __init__(self, request: Request) -> None:
+        self._request = request
+        self._event = asyncio.Event()
+        self._task: asyncio.Task[None] | None = None
+        self.skipped: list[str] = []
+
+    @property
+    def gone(self) -> bool:
+        return self._event.is_set()
+
+    async def _listen(self) -> None:
+        try:
+            for _ in range(self._MAX_STRAY_MESSAGES):
+                message = await self._request.receive()
+                if message.get("type") == "http.disconnect":
+                    self._event.set()
+                    return
+        except Exception:  # noqa: BLE001 - an unreadable channel is not a disconnect
+            return
+
+    async def __aenter__(self) -> "DisconnectGuard":
+        self._task = asyncio.ensure_future(self._listen())
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        task, self._task = self._task, None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    async def client_gone(self) -> bool:
+        if not self._event.is_set():
+            await asyncio.sleep(0)  # let the listener take a pending disconnect
+        return self._event.is_set()
+
+    def complete(self, runner: Any) -> Any:
+        async def guarded(
+            messages: list[dict[str, Any]] | None = None,
+            *,
+            purpose: str = "think",
+            prompt: str = "",
+            bearer: str | None = None,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            if await self.client_gone():
+                self.skipped.append(f"model:{purpose}")
+                return {
+                    "ok": False,
+                    "status": "REFUSE",
+                    "purpose": purpose,
+                    "refused": CLIENT_GONE,
+                    "values": [],
+                    "live_5000_ci": False,
+                }
+            out = await runner(messages, purpose=purpose, prompt=prompt, bearer=bearer, **kwargs)
+            return out if isinstance(out, dict) else {}
+
+        return guarded
+
+    def bridge(self, inner: Any) -> Any:
+        guard = self
+
+        class _GuardedBridge:
+            base_url = getattr(inner, "base_url", "in-process")
+
+            async def ask(self, question: str) -> dict[str, Any]:
+                if await guard.client_gone():
+                    guard.skipped.append("engine:ask")
+                    return {"ok": False, "answer": CLIENT_GONE, "badge": "engine_offline"}
+                out = await inner.ask(question)
+                return out if isinstance(out, dict) else {}
+
+        return _GuardedBridge()
 
 
 async def execute_insights(
@@ -154,14 +297,21 @@ async def execute_insights(
             )
             if bearer is None:
                 return _caller_refused("generative_ask")
-    result = await insights_mod.run_insights(
-        intent,
-        bridge=LocalEngineBridge(session_id=body.session_id, space_id=body.space_id),
-        ask=body.ask,
-        generate=body.generate,
-        bearer=bearer,
-    )
-    return stamp_api(result, consumer=consumer, alias=alias)
+    async with DisconnectGuard(request) as guard:
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=guard.bridge(
+                LocalEngineBridge(session_id=body.session_id, space_id=body.space_id)
+            ),
+            ask=body.ask,
+            generate=body.generate,
+            bearer=bearer,
+            complete=guard.complete(freeroute_mod.complete) if body.generate else None,
+        )
+    out = stamp_api(result, consumer=consumer, alias=alias)
+    if guard.gone:
+        out["client_disconnected"] = True
+    return out
 
 
 @router.get("", operation_id="insights.law")
