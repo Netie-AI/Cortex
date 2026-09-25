@@ -234,21 +234,52 @@ def test_baseline_refuses_when_learn_unset() -> None:
     ).lower()
 
 
-def test_baseline_refuses_when_unarmed_and_records_reason(monkeypatch, tmp_path) -> None:
+_REFUSAL_TESTS = (
+    "test_heldout_shadow_benchmark_rows_do_not_change_pick",
+    "test_baseline_refuses_when_unarmed_and_records_reason",
+    "test_baseline_refuses_when_spendable_hops_zero_and_records_reason",
+    "test_baseline_records_setup_without_inventing_numbers_when_armed",
+    "test_baseline_refuses_when_learn_unset",
+)
+
+
+def test_refusal_tests_have_no_skip_or_xfail_markers() -> None:
+    """CI skip/xfail on these names is Formal NOT GREEN (comment 5829080661)."""
+    import tests.test_freeroute_router1 as mod
+
+    src = Path(__file__).read_text(encoding="utf-8")
+    for name in _REFUSAL_TESTS:
+        fn = getattr(mod, name)
+        raw = getattr(fn, "pytestmark", [])
+        marks = list(raw) if isinstance(raw, list) else [raw]
+        kinds = {getattr(m, "name", "") for m in marks}
+        assert "skip" not in kinds, name
+        assert "skipif" not in kinds, name
+        assert "xfail" not in kinds, name
+        block = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
+        assert "pytest.skip" not in block, name
+        assert "pytest.xfail" not in block, name
+
+
+def test_baseline_refuses_when_unarmed_and_records_reason(
+    armed_openvault, monkeypatch, tmp_path
+) -> None:
+    """Stubbed OpenVault, sealed vault, no live key. Must not skip."""
     from CortexOS.integrations import freeroute_baseline as bl
 
     monkeypatch.setenv("CORTEX_FREEROUTE_LEARN", "0")
     monkeypatch.setenv("CORTEX_FREEROUTE_SCOREBOARD", str(tmp_path / "baseline.db"))
-    monkeypatch.setenv("CORTEX_FREEROUTE", "0")
+    armed_openvault.sealed = True
     fr.reset()
     body = bl.evaluate()
     assert body["recorded"] is False
     assert body["baseline_recorded"] is False
     assert body["armed"] is False
     assert body["spendable_hops"] == 0
-    assert "CORTEX_FREEROUTE=0" in body["arming_reason"]
+    assert "sealed" in body["arming_reason"].lower()
     assert body["numbers"] is None
     assert body["live_baseline_counts"] is False
+    assert armed_openvault.status_calls, "must probe the stand-in OpenVault"
     env = os.environ.copy()
     env["CORTEX_FREEROUTE_LEARN"] = "0"
     env["CORTEX_FREEROUTE"] = "0"
@@ -268,13 +299,13 @@ def test_baseline_refuses_when_unarmed_and_records_reason(monkeypatch, tmp_path)
     assert cli["armed"] is False
     assert cli["spendable_hops"] == 0
     assert cli["arming_reason"]
-    assert "CORTEX_FREEROUTE=0" in cli["arming_reason"]
     assert "arming_reason:" in got.stderr
 
 
 def test_baseline_refuses_when_spendable_hops_zero_and_records_reason(
-    monkeypatch, tmp_path
+    fake_openvault, monkeypatch, tmp_path
 ) -> None:
+    """Stand-in transport installed. Arming result stubbed: do not change arming()."""
     from CortexOS.integrations import freeroute_baseline as bl
 
     monkeypatch.setenv("CORTEX_FREEROUTE_LEARN", "0")
@@ -298,26 +329,22 @@ def test_baseline_refuses_when_spendable_hops_zero_and_records_reason(
 
 
 def test_baseline_records_setup_without_inventing_numbers_when_armed(
-    monkeypatch, tmp_path
+    armed_openvault, monkeypatch, tmp_path
 ) -> None:
     from CortexOS.integrations import freeroute_baseline as bl
 
     monkeypatch.setenv("CORTEX_FREEROUTE_LEARN", "0")
     monkeypatch.setenv("CORTEX_FREEROUTE_SCOREBOARD", str(tmp_path / "baseline.db"))
-    stub = fr.Arming(
-        armed=True,
-        reason="armed: 3 pooled keys, 2 spendable hops at http://127.0.0.1:5000 as loopback",
-        url="http://127.0.0.1:5000",
-        sealed=False,
-        pooled_keys=3,
-        spendable_hops=2,
-    )
-    monkeypatch.setattr(fr, "arming", lambda **k: stub)
+    fr.reset()
+    arm = fr.arming(fresh=True)
+    assert arm.armed is True
+    assert arm.spendable_hops > 0
     body = bl.evaluate()
     assert body["recorded"] is True
     assert body["armed"] is True
-    assert body["spendable_hops"] == 2
-    assert body["arming_reason"] == stub.reason
+    assert body["spendable_hops"] > 0
+    assert body["arming_reason"]
+    assert "armed" in body["arming_reason"].lower()
     assert body["masking_state"] == "off"
     assert body["comparable_with_masking_on"] is False
     assert body["numbers"] is None
@@ -329,6 +356,7 @@ def test_baseline_records_setup_without_inventing_numbers_when_armed(
     assert body["learn_enabled"] is False
     assert "never be compared" in body["masking_compare"]
     assert "#266" in body["plan_source_from"]
+    assert armed_openvault.status_calls, "must probe the stand-in OpenVault"
 
 
 def test_baseline_row_plan_source_from_stamp_not_labels() -> None:

@@ -53,6 +53,18 @@ jobs:
         # what a consumer checks a vendored copy against.
         run: python scripts/check_contract_compat.py
 
+      - name: ROUTER-1 refusal tests (verbose, no skip)
+        # R-0007 / #269 comment 5829080661: names must appear PASSED in this
+        # job log. Stubbed OpenVault only. A skip here is Formal NOT GREEN.
+        run: |
+          python -m pytest -v --tb=short -ra \
+            tests/test_freeroute_router1.py::test_heldout_shadow_benchmark_rows_do_not_change_pick \
+            tests/test_freeroute_router1.py::test_baseline_refuses_when_unarmed_and_records_reason \
+            tests/test_freeroute_router1.py::test_baseline_refuses_when_spendable_hops_zero_and_records_reason \
+            tests/test_freeroute_router1.py::test_baseline_records_setup_without_inventing_numbers_when_armed \
+            tests/test_freeroute_router1.py::test_baseline_refuses_when_learn_unset \
+            tests/test_freeroute_router1.py::test_refusal_tests_have_no_skip_or_xfail_markers
+
       - name: Pytest
         run: python -m pytest tests/ -q --tb=short
 
