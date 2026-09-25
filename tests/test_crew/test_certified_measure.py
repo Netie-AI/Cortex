@@ -243,6 +243,63 @@ def test_extra_ask_the_certified_query_cannot_express_is_a_named_abstain(
 
 
 @pytest.mark.parametrize(
+    ("q", "what"),
+    [
+        # Qualifiers _norm would silently drop: non-ASCII scripts and operators.
+        ("What is total stock value by category? 仅限马来西亚供应商", "chars("),
+        ("What is our total spend by supplier country? ｅｘｃｌｕｄｉｎｇ ＭＹ", "chars("),
+        ("Show warehouse capacity utilisation கடந்த மாதம்", "chars("),
+        ("What is our total spend by supplier country? != MY", "chars(="),
+        ("What is our total spend by supplier country? <> MY", "chars(<>)"),
+        # Country codes are values, never filler.
+        ("What is our total spend by supplier country, MY?", "terms(my)"),
+        ("What is our total spend by supplier country to MY", "terms(my)"),
+        ("US: what is our total spend by supplier country", "chars(:)"),
+        ("What is our total spend by supplier country for us", "terms(for us)"),
+    ],
+)
+def test_qualifier_the_residue_check_cannot_read_is_a_named_abstain(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, q: str, what: str
+) -> None:
+    res, prompts = _ask(client, monkeypatch, q, INVENTED)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "ABSTAIN"
+    assert body["badge"] == "abstain"
+    assert body["values"] == []
+    assert body["refuse_reason"].startswith(f"{CANNOT}:{what}"), body["refuse_reason"]
+    assert body["refuse_reason"] in body["answer"]
+    assert "query_sql" not in body  # the unfiltered certified rows are not served
+    assert prompts == []
+
+
+def test_politeness_around_the_certified_phrase_still_serves(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    q = "Hi, please show warehouse capacity utilisation, thanks"
+    res, prompts = _ask(client, monkeypatch, q, INVENTED)
+    assert res.status_code == 200, res.text
+    sql = _assert_served(res.json(), "cq_capacity_utilisation", prompts)
+    assert Counter(_rows(sql)) == Counter(_rows(cot_climb.gold_sql_for("cq_capacity_utilisation")))
+
+
+@pytest.mark.parametrize("limit", [True, 2.9, "3", 10**30, 0, -1])
+def test_limit_that_is_not_a_plain_bounded_int_is_a_named_abstain(
+    crew_client: TestClient, monkeypatch: pytest.MonkeyPatch, limit: Any
+) -> None:
+    plan = {"measure": "risk", "group_by": [["supplier", "supplier_id"]], "limit": limit}
+    res, prompts = _ask(crew_client, monkeypatch, RANK_Q, INVENTED, query_plan=plan)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "ABSTAIN"
+    assert body["values"] == []
+    assert body["refuse_reason"] == f"{CANNOT}:limit"
+    assert body["refuse_reason"] in body["answer"]
+    assert "query_sql" not in body
+    assert prompts == []
+
+
+@pytest.mark.parametrize(
     ("q", "plan", "what"),
     [
         (
@@ -269,6 +326,11 @@ def test_extra_ask_the_certified_query_cannot_express_is_a_named_abstain(
             MEASURES["cq_sales_top5_value"],
             {"measure": "outbound_value_myr", "group_by": [["product", "sku"]], "limit": 3},
             "limit(3)",
+        ),
+        (
+            MEASURES["cq_stock_value_by_category"],
+            {"measure": "stock_value_myr", "filter": [["location", "location_code", "WH-A"]]},
+            "plan_key(filter)",
         ),
     ],
 )
