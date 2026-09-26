@@ -25,8 +25,14 @@ COPY packs ./packs
 COPY packages ./packages
 COPY contract ./contract
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+# Supply chain (R13.1, HX-02): every third-party wheel is exact-pinned and
+# hash-checked from requirements/image-core.lock.txt (scripts/lock_images.py,
+# never hand-edited), then the project goes in with --no-deps. No build
+# isolation, so the build backend is the hashed poetry-core from the lock.
+COPY requirements/image-core.lock.txt ./requirements/
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes \
+        -r requirements/image-core.lock.txt \
+    && pip install --no-cache-dir --no-deps --no-build-isolation .
 
 EXPOSE 8010
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

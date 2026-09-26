@@ -1,0 +1,6 @@
+# Ungated model egress debt, frozen at 03b545f (HX-02, R2.5). Owner: HX-08.
+# May only shrink: delete a line in the commit that routes its file through
+# CortexOS.integrations.harness.gate.call. Never add one.
+CortexOS/routing/adapters/anthropic.py
+CortexOS/routing/adapters/openai.py
+CortexOS/routing/adapters/vllm.py
