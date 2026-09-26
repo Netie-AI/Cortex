@@ -39,7 +39,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from CortexOS.integrations.harness import registry
+from CortexOS.integrations.harness import secrets as harness_secrets
+
 TRANSPORT_ENV = "CORTEX_MODEL_TRANSPORT"
+#: Comma list of registry ids env-direct may serve beyond the four defaults.
+OPT_IN_ENV = "CORTEX_DIRECT_PROVIDERS"
 IMPL = "env-direct"
 CUSTODY = "process-env (operator opt-in, not OpenVault)"
 URL = "env-direct:"
@@ -62,40 +67,30 @@ class Provider:
         return f"CORTEX_DIRECT_{self.label.upper()}_MODELS"
 
 
-# Order is the default exploration order. Defaults are models that answered a
-# live chat on 2026-09-25; override per provider with CORTEX_DIRECT_<P>_MODELS.
-PROVIDERS: tuple[Provider, ...] = (
-    Provider(
-        "google",
-        ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-        "https://generativelanguage.googleapis.com/v1beta/openai",
-        ("gemini-3-flash-preview",),
-    ),
-    Provider(
-        "nvidia",
-        ("NVIDIA_API_KEY",),
-        "https://integrate.api.nvidia.com/v1",
-        ("moonshotai/kimi-k3",),
-    ),
-    Provider(
-        "mistral",
-        ("MISTRAL_API_KEY",),
-        "https://api.mistral.ai/v1",
-        ("mistral-medium-latest",),
-    ),
-    Provider(
-        "cerebras",
-        ("CEREBRAS_API_KEY",),
-        "https://api.cerebras.ai/v1",
-        ("gpt-oss-120b",),
-    ),
+def _provider(row: registry.ProviderRow) -> Provider:
+    return Provider(row.id, row.key_envs, row.base_url, (row.default_model,) if row.default_model else ())
+
+
+# Derived from the one registry (harness/registry.py). Order is the default
+# exploration order; override models per provider with CORTEX_DIRECT_<P>_MODELS.
+PROVIDERS: tuple[Provider, ...] = tuple(_provider(registry.row(i)) for i in registry.DIRECT_DEFAULTS)
+#: Every row this transport can serve: bearer auth on the openai_compat wire to a
+#: fixed https host. Rows past the defaults are served only when listed in
+#: CORTEX_DIRECT_PROVIDERS (PRD R1.5). A row with no default model also needs
+#: CORTEX_DIRECT_<P>_MODELS, or it arms with an empty catalogue.
+CATALOGUE: tuple[Provider, ...] = tuple(
+    _provider(r)
+    for r in registry.ROWS
+    if r.shipped and r.wire == "openai_compat" and r.auth == "bearer" and r.base_url.startswith("https://")
 )
-_BY_LABEL = {p.label: p for p in PROVIDERS}
-#: Every env name a provider key is read from. Child processes never inherit these.
-KEY_ENVS: tuple[str, ...] = tuple(dict.fromkeys(n for p in PROVIDERS for n in p.key_envs))
+_BY_LABEL = {p.label: p for p in CATALOGUE}
+#: Every secret env name (provider keys, their _FILE forms, the OpenVault token).
+#: ``freeroute.child_env`` strips these, so a child never inherits a key.
+KEY_ENVS: tuple[str, ...] = harness_secrets.secret_env_names()
 
 _latch_lock = threading.Lock()
 _latched: bool | None = None
+_latched_opt_in: tuple[str, ...] | None = None
 
 
 def _read_opt_in(src: Mapping[str, str]) -> bool:
@@ -118,18 +113,38 @@ def enabled(env: Mapping[str, str] | None = None) -> bool:
 
 
 def reset_opt_in() -> None:
-    """Forget the latched opt-in; the next :func:`enabled` re-reads the env."""
-    global _latched
+    """Forget the latched opt-ins; the next read re-reads the env."""
+    global _latched, _latched_opt_in
     with _latch_lock:
         _latched = None
+        _latched_opt_in = None
+
+
+def _read_provider_opt_in(src: Mapping[str, str]) -> tuple[str, ...]:
+    ids = [i.strip().lower() for i in (src.get(OPT_IN_ENV) or "").split(",") if i.strip()]
+    return tuple(dict.fromkeys(i for i in ids if i in _BY_LABEL))
+
+
+def served_providers(env: Mapping[str, str] | None = None) -> tuple[Provider, ...]:
+    """The four defaults, then each catalogued row listed in CORTEX_DIRECT_PROVIDERS.
+
+    Process env is latched at first read, like :func:`enabled`, so a later
+    ``os.environ`` write cannot widen the served set. ``env`` given: not latched.
+    """
+    global _latched_opt_in
+    if env is not None:
+        ids = _read_provider_opt_in(env)
+    else:
+        with _latch_lock:
+            if _latched_opt_in is None:
+                _latched_opt_in = _read_provider_opt_in(os.environ)
+            ids = _latched_opt_in
+    return tuple(_BY_LABEL[i] for i in dict.fromkeys((*registry.DIRECT_DEFAULTS, *ids)))
 
 
 def _key(p: Provider, env: Mapping[str, str]) -> tuple[str, str]:
-    for name in p.key_envs:
-        value = (env.get(name) or "").strip()
-        if value:
-            return value, name
-    return "", ""
+    """Per call, from env or a mounted ``<ENV>_FILE``. Never written to os.environ."""
+    return harness_secrets.read_key(p.key_envs, env)
 
 
 def _models(p: Provider, env: Mapping[str, str]) -> tuple[str, ...]:
@@ -141,7 +156,7 @@ def configured(env: Mapping[str, str] | None = None) -> list[tuple[Provider, str
     """(provider, key env name, models) for each provider with a key set."""
     src = os.environ if env is None else env
     out = []
-    for p in PROVIDERS:
+    for p in served_providers(env):
         _, name = _key(p, src)
         if name:
             out.append((p, name, _models(p, src)))
@@ -152,7 +167,8 @@ def split_id(candidate: str) -> tuple[Provider | None, str]:
     label, sep, model = (candidate or "").partition(":")
     if not sep or not model:
         return None, ""
-    return _BY_LABEL.get(label.strip().lower()), model.strip()
+    wanted = label.strip().lower()
+    return next((p for p in served_providers() if p.label == wanted), None), model.strip()
 
 
 def _error(status: int, message: str, kind: str = "env_direct_refused") -> tuple[int, dict[str, Any]]:
@@ -229,7 +245,7 @@ def request_json(
     requested = str(payload.get("model") or "")
     provider, model = split_id(requested)
     if provider is None:
-        known = ", ".join(p.label for p in PROVIDERS)
+        known = ", ".join(p.label for p in served_providers())
         return _error(400, f"env-direct model id must be <provider>:<model> with provider in {known}; got {requested!r}")
     key, _name = _key(provider, os.environ)
     if not key:
@@ -308,10 +324,12 @@ def _json(raw: bytes) -> dict[str, Any] | None:
 
 __all__ = [
     "CLOUD_ONLY",
+    "CATALOGUE",
     "CUSTODY",
     "IMPL",
     "KEY_ENVS",
     "MAX_RESPONSE_BYTES",
+    "OPT_IN_ENV",
     "PROVIDERS",
     "Provider",
     "RELAY_REFUSED",
@@ -321,5 +339,6 @@ __all__ = [
     "enabled",
     "request_json",
     "reset_opt_in",
+    "served_providers",
     "split_id",
 ]

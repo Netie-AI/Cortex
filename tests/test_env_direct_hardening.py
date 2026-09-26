@@ -328,7 +328,8 @@ def test_child_env_strips_every_provider_key_env() -> None:
     src.update({fr.TOKEN_ENV: "ov_testtoken_abc", "PATH": "/bin", "HOME": "/h"})
     out = fr.child_env(src)
     assert out == {"PATH": "/bin", "HOME": "/h"}
-    assert set(direct_providers.KEY_ENVS) == set(ALL_KEY_ENVS)
+    # HX-01 (PRD R1.4): KEY_ENVS is now every secret env name, a superset of these.
+    assert set(ALL_KEY_ENVS) <= set(direct_providers.KEY_ENVS)
 
 
 def test_app_runner_child_gets_no_provider_key(monkeypatch, keys, tmp_path) -> None:

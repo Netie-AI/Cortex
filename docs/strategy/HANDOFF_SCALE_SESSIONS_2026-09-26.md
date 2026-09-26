@@ -75,3 +75,7 @@ Crew live eval:
 5. Open a **draft PR whose base is the parent branch above** (not main), so the parent can integrate.
 6. File a finding.
 7. Say in the PR body what was verified and what was assumed.
+
+## EPIC-HARNESS-ENT (#280)
+- The plan is `docs/strategy/PRD_EPIC_HARNESS_ENT.md`. Read §4 (requirements) and §11 (shared rules, ticket map) before starting an HX ticket.
+- HX-01 (branch `claude/cortex-hx-01`) adds the one provider registry and secret list under `CortexOS/integrations/harness/` (`registry.py`, `secrets.py`, stdlib only). Derive provider tables from it instead of adding another list. `direct_providers.KEY_ENVS` is now every secret env name, so `freeroute.child_env` strips all of them. New env-direct providers need `CORTEX_DIRECT_PROVIDERS=<id,...>`; a key can also come from a mounted `<ENV>_FILE`.

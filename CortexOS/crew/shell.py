@@ -30,6 +30,7 @@ from CortexOS.crew.config import (
     CrewSettings,
     parse_runtime_backend,
 )
+from CortexOS.integrations.harness import secrets as harness_secrets
 
 CF_COMPUTER_SOURCE = "https://github.com/cloudflare/computer"
 # Matches workspace.runtime.exec command backends in the preview package.
@@ -94,7 +95,7 @@ class ExecResult:
 def _is_secret_key(name: str) -> bool:
     if name.upper() in {FLAG_CF_COMPUTER, "CREW_CF_COMPUTER_TOKEN", "CREW_CF_COMPUTER_URL"}:
         return True
-    return bool(_SECRET_KEY_RE.search(name))
+    return bool(_SECRET_KEY_RE.search(name)) or name in harness_secrets.secret_env_names()
 
 
 def isolate_env(
@@ -119,8 +120,19 @@ def isolate_env(
     return out
 
 
+def laptop_env() -> dict[str, str]:
+    """Host env minus every secret the registry knows (PRD R1.4). ``GH_TOKEN`` stays for ``gh``.
+
+    ``CREW_SHELL_KEEP_PROVIDER_KEYS=1`` is a dev-only opt-out; the enterprise
+    profile refuses it.
+    """
+    if harness_secrets.keep_provider_keys():
+        return dict(os.environ)
+    return harness_secrets.scrub(os.environ)
+
+
 def _run_local(argv: list[str], timeout: float = 20.0, cwd: str | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=laptop_env())
 
 
 def _post_json(url: str, body: dict[str, Any], token: str, timeout: float) -> dict[str, Any]:
@@ -154,7 +166,7 @@ class LaptopAdapter:
         env: dict[str, str] | None = None,
         timeout: float = 20.0,
     ) -> ExecResult:
-        del env  # laptop keeps host env; isolate path is the leak boundary
+        del env  # the default runner scrubs the host env (laptop_env); no provider key reaches a child
         try:
             result = self.runner(argv, timeout=timeout, cwd=cwd)
         except TypeError:

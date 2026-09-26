@@ -12,19 +12,25 @@ import os
 from pathlib import Path
 from typing import Any
 
-KNOWN = (
-    "ANTHROPIC_API_KEY",
-    "OPENROUTER_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "OPENAI_API_KEY",
-    "CURSOR_API_KEY",
-    "XAI_API_KEY",
-    "GROQ_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "NVIDIA_API_KEY",
-    "CEREBRAS_API_KEY",
-    "MISTRAL_API_KEY",
+from CortexOS.integrations.harness import registry
+
+# Provider rows Crew offers keys for, in form order. Names come from the one
+# registry (harness/registry.py), so a key env Crew accepts is one every child
+# scrub and secret list already knows.
+_CREW_PROVIDERS = (
+    "anthropic",
+    "openrouter",
+    "deepseek",
+    "openai",
+    "cursor",
+    "xai",
+    "groq",
+    "google",
+    "nvidia",
+    "cerebras",
+    "mistral",
+)
+_SETTINGS = (
     "CREW_MODEL",
     "CREW_PROVIDER",
     "CREW_OPENAI_BASE_URL",
@@ -44,18 +50,20 @@ KNOWN = (
     "GMAIL_APP_PASSWORD",
     "GMAIL_IMAP_HOST",
 )
+KNOWN: tuple[str, ...] = tuple(
+    dict.fromkeys((*(n for p in _CREW_PROVIDERS for n in registry.key_envs(p)), *_SETTINGS))
+)
 
 # Env names a litellm-routed host reads, first set wins. The provider chain
 # stamps that name as the source and ``llm.chat`` spends that same key, so the
 # stamp can never name one key while another is spent. litellm alone reads
 # GOOGLE_API_KEY before GEMINI_API_KEY, and NVIDIA_NIM_API_KEY, never
 # NVIDIA_API_KEY.
-KEY_ENVS: dict[str, tuple[str, ...]] = {
-    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"),
-}
+KEY_ENVS: dict[str, tuple[str, ...]] = {p: registry.key_envs(p) for p in ("google", "nvidia")}
 # litellm model prefix -> chain label whose KEY_ENVS key ``llm.chat`` passes.
-KEY_PREFIXES: dict[str, str] = {"gemini": "google", "nvidia_nim": "nvidia"}
+KEY_PREFIXES: dict[str, str] = {registry.row(p).litellm_prefix: p for p in KEY_ENVS}
+
+VAULT_REFUSED = "vault upsert refused: OpenVault URL is neither https nor loopback; key kept local, nothing sent"
 
 
 def key_env(label: str) -> str:
@@ -94,8 +102,26 @@ def apply_saved(data_dir: Path) -> None:
             os.environ[key] = value
 
 
+def _vault_serves(key: str) -> bool:
+    """Can OpenVault hand this key back to Crew? Unmapped names (NVIDIA, Gemini) cannot."""
+    from CortexOS.crew.openvault import _ENV_TO_PROVIDER
+
+    return _ENV_TO_PROVIDER.get(key, "custom") != "custom"
+
+
+def _vault_url_safe() -> bool:
+    from CortexOS.crew.openvault import base_url
+
+    return registry.safe_base_url(base_url())
+
+
 def save(data_dir: Path, updates: dict[str, str | None]) -> dict[str, Any]:
-    """Merge updates into the file and this process. Empty string unsets."""
+    """Merge updates into the file and this process. Empty string unsets.
+
+    A key goes to OpenVault only over https or to a loopback vault; otherwise
+    no request is made. The local copy is dropped only when the vault took the
+    key and can serve it back to Crew.
+    """
     current = load_saved(data_dir)
     for key, value in updates.items():
         if key not in KNOWN:
@@ -108,29 +134,40 @@ def save(data_dir: Path, updates: dict[str, str | None]) -> dict[str, Any]:
             os.environ[key] = stripped
             keep_local = True
             if key.endswith("_API_KEY"):
-                from CortexOS.crew.openvault import upsert_env_key
-
-                vaulted = upsert_env_key(key, stripped)
-                if vaulted.get("ok"):
-                    # Secret lives in OpenVault. Do not keep a crew copy on disk.
-                    keep_local = False
-                    os.environ.pop("CREW_VAULT_LAST_ERROR", None)
+                if not _vault_url_safe():
+                    os.environ["CREW_VAULT_LAST_ERROR"] = VAULT_REFUSED
                 else:
-                    os.environ["CREW_VAULT_LAST_ERROR"] = str(
-                        vaulted.get("detail") or "vault upsert failed"
-                    )
+                    from CortexOS.crew.openvault import upsert_env_key
+
+                    vaulted = upsert_env_key(key, stripped)
+                    if vaulted.get("ok"):
+                        # Secret lives in OpenVault. Keep no crew copy on disk,
+                        # unless the vault cannot serve it back (C8).
+                        keep_local = not _vault_serves(key)
+                        os.environ.pop("CREW_VAULT_LAST_ERROR", None)
+                    else:
+                        detail = str(vaulted.get("detail") or "vault upsert failed")
+                        os.environ["CREW_VAULT_LAST_ERROR"] = detail.replace(stripped, "<redacted>")
             if keep_local:
                 current[key] = stripped
             else:
                 current.pop(key, None)
     data_dir.mkdir(parents=True, exist_ok=True)
-    path = _path(data_dir)
-    path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    _write_private(_path(data_dir), json.dumps(current, indent=2))
+    return status()
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Create or replace ``path`` with mode 0600 from the first byte (no 0644 window)."""
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
     try:
-        os.chmod(path, 0o600)
+        os.chmod(tmp, 0o600)
     except OSError:
         pass
-    return status()
+    os.replace(tmp, path)
 
 
 def status() -> dict[str, Any]:

@@ -75,8 +75,13 @@ def _write_line(path: Path, line: str) -> None:
     it across the syscall is what deadlocked forked children before #255.
     """
     data = (line + "\n").encode("utf-8")
-    fd = os.open(path, _OPEN_FLAGS, 0o644)
+    fd = os.open(path, _OPEN_FLAGS, 0o600)
     try:
+        if hasattr(os, "fchmod"):  # a log created 0644 before HX-01 is tightened too
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass  # not the owner: the line is still written
         written = os.write(fd, data)
         if written != len(data):  # short write: the line is torn, count it
             raise OSError(f"short write: {written} of {len(data)} bytes")
