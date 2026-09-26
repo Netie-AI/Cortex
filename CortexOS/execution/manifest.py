@@ -49,6 +49,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
+from CortexOS.execution.sql_scope import ScopeError, cte_reference_ids, dotted_part
 from CortexOS.paths import data_path
 
 __all__ = [
@@ -747,21 +748,29 @@ def _locally_bound_names(root: exp.Expression) -> set[str]:
             continue
         if alias.name:
             bound.add(alias.name.lower())
-    return bound | _cte_names(root)
+    return bound | {cte.alias.lower() for cte in root.find_all(exp.CTE) if cte.alias}
 
 
-def _cte_names(root: exp.Expression) -> set[str]:
-    """Names a ``WITH`` clause defines — the only local bindings that shadow.
+def _cte_reference_ids(root: exp.Expression) -> set[int]:
+    """The table references that scope resolves to a CTE -- the only exemptions.
 
-    This is deliberately narrower than :func:`_locally_bound_names`, and the
-    difference is a real escape. A CTE named ``c`` means a later ``FROM c`` is
-    not a base table. A *FROM-clause alias* named ``c`` does not: in
-    ``FROM UNNEST([1]) AS secrets(x), secrets AS s`` the second entry still
-    resolves to the base table ``secrets``. Treating both as "locally bound"
-    therefore let an attacker exempt any table from the grant check just by
-    aliasing something else to its name.
+    Deliberately narrower than :func:`_locally_bound_names`, and the difference
+    is a real escape. A *FROM-clause alias* named ``c`` never makes a later
+    ``FROM c`` anything but the base table (``FROM UNNEST([1]) AS secrets(x),
+    secrets AS s``), so only a CTE may exempt a reference. And a CTE only
+    exempts the references its scope actually binds to it: a ``WITH`` inside a
+    derived table, a forward reference to a later sibling CTE, and the anchor
+    arm of a recursive CTE all reach the base table in DuckDB. Collecting CTE
+    names tree-wide and exempting every bare table of that name let each of
+    those read an ungranted table. See :mod:`CortexOS.execution.sql_scope`.
+
+    Recursive CTEs stay allowed (the corpus relies on them); a self-reference
+    is exempt only in the recursive arm.
     """
-    return {cte.alias.lower() for cte in root.find_all(exp.CTE) if cte.alias}
+    try:
+        return cte_reference_ids(root, allow_recursive=True)
+    except ScopeError as exc:
+        raise SqlNotAnalyzable(f"{exc}; refusing rather than guessing what a name binds to") from exc
 
 
 def _named_tables(root: exp.Expression) -> list[exp.Table]:
@@ -905,6 +914,22 @@ def _bare(key: str) -> str:
     return key.rsplit(".", 1)[-1]
 
 
+def _grant_pairs(granted: set[str]) -> dict[tuple[str, str], str]:
+    """Grant keys as ``(schema, table)`` pairs; a bare key has schema ``""``.
+
+    A key with more than two parts names nothing a two-part reference can be,
+    so it is left out rather than matched loosely.
+    """
+    pairs: dict[tuple[str, str], str] = {}
+    for key in granted:
+        parts = key.split(".")
+        if len(parts) == 1:
+            pairs[("", parts[0])] = key
+        elif len(parts) == 2 and all(parts):
+            pairs[(parts[0], parts[1])] = key
+    return pairs
+
+
 def _grant_key(table: exp.Table, granted: set[str]) -> str | None:
     """The manifest key that grants this table reference, matched exactly.
 
@@ -918,24 +943,28 @@ def _grant_key(table: exp.Table, granted: set[str]) -> str | None:
       ``main.table``, which is what a bare reference resolves to. Any other
       schema is a different relation and is not granted.
 
-    Matching on ``table.name`` alone used to let a bare grant for ``schools``
-    wave through ``secret_schema.schools``, and made a qualified grant key
-    unmatchable. Three-part names are refused before this is reached.
+    The comparison is on parsed ``(schema, table)`` pairs, never on a joined
+    string: ``main."bronze.schools"`` is the table literally named
+    ``bronze.schools`` and must not match the key ``bronze.schools``. A part
+    that contains a dot never matches at all. Three-part names are refused
+    before this is reached.
     """
+    if dotted_part(table) is not None:
+        return None
+    pairs = _grant_pairs(granted)
     name = table.name.lower()
     schema = (table.db or "").lower()
     if schema:
-        qualified = f"{schema}.{name}"
-        if qualified in granted:
-            return qualified
-        if schema == "main" and name in granted:
-            return name
+        if (schema, name) in pairs:
+            return pairs[(schema, name)]
+        if schema == "main" and ("", name) in pairs:
+            return pairs[("", name)]
         return None
-    return name if name in granted else None
+    return pairs.get(("", name))
 
 
 def _refuse_ungranted_tables(
-    root: exp.Expression, granted: set[str], bound: set[str]
+    root: exp.Expression, granted: set[str], cte_refs: set[int]
 ) -> None:
     """Deny by default: a relation the manifest never names is not readable.
 
@@ -947,13 +976,19 @@ def _refuse_ungranted_tables(
 
     Without this, ``SELECT id FROM orders UNION ALL SELECT id FROM secrets``
     passes every path check, because ``secrets`` is not a path.
+
+    ``cte_refs`` holds the references scope resolved to a CTE; every other
+    named table, wherever it sits, is a real table and must be granted.
     """
     for table in _named_tables(root):
-        name = table.name.lower()
-        if not name:
-            continue
-        if not table.db and name in bound:
-            continue  # a CTE this statement defines itself (never schema-qualified)
+        if id(table) in cte_refs:
+            continue  # scope binds this reference to a CTE of this statement
+        dotted = dotted_part(table)
+        if dotted is not None:
+            raise PathNotAllowed(
+                f"table identifier part {dotted!r} contains a dot; a quoted dotted name is one "
+                "relation, not schema.table, and is never matched against a grant"
+            )
         if _grant_key(table, granted) is None:
             raise PathNotAllowed(
                 f"table {table.sql(dialect='duckdb')!r} is not named by this manifest"
@@ -1037,10 +1072,10 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
     granted = set(predicates)
     # Order matters: disjointness first, so the grant check and the injector
     # below can both decide by name alone. Note the two different sets — only a
-    # CTE exempts a name from the grant check, while *any* local binding of a
-    # governed name is refused outright.
+    # reference scope resolves to a CTE is exempt from the grant check, while
+    # *any* local binding of a governed name is refused outright.
     _refuse_shadowing(_locally_bound_names(root), granted)
-    _refuse_ungranted_tables(root, granted, _cte_names(root))
+    _refuse_ungranted_tables(root, granted, _cte_reference_ids(root))
     _refuse_schema_qualified_columns(root, granted)
     if not predicates:
         return root.sql(dialect="duckdb")

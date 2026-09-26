@@ -673,6 +673,35 @@
       "technique": "cte_exemption_by_name",
       "why_it_might_slip": "The CTE binds the bare name secrets, and a grant check that exempts every table whose .name is locally bound also exempts vault.secrets, which a CTE can never be: a schema-qualified reference always reaches the base table.",
       "expected": "reject_path"
+    },
+    {
+      "name": "cte_inside_derived_table_shadows_outer_real_table",
+      "sql": "SELECT d.id, s.* FROM (WITH secrets AS (SELECT 1 AS id) SELECT id FROM secrets) AS d, secrets AS s",
+      "technique": "cte_scope_escape",
+      "why_it_might_slip": "The WITH lives inside the derived table d and is invisible outside it, so the second FROM entry is the real secrets table. A grant check that collects CTE names from the whole tree and exempts every bare table of that name waves it through.",
+      "expected": "reject_path",
+      "enforcer_note": "Only a reference that sqlglot scope analysis resolves to a CTE in its own scope is exempt from the grant check."
+    },
+    {
+      "name": "cte_forward_reference_reads_real_table",
+      "sql": "WITH a AS (SELECT * FROM secrets), secrets AS (SELECT 1 AS id) SELECT * FROM a",
+      "technique": "cte_scope_escape",
+      "why_it_might_slip": "A CTE body sees only the CTEs before it in the same WITH list. DuckDB binds the secrets inside a to the base table, but a name-based exemption sees a CTE called secrets and skips the grant check.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "same_named_cte_and_real_table_in_sibling_subqueries",
+      "sql": "SELECT (WITH secrets AS (SELECT 1 AS id) SELECT max(id) FROM secrets) AS decoy, (SELECT max(id) FROM secrets) AS leak FROM orders",
+      "technique": "cte_scope_escape",
+      "why_it_might_slip": "The CTE is scoped to the first scalar subquery; the second subquery reads the real secrets table. The names are identical, so only scope resolution tells the two references apart.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "recursive_cte_anchor_arm_reads_real_table_of_same_name",
+      "sql": "WITH RECURSIVE secrets AS (SELECT id FROM secrets UNION ALL SELECT id + 1 FROM secrets WHERE id < 3) SELECT * FROM secrets",
+      "technique": "cte_scope_escape",
+      "why_it_might_slip": "A recursive CTE binds its own name only in the recursive arm. DuckDB resolves the anchor arm's secrets to the base table, and sqlglot's scope builder also lists the CTE as visible there, so a self-reference is exempt only inside the recursive arm.",
+      "expected": "reject_path"
     }
   ],
   "_expected_values": {

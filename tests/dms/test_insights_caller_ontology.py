@@ -234,7 +234,8 @@ def test_qualified_catalog_reaches_generation_and_qualified_sql_is_accepted(
     assert body["generative"]["valid"] is True
     assert body["generative"]["check"].startswith("caller catalog")
     sql = body["query_sql"]
-    assert sql == GOOD_SQL and body["sql_used"] == sql
+    # Same LIMIT cap as the engine pack path (sql_guardrail.MAX_LIMIT).
+    assert sql == GOOD_SQL + " LIMIT 1000" and body["sql_used"] == sql
     ranked = {row["where"]["table"] for row in body["ontology"]["locations"]}
     assert ranked == {"bronze.schools", "bronze.satscores"}
     assert body["ontology"]["certified"] == []
@@ -336,7 +337,7 @@ def test_bare_catalog_names_still_work_for_space(
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["status"] == "ABSTAIN"
-    assert body["query_sql"] == BARE_SQL
+    assert body["query_sql"] == BARE_SQL + " LIMIT 1000"
     assert _bird_lake().execute(body["query_sql"]).fetchall() == [(999,)]
 
 

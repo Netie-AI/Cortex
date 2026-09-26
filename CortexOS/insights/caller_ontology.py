@@ -172,6 +172,22 @@ def _size(raw: Any, limit: int, what: str) -> None:
         raise CallerOntologyError("too_large", f"{what} exceeds {limit} bytes")
 
 
+def _bounded_number(value: int | float) -> bool:
+    """Finite and within ``MAX_SCORE``, decided without float conversion.
+
+    JSON on the wire may carry NaN / Infinity / 1e400 (floats) or an integer of
+    hundreds of digits. ``math.isfinite`` of a huge int converts it to float and
+    raises ``OverflowError``, so the size check comes first for ints; either
+    way the answer is a named 422, never a 500.
+    """
+    if isinstance(value, int):
+        return -MAX_SCORE <= value <= MAX_SCORE
+    try:
+        return math.isfinite(value) and abs(value) <= MAX_SCORE
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _mapping(raw: Any, where: str) -> dict[str, Any]:
     if raw is None:
         return {}
@@ -220,9 +236,7 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
         score = row.get("score", 0)
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             raise CallerOntologyError("bad_shape", f"ontology.schema[{idx}].score must be a number")
-        # JSON on the wire may carry NaN / Infinity / 1e400; int() of those raises
-        # OverflowError / ValueError, which would surface as a 500.
-        if not math.isfinite(score) or abs(score) > MAX_SCORE:
+        if not _bounded_number(score):
             raise CallerOntologyError(
                 "bad_number", f"ontology.schema[{idx}].score must be finite and <= {MAX_SCORE}"
             )
