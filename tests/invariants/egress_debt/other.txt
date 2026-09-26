@@ -1,0 +1,3 @@
+# Ungated model egress debt, frozen at 03b545f (HX-02, R2.5). Owner: any ticket that finds a site outside the four areas; empty at 03b545f.
+# May only shrink: delete a line in the commit that routes its file through
+# CortexOS.integrations.harness.gate.call. Never add one.
