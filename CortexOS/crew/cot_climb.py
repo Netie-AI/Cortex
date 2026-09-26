@@ -191,8 +191,10 @@ async def _call_runner(
         kwargs["pick"] = pick
     try:
         out = await runner(None, **kwargs)
-    except TypeError:
-        out = await runner(None, purpose=purpose, prompt=prompt)
+    except TypeError as exc:
+        # Never re-send without the caller's bearer: that would spend Cortex's
+        # own credential on a relayed call (PRD R3.4, C4). One attempt, refused.
+        return {"ok": False, "reason": f"runner refused the call ({type(exc).__name__}); not retried without the caller's credential"}
     return out if isinstance(out, dict) else {}
 
 
