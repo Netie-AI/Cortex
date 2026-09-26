@@ -4,8 +4,8 @@ Refuses unless ``CORTEX_FREEROUTE_LEARN`` is set explicitly. Refuses to
 record a baseline unless ``arming()`` reports ``armed=True`` and
 ``spendable_hops > 0``. Writes the arming reason either way. Does not invent
 coverage / WRONG / cost / latency. A live pack run is not required for merge
-and does not count until prove is armed. Masking is off until Cortex #268;
-masking-off numbers must never be compared with masking-on runs.
+and does not count until prove is armed. Masking is on since Cortex #268;
+masking-off numbers (recorded before it) must never be compared with masking-on runs.
 
 Does not change ``arming()`` or RouteStamp served_* (#272).
 """
@@ -79,7 +79,7 @@ def evaluate(*, arm: core.Arming | None = None) -> dict[str, Any]:
         "masking_state": core.MASKING_STATE,
         "masking_compare_forbidden": True,
         "masking_compare": MASKING_COMPARE,
-        "comparable_with_masking_on": False,
+        "comparable_with_masking_on": core.MASKING_STATE == "on",
         "learn_enabled": learn["learn_enabled"],
         "learn_source": learn["learn_source"],
         "route_store_id": store["id"],

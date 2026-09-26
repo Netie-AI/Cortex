@@ -29,7 +29,7 @@ def _assert_unproven_served(env: dict[str, Any], *, requested: str = "") -> None
     assert env.get("learn_source") in {"env", "default"}
     assert "learn_enabled" in env
     assert env.get("route_store_id")
-    assert env.get("masking_state") == "off"
+    assert env.get("masking_state") == "on"
     text = insights.render_tool_text(env)
     assert "served_provider: None" in text
     assert "served_model: None" in text

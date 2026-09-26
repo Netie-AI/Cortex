@@ -54,7 +54,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from CortexOS.integrations import direct_providers, freeroute_ov_local, openvault_client
+from CortexOS.integrations import direct_providers, freeroute_ov_local, openvault_client, pii_mask
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
@@ -130,8 +130,9 @@ NON_LEARNING_SPLITS = frozenset({SPLIT_HELDOUT, SPLIT_BENCHMARK})
 _LEARNING_FILTER_SQL = (
     "shadow = 0 AND IFNULL(split, 'product') NOT IN ('heldout', 'benchmark')"
 )
-# Cortex #268 (masking) is not this slice. Record the setup; do not compare.
-MASKING_STATE = "off"
+# Cortex #268: every call is PII-masked before the transport (pii_mask); there
+# is no switch that turns it off.
+MASKING_STATE = "on"
 SERVED_PENDING_272 = (
     "served_provider/served_model/served_local wait for Cortex #272 LOCAL-1; "
     "not inferred from requested model or OpenVault chat model name"
@@ -1072,6 +1073,8 @@ class RouteStamp:
     served_model: str | None = None
     served_local: bool = False
     served_reason: str = ""
+    # Cortex #268: what was masked before sending, counts by kind only.
+    masked: dict[str, int] = field(default_factory=dict)
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -1286,10 +1289,28 @@ def complete(
             return Completion(ok=False, stamp=stamp, reason=reason)
         leave_decision = why
 
+    # Cortex #268: mask PII before anything is sent. Fail closed: a masker
+    # error refuses the call; nothing goes out unmasked.
+    try:
+        masked = pii_mask.mask_messages(messages)
+    except pii_mask.MaskingFailed as exc:
+        reason = f"PII masking failed, not sent ({pii_mask.REFUSED_REASON}): {redact(exc)}"
+        stamp = RouteStamp(
+            call_id=uuid.uuid4().hex,
+            task=task,
+            requested="",
+            error=reason,
+            credential=credential,
+            impl=_transport()[1],
+            leave_gate=leave_decision,
+        )
+        _journal_add(stamp)
+        return Completion(ok=False, stamp=stamp, reason=reason)
+
     chosen = pick(task, arm, pin=pin, pin_source=pin_source)
     body: dict[str, Any] = {
         "model": chosen.requested,
-        "messages": messages,
+        "messages": masked.messages,
         "max_tokens": int(max_tokens),
         "stream": False,
     }
@@ -1330,6 +1351,7 @@ def complete(
         leave_gate=leave_decision,
         measured_n=chosen.measured_n,
         measured_score=chosen.measured_score,
+        masked=dict(masked.counts),
     )
     text = ""
     message: dict[str, Any] = {}
@@ -1351,6 +1373,8 @@ def complete(
             message = dict(choice.get("message") or {})
         except (IndexError, TypeError, AttributeError):
             message = {}
+        # Placeholders come back as the real values before any parse or validation.
+        message = pii_mask.restore_value(message, masked.restore)
         text = str(message.get("content") or "")
         usage = dict(data.get("usage") or {}) if isinstance(data.get("usage"), dict) else {}
         usable = bool(text.strip()) or bool(message.get("tool_calls"))

@@ -26,6 +26,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from CortexOS.integrations import pii_mask
+
 
 class LLMError(RuntimeError):
     pass
@@ -463,10 +465,18 @@ async def chat(
             return await ov.chat(
                 messages, tools=tools, max_tokens=max_tokens, timeout=timeout, model=model
             )
+        # Cortex #268: mask PII before litellm sends anything; fail closed.
+        try:
+            masked = pii_mask.mask_messages(messages)
+        except pii_mask.MaskingFailed as exc:
+            raise LLMError(
+                f"model call refused ({model}): {pii_mask.REFUSED_REASON}, nothing sent"
+            ) from exc
+        restore = masked.restore
         litellm = _litellm()
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": _strip_cache_control(model, messages),
+            "messages": _strip_cache_control(model, masked.messages),
             "max_tokens": max_tokens,
             "timeout": timeout,
             "num_retries": 1,
@@ -489,7 +499,9 @@ async def chat(
         nonlocal emitted
         emitted = True
         assert stream_cb is not None
-        await stream_cb(text)
+        # Best effort per chunk: a placeholder split across chunks shows as-is
+        # locally; the final LLMResult is always fully restored.
+        await stream_cb(pii_mask.restore_text(text, restore))
 
     attempt = 0
     while True:
@@ -497,8 +509,8 @@ async def chat(
         try:
             if stream_cb is None:
                 response = await litellm.acompletion(**kwargs)
-                return _from_response(litellm, response, model)
-            return await _streamed(litellm, kwargs, model, _cb)
+                return _restored(_from_response(litellm, response, model), restore)
+            return _restored(await _streamed(litellm, kwargs, model, _cb), restore)
         except LLMError:
             raise
         except Exception as exc:  # noqa: BLE001 - every provider fails differently
@@ -514,6 +526,17 @@ async def chat(
             raise LLMError(
                 f"model call failed ({model}){tries}: {_describe_failure(exc)}"
             ) from exc
+
+
+def _restored(result: LLMResult, restore: dict[str, str]) -> LLMResult:
+    """Put this call's masked PII back into the reply (Cortex #268), locally."""
+    if not restore:
+        return result
+    result.text = pii_mask.restore_text(result.text, restore)
+    result.reasoning = pii_mask.restore_text(result.reasoning, restore)
+    for call in result.tool_calls:
+        call.args = pii_mask.restore_value(call.args, restore)
+    return result
 
 
 def _from_response(litellm: Any, response: Any, model: str) -> LLMResult:
