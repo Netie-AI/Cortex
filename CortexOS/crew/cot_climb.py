@@ -164,6 +164,37 @@ async def _call_runner(
     return out if isinstance(out, dict) else {}
 
 
+def _qualified_refusal(sql: str) -> dict[str, Any] | None:
+    """Refuse ``db.table`` / ``catalog.db.table`` before the scope check.
+
+    ``validate_sql`` scopes on bare table names, so ``other_db.schools`` would
+    pass for a caller that sent ``schools`` while reading another attached
+    catalog. Rankings only ever name bare tables. Unparseable SQL is left to
+    ``validate_sql``, which refuses it by name.
+    """
+    try:
+        import sqlglot
+        from sqlglot import exp
+
+        statements = sqlglot.parse(sql or "", read="duckdb")
+    except Exception:  # noqa: BLE001 - validate_sql owns the parse refusal
+        return None
+    for stmt in statements:
+        if stmt is None:
+            continue
+        for node in stmt.find_all(exp.Table):
+            if node.args.get("db") or node.args.get("catalog"):
+                return {
+                    "ok": False,
+                    "sql": None,
+                    "tables": [],
+                    "reason": "qualified table reference refused: "
+                    + node.sql(dialect="duckdb")[:80],
+                    "check": "refused",
+                }
+    return None
+
+
 def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
     tables: set[str] = set()
     for row in ranking.get("locations") or []:
@@ -722,7 +753,9 @@ async def climb(
 
         sql = fr.extract_sql(str(gen.get("text") or ""))
         extracted = str(sql or "").strip()
-        checked = fr.validate_sql(sql or "", allowed, columns=columns)
+        checked = _qualified_refusal(sql or "") or fr.validate_sql(
+            sql or "", allowed, columns=columns
+        )
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core

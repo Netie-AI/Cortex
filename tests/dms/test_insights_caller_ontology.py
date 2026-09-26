@@ -25,6 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from CortexOS.crew import certified_serve, insights
+from CortexOS.insights.routes import InsightsAskIn
 from packs.dms.security.rate_limit import reset_limiter
 
 Q = "What is the highest average math SAT score among schools in Alameda county?"
@@ -288,7 +289,12 @@ def test_absent_ontology_keeps_pack_ranking_and_certified_serve(
     res2, prompts2 = _post(client, monkeypatch, dms_body(RANK_Q, demo), sql="SELECT 1")
     assert res2.status_code == 200, res2.text
     body2 = res2.json()
-    assert body2["ontology_source"] == "engine_pack"
+    # The pack ranking, narrowed to the tables the demo Space sent.
+    assert body2["ontology_source"] == "engine_pack_caller_scoped"
+    assert {row["where"]["table"] for row in body2["ontology"]["locations"]} <= {
+        "suppliers",
+        "inventory",
+    }
     assert _served(body2) == _served(body)
     assert not any(p.startswith("generative_ask:") for p in prompts2)
 
@@ -378,3 +384,160 @@ def test_ranked_retry_body_is_accepted_and_plan_reaches_the_prompt(
     assert out["api"]["received"]["generate_retry"] == "ranked_slots"
     assert out["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
     assert _bird_lake().execute(out["query_sql"]).fetchall() == [(640,)]
+
+
+# -- verifier round 2 --------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw_score", ["NaN", "Infinity", "-Infinity", "1e400"])
+def test_non_finite_schema_score_is_a_named_422_not_a_500(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, raw_score: str
+) -> None:
+    from CortexOS.crew import freeroute as fr
+
+    prompts: list[str] = []
+    monkeypatch.setattr(fr, "complete", _stub(GOOD_SQL, prompts))
+    onto = json.dumps(bird_ontology()).replace('"score": 4', f'"score": {raw_score}')
+    assert raw_score in onto
+    body = json.dumps(dms_body(Q)).rstrip("}") + ', "ontology": ' + onto + "}"
+    safe = TestClient(client.app, client=("127.0.0.1", 5555), raise_server_exceptions=False)
+    res = safe.post("/v1/insights", content=body, headers={"content-type": "application/json"})
+    assert res.status_code == 422, res.text
+    out = res.json()
+    assert out["status"] == "ABSTAIN"
+    assert out["refuse_reason"] == "caller_ontology_invalid:bad_number"
+    assert out["values"] == []
+    assert prompts == []
+
+
+def test_pack_table_subset_restricts_sql_to_the_tables_the_caller_sent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P2: caller sends only ``inventory``; SQL on ``suppliers`` is out of scope."""
+    onto = bird_ontology(
+        schema=[{"table": "inventory", "columns": ["sku", "quantity_kg"], "score": 2}],
+        measures={},
+        objects={},
+        links={},
+    )
+    res, prompts = _post(
+        client,
+        monkeypatch,
+        dms_body("How many suppliers are there in total?", onto),
+        sql="SELECT COUNT(*) AS n FROM suppliers",
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    ranked = {row["where"]["table"] for row in body["ontology"]["locations"]}
+    assert ranked <= {"inventory"}
+    for row in body["ontology"]["metrics"] + body["ontology"]["certified"]:
+        assert set(row["where"]["tables"]) <= {"inventory"}
+    assert body["ontology_source"] == "engine_pack_caller_scoped"
+    assert any(p.startswith("generative_ask:") for p in prompts)
+    assert body["status"] == "REFUSE"
+    assert body["values"] == []
+    assert "query_sql" not in body
+    assert "sql reads tables outside ontology ranking: suppliers" in body["answer"]
+
+
+def test_customer_table_named_like_a_pack_table_never_gets_the_demo_formula(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3: ``suppliers(vendor_name, score)`` is a customer table, not the pack's."""
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("engine pack consulted for a caller-ontology Space")
+
+    monkeypatch.setattr(insights, "retrieve_ontology", boom)
+    monkeypatch.setattr(certified_serve, "resolve", boom)
+    onto = bird_ontology(
+        schema=[{"table": "suppliers", "columns": ["vendor_name", "score"], "score": 5}],
+        measures={},
+        objects={},
+        links={},
+    )
+    sql = "SELECT vendor_name, score FROM suppliers ORDER BY score DESC"
+    res, prompts = _post(client, monkeypatch, dms_body(RANK_Q, onto), sql=sql)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ontology_source"] == "caller_ontology"
+    assert body["ontology"]["certified"] == []
+    assert not str(body["generative"].get("check") or "").startswith("certified_query")
+    assert any(p.startswith("generative_ask:") for p in prompts)
+    assert "risk_score" not in (body.get("query_sql") or "")
+    assert body["values"] == []
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE suppliers (vendor_name VARCHAR, score DOUBLE)")
+    con.execute("INSERT INTO suppliers VALUES ('Acme', 0.9), ('Beta', 0.4)")
+    assert con.execute(body["query_sql"]).fetchall() == [("Acme", 0.9), ("Beta", 0.4)]
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["What is the total number of SKUs with quantity below reorder level?", RANK_Q],
+)
+def test_ontology_with_no_tables_abstains_by_name_and_never_ranks_the_pack(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, question: str
+) -> None:
+    """P4: the original BIRD failure. An empty schema is never the demo pack."""
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("engine pack consulted for an empty caller ontology")
+
+    monkeypatch.setattr(insights, "retrieve_ontology", boom)
+    monkeypatch.setattr(certified_serve, "resolve", boom)
+    onto = bird_ontology(schema=[], measures={}, objects={}, links={})
+    res, prompts = _post(client, monkeypatch, dms_body(question, onto))
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "ABSTAIN"
+    assert body["badge"] == "abstain"
+    assert body["refuse_reason"] == "caller_ontology_empty"
+    assert "caller_ontology_empty" in body["answer"]
+    assert body["values"] == []
+    assert body["sql_used"] is None
+    assert "query_sql" not in body
+    assert prompts == []
+
+
+def test_schema_qualified_table_is_refused_even_with_a_caller_table_name(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P5: ``other_db.schools`` must not pass the scope check on its bare name."""
+    res, prompts = _post(
+        client,
+        monkeypatch,
+        dms_body(Q, bird_ontology()),
+        sql="SELECT COUNT(*) FROM other_db.schools",
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert any(p.startswith("generative_ask:") for p in prompts)
+    assert body["status"] == "REFUSE"
+    assert body["values"] == []
+    assert "query_sql" not in body
+    assert "qualified table reference refused" in body["answer"]
+
+
+def test_declared_request_model_matches_the_frozen_contract_component(
+    client: TestClient,
+) -> None:
+    """The wire extension must not drift contract/openapi-1.2.0.json.
+
+    ``InsightsAskIn`` leaks into the contract spec's components (the route is
+    not a contract route); ``InsightsWireIn`` must never appear there.
+    """
+    from pathlib import Path
+
+    spec = json.loads(
+        (Path(__file__).resolve().parents[2] / "contract" / "openapi-1.2.0.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    frozen = spec["components"]["schemas"]["InsightsAskIn"]
+    live = client.app.openapi()["components"]["schemas"]
+    assert live["InsightsAskIn"] == frozen
+    assert "InsightsWireIn" not in live
+    assert set(InsightsAskIn.model_fields) == set(frozen["properties"])
+    op = client.app.openapi()["paths"]["/v1/insights"]["post"]
+    assert "ontology" in op["x-cortex-request-extension"]["fields"]
