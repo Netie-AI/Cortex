@@ -66,4 +66,40 @@ Fail-open credential default: "no credential presented" was mapped to "unattribu
 - Item 8 (key id / `verified_by` stamp) is #276, per the issue comments.
 
 ## #265 TRUST-CONTRACT-AUTH
-See the #265 section appended below once that commit lands.
+
+### Expected vs actual (base fa0f8a8)
+- Expected:
+  - Every `/v1/contract/*` route refuses a keyless or under-privileged caller (401/403) with no side effect.
+  - `ledger/append` records the authenticated caller.
+  - Crew and `/dms/query` never spend a model credential for an unauthenticated caller, loopback included.
+- Actual:
+  - The contract routes had no auth dependency at all.
+  - `ledger/append` wrote `body.actor`, so a caller could write rows as "admin".
+  - Crew message/spawn/accept/assign/tickets and `POST /crew/insights` (generate) served a keyless loopback caller. The insights generate call spent, stamped `loopback tier (unattributed)`.
+
+### Repro
+Check out `CortexOS/api/contract_routes.py`, `CortexOS/api/dms_query.py`, `CortexOS/crew/server.py` and `CortexOS/crew/prompt_harness_routes.py` at `fa0f8a8`. Then `python -m pytest tests/security/test_contract_auth_265.py tests/test_crew/test_crew_spend_auth_265.py -q -p no:cacheprovider` gives 25 failed. At head the same run gives 25 passed.
+
+### Root-cause class
+Missing authorization at a trust boundary, and caller identity taken from the request body instead of the credential.
+
+### Fix
+- Role gates through the TRUST-01 port:
+  - viewer: ask, drillthrough, tools, ledger/verify;
+  - steward: submit, ledger/append, jwks/refresh.
+- `ledger/append` takes `Principal.actor`. The body `actor` wire field is kept and ignored, because removing it would be a contract major.
+- `auth_port.require_spend_auth()` names the refusal `spend_requires_auth`. It gates `/dms/query`, the crew routes that start a model call, and `/crew/insights` when `generate` is true.
+
+### Open (needs a founder decision)
+- `POST /crew/freeroute` is still ungated. The #215-guarded `tests/test_crew/test_freeroute.py` pins a keyless loopback spend there, and an `ov_` relay that the auth port cannot admit until OpenVault#67 ships.
+- **Deploy risk (a control that blocks work):**
+  - The DMS key that calls Cortex must now be steward+ for submit, ledger/append and jwks/refresh.
+  - The Crew UI sends no key today, so crew chat, spawn and tickets refuse until it does.
+  - A crew process without an authorizer (`PACK` not dms) answers 503 on those routes.
+- The `/dms/query` 401/403 `detail` is now an object (`code`, `message`, `auth`) instead of a string. The status codes are unchanged.
+
+### Invariant
+"Fix the root-cause class": actor from the credential, never the body. "Never cut on trust-boundary validation".
+
+### Subagent record
+One worktree agent on #265 (isolated context, general-purpose). #268 and #275 were done in the main session. The agent's worktree started at 27f79ea and it reset to fa0f8a8 before working. Its commit was cherry-picked cleanly (`83e50c8`) and re-verified here: 25 tests fail on the base routes, and the full suite gives 3246 passed.
