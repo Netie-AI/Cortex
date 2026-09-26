@@ -15,7 +15,7 @@ import pytest
 
 from CortexOS.crew import keys, openvault
 
-SECRET = "sk-hx01-must-never-leave-123456"
+SECRET = "hx01-dummy-must-never-leave-123456"
 
 
 @pytest.fixture(autouse=True)

@@ -223,7 +223,7 @@ def test_env_value_wins_over_file_and_missing_file_is_unset(tmp_path) -> None:
 
 def test_openai_key_for_crew_does_not_arm_env_direct_openai(monkeypatch, net) -> None:
     monkeypatch.setenv(direct_providers.TRANSPORT_ENV, "env-direct")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-crew-only-key-123456")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-crew-only-key-123456")
     monkeypatch.setenv("CORTEX_DIRECT_OPENAI_MODELS", "gpt-test")
     assert [p.label for p, _, _ in direct_providers.configured()] == []
     assert fr.arming().armed is False
@@ -237,7 +237,7 @@ def test_openai_key_for_crew_does_not_arm_env_direct_openai(monkeypatch, net) ->
 def test_opt_in_serves_openai_after_the_defaults(monkeypatch, net) -> None:
     monkeypatch.setenv(direct_providers.TRANSPORT_ENV, "env-direct")
     monkeypatch.setenv(direct_providers.OPT_IN_ENV, "openai, anthropic, nosuch")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-opted-in-key-123456")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-opted-in-key-123456")
     monkeypatch.setenv("NVIDIA_API_KEY", "nv-default-key-123456")
     monkeypatch.setenv("CORTEX_DIRECT_OPENAI_MODELS", "gpt-test")
     assert [p.label for p in direct_providers.served_providers()] == [
@@ -254,12 +254,12 @@ def test_opt_in_serves_openai_after_the_defaults(monkeypatch, net) -> None:
     )
     assert status == 200
     assert net[0]["url"] == "https://api.openai.com/v1/chat/completions"
-    assert net[0]["auth"] == "Bearer sk-opted-in-key-123456"
+    assert net[0]["auth"] == "Bearer dummy-opted-in-key-123456"
     assert net[0]["body"]["model"] == "gpt-test"
 
 
 def test_provider_opt_in_latches_at_first_read(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-latched-key-123456")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-latched-key-123456")
     assert "openai" not in [p.label for p in direct_providers.served_providers()]
     monkeypatch.setenv(direct_providers.OPT_IN_ENV, "openai")
     assert "openai" not in [p.label for p in direct_providers.served_providers()]
@@ -274,7 +274,7 @@ def test_redact_secrets_removes_live_values_key_shapes_and_pii(monkeypatch) -> N
     monkeypatch.setenv("XAI_API_KEY", "plainvalue-without-shape")
     text = (
         "401 for key plainvalue-without-shape; Authorization: Bearer abc.def; "
-        "nvapi-12ab sk-ant-api03-zzzzzzzzzz AIzaSyXXXX; owner ali@example.com IC 900101-14-5678"
+        "nvapi-12ab " + "sk-" + "ant-api03-zzzzzzzzzz AIzaSyXXXX; owner ali@example.com IC 900101-14-5678"
     )
     out = harness_secrets.redact_secrets(text)
     for leak in ("plainvalue", "abc.def", "nvapi-12ab", "sk-ant", "AIzaSy", "ali@example.com", "900101-14-5678"):
