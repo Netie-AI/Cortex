@@ -27,6 +27,7 @@ import yaml
 from CortexOS.crew.config import BACKEND_CF_COMPUTER
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
+from CortexOS.insights.caller_ontology import SOURCE_CALLER, SOURCE_PACK, CallerCatalog
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
 
 _log = logging.getLogger(__name__)
@@ -534,6 +535,111 @@ def retrieve_ontology(intent: str, *, pack_dir: Path | str | None = None) -> dic
         ),
         "refuse_reason": "" if has_path else "no ontology path or metric for intent",
     }
+
+
+def _pack_tables(pack_dir: Path | str | None = None) -> set[str]:
+    """Tables the engine's own ask spine ranks. Empty if its YAML is unreadable."""
+    try:
+        return {str(o.id).lower() for o in load_object_types(_pack_dir(pack_dir))}
+    except (OSError, ValueError):
+        return set()
+
+
+def caller_is_pack_spine(
+    caller: CallerCatalog | None, *, pack_dir: Path | str | None = None
+) -> bool:
+    """True when every table the caller names is one the engine pack ranks.
+
+    The DMS demo Space sends its (demo) catalog too; that keeps the engine
+    pack ranking and the certified-measure serve exactly as before. A catalog
+    naming any other table is a caller Space and is ranked on its own terms.
+    """
+    if caller is None:
+        return True
+    pack = _pack_tables(pack_dir)
+    return bool(pack) and caller.table_names <= pack
+
+
+def ranking_from_caller(intent: str, caller: CallerCatalog) -> dict[str, Any]:
+    """Where + importance over the caller's tables only. Never reads the pack."""
+    text = (intent or "").strip()
+    intent_tok = tokens(text)
+    locations: list[dict[str, Any]] = []
+    for table, cols in caller.tables.items():
+        hay = tokens(table.replace("_", " ") + " " + table)
+        for col in cols:
+            hay = hay | tokens(col.replace("_", " ") + " " + col)
+        overlap = _score_overlap(intent_tok, hay)
+        score = int(caller.scores.get(table, 0)) + overlap
+        why = f"caller ontology (schema score {int(caller.scores.get(table, 0))}"
+        why += f", token overlap {overlap})"
+        locations.append(
+            {
+                "id": table,
+                "kind": "object",
+                "where": {"table": table, "primary_key": "", "columns": list(cols)},
+                "importance": {"score": score, "why": why},
+                "exclude_columns": [],
+            }
+        )
+    metrics: list[dict[str, Any]] = []
+    for name, grain in caller.measures.items():
+        if grain is None:
+            continue
+        score = _score_overlap(intent_tok, tokens(name.replace("_", " ") + " " + name))
+        if score <= 0:
+            continue
+        # No trial_question: a caller measure is never replayed on the engine
+        # pack's /dms/query bridge.
+        metrics.append(
+            {
+                "id": name,
+                "kind": "metric",
+                "where": {"tables": [grain], "synonym": name},
+                "importance": {"score": score, "why": f"caller measure {name}"},
+            }
+        )
+    locations.sort(key=lambda r: (-int(r["importance"]["score"]), r["id"]))
+    metrics.sort(key=lambda r: (-int(r["importance"]["score"]), r["id"]))
+    metrics = metrics[:12]
+    for idx, row in enumerate(locations, start=1):
+        row["importance"]["rank"] = idx
+    for idx, row in enumerate(metrics, start=1):
+        row["importance"]["rank"] = idx
+    joins = [
+        {"id": lid, "from": src, "to": dst, "from_property": "", "to_property": ""}
+        for lid, src, dst in caller.links
+    ]
+    ok = bool(locations)
+    return {
+        "ok": ok,
+        "phase": "ontology",
+        "source": SOURCE_CALLER,
+        "intent": text,
+        "locations": locations,
+        "metrics": metrics,
+        "certified": [],
+        "joins": joins,
+        "law": (
+            "Ontology first: ranked over the caller's own catalog; the engine "
+            "pack is not consulted. Generated SQL may read only these tables."
+        ),
+        "refuse_reason": "" if ok else "caller ontology names no tables",
+    }
+
+
+def select_ranking(
+    intent: str,
+    *,
+    pack_dir: Path | str | None = None,
+    caller: CallerCatalog | None = None,
+) -> dict[str, Any]:
+    """Caller catalog when it is not the pack spine; else the engine pack (unchanged)."""
+    if caller is not None and not caller_is_pack_spine(caller, pack_dir=pack_dir):
+        return ranking_from_caller(intent, caller)
+    ranking = retrieve_ontology(intent, pack_dir=pack_dir)
+    ranking.setdefault("source", SOURCE_PACK)
+    return ranking
 
 
 def constrain_trials(ranking: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1225,7 +1331,13 @@ async def generative_ask(
     # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
     # served as stored (or the ask abstains by name); the model is not asked to
     # re-derive a formula that is already law.
-    hit = certified_serve.resolve(intent, ranking, query_plan=query_plan, pack_dir=pack_dir)
+    # A caller-ontology ranking never consults the engine pack's certified
+    # queries: they are another Space's law.
+    hit = None
+    if ranking.get("source") != SOURCE_CALLER:
+        hit = certified_serve.resolve(
+            intent, ranking, query_plan=query_plan, pack_dir=pack_dir
+        )
     if hit is not None:
         if hit["action"] == "serve":
             return certified_serve.served_envelope(hit)
@@ -1293,8 +1405,14 @@ async def run_insights(
     pack_dir: Path | str | None = None,
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
+    caller: CallerCatalog | None = None,
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
+
+    ``caller`` is the validated catalog the HTTP caller sent. When it names
+    tables outside the engine pack, ranking, generation and the SQL validator
+    use only the caller's tables, and the engine pack's /dms/query trials are
+    not run (they answer a different Space).
 
     ``bearer`` only matters with ``generate``: an HTTP caller's own OpenVault
     key (or ``""`` for the loopback tier); in-process callers leave ``None``.
@@ -1321,7 +1439,8 @@ async def run_insights(
             )
         )
 
-    ranking = retrieve_ontology(text, pack_dir=pack_dir)
+    ranking = select_ranking(text, pack_dir=pack_dir, caller=caller)
+    caller_mode = ranking.get("source") == SOURCE_CALLER
     gen: dict[str, Any] | None = None
     if generate:
         if not ranking.get("ok"):
@@ -1365,7 +1484,7 @@ async def run_insights(
                 ),
                 gen,
             )
-        if not ask:
+        if not ask or caller_mode:
             validation = _validation(
                 status="ABSTAIN",
                 ranking=ranking,
@@ -1419,6 +1538,20 @@ async def run_insights(
                     "refuse_reason": ranking.get("refuse_reason") or "",
                 }
             )
+
+    if caller_mode:
+        return _attach_generative(
+            _refuse(
+                intent=text,
+                ranking=ranking,
+                reason=(
+                    "caller_ontology_ask_unsupported: engine /dms/query trials "
+                    "serve only the engine pack; send generate=true"
+                ),
+                shell_public=shell_public,
+            ),
+            gen,
+        )
 
     if not ranking.get("ok"):
         return _attach_generative(

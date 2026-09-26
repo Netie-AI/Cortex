@@ -15,8 +15,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from CortexOS.insights import caller_ontology as caller_onto
 from CortexOS.insights import keys as insight_keys
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
@@ -28,6 +29,18 @@ CREW_ALIAS = "POST /crew/insights"
 
 
 class InsightsAskIn(BaseModel):
+    """Every field DMS ``compute_insights`` POSTs is modelled here.
+
+    ``ontology`` / ``query_plan`` / ``intent_slots`` are typed ``Any`` on
+    purpose: the caller catalog is a trust boundary validated by
+    ``caller_ontology`` so a malformed one is a *named* 422 ABSTAIN body the
+    DMS client reads, not a bare pydantic error. Unknown fields are kept
+    (``extra="allow"``) only so the route can reject them by name instead of
+    dropping them silently.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     intent: str = ""
     question: str = ""
     ask: bool = True
@@ -35,6 +48,18 @@ class InsightsAskIn(BaseModel):
     session_id: str = "demo"
     space_id: str | None = None
     consumer: str = Field(default="dms")
+    #: Request plan mode (DMS sends ``ontology_plan``). Recorded, never a stamp:
+    #: plan_source is decided from the SQL actually produced.
+    mode: Any = None
+    #: Advisory FreeRoute preference (DMS sends ``free+normal``); OpenVault picks.
+    model_preference: Any = None
+    #: The Space's retrieved catalog (DMS ``retrieve_short_context`` shape).
+    ontology: Any = None
+    intent_slots: Any = None
+    #: Ranked-slot retry: typed plan folded into the SQL prompt, not a stamp.
+    query_plan: Any = None
+    ranked_metric: Any = None
+    generate_retry: Any = None
 
 
 def resolved_intent(body: InsightsAskIn) -> str:
@@ -58,6 +83,42 @@ def _caller_refused(purpose: str) -> JSONResponse:
     }
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
+
+
+def _invalid_request(reason: str, detail: str, *, intent: str) -> JSONResponse:
+    """Named 422 ABSTAIN for a request Cortex refuses to use. Never a 500."""
+    from CortexOS.integrations import freeroute as core
+
+    body: dict[str, Any] = {
+        "ok": False,
+        "status": "ABSTAIN",
+        "phase": "request",
+        "intent": intent,
+        "badge": "abstain",
+        "answer": f"Abstained ({reason}): {detail}. No number invented.",
+        "refuse_reason": reason,
+        "detail": detail,
+        "values": [],
+        "sql_used": None,
+        "audit_id": None,
+        "live_5000_ci": False,
+    }
+    core.stamp_router_fingerprint(body)
+    return JSONResponse(body, status_code=422)
+
+
+def _received(body: InsightsAskIn, ontology_source: str) -> dict[str, Any]:
+    return {
+        "mode": body.mode,
+        "model_preference": body.model_preference,
+        "model_preference_note": "advisory; OpenVault FreeRoute picks the model",
+        "ontology": body.ontology is not None,
+        "ontology_source": ontology_source,
+        "query_plan": body.query_plan is not None,
+        "intent_slots": body.intent_slots is not None,
+        "ranked_metric": body.ranked_metric,
+        "generate_retry": body.generate_retry,
+    }
 
 
 def stamp_api(
@@ -153,6 +214,21 @@ async def execute_insights(
     intent = resolved_intent(body)
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
+    extras = sorted((body.model_extra or {}).keys())
+    if extras:
+        return _invalid_request(
+            "unknown_request_fields",
+            "not modelled by POST /v1/insights: " + ", ".join(extras)[:200],
+            intent=intent,
+        )
+    try:
+        for name in ("mode", "model_preference", "ranked_metric", "generate_retry"):
+            caller_onto.check_field(getattr(body, name), name)
+        caller = caller_onto.parse_caller_ontology(body.ontology)
+        query_plan = caller_onto.check_plan(body.query_plan, "query_plan")
+        caller_onto.check_plan(body.intent_slots, "intent_slots")
+    except caller_onto.CallerOntologyError as exc:
+        return _invalid_request(exc.reason, exc.detail, intent=intent)
     bearer: str | None = None
     if body.generate:
         armed = await freeroute_mod.run_core(freeroute_mod.arming)
@@ -169,8 +245,15 @@ async def execute_insights(
         ask=body.ask,
         generate=body.generate,
         bearer=bearer,
+        query_plan=query_plan,
+        caller=caller,
     )
-    return stamp_api(result, consumer=consumer, alias=alias)
+    ranking = result.get("ontology") if isinstance(result, dict) else None
+    source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
+    result["ontology_source"] = source
+    out = stamp_api(result, consumer=consumer, alias=alias)
+    out["api"]["received"] = _received(body, source)
+    return out
 
 
 @router.get("", operation_id="insights.law")
