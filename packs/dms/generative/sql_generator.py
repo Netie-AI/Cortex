@@ -12,10 +12,12 @@ the measured route (no hardcoded model), and the Cortex OpenVault credential.
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from CortexOS.dms.sql_extract import extract_select
 from CortexOS.integrations import freeroute
+from packs.dms.generative import few_shot
 from packs.dms.generative.literal_normalize import normalize_sql_literals
 from packs.dms.generative.schema_retrieval import retrieve, schema_prompt_block
 
@@ -26,6 +28,43 @@ _SYSTEM_PROMPT = (
     "Return SQL only."
 )
 _PIN_ENVS = ("DMS_L2_MODEL", "OPENVAULT_SQL_MODEL")
+#: Total characters for the EXAMPLES block (header included).
+EXAMPLES_CHAR_CAP = 1500
+_EXAMPLES_HEADER = "EXAMPLES (verified question \u2192 SQL):"
+_last_few_shot: ContextVar[int] = ContextVar("l2_last_few_shot_count", default=0)
+
+
+def few_shot_enabled() -> bool:
+    """``DMS_L2_FEW_SHOT=0`` turns examples off (A/B against the shadow log)."""
+    return os.environ.get("DMS_L2_FEW_SHOT", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def last_few_shot_count() -> int:
+    """Examples placed in the most recent prompt built in this context."""
+    return _last_few_shot.get()
+
+
+def _examples_block(examples: list[tuple[str, str]]) -> tuple[str, int]:
+    """Render examples under the char cap. Whole pairs only; returns (block, count)."""
+    lines = [_EXAMPLES_HEADER]
+    used = len(_EXAMPLES_HEADER)
+    count = 0
+    for question, sql in examples:
+        pair = [f"Q: {' '.join(question.split())}", f"SQL: {' '.join(sql.split())}"]
+        cost = sum(len(line) + 1 for line in pair)
+        if used + cost > EXAMPLES_CHAR_CAP:
+            continue
+        lines.extend(pair)
+        used += cost
+        count += 1
+    if not count:
+        return "", 0
+    return "\n".join(lines), count
 
 
 def _l2_flag_on() -> bool:
@@ -99,19 +138,35 @@ def _build_prompt(
     schema_context: dict[str, Any],
     *,
     prior_violations: list[str] | None,
+    examples: list[tuple[str, str]] | None = None,
 ) -> str:
-    parts = [
-        schema_prompt_block(schema_context),
-        "",
+    parts = [schema_prompt_block(schema_context), ""]
+    block, count = _examples_block(list(examples or []))
+    _last_few_shot.set(count)
+    if block:
+        parts.extend([block, ""])
+    parts.extend([
         f"QUESTION: {question}",
         "",
         "Emit one DuckDB SELECT. Encode categorical filters with exact warehouse values "
         "(e.g. SKU-BETA not BETA; WH-A / WAREHOUSE A as stored).",
-    ]
+    ])
     if prior_violations:
         parts.append("PREVIOUS VALIDATION ERRORS (fix these):")
         parts.extend(f"- {v}" for v in prior_violations[:8])
     return "\n".join(parts)
+
+
+def _select_examples(question: str, schema: dict[str, Any]) -> list[tuple[str, str]]:
+    """Verified pairs restricted to the reduced schema. Never blocks generation."""
+    if not few_shot_enabled():
+        return []
+    try:
+        return few_shot.select_examples(
+            question, tables=(schema.get("tables") or {}).keys()
+        )
+    except Exception:  # noqa: BLE001 - examples are an aid, not a gate
+        return []
 
 
 def generate_candidates(
@@ -123,13 +178,19 @@ def generate_candidates(
 ) -> list[str]:
     """Return normalized SQL candidates. Empty → caller must abstain."""
     _ = n  # FreeRoute returns one proposal; retries feed prior_violations.
+    _last_few_shot.set(0)
     if not is_configured():
         return []
 
     # The leave-machine gate runs inside freeroute.complete(egress="leave"):
     # a denial sends nothing and never degrades to a smaller/local model.
     schema = schema_context if schema_context is not None else retrieve(question)
-    prompt = _build_prompt(question, schema, prior_violations=prior_violations)
+    prompt = _build_prompt(
+        question,
+        schema,
+        prior_violations=prior_violations,
+        examples=_select_examples(question, schema),
+    )
     raw = _freeroute_complete(prompt)
     if not raw:
         return []
@@ -163,6 +224,7 @@ def generate_with_detail(
         "gate_reason": gate_reason,
         "schema_tables": list((schema.get("tables") or {}).keys()),
         "candidates": cands,
+        "few_shot_count": last_few_shot_count(),
         "routes": [stamp.public() for stamp in stamps],
     }
 
@@ -170,6 +232,8 @@ def generate_with_detail(
 __all__ = [
     "generate_candidates",
     "generate_with_detail",
+    "few_shot_enabled",
     "is_configured",
+    "last_few_shot_count",
     "unarmed_reason",
 ]
