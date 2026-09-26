@@ -54,7 +54,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from CortexOS.integrations import direct_providers, freeroute_ov_local, openvault_client
+from CortexOS.integrations import (
+    direct_providers,
+    freeroute_ov_local,
+    freeroute_prespend,
+    openvault_client,
+)
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
@@ -635,6 +640,9 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("completion_tokens", "INTEGER"),
     ("total_tokens", "INTEGER"),
     ("split", "TEXT NOT NULL DEFAULT 'product'"),
+    # #271: the pre-spend prediction a call went out under (tuning is train-only).
+    ("prespend_p", "REAL"),
+    ("prespend_mode", "TEXT"),
 )
 
 
@@ -751,8 +759,8 @@ def _write_row(
             "INSERT OR REPLACE INTO routes ("
             "call_id, task, requested, served, status, usable, scored, verdict, "
             "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
-            "total_tokens, split"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "total_tokens, split, prespend_p, prespend_mode"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 stamp.call_id,
                 stamp.task,
@@ -770,6 +778,8 @@ def _write_row(
                 completion_tokens,
                 total_tokens,
                 _normalize_split(split),
+                stamp.prespend.get("p_valid"),
+                stamp.prespend.get("mode"),
             ),
         )
 
@@ -1389,6 +1399,7 @@ def _ladder_complete(
     pin: str,
     pin_source: str,
     send_kw: dict[str, Any],
+    skip: freeroute_prespend.Gate | None = None,
 ) -> Completion:
     """No-model rungs, then model rungs cheapest-first; step up only on a checker reject.
 
@@ -1410,6 +1421,9 @@ def _ladder_complete(
             tried[-1]["final"] = True
             stamp.ladder = tried
             return Completion(ok=True, text=text, message={"role": "assistant", "content": text}, stamp=stamp)
+    if skip is not None:
+        # #271: the no-model rungs were free; the first paid rung is not sent.
+        return _prespend_skipped(task, credential, skip, tried)
 
     rungs, _ = ladder_order(task, arm, pin=pin, pin_source=pin_source)
     last: Completion | None = None
@@ -1468,11 +1482,14 @@ def complete(
     split: str = "",
     ladder: int | None = None,
     solvers: Sequence[Solver] | None = None,
+    predict_state: Mapping[str, Any] | None = None,
 ) -> Completion:
     """One FreeRoute call. Never raises. Refusals are named and stamped.
 
     ``ladder`` / ``solvers`` (or ``CORTEX_FREEROUTE_LADDER``) opt into the #270
     ladder: see :func:`_ladder_complete`. Unset, this is one model request.
+    ``predict_state`` is the plan the #271 pre-spend gate is asked about
+    (``CORTEX_FREEROUTE_PRESPEND``; see :mod:`freeroute_prespend`).
     """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
@@ -1555,7 +1572,12 @@ def complete(
             return Completion(ok=False, stamp=stamp, reason=reason)
         leave_decision = why
 
+    gate = freeroute_prespend.check(predict_state)
+    prespend = dict(gate.record) if gate is not None else {}
+    skip = gate if gate is not None and not gate.spend else None
     steps, ladder_note = _ladder_steps(ladder)
+    if skip is not None and not solvers:
+        return _prespend_skipped(task, credential, skip, [])
     if steps or solvers:
         return _ladder_complete(
             task,
@@ -1567,6 +1589,7 @@ def complete(
             accept=accept,
             pin=pin,
             pin_source=pin_source,
+            skip=skip,
             send_kw={
                 "max_tokens": max_tokens,
                 "temperature": temperature,
@@ -1577,6 +1600,7 @@ def complete(
                 "split": split,
                 "credential": credential,
                 "leave_decision": leave_decision,
+                "prespend": prespend,
             },
         )
     chosen = pick(task, arm, pin=pin, pin_source=pin_source)
@@ -1603,7 +1627,26 @@ def complete(
         split=split,
         credential=credential,
         leave_decision=leave_decision,
+        prespend=prespend,
     )
+
+
+def _prespend_skipped(
+    task: str, credential: str, gate: freeroute_prespend.Gate, tried: list[dict[str, Any]]
+) -> Completion:
+    """The #271 gate said do not spend: a named refusal, stamped, nothing sent."""
+    stamp = RouteStamp(
+        call_id=uuid.uuid4().hex,
+        task=task,
+        requested="",
+        error=gate.reason,
+        credential=credential,
+        impl=_transport()[1],
+        prespend=dict(gate.record),
+        ladder=tried,
+    )
+    _journal_add(stamp)
+    return Completion(ok=False, stamp=stamp, reason=gate.reason)
 
 
 def _send(
@@ -1621,6 +1664,7 @@ def _send(
     split: str,
     credential: str,
     leave_decision: str,
+    prespend: dict[str, Any] | None = None,
 ) -> Completion:
     """One model request for ``chosen``: stamped, stored, journalled. Never raises."""
     body: dict[str, Any] = {
@@ -1666,6 +1710,7 @@ def _send(
         leave_gate=leave_decision,
         measured_n=chosen.measured_n,
         measured_score=chosen.measured_score,
+        prespend=dict(prespend or {}),
     )
     text = ""
     message: dict[str, Any] = {}

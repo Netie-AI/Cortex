@@ -32,6 +32,8 @@ _PIN_ENVS = ("DMS_L2_MODEL", "OPENVAULT_SQL_MODEL")
 EXAMPLES_CHAR_CAP = 1500
 _EXAMPLES_HEADER = "EXAMPLES (verified question \u2192 SQL):"
 _last_few_shot: ContextVar[int] = ContextVar("l2_last_few_shot_count", default=0)
+# #271: the plan the FreeRoute pre-spend gate is asked about for this proposal.
+_plan_var: ContextVar[dict[str, Any] | None] = ContextVar("l2_prespend_plan", default=None)
 
 
 def few_shot_enabled() -> bool:
@@ -129,8 +131,24 @@ def _freeroute_complete(prompt: str) -> str | None:
         pin=pin,
         pin_source=pin_source,
         egress="leave",
+        predict_state=_plan_var.get(),
     )
     return out.text if out.ok else None
+
+
+def _plan_state(question: str, schema: dict[str, Any], *, retry: bool) -> dict[str, Any]:
+    """What the #271 pre-spend gate is asked about: tables, joins, retry. No rows."""
+    return {
+        "task": "gen-ask-sql",
+        "question": question,
+        "tables": sorted((schema.get("tables") or {}).keys()),
+        "joins": [
+            f"{j.get('from_table')}.{j.get('from_column')}={j.get('to_table')}.{j.get('to_column')}"
+            for j in schema.get("joins") or []
+            if isinstance(j, dict)
+        ],
+        "retry": retry,
+    }
 
 
 def _build_prompt(
@@ -191,7 +209,11 @@ def generate_candidates(
         prior_violations=prior_violations,
         examples=_select_examples(question, schema),
     )
-    raw = _freeroute_complete(prompt)
+    plan_token = _plan_var.set(_plan_state(question, schema, retry=bool(prior_violations)))
+    try:
+        raw = _freeroute_complete(prompt)
+    finally:
+        _plan_var.reset(plan_token)
     if not raw:
         return []
     sql = _extract_sql(raw)
