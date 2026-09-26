@@ -74,7 +74,7 @@ def _threshold() -> float | None:
 
 
 def _question() -> Any:
-    from CortexOS.decision import NoulQuestion
+    from CortexOS.decision.models import NoulQuestion
 
     return NoulQuestion(
         QUESTION_TEXT,
@@ -126,7 +126,9 @@ def check(state: Mapping[str, Any] | None) -> Gate | None:
     backend, why = _backend()
     if backend is None:
         return Gate(True, {**base, "decision": "spend", "degraded": why})
-    from CortexOS.decision import decide
+    # The submodule, not the package attribute: importing ``netie.decision.decide``
+    # through the netie alias rebinds ``CortexOS.decision.decide`` to the module.
+    from CortexOS.decision.decide import decide
 
     try:
         answer = decide(_question(), dict(state), backend, abstain_threshold=threshold)
@@ -205,7 +207,7 @@ def tune(rows: list[tuple[float, int]] | None = None) -> float | None:
 
 def report(threshold: float, rows: list[tuple[float, int]] | None = None) -> dict[str, Any]:
     """Held-out ECE, Brier, automatable share, and what ``enforce`` would skip."""
-    from CortexOS.decision import automatable_share, brier, ece
+    from CortexOS.decision.calibration import automatable_share, brier, ece
 
     data = _labelled("heldout") if rows is None else rows
     if not data:

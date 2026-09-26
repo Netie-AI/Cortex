@@ -18,6 +18,17 @@ Both files fail to collect on fa0f8a8 (the ladder and gate APIs are absent). `te
 
 Live (evidence only, n=1, env-direct, split=benchmark): `ladder=1` with a checker that rejects the first answer. gemini-3-flash-preview served and was rejected, then kimi-k3 served, was accepted and is marked `final`. At `max_tokens=20` kimi came back empty (reasoning budget) and the ladder ended as an honest refusal with empty text.
 
+## Found on the way: package attribute shadowed by a same-named submodule
+
+- **Expected:** with `enforce` on and P(valid) = 0.1, the call is skipped.
+- **Actual:** in the full suite only, the gate degraded with `backend error: TypeError` and spent.
+- **Why:** `CortexOS/decision/__init__.py` binds the function `decide`, and there is also a submodule `decide.py`. Importing `netie.decision.decide` through the netie alias rebinds `CortexOS.decision.decide` to the submodule. So `from CortexOS.decision import decide` returned a module.
+- **Repro:** `pytest tests/test_decision tests/test_freeroute_prespend.py` on f84aa61.
+- **Fix:** import from the submodules. The degraded path was working as designed: the failure was visible, never silent.
+- **Class:** order-dependent import aliasing.
+- **Guard:** `test_gate_survives_the_netie_alias_rebinding_decide`.
+- **Other callers:** grep finds no other `from CortexOS.decision import decide` in `CortexOS/` or `packs/`. The package-level name is still shadowable.
+
 ## Root-cause class
 
 The single-shot model call had no in-call recovery tied to the checker. The spend decision had no predictor in front of it. Both are *missing control points*, not bugs.

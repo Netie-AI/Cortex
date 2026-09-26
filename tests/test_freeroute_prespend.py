@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from CortexOS.decision import RawDecision
+from CortexOS.decision.models import RawDecision
 from CortexOS.integrations import direct_providers
 from CortexOS.integrations import freeroute as fr
 from CortexOS.integrations import freeroute_prespend as ps
@@ -288,3 +288,19 @@ def test_sql_lane_passes_its_plan_to_the_gate(wire, monkeypatch) -> None:
             "retry": False,
         }
     ]
+
+
+def test_gate_survives_the_netie_alias_rebinding_decide(wire, monkeypatch) -> None:
+    """Importing ``netie.decision.decide`` rebinds ``CortexOS.decision.decide`` to the
+    submodule. Seen in the full suite: the gate degraded with a TypeError and spent."""
+    import importlib
+
+    import CortexOS.decision as pkg
+
+    importlib.import_module("netie.decision.decide")
+    monkeypatch.setattr(pkg, "decide", importlib.import_module("CortexOS.decision.decide"))
+    _enforce(monkeypatch)
+    with ps.use_backend(Kev(0.1)):
+        out = _ask()
+    assert wire.sent == []
+    assert out.ok is False and "predicted invalid" in out.reason
