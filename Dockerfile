@@ -30,8 +30,14 @@ COPY packages ./packages
 COPY contract ./contract
 COPY data/samples ./data/samples
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir ".[dms]" \
+# Supply chain (R13.1, HX-02): every third-party wheel is exact-pinned and
+# hash-checked from requirements/image-constructor.lock.txt (scripts/lock_images.py,
+# never hand-edited), then the project goes in with --no-deps. No build
+# isolation, so the build backend is the hashed poetry-core from the lock.
+COPY requirements/image-constructor.lock.txt ./requirements/
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes \
+        -r requirements/image-constructor.lock.txt \
+    && pip install --no-cache-dir --no-deps --no-build-isolation ".[dms]" \
     && python -c "from CortexOS.dms.warehouse_db import load_inventory_csv; load_inventory_csv()"
 
 # Hyperlift default app port is 8080 (set PORT in Hyperlift Manager, not EXPOSE).
