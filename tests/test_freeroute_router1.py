@@ -381,3 +381,23 @@ def test_baseline_row_plan_source_from_stamp_not_labels() -> None:
         "ontology_plan"
     )
 
+
+def test_baseline_row_records_credential_and_refuses_unattributed() -> None:
+    """Cortex #275 item 9: the credential is on every row; unattributed rows never count."""
+    from CortexOS.integrations import freeroute_baseline as baseline
+
+    def row(credential: str | None) -> dict[str, object]:
+        stamp = {} if credential is None else {"credential": credential}
+        return {"status": "ABSTAIN", "generative": {"stamp": stamp}}
+
+    loopback = baseline.row_countable(row("loopback tier (unattributed)"))
+    assert loopback == {
+        "credential": "loopback tier (unattributed)",
+        "counted": False,
+        "reason": baseline.ROW_UNATTRIBUTED,
+    }
+    missing = baseline.row_countable(row(None))
+    assert missing["counted"] is False and missing["reason"] == baseline.ROW_NO_CREDENTIAL
+    assert baseline.row_countable({"status": "CERTIFIED"})["counted"] is False
+    relayed = baseline.row_countable(row("relayed bearer"))
+    assert relayed == {"credential": "relayed bearer", "counted": True, "reason": ""}

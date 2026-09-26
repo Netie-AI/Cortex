@@ -66,6 +66,30 @@ def row_plan_source(envelope: Mapping[str, Any]) -> str:
     return raw if raw in PLAN_SOURCES else "other"
 
 
+UNATTRIBUTED = "unattributed"
+ROW_UNATTRIBUTED = (
+    "row credential reads unattributed; not counted (DMS #231 INVALID rule, Cortex #275)"
+)
+ROW_NO_CREDENTIAL = "row has no model-call credential stamp; not counted"
+
+
+def row_credential(envelope: Mapping[str, Any]) -> str:
+    """The credential the row's model call was stamped with, or ``""``."""
+    gen = envelope.get("generative")
+    stamp = gen.get("stamp") if isinstance(gen, Mapping) else None
+    return str(stamp.get("credential") or "") if isinstance(stamp, Mapping) else ""
+
+
+def row_countable(envelope: Mapping[str, Any]) -> dict[str, Any]:
+    """Credential on every row; an unattributed or missing one is never counted."""
+    credential = row_credential(envelope)
+    if not credential:
+        return {"credential": "", "counted": False, "reason": ROW_NO_CREDENTIAL}
+    if UNATTRIBUTED in credential.lower():
+        return {"credential": credential, "counted": False, "reason": ROW_UNATTRIBUTED}
+    return {"credential": credential, "counted": True, "reason": ""}
+
+
 def evaluate(*, arm: core.Arming | None = None) -> dict[str, Any]:
     """Setup fingerprint. Always includes arming reason. Numbers stay null here."""
     require_explicit_learn()
