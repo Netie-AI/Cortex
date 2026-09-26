@@ -296,3 +296,38 @@ def test_insights_stamp_reader_keeps_the_ladder(script) -> None:
     envelope = {"generative": {"stamp": out.stamp.public()}}
     rebuilt = insights._route_stamp_for_fingerprint(envelope)
     assert [s["verdict"] for s in fr.router_fingerprint(rebuilt)["ladder"]] == ["rejected", "accepted"]
+
+
+def test_every_ladder_rung_sends_masked_text_and_the_answer_is_restored(script, monkeypatch) -> None:
+    """#268 x #270: masking runs per request, so a stepped-up rung never sends raw PII."""
+    bodies: list[str] = []
+    inner = script
+
+    def recording(method: str, path: str, *, body: Any = None, **kw: Any) -> tuple[int, Any]:
+        bodies.append(str((body or {}).get("messages")))
+        return inner(method, path, body=body, **kw)
+
+    email = "tan.ah.kow@example.com"
+    msgs = [{"role": "user", "content": f"how many orders did {email} place"}]
+    script.on("google", ("ok", "I think about 40 orders.", 10))
+    with fr.use_transport(recording, direct_providers.IMPL):
+        out = fr.complete("gen-ask-sql", msgs, accept=_is_select, ladder=2)
+    assert out.ok is True and out.text == GOOD_SQL
+    assert len(bodies) == 2, "expected one request per rung"
+    for sent in bodies:
+        assert email not in sent
+        assert "<PII:EMAIL_1>" in sent
+    assert out.stamp is not None and out.stamp.masked.get("EMAIL") == 1
+
+
+def test_masker_failure_on_a_ladder_refuses_every_rung_with_nothing_sent(script, monkeypatch) -> None:
+    from CortexOS.integrations import pii_mask
+
+    def boom(_messages: Any) -> Any:
+        raise pii_mask.MaskingFailed(pii_mask.REFUSED_REASON)
+
+    monkeypatch.setattr(pii_mask, "mask_messages", boom)
+    out = fr.complete("gen-ask-sql", MSGS, accept=_is_select, ladder=2)
+    assert out.ok is False and out.text == ""
+    assert script.sent == []
+    assert pii_mask.REFUSED_REASON in out.reason

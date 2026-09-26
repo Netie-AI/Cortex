@@ -6,8 +6,14 @@ Pydantic models are hoisted to module level.
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+
+from CortexOS.security.auth_port import require_spend_auth
+
+# #265 (P24.4): the POST runs FreeRoute completions, so it needs an engine
+# auth-port caller (viewer+), loopback included, before any model call.
+_SPEND = [Depends(require_spend_auth("viewer"))]
 
 
 class PromptHarnessIn(BaseModel):
@@ -34,7 +40,7 @@ def mount_prompt_harness(router: APIRouter) -> None:
 
         return harness.public_map()
 
-    @router.post("/prompt-harness")
+    @router.post("/prompt-harness", dependencies=_SPEND)
     async def prompt_harness_run(body: PromptHarnessIn | None = None) -> Any:
         """Measure vs DMS #180. Unarmed fail-closed. Never invent COMPLETE."""
         from CortexOS.crew import prompt_harness_climb as harness

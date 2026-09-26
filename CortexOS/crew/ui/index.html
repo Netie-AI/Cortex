@@ -380,9 +380,44 @@
       plane: "crew", shell: null, appHealth: []
     };
     const $ = (id) => document.getElementById(id);
-    const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts)).then(async (r) => {
+    // #265: spend routes need an authenticated caller. The operator's key is
+    // asked for once on a 401 and kept for this tab only (sessionStorage); it
+    // is never embedded in the page.
+    const KEY_STORE = "cortex.crew.apiKey";
+    function apiKey() {
+      try { return sessionStorage.getItem(KEY_STORE) || ""; } catch (_) { return ""; }
+    }
+    function authHeaders(extra) {
+      const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
+      const k = apiKey();
+      if (k) h["X-API-Key"] = k;
+      return h;
+    }
+    function detailText(d, fallback) {
+      if (!d) return fallback;
+      if (typeof d === "string") return d;
+      return d.message || d.code || fallback;
+    }
+    function askForKey(reason) {
+      const k = window.prompt((reason ? reason + "\n\n" : "") + "Enter your Cortex API key (kept for this tab only):");
+      if (!k || !k.trim()) return false;
+      try { sessionStorage.setItem(KEY_STORE, k.trim()); } catch (_) { return false; }
+      return true;
+    }
+    async function authedFetch(path, opts) {
+      const base = Object.assign({}, opts || {});
+      let r = await fetch(path, Object.assign({}, base, { headers: authHeaders(base.headers) }));
+      if (r.status === 401) {
+        const body = await r.clone().json().catch(() => ({}));
+        if (askForKey(detailText(body.detail, "This action needs an API key."))) {
+          r = await fetch(path, Object.assign({}, base, { headers: authHeaders(base.headers) }));
+        }
+      }
+      return r;
+    }
+    const api = (path, opts) => authedFetch(path, opts).then(async (r) => {
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || r.statusText);
+      if (!r.ok) throw new Error(detailText(data.detail, r.statusText));
       return data;
     });
 
@@ -1189,28 +1224,27 @@
       state.claimBusy = ticket + ":" + act;
       try {
         const name = (($("spawnName") && $("spawnName").value) || "Ticket").trim() || "Ticket";
-        const resp = await fetch("/crew/tickets/" + encodeURI(ticket) + "/" + act, {
+        const resp = await authedFetch("/crew/tickets/" + encodeURI(ticket) + "/" + act, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ worker: name, name: name, ttl_s: 900 })
         });
         const data = await resp.json().catch(() => ({}));
         if (resp.status === 409) {
-          toast((data.detail || "Held elsewhere.") + " No silent retry.", "bad");
+          toast(detailText(data.detail, "Held elsewhere.") + " No silent retry.", "bad");
           return;
         }
         if (resp.status === 403) {
-          toast((data.detail || "Not the holder.") + " No silent retry.", "bad");
+          toast(detailText(data.detail, "Not the holder.") + " No silent retry.", "bad");
           return;
         }
         if (!resp.ok) {
-          toast((data.detail || ("claim " + resp.status)) + " - no silent retry.", "bad");
+          toast(detailText(data.detail, "claim " + resp.status) + " - no silent retry.", "bad");
           return;
         }
         toast(
           act === "claim"
-            ? (data.detail || ("Leased to " + (data.worker || name)))
-            : (data.detail || "Released."),
+            ? detailText(data.detail, "Leased to " + (data.worker || name))
+            : detailText(data.detail, "Released."),
           "ok"
         );
         const board = await api("/crew/tickets").catch(() => null);
@@ -1229,17 +1263,16 @@
       state.claimBusy = spec + ":build";
       try {
         const name = (($("spawnName") && $("spawnName").value) || "").trim();
-        const resp = await fetch("/crew/tickets/build", {
+        const resp = await authedFetch("/crew/tickets/build", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ spec: spec, space_id: state.spaceId, name: name })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          toast((data.detail || ("build " + resp.status)) + " - no silent retry.", "bad");
+          toast(detailText(data.detail, "build " + resp.status) + " - no silent retry.", "bad");
           return;
         }
-        toast(data.detail || ("Build " + spec), "ok");
+        toast(detailText(data.detail, "Build " + spec), "ok");
         await refreshAgents();
         const board = await api("/crew/tickets").catch(() => null);
         if (board) renderTickets(board);
@@ -1254,14 +1287,13 @@
       if (state.claimBusy) { toast("Claim in flight. No silent retry.", "warn"); return; }
       state.claimBusy = "scale";
       try {
-        const resp = await fetch("/crew/tickets/scale", {
+        const resp = await authedFetch("/crew/tickets/scale", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ space_id: state.spaceId, limit: 3 })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          toast((data.detail || ("scale " + resp.status)) + " - no silent retry.", "bad");
+          toast(detailText(data.detail, "scale " + resp.status) + " - no silent retry.", "bad");
           return;
         }
         const seated = (data.seated || []).length;

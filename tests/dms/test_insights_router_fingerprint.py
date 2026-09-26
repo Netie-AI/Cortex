@@ -29,7 +29,7 @@ def _assert_unproven_served(env: dict[str, Any], *, requested: str = "") -> None
     assert env.get("learn_source") in {"env", "default"}
     assert "learn_enabled" in env
     assert env.get("route_store_id")
-    assert env.get("masking_state") == "off"
+    assert env.get("masking_state") == "on"
     text = insights.render_tool_text(env)
     assert "served_provider: None" in text
     assert "served_model: None" in text
@@ -172,9 +172,8 @@ def test_http_insights_and_401_carry_fingerprint(
         env = res.json()
         assert env["status"] == "REFUSE"
         assert env["values"] == []
-        assert env["served_provider"] is None
-        assert env["served_model"] is None
-        assert env["served_local"] is False
-        assert "272" in str(env.get("served_reason") or "")
-        assert env.get("learn_source") in {"env", "default"}
-        assert env.get("route_store_id")
+        # Cortex #275: an unauthenticated 401 carries the reason code and a
+        # message only; no setup fingerprint, learn state or route store.
+        assert env["reason"] == "generate_requires_bearer"
+        for key in ("route_store", "route_store_id", "learn_enabled", "learn_source", "served_reason"):
+            assert key not in env, key

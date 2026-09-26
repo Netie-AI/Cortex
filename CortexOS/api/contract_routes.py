@@ -19,8 +19,10 @@ from cortex_contract.answer import (
 from cortex_contract.execution import QueryResult, SubmitRequest
 from cortex_contract.ledger import ChainVerification, LedgerEntry
 from cortex_contract.tools import ToolClass, ToolSpec
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from CortexOS.security.auth_port import Principal, require_role
 
 # Canonical contract route IDs — keep in lockstep with scripts/export_openapi.py.
 CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
@@ -35,6 +37,16 @@ CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
 )
 
 router = APIRouter(prefix="/v1/contract", tags=["contract"])
+
+# TRUST-CONTRACT-AUTH (#265): every contract route is gated through the engine
+# auth port (TRUST-01), so a missing key is 401 and a low role 403 before the
+# handler runs, and a refused call has no side effect. Reads (ask, drillthrough,
+# tools, ledger/verify) need viewer. Anything that writes engine state needs
+# steward: submit binds a session manifest and runs a plan, ledger/append writes
+# a chain row, and jwks/refresh replaces the manifest trust store.
+_VIEWER = [Depends(require_role("viewer"))]
+_STEWARD = require_role("steward")
+_STEWARD_ONLY = [Depends(_STEWARD)]
 
 
 class LedgerAppendRequest(BaseModel):
@@ -279,7 +291,7 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
     return data
 
 
-@router.post("/ask", response_model=Answer, operation_id="ask")
+@router.post("/ask", response_model=Answer, operation_id="ask", dependencies=_VIEWER)
 async def contract_ask(body: AskRequest) -> Answer:
     """Answer a governed question (DMS ask plane). Requires a prior submit bind."""
     from CortexOS.dms.answer_engine import answer as answer_engine
@@ -334,7 +346,12 @@ async def contract_ask(body: AskRequest) -> Answer:
     return Answer.model_validate(data)
 
 
-@router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")
+@router.post(
+    "/drillthrough",
+    response_model=DrillthroughResponse,
+    operation_id="drillthrough",
+    dependencies=_VIEWER,
+)
 async def contract_drillthrough(body: DrillthroughRequest) -> DrillthroughResponse:
     """Re-derive contributing rows under the same session manifest (T7)."""
     from CortexOS.execution.drillthrough import (
@@ -352,7 +369,9 @@ async def contract_drillthrough(body: DrillthroughRequest) -> DrillthroughRespon
     return DrillthroughResponse.model_validate(result)
 
 
-@router.post("/submit", response_model=QueryResult, operation_id="submit")
+@router.post(
+    "/submit", response_model=QueryResult, operation_id="submit", dependencies=_STEWARD_ONLY
+)
 async def contract_submit(body: SubmitRequest) -> QueryResult:
     """Submit a plan under a signed session manifest (C4)."""
     from CortexOS.execution.submit import submit_request
@@ -392,11 +411,19 @@ def _ledger() -> Any:
 
 
 @router.post("/ledger/append", response_model=LedgerEntry, operation_id="ledger.append")
-async def contract_ledger_append(body: LedgerAppendRequest) -> LedgerEntry:
+async def contract_ledger_append(
+    body: LedgerAppendRequest, caller: Principal = Depends(_STEWARD)
+) -> LedgerEntry:
     # No docstring: FastAPI publishes it as the operation `description`, and the
     # released spec (contract/openapi-1.1.0.json) has none for this operation.
+    #
+    # #265: the row records the authenticated caller, never ``body.actor``. The
+    # wire field stays (removing it is a contract major); it is ignored, so a
+    # body that names "admin" or anyone else cannot write a row in their name.
     ledger = _ledger()
-    entry = LedgerEntry.model_validate(_as_mapping(ledger.append(body.actor, body.event_type, body.payload)))
+    entry = LedgerEntry.model_validate(
+        _as_mapping(ledger.append(caller.actor, body.event_type, body.payload))
+    )
     if not _entry_is_on_chain(ledger, entry):
         # Honesty: id+hash that never landed is indistinguishable from a write
         # to DMS, which then calls ledger.verify (whole-chain ok) and trusts it.
@@ -432,7 +459,12 @@ def _entry_is_on_chain(ledger: Any, entry: LedgerEntry) -> bool:
     return False
 
 
-@router.post("/ledger/verify", response_model=ChainVerification, operation_id="ledger.verify")
+@router.post(
+    "/ledger/verify",
+    response_model=ChainVerification,
+    operation_id="ledger.verify",
+    dependencies=_VIEWER,
+)
 async def contract_ledger_verify(body: LedgerVerifyRequest) -> ChainVerification:
     # No docstring — see contract_ledger_append.
     ledger = _ledger()
@@ -447,7 +479,12 @@ async def contract_ledger_verify(body: LedgerVerifyRequest) -> ChainVerification
     return ChainVerification.model_validate(mapped)
 
 
-@router.get("/tools", response_model=ToolRegistryResponse, operation_id="tool.registry")
+@router.get(
+    "/tools",
+    response_model=ToolRegistryResponse,
+    operation_id="tool.registry",
+    dependencies=_VIEWER,
+)
 async def contract_tool_registry() -> ToolRegistryResponse:
     """List tools DMS may invoke through the contract runtime."""
     from CortexOS.execution.tool_runner import allowed_action_tools
@@ -459,7 +496,7 @@ async def contract_tool_registry() -> ToolRegistryResponse:
     return ToolRegistryResponse(tools=tools)
 
 
-@router.post("/jwks/refresh")
+@router.post("/jwks/refresh", dependencies=_STEWARD_ONLY)
 def contract_jwks_refresh() -> dict[str, Any]:
     """Cold-path JWKS refresh after DMS mints a new OpenVault intermediate."""
     from CortexOS.execution.submit import refresh_jwks

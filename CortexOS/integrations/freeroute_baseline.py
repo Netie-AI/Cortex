@@ -4,8 +4,8 @@ Refuses unless ``CORTEX_FREEROUTE_LEARN`` is set explicitly. Refuses to
 record a baseline unless ``arming()`` reports ``armed=True`` and
 ``spendable_hops > 0``. Writes the arming reason either way. Does not invent
 coverage / WRONG / cost / latency. A live pack run is not required for merge
-and does not count until prove is armed. Masking is off until Cortex #268;
-masking-off numbers must never be compared with masking-on runs.
+and does not count until prove is armed. Masking is on since Cortex #268;
+masking-off numbers (recorded before it) must never be compared with masking-on runs.
 
 Does not change ``arming()`` or RouteStamp served_* (#272).
 """
@@ -66,6 +66,30 @@ def row_plan_source(envelope: Mapping[str, Any]) -> str:
     return raw if raw in PLAN_SOURCES else "other"
 
 
+UNATTRIBUTED = "unattributed"
+ROW_UNATTRIBUTED = (
+    "row credential reads unattributed; not counted (DMS #231 INVALID rule, Cortex #275)"
+)
+ROW_NO_CREDENTIAL = "row has no model-call credential stamp; not counted"
+
+
+def row_credential(envelope: Mapping[str, Any]) -> str:
+    """The credential the row's model call was stamped with, or ``""``."""
+    gen = envelope.get("generative")
+    stamp = gen.get("stamp") if isinstance(gen, Mapping) else None
+    return str(stamp.get("credential") or "") if isinstance(stamp, Mapping) else ""
+
+
+def row_countable(envelope: Mapping[str, Any]) -> dict[str, Any]:
+    """Credential on every row; an unattributed or missing one is never counted."""
+    credential = row_credential(envelope)
+    if not credential:
+        return {"credential": "", "counted": False, "reason": ROW_NO_CREDENTIAL}
+    if UNATTRIBUTED in credential.lower():
+        return {"credential": credential, "counted": False, "reason": ROW_UNATTRIBUTED}
+    return {"credential": credential, "counted": True, "reason": ""}
+
+
 def evaluate(*, arm: core.Arming | None = None) -> dict[str, Any]:
     """Setup fingerprint. Always includes arming reason. Numbers stay null here."""
     require_explicit_learn()
@@ -79,7 +103,7 @@ def evaluate(*, arm: core.Arming | None = None) -> dict[str, Any]:
         "masking_state": core.MASKING_STATE,
         "masking_compare_forbidden": True,
         "masking_compare": MASKING_COMPARE,
-        "comparable_with_masking_on": False,
+        "comparable_with_masking_on": core.MASKING_STATE == "on",
         "learn_enabled": learn["learn_enabled"],
         "learn_source": learn["learn_source"],
         "route_store_id": store["id"],

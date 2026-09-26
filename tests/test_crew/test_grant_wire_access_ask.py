@@ -39,6 +39,7 @@ from CortexOS.crew.runtime import ACCESS_ASK_EVENT
 from CortexOS.crew.server import create_app
 from CortexOS.crew.session_grants import SessionGrantBook
 from CortexOS.crew.workspace import GrantMissing, WorkspaceError, workspace_for
+from tests.api_key_isolation import TEST_VIEWER_KEY
 from tests.test_crew.conftest import FakeLLM, wait_run_done
 from tests.test_crew.test_session_grant_dialog import browser_gate_unavailable
 
@@ -318,6 +319,8 @@ def page(browser, served):
     import httpx
 
     context = browser.new_context()
+    # #265: the page sends the operator's key from this tab's sessionStorage.
+    context.add_init_script(f"sessionStorage.setItem('cortex.crew.apiKey', '{TEST_VIEWER_KEY}')")
     pg = context.new_page()
     posts: list[dict] = []
     pg.on(
@@ -336,7 +339,7 @@ def page(browser, served):
         yield SimpleNamespace(
             pg=pg,
             posts=posts,
-            http=httpx.Client(base_url=served.base, timeout=10),
+            http=httpx.Client(base_url=served.base, timeout=10, headers={"X-API-Key": TEST_VIEWER_KEY}),
             llm=served.llm,
             space_id=pg.evaluate("() => state.spaceId"),
         )
@@ -440,3 +443,38 @@ def test_browser_never_grantable_refusal_opens_nothing(page, laptop) -> None:
     assert not pg.evaluate("() => document.getElementById('accessAsk').open")
     assert page.posts == []
     assert not (laptop["outside"] / "n.txt").exists()
+
+
+def test_browser_page_asks_for_the_key_once_on_401_and_sends_it(browser, served) -> None:
+    """#265: a gated Crew call from the page with no key prompts once, then
+    retries with the key; the key stays in this tab's sessionStorage."""
+    context = browser.new_context()
+    try:
+        pg = context.new_page()
+        sent: list[str | None] = []
+        pg.on(
+            "request",
+            lambda req: sent.append(req.headers.get("x-api-key"))
+            if req.method == "POST" and req.url.endswith("/messages")
+            else None,
+        )
+        prompts: list[str] = []
+
+        def on_dialog(dialog) -> None:
+            prompts.append(dialog.message)
+            dialog.accept(TEST_VIEWER_KEY)
+
+        pg.on("dialog", on_dialog)
+        served.llm.manager.append(LLMResult(text="done"))
+        pg.goto(served.base + "/")
+        pg.wait_for_function("() => !!state.spaceId")
+        ok = pg.evaluate(
+            "async () => { await api('/crew/spaces/' + state.spaceId + '/messages',"
+            " {method: 'POST', body: JSON.stringify({text: 'hi'})}); return true; }"
+        )
+        assert ok is True
+        assert len(prompts) == 1 and "API key" in prompts[0]
+        assert sent == [None, TEST_VIEWER_KEY]
+        assert pg.evaluate("() => sessionStorage.getItem('cortex.crew.apiKey')") == TEST_VIEWER_KEY
+    finally:
+        context.close()

@@ -25,6 +25,10 @@ from CortexOS.integrations import direct_providers
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
 STATUSES = ("CERTIFIED", "ABSTAIN", "REFUSE")
+# Cortex #275 AUTH-GEN-01: named refusal for generate=true without the
+# caller's own OpenVault ov_ bearer (loopback included). Nothing is spent.
+GENERATE_REQUIRES_BEARER = "generate_requires_bearer"
+GENERATE_REQUIRES_AUTH = "generate_requires_auth"
 STABLE_ASK = "POST /v1/insights"
 AIRGPT_ALIAS = "POST /dms/sidecar/insights"
 CREW_ALIAS = "POST /crew/insights"
@@ -48,19 +52,64 @@ def _peer_host(request: Request) -> str:
     return str(request.client.host if request.client else "")
 
 
-def _caller_refused(purpose: str) -> JSONResponse:
-    from CortexOS.integrations import freeroute as core
+def _caller_refused(purpose: str, reason: str = GENERATE_REQUIRES_BEARER) -> JSONResponse:
+    """401 for an unauthenticated spend. Reason code and message only (#275).
 
+    No route-store path, learn state or other setup fingerprint: the caller
+    has not authenticated, so it learns nothing about this engine's files.
+    """
     body = {
         "ok": False,
         "status": "REFUSE",
         "purpose": purpose,
+        "reason": reason,
         "refused": insight_keys.CALLER_KEY_RULE,
         "values": [],
         "live_5000_ci": False,
     }
-    core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
+
+
+def _without_paths(envelope: dict[str, Any]) -> None:
+    """Authenticated bodies keep the route-store id, never where files live (#275)."""
+    store = envelope.get("route_store")
+    if isinstance(store, dict) and "path" in store:
+        envelope["route_store"] = {k: v for k, v in store.items() if k != "path"}
+
+
+def _anonymous_complete(runner: Any) -> Any:
+    """Runner for a caller with no ov_ bearer while FreeRoute was unarmed.
+
+    It never passes ``bearer=None`` (Cortex's own key) and re-checks arming
+    before each call: if FreeRoute armed mid-request it refuses with
+    :data:`GENERATE_REQUIRES_BEARER` instead of serving on the loopback tier.
+    """
+    from CortexOS.crew import freeroute as freeroute_mod
+
+    async def guarded(
+        messages: list[dict[str, Any]] | None = None,
+        *,
+        purpose: str = "think",
+        prompt: str = "",
+        bearer: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _ = bearer
+        armed = await freeroute_mod.run_core(freeroute_mod.arming)
+        if armed.get("armed"):
+            return {
+                "ok": False,
+                "status": "REFUSE",
+                "purpose": purpose,
+                "reason": GENERATE_REQUIRES_BEARER,
+                "refused": insight_keys.CALLER_KEY_RULE,
+                "values": [],
+                "live_5000_ci": False,
+            }
+        out = await runner(messages, purpose=purpose, prompt=prompt, bearer="", **kwargs)
+        return out if isinstance(out, dict) else {}
+
+    return guarded
 
 
 async def _env_direct_caller_ok(request: Request) -> bool:
@@ -122,6 +171,7 @@ def stamp_api(
         out["generative"] = dict(out["generative"])
     _annotate_transport(out)
     core.stamp_router_fingerprint(out, _served_stamp(out))
+    _without_paths(out)
     out["api"] = {
         "stable": STABLE_ASK,
         "alias": alias,
@@ -300,20 +350,27 @@ async def execute_insights(
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     bearer: str | None = None
+    runner: Any = freeroute_mod.complete
     if body.generate and direct_providers.enabled():
         # env-direct spends the operator's own provider keys, so the caller must
         # authenticate through the engine auth port; nothing is relayed.
         if not await _env_direct_caller_ok(request):
-            return _caller_refused("generative_ask")
+            return _caller_refused("generative_ask", GENERATE_REQUIRES_AUTH)
     elif body.generate:
-        armed = await freeroute_mod.run_core(freeroute_mod.arming)
-        if armed.get("armed"):
-            bearer = insight_keys.relay_bearer(
-                request.headers.get("authorization") or "",
-                _peer_host(request),
-            )
-            if bearer is None:
+        # #275: only the caller's own ov_ bearer may spend. An empty bearer
+        # (loopback tier) is anonymous spend, and Cortex's key is never lent.
+        relayed = insight_keys.relay_bearer(
+            request.headers.get("authorization") or "",
+            _peer_host(request),
+        )
+        if relayed:
+            bearer = relayed
+        else:
+            armed = await freeroute_mod.run_core(freeroute_mod.arming)
+            if armed.get("armed"):
                 return _caller_refused("generative_ask")
+            # Unarmed: run_insights refuses inside with nothing spent.
+            runner = _anonymous_complete(freeroute_mod.complete)
     async with DisconnectGuard(request) as guard:
         result = await insights_mod.run_insights(
             intent,
@@ -323,7 +380,7 @@ async def execute_insights(
             ask=body.ask,
             generate=body.generate,
             bearer=bearer,
-            complete=guard.complete(freeroute_mod.complete) if body.generate else None,
+            complete=guard.complete(runner) if body.generate else None,
         )
     out = stamp_api(result, consumer=consumer, alias=alias)
     if guard.gone:
@@ -374,6 +431,8 @@ def register_insights_routes(app: Any) -> None:
 
 
 __all__ = [
+    "GENERATE_REQUIRES_AUTH",
+    "GENERATE_REQUIRES_BEARER",
     "InsightsAskIn",
     "STATUSES",
     "execute_insights",

@@ -24,6 +24,27 @@ from CortexOS.crew.runtime import CrewRuntime
 from CortexOS.crew.store import CrewStore
 
 
+@pytest.fixture(autouse=True)
+def crew_request_authorizer():
+    """#265: Crew spend routes authenticate through the engine auth port.
+
+    The engine only holds the port; the in-repo DMS authorizer fills it when
+    ``packs.dms.security.api_auth`` is imported, which otherwise depends on test
+    order. Register it for every crew test (keys come from
+    ``tests/api_key_isolation.py``) and put back whatever was there before.
+    """
+    from CortexOS.security import auth_port
+    from packs.dms.security.api_auth import register_request_authorizer
+
+    previous = auth_port.registered_authorizer()
+    register_request_authorizer()
+    yield
+    if previous is None:
+        auth_port.clear_authorizer()
+    else:
+        auth_port.register_authorizer(previous)
+
+
 @pytest.fixture()
 def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """A deterministic provider environment: explicit model, no probes."""
