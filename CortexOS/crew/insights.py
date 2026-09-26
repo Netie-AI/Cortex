@@ -17,6 +17,7 @@ Keys stay on the OpenVault-armed Crew engine bridge. No second vault.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,14 @@ import yaml
 from CortexOS.crew.config import BACKEND_CF_COMPUTER
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
+from CortexOS.insights.caller_ontology import (
+    SOURCE_CALLER,
+    SOURCE_PACK,
+    CallerCatalog,
+)
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
+
+_log = logging.getLogger(__name__)
 
 LAW = (
     "Intent then ontology (where to get data + which data is more important) "
@@ -190,7 +198,9 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         ),
         "plan_source": (
             "ontology_plan only when this answer's SQL is NL then ontology "
-            "plan then FreeRoute SQL then validate. Else other. Request "
+            "plan then FreeRoute SQL then validate, or NL then ontology then "
+            "the certified query that ontology resolved (served as stored; "
+            "served_reason names it; no model called). Else other. Request "
             "mode=ontology_plan is not a stamp. Never bind_plan here."
         ),
         "cot_climb": _cot_public_map(),
@@ -529,6 +539,94 @@ def retrieve_ontology(intent: str, *, pack_dir: Path | str | None = None) -> dic
         ),
         "refuse_reason": "" if has_path else "no ontology path or metric for intent",
     }
+
+
+def ranking_from_caller(intent: str, caller: CallerCatalog) -> dict[str, Any]:
+    """Where + importance over the caller's tables only. Never reads the pack."""
+    text = (intent or "").strip()
+    intent_tok = tokens(text)
+    locations: list[dict[str, Any]] = []
+    for table, cols in caller.tables.items():
+        hay = tokens(table.replace(".", " ").replace("_", " ") + " " + table)
+        for col in cols:
+            hay = hay | tokens(col.replace("_", " ") + " " + col)
+        overlap = _score_overlap(intent_tok, hay)
+        score = int(caller.scores.get(table, 0)) + overlap
+        why = f"caller ontology (schema score {int(caller.scores.get(table, 0))}"
+        why += f", token overlap {overlap})"
+        locations.append(
+            {
+                "id": table,
+                "kind": "object",
+                "where": {"table": table, "primary_key": "", "columns": list(cols)},
+                "importance": {"score": score, "why": why},
+                "exclude_columns": [],
+            }
+        )
+    metrics: list[dict[str, Any]] = []
+    for name, grain in caller.measures.items():
+        if grain is None:
+            continue
+        score = _score_overlap(intent_tok, tokens(name.replace("_", " ") + " " + name))
+        if score <= 0:
+            continue
+        # No trial_question: a caller measure is never replayed on the engine
+        # pack's /dms/query bridge.
+        metrics.append(
+            {
+                "id": name,
+                "kind": "metric",
+                "where": {"tables": [grain], "synonym": name},
+                "importance": {"score": score, "why": f"caller measure {name}"},
+            }
+        )
+    locations.sort(key=lambda r: (-int(r["importance"]["score"]), r["id"]))
+    metrics.sort(key=lambda r: (-int(r["importance"]["score"]), r["id"]))
+    metrics = metrics[:12]
+    for idx, row in enumerate(locations, start=1):
+        row["importance"]["rank"] = idx
+    for idx, row in enumerate(metrics, start=1):
+        row["importance"]["rank"] = idx
+    joins = [
+        {"id": lid, "from": src, "to": dst, "from_property": "", "to_property": ""}
+        for lid, src, dst in caller.links
+    ]
+    ok = bool(locations)
+    return {
+        "ok": ok,
+        "phase": "ontology",
+        "source": SOURCE_CALLER,
+        "intent": text,
+        "locations": locations,
+        "metrics": metrics,
+        "certified": [],
+        "joins": joins,
+        "law": (
+            "Ontology first: ranked over the caller's own catalog; the engine "
+            "pack is not consulted. Generated SQL may read only these tables."
+        ),
+        "refuse_reason": "" if ok else "caller ontology names no tables",
+    }
+
+
+def select_ranking(
+    intent: str,
+    *,
+    pack_dir: Path | str | None = None,
+    caller: CallerCatalog | None = None,
+) -> dict[str, Any]:
+    """Which catalog ranks this ask. Decided by the wire, never guessed.
+
+    * ``caller`` is None (no ontology, or ``ontology.source`` demo/absent): the
+      engine pack, exactly as before INSIGHTS-ONTO;
+    * a caller catalog (``ontology.source == "space"``): the caller's tables
+      only; the pack, its metrics and its certified formulas are never read.
+    """
+    if caller is not None:
+        return ranking_from_caller(intent, caller)
+    ranking = retrieve_ontology(intent, pack_dir=pack_dir)
+    ranking.setdefault("source", SOURCE_PACK)
+    return ranking
 
 
 def constrain_trials(ranking: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1011,6 +1109,42 @@ def _abstain(
     return body
 
 
+def _generative_abstain(
+    *,
+    intent: str,
+    ranking: dict[str, Any],
+    reason: str,
+    shell_public: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Named ABSTAIN for a generate-path gate miss. No SQL, no figure."""
+    validation = _validation(
+        status="ABSTAIN",
+        ranking=ranking,
+        trial=None,
+        envelope={},
+        unused_trials=[],
+        extra_unsure=[{"id": "generative_sql", "kind": "sql", "why": reason}],
+    )
+    return {
+        "ok": True,
+        "status": "ABSTAIN",
+        "phase": "generate",
+        "intent": intent,
+        "answer": f"Abstained ({reason}). No number invented.",
+        "badge": "abstain",
+        "audit_id": None,
+        "values": [],
+        "sql_used": None,
+        "refuse_reason": reason,
+        "ontology": ranking,
+        "trials": [],
+        "validation": validation,
+        "law": LAW,
+        "export_runtime": export_runtime_hint(shell_public),
+        "scale": "1GB to 10TB is a design target only; not COMPLETE",
+    }
+
+
 def _sql_schema_prompt(intent: str, ranking: dict[str, Any]) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
@@ -1039,6 +1173,8 @@ VALIDATOR = "static sqlglot guardrail: not EXPLAINed, not manifest-enforced, not
 
 def _generative_unsure_why(gen: dict[str, Any] | None = None) -> str:
     check = str((gen or {}).get("check") or "table scope")
+    if check.startswith("certified_query:"):
+        return f"served {check} as stored (no model called); not executed in crew"
     return f"FreeRoute SQL passed the {VALIDATOR} ({check}); not executed in crew"
 
 
@@ -1167,6 +1303,7 @@ async def generative_ask(
     complete: Any | None = None,
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
+    pack_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
@@ -1176,7 +1313,22 @@ async def generative_ask(
     ``complete`` and ``validate_sql`` only. ``query_plan`` is a caller-typed
     ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
-    from CortexOS.crew import cot_climb
+    from CortexOS.crew import certified_serve, cot_climb
+
+    # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
+    # served as stored (or the ask abstains by name); the model is not asked to
+    # re-derive a formula that is already law.
+    # A caller-ontology ranking never consults the engine pack's certified
+    # queries: they are another Space's law.
+    hit = None
+    if ranking.get("source") != SOURCE_CALLER:
+        hit = certified_serve.resolve(
+            intent, ranking, query_plan=query_plan, pack_dir=pack_dir
+        )
+    if hit is not None:
+        if hit["action"] == "serve":
+            return certified_serve.served_envelope(hit)
+        return certified_serve.abstain_envelope(hit)
 
     out = await cot_climb.climb(
         intent, ranking, complete=complete, bearer=bearer, query_plan=query_plan
@@ -1240,8 +1392,15 @@ async def run_insights(
     pack_dir: Path | str | None = None,
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
+    caller: CallerCatalog | None = None,
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
+
+    ``caller`` is the validated catalog of a ``source=space`` caller. Ranking,
+    generation and the SQL validator then only ever use the caller's tables;
+    the pack is not read at all and its /dms/query trials are not run (they
+    answer a different Space). ``None`` is the demo / in-process path and is
+    unchanged.
 
     ``bearer`` only matters with ``generate``: an HTTP caller's own OpenVault
     key (or ``""`` for the loopback tier); in-process callers leave ``None``.
@@ -1268,7 +1427,8 @@ async def run_insights(
             )
         )
 
-    ranking = retrieve_ontology(text, pack_dir=pack_dir)
+    ranking = select_ranking(text, pack_dir=pack_dir, caller=caller)
+    caller_mode = ranking.get("source") == SOURCE_CALLER
     gen: dict[str, Any] | None = None
     if generate:
         if not ranking.get("ok"):
@@ -1278,9 +1438,30 @@ async def run_insights(
                 reason="no ontology path or metric for intent",
                 shell_public=shell_public,
             )
-        gen = await generative_ask(
-            text, ranking, complete=complete, bearer=bearer, query_plan=query_plan
-        )
+        try:
+            gen = await generative_ask(
+                text,
+                ranking,
+                complete=complete,
+                bearer=bearer,
+                query_plan=query_plan,
+                pack_dir=pack_dir,
+            )
+        except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
+            # The caller sees a named abstain; operators still see the bug.
+            _log.exception("generative_ask raised; answering a named ABSTAIN")
+            reason = f"generative_error:{type(exc).__name__}"
+            gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
+        if not gen.get("ok") and gen.get("status") == "ABSTAIN":
+            return _attach_generative(
+                _generative_abstain(
+                    intent=text,
+                    ranking=ranking,
+                    reason=str(gen.get("refuse_reason") or "generative_abstain"),
+                    shell_public=shell_public,
+                ),
+                gen,
+            )
         if not gen.get("ok"):
             return _attach_generative(
                 _refuse(
@@ -1291,7 +1472,7 @@ async def run_insights(
                 ),
                 gen,
             )
-        if not ask:
+        if not ask or caller_mode:
             validation = _validation(
                 status="ABSTAIN",
                 ranking=ranking,
@@ -1345,6 +1526,20 @@ async def run_insights(
                     "refuse_reason": ranking.get("refuse_reason") or "",
                 }
             )
+
+    if caller_mode:
+        return _attach_generative(
+            _refuse(
+                intent=text,
+                ranking=ranking,
+                reason=(
+                    "caller_ontology_ask_unsupported: engine /dms/query trials "
+                    "serve only the engine pack; send generate=true"
+                ),
+                shell_public=shell_public,
+            ),
+            gen,
+        )
 
     if not ranking.get("ok"):
         return _attach_generative(

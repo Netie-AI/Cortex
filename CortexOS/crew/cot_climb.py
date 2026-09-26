@@ -164,6 +164,30 @@ async def _call_runner(
     return out if isinstance(out, dict) else {}
 
 
+def _check_sql(
+    fr: Any,
+    sql: str,
+    ranking: Mapping[str, Any],
+    allowed: set[str],
+    columns: dict[str, list[str]],
+) -> dict[str, Any]:
+    """Static SQL check for this ranking's catalog.
+
+    A caller catalog (``source=space``) is checked by the shared naming rule:
+    qualified names exactly as declared, a bare name only when it resolves to
+    one declared table, columns only where the caller declared them. The engine
+    pack path is unchanged.
+    """
+    from CortexOS.insights.caller_ontology import SOURCE_CALLER
+
+    if ranking.get("source") == SOURCE_CALLER:
+        from CortexOS.insights.caller_sql import validate_caller_sql
+
+        declared = {t: list(columns.get(t) or []) for t in allowed}
+        return validate_caller_sql(sql, declared)
+    return fr.validate_sql(sql, allowed, columns=columns)
+
+
 def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
     tables: set[str] = set()
     for row in ranking.get("locations") or []:
@@ -720,9 +744,17 @@ async def climb(
                 refuse_reason=str(gen.get("refused") or "FreeRoute generative_ask refused"),
             )
 
-        sql = fr.extract_sql(str(gen.get("text") or ""))
+        from CortexOS.dms.sql_extract import extract_statement
+
+        pulled = extract_statement(str(gen.get("text") or ""))
+        sql = pulled.sql
         extracted = str(sql or "").strip()
-        checked = fr.validate_sql(sql or "", allowed, columns=columns)
+        if sql is None:
+            # Name why nothing was extracted (a second statement, no FROM)
+            # instead of validating "" and reporting "empty sql".
+            checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
+        else:
+            checked = _check_sql(fr, sql, ranking, allowed, columns)
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
