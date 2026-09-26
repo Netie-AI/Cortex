@@ -17,6 +17,7 @@ named 4xx ABSTAIN, never a 500.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,6 +32,8 @@ MAX_MEASURES = 256
 MAX_LINKS = 256
 MAX_TEXT = 500
 MAX_FIELD = 64
+#: Schema scores are small token-overlap counts; anything past this is not one.
+MAX_SCORE = 1_000_000
 
 # Statement-shaped SQL only: prose like "lots below reorder level; one per lot"
 # is a legitimate DMS description and must not 4xx the demo Space.
@@ -45,6 +48,11 @@ _SQLISH = re.compile(
 
 SOURCE_CALLER = "caller_ontology"
 SOURCE_PACK = "engine_pack"
+#: Caller catalog is the engine pack's own tables (DMS demo Space): pack ranking,
+#: narrowed to the tables the caller sent.
+SOURCE_PACK_CALLER = "engine_pack_caller_scoped"
+#: Named ABSTAIN when an ontology was sent but names no tables.
+EMPTY_REASON = "caller_ontology_empty"
 
 
 class CallerOntologyError(ValueError):
@@ -74,6 +82,10 @@ class CallerCatalog:
     @property
     def table_names(self) -> set[str]:
         return set(self.tables)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.tables
 
 
 def _ident(value: Any, where: str) -> str:
@@ -111,7 +123,12 @@ def _mapping(raw: Any, where: str) -> dict[str, Any]:
 
 
 def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
-    """Validate a caller ontology. None when absent or it names no tables.
+    """Validate a caller ontology. None only when absent.
+
+    A present ontology that names no tables comes back as a catalog with
+    ``tables == {}`` (``is_empty``): the route abstains on it by name rather
+    than silently ranking the engine pack, which is how a SQL-source Space
+    whose schema retrieval matched nothing used to reach demo metrics.
 
     Raises ``CallerOntologyError`` on anything malformed. Measure SQL is
     refused outright: DMS keeps measure expressions off the wire, and an
@@ -145,6 +162,12 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
         score = row.get("score", 0)
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             raise CallerOntologyError("bad_shape", f"ontology.schema[{idx}].score must be a number")
+        # JSON on the wire may carry NaN / Infinity / 1e400; int() of those raises
+        # OverflowError / ValueError, which would surface as a 500.
+        if not math.isfinite(score) or abs(score) > MAX_SCORE:
+            raise CallerOntologyError(
+                "bad_number", f"ontology.schema[{idx}].score must be finite and <= {MAX_SCORE}"
+            )
         scores[name] = max(scores.get(name, 0), int(score))
     if len(tables) > MAX_TABLES:
         raise CallerOntologyError("too_large", f"ontology names more than {MAX_TABLES} tables")
@@ -203,8 +226,6 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
         if src in tables and dst in tables:
             links.append((lid, src, dst))
 
-    if not tables:
-        return None
     return CallerCatalog(
         tables=tables,
         scores=scores,
@@ -239,9 +260,12 @@ def check_field(raw: Any, what: str) -> str | None:
 __all__ = [
     "CallerCatalog",
     "CallerOntologyError",
+    "EMPTY_REASON",
     "IDENT",
+    "MAX_SCORE",
     "SOURCE_CALLER",
     "SOURCE_PACK",
+    "SOURCE_PACK_CALLER",
     "check_field",
     "check_plan",
     "parse_caller_ontology",

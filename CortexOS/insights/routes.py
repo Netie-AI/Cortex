@@ -28,19 +28,13 @@ AIRGPT_ALIAS = "POST /dms/sidecar/insights"
 CREW_ALIAS = "POST /crew/insights"
 
 
+# The declared request model stays exactly what it was before INSIGHTS-ONTO: its
+# JSON Schema leaks into components.schemas of contract/openapi-1.2.0.json
+# (see scripts/export_openapi.py; /v1/insights itself is not a contract route),
+# so widening it would drift the frozen contract artifact. The fields DMS sends
+# on top are modelled by ``InsightsWireIn`` below and read from the raw body.
+# No docstring: it would become the schema's "description" and drift it too.
 class InsightsAskIn(BaseModel):
-    """Every field DMS ``compute_insights`` POSTs is modelled here.
-
-    ``ontology`` / ``query_plan`` / ``intent_slots`` are typed ``Any`` on
-    purpose: the caller catalog is a trust boundary validated by
-    ``caller_ontology`` so a malformed one is a *named* 422 ABSTAIN body the
-    DMS client reads, not a bare pydantic error. Unknown fields are kept
-    (``extra="allow"``) only so the route can reject them by name instead of
-    dropping them silently.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
     intent: str = ""
     question: str = ""
     ask: bool = True
@@ -48,6 +42,22 @@ class InsightsAskIn(BaseModel):
     session_id: str = "demo"
     space_id: str | None = None
     consumer: str = Field(default="dms")
+
+
+class InsightsWireIn(InsightsAskIn):
+    """Every field DMS ``compute_insights`` POSTs (``_insights_body`` + ranked retry).
+
+    Not referenced by a route signature, so it never enters the OpenAPI
+    components; ``execute_insights`` validates the raw request body into it.
+    ``ontology`` / ``query_plan`` / ``intent_slots`` are ``Any`` on purpose: the
+    caller catalog is a trust boundary validated by ``caller_ontology`` so a
+    malformed one is a *named* 422 ABSTAIN body the DMS client reads, not a
+    bare pydantic error. Unknown fields are kept (``extra="allow"``) only so
+    the route can reject them by name instead of dropping them silently.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     #: Request plan mode (DMS sends ``ontology_plan``). Recorded, never a stamp:
     #: plan_source is decided from the SQL actually produced.
     mode: Any = None
@@ -60,6 +70,32 @@ class InsightsAskIn(BaseModel):
     query_plan: Any = None
     ranked_metric: Any = None
     generate_retry: Any = None
+
+
+#: Documented on the (non-contract) ``insights.ask`` operation only.
+WIRE_FIELDS_DOC: dict[str, Any] = {
+    "x-cortex-request-extension": {
+        "model": "InsightsWireIn",
+        "fields": sorted(set(InsightsWireIn.model_fields) - set(InsightsAskIn.model_fields)),
+        "unknown_fields": "422 ABSTAIN refuse_reason=unknown_request_fields",
+        "invalid_ontology": "422 ABSTAIN refuse_reason=caller_ontology_invalid:<code>",
+        "empty_ontology": "200 ABSTAIN refuse_reason=caller_ontology_empty",
+    }
+}
+
+
+async def wire_body(body: InsightsAskIn, request: Request) -> InsightsWireIn:
+    """The full caller body. FastAPI already parsed and cached it as JSON."""
+    if isinstance(body, InsightsWireIn):
+        return body
+    raw: Any = None
+    try:
+        raw = await request.json()
+    except Exception:  # noqa: BLE001 - no raw JSON body (in-process caller)
+        raw = None
+    if not isinstance(raw, dict):
+        raw = body.model_dump()
+    return InsightsWireIn.model_validate(raw)
 
 
 def resolved_intent(body: InsightsAskIn) -> str:
@@ -85,8 +121,10 @@ def _caller_refused(purpose: str) -> JSONResponse:
     return JSONResponse(body, status_code=401)
 
 
-def _invalid_request(reason: str, detail: str, *, intent: str) -> JSONResponse:
-    """Named 422 ABSTAIN for a request Cortex refuses to use. Never a 500."""
+def _invalid_request(
+    reason: str, detail: str, *, intent: str, status_code: int = 422
+) -> JSONResponse:
+    """Named ABSTAIN (422 by default) for a request Cortex refuses to use. Never a 500."""
     from CortexOS.integrations import freeroute as core
 
     body: dict[str, Any] = {
@@ -104,10 +142,10 @@ def _invalid_request(reason: str, detail: str, *, intent: str) -> JSONResponse:
         "live_5000_ci": False,
     }
     core.stamp_router_fingerprint(body)
-    return JSONResponse(body, status_code=422)
+    return JSONResponse(body, status_code=status_code)
 
 
-def _received(body: InsightsAskIn, ontology_source: str) -> dict[str, Any]:
+def _received(body: InsightsWireIn, ontology_source: str) -> dict[str, Any]:
     return {
         "mode": body.mode,
         "model_preference": body.model_preference,
@@ -214,7 +252,8 @@ async def execute_insights(
     intent = resolved_intent(body)
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
-    extras = sorted((body.model_extra or {}).keys())
+    wire = await wire_body(body, request)
+    extras = sorted((wire.model_extra or {}).keys())
     if extras:
         return _invalid_request(
             "unknown_request_fields",
@@ -223,14 +262,24 @@ async def execute_insights(
         )
     try:
         for name in ("mode", "model_preference", "ranked_metric", "generate_retry"):
-            caller_onto.check_field(getattr(body, name), name)
-        caller = caller_onto.parse_caller_ontology(body.ontology)
-        query_plan = caller_onto.check_plan(body.query_plan, "query_plan")
-        caller_onto.check_plan(body.intent_slots, "intent_slots")
+            caller_onto.check_field(getattr(wire, name), name)
+        caller = caller_onto.parse_caller_ontology(wire.ontology)
+        query_plan = caller_onto.check_plan(wire.query_plan, "query_plan")
+        caller_onto.check_plan(wire.intent_slots, "intent_slots")
     except caller_onto.CallerOntologyError as exc:
         return _invalid_request(exc.reason, exc.detail, intent=intent)
+    if caller is not None and caller.is_empty:
+        # An ontology was sent but names no tables (DMS schema retrieval matched
+        # nothing). Ranking the engine pack here is how a SQL-source Space got
+        # demo metrics; abstain by name instead. Not malformed, so not a 422.
+        return _invalid_request(
+            caller_onto.EMPTY_REASON,
+            "the ontology sent names no tables; nothing to rank or generate against",
+            intent=intent,
+            status_code=200,
+        )
     bearer: str | None = None
-    if body.generate:
+    if wire.generate:
         armed = await freeroute_mod.run_core(freeroute_mod.arming)
         if armed.get("armed"):
             bearer = insight_keys.relay_bearer(
@@ -241,9 +290,9 @@ async def execute_insights(
                 return _caller_refused("generative_ask")
     result = await insights_mod.run_insights(
         intent,
-        bridge=LocalEngineBridge(session_id=body.session_id, space_id=body.space_id),
-        ask=body.ask,
-        generate=body.generate,
+        bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
+        ask=wire.ask,
+        generate=wire.generate,
         bearer=bearer,
         query_plan=query_plan,
         caller=caller,
@@ -252,7 +301,7 @@ async def execute_insights(
     source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
     result["ontology_source"] = source
     out = stamp_api(result, consumer=consumer, alias=alias)
-    out["api"]["received"] = _received(body, source)
+    out["api"]["received"] = _received(wire, source)
     return out
 
 
@@ -284,7 +333,7 @@ async def insights_keys() -> dict[str, Any]:
     return public_keys_body()
 
 
-@router.post("", operation_id="insights.ask")
+@router.post("", operation_id="insights.ask", openapi_extra=WIRE_FIELDS_DOC)
 @router.post("/", include_in_schema=False)
 async def insights_ask(body: InsightsAskIn, request: Request) -> Any:
     """NL then ontology then SQL then validate. CERTIFIED|ABSTAIN|REFUSE."""
@@ -300,6 +349,7 @@ def register_insights_routes(app: Any) -> None:
 
 __all__ = [
     "InsightsAskIn",
+    "InsightsWireIn",
     "STATUSES",
     "execute_insights",
     "ontology_body",
@@ -310,4 +360,5 @@ __all__ = [
     "resolved_intent",
     "router",
     "stamp_api",
+    "wire_body",
 ]

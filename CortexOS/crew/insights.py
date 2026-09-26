@@ -27,7 +27,12 @@ import yaml
 from CortexOS.crew.config import BACKEND_CF_COMPUTER
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
-from CortexOS.insights.caller_ontology import SOURCE_CALLER, SOURCE_PACK, CallerCatalog
+from CortexOS.insights.caller_ontology import (
+    SOURCE_CALLER,
+    SOURCE_PACK,
+    SOURCE_PACK_CALLER,
+    CallerCatalog,
+)
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
 
 _log = logging.getLogger(__name__)
@@ -537,27 +542,80 @@ def retrieve_ontology(intent: str, *, pack_dir: Path | str | None = None) -> dic
     }
 
 
-def _pack_tables(pack_dir: Path | str | None = None) -> set[str]:
-    """Tables the engine's own ask spine ranks. Empty if its YAML is unreadable."""
+def _pack_columns(pack_dir: Path | str | None = None) -> dict[str, set[str]]:
+    """Table -> every property name the engine pack declares. Empty if unreadable."""
     try:
-        return {str(o.id).lower() for o in load_object_types(_pack_dir(pack_dir))}
+        objects = load_object_types(_pack_dir(pack_dir))
     except (OSError, ValueError):
-        return set()
+        return {}
+    return {
+        str(o.id).lower(): {str(p.name).lower() for p in o.properties} for o in objects
+    }
 
 
 def caller_is_pack_spine(
     caller: CallerCatalog | None, *, pack_dir: Path | str | None = None
 ) -> bool:
-    """True when every table the caller names is one the engine pack ranks.
+    """True when the caller catalog *is* the engine pack's own tables.
 
-    The DMS demo Space sends its (demo) catalog too; that keeps the engine
-    pack ranking and the certified-measure serve exactly as before. A catalog
-    naming any other table is a caller Space and is ranked on its own terms.
+    There is no explicit demo-Space signal on the wire, so the catalog has to
+    prove it: every table it names is a pack table **and** every column it
+    names for that table is one the pack declares for it. A customer table
+    that merely shares a pack table's name (``suppliers`` with
+    ``vendor_name``) is a caller Space and is ranked on its own terms; it never
+    gets another Space's certified formula. An empty catalog is never the
+    spine (the route abstains on it by name before ranking).
     """
     if caller is None:
         return True
-    pack = _pack_tables(pack_dir)
-    return bool(pack) and caller.table_names <= pack
+    if caller.is_empty:
+        return False
+    pack = _pack_columns(pack_dir)
+    if not pack:
+        return False
+    for table, cols in caller.tables.items():
+        declared = pack.get(table)
+        if declared is None or not set(cols) <= declared:
+            return False
+    return True
+
+
+def scope_ranking_to_caller(ranking: dict[str, Any], caller: CallerCatalog) -> dict[str, Any]:
+    """Pack ranking narrowed to the tables the caller sent (spine catalogs only).
+
+    Locations, metrics, certified rows and joins that read a table the caller
+    did not send are dropped, so ``_allowed_tables`` -- the SQL validator's
+    scope -- and the certified serve only ever see the caller's tables.
+    """
+    allowed = caller.table_names
+
+    def within(row: dict[str, Any]) -> bool:
+        where = row.get("where") or {}
+        tables = [str(t).lower() for t in (where.get("tables") or [])]
+        table = str(where.get("table") or "").lower()
+        if table:
+            tables.append(table)
+        return bool(tables) and set(tables) <= allowed
+
+    out = dict(ranking)
+    for key in ("locations", "metrics", "certified"):
+        rows = [dict(r) for r in (ranking.get(key) or []) if within(r)]
+        for idx, row in enumerate(rows, start=1):
+            imp = dict(row.get("importance") or {})
+            imp["rank"] = idx
+            row["importance"] = imp
+        out[key] = rows
+    out["joins"] = [
+        j
+        for j in (ranking.get("joins") or [])
+        if str(j.get("from") or "").lower() in allowed and str(j.get("to") or "").lower() in allowed
+    ]
+    ok = bool(out["locations"] or out["metrics"] or out["certified"])
+    out["ok"] = ok
+    out["refuse_reason"] = "" if ok else "no ontology path or metric within the caller's tables"
+    out["source"] = SOURCE_PACK_CALLER
+    out["caller_tables"] = sorted(allowed)
+    return out
 
 
 def ranking_from_caller(intent: str, caller: CallerCatalog) -> dict[str, Any]:
@@ -634,10 +692,18 @@ def select_ranking(
     pack_dir: Path | str | None = None,
     caller: CallerCatalog | None = None,
 ) -> dict[str, Any]:
-    """Caller catalog when it is not the pack spine; else the engine pack (unchanged)."""
+    """Which catalog ranks this ask.
+
+    * no caller catalog: the engine pack, unchanged;
+    * a spine catalog (the pack's own tables and columns): the pack ranking
+      narrowed to the caller's tables;
+    * anything else: the caller's catalog only; the pack is never read.
+    """
     if caller is not None and not caller_is_pack_spine(caller, pack_dir=pack_dir):
         return ranking_from_caller(intent, caller)
     ranking = retrieve_ontology(intent, pack_dir=pack_dir)
+    if caller is not None:
+        return scope_ranking_to_caller(ranking, caller)
     ranking.setdefault("source", SOURCE_PACK)
     return ranking
 
@@ -1409,10 +1475,12 @@ async def run_insights(
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
 
-    ``caller`` is the validated catalog the HTTP caller sent. When it names
-    tables outside the engine pack, ranking, generation and the SQL validator
-    use only the caller's tables, and the engine pack's /dms/query trials are
-    not run (they answer a different Space).
+    ``caller`` is the validated catalog the HTTP caller sent. Ranking,
+    generation and the SQL validator only ever use the caller's tables. When
+    the catalog is not the pack spine (see ``caller_is_pack_spine``) the pack
+    is not read at all and its /dms/query trials are not run (they answer a
+    different Space); a spine catalog keeps the pack ranking narrowed to the
+    tables it sent.
 
     ``bearer`` only matters with ``generate``: an HTTP caller's own OpenVault
     key (or ``""`` for the loopback tier); in-process callers leave ``None``.
