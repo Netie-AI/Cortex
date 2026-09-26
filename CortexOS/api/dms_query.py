@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import Depends
 from pydantic import BaseModel, Field
 
-from CortexOS.security.auth_port import Principal, require_role
+from CortexOS.security.auth_port import Principal, require_role, require_spend_auth
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "data" / "samples"
@@ -97,12 +97,15 @@ def _missing_dataset_response() -> dict[str, Any]:
 # name taken from the request body.
 _VIEWER = [Depends(require_role("viewer"))]
 _STEWARD = require_role("steward")
+# #265 (P24.4): /dms/query can reach the L2 model path, so its viewer gate names
+# the shared spend refusal reason. Same role, same 401/403; loopback not exempt.
+_SPEND = [Depends(require_spend_auth("viewer"))]
 
 
 def register_dms_routes(app: Any) -> None:
     from fastapi import HTTPException, Query
 
-    @app.post("/dms/query", response_model=DMSQueryResponse, dependencies=_VIEWER)
+    @app.post("/dms/query", response_model=DMSQueryResponse, dependencies=_SPEND)
     async def dms_query(body: DMSQueryRequest) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":

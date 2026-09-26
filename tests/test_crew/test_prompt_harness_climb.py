@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from CortexOS.crew import insights
 from CortexOS.crew import prompt_harness_climb as harness
 from CortexOS.crew.server import create_app
+from tests.api_key_isolation import TEST_VIEWER_KEY
 from tests.test_crew.conftest import FakeLLM
 
 HARNESS_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "prompt_harness_climb.py"
@@ -127,7 +128,8 @@ def _cases(complete: Callable[..., Any]) -> list[dict[str, Any]]:
 def client(settings, crew_env) -> Iterator[SimpleNamespace]:
     fake = FakeLLM()
     app = create_app(settings, llm_chat=fake)
-    with TestClient(app) as tc:
+    # #265: crew spend routes need an engine auth-port caller; send a viewer key.
+    with TestClient(app, headers={"X-API-Key": TEST_VIEWER_KEY}) as tc:
         yield SimpleNamespace(http=tc, llm=fake, app=app, crew=app.state.crew)
 
 

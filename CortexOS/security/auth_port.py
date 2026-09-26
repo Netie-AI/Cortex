@@ -174,6 +174,48 @@ def require_role(min_role: str) -> Any:
     return _dep
 
 
+# #265 (P24.4): a route that can spend a model credential names this reason when
+# it refuses an unauthenticated or under-privileged caller, so every spend path
+# refuses the same way. Loopback callers are not exempt.
+SPEND_REQUIRES_AUTH: Final[str] = "spend_requires_auth"
+SPEND_REQUIRES_AUTH_MESSAGE: Final[str] = (
+    "A call that can spend a model credential needs an authenticated caller "
+    "(X-API-Key or Bearer); local callers are not exempt"
+)
+
+
+def require_spend_auth(min_role: str = "viewer") -> Any:
+    """FastAPI dependency: :func:`require_role` for routes that can spend a model credential.
+
+    Same decision and status codes as :func:`require_role` (401 no credential,
+    403 role too low, 503 no or broken authorizer). A 401 / 403 body carries the
+    named reason :data:`SPEND_REQUIRES_AUTH`; a 503 keeps its fixed body. It
+    runs before the handler, so a refused caller never reaches a provider or
+    model call.
+    """
+    gate = require_role(min_role)
+
+    async def _dep(request: Request) -> Principal:
+        try:
+            principal: Principal = await gate(request)
+        except HTTPException as exc:
+            if exc.status_code not in (401, 403):
+                # 503 is the engine's own state (no or broken authorizer), not
+                # the caller's; its fixed body passes through unchanged.
+                raise
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={
+                    "code": SPEND_REQUIRES_AUTH,
+                    "message": SPEND_REQUIRES_AUTH_MESSAGE,
+                    "auth": exc.detail,
+                },
+            ) from None
+        return principal
+
+    return _dep
+
+
 __all__ = [
     "AUTHORIZER_FAILED_DETAIL",
     "AuthorizerNotRegistered",
@@ -181,11 +223,14 @@ __all__ = [
     "Principal",
     "ROLES",
     "RequestAuthorizer",
+    "SPEND_REQUIRES_AUTH",
+    "SPEND_REQUIRES_AUTH_MESSAGE",
     "clear_authorizer",
     "log_startup_warnings",
     "register_authorizer",
     "registered_authorizer",
     "require_role",
+    "require_spend_auth",
     "resolve_authorizer",
     "role_at_least",
     "startup_warnings",
