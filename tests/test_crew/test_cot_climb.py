@@ -130,14 +130,12 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         # crew/config.py and crew/llm.py: founder override 2026-09-25 (PR #235)
         # so the Crew chain can spend GEMINI/NVIDIA/Cerebras env keys.
         "CortexOS/crew/mcp_client.py",
-        "CortexOS/dms/answer_engine.py",
-        "CortexOS/dms/l2_generation.py",
+        # answer_engine.py, l2_generation.py, l2_adapter.py, sql_generator.py:
+        # founder override 2026-09-26 (PR #235): follow-ups, empty-result retry, few-shot.
         # #269 ROUTER-1 owns store schema / _write_row / _stats / pick in
         # CortexOS/integrations/freeroute.py. Arming + RouteStamp served_*
         # stay #272. Do not put crew/freeroute.py back on this allow.
         "CortexOS/integrations/openvault_client.py",
-        "packs/dms/generative/l2_adapter.py",
-        "packs/dms/generative/sql_generator.py",
         "tests/test_crew/test_freeroute.py",
         "tests/test_crew/test_openvault.py",
         "tests/conftest.py",

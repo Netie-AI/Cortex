@@ -212,7 +212,7 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
         "CortexOS/crew/liberty_routes.py",
         # #269 ROUTER-1 owns the FreeRoute store schema/_write_row/_stats/pick.
         "CortexOS/execution/distill_harness.py",
-        "CortexOS/dms/answer_engine.py",
+        # CortexOS/dms/answer_engine.py: founder override 2026-09-26 (PR #235).
         "packages/cortex_contract/execution.py",
     }
     overlap = sorted(names & banned)
