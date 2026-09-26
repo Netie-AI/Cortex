@@ -744,9 +744,17 @@ async def climb(
                 refuse_reason=str(gen.get("refused") or "FreeRoute generative_ask refused"),
             )
 
-        sql = fr.extract_sql(str(gen.get("text") or ""))
+        from CortexOS.dms.sql_extract import extract_statement
+
+        pulled = extract_statement(str(gen.get("text") or ""))
+        sql = pulled.sql
         extracted = str(sql or "").strip()
-        checked = _check_sql(fr, sql or "", ranking, allowed, columns)
+        if sql is None:
+            # Name why nothing was extracted (a second statement, no FROM)
+            # instead of validating "" and reporting "empty sql".
+            checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
+        else:
+            checked = _check_sql(fr, sql, ranking, allowed, columns)
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
