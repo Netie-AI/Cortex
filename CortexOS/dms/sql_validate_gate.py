@@ -18,6 +18,21 @@ from CortexOS.execution.manifest import VerifiedManifest
 #: Violation token when enforce_manifest refuses a candidate (C7-02).
 MANIFEST_VIOLATION_PREFIX = "MANIFEST:"
 
+#: CX-SC-01 — probe feedback tokens fed back to the generator as violations.
+EXECUTION_ERROR_PREFIX = "EXECUTION_ERROR:"
+EMPTY_RESULT_VIOLATION = (
+    "EMPTY_RESULT: the query returned no rows — check filter literals use exact "
+    "stored values and conditions are not over-restrictive; do not invent filter values"
+)
+
+
+@dataclass(slots=True)
+class ProbeResult:
+    """Outcome of executing a gate-passed candidate once (CX-SC-01)."""
+
+    row_count: int = 0
+    error: str | None = None
+
 
 @dataclass(slots=True)
 class ValidateGateResult:
@@ -40,10 +55,16 @@ class SqlGateAbstain(Exception):
         *,
         violations: list[str] | None = None,
         manifest_refused: bool = False,
+        empty_result: bool = False,
+        attempts: int = 0,
     ) -> None:
         super().__init__(message)
         self.violations = list(violations or [])
         self.manifest_refused = manifest_refused
+        # CX-SC-01: a candidate passed the gate but the probe found no rows
+        # (or failed to execute) — the caller abstains, never serves empty.
+        self.empty_result = empty_result
+        self.attempts = attempts
 
     def __str__(self) -> str:
         # FF-03 / dms#59 — callers interpolate `{exc}` into the envelope reason.
@@ -148,16 +169,24 @@ def gate_with_retry(
     con: Any | None = None,
     verified: VerifiedManifest | None = None,
     max_retries: int = 2,
+    probe: Callable[[str], ProbeResult] | None = None,
 ) -> ValidateGateResult:
     """Call generate_fn up to max_retries+1 times, feeding prior violations back.
 
     ``generate_fn(prior_violations) -> sql | None``. Exhaustion raises SqlGateAbstain.
     ManifestError aborts that candidate (no EXPLAIN, no second try of the same
     SQL). A later generate_fn result may still pass.
+
+    ``probe`` (CX-SC-01) runs only on SQL that already passed allowlist,
+    manifest and EXPLAIN — it is never a way around a refusal. An execution
+    error or zero rows becomes an ``EXECUTION_ERROR:`` / ``EMPTY_RESULT``
+    violation fed back to the next attempt; exhaustion raises
+    ``SqlGateAbstain(empty_result=True)``.
     """
     prior: list[str] = []
     last = ValidateGateResult(passed=False, attempts=0)
     saw_manifest = False
+    saw_empty = False
     refused_sql: set[str] = set()
     for attempt in range(1, max_retries + 2):
         sql = generate_fn(prior)
@@ -181,13 +210,35 @@ def gate_with_retry(
                 )
             refused_sql.add(sql)
         if last.passed and last.safe_sql:
-            return last
+            if probe is None:
+                return last
+            feedback = _probe_violation(probe, last.safe_sql)
+            if feedback is None:
+                return last
+            saw_empty = True
+            last.passed = False
+            last.violations = [feedback]
         prior = list(last.violations)
     raise SqlGateAbstain(
         "SQL validation gate exhausted retries",
         violations=last.violations,
         manifest_refused=saw_manifest or last.manifest_refused,
+        empty_result=saw_empty,
+        attempts=last.attempts,
     )
+
+
+def _probe_violation(probe: Callable[[str], ProbeResult], safe_sql: str) -> str | None:
+    """None when the probe found rows; else the violation to feed back."""
+    try:
+        res = probe(safe_sql)
+    except Exception as exc:  # noqa: BLE001 — a probe failure is feedback, not a crash
+        return f"{EXECUTION_ERROR_PREFIX} {str(exc)[:400]}"
+    if res.error:
+        return f"{EXECUTION_ERROR_PREFIX} {res.error[:400]}"
+    if int(res.row_count or 0) <= 0:
+        return EMPTY_RESULT_VIOLATION
+    return None
 
 
 def guard_result_from_gate(gate: ValidateGateResult) -> GuardrailResult:
@@ -199,7 +250,10 @@ def guard_result_from_gate(gate: ValidateGateResult) -> GuardrailResult:
 
 
 __all__ = [
+    "EMPTY_RESULT_VIOLATION",
+    "EXECUTION_ERROR_PREFIX",
     "MANIFEST_VIOLATION_PREFIX",
+    "ProbeResult",
     "SqlGateAbstain",
     "ValidateGateResult",
     "explain_dry_run",

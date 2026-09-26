@@ -97,6 +97,8 @@ class L2Attempt:
     retrieved_tables: tuple[str, ...] = ()
     route: dict[str, Any] | None = None
     route_call: str = ""
+    #: CX-SC-01 — row count of the last execution probe (None: not run / errored).
+    probe_rows: int | None = None
 
 
 def _env_on(name: str) -> bool:
@@ -138,7 +140,7 @@ def attempt_l2(
     if not force and not _env_on("DMS_L2_ENABLED"):
         return None
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, gate_with_retry
+    from CortexOS.dms.sql_validate_gate import ProbeResult, SqlGateAbstain, gate_with_retry
     from CortexOS.dms.warehouse_db import (
         DEFAULT_DB,
         get_connection,
@@ -180,7 +182,27 @@ def attempt_l2(
 
     from CortexOS.integrations import freeroute
 
-    con_explain = None
+    con_explain: Any = None
+    probes: list[ProbeResult] = []
+
+    def _probe(safe_sql: str) -> ProbeResult:
+        # CX-SC-01: runs only on post-enforce SQL that passed the gate.
+        # Same connection as EXPLAIN; no new duckdb import site.
+        try:
+            row = con_explain.execute(
+                f"SELECT count(*) FROM ({safe_sql}) AS _p LIMIT 1"
+            ).fetchone()
+            res = ProbeResult(row_count=int(row[0]) if row else 0)
+        except Exception as exc:  # noqa: BLE001 — becomes EXECUTION_ERROR feedback
+            res = ProbeResult(row_count=0, error=str(exc)[:400] or type(exc).__name__)
+        probes.append(res)
+        return res
+
+    def _probe_rows() -> int | None:
+        if not probes or probes[-1].error:
+            return None
+        return probes[-1].row_count
+
     with freeroute.journal(shadow=_shadow_run.get()) as stamps:
         try:
             # EXPLAIN must run on post-enforce SQL even when a session is bound.
@@ -194,14 +216,29 @@ def attempt_l2(
                 con=con_explain,
                 verified=verified,
                 max_retries=2,
+                probe=_probe,
             )
         except SqlGateAbstain as exc:
             _credit_gate(stamps, passed=False)
             if exc.manifest_refused:
-                return _manifest_l2_attempt(list(exc.violations))
+                out = _manifest_l2_attempt(list(exc.violations))
+                out.probe_rows = _probe_rows()
+                return out
+            if exc.empty_result:
+                # CLAUDE.md §8: abstain rather than serve a filter that matches nothing.
+                detail = ", ".join(exc.violations)
+                return L2Attempt(
+                    reason=_with_route(
+                        f"no rows matched after {exc.attempts} attempts (empty-success): {detail}",
+                        stamps,
+                    ),
+                    violations=list(exc.violations),
+                    probe_rows=_probe_rows(),
+                )
             return L2Attempt(
                 reason=_with_route(f"L2 generation failed validation gate: {exc}", stamps),
                 violations=list(exc.violations),
+                probe_rows=_probe_rows(),
             )
         finally:
             if con_explain is not None:
@@ -236,6 +273,7 @@ def attempt_l2(
         retrieved_tables=tables,
         route=served.public() if served is not None else None,
         route_call=served.call_id if served is not None else "",
+        probe_rows=_probe_rows(),
     )
 
 
@@ -350,9 +388,12 @@ def _write_l2_shadow(
     refusal: str | None = None
     l2_sql: str | None = None
     l2_rows: list[Any] | None = None
+    probe_rows: int | None = None
     token = _shadow_run.set(True)
     try:
         out = attempt_l2(question, verified=verified, force=True, promote=False)
+        if out is not None:
+            probe_rows = out.probe_rows
         if out is None:
             refusal = "not_enabled"
         elif not out.sql:
@@ -393,6 +434,7 @@ def _write_l2_shadow(
         "l2_refusal_type": refusal,
         "l2_row_count": l2_n,
         "l2_values": _compact_values(l2_rows),
+        "probe_rows": probe_rows,
         "agree": agree,
         "latency_ms": latency_ms,
     }
