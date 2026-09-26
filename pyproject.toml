@@ -144,6 +144,9 @@ files = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# H2-TEST-ISOLATION (#254): redirect the runtime decision/shadow logs for every
+# test. A plugin, not tests/conftest.py, which the #215 dual-write guard freezes.
+addopts = "-p tests.runtime_log_isolation -p tests.api_key_isolation"
 markers = [
     "corpus_expanded: full paraphrase expansion (slow; set CORPUS_EXPANDED=1)",
 ]

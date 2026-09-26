@@ -140,6 +140,12 @@ def create_app() -> Any:
                 routes=[("POST", "/a2a/messages")],
             )
 
+    # T2-FAILCLOSED (#263): an explicit auth bypass, or an engine with nothing
+    # able to authorize requests, is logged loudly every time an app is built.
+    from CortexOS.security.auth_port import log_startup_warnings
+
+    log_startup_warnings()
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "pack": pack.name}

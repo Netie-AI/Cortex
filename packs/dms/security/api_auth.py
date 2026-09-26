@@ -1,23 +1,34 @@
-"""F7 remainder — API-key RBAC (viewer / steward / admin)."""
+"""F7 remainder — API-key RBAC (viewer / steward / admin).
+
+T2-FAILCLOSED (#263): there is no built-in key. The only keys this module
+accepts are the ones an operator configured in ``DMS_API_KEYS`` (or an
+OpenVault ``ov_`` token the vault verifies). With ``DMS_API_KEYS`` unset or
+empty every gated request without such a credential is refused with 401.
+
+``DMS_AUTH_DISABLED`` remains an explicit local-development opt-in only. No
+shipped image sets it, and :func:`auth_bypass_warnings` reports it so the app
+logs a WARNING at startup whenever it is active.
+
+``DMS_REFUSE_DEMO_KEYS`` used to switch the demo fallback off. The fallback is
+gone, so the variable is still accepted (images and compose files set it) but
+has no effect: refusing unknown keys is now the only behaviour.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 Role = Literal["viewer", "steward", "admin"]
 
 ROLES: Final[tuple[str, ...]] = ("viewer", "steward", "admin")
 _ROLE_RANK: Final[dict[str, int]] = {"viewer": 0, "steward": 1, "admin": 2}
-
-_DEMO_KEYS: Final[str] = (
-    "viewer:dms-demo-viewer-key;"
-    "steward:dms-demo-steward-key;"
-    "admin:dms-demo-admin-key"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,23 +37,33 @@ class Caller:
     actor: str
 
 
-def _refuse_demo_keys() -> bool:
-    return os.environ.get("DMS_REFUSE_DEMO_KEYS", "").lower() in ("1", "true", "yes")
+AUTH_DISABLED_ENV: Final[str] = "DMS_AUTH_DISABLED"
+_TRUTHY: Final[tuple[str, ...]] = ("1", "true", "yes")
 
 
 def _keys_source() -> str:
-    raw = (os.environ.get("DMS_API_KEYS") or "").strip()
-    if raw:
-        return raw
-    if _refuse_demo_keys():
-        return ""
-    return _DEMO_KEYS
+    """The operator-configured keys, or ``""``. Never a built-in default."""
+    return (os.environ.get("DMS_API_KEYS") or "").strip()
 
 
 def auth_required() -> bool:
-    if os.environ.get("DMS_AUTH_DISABLED", "").lower() in ("1", "true", "yes"):
-        return False
-    return True
+    return os.environ.get(AUTH_DISABLED_ENV, "").strip().lower() not in _TRUTHY
+
+
+def auth_bypass_warnings() -> list[str]:
+    """Startup warnings about how this install authenticates (empty when healthy)."""
+    if not auth_required():
+        return [
+            f"{AUTH_DISABLED_ENV} is set: API authentication is OFF and every caller "
+            "is treated as admin. Local development only. Never set it on a shared "
+            "or deployed engine."
+        ]
+    if not parse_api_keys():
+        return [
+            "DMS_API_KEYS is not set: no API keys are configured, so gated requests "
+            "are refused unless they carry an OpenVault-verified token."
+        ]
+    return []
 
 
 def parse_api_keys(source: str | None = None) -> dict[str, Caller]:
@@ -58,8 +79,25 @@ def parse_api_keys(source: str | None = None) -> dict[str, Caller]:
         key = key.strip()
         if role not in _ROLE_RANK or not key:
             continue
+        if _is_unusable_key(key):
+            # A template placeholder or a key that was once published is known to
+            # everyone; accepting it would reopen the fail-open default by copy-paste.
+            logger.warning("DMS_API_KEYS: ignoring a %s key that is a placeholder or a published value", role)
+            continue
         mapping[key] = Caller(role=role, actor=f"api_{role}")  # type: ignore[arg-type]
     return mapping
+
+
+# Values that shipped publicly (the removed demo fallback) and the template
+# placeholder prefix. Neither may ever authenticate anyone.
+_PUBLISHED_KEYS: Final[frozenset[str]] = frozenset(
+    {"dms-demo-viewer-key", "dms-demo-steward-key", "dms-demo-admin-key"}
+)
+_PLACEHOLDER_PREFIX: Final[str] = "replace_with"
+
+
+def _is_unusable_key(key: str) -> bool:
+    return key in _PUBLISHED_KEYS or key.lower().startswith(_PLACEHOLDER_PREFIX)
 
 
 def extract_api_key(
@@ -134,3 +172,32 @@ def require_role(min_role: Role):
         return caller
 
     return _dep
+
+
+class DmsRequestAuthorizer:
+    """The DMS implementation of the engine's request authorizer port (TRUST-01).
+
+    Same rules as :func:`get_caller` and :func:`require_role`, so an engine route
+    gated through ``CortexOS.security.auth_port`` accepts exactly the keys and
+    roles a DMS route accepts, including ``DMS_AUTH_DISABLED``.
+    """
+
+    def startup_warnings(self) -> list[str]:
+        return auth_bypass_warnings()
+
+    async def authorize(self, request: Request, min_role: str) -> Caller:
+        caller = await get_caller(
+            x_api_key=request.headers.get("X-API-Key"),
+            authorization=request.headers.get("Authorization"),
+        )
+        return await require_role(min_role)(caller)  # type: ignore[arg-type]
+
+
+def register_request_authorizer() -> None:
+    """Hand the engine our authorizer (the arrow points packs -> CortexOS)."""
+    from CortexOS.security.auth_port import register_authorizer
+
+    register_authorizer(DmsRequestAuthorizer())
+
+
+register_request_authorizer()

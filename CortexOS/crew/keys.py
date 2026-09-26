@@ -20,7 +20,9 @@ KNOWN = (
     "CURSOR_API_KEY",
     "XAI_API_KEY",
     "GROQ_API_KEY",
+    "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
+    "NVIDIA_API_KEY",
     "CEREBRAS_API_KEY",
     "MISTRAL_API_KEY",
     "CREW_MODEL",
@@ -33,11 +35,35 @@ KNOWN = (
     "CREW_OPENAI_MODEL",
     "CREW_CURSOR_MODEL",
     "CREW_XAI_MODEL",
+    "CREW_GOOGLE_MODEL",
+    "CREW_NVIDIA_MODEL",
+    "CREW_NVIDIA_BASE_URL",
+    "CREW_CEREBRAS_MODEL",
     "CREW_OPENVAULT_MODEL",
     "GMAIL_IMAP_USER",
     "GMAIL_APP_PASSWORD",
     "GMAIL_IMAP_HOST",
 )
+
+# Env names a litellm-routed host reads, first set wins. The provider chain
+# stamps that name as the source and ``llm.chat`` spends that same key, so the
+# stamp can never name one key while another is spent. litellm alone reads
+# GOOGLE_API_KEY before GEMINI_API_KEY, and NVIDIA_NIM_API_KEY, never
+# NVIDIA_API_KEY.
+KEY_ENVS: dict[str, tuple[str, ...]] = {
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"),
+}
+# litellm model prefix -> chain label whose KEY_ENVS key ``llm.chat`` passes.
+KEY_PREFIXES: dict[str, str] = {"gemini": "google", "nvidia_nim": "nvidia"}
+
+
+def key_env(label: str) -> str:
+    """Name of the first set env var for ``label``, or ''. Never the value."""
+    for name in KEY_ENVS.get(label, ()):
+        if os.environ.get(name, "").strip():
+            return name
+    return ""
 
 
 def _path(data_dir: Path) -> Path:
@@ -127,7 +153,10 @@ def public_fields() -> list[dict[str, str]]:
         {"key": "GMAIL_IMAP_USER", "label": "Gmail IMAP user", "hint": "you@gmail.com"},
         {"key": "GMAIL_APP_PASSWORD", "label": "Gmail app password", "hint": "IMAP read; Crew never sends"},
         {"key": "GROQ_API_KEY", "label": "Groq", "hint": "gsk_... (vaulted, used via OpenVault)"},
-        {"key": "GOOGLE_API_KEY", "label": "Google AI", "hint": "AIza..."},
+        {"key": "GEMINI_API_KEY", "label": "Google AI (Gemini)", "hint": "AIza... (read before GOOGLE_API_KEY)"},
+        {"key": "GOOGLE_API_KEY", "label": "Google AI (alt name)", "hint": "AIza... (used when GEMINI_API_KEY is unset)"},
+        {"key": "NVIDIA_API_KEY", "label": "NVIDIA NIM", "hint": "nvapi-... (integrate.api.nvidia.com)"},
+        {"key": "CREW_NVIDIA_MODEL", "label": "NVIDIA NIM model", "hint": "moonshotai/kimi-k3"},
         {"key": "CEREBRAS_API_KEY", "label": "Cerebras", "hint": "csk-..."},
         {"key": "MISTRAL_API_KEY", "label": "Mistral", "hint": "vaulted via OpenVault"},
         {"key": "XAI_API_KEY", "label": "xAI / Grok", "hint": "xai-..."},

@@ -25,11 +25,22 @@ from typing import Any
 
 import sqlglot
 
+from CortexOS.dms.followup_refine import (
+    RefineAbstain,
+    Refinement,
+    candidate_like_pattern,
+    detect_refinement,
+    prior_table,
+    refine,
+    support_probe_sql,
+)
+from CortexOS.dms.followup_refine import describe as describe_refinement
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
     guard_and_execute,
     log_audit,
+    validate_sql,
 )
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
@@ -1594,6 +1605,121 @@ def _aggregate_prior(
     return sql, []  # rows filled by execute
 
 
+def _has_values(rows: list[dict[str, Any]]) -> bool:
+    """At least one row with at least one non-NULL cell."""
+    return any(any(v is not None for v in row.values()) for row in rows)
+
+
+# Measures, flags and dates are never the target of an "only <value>" filter.
+_REFINE_SKIP_COLUMN = re.compile(
+    r"(_kg|_myr|_days|_score|_date|_at|_time|^timestamp|^latitude|^longitude|^is_\w+|"
+    r"^last_restocked)$"
+)
+
+
+def _guarded_read(
+    sql: str,
+    *,
+    semantic: dict[str, Any],
+    verified: VerifiedManifest | None,
+    con: Any = None,
+) -> list[dict[str, Any]]:
+    """Read through the answer path's guardrail (and manifest, when bound).
+
+    A guardrail refusal reads as no rows. A manifest refusal raises
+    ``ManifestError`` — the caller decides whether that is fatal.
+    """
+    if verified is not None:
+        from CortexOS.execution.submit import execute_sql
+
+        guard = validate_sql(sql, semantic)
+        if not guard.passed or not guard.safe_sql:
+            return []
+        rows, _, _ = execute_sql(verified, guard.safe_sql)
+        return rows
+    own = con is None
+    handle = con if con is not None else get_connection(
+        DEFAULT_DB, read_only=read_only_queries_enabled()
+    )
+    try:
+        guard_result, rows, _ = guard_and_execute(sql, semantic, handle)
+    finally:
+        if own:
+            handle.close()
+    return rows if guard_result.passed else []
+
+
+def _refinement_is_empty(sql: str, *, verified: VerifiedManifest | None) -> bool:
+    """True when the refined WHERE selects no source rows at all.
+
+    An ungrouped ``COALESCE(SUM(..), 0)`` still returns one row of 0 over an
+    empty selection; that is "nothing matched", not a total of zero.
+    """
+    probe = support_probe_sql(sql)
+    rows = _guarded_read(probe, semantic=load_semantic_layer(), verified=verified)
+    if not rows:
+        return True
+    return not int(next(iter(rows[0].values())) or 0)
+
+
+def _refine_prior(
+    prior: dict[str, Any],
+    ref: Refinement,
+    *,
+    verified: VerifiedManifest | None,
+) -> tuple[str, Refinement]:
+    """Resolve columns / values through the answer path's read path, then rewrite.
+
+    Columns come from the semantic layer the guardrail enforces (sensitive
+    columns dropped). Candidate values are read through the same guardrail
+    and, for a bound session, the same ``execute_sql`` manifest enforcement
+    as the answer itself: a table the manifest does not grant raises
+    ``ManifestError`` (-> refused).
+    """
+    prior_sql = str(prior["sql"])
+    table = prior_table(prior_sql)
+    semantic = load_semantic_layer()
+    spec = (semantic.get("tables") or {}).get(table)
+    if not spec:
+        raise RefineAbstain(f"table '{table}' is not in the semantic layer")
+    sensitive = {c.lower() for c in semantic.get("sensitive_columns") or []}
+    columns = [c for c in spec.get("columns") or [] if c.lower() not in sensitive]
+    if ref.kind != "filter":
+        return refine(prior_sql, ref, columns=columns)
+
+    pattern = candidate_like_pattern(ref.term)
+    if pattern is None:
+        raise RefineAbstain(f"'{ref.term}' is not a value that can be filtered on")
+
+    con = None if verified is not None else get_connection(
+        DEFAULT_DB, read_only=read_only_queries_enabled()
+    )
+
+    def _read(sql: str) -> list[dict[str, Any]]:
+        return _guarded_read(sql, semantic=semantic, verified=verified, con=con)
+
+    value_index: dict[str, list[str]] = {}
+    try:
+        for col in columns:
+            if _REFINE_SKIP_COLUMN.search(col.lower()):
+                continue
+            rows = _read(
+                f"SELECT DISTINCT {col} FROM {table} "
+                f"WHERE LOWER(CAST({col} AS VARCHAR)) LIKE '{pattern}'"
+            )
+            if len(rows) >= MAX_LIMIT:
+                # Truncated candidates cannot prove a value is unique.
+                raise RefineAbstain(f"'{ref.term}' is too broad to pick one value of {col}")
+            value_index[col] = [v for v in (r.get(col) for r in rows) if isinstance(v, str)]
+    finally:
+        if con is not None:
+            con.close()
+    # No WH-A -> LOC-001 alias: inventory.location_id is itself dual-coded
+    # (LOC-001 / "Warehouse A" / "wh_o"), so one equality on the mapped id would
+    # silently undercount. Such tokens resolve by encoding or abstain.
+    return refine(prior_sql, ref, columns=columns, value_index=value_index)
+
+
 def _honest_plan(
     question: str,
     sql: str | None,
@@ -1721,7 +1847,33 @@ def answer(
         and _rank_window(q_low)
         and not _wants_sales_rank(q_low, q_low)
     )
-    if prior and prior.get("sql") and (_is_anaphora(q_low) or window_followup):
+    # CX-MT-01 — "and by location?" / "only SKU-BETA" / "only 2026" rewrite
+    # the prior turn's SQL. Tried before arithmetic anaphora; the detector is
+    # anchored, so a fresh "sales by region last month" never lands here.
+    refinement: Refinement | None = None
+    if (
+        prior
+        and prior.get("sql")
+        and not window_followup
+        and not _is_anaphora(q_low)
+    ):
+        refinement = detect_refinement(question)
+    if refinement is not None and prior is not None:
+        try:
+            sql, refinement = _refine_prior(prior, refinement, verified=verified)
+        except RefineAbstain as exc:
+            return _abs(f"could not refine the previous answer: {exc}")
+        except ManifestError as exc:
+            return _done(
+                _abstain_refused(
+                    question, audit_id, reason=f"{type(exc).__name__}: {exc}"
+                )
+            )
+        layer, badge = "session", "session"
+        assumptions = f"refined prior turn: {describe_refinement(refinement)}"
+        metric_id = prior.get("metric_id")
+        planned_tables = (prior_table(sql),)
+    elif prior and prior.get("sql") and (_is_anaphora(q_low) or window_followup):
         try:
             if window_followup:
                 sql, session_rows = _reslice_prior(prior["sql"], question)
@@ -1958,6 +2110,19 @@ def answer(
     if not guard_result.passed:
         return _abs(f"internal SQL failed guardrail {guard_result.violations}")
 
+    if refinement is not None and (
+        not _has_values(rows)
+        or (
+            refinement.kind in ("filter", "time")
+            and _refinement_is_empty(guard_result.safe_sql or sql, verified=verified)
+        )
+    ):
+        # A refinement that selects nothing must not stamp success (§8).
+        return _abs(
+            f"the previous answer has no rows once refined "
+            f"({describe_refinement(refinement)})"
+        )
+
     if layer == "generated":
         from CortexOS.dms.l2_generation import note_l2_plausibility, resolve_l2_generation
         from CortexOS.dms.l2_plausibility import (
@@ -1988,6 +2153,11 @@ def answer(
 
     truncated = total_count is not None and len(rows) >= MAX_LIMIT and total_count > len(rows)
     answer_text = synthesize_answer(rows, question)
+    if refinement is not None:
+        answer_text = (
+            f"Refined the previous answer ({describe_refinement(refinement)}).\n"
+            + answer_text
+        )
     if truncated:
         answer_text = f"{total_count} rows match; showing the first {len(rows)}.\n" + answer_text
 

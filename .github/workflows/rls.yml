@@ -1,4 +1,7 @@
 # Postgres RLS proof (F7 remainder / C-SEC-2) — fails closed without a green DSN job.
+# GH-04 (#244): also runs the Postgres ledger tests and fails if any is skipped.
+# TRUST-05 (#261): every proof step writes junit and scripts/check_junit_all_passed.py
+# fails the job unless each expected test PASSED (pytest exits 0 on all-skipped).
 name: RLS Proof
 
 on:
@@ -43,4 +46,31 @@ jobs:
           python -m pip install --upgrade pip wheel
           pip install -e ".[dev,api,dms,postgres]"
       - name: RLS deny proof
-        run: pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short
+        run: >-
+          pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short -rA
+          -p no:cacheprovider --junitxml=rls-deny-junit.xml
+      - name: RLS deny test must be PASSED, never SKIPPED
+        # The module skips as a whole when DMS_LEDGER_DSN is empty or sqlalchemy is
+        # absent, and pytest exits 0 when every test is skipped.
+        run: >-
+          python scripts/check_junit_all_passed.py --junit rls-deny-junit.xml
+          --expect test_rls_blocks_out_of_scope_read
+      - name: Postgres ledger proof (chain, 20-way concurrency, append-only trigger, migrated 001+002 schema)
+        run: >-
+          pytest tests/dms/test_f1_ledger.py tests/dms/test_f1_ledger_pg_migrated_schema.py
+          -k postgres -q --tb=short -rA
+          -p no:cacheprovider --junitxml=ledger-pg-junit.xml
+      - name: Postgres ledger tests must be PASSED, never SKIPPED
+        run: >-
+          python scripts/check_junit_all_passed.py --junit ledger-pg-junit.xml
+          --expect test_postgres_chain_append_and_verify_ok,test_postgres_concurrent_appends_consistent,test_postgres_append_only_trigger,test_postgres_migrated_schema_chain_verifies
+      - name: Multi-process SQLite ledger proof
+        env:
+          DMS_LEDGER_DSN: ""
+        run: >-
+          pytest tests/dms/test_f1_ledger_multiprocess.py -q --tb=short -rA
+          -p no:cacheprovider --junitxml=ledger-mp-junit.xml
+      - name: Multi-process SQLite ledger tests must be PASSED, never SKIPPED
+        run: >-
+          python scripts/check_junit_all_passed.py --junit ledger-mp-junit.xml
+          --expect test_connect_sets_busy_timeout_of_at_least_30s,test_four_processes_append_25_each_yield_gap_free_verified_chain

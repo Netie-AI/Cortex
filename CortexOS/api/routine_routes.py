@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from CortexOS.execution import humanize, routine_scheduler
+from CortexOS.security.auth_port import require_role
 
 
 class RoutineBody(BaseModel):
@@ -59,8 +60,20 @@ def _found(routine: dict[str, Any] | None) -> dict[str, Any]:
     return routine
 
 
+# T2-CTRL-A (#263): every route is gated through the engine's auth port, the
+# same dependency TRUST-01 put on /api/apps. Reads and the
+# save-nothing draft preview need viewer. Creating, editing, pausing and
+# running one routine need steward. Deleting a routine, forcing a scheduler
+# tick over every due routine, and resuming every paused routine at once need
+# admin. Pause-all stays at steward so the stop switch is not harder to reach
+# than the things it stops.
+_VIEWER = [Depends(require_role("viewer"))]
+_STEWARD = [Depends(require_role("steward"))]
+_ADMIN = [Depends(require_role("admin"))]
+
+
 def register_routine_routes(app: Any) -> None:
-    @app.get("/api/routines")
+    @app.get("/api/routines", dependencies=_VIEWER)
     async def list_routines() -> dict[str, Any]:
         routine_scheduler.init()
         return {
@@ -69,7 +82,7 @@ def register_routine_routes(app: Any) -> None:
             "budget": routine_scheduler.global_budget_state(),
         }
 
-    @app.post("/api/routines/draft")
+    @app.post("/api/routines/draft", dependencies=_VIEWER)
     async def draft_routine(body: DraftBody) -> dict[str, Any]:
         """Preview what one sentence becomes — nothing is saved."""
         from CortexOS.execution import routine_composer
@@ -80,7 +93,7 @@ def register_routine_routes(app: Any) -> None:
             "suggestions": routine_composer.SUGGESTIONS,
         }
 
-    @app.post("/api/routines")
+    @app.post("/api/routines", dependencies=_STEWARD)
     async def create_routine(body: RoutineBody) -> dict[str, Any]:
         goal = (body.goal or body.prompt or "").strip()
         if not goal:
@@ -100,59 +113,59 @@ def register_routine_routes(app: Any) -> None:
             routine = routine_scheduler.update_routine(routine["id"], vars=body.vars)
         return {"ok": True, "routine": routine}
 
-    @app.post("/api/routines/tick")
+    @app.post("/api/routines/tick", dependencies=_ADMIN)
     async def tick_now() -> dict[str, Any]:
         return {"ok": True, "ran": await routine_scheduler.tick()}
 
-    @app.post("/api/routines/pause-all")
+    @app.post("/api/routines/pause-all", dependencies=_STEWARD)
     async def pause_all_routines() -> dict[str, Any]:
         routine_scheduler.init()
         return {"ok": True, "paused": routine_scheduler.pause_all()}
 
-    @app.post("/api/routines/resume-all")
+    @app.post("/api/routines/resume-all", dependencies=_ADMIN)
     async def resume_all_routines() -> dict[str, Any]:
         """Resumes user-paused routines; governor pauses stay parked by design."""
         routine_scheduler.init()
         return {"ok": True, "resumed": routine_scheduler.resume_all()}
 
-    @app.get("/api/routines/{rid}")
+    @app.get("/api/routines/{rid}", dependencies=_VIEWER)
     async def get_routine(rid: str) -> dict[str, Any]:
         routine_scheduler.init()
         return {"ok": True, "routine": _found(routine_scheduler.get_routine(rid))}
 
-    @app.patch("/api/routines/{rid}")
+    @app.patch("/api/routines/{rid}", dependencies=_STEWARD)
     async def patch_routine(rid: str, body: RoutinePatchBody) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
         return {"ok": True, "routine": routine_scheduler.update_routine(rid, **fields)}
 
-    @app.delete("/api/routines/{rid}")
+    @app.delete("/api/routines/{rid}", dependencies=_ADMIN)
     async def delete_routine(rid: str) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))
         return {"ok": routine_scheduler.delete_routine(rid)}
 
-    @app.post("/api/routines/{rid}/pause")
+    @app.post("/api/routines/{rid}/pause", dependencies=_STEWARD)
     async def pause_routine(rid: str, body: PauseBody | None = None) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))
         reason = body.reason if body else "user"
         return {"ok": True, "routine": routine_scheduler.pause(rid, reason)}
 
-    @app.post("/api/routines/{rid}/resume")
+    @app.post("/api/routines/{rid}/resume", dependencies=_STEWARD)
     async def resume_routine(rid: str) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))
         return {"ok": True, "routine": routine_scheduler.resume(rid)}
 
-    @app.post("/api/routines/{rid}/run")
+    @app.post("/api/routines/{rid}/run", dependencies=_STEWARD)
     async def run_routine(rid: str) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))
         return {"ok": True, "run": await routine_scheduler.run_once(rid)}
 
-    @app.post("/api/routines/{rid}/fire")
+    @app.post("/api/routines/{rid}/fire", dependencies=_STEWARD)
     async def fire_routine(rid: str, body: FireBody) -> dict[str, Any]:
         """External /fire trigger — wraps payload as untrusted data (Claude Code routines pattern)."""
         from CortexOS.execution.untrusted_payload import prepare_external_prompt
@@ -203,7 +216,7 @@ def register_routine_routes(app: Any) -> None:
             "run": run,
         }
 
-    @app.get("/api/routines/{rid}/runs")
+    @app.get("/api/routines/{rid}/runs", dependencies=_VIEWER)
     async def routine_runs(rid: str) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))

@@ -8,6 +8,16 @@ from netie.execution.model_router import BIG_API_PLACEHOLDER, ModelRouter
 
 from tests.test_execution.test_cost_ledger_and_executor import StubAdapter
 
+# T2-CTRL-B (#263): /run needs admin and the cost read needs viewer.
+_ADMIN_KEY = "dag-endpoint-admin-key"
+_AUTH = {"X-API-Key": _ADMIN_KEY}
+
+
+@pytest.fixture(autouse=True)
+def _api_key(monkeypatch):
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", f"admin:{_ADMIN_KEY}")
+
 
 def test_judged_node_end_to_end_via_test_client():
     app = create_app()
@@ -46,6 +56,7 @@ def test_judged_node_end_to_end_via_test_client():
                 "run_id": "api_run",
                 "context": {},
             },
+            headers=_AUTH,
         )
     assert r.status_code == 200
     payload = r.json()
@@ -88,9 +99,9 @@ def test_run_cost_endpoint_returns_total_and_records():
                 {"id": "e1", "kind": "EMIT", "tier": 0, "inputs": ["j1"]},
             ],
         }
-        run = client.post("/run", json={"dag": dag, "run_id": "cost_probe"})
+        run = client.post("/run", json={"dag": dag, "run_id": "cost_probe"}, headers=_AUTH)
         assert run.status_code == 200
-        cost = client.get("/api/engine/runs/cost_probe/cost")
+        cost = client.get("/api/engine/runs/cost_probe/cost", headers=_AUTH)
     assert cost.status_code == 200
     body = cost.json()
     assert body["run_id"] == "cost_probe"

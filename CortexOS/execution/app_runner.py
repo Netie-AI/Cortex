@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.execution.app_package import DEFAULT_API_BASE
+from CortexOS.integrations import freeroute
 
 # app_id -> live Popen (in-process; reaped on stop / stale pid check)
 _PROCS: dict[str, subprocess.Popen[Any]] = {}
@@ -124,7 +125,10 @@ def start(
     if not start_cmd:
         return {"ok": False, "error": "no_start_command"}
 
-    env = os.environ.copy()
+    # An approved app is third-party code: it never inherits the Cortex
+    # OpenVault key or an env-direct provider key. PORT / API_BASE /
+    # PYTHONUNBUFFERED below are the only variables it is handed on purpose.
+    env = freeroute.child_env()
     env["PORT"] = str(port)
     env["API_BASE"] = DEFAULT_API_BASE
     env.setdefault("PYTHONUNBUFFERED", "1")

@@ -78,8 +78,47 @@ INTERNAL_TOOLS = frozenset(
         "ws_write",
         "ws_edit",
         "ws_glob",
+        # EPIC-GRANT-04: Excel as data (openpyxl, never the Excel UI) and a
+        # verify-only attach to an already-open granted window. Both are reads
+        # against a session grant; neither is an MCP mutation, so neither takes
+        # the per-call confirm. attach_window's one UACC call (list_windows) is
+        # gated by ``decide`` like any capture tool inside the runtime.
+        "ws_read_xlsx",
+        "attach_window",
+        # Research tools: a keyless public web read (results come back inside
+        # the untrusted-payload wrapper) and a pure arithmetic evaluator.
+        # Neither touches the desktop, the workspace or a secret.
+        "web_search",
+        "web_fetch",
+        "calc",
     }
 )
+
+# EPIC-GRANT-02: a session folder grant (``session_grants.py``, decision allow)
+# widens ONLY the workspace jail, and only for these read tools. It is not an
+# approval: it never touches the master switch, arming, or the per-call
+# confirm above, so a click or type_text still walks the CONFIRM ladder with a
+# grant present. Writes outside the space folder stay refused: an Allow on a
+# laptop folder was asked as a read, and nothing in the catalog says "modify".
+# EPIC-GRANT-04 adds ws_read_xlsx (a workbook opened as data) to the read set.
+GRANT_READ_TOOLS = frozenset({"ws_ls", "ws_read", "ws_glob", "ws_read_xlsx"})
+GRANT_WRITE_TOOLS = frozenset({"ws_write", "ws_edit"})
+
+REACH_READ = "read"
+REACH_WRITE = "write"
+REACH_NONE = "none"
+
+
+def grant_reach(tool: str) -> str:
+    """What a session folder grant may admit for this tool: ``read`` (ls / read /
+    glob into an Allow-ed folder), ``write`` (never outside the space), ``none``
+    (grants are irrelevant; MCP tools go through ``decide``)."""
+    if tool in GRANT_READ_TOOLS:
+        return REACH_READ
+    if tool in GRANT_WRITE_TOOLS:
+        return REACH_WRITE
+    return REACH_NONE
+
 
 ALLOW = "allow"
 CONFIRM = "confirm"

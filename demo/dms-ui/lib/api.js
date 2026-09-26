@@ -1,19 +1,54 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-const DEMO_API_KEYS = {
-  ANALYST: "dms-demo-viewer-key",
-  STEWARD: "dms-demo-steward-key",
-  ADMIN: "dms-demo-admin-key",
+// T2-FAILCLOSED (#263): no API key ships with Cortex or with this UI. The keys
+// come from the environment: demo/run_demo.ps1 generates per-install keys into
+// the gitignored data/local/demo_api_keys.env and exports them before starting
+// `next dev`. Next only inlines NEXT_PUBLIC_* values written out literally, so
+// each variable is spelled in full here.
+const API_KEYS = {
+  ANALYST: process.env.NEXT_PUBLIC_DMS_VIEWER_KEY || "",
+  STEWARD: process.env.NEXT_PUBLIC_DMS_STEWARD_KEY || "",
+  ADMIN: process.env.NEXT_PUBLIC_DMS_ADMIN_KEY || "",
 };
+
+const API_KEY_ENV = {
+  ANALYST: "NEXT_PUBLIC_DMS_VIEWER_KEY",
+  STEWARD: "NEXT_PUBLIC_DMS_STEWARD_KEY",
+  ADMIN: "NEXT_PUBLIC_DMS_ADMIN_KEY",
+};
+
+// Paths the engine serves without a key.
+const PUBLIC_PATHS = new Set(["/health"]);
 
 let _roleId = "ANALYST";
 
 export function setApiRoleKey(roleId) {
-  _roleId = roleId || "ANALYST";
+  _roleId = API_KEYS[roleId] !== undefined ? roleId : "ANALYST";
+}
+
+export class ApiKeyMissingError extends Error {
+  constructor(roleId) {
+    const envName = API_KEY_ENV[roleId] || API_KEY_ENV.ANALYST;
+    super(
+      `No Cortex API key configured for role ${roleId}: set ${envName} ` +
+        "(demo/run_demo.ps1 generates one per install) and restart the UI."
+    );
+    this.name = "ApiKeyMissingError";
+  }
+}
+
+/** The clear message shown when the current role has no key, or null. */
+export function missingApiKeyMessage() {
+  return API_KEYS[_roleId] ? null : new ApiKeyMissingError(_roleId).message;
 }
 
 function authHeaders(extra = {}) {
-  const key = DEMO_API_KEYS[_roleId] || DEMO_API_KEYS.ANALYST;
+  const key = API_KEYS[_roleId];
+  if (!key) {
+    const err = new ApiKeyMissingError(_roleId);
+    if (typeof console !== "undefined") console.error(err.message);
+    throw err;
+  }
   return { "X-API-Key": key, ...extra };
 }
 
@@ -26,13 +61,14 @@ export class ApiOfflineError extends Error {
 
 async function request(path, options = {}) {
   const url = `${API_BASE}${path}`;
+  const auth = PUBLIC_PATHS.has(path) ? {} : authHeaders();
   let res;
   try {
     res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...authHeaders(),
+        ...auth,
         ...(options.headers || {}),
       },
     });

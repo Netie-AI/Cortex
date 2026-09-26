@@ -14,7 +14,7 @@ import ipaddress
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -30,9 +30,11 @@ from CortexOS.crew.keys import status as keys_status
 from CortexOS.crew.mcp_client import MCPManager
 from CortexOS.crew.queue import JobQueue
 from CortexOS.crew.runtime import CrewRuntime
+from CortexOS.crew.session_grants import SessionGrantBook
 from CortexOS.crew.shell import CrewShell
 from CortexOS.crew.store import CrewStore
 from CortexOS.crew.wakes import WakeBoard, conveyor
+from CortexOS.security.auth_port import require_spend_auth
 
 SSE_KEEPALIVE_S = 25
 SSE_BREAK = '\n\n'
@@ -127,6 +129,7 @@ class CrewApp:
             self.settings.mcp_config_path, self.settings.master_computer_control
         )
         self.approvals = ApprovalBook(self.settings.data_dir / "approvals.json")
+        self.session_grants = SessionGrantBook(self.settings.data_dir / "session_grants.json")
         self.runtime = CrewRuntime(
             self.store,
             self.bus,
@@ -135,6 +138,7 @@ class CrewApp:
             self.bridge,
             llm_chat=llm_chat,
             approvals=self.approvals,
+            session_grants=self.session_grants,
         )
         self.shell = CrewShell(self.settings)
         self.wakes = WakeBoard()
@@ -274,6 +278,31 @@ class InsightsIn(BaseModel):
     ask: bool = True
     generate: bool = False
     query_plan: dict[str, Any] | None = None
+
+
+# #265 (P24.4): Crew never spends a model credential for a caller the engine
+# auth port does not admit, loopback included. Each route that can start or
+# wake a model call (a crew run through crew/llm.py, or a FreeRoute
+# generate) takes this gate as a dependency, so a refused caller gets
+# 401/403 with reason ``spend_requires_auth`` before the handler runs. The
+# handlers themselves are unchanged. POST /crew/freeroute is not gated here:
+# tests/test_crew/test_freeroute.py (guarded, #215) still pins a keyless
+# loopback spend there; that needs a founder decision.
+_spend_gate = require_spend_auth("viewer")
+_SPEND = [Depends(_spend_gate)]
+
+
+async def _insights_spend_gate(request: Request) -> None:
+    """Gate POST /crew/insights only when it asks for a model generate."""
+    try:
+        payload = InsightsIn.model_validate(await request.json())
+    except Exception:  # noqa: BLE001 - the route's own validation answers; nothing spends
+        return
+    if payload.generate:
+        await _spend_gate(request)
+
+
+_INSIGHTS_SPEND = [Depends(_insights_spend_gate)]
 
 
 class FreeRouteIn(BaseModel):
@@ -504,7 +533,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             raise HTTPException(404, "unknown space")
         return body
 
-    @router.post("/spaces/{space_id}/messages")
+    @router.post("/spaces/{space_id}/messages", dependencies=_SPEND)
     async def post_message(space_id: str, body: MessageIn) -> dict[str, Any]:
         if crew.store.get_space(space_id) is None:
             raise HTTPException(404, "unknown space")
@@ -519,7 +548,7 @@ def build_router(crew: CrewApp) -> APIRouter:
     async def agents(space_id: str) -> list[dict[str, Any]]:
         return crew.store.list_agents(space_id)
 
-    @router.post("/spaces/{space_id}/agents")
+    @router.post("/spaces/{space_id}/agents", dependencies=_SPEND)
     async def spawn_agent(space_id: str, body: AgentSpawnIn) -> dict[str, Any]:
         if crew.store.get_space(space_id) is None:
             raise HTTPException(404, "unknown space")
@@ -590,7 +619,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             raise HTTPException(404, "unknown agent")
         return {"ok": True, "agent": updated}
 
-    @router.post("/spaces/{space_id}/agents/{agent_id}/accept")
+    @router.post("/spaces/{space_id}/agents/{agent_id}/accept", dependencies=_SPEND)
     async def accept_task(space_id: str, agent_id: str, body: AgentAcceptIn | None = None) -> dict[str, Any]:
         row = crew.store.get_agent(agent_id)
         if row is None or row.get("space_id") != space_id:
@@ -972,7 +1001,7 @@ def build_router(crew: CrewApp) -> APIRouter:
 
         return assign_catalog(live=True)
 
-    @router.post("/assign")
+    @router.post("/assign", dependencies=_SPEND)
     async def assign_task(body: TaskAssignIn) -> Any:
         """Execute through Crew adapters. Control must not POST this."""
         from CortexOS.crew.assign_router import dispatch as assign_dispatch
@@ -1020,7 +1049,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "export_runtime": insights_mod.export_runtime_hint(crew.shell.public()),
         }
 
-    @router.post("/insights")
+    @router.post("/insights", dependencies=_INSIGHTS_SPEND)
     async def insights_ask(body: InsightsIn, request: Request) -> Any:
         """Ontology first, then constrained DMS ask. CERTIFIED|ABSTAIN|REFUSE."""
         from CortexOS.crew import freeroute as freeroute_mod
@@ -1051,9 +1080,11 @@ def build_router(crew: CrewApp) -> APIRouter:
 
     from CortexOS.crew.liberty_routes import mount_liberty
     from CortexOS.crew.prompt_harness_routes import mount_prompt_harness
+    from CortexOS.crew.session_grants import mount_session_grants
 
     mount_liberty(router)
     mount_prompt_harness(router)
+    mount_session_grants(router, crew.session_grants)
 
     @router.get("/identity")
     async def cortex_identity() -> dict[str, Any]:
@@ -1132,7 +1163,7 @@ def build_router(crew: CrewApp) -> APIRouter:
         )
         return body
 
-    @router.post("/tickets/claim")
+    @router.post("/tickets/claim", dependencies=_SPEND)
     async def claim_ticket(body: TicketAssignIn) -> dict[str, Any]:
         """Local /assign bind. Does not write CLAIMS.json. Does not seat Ticket Runner."""
         if crew.store.get_space(body.space_id) is None:
@@ -1172,7 +1203,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "law": "Released local bind. Did not edit CLAIMS.json.",
         }
 
-    @router.post("/tickets/build")
+    @router.post("/tickets/build", dependencies=_SPEND)
     async def build_ticket(body: TicketBuildIn) -> dict[str, Any]:
         """Operator /build over HTTP: skill build + verifier named test. 409 SEATED."""
         from CortexOS.crew import scale as scale_mod
@@ -1193,7 +1224,7 @@ def build_router(crew: CrewApp) -> APIRouter:
             "law": scale_mod.LAW_BUILD,
         }
 
-    @router.post("/tickets/scale")
+    @router.post("/tickets/scale", dependencies=_SPEND)
     async def scale_tickets(body: TicketScaleIn) -> dict[str, Any]:
         """Operator /scale over HTTP: seat existing writers, spawn only to cap."""
         from CortexOS.crew import scale as scale_mod

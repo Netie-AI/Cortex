@@ -7,8 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CORTEX_PROFILE=full \
     CORTEX_REQUIRE_AGENTIC_MARKER=1 \
-    PACK=dms \
-    DMS_AUTH_DISABLED=1
+    PACK=dms
+# Auth is on (T2-FAILCLOSED, #263). Pass DMS_API_KEYS or pair OpenVault via
+# OPENVAULT_BASE_URL at run time; with neither, every gated request is refused.
+# Never bake keys into this image.
 
 WORKDIR /app
 

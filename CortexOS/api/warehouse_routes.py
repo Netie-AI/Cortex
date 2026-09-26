@@ -2,7 +2,10 @@
 
 from typing import Any
 
+from fastapi import Depends, Request
 from pydantic import BaseModel, Field
+
+from CortexOS.security.auth_port import Principal, require_role
 
 
 class CreateLocationRequest(BaseModel):
@@ -18,14 +21,14 @@ class IntakeRequest(BaseModel):
     label: str
     location_code: str
     photo: str = Field(description="base64-encoded image")
-    actor: str = "demo_operator"
+    actor: str = "demo_operator"  # ignored: the caller is recorded (T2-DMS, #263)
     tenant_id: str = "default"
 
 
 class ScanMoveRequest(BaseModel):
     item_qr_or_id: str
     to_location_qr: str
-    actor: str = "demo_operator"
+    actor: str = "demo_operator"  # ignored: the caller is recorded (T2-DMS, #263)
     tenant_id: str = "default"
 
 
@@ -36,15 +39,26 @@ class ConfirmDimsRequest(BaseModel):
     w: float
     h: float
     unit: str = "m"
-    actor: str = "demo_operator"
+    actor: str = "demo_operator"  # ignored: the caller is recorded (T2-DMS, #263)
     tenant_id: str = "default"
-    gate_approved: bool = False
+    gate_approved: bool = False  # overriding the capacity gate needs admin (T2-DMS, #263)
 
 
 class EstimateDimsRequest(BaseModel):
     photo: str = Field(description="base64-encoded image")
     depth_source: str | None = None
     depth_map: str | None = Field(default=None, description="base64 depth map for lidar path")
+
+
+# T2-DMS (#263): gated through the engine's auth port. Reads need viewer.
+# Creating locations, intake, moves, dimension estimates (a step of intake that
+# takes an untrusted upload) and dimension confirmation need steward, and the
+# ledger actor is the authenticated caller, never a name from the request body.
+# Overriding the capacity gate on confirm-dims is an approval, so it needs admin.
+_VIEWER = [Depends(require_role("viewer"))]
+_STEWARD = require_role("steward")
+_STEWARD_ONLY = [Depends(_STEWARD)]
+_ADMIN = require_role("admin")
 
 
 def register_warehouse_routes(app: Any) -> None:
@@ -58,7 +72,7 @@ def register_warehouse_routes(app: Any) -> None:
         get_location_by_code,
     )
 
-    @app.post("/dms/warehouse/locations")
+    @app.post("/dms/warehouse/locations", dependencies=_STEWARD_ONLY)
     async def warehouse_create_location(body: CreateLocationRequest) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -74,14 +88,14 @@ def register_warehouse_routes(app: Any) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/dms/warehouse/locations/tree")
+    @app.get("/dms/warehouse/locations/tree", dependencies=_VIEWER)
     async def warehouse_location_tree(tenant_id: str = Query("default")) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         return {"tree": locations.location_tree_with_items(tenant_id=tenant_id)}
 
-    @app.get("/dms/warehouse/locations/{location_id}/qr-label")
+    @app.get("/dms/warehouse/locations/{location_id}/qr-label", dependencies=_VIEWER)
     async def warehouse_qr_label(location_id: str, tenant_id: str = Query("default")) -> Response:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -103,7 +117,9 @@ def register_warehouse_routes(app: Any) -> None:
         return Response(content=png, media_type="image/png")
 
     @app.post("/dms/items/intake")
-    async def warehouse_intake(body: IntakeRequest) -> dict[str, Any]:
+    async def warehouse_intake(
+        body: IntakeRequest, caller: Principal = Depends(_STEWARD)
+    ) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
@@ -113,7 +129,7 @@ def register_warehouse_routes(app: Any) -> None:
                 label=body.label,
                 location_code=body.location_code,
                 photo_b64=body.photo,
-                actor=body.actor,
+                actor=caller.actor,
                 tenant_id=body.tenant_id,
             )
         except ValueError as exc:
@@ -122,7 +138,9 @@ def register_warehouse_routes(app: Any) -> None:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @app.post("/dms/movements/scan")
-    async def warehouse_scan_move(body: ScanMoveRequest) -> dict[str, Any]:
+    async def warehouse_scan_move(
+        body: ScanMoveRequest, caller: Principal = Depends(_STEWARD)
+    ) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
@@ -130,7 +148,7 @@ def register_warehouse_routes(app: Any) -> None:
             return movement.scan_move(
                 item_qr_or_id=body.item_qr_or_id,
                 to_location_qr=body.to_location_qr,
-                actor=body.actor,
+                actor=caller.actor,
                 tenant_id=body.tenant_id,
             )
         except ValueError as exc:
@@ -138,7 +156,7 @@ def register_warehouse_routes(app: Any) -> None:
         except RLSViolationError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    @app.post("/dms/items/estimate-dims")
+    @app.post("/dms/items/estimate-dims", dependencies=_STEWARD_ONLY)
     async def warehouse_estimate_dims(body: EstimateDimsRequest) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -185,10 +203,19 @@ def register_warehouse_routes(app: Any) -> None:
         return {"suggested_dims": suggestion.to_dict()}
 
     @app.post("/dms/items/{item_id}/confirm-dims")
-    async def warehouse_confirm_dims(item_id: str, body: ConfirmDimsRequest) -> dict[str, Any]:
+    async def warehouse_confirm_dims(
+        item_id: str,
+        body: ConfirmDimsRequest,
+        request: Request,
+        caller: Principal = Depends(_STEWARD),
+    ) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
+        if body.gate_approved:
+            # The gate override is an approval: re-authorize at admin before
+            # anything is written, and record the admin as the actor.
+            caller = await _ADMIN(request)
         try:
             return intake.confirm_item_dims(
                 item_id=item_id,
@@ -196,7 +223,7 @@ def register_warehouse_routes(app: Any) -> None:
                 w=body.w,
                 h=body.h,
                 unit=body.unit,
-                actor=body.actor,
+                actor=caller.actor,
                 tenant_id=body.tenant_id,
                 gate_approved=body.gate_approved,
             )
@@ -205,7 +232,7 @@ def register_warehouse_routes(app: Any) -> None:
         except RLSViolationError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    @app.get("/dms/locations/{location_id}/space")
+    @app.get("/dms/locations/{location_id}/space", dependencies=_VIEWER)
     async def warehouse_location_space(
         location_id: str,
         tenant_id: str = Query("default"),
@@ -218,7 +245,7 @@ def register_warehouse_routes(app: Any) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @app.get("/dms/warehouse/locations/by-code/{code}")
+    @app.get("/dms/warehouse/locations/by-code/{code}", dependencies=_VIEWER)
     async def warehouse_location_by_code(code: str, tenant_id: str = Query("default")) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":

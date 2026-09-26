@@ -24,6 +24,27 @@ from CortexOS.crew.runtime import CrewRuntime
 from CortexOS.crew.store import CrewStore
 
 
+@pytest.fixture(autouse=True)
+def crew_request_authorizer():
+    """#265: Crew spend routes authenticate through the engine auth port.
+
+    The engine only holds the port; the in-repo DMS authorizer fills it when
+    ``packs.dms.security.api_auth`` is imported, which otherwise depends on test
+    order. Register it for every crew test (keys come from
+    ``tests/api_key_isolation.py``) and put back whatever was there before.
+    """
+    from CortexOS.security import auth_port
+    from packs.dms.security.api_auth import register_request_authorizer
+
+    previous = auth_port.registered_authorizer()
+    register_request_authorizer()
+    yield
+    if previous is None:
+        auth_port.clear_authorizer()
+    else:
+        auth_port.register_authorizer(previous)
+
+
 @pytest.fixture()
 def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """A deterministic provider environment: explicit model, no probes."""
@@ -38,10 +59,17 @@ def crew_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GMAIL_IMAP_USER",
         "GMAIL_APP_PASSWORD",
         "GROQ_API_KEY",
+        "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
+        "NVIDIA_API_KEY",
+        "NVIDIA_NIM_API_KEY",
         "CEREBRAS_API_KEY",
         "MISTRAL_API_KEY",
         "CREW_PROVIDER",
+        "CREW_GOOGLE_MODEL",
+        "CREW_NVIDIA_MODEL",
+        "CREW_NVIDIA_BASE_URL",
+        "CREW_CEREBRAS_MODEL",
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("CREW_MODEL", "test/fake-model")

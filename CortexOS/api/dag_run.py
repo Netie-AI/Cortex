@@ -3,11 +3,18 @@
 import json
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from netie.result import Ok
 from pydantic import BaseModel, Field
 
 from CortexOS.packaging import FeatureNotInstalled, require_extra
+from CortexOS.security.auth_port import require_role
+
+# T2-CTRL-B (#263): gated through the engine's auth port (no packs import).
+# An inline DAG is arbitrary caller-authored work that spends model budget and
+# writes the cost ledger, so it needs admin; reading a run's cost needs viewer.
+_VIEWER = [Depends(require_role("viewer"))]
+_ADMIN = [Depends(require_role("admin"))]
 
 
 class RunDAGRequest(BaseModel):
@@ -48,7 +55,7 @@ def register_dag_run_routes(app: Any) -> None:
     """Always register ``POST /run`` — core profile returns HTTP 501."""
     from CortexOS.api.feature_stubs import feature_not_installed_detail
 
-    @app.post("/run")
+    @app.post("/run", dependencies=_ADMIN)
     async def run_inline_dag(request: Request, body: RunDAGRequest) -> dict[str, Any]:
         try:
             require_extra("agentic", feature="dag_run")
@@ -95,7 +102,7 @@ def register_dag_run_routes(app: Any) -> None:
             "total_myr": ledger.total_cost(body.run_id),
         }
 
-    @app.get("/api/engine/runs/{run_id}/cost")
+    @app.get("/api/engine/runs/{run_id}/cost", dependencies=_VIEWER)
     async def get_run_cost(request: Request, run_id: str) -> dict[str, Any]:
         try:
             require_extra("agentic", feature="dag_run")

@@ -40,6 +40,12 @@ _KEY_ENV: dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
 }
 
+#: The only env names a keyvault snapshot may write. A snapshot row naming any
+#: other ``env`` (``CORTEX_MODEL_TRANSPORT``, ``PATH``, ``CORTEX_FREEROUTE``...)
+#: would reconfigure this process, not hydrate a key, so it is refused.
+ALLOWED_KEY_ENVS: frozenset[str] = frozenset(_KEY_ENV.values())
+REFUSED_ENV_NOTE = "not a known provider key env; snapshot may only hydrate provider keys"
+
 
 def workflow_identity(run_id: str, node_id: str = "") -> str:
     rid = (run_id or "anon").replace(" ", "")[:64]
@@ -55,12 +61,15 @@ def ensure_provider_keys(*, force: bool = False) -> dict[str, Any]:
     """Hydrate missing provider env vars from OpenVault when online.
 
     Returns a status dict suitable for diagnostics (no secret material).
+    Only :data:`ALLOWED_KEY_ENVS` are ever written; any other env name a
+    snapshot row carries is listed under ``refused`` with a named note.
     """
     snap = _get_json("/api/keyvault/snapshot")
     if not snap or not snap.get("ok"):
         return {"ok": False, "source": "offline", "hydrated": []}
 
     hydrated: list[str] = []
+    refused: list[dict[str, str]] = []
     providers = snap.get("providers") or snap.get("secrets") or []
     if isinstance(providers, dict):
         iterable = [
@@ -77,6 +86,9 @@ def ensure_provider_keys(*, force: bool = False) -> dict[str, Any]:
         env_name = _KEY_ENV.get(pid) or str(item.get("env") or "")
         if not env_name:
             continue
+        if env_name not in ALLOWED_KEY_ENVS:
+            refused.append({"env": env_name[:64], "note": REFUSED_ENV_NOTE})
+            continue
         if os.environ.get(env_name) and not force:
             continue
         secret = item.get("value") or item.get("secret") or item.get("key")
@@ -87,7 +99,7 @@ def ensure_provider_keys(*, force: bool = False) -> dict[str, Any]:
         os.environ[env_name] = secret
         hydrated.append(env_name)
 
-    return {"ok": True, "source": "openvault", "hydrated": hydrated}
+    return {"ok": True, "source": "openvault", "hydrated": hydrated, "refused": refused}
 
 
 def check_openfree_budget(

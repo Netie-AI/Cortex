@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from CortexOS.dms.warehouse_db import (
 from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
 from packs.dms.security.reversible import secure_reversible
+
+_log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = ROOT / "data" / "samples" / "supplier_contracts"
@@ -917,9 +920,13 @@ def answer_question(
     (delayed shipments / sales / supplier ranking), serve the legacy path so
     pre-Q2 demo queries keep working until dedicated governed metrics cover them.
     """
+    # Imported outside the try: if it lived inside and the engine import failed,
+    # evaluating ``except ManifestError`` would itself raise and bypass the
+    # fail-closed branch below.
+    from CortexOS.execution.manifest import ManifestError
+
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
-        from CortexOS.execution.manifest import ManifestError
 
         result = _engine_answer(
             question,
@@ -946,8 +953,48 @@ def answer_question(
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.
         raise
-    except Exception:  # noqa: BLE001 — engine failure must not take the API down
+    except Exception as exc:  # noqa: BLE001 — engine failure must not take the API down
+        if require_grounding:
+            # The legacy path reads the demo warehouse and knows nothing about
+            # session grants. A grounded caller (/dms/query, insights bridge)
+            # must get an explicit abstain, never ungranted warehouse rows.
+            _log.warning(
+                "answer engine failed under require_grounding; abstaining (%s)",
+                type(exc).__name__,
+                exc_info=True,
+            )
+            return _abstain_engine_failure()
         return _answer_question_legacy(question, session_id=session_id)
+
+
+ENGINE_FAILURE_ANSWER = (
+    "The answer engine could not answer this question, so no data is returned. "
+    "Please try again, or rephrase the question."
+)
+
+
+def _abstain_engine_failure() -> dict[str, Any]:
+    """Fail-closed envelope for an engine failure on a grounded call.
+
+    Carries no rows, no SQL, no sources and no exception text (an exception
+    message can quote warehouse values).
+    """
+    return {
+        "answer": ENGINE_FAILURE_ANSWER,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": str(uuid.uuid4()),
+        "violations_blocked": [],
+        "route": "abstain",
+        "rows": [],
+        "row_count": 0,
+        "total_count": 0,
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": "answer engine failure",
+        "suggestions": [],
+    }
 
 
 def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
@@ -975,7 +1022,7 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     if route == "rag":
         answer, sources = rag_answer(question)
-        return {
+        out: dict[str, Any] = {
             "answer": answer,
             "sql_used": None,
             "chart_spec": None,
@@ -987,6 +1034,12 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
             "source_table": None,
             "query_plan": query_plan.to_dict(),
         }
+        if not sources:
+            # No document matched: say so, and stamp abstain so no consumer
+            # renders an empty answer as a served one.
+            out["badge"] = "abstain"
+            out["answer"] = "I could not find a document that answers this question."
+        return out
 
     if route == "needs_clarification":
         return {

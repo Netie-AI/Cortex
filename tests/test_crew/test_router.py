@@ -22,7 +22,10 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
         "CURSOR_API_KEY",
         "XAI_API_KEY",
         "GROQ_API_KEY",
+        "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
+        "NVIDIA_API_KEY",
+        "NVIDIA_NIM_API_KEY",
         "CEREBRAS_API_KEY",
         "MISTRAL_API_KEY",
     ):

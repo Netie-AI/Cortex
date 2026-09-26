@@ -1,0 +1,221 @@
+"""Prompt redactor port: the engine side of the PII seam (C2 boundary, GH-01).
+
+``CortexOS`` may not import ``packs.*`` (``tests/contract/test_import_boundaries.py``).
+The fuller redactor (phone, NER, token vault) lives in ``packs/dms/security``, so
+the dependency is inverted the same way as :mod:`CortexOS.audit.ledger_registry`:
+the engine owns the port declared here, a pack may push its implementation in
+with :func:`register_redactor`, and :func:`redact_prompt_text` pulls it back out.
+The arrow only ever points packs -> CortexOS.
+
+Fail-closed rules (issue #241):
+
+* There is always an active redactor. When no pack registered one, the
+  engine default (:func:`default_redact`) runs. It covers the Singapore
+  NRIC/FIN, the Malaysian MyKad (with and without dashes), email and payment
+  card numbers. It deliberately does not cover phone numbers, because the
+  broad phone regex would eat quantities and SKUs in analytics prompts.
+* A registered redactor that raises must abort the model call. The port does
+  not swallow the error; ``invoke_routed_completion`` records status=error and
+  re-raises, so unredacted text never leaves the process.
+
+The pattern table is public so ``packs/dms/security/pii.py`` can reuse it
+instead of carrying a second copy of the same rule.
+
+Edge cases (H2-PII-EDGE, issue #250):
+
+* Identity numbers use digit lookarounds instead of ``\b``. ``\b`` treats ``_``
+  as a word character, so ``user_S1234567D`` and ``S1234567D_x`` slipped
+  through; a letter or underscore next to the number is now allowed, only a
+  digit still blocks the match (so a 13+ digit run is not split into a MyKad).
+* A MyKad may be written with dashes, spaces or nothing, as long as both
+  separators agree (``900101 14 5678`` is redacted, ``900101-14 5678`` is not).
+* Fullwidth digits and letters (``Ｓ１２３４５６７Ｄ``) are folded to ASCII before
+  matching. The fold is width-preserving (one code point in, one out), so the
+  spans still index the caller's original text and everything outside a
+  redacted span comes back byte-identical.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter. Digits on either
+# side would make it part of a longer number; letters and ``_`` do not.
+NRIC = re.compile(r"(?<!\d)[STFGM]\d{7}[A-Z](?!\d)", re.IGNORECASE)
+
+# Malaysian MyKad: YYMMDD-PB-#### (place-of-birth code 01-16, 21-59, 60-68,
+# 71-72, 74-79, 82-93, 98-99). Separator is a dash, a space or nothing, and the
+# second separator must equal the first. Both ends must be separated from other
+# digits so a 13+ digit card number is not split into a MyKad.
+MYKAD = re.compile(
+    r"(?<!\d)"
+    r"\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
+    r"(?P<sep>[- ]?)"
+    r"(?:0[1-9]|1[0-6]|2[1-9]|[345]\d|6[0-8]|7[124-9]|8[2-9]|9[0-3]|9[89])"
+    r"(?P=sep)"
+    r"\d{4}"
+    r"(?!\d)"
+)
+
+# Email (RFC5322 simplified)
+EMAIL = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+
+# Payment card: 13-19 digits with optional separators
+CREDIT_CARD = re.compile(r"\b(?:\d{4}[-\s]?){3}\d{1,4}\b|\b\d{13,19}\b")
+
+# Order matters: an earlier kind wins on an equal-start overlap, and a longer
+# match wins on the same start, so identity numbers are listed before the
+# broad card pattern.
+ENGINE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("nric", NRIC),
+    ("mykad", MYKAD),
+    ("credit_card", CREDIT_CARD),
+    ("email", EMAIL),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RedactSpan:
+    start: int
+    end: int
+    kind: str
+    text: str
+
+
+def fold_for_matching(text: str) -> str:
+    """NFKC-fold *text* one code point at a time, keeping its length.
+
+    Fullwidth ``Ｓ`` becomes ``S`` and ``１`` becomes ``1`` so the ASCII patterns
+    see them. A code point whose NFKC form is not exactly one code point (a
+    ligature, a squared unit) is left as is, so ``len(result) == len(text)``
+    and any span found in the result indexes *text* unchanged.
+    """
+    if text.isascii():
+        return text
+    out: list[str] = []
+    for ch in text:
+        folded = unicodedata.normalize("NFKC", ch)
+        out.append(folded if len(folded) == 1 else ch)
+    return "".join(out)
+
+
+def detect_spans(
+    text: str, patterns: tuple[tuple[str, re.Pattern[str]], ...] = ENGINE_PATTERNS
+) -> list[RedactSpan]:
+    """Return non-overlapping spans for *patterns* in *text* (earliest, then longest).
+
+    Matching runs on :func:`fold_for_matching` of *text*; the spans (and their
+    ``text``) refer to the original so :func:`apply_spans` can splice it.
+    """
+    folded = fold_for_matching(text)
+    spans: list[RedactSpan] = []
+    for kind, pattern in patterns:
+        for match in pattern.finditer(folded):
+            spans.append(RedactSpan(match.start(), match.end(), kind, text[match.start() : match.end()]))
+    spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
+    merged: list[RedactSpan] = []
+    cursor = -1
+    for span in spans:
+        if span.start >= cursor:
+            merged.append(span)
+            cursor = span.end
+    return merged
+
+
+def apply_spans(text: str, spans: list[RedactSpan]) -> str:
+    """Replace each span with ``[REDACTED:<kind>]``; spans must be non-overlapping and sorted."""
+    if not spans:
+        return text
+    parts: list[str] = []
+    cursor = 0
+    for span in spans:
+        parts.append(text[cursor : span.start])
+        parts.append(f"[REDACTED:{span.kind}]")
+        cursor = span.end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def default_redact(text: str) -> str:
+    """Engine default: NRIC, MyKad, email and card numbers become typed placeholders."""
+    return apply_spans(text, detect_spans(text, ENGINE_PATTERNS))
+
+
+@runtime_checkable
+class PromptRedactor(Protocol):
+    """Anything callable ``str -> str`` that strips PII before a model sees the text."""
+
+    def __call__(self, text: str) -> str: ...
+
+
+class RedactionFailed(RuntimeError):
+    """The active redactor raised; the model call was aborted before any text left."""
+
+
+_redactor: PromptRedactor | None = None
+
+
+def register_redactor(redactor: PromptRedactor) -> None:
+    """Install the active redactor. Called by the owning pack, never by the engine."""
+    global _redactor
+    _redactor = redactor
+
+
+def clear_redactor() -> None:
+    """Drop the registered redactor (pack swap / test teardown); the default takes over."""
+    global _redactor
+    _redactor = None
+
+
+def registered_redactor() -> PromptRedactor | None:
+    """The pack-registered redactor, or ``None`` when the engine default is active."""
+    return _redactor
+
+
+def active_redactor() -> PromptRedactor:
+    """The redactor a model call will run through: registered one, else the engine default."""
+    return _redactor if _redactor is not None else default_redact
+
+
+def redact_prompt_text(text: str) -> str:
+    """Run *text* through the active redactor.
+
+    Fail closed: any exception from the redactor becomes :class:`RedactionFailed`
+    (chained), and no partially redacted text is returned. A redactor that hands
+    back something other than a string is treated the same way, because the
+    caller would otherwise send an unknown object to the adapter.
+    """
+    redactor = active_redactor()
+    try:
+        out = redactor(text)
+    except Exception as exc:
+        raise RedactionFailed(f"prompt redactor {redactor!r} raised: {exc}") from exc
+    if not isinstance(out, str):
+        raise RedactionFailed(
+            f"prompt redactor {redactor!r} returned {type(out).__name__}, expected str"
+        )
+    return out
+
+
+__all__ = [
+    "CREDIT_CARD",
+    "EMAIL",
+    "ENGINE_PATTERNS",
+    "MYKAD",
+    "NRIC",
+    "PromptRedactor",
+    "RedactSpan",
+    "RedactionFailed",
+    "active_redactor",
+    "apply_spans",
+    "clear_redactor",
+    "default_redact",
+    "detect_spans",
+    "fold_for_matching",
+    "redact_prompt_text",
+    "register_redactor",
+    "registered_redactor",
+]

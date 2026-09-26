@@ -53,6 +53,10 @@ jobs:
         # what a consumer checks a vendored copy against.
         run: python scripts/check_contract_compat.py
 
+      - name: Browser gate (Chromium for Crew dialog tests)
+        run: |
+          pip install "playwright==1.56.0"
+          python -m playwright install --with-deps chromium
       - name: ROUTER-1 refusal tests (verbose, no skip)
         # R-0007 / #269 comment 5829080661: names must appear PASSED in this
         # job log. Stubbed OpenVault only. A skip here is Formal NOT GREEN.
@@ -66,6 +70,9 @@ jobs:
             tests/test_freeroute_router1.py::test_refusal_tests_have_no_skip_or_xfail_markers
 
       - name: Pytest
+        env:
+          # The Crew access-dialog tests fail instead of skip when Chromium is missing.
+          CORTEX_BROWSER_GATE: required
         run: python -m pytest tests/ -q --tb=short
 
   base-install:

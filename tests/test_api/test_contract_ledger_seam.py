@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -20,6 +21,10 @@ from CortexOS.api import contract_routes
 from CortexOS.audit import ledger_registry
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# #265: ledger/append records the authenticated caller the auth port hands the
+# handler, not the body actor. Direct handler calls pass that principal.
+_CALLER = SimpleNamespace(role="steward", actor="tester")
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +99,8 @@ def test_ledger_routes_go_through_the_registry() -> None:
         contract_routes.contract_ledger_append(
             contract_routes.LedgerAppendRequest(
                 actor="tester", event_type="demo.event", payload={"k": "v"}
-            )
+            ),
+            caller=_CALLER,
         )
     )
     chain = asyncio.run(
@@ -139,7 +145,8 @@ def test_append_fails_closed_when_entry_is_not_on_the_chain() -> None:
             contract_routes.contract_ledger_append(
                 contract_routes.LedgerAppendRequest(
                     actor="tester", event_type="demo.event", payload={"k": "v"}
-                )
+                ),
+                caller=_CALLER,
             )
         )
 

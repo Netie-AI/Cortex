@@ -28,17 +28,19 @@ def _jpeg_b64() -> str:
 
 
 def _jpeg_with_gps_b64() -> str:
-    piexif = pytest.importorskip("piexif")
+    """JPEG carrying a GPS IFD (0x8825), built with Pillow alone.
+
+    Pillow is a hard dependency, so this runs everywhere; the former piexif
+    helper made the only F7 GPS-strip test skip on every install (TRUST-06).
+    """
     img = Image.new("RGB", (32, 32), color=(40, 50, 60))
-    exif = piexif.dump(
-        {
-            "0th": {piexif.ImageIFD.Make: b"TestCam"},
-            "GPS": {
-                piexif.GPSIFD.GPSLatitudeRef: b"N",
-                piexif.GPSIFD.GPSLatitude: ((3, 1), (0, 1), (0, 1)),
-            },
-        }
-    )
+    exif = Image.Exif()
+    exif[0x010F] = "TestCam"  # Make
+    gps = exif.get_ifd(0x8825)  # GPSInfo IFD
+    gps[1] = "N"  # GPSLatitudeRef
+    gps[2] = (3.0, 0.0, 0.0)  # GPSLatitude
+    gps[3] = "E"  # GPSLongitudeRef
+    gps[4] = (101.0, 0.0, 0.0)  # GPSLongitude
     buf = io.BytesIO()
     img.save(buf, format="JPEG", exif=exif)
     return base64.b64encode(buf.getvalue()).decode("ascii")
@@ -90,20 +92,32 @@ def test_intake_stores_item_photo_and_ledger(ops_db):
 def test_exif_gps_stripped(ops_db):
     from packs.dms.security.photo_sanitize import has_gps_exif, strip_exif_gps
     from packs.dms.vision import intake, locations
+    from packs.dms.vision.warehouse_store import photos_dir
 
     locations.build_location(kind="bin", code="BIN-EXIF", db_path=ops_db)
-    raw = base64.b64decode(_jpeg_with_gps_b64())
+    photo_b64 = _jpeg_with_gps_b64()
+    raw = base64.b64decode(photo_b64)
+    # The fixture must really carry GPS, or the assertions below cannot fail.
     assert has_gps_exif(raw)
-    clean = strip_exif_gps(raw)
-    assert not has_gps_exif(clean)
+    assert not has_gps_exif(strip_exif_gps(raw))
 
-    intake.intake_item(
+    # Submit the RAW GPS-bearing bytes: intake itself is the choke-point.
+    result = intake.intake_item(
         sku="SKU-EXIF",
         label="GPS test",
         location_code="BIN-EXIF",
-        photo_b64=base64.b64encode(clean).decode("ascii"),
+        photo_b64=photo_b64,
         db_path=ops_db,
     )
+    uri = result["item"]["photo_uri"]
+    stored = photos_dir(ops_db) / Path(uri).name
+    assert stored.is_file()
+    persisted = stored.read_bytes()
+    assert not has_gps_exif(persisted)
+    with Image.open(io.BytesIO(persisted)) as img:
+        img.verify()
+    with Image.open(io.BytesIO(persisted)) as img:
+        assert img.size == (32, 32)
 
 
 def test_scan_move_updates_and_records(ops_db):
@@ -136,7 +150,11 @@ def test_scan_move_updates_and_records(ops_db):
 
 def test_rls_on_warehouse_tables(ops_db):
     from packs.dms.vision import locations
-    from packs.dms.vision.warehouse_store import RLSViolationError, create_item, get_location_by_code
+    from packs.dms.vision.warehouse_store import (
+        RLSViolationError,
+        create_item,
+        get_location_by_code,
+    )
 
     sql = MIGRATION.read_text(encoding="utf-8")
     assert "ENABLE ROW LEVEL SECURITY" in sql
@@ -161,12 +179,11 @@ def test_rls_on_warehouse_tables(ops_db):
 
 def test_qr_label_endpoint(ops_db):
     pytest.importorskip("fastapi")
+    import netie.config
     from fastapi.testclient import TestClient
 
     from CortexOS.api.app import create_app
     from packs.dms.vision import locations
-
-    import netie.config
 
     netie.config._cached_config = None
     bin_loc = locations.build_location(kind="bin", code="QR-BIN", db_path=ops_db)
@@ -176,7 +193,8 @@ def test_qr_label_endpoint(ops_db):
     os.environ["PACK"] = "dms"
     netie.config._cached_config = None
     app = create_app()
-    client = TestClient(app)
+    # T2-DMS (#263): warehouse reads are role-gated; send a viewer key.
+    client = TestClient(app, headers={"X-API-Key": "pytest-viewer-key"})
     res = client.get(f"/dms/warehouse/locations/{bin_loc['id']}/qr-label")
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"

@@ -1,5 +1,137 @@
 # STATUS.md
-**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#272 LOCAL-1 local not proven**; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#212 CoT leftover INCOMPLETE**
+
+> **2026-09-25 (EPIC-TRUST-02 #263 + T2-FAILCLOSED):** PR #235 (draft). Role
+> gates through the TRUST-01 auth port on routines/goals/race (CTRL-A),
+> workflows/DAG-run/activity with caller-derived actor and reap-on-read
+> (CTRL-B), DMS query/chat/warehouse/tasks with caller-derived approver
+> (DMS), and no absolute host paths in app/connector responses plus archive
+> import limits (RESP). T2-FAILCLOSED (founder decision 2026-09-25): no
+> built-in demo-key fallback; with no keys configured every gated request is
+> 401 (503 with no authorizer); no shipped Dockerfile sets DMS_AUTH_DISABLED
+> (local opt-in only, loud startup warning); published keys removed from
+> SETUP_ONCE.ps1 and the secrets template; local demo generates per-install
+> keys into gitignored data/local/; template placeholders and the formerly
+> published values never authenticate; operator desk is a no-data shell that
+> sends the operator key. Tests get keys from a pytest plugin (tests/conftest.py
+> untouched). Not executed here: pwsh scripts, Next UI, UI e2e. Merge gate
+> (founder): FAILCLOSED on tip + CI green; DMS Studio must call with a real
+> OpenVault key first. Suite 2993 passed / 12 skipped / 4 xfailed.
+
+> **2026-09-24 (EPIC-TRUST-01 #256):** PR #235 (draft). #257 TRUST-01: engine
+> auth port (pack registers the authorizer; CortexOS imports no packs) gates
+> every /api/apps and /api/connectors route by role; no key 401, low role 403,
+> no authorizer 503; unchanged for sufficient roles. #258 TRUST-02: engine
+> failure with require_grounding abstains (no warehouse rows). #259 TRUST-03:
+> ABSTAIN envelopes carry no sources or drillthrough. #260 TRUST-04: orphaned
+> runs reaped on loop start as "interrupted, resumable"; resume replays. #261
+> TRUST-05: scripts/check_junit_all_passed.py guards every RLS proof step (an
+> all-skipped step now fails; replayed locally on Postgres 16). #262 TRUST-06:
+> EXIF-GPS strip test runs without piexif and asserts the stored photo.
+> Residual: default auth is still fail-open (public demo keys accepted when
+> DMS_API_KEYS unset; founder decision), operator desk HTML sends no key,
+> viewer reads show host paths, get_task/activity do not reap. Queued: auth for
+> routines/workflows/goals/DMS writes/contract ledger. Suite 2832 passed /
+> 12 skipped / 4 xfailed.
+
+> **2026-09-24 (EPIC-HARDEN-2 #249):** PR #235 (draft). Six residuals closed,
+> each passed by an independent adversarial verifier (four needed a judge-model
+> escalation). #250 PII redacted before routing and in the cost gate; NRIC/MyKad
+> edge forms (NFKC). #251 legal terms matched as tokens (spa != space, but
+> LoanAgreement floors); a deterministic floor above a node max_tier refuses
+> with a typed error. #252 one ledger row per attempt for every node kind,
+> including non-LLM failures and replays. #253 shadow runs off the serving
+> path (bounded queue, drops counted). #254 runtime logs isolated by a pytest
+> plugin (tests/conftest.py untouched: #215 guard). #255 decision log
+> fork-safe, O_APPEND lines, contended multi-process proof (two-phase
+> barrier). KEV-CALIB r4: raw scale is the source of truth; scaled threshold
+> prints `inexact` instead of crashing on float collapse (3000-log fuzz, 0
+> crashes). Suite 2775 passed / 13 skipped / 4 xfailed; the full suite leaves
+> data/engine/tier_{decisions,shadow}.jsonl absent. mypy 40 (was 41).
+
+> **2026-09-23 (EPIC-KEV-LOOP #245):** PR #235 (draft). Tier decisions can now
+> learn from outcomes without hand labels. KEV-LOG #246: append-only
+> `data/engine/tier_decisions.jsonl` from `invoke_routed_completion` (ok,
+> error, T0), state_hash only, never raises. KEV-CALIB #247: labels join
+> log + ledger per attempt (infra/provider errors excluded and counted);
+> `scripts/kev_calibration_report.py` prints INSUFFICIENT and exits 2 below
+> n=300 or <30 negatives, else T, ECE, Brier and serve_automation with exact
+> raw and T-scaled P(sufficient) thresholds (tie-safe; fixed a 90%-failing
+> tier previously reported "100% automatable"). KEV-SHADOW #248:
+> CORTEX_KEV_SHADOW keeps rules serving, logs kev agreement; any value but an
+> explicit off means watch (a typo can never let kev serve); no agreement
+> rate below n=300. Residual: shadow is synchronous (slow kev adds latency
+> while shadow is on); decision log not tested multi-process; the test suite
+> writes synthetic rows to the runtime log (filter or conftest follow-up).
+> Serve cutover stays a founder decision gated on the report.
+
+> **2026-09-23 (EPIC-GOVERN-HARDEN #240):** PR #235 (draft). Four verified
+> governance holes closed, each built in an isolated worktree and passed by an
+> independent adversarial verifier. GH-01 #241: `invoke_routed_completion`
+> redacts prompt+system through an engine redact port before cost estimate and
+> adapter (NRIC, MyKad, email, card); raising redactor = 0 adapter calls + error
+> row; `pii.py` reuses engine patterns (MyKad added). GH-02 #242: legal/VIP/T0
+> floors apply after a decision-backend choice (closes a KEV-DECIDE bypass).
+> GH-03 #243: parallel batches gated on summed estimates before any sibling
+> spends; one journal lookup shared by gate and replay; sequential gating
+> byte-identical to base. GH-04 #244: SQLite ledger 30 s busy timeout;
+> 4-process contended append proof (>=10 switches asserted); Postgres ledger
+> tests now run in RLS CI and fail if skipped. Residual: estimate-based gate
+> (underestimates can still overspend), MyKad-with-spaces / underscore-adjacent
+> NRIC not matched, kev backend sees unredacted text on loopback, DSL max_tier
+> clamp still bounds legal requests. Next epic queued: EPIC-KEV-LOOP.
+
+> **2026-09-23 (GRANT-WIRE + BROWSER-GATE-CI):** PR #235 (draft).
+> GRANT-WIRE: a `ws_*` read refused only for a missing folder grant now
+> raises `GrantMissing`; runtime emits one `access_ask` on the existing SSE
+> bus and the page opens the GRANT-03 dialog for that folder (one open ask
+> per space+folder). Never-grantable refusals (root, `/`, profile root,
+> `..`, History DB, writes) ask nothing. No auto-retry; confirm unchanged.
+> BROWSER-GATE-CI: CI was green with the dialog browser tests skipped (no
+> playwright). CI now installs Chromium; `CORTEX_BROWSER_GATE=required`
+> makes a skip fail. Fixed a boot race (state.spaceId overwritten under
+> load, 2/6 -> 0/12). Suite 2203 passed / 12 skipped / 4 xfailed.
+> HT1-HT4 founder gates still PENDING.
+
+> **2026-09-23 (EPIC-GRANT-04):** PR #235 (draft). #205. Granted
+> `ws_ls/read/glob` already ran without a per-read confirm (crew-internal
+> tools); a test now pins that. New `attach_window`: window grant (pid +
+> normalised title) verified against one live UACC `list_windows` behind
+> master + arming; only `list_windows` is ever called, nothing launches
+> (R-0015). New `ws_read_xlsx`: granted workbook read as data (openpyxl
+> read_only, 2 MiB cap), no Excel UI. Browser history DBs refused even
+> inside a grant. Click/type still CONFIRM. Real UACC result shape assumed
+> (json pid/title, text fallback). HT2/HT3/HT4 founder gates PENDING.
+> Suite 2195 passed / 12 skipped / 4 xfailed. EPIC-GRANT 01-04 code complete;
+> human gates HT1-HT4 open.
+
+> **2026-09-23 (EPIC-GRANT-02 + EPIC-GRANT-03):** PR #235 (draft, held for
+> founder review). GRANT-02 (#203): `ws_ls/read/glob` leave the space only
+> into a folder this space granted allow (grant session_id = Crew space id);
+> check on the resolved real path, component-wise, plus a second
+> relative_to net. Prefix trap, `..`, symlink, cancel, other space, drive
+> root, `/`, profile root, ungranted AppData refused with R-0011 reason.
+> Writes outside the space stay refused. Click/type still CONFIRM;
+> `CORTEX_COMPUTER_CONTROL` untouched. Leading `/` now means outside the
+> space. Residual: resolve-then-read TOCTOU. GRANT-03 (#204): native
+> Allow/Cancel dialog `window.crewAskAccess`, textContent only, persist=false,
+> Escape = Cancel; no runtime path calls it yet. HT1 founder walk PENDING.
+> Browser tests need python playwright (importorskip with loud reason if
+> absent). Suite 2179 passed / 12 skipped / 4 xfailed. GRANT-04 unblocked, not started.
+
+> **2026-09-23 (KEV-DECIDE + EPIC-GRANT-01):** PR #235. KEV-DECIDE:
+> `CortexOS/decision/` is a kev-shaped (jaredpalmer/kev) noul/choice/score
+> decision port with stdlib calibration (temperature, Brier, ECE,
+> automatable share at 5% error budget). Opt-in behind `JudgmentModel` via
+> `CORTEX_KEV_URL` (loopback only); default rules-v0 path unchanged.
+> Rules backend stamps `calibrated=false`; kev errors degrade with cause.
+> No live kev run (respx only); 0.5 abstain threshold untuned (no dev set).
+> No Jev integration or numbers claimed. EPIC-GRANT-01 (#202): store only,
+> `GET|POST /crew/session-grants` for folder / window / office_file
+> Allow|Cancel; drive, UNC, profile roots and `..` refused 4xx with store
+> unchanged; persist unset is session-only. No laptop reach (GRANT-02 later).
+> Suite 2122 passed / 13 skipped / 4 xfailed. OpenAPI check not run here
+> (needs `.[full]`); crew routes are not contract routes. Not a GitHub CI claim.
 
 > **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
 > Arming accepts an OpenVault-reported local spendable hop. RouteStamp

@@ -9,20 +9,33 @@ never takes the panel down with it.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
+
+from fastapi import Depends
+
+from CortexOS.security.auth_port import require_role
+
+_log = logging.getLogger(__name__)
+
+# T2-CTRL-B (#263): the panel is a read, so it needs viewer (engine auth port).
+_VIEWER = [Depends(require_role("viewer"))]
 
 
 def _section(fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     try:
         return fn()
     except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        # The exception text can carry a store's file location, so the panel
+        # gets the error class and the detail goes to the server log.
+        _log.warning("engine activity section failed", exc_info=True)
+        return {"error": type(exc).__name__}
 
 
 def register_activity_routes(app: Any) -> None:
-    @app.get("/api/engine/activity")
+    @app.get("/api/engine/activity", dependencies=_VIEWER)
     async def engine_activity() -> dict[str, Any]:
         now = time.time()
 
@@ -51,9 +64,12 @@ def register_activity_routes(app: Any) -> None:
             }
 
         def _workflows() -> dict[str, Any]:
-            from CortexOS.execution import workflow_store
+            from CortexOS.execution import workflow_runner, workflow_store
 
             workflow_store.init()
+            # Reconcile runs a dead engine left 'running' before listing them
+            # as active (T2-CTRL-B, #263).
+            workflow_runner._reap_orphans_once()
 
             def _slim(run: dict[str, Any]) -> dict[str, Any]:
                 return {

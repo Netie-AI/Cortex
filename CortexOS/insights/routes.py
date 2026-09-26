@@ -11,6 +11,8 @@ Lives outside ``CortexOS/api`` so the engine API tree does not import Crew
 No from __future__ import annotations (FastAPI route module rule).
 """
 
+import asyncio
+import contextlib
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,10 +20,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from CortexOS.insights import keys as insight_keys
+from CortexOS.integrations import direct_providers
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
 STATUSES = ("CERTIFIED", "ABSTAIN", "REFUSE")
+# Cortex #275 AUTH-GEN-01: named refusal for generate=true without the
+# caller's own OpenVault ov_ bearer (loopback included). Nothing is spent.
+GENERATE_REQUIRES_BEARER = "generate_requires_bearer"
+GENERATE_REQUIRES_AUTH = "generate_requires_auth"
 STABLE_ASK = "POST /v1/insights"
 AIRGPT_ALIAS = "POST /dms/sidecar/insights"
 CREW_ALIAS = "POST /crew/insights"
@@ -45,19 +52,110 @@ def _peer_host(request: Request) -> str:
     return str(request.client.host if request.client else "")
 
 
-def _caller_refused(purpose: str) -> JSONResponse:
-    from CortexOS.integrations import freeroute as core
+def _caller_refused(purpose: str, reason: str = GENERATE_REQUIRES_BEARER) -> JSONResponse:
+    """401 for an unauthenticated spend. Reason code and message only (#275).
 
+    No route-store path, learn state or other setup fingerprint: the caller
+    has not authenticated, so it learns nothing about this engine's files.
+    """
     body = {
         "ok": False,
         "status": "REFUSE",
         "purpose": purpose,
+        "reason": reason,
         "refused": insight_keys.CALLER_KEY_RULE,
         "values": [],
         "live_5000_ci": False,
     }
-    core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
+
+
+def _without_paths(envelope: dict[str, Any]) -> None:
+    """Authenticated bodies keep the route-store id, never where files live (#275)."""
+    store = envelope.get("route_store")
+    if isinstance(store, dict) and "path" in store:
+        envelope["route_store"] = {k: v for k, v in store.items() if k != "path"}
+
+
+def _anonymous_complete(runner: Any) -> Any:
+    """Runner for a caller with no ov_ bearer while FreeRoute was unarmed.
+
+    It never passes ``bearer=None`` (Cortex's own key) and re-checks arming
+    before each call: if FreeRoute armed mid-request it refuses with
+    :data:`GENERATE_REQUIRES_BEARER` instead of serving on the loopback tier.
+    """
+    from CortexOS.crew import freeroute as freeroute_mod
+
+    async def guarded(
+        messages: list[dict[str, Any]] | None = None,
+        *,
+        purpose: str = "think",
+        prompt: str = "",
+        bearer: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _ = bearer
+        armed = await freeroute_mod.run_core(freeroute_mod.arming)
+        if armed.get("armed"):
+            return {
+                "ok": False,
+                "status": "REFUSE",
+                "purpose": purpose,
+                "reason": GENERATE_REQUIRES_BEARER,
+                "refused": insight_keys.CALLER_KEY_RULE,
+                "values": [],
+                "live_5000_ci": False,
+            }
+        out = await runner(messages, purpose=purpose, prompt=prompt, bearer="", **kwargs)
+        return out if isinstance(out, dict) else {}
+
+    return guarded
+
+
+async def _env_direct_caller_ok(request: Request) -> bool:
+    """True when the engine auth port grants the caller at least ``viewer``."""
+    from CortexOS.security import auth_port
+
+    try:
+        principal = await auth_port.resolve_authorizer().authorize(request, "viewer")
+    except Exception:  # noqa: BLE001 - 401/403/no authorizer all refuse
+        return False
+    return auth_port.role_at_least(str(getattr(principal, "role", "") or ""), "viewer")
+
+
+def _served_stamp(envelope: dict[str, Any]) -> Any:
+    """The RouteStamp of the model call that served this envelope, or ``None``.
+
+    Read from ``generative.stamp`` (the generate call's own stamp) through the
+    same reader run_insights stamps with, so the HTTP envelope cannot disagree
+    with it. ``None`` (no model call) keeps the #272 pending text.
+    """
+    from CortexOS.crew import insights as insights_mod
+
+    return insights_mod._route_stamp_for_fingerprint(envelope)
+
+
+def _annotate_transport(envelope: dict[str, Any]) -> None:
+    """Say env-direct where the Crew route view still says ``connector: openvault``.
+
+    ``RoutePick.connector`` is fixed in the #215 Crew layer, which this lane does
+    not edit. The stamp's ``impl`` is what actually carried the call, so when it
+    is the env-direct transport the route is re-labelled here, at the API edge.
+    """
+    from CortexOS.integrations import direct_providers
+
+    gen = envelope.get("generative")
+    if not isinstance(gen, dict):
+        return
+    stamp = gen.get("stamp")
+    if not isinstance(stamp, dict) or stamp.get("impl") != direct_providers.IMPL:
+        return
+    route = gen.get("route")
+    if isinstance(route, dict):
+        route = dict(route)
+        route["connector"] = direct_providers.IMPL
+        route["custody"] = direct_providers.CUSTODY
+        gen["route"] = route
 
 
 def stamp_api(
@@ -69,7 +167,11 @@ def stamp_api(
     from CortexOS.integrations import freeroute as core
 
     out = dict(envelope)
-    core.stamp_router_fingerprint(out)
+    if isinstance(out.get("generative"), dict):
+        out["generative"] = dict(out["generative"])
+    _annotate_transport(out)
+    core.stamp_router_fingerprint(out, _served_stamp(out))
+    _without_paths(out)
     out["api"] = {
         "stable": STABLE_ASK,
         "alias": alias,
@@ -107,8 +209,12 @@ def public_keys_body() -> dict[str, Any]:
 
 def public_identity_body() -> dict[str, Any]:
     from CortexOS.crew import freeroute as freeroute_mod
+    from CortexOS.integrations import direct_providers
 
     body = dict(freeroute_mod.public_identity())
+    if direct_providers.enabled():
+        # Crew's identity view hardcodes openvault; the env-direct opt-in is not that.
+        body["custody"] = direct_providers.CUSTODY
     body["http"] = {
         "stable": "GET /v1/insights/identity",
         "crew": "GET /crew/identity",
@@ -130,6 +236,105 @@ def ontology_body(intent: str) -> dict[str, Any]:
     }
 
 
+CLIENT_GONE = (
+    "client disconnected before this step; Cortex stopped spending "
+    "(no further model or engine calls)"
+)
+
+
+class DisconnectGuard:
+    """Stop spending once the HTTP caller has gone (DMS abandons at its timeout).
+
+    Starlette does not cancel a handler when the client disconnects, so without
+    this the climb keeps calling providers for an answer nobody will read. A
+    listener task awaits the ASGI ``http.disconnect`` (the body is already
+    read, so nothing else can arrive); the check runs on the event loop before
+    each model call and engine ask. It cannot recall a call already in flight,
+    only refuse the next one.
+
+    ``Request.is_disconnected()`` is not used: it polls with a pre-cancelled
+    scope, and behind a ``BaseHTTPMiddleware`` (the rate limiter) that poll is
+    cancelled before it reaches the server, so it never reports a disconnect.
+    """
+
+    _MAX_STRAY_MESSAGES = 8
+
+    def __init__(self, request: Request) -> None:
+        self._request = request
+        self._event = asyncio.Event()
+        self._task: asyncio.Task[None] | None = None
+        self.skipped: list[str] = []
+
+    @property
+    def gone(self) -> bool:
+        return self._event.is_set()
+
+    async def _listen(self) -> None:
+        try:
+            for _ in range(self._MAX_STRAY_MESSAGES):
+                message = await self._request.receive()
+                if message.get("type") == "http.disconnect":
+                    self._event.set()
+                    return
+        except Exception:  # noqa: BLE001 - an unreadable channel is not a disconnect
+            return
+
+    async def __aenter__(self) -> "DisconnectGuard":
+        self._task = asyncio.ensure_future(self._listen())
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        task, self._task = self._task, None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    async def client_gone(self) -> bool:
+        if not self._event.is_set():
+            await asyncio.sleep(0)  # let the listener take a pending disconnect
+        return self._event.is_set()
+
+    def complete(self, runner: Any) -> Any:
+        async def guarded(
+            messages: list[dict[str, Any]] | None = None,
+            *,
+            purpose: str = "think",
+            prompt: str = "",
+            bearer: str | None = None,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            if await self.client_gone():
+                self.skipped.append(f"model:{purpose}")
+                return {
+                    "ok": False,
+                    "status": "REFUSE",
+                    "purpose": purpose,
+                    "refused": CLIENT_GONE,
+                    "values": [],
+                    "live_5000_ci": False,
+                }
+            out = await runner(messages, purpose=purpose, prompt=prompt, bearer=bearer, **kwargs)
+            return out if isinstance(out, dict) else {}
+
+        return guarded
+
+    def bridge(self, inner: Any) -> Any:
+        guard = self
+
+        class _GuardedBridge:
+            base_url = getattr(inner, "base_url", "in-process")
+
+            async def ask(self, question: str) -> dict[str, Any]:
+                if await guard.client_gone():
+                    guard.skipped.append("engine:ask")
+                    return {"ok": False, "answer": CLIENT_GONE, "badge": "engine_offline"}
+                out = await inner.ask(question)
+                return out if isinstance(out, dict) else {}
+
+        return _GuardedBridge()
+
+
 async def execute_insights(
     body: InsightsAskIn,
     request: Request,
@@ -145,23 +350,42 @@ async def execute_insights(
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     bearer: str | None = None
-    if body.generate:
-        armed = await freeroute_mod.run_core(freeroute_mod.arming)
-        if armed.get("armed"):
-            bearer = insight_keys.relay_bearer(
-                request.headers.get("authorization") or "",
-                _peer_host(request),
-            )
-            if bearer is None:
+    runner: Any = freeroute_mod.complete
+    if body.generate and direct_providers.enabled():
+        # env-direct spends the operator's own provider keys, so the caller must
+        # authenticate through the engine auth port; nothing is relayed.
+        if not await _env_direct_caller_ok(request):
+            return _caller_refused("generative_ask", GENERATE_REQUIRES_AUTH)
+    elif body.generate:
+        # #275: only the caller's own ov_ bearer may spend. An empty bearer
+        # (loopback tier) is anonymous spend, and Cortex's key is never lent.
+        relayed = insight_keys.relay_bearer(
+            request.headers.get("authorization") or "",
+            _peer_host(request),
+        )
+        if relayed:
+            bearer = relayed
+        else:
+            armed = await freeroute_mod.run_core(freeroute_mod.arming)
+            if armed.get("armed"):
                 return _caller_refused("generative_ask")
-    result = await insights_mod.run_insights(
-        intent,
-        bridge=LocalEngineBridge(session_id=body.session_id, space_id=body.space_id),
-        ask=body.ask,
-        generate=body.generate,
-        bearer=bearer,
-    )
-    return stamp_api(result, consumer=consumer, alias=alias)
+            # Unarmed: run_insights refuses inside with nothing spent.
+            runner = _anonymous_complete(freeroute_mod.complete)
+    async with DisconnectGuard(request) as guard:
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=guard.bridge(
+                LocalEngineBridge(session_id=body.session_id, space_id=body.space_id)
+            ),
+            ask=body.ask,
+            generate=body.generate,
+            bearer=bearer,
+            complete=guard.complete(runner) if body.generate else None,
+        )
+    out = stamp_api(result, consumer=consumer, alias=alias)
+    if guard.gone:
+        out["client_disconnected"] = True
+    return out
 
 
 @router.get("", operation_id="insights.law")
@@ -207,6 +431,8 @@ def register_insights_routes(app: Any) -> None:
 
 
 __all__ = [
+    "GENERATE_REQUIRES_AUTH",
+    "GENERATE_REQUIRES_BEARER",
     "InsightsAskIn",
     "STATUSES",
     "execute_insights",

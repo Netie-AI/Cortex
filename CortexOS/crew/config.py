@@ -3,7 +3,7 @@
 The crew layer never requires one specific model host. Resolution walks a
 chain (explicit ``CREW_MODEL``, then live OpenVault FreeRoute, then Anthropic,
 Cursor, OpenRouter, DeepSeek, any OpenAI-compatible endpoint, Groq / Google /
-Cerebras / Mistral, and last a locally reachable Ollama).
+NVIDIA NIM / Cerebras / Mistral, and last a locally reachable Ollama).
 
 ``CREW_PROVIDER`` pins one label. A pin does not fall through to the next
 configured host if that label is unset or down. The winner is stamped on
@@ -19,9 +19,18 @@ import urllib.request
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from CortexOS.crew.keys import KEY_ENVS, key_env
 from CortexOS.paths import data_path
 
 DEFAULT_PORT = 8020  # 8010 is the engine, 8765 is reserved for AirGPT.
+
+# Default models. Each answered a live chat on 2026-09-25; Google closed the
+# 2.x flash line to new users and Cerebras dropped llama3.1-8b from its
+# catalogue, so the old defaults configured a host that could not answer.
+DEFAULT_GOOGLE_MODEL = "gemini-3-flash-preview"
+DEFAULT_NVIDIA_MODEL = "moonshotai/kimi-k3"
+DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
 @dataclass(frozen=True)
@@ -312,15 +321,24 @@ def resolve_providers() -> list[Provider]:
         "GROQ_API_KEY",
         bool(env.get("GROQ_API_KEY")),
     )
+    google_key = key_env("google")
     add(
         "google",
-        "gemini/" + env.get("CREW_GOOGLE_MODEL", "gemini-2.0-flash"),
-        "GOOGLE_API_KEY",
-        bool(env.get("GOOGLE_API_KEY")),
+        "gemini/" + (env.get("CREW_GOOGLE_MODEL", "").strip() or DEFAULT_GOOGLE_MODEL),
+        google_key or " / ".join(KEY_ENVS["google"]),
+        bool(google_key),
+    )
+    nvidia_key = key_env("nvidia")
+    add(
+        "nvidia",
+        "nvidia_nim/" + (env.get("CREW_NVIDIA_MODEL", "").strip() or DEFAULT_NVIDIA_MODEL),
+        nvidia_key or " / ".join(KEY_ENVS["nvidia"]),
+        bool(nvidia_key),
+        env.get("CREW_NVIDIA_BASE_URL", "").strip() or NVIDIA_BASE_URL,
     )
     add(
         "cerebras",
-        "cerebras/" + env.get("CREW_CEREBRAS_MODEL", "llama3.1-8b"),
+        "cerebras/" + (env.get("CREW_CEREBRAS_MODEL", "").strip() or DEFAULT_CEREBRAS_MODEL),
         "CEREBRAS_API_KEY",
         bool(env.get("CEREBRAS_API_KEY")),
     )
@@ -346,13 +364,14 @@ def resolve_providers() -> list[Provider]:
     )
 
     pin = env.get("CREW_PROVIDER", "").strip().lower()
-    if pin in {"openai", "ov", "vault", "gemini"}:
-        pin = {
-            "openai": "openai-compatible",
-            "ov": "openvault",
-            "vault": "openvault",
-            "gemini": "google",
-        }[pin]
+    pin = {
+        "openai": "openai-compatible",
+        "ov": "openvault",
+        "vault": "openvault",
+        "gemini": "google",
+        "nvidia_nim": "nvidia",
+        "nim": "nvidia",
+    }.get(pin, pin)
 
     out: list[Provider] = []
     if pin:

@@ -1,36 +1,109 @@
 """Per-space jailed filesystem. Original Cortex code.
 
 DeepAgents MIT pattern (filesystem tools + permission at the tool boundary),
-not a vendor copy and not a second dag_runner. Every path is resolved under
-``data/crew/spaces/<id>/ws``. Escape attempts fail closed.
+not a vendor copy and not a second dag_runner. Every relative path is resolved
+under ``data/crew/spaces/<id>/ws``. Escape attempts fail closed.
+
+EPIC-GRANT-02 (#203): an absolute path leaves the space folder and is admitted
+only when it lies inside a folder this session granted ``allow`` in the
+``SessionGrantBook`` (EPIC-GRANT-01). The check runs on the *resolved real
+path* (symlinks followed) and is component-wise, so ``D:\\work`` never admits
+``D:\\work-evil``, ``D:\\work\\..\\x`` or a symlink that points out of the
+grant. A cancelled grant and another session's grant admit nothing. Reads only
+(ls / read / glob): a write or edit outside the space folder stays refused,
+because an Allow on a laptop folder was asked as a read. Every refusal names
+the rule (R-0011) and the grant that was missing, so the transcript says why
+nothing happened instead of reading as a hang.
+
+EPIC-GRANT-04 (#205): a granted read needs no second per-read confirm (the
+``ws_*`` tools never took one; ``policy.decide`` returns allow for
+crew-internal tools). Two additions on the granted path: a browser history
+database (Chrome/Edge ``History``, Firefox ``places.sqlite``) is refused even
+inside an Allow-ed folder because v1 has no grant kind for it, and
+``read_xlsx`` opens a granted workbook as data through ``openpyxl`` (never the
+Excel UI). Both rules live in ``granted_reach.py``; the jail only applies them.
+
+GRANT-WIRE (#204): the one refusal a founder can lift, "no folder grant covers
+this path", is raised as ``GrantMissing`` (a ``WorkspaceError`` subclass) and
+carries the folder to ask for, so the runtime can raise the GRANT-03 Allow /
+Cancel dialog without matching message text. A refusal that can never be
+granted (a write, ``..``, a drive root, ``/``, the profile root, a history
+database, a missing book) stays a plain ``WorkspaceError`` and asks nothing.
 """
 
 from __future__ import annotations
 
 import fnmatch
-from pathlib import Path
-from typing import Any
+import re
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from typing import Any, Protocol
+
+from CortexOS.crew import granted_reach
+from CortexOS.crew.policy import REACH_READ, REACH_WRITE
+from CortexOS.crew.session_grants import GrantRefused, normalise_folder
 
 MAX_BYTES = 256 * 1024
 MAX_LIST = 200
 READ_LINES = 200
+
+RULE = "R-0011"
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_WILD = ("*", "?", "[")
 
 
 class WorkspaceError(ValueError):
     """Path or size refused. The agent must report this, not retry blindly."""
 
 
+class GrantMissing(WorkspaceError):
+    """GRANT-WIRE: refused only because no folder grant covers the path.
+
+    ``folder`` is the folder the founder could Allow (the typed path itself
+    when it is a directory, else its parent) after GRANT-01 normalisation, or
+    ``None`` when that folder can never be a grant (drive root, ``/``, the
+    profile root), in which case nothing should be asked. The message still
+    carries the R-0011 reason for the transcript.
+    """
+
+    def __init__(self, message: str, *, folder: str | None) -> None:
+        super().__init__(message)
+        self.folder = folder
+
+
+class GrantLookup(Protocol):
+    """The slice of ``SessionGrantBook`` the jail needs. One store, one normaliser."""
+
+    def granted_folder_for(self, session_id: str, path: Any) -> str | None: ...
+
+
+def _is_absolute(text: str) -> bool:
+    return text.startswith(("/", "\\")) or bool(_DRIVE_RE.match(text))
+
+
 class SpaceWorkspace:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        grants: GrantLookup | None = None,
+        session_id: str = "",
+    ) -> None:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.grants = grants
+        self.session_id = session_id
 
-    def resolve(self, rel: str) -> Path:
-        raw = (rel or "").strip().replace("\\", "/").lstrip("/")
-        if not raw or raw in {".", "./"}:
+    # ---- jail -------------------------------------------------------------
+
+    def resolve(self, rel: str, *, reach: str = REACH_READ) -> Path:
+        """Relative paths stay under the space folder. Absolute paths reach a
+        session folder grant (reads only) or are refused with the reason."""
+        text = (rel or "").strip()
+        if not text or text in {".", "./"}:
             return self.root
-        if raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":"):
-            raise WorkspaceError("absolute paths are denied")
+        if _is_absolute(text):
+            return self._resolve_granted(rel, text, reach)
+        raw = text.replace("\\", "/").lstrip("/")
         parts = [p for p in raw.split("/") if p and p != "."]
         if any(p == ".." for p in parts):
             raise WorkspaceError("path escapes workspace")
@@ -40,6 +113,80 @@ class SpaceWorkspace:
         except ValueError as exc:
             raise WorkspaceError("path escapes workspace") from exc
         return candidate
+
+    def _resolve_granted(self, rel: str, text: str, reach: str) -> Path:
+        if reach != REACH_READ:
+            raise WorkspaceError(
+                f"{RULE}: absolute path '{rel}' refused: {reach} stays inside the space "
+                "folder; a session folder grant admits reads only (ls, read, glob)"
+            )
+        if self.grants is None or not self.session_id:
+            raise WorkspaceError(
+                f"{RULE}: absolute path '{rel}' refused: no session grant book is "
+                "attached to this workspace, so nothing outside the space folder is granted"
+            )
+        if any(p == ".." for p in PurePath(text.replace("\\", "/")).parts):
+            raise WorkspaceError(
+                f"{RULE}: absolute path '{rel}' refused: '..' traversal is refused"
+            )
+        try:
+            candidate = Path(text).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise WorkspaceError(
+                f"{RULE}: absolute path '{rel}' refused: cannot resolve ({exc})"
+            ) from exc
+        try:
+            folder = self.grants.granted_folder_for(self.session_id, str(candidate))
+        except GrantRefused as exc:
+            raise WorkspaceError(
+                f"{RULE}: '{rel}' refused: {exc.reason}; it can never be a session folder grant"
+            ) from exc
+        if folder is None:
+            # The real path is not echoed: naming a link's target would leak a
+            # filename from a folder that was never granted. GRANT-WIRE: this is
+            # the one refusal an Allow can lift, so it names the folder to ask for
+            # (from the typed path, never the resolved one).
+            raise GrantMissing(
+                f"{RULE}: '{rel}' is outside the space folder and no folder grant with "
+                "decision allow covers its real path (links followed) in this session; "
+                "missing grant: folder allow for that path or a parent. Ask the operator "
+                "to Allow the folder first",
+                folder=self._ask_folder(text, candidate),
+            )
+        # Second net on a different mechanism: the real path must sit under the
+        # granted folder as the filesystem sees it, not only as strings compare.
+        try:
+            candidate.relative_to(Path(folder).resolve())
+        except (OSError, ValueError) as exc:
+            raise WorkspaceError(
+                f"{RULE}: '{rel}' refused: its real path (links followed) is not under "
+                f"the granted folder {folder}"
+            ) from exc
+        # EPIC-GRANT-04: the folder grant admits the folder, not the browser's
+        # history inside it. Checked on the resolved name so a link named
+        # anything else that points at History is refused the same way.
+        if granted_reach.is_history_database(candidate.name):
+            raise WorkspaceError(granted_reach.history_refusal(rel, candidate.name))
+        return candidate
+
+    def _ask_folder(self, text: str, candidate: Path) -> str | None:
+        """The folder an Allow would have to cover: the typed path when it is a
+        directory (ls / glob head), else the directory containing it. Normalised
+        by the GRANT-01 rule; ``None`` when that rule refuses it (drive root,
+        ``/``, the profile root), because such a folder can never be granted."""
+        if candidate.is_dir():
+            folder = text
+        else:
+            windows_style = bool(_DRIVE_RE.match(text)) or "\\" in text
+            pure: PurePath = PureWindowsPath(text) if windows_style else PurePosixPath(text)
+            folder = str(pure.parent)
+        roots = getattr(self.grants, "profile_roots", None)
+        try:
+            return normalise_folder(folder, roots)
+        except GrantRefused:
+            return None
+
+    # ---- tools ------------------------------------------------------------
 
     def ls(self, rel: str = ".") -> str:
         target = self.resolve(rel)
@@ -72,10 +219,27 @@ class SpaceWorkspace:
         header = f"# {rel} lines {start + 1}-{start + len(chunk)} of {len(lines)}\n"
         return header + "\n".join(chunk)
 
+    def read_xlsx(
+        self,
+        rel: str,
+        *,
+        sheet: str | None = None,
+        offset: int = 0,
+        limit: int = granted_reach.XLSX_ROWS,
+    ) -> str:
+        """EPIC-GRANT-04: a workbook opened as data (openpyxl, read-only, values
+        only). Same jail as ``read``: relative stays in the space, absolute needs
+        a folder grant. Never drives the Excel UI."""
+        path = self.resolve(rel, reach=REACH_READ)
+        try:
+            return granted_reach.read_xlsx(path, rel, sheet=sheet, offset=offset, limit=limit)
+        except granted_reach.ReachRefused as exc:
+            raise WorkspaceError(str(exc)) from exc
+
     def write(self, rel: str, content: str) -> str:
         if not (rel or "").strip() or (rel or "").strip() in {".", "./"}:
             raise WorkspaceError("need a file path")
-        path = self.resolve(rel)
+        path = self.resolve(rel, reach=REACH_WRITE)
         if path.exists() and path.is_dir():
             raise WorkspaceError(f"is a directory: {rel}")
         data = content if isinstance(content, str) else str(content)
@@ -87,7 +251,7 @@ class SpaceWorkspace:
         return f"wrote {rel} ({len(encoded)} bytes)"
 
     def edit(self, rel: str, old: str, new: str) -> str:
-        path = self.resolve(rel)
+        path = self.resolve(rel, reach=REACH_WRITE)
         if not path.is_file():
             raise WorkspaceError(f"not a file: {rel}")
         body = path.read_text(encoding="utf-8", errors="replace")
@@ -98,23 +262,55 @@ class SpaceWorkspace:
         return self.write(rel, body.replace(old, new, 1))
 
     def glob(self, pattern: str) -> str:
-        needle = (pattern or "*").replace("\\", "/")
+        needle = (pattern or "*").strip() or "*"
+        base = self.root
+        granted = False
+        if _is_absolute(needle):
+            base, needle = self._split_glob(needle)
+            granted = True
+        needle = needle.replace("\\", "/")
         hits: list[str] = []
-        for path in self.root.rglob("*"):
+        for path in base.rglob("*"):
             if not path.is_file():
                 continue
-            rel = path.relative_to(self.root).as_posix()
+            if granted:
+                # A symlink inside the grant that points outside it is not granted.
+                try:
+                    path.resolve().relative_to(base)
+                except (OSError, ValueError):
+                    continue
+            rel = path.relative_to(base).as_posix()
             if fnmatch.fnmatch(rel, needle) or fnmatch.fnmatch(path.name, needle):
-                hits.append(rel)
+                hits.append(str(base / rel) if granted else rel)
             if len(hits) >= MAX_LIST:
                 break
         if not hits:
             return "(no matches)"
         return "\n".join(hits)
 
+    def _split_glob(self, needle: str) -> tuple[Path, str]:
+        """Absolute pattern: the longest wildcard-free prefix is the folder that
+        must be granted; the rest is matched under it."""
+        parts = list(PurePath(needle.replace("\\", "/")).parts)
+        head: list[str] = []
+        while parts and not any(w in parts[0] for w in _WILD):
+            head.append(parts.pop(0))
+        if not head:
+            raise WorkspaceError(f"{RULE}: glob '{needle}' refused: no folder before the wildcard")
+        base = self.resolve(str(PurePath(*head)), reach=REACH_READ)
+        return base, "/".join(parts) or "*"
 
-def workspace_for(data_dir: Path, space_id: str) -> SpaceWorkspace:
-    return SpaceWorkspace(data_dir / "spaces" / space_id / "ws")
+
+def workspace_for(
+    data_dir: Path,
+    space_id: str,
+    *,
+    grants: GrantLookup | None = None,
+    session_id: str = "",
+) -> SpaceWorkspace:
+    return SpaceWorkspace(
+        data_dir / "spaces" / space_id / "ws", grants=grants, session_id=session_id
+    )
 
 
 def as_error(exc: BaseException) -> str:

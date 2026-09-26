@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from CortexOS.crew import insights
 from CortexOS.crew.llm import LLMResult
 from CortexOS.crew.server import create_app
+from tests.api_key_isolation import TEST_VIEWER_KEY
 from tests.test_crew.conftest import FakeLLM, wait_run_done
 from tests.test_crew.test_runtime import _tc
 
@@ -52,7 +53,8 @@ def _certified_engine(**extra: Any) -> dict[str, Any]:
 def client(settings, crew_env) -> Iterator[SimpleNamespace]:
     fake = FakeLLM()
     app = create_app(settings, llm_chat=fake)
-    with TestClient(app) as tc:
+    # #265: crew spend routes need an engine auth-port caller; send a viewer key.
+    with TestClient(app, headers={"X-API-Key": TEST_VIEWER_KEY}) as tc:
         yield SimpleNamespace(http=tc, llm=fake, app=app, crew=app.state.crew)
 
 

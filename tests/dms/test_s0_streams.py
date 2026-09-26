@@ -78,19 +78,19 @@ def test_events_api_rbac_and_backpressure(lake_home, monkeypatch):
 
     # viewer forbidden, steward ok
     assert client.post("/dms/streams/apis/events", json=body,
-                       headers={"X-API-Key": "dms-demo-viewer-key"}).status_code == 403
+                       headers={"X-API-Key": "pytest-viewer-key"}).status_code == 403
     ok = client.post("/dms/streams/apis/events", json=body,
-                     headers={"X-API-Key": "dms-demo-steward-key"})
+                     headers={"X-API-Key": "pytest-steward-key"})
     assert ok.status_code == 200 and ok.json()["accepted"] == 2
 
     # exceed hard cap without flushing → 429
     big = {"events": [{"i": i} for i in range(50)]}
     r = client.post("/dms/streams/apis/events", json=big,
-                    headers={"X-API-Key": "dms-demo-steward-key"})
+                    headers={"X-API-Key": "pytest-steward-key"})
     assert r.status_code == 429
 
     # stream auto-registered on first use
-    listed = client.get("/dms/streams", headers={"X-API-Key": "dms-demo-viewer-key"})
+    listed = client.get("/dms/streams", headers={"X-API-Key": "pytest-viewer-key"})
     assert any(s["stream_id"] == "apis" for s in listed.json()["streams"])
 
 

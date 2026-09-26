@@ -16,6 +16,10 @@ from typing import Any
 
 GENESIS_HASH = "0" * 64
 _LOCK = threading.Lock()
+# Cross-process writers wait on SQLITE_BUSY for this long before failing.
+# The module _LOCK only serialises threads in one process; BEGIN IMMEDIATE
+# plus this busy timeout is what serialises separate OS processes.
+SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
 _POSTGRES_MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "002_ledger_postgres.sql"
 _pg_engine = None
 _pg_engine_dsn: str | None = None
@@ -98,9 +102,16 @@ def compute_entry_hash(seq: int, prev_hash: str, payload: dict[str, Any], create
 def _connect(db_path: Path | str) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(path), check_same_thread=False)
+    con = sqlite3.connect(
+        str(path),
+        timeout=SQLITE_BUSY_TIMEOUT_SECONDS,
+        check_same_thread=False,
+    )
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    # Explicit so the value is observable via `PRAGMA busy_timeout` and does not
+    # depend on the sqlite3 module default (5s), which fails cross-process writers.
+    con.execute(f"PRAGMA busy_timeout = {int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)}")
     return con
 
 
@@ -124,6 +135,31 @@ def init_ledger_schema(con: sqlite3.Connection) -> None:
     con.commit()
 
 
+def _stored_payload(raw: Any) -> dict[str, Any]:
+    """Payload as hashed at append time, whatever the column type.
+
+    ``002_ledger_postgres.sql`` stores it as TEXT (canonical JSON), but a
+    database migrated in order already has ``001_warehouse_v0.sql``'s JSONB
+    column (002's CREATE ... IF NOT EXISTS is then a no-op), and the driver
+    returns a decoded dict. Both must verify.
+    """
+    return raw if isinstance(raw, dict) else json.loads(raw)
+
+
+def _stored_created_at(raw: Any) -> str:
+    """``created_at`` exactly as hashed at append time.
+
+    Appends hash ``datetime.now(timezone.utc).replace(microsecond=0).isoformat()``.
+    A TEXT column returns that string unchanged; ``001``'s TIMESTAMPTZ column
+    returns a ``datetime`` in the session time zone, which is rendered back to
+    the same UTC ISO string so the hash recompute can match.
+    """
+    if isinstance(raw, datetime):
+        dt = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    return str(raw)
+
+
 def _row_to_entry(row: sqlite3.Row | dict[str, Any]) -> LedgerEntry:
     if isinstance(row, sqlite3.Row):
         payload_raw = row["payload"]
@@ -138,20 +174,15 @@ def _row_to_entry(row: sqlite3.Row | dict[str, Any]) -> LedgerEntry:
             created_at=row["created_at"],
             signature=row["signature"],
         )
-    payload_raw = row["payload"]
-    if isinstance(payload_raw, dict):
-        payload = payload_raw
-    else:
-        payload = json.loads(payload_raw)
     return LedgerEntry(
         id=str(row["id"]),
         seq=int(row["seq"]),
         actor=row["actor"],
         event_type=row["event_type"],
-        payload=payload,
+        payload=_stored_payload(row["payload"]),
         prev_hash=row["prev_hash"],
         entry_hash=row["entry_hash"],
-        created_at=row["created_at"],
+        created_at=_stored_created_at(row["created_at"]),
         signature=row["signature"],
     )
 
@@ -389,8 +420,10 @@ def _postgres_verify(*, start_seq: int) -> VerifyResult:
             seq = int(row["seq"])
             if seq != expected_seq:
                 return VerifyResult(ok=False, broken_at=seq)
-            payload = json.loads(row["payload"])
-            expected = compute_entry_hash(seq, prev_hash or GENESIS_HASH, payload, row["created_at"])
+            payload = _stored_payload(row["payload"])
+            expected = compute_entry_hash(
+                seq, prev_hash or GENESIS_HASH, payload, _stored_created_at(row["created_at"])
+            )
             if row["entry_hash"] != expected or row["prev_hash"] != (prev_hash or GENESIS_HASH):
                 return VerifyResult(ok=False, broken_at=seq)
             prev_hash = row["entry_hash"]
