@@ -20,10 +20,14 @@ from CortexOS.crew import freeroute as fr
 from CortexOS.crew import openvault
 from CortexOS.crew.server import create_app
 from CortexOS.integrations import freeroute as core
+from tests.api_key_isolation import TEST_VIEWER_KEY
 from tests.test_crew.conftest import FakeLLM
 
 CALLER_KEY = "ov_callerkeyxxxxxxxx"
 CORTEX_KEY = "ov_cortexkeyxxxxxxxx"
+# Founder decision 2026-09-26 (#265 follow-up): POST /crew/freeroute spends
+# only for an authenticated caller, loopback included.
+VIEWER = {"X-API-Key": TEST_VIEWER_KEY}
 
 
 @pytest.fixture()
@@ -101,7 +105,9 @@ def test_unarmed_complete_fail_closed(crew_env) -> None:
 
 
 def test_http_freeroute_unarmed_is_409(client) -> None:
-    res = client.http.post("/crew/freeroute", json={"purpose": "think", "prompt": "hello"})
+    res = client.http.post(
+        "/crew/freeroute", json={"purpose": "think", "prompt": "hello"}, headers=VIEWER
+    )
     assert res.status_code == 409
     body = res.json()
     assert body["ok"] is False
@@ -299,11 +305,19 @@ def test_cortex_key_is_never_lent_to_an_http_caller(armed_client, monkeypatch) -
     monkeypatch.setenv("CORTEX_FREEROUTE_TOKEN", CORTEX_KEY)
     armed_client.vault.identities[CORTEX_KEY] = "key_cortex"
     core.reset()
+    keyless = armed_client.http.post(
+        "/crew/freeroute",
+        json={"purpose": "think", "prompt": "hello"},
+        headers={"X-Cortex-Identity": "attacker:root"},
+    )
+    assert keyless.status_code == 401, keyless.text
+    assert keyless.json()["detail"]["code"] == "spend_requires_auth"
+    assert armed_client.vault.chat_calls == []
     for _ in range(2):
         res = armed_client.http.post(
             "/crew/freeroute",
             json={"purpose": "think", "prompt": "hello"},
-            headers={"X-Cortex-Identity": "attacker:root"},
+            headers={"X-Cortex-Identity": "attacker:root", **VIEWER},
         )
         assert res.status_code == 200, res.text
     sent = armed_client.vault.chat_calls
@@ -318,10 +332,11 @@ def test_caller_bearer_is_relayed_verbatim(armed_client) -> None:
     res = armed_client.http.post(
         "/crew/freeroute",
         json={"purpose": "think", "prompt": "hello"},
-        headers={"Authorization": f"Bearer {CALLER_KEY}"},
+        headers={"Authorization": f"Bearer {CALLER_KEY}", **VIEWER},
     )
     assert res.status_code == 200, res.text
     assert armed_client.vault.chat_calls[-1]["headers"]["Authorization"] == f"Bearer {CALLER_KEY}"
+    assert TEST_VIEWER_KEY not in str(armed_client.vault.chat_calls[-1]["headers"])
 
 
 def test_non_loopback_caller_without_a_key_is_refused_before_spending(
@@ -333,6 +348,13 @@ def test_non_loopback_caller_without_a_key_is_refused_before_spending(
     app = create_app(settings, llm_chat=FakeLLM())
     with TestClient(app, client=("10.0.0.5", 5555)) as remote:
         res = remote.post("/crew/freeroute", json={"purpose": "think", "prompt": "hello"})
+        assert res.status_code == 401
+        assert res.json()["detail"]["code"] == "spend_requires_auth"
+        assert armed_openvault.chat_calls == []
+        # Authenticated but no ov_ bearer from a remote peer: still no relay.
+        res = remote.post(
+            "/crew/freeroute", json={"purpose": "think", "prompt": "hello"}, headers=VIEWER
+        )
         assert res.status_code == 401
         body = res.json()
         assert body["values"] == []
