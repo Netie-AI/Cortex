@@ -47,12 +47,12 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from CortexOS.integrations import direct_providers, freeroute_ov_local, openvault_client
 
@@ -75,6 +75,17 @@ COOLDOWN_ENV = "CORTEX_FREEROUTE_COOLDOWN_S"
 COOLDOWN_S = 30.0
 COOLDOWN_STATUSES = frozenset({429, 402, 503})
 SCORE_WINDOW = 200
+# Cortex #270 ROUTER-2: opt-in cost-ordered ladder. Unset keeps one call per
+# complete(). The value is how many step-ups one call may take.
+LADDER_ENV = "CORTEX_FREEROUTE_LADDER"
+LADDER_DEFAULT_STEPS = 2
+# A measured model below this Laplace validity score is not a ladder rung.
+LADDER_VALIDITY_BAR = 0.5
+RUNG_DETERMINISTIC = "deterministic"
+RUNG_CLASSIC_ML = "classic_ml"
+RUNG_LOCAL = "local"
+RUNG_CLOUD = "cloud"
+SOLVER_IMPL = "cortex-solver"
 MAX_CANDIDATES = 6
 PER_PROVIDER = 2
 
@@ -1072,14 +1083,24 @@ class RouteStamp:
     served_model: str | None = None
     served_local: bool = False
     served_reason: str = ""
+    # #270: which rung this call was ("" = not a ladder call) and, on the stamp
+    # a ladder call returns, every rung tried in order.
+    rung: str = ""
+    ladder: list[dict[str, Any]] = field(default_factory=list)
+    # #271: the pre-spend prediction this call went out (or was skipped) under.
+    prespend: dict[str, Any] = field(default_factory=dict)
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
         prefix = "" if self.impl == IMPL else f"NOT OpenVault FreeRoute ({self.impl}): "
-        if self.status is None:
+        if self.impl == SOLVER_IMPL:
+            text = f"FreeRoute {self.task}: {self.rung} solver {self.requested} (no model call)"
+        elif self.status is None:
             text = f"FreeRoute {self.task}: not sent ({self.error})"
         else:
             text = f"FreeRoute {self.task}: asked {self.requested}, served {self.served or 'none'} ({self.source})"
+        if self.ladder:
+            text += f" [ladder: {len(self.ladder)} rung(s) tried]"
         err = store_error()
         if err:
             text += f" [{err}]"
@@ -1186,6 +1207,248 @@ def _error_message(body: Any) -> str:
     return ""
 
 
+# -- ladder (Cortex #270 ROUTER-2) ----------------------------------------------
+
+
+class Solver(Protocol):
+    """A no-model rung. ``kind`` is :data:`RUNG_DETERMINISTIC` or :data:`RUNG_CLASSIC_ML`.
+
+    ``solve`` returns a candidate answer or ``None`` (abstain). The candidate is
+    checked by the same ``accept`` a model answer is; it is never trusted
+    unchecked. A classic-ML solver also needs a truthy ``heldout`` mapping (its
+    held-out numbers) or the rung stays disabled.
+    """
+
+    name: str
+    kind: str
+
+    def solve(self, task: str, messages: list[dict[str, Any]]) -> str | None: ...
+
+
+def _ladder_steps(ladder: int | None) -> tuple[int, str]:
+    """Step-ups allowed for this call, plus a note when the env value was ignored."""
+    if ladder is not None:
+        return max(0, int(ladder)), ""
+    raw = (os.environ.get(LADDER_ENV) or "").strip()
+    if not raw:
+        return 0, ""
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        return 0, f"{LADDER_ENV}={raw[:16]!r} ignored (not a step count >= 0); no ladder"
+    return value, ""
+
+
+def ladder_order(
+    task: str, arm: Arming, *, pin: str = "", pin_source: str = ""
+) -> tuple[list[Pick], str]:
+    """Model rungs, cheapest measured cost first. Returns (rungs, what was left out).
+
+    A rung must clear the bar pick() uses: not ineligible, not cooling after a
+    429/402/503, and not measured below :data:`LADDER_VALIDITY_BAR`. Unmeasured
+    cost sorts after measured cost, in candidate order. When nothing clears the
+    bar the one rung is whatever :func:`pick` would send, so the 429 cooldown
+    and exploration rules keep the final say.
+    """
+    models, source = candidates(arm, pin=pin, pin_source=pin_source)
+    stats = _stats(task, list(models))
+    order = {m: i for i, m in enumerate(models)}
+    keep: list[str] = []
+    left_out: list[str] = []
+    for model in models:
+        st = stats[model]
+        why = st.ineligible or (f"cooling ({st.cooling})" if st.cooling else "")
+        if not why and st.score is not None and st.score < LADDER_VALIDITY_BAR:
+            why = f"validity {st.score} < {LADDER_VALIDITY_BAR}"
+        if why:
+            left_out.append(f"{model} ({why})")
+        else:
+            keep.append(model)
+    dropped = "; left out: " + ", ".join(left_out) if left_out else ""
+    if not keep:
+        chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+        return [
+            Pick(
+                chosen.requested,
+                f"ladder rung 1/1: no candidate clears the bar; {chosen.reason}",
+                chosen.source,
+                chosen.candidates,
+                chosen.measured_n,
+                chosen.measured_score,
+            )
+        ], dropped
+    keep.sort(key=lambda m: (stats[m].mean_cost is None, stats[m].mean_cost or 0.0, order[m]))
+    rungs: list[Pick] = []
+    for i, model in enumerate(keep, start=1):
+        st = stats[model]
+        cost = "unmeasured" if st.mean_cost is None else f"{st.mean_cost} tokens"
+        rungs.append(
+            Pick(
+                model,
+                f"ladder rung {i}/{len(keep)}: cheapest-first by mean cost ({cost}){dropped}",
+                source,
+                tuple(keep),
+                st.scored_n,
+                st.score,
+            )
+        )
+    return rungs, dropped
+
+
+def _step(stamp: RouteStamp, verdict: str) -> dict[str, Any]:
+    return {
+        "rung": stamp.rung,
+        "call_id": stamp.call_id,
+        "requested": stamp.requested,
+        "served": stamp.served,
+        "honored": stamp.honored,
+        "served_provider": stamp.served_provider,
+        "served_model": stamp.served_model,
+        "served_local": stamp.served_local,
+        "status": stamp.status,
+        "verdict": verdict,
+        "final": False,
+    }
+
+
+def _solver_rung(
+    task: str,
+    messages: list[dict[str, Any]],
+    solver: Solver,
+    accept: Callable[[str], Any] | None,
+    credential: str,
+) -> tuple[RouteStamp, str, str]:
+    """Run one no-model rung under the checker. Returns (stamp, text, verdict)."""
+    name = str(getattr(solver, "name", "") or type(solver).__name__)
+    kind = str(getattr(solver, "kind", "") or "")
+    stamp = RouteStamp(
+        call_id=uuid.uuid4().hex,
+        task=task,
+        requested=name,
+        impl=SOLVER_IMPL,
+        credential=credential,
+        rung=kind or "unknown",
+        served_provider=SOLVER_IMPL,
+        served_model=name,
+        served_local=False,
+        served_reason="in-process solver; no model hop",
+    )
+    text = ""
+    if kind not in (RUNG_DETERMINISTIC, RUNG_CLASSIC_ML):
+        verdict = f"skipped: unknown rung kind {kind!r}"
+    elif kind == RUNG_CLASSIC_ML and not getattr(solver, "heldout", None):
+        verdict = "disabled: classic ML rung has no held-out numbers"
+    elif accept is None:
+        verdict = "skipped: no checker (a solver answer is never unchecked)"
+    else:
+        try:
+            got = solver.solve(task, messages)
+        except Exception as exc:  # noqa: BLE001 - a broken solver is a rung failure
+            got, verdict = None, f"error: {type(exc).__name__}"
+        else:
+            verdict = "abstained" if not (got or "").strip() else ""
+        if got and got.strip() and not verdict:
+            try:
+                ok = bool(accept(got))
+            except Exception:  # noqa: BLE001 - a raising checker means rejected
+                ok = False
+            verdict = "accepted" if ok else "rejected"
+            if ok:
+                text = got
+                stamp.served = name
+                stamp.usable = True
+    if verdict != "accepted":
+        stamp.error = f"{kind or 'unknown'} rung {name}: {verdict}"
+    _journal_add(stamp)
+    return stamp, text, verdict
+
+
+def _model_verdict(out: Completion) -> str:
+    stamp = out.stamp
+    status = int(stamp.status or 0) if stamp is not None and stamp.status is not None else 0
+    if out.ok:
+        return "accepted"
+    if status == 200:
+        return "rejected"
+    if status in _STATUS_REASONS:
+        return f"refused (HTTP {status})"
+    return f"failed (HTTP {status})"
+
+
+def _ladder_complete(
+    task: str,
+    messages: list[dict[str, Any]],
+    arm: Arming,
+    *,
+    steps: int,
+    note: str,
+    solvers: tuple[Solver, ...],
+    accept: Callable[[str], Any] | None,
+    pin: str,
+    pin_source: str,
+    send_kw: dict[str, Any],
+) -> Completion:
+    """No-model rungs, then model rungs cheapest-first; step up only on a checker reject.
+
+    - Every rung is checked by ``accept`` (plus the usable-answer rule).
+    - A rejected answer, or a non-refusal failure (500, 504, ...), steps up one
+      rung, at most ``steps`` times.
+    - A refusal status (402, 429 and the rest of ``_STATUS_REASONS``) stops the
+      ladder: it is a budget / custody answer, not a verdict on the model.
+    - Every rung tried is on the returned stamp's ``ladder``, in order, and
+      the one that answered is ``final``. No rung passing is an honest
+      refusal with no text, never the best rejected guess.
+    """
+    credential = str(send_kw.get("credential") or "")
+    tried: list[dict[str, Any]] = []
+    for solver in solvers:
+        stamp, text, verdict = _solver_rung(task, messages, solver, accept, credential)
+        tried.append(_step(stamp, verdict))
+        if verdict == "accepted":
+            tried[-1]["final"] = True
+            stamp.ladder = tried
+            return Completion(ok=True, text=text, message={"role": "assistant", "content": text}, stamp=stamp)
+
+    rungs, _ = ladder_order(task, arm, pin=pin, pin_source=pin_source)
+    last: Completion | None = None
+    stop = ""
+    for i, chosen in enumerate(rungs[: steps + 1]):
+        if note:
+            chosen = Pick(
+                chosen.requested,
+                f"{chosen.reason}; {note}",
+                chosen.source,
+                chosen.candidates,
+                chosen.measured_n,
+                chosen.measured_score,
+            )
+        out = _send(task, messages, arm, chosen, **send_kw)
+        assert out.stamp is not None  # _send always stamps
+        # Local only when OpenVault said so for this call (#272), never by name.
+        out.stamp.rung = (
+            RUNG_LOCAL if out.stamp.served_local else RUNG_CLOUD if out.stamp.status == 200 else "model"
+        )
+        verdict = _model_verdict(out)
+        tried.append(_step(out.stamp, verdict))
+        last = out
+        if out.ok:
+            tried[-1]["final"] = True
+            out.stamp.ladder = tried
+            return out
+        if verdict.startswith("refused"):
+            stop = f"; stopped at rung {i + 1} on a refusal status, no step-up"
+            break
+    assert last is not None and last.stamp is not None  # ladder_order returns >= 1 rung
+    if not stop and len(rungs) > steps + 1:
+        stop = f"; step limit {steps} reached"
+    reason = f"ladder: no rung passed the checker ({len(tried)} tried{stop}): {last.reason}"
+    last.stamp.error = reason
+    last.stamp.ladder = tried
+    return Completion(ok=False, stamp=last.stamp, reason=reason, usage=last.usage)
+
+
 # -- complete -------------------------------------------------------------------
 
 
@@ -1203,8 +1466,14 @@ def complete(
     tools: list[dict[str, Any]] | None = None,
     bearer: str | None = None,
     split: str = "",
+    ladder: int | None = None,
+    solvers: Sequence[Solver] | None = None,
 ) -> Completion:
-    """One FreeRoute call. Never raises. Refusals are named and stamped."""
+    """One FreeRoute call. Never raises. Refusals are named and stamped.
+
+    ``ladder`` / ``solvers`` (or ``CORTEX_FREEROUTE_LADDER``) opt into the #270
+    ladder: see :func:`_ladder_complete`. Unset, this is one model request.
+    """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
     direct = direct_providers.enabled()
@@ -1286,7 +1555,74 @@ def complete(
             return Completion(ok=False, stamp=stamp, reason=reason)
         leave_decision = why
 
+    steps, ladder_note = _ladder_steps(ladder)
+    if steps or solvers:
+        return _ladder_complete(
+            task,
+            messages,
+            arm,
+            steps=steps,
+            note=ladder_note,
+            solvers=tuple(solvers or ()),
+            accept=accept,
+            pin=pin,
+            pin_source=pin_source,
+            send_kw={
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "timeout": timeout,
+                "accept": accept,
+                "tools": tools,
+                "bearer": bearer,
+                "split": split,
+                "credential": credential,
+                "leave_decision": leave_decision,
+            },
+        )
     chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+    if ladder_note:
+        chosen = Pick(
+            chosen.requested,
+            f"{chosen.reason}; {ladder_note}",
+            chosen.source,
+            chosen.candidates,
+            chosen.measured_n,
+            chosen.measured_score,
+        )
+    return _send(
+        task,
+        messages,
+        arm,
+        chosen,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        timeout=timeout,
+        accept=accept,
+        tools=tools,
+        bearer=bearer,
+        split=split,
+        credential=credential,
+        leave_decision=leave_decision,
+    )
+
+
+def _send(
+    task: str,
+    messages: list[dict[str, Any]],
+    arm: Arming,
+    chosen: Pick,
+    *,
+    max_tokens: int,
+    temperature: float | None,
+    timeout: float,
+    accept: Callable[[str], Any] | None,
+    tools: list[dict[str, Any]] | None,
+    bearer: str | None,
+    split: str,
+    credential: str,
+    leave_decision: str,
+) -> Completion:
+    """One model request for ``chosen``: stamped, stored, journalled. Never raises."""
     body: dict[str, Any] = {
         "model": chosen.requested,
         "messages": messages,
@@ -1508,7 +1844,7 @@ def router_fingerprint(stamp: RouteStamp | None = None) -> dict[str, Any]:
             and not (stamp.served_reason or "").strip()
         )
         served_reason = SERVED_PENDING_272 if empty else stamp.served_reason
-    return {
+    out: dict[str, Any] = {
         "served_provider": served_provider,
         "served_model": served_model,
         "served_local": served_local,
@@ -1519,6 +1855,10 @@ def router_fingerprint(stamp: RouteStamp | None = None) -> dict[str, Any]:
         "route_store": store,
         "masking_state": MASKING_STATE,
     }
+    if stamp is not None and stamp.ladder:
+        # #270: every rung tried, in order, with the answering one marked final.
+        out["ladder"] = [dict(step) for step in stamp.ladder]
+    return out
 
 
 def stamp_router_fingerprint(
@@ -1587,6 +1927,7 @@ __all__ = [
     "SPLIT_HELDOUT",
     "SPLIT_PRODUCT",
     "SPLIT_TRAIN",
+    "Solver",
     "TOKEN_ENV",
     "arming",
     "auth_headers",
@@ -1596,6 +1937,7 @@ __all__ = [
     "fingerprint",
     "identity",
     "journal",
+    "ladder_order",
     "last_line",
     "learn_state",
     "leave_gate",

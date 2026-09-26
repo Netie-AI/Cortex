@@ -1132,6 +1132,7 @@ def _route_stamp_for_fingerprint(
         served_model=model.strip() if isinstance(model, str) and model.strip() else None,
         served_local=raw.get("served_local") is True,
         served_reason=str(raw.get("served_reason") or ""),
+        ladder=[dict(step) for step in raw.get("ladder") or [] if isinstance(step, dict)],
     )
 
 
