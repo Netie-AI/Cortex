@@ -62,8 +62,8 @@ RECURSIVE_ESCAPE = (
     "SELECT MAX(id) AS top_math FROM (WITH RECURSIVE secrets AS (SELECT id FROM secrets "
     "UNION ALL SELECT id + 1 FROM secrets WHERE id < 0) SELECT id FROM secrets) AS d"
 )
-# The same escapes as top-level statements, for the validator itself (the route's
-# SQL extractor starts at the first SELECT, so a top-level WITH never reaches it).
+# The same escapes as top-level statements, for the validator itself (the route
+# path for top-level WITH is covered in test_insights_with_extract.py).
 TOP_LEVEL = [
     "WITH a AS (SELECT id FROM secrets), secrets AS (SELECT 1 AS id) SELECT MAX(id) FROM a",
     "WITH RECURSIVE secrets AS (SELECT id FROM secrets UNION ALL "
