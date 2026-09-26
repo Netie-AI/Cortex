@@ -136,7 +136,8 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         # CortexOS/integrations/freeroute.py. Arming + RouteStamp served_*
         # stay #272. Do not put crew/freeroute.py back on this allow.
         "CortexOS/integrations/openvault_client.py",
-        "tests/test_crew/test_freeroute.py",
+        # tests/test_crew/test_freeroute.py: founder override 2026-09-26 (#265
+        # follow-up): POST /crew/freeroute needs a key, so its pins now send one.
         "tests/test_crew/test_openvault.py",
         "tests/conftest.py",
         "tests/freeroute_fake.py",
