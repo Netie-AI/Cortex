@@ -658,6 +658,21 @@
       "technique": "predicate_injection_with_bind_parameters",
       "why_it_might_slip": "The SDK wraps filters as positional ? placeholders. Predicate wrapping moves the table into a FROM subquery. If the injected predicate ever carried a placeholder, or the rewrite reordered the tree, every positional bind would silently attach to the wrong column and the caller would get rows it did not ask for under a manifest that looked enforced.",
       "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "bare_grant_read_through_other_schema",
+      "sql": "SELECT o.id, o.amount FROM tenant_b.orders AS o",
+      "technique": "qualified_name_mismatch",
+      "why_it_might_slip": "The grant is the bare name orders. sqlglot gives tenant_b.orders a .name of 'orders', so a checker that compares only the bare name matches the grant and then wraps the other schema's table with tenant a's predicate, reading a relation the manifest never named.",
+      "expected": "reject_path",
+      "enforcer_note": "A bare grant key names the table in the default schema only (bare or main.orders). Any other schema is a different relation."
+    },
+    {
+      "name": "cte_name_reused_as_schema_qualified_table",
+      "sql": "WITH secrets AS (SELECT 1 AS id) SELECT s.* FROM vault.secrets AS s",
+      "technique": "cte_exemption_by_name",
+      "why_it_might_slip": "The CTE binds the bare name secrets, and a grant check that exempts every table whose .name is locally bound also exempts vault.secrets, which a CTE can never be: a schema-qualified reference always reaches the base table.",
+      "expected": "reject_path"
     }
   ],
   "_expected_values": {

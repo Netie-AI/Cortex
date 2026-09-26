@@ -12,6 +12,13 @@ a database, and never lets caller text reach SQL: names must be identifiers,
 descriptions must not look like SQL, sizes are bounded. A malformed ontology
 raises ``CallerOntologyError`` with a stable ``code`` the route turns into a
 named 4xx ABSTAIN, never a 500.
+
+Which catalog ranks an ask is decided by DMS, not guessed here:
+``ontology.source == "space"`` means the caller catalog is the whole universe
+(the engine pack, its metrics and certified formulas are never consulted);
+``"demo"`` or absent means the engine pack ranks exactly as it always has and
+the ontology body is not used. Table names follow the shared naming rule:
+``table`` or ``schema.table``, each part matching ``IDENT`` in full.
 """
 
 from __future__ import annotations
@@ -22,8 +29,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-#: Same identifier rule DMS applies before it sends a name (``_safe_ident``).
-IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+#: One SQL identifier part (shared naming rule). Always used with ``fullmatch``:
+#: ``re.match`` with ``$`` accepts a trailing newline (``"schools\n"``).
+IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MAX_ONTOLOGY_BYTES = 64 * 1024
 MAX_PLAN_BYTES = 4 * 1024
 MAX_TABLES = 64
@@ -48,9 +56,11 @@ _SQLISH = re.compile(
 
 SOURCE_CALLER = "caller_ontology"
 SOURCE_PACK = "engine_pack"
-#: Caller catalog is the engine pack's own tables (DMS demo Space): pack ranking,
-#: narrowed to the tables the caller sent.
-SOURCE_PACK_CALLER = "engine_pack_caller_scoped"
+#: ``ontology.source`` on the wire. DMS says which Space this is; Cortex never
+#: guesses it from column names. Absent means demo (older DMS builds).
+WIRE_SOURCE_DEMO = "demo"
+WIRE_SOURCE_SPACE = "space"
+WIRE_SOURCES = (WIRE_SOURCE_DEMO, WIRE_SOURCE_SPACE)
 #: Named ABSTAIN when an ontology was sent but names no tables.
 EMPTY_REASON = "caller_ontology_empty"
 
@@ -70,7 +80,11 @@ class CallerOntologyError(ValueError):
 
 @dataclass(frozen=True)
 class CallerCatalog:
-    """Validated caller catalog. Tables and columns are lower-cased identifiers."""
+    """Validated caller catalog (source=space).
+
+    Table keys are lower-cased ``table`` or ``schema.table`` names exactly as
+    declared; columns are lower-cased single identifiers.
+    """
 
     tables: dict[str, list[str]]
     scores: dict[str, int]
@@ -89,9 +103,53 @@ class CallerCatalog:
 
 
 def _ident(value: Any, where: str) -> str:
-    if not isinstance(value, str) or not IDENT.match(value):
+    """One identifier part: no dot, no quote, no whitespace, no trailing newline."""
+    if not isinstance(value, str) or IDENT.fullmatch(value) is None:
         raise CallerOntologyError("bad_identifier", f"{where} is not an identifier")
     return value.lower()
+
+
+def _table_name(value: Any, where: str) -> str:
+    """``table`` or ``schema.table``, each part an identifier (shared naming rule)."""
+    if not isinstance(value, str):
+        raise CallerOntologyError("bad_identifier", f"{where} is not a table name")
+    parts = value.split(".")
+    if len(parts) > 2 or any(IDENT.fullmatch(p) is None for p in parts):
+        raise CallerOntologyError(
+            "bad_identifier", f"{where} is not a table name (table or schema.table)"
+        )
+    return value.lower()
+
+
+def _resolve(name: str, tables: dict[str, list[str]]) -> str | None:
+    """A declared table for ``name``: exact, or a bare name unique among the declared."""
+    if name in tables:
+        return name
+    if "." in name:
+        return None
+    hits = [t for t in tables if "." in t and t.rsplit(".", 1)[-1] == name]
+    return hits[0] if len(hits) == 1 else None
+
+
+def ontology_source(raw: Any) -> str | None:
+    """``demo`` / ``space`` from ``ontology.source``; None when no ontology was sent.
+
+    Absent ``source`` is ``demo``: that is the body every DMS build before the
+    shared naming rule sends for the demo Space, and it must rank exactly as it
+    did. Any other value is a named 422.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise CallerOntologyError("bad_shape", "ontology must be an object")
+    source = raw.get("source", WIRE_SOURCE_DEMO)
+    if source is None:
+        source = WIRE_SOURCE_DEMO
+    if source not in WIRE_SOURCES:
+        raise CallerOntologyError(
+            "bad_source", "ontology.source must be one of " + ", ".join(WIRE_SOURCES)
+        )
+    return str(source)
 
 
 def _text(value: Any, where: str) -> None:
@@ -148,7 +206,7 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
     for idx, row in enumerate(schema or []):
         if not isinstance(row, dict):
             raise CallerOntologyError("bad_shape", f"ontology.schema[{idx}] must be an object")
-        name = _ident(row.get("table"), f"ontology.schema[{idx}].table")
+        name = _table_name(row.get("table"), f"ontology.schema[{idx}].table")
         cols_raw = row.get("columns") or []
         if not isinstance(cols_raw, list):
             raise CallerOntologyError("bad_shape", f"ontology.schema[{idx}].columns must be a list")
@@ -175,18 +233,19 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
     # ``columns`` is keyed by ontology object; merge only where it is a table.
     col_map = _mapping(raw.get("columns"), "ontology.columns")
     for key, cols_raw in col_map.items():
-        obj = _ident(key, "ontology.columns key")
+        obj = _table_name(key, "ontology.columns key")
         if not isinstance(cols_raw, list):
             raise CallerOntologyError("bad_shape", f"ontology.columns.{obj} must be a list")
         if len(cols_raw) > MAX_COLUMNS_PER_TABLE:
             raise CallerOntologyError("too_large", f"ontology.columns.{obj} too long")
         names = [_ident(c, f"ontology.columns.{obj}[]") for c in cols_raw]
-        if obj in tables:
-            tables[obj].extend(c for c in names if c not in tables[obj])
+        target = _resolve(obj, tables)
+        if target is not None:
+            tables[target].extend(c for c in names if c not in tables[target])
 
     objects = _mapping(raw.get("objects"), "ontology.objects")
     for key, spec in objects.items():
-        obj = _ident(key, "ontology.objects key")
+        obj = _table_name(key, "ontology.objects key")
         spec_d = _mapping(spec, f"ontology.objects.{obj}")
         keys = spec_d.get("key") or []
         if not isinstance(keys, list):
@@ -207,9 +266,11 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
                     "sql_in_ontology", f"ontology.measures.{name}.{banned} is not accepted"
                 )
         grain = spec_d.get("grain")
-        grain_n = _ident(grain, f"ontology.measures.{name}.grain") if grain is not None else None
+        grain_n = (
+            _table_name(grain, f"ontology.measures.{name}.grain") if grain is not None else None
+        )
         _text(spec_d.get("description"), f"ontology.measures.{name}.description")
-        measures[name] = grain_n if grain_n in tables else None
+        measures[name] = _resolve(grain_n, tables) if grain_n is not None else None
 
     links: list[tuple[str, str, str]] = []
     l_raw = _mapping(raw.get("links"), "ontology.links")
@@ -218,12 +279,14 @@ def parse_caller_ontology(raw: Any) -> CallerCatalog | None:
     for key, spec in l_raw.items():
         lid = _ident(key, "ontology.links key")
         spec_d = _mapping(spec, f"ontology.links.{lid}")
-        src = _ident(spec_d.get("from"), f"ontology.links.{lid}.from")
-        dst = _ident(spec_d.get("to"), f"ontology.links.{lid}.to")
+        src_n = _table_name(spec_d.get("from"), f"ontology.links.{lid}.from")
+        dst_n = _table_name(spec_d.get("to"), f"ontology.links.{lid}.to")
+        src = _resolve(src_n, tables)
+        dst = _resolve(dst_n, tables)
         card = spec_d.get("cardinality")
         if card is not None and (not isinstance(card, str) or len(card) > MAX_FIELD):
             raise CallerOntologyError("bad_shape", f"ontology.links.{lid}.cardinality")
-        if src in tables and dst in tables:
+        if src is not None and dst is not None:
             links.append((lid, src, dst))
 
     return CallerCatalog(
@@ -265,8 +328,11 @@ __all__ = [
     "MAX_SCORE",
     "SOURCE_CALLER",
     "SOURCE_PACK",
-    "SOURCE_PACK_CALLER",
+    "WIRE_SOURCES",
+    "WIRE_SOURCE_DEMO",
+    "WIRE_SOURCE_SPACE",
     "check_field",
     "check_plan",
+    "ontology_source",
     "parse_caller_ontology",
 ]

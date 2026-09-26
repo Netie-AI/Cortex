@@ -80,6 +80,11 @@ WIRE_FIELDS_DOC: dict[str, Any] = {
         "unknown_fields": "422 ABSTAIN refuse_reason=unknown_request_fields",
         "invalid_ontology": "422 ABSTAIN refuse_reason=caller_ontology_invalid:<code>",
         "empty_ontology": "200 ABSTAIN refuse_reason=caller_ontology_empty",
+        "ontology_source": (
+            "ontology.source = demo (default when absent): engine pack ranking, "
+            "ontology body unused; space: caller catalog only, tables named "
+            "table or schema.table"
+        ),
     }
 }
 
@@ -146,8 +151,10 @@ def _invalid_request(
 
 
 def _received(body: InsightsWireIn, ontology_source: str) -> dict[str, Any]:
+    wire_source = body.ontology.get("source") if isinstance(body.ontology, dict) else None
     return {
         "mode": body.mode,
+        "wire_ontology_source": wire_source,
         "model_preference": body.model_preference,
         "model_preference_note": "advisory; OpenVault FreeRoute picks the model",
         "ontology": body.ontology is not None,
@@ -260,12 +267,20 @@ async def execute_insights(
             "not modelled by POST /v1/insights: " + ", ".join(extras)[:200],
             intent=intent,
         )
+    caller: caller_onto.CallerCatalog | None = None
+    query_plan: dict[str, Any] | None = None
     try:
         for name in ("mode", "model_preference", "ranked_metric", "generate_retry"):
             caller_onto.check_field(getattr(wire, name), name)
-        caller = caller_onto.parse_caller_ontology(wire.ontology)
-        query_plan = caller_onto.check_plan(wire.query_plan, "query_plan")
-        caller_onto.check_plan(wire.intent_slots, "intent_slots")
+        wire_source = caller_onto.ontology_source(wire.ontology)
+        if wire_source == caller_onto.WIRE_SOURCE_SPACE:
+            caller = caller_onto.parse_caller_ontology(wire.ontology)
+            query_plan = caller_onto.check_plan(wire.query_plan, "query_plan")
+            caller_onto.check_plan(wire.intent_slots, "intent_slots")
+        # source demo / absent: the engine pack ranks exactly as it did before
+        # INSIGHTS-ONTO. The ontology body, query_plan and intent_slots are not
+        # used on that path, so they are not read (a demo body that used to be
+        # answered must not start failing a validator it never reached).
     except caller_onto.CallerOntologyError as exc:
         return _invalid_request(exc.reason, exc.detail, intent=intent)
     if caller is not None and caller.is_empty:

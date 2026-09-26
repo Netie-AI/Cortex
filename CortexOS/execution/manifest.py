@@ -892,12 +892,46 @@ def _refuse_shadowing(bound: set[str], granted: set[str]) -> None:
     Enforcing disjointness here is what lets every later step decide by name
     alone: a granted name can only ever mean the granted table.
     """
-    collision = sorted(bound & granted)
+    collision = sorted(bound & (granted | {_bare(key) for key in granted}))
     if collision:
         raise PathNotAllowed(
             f"{collision[0]!r} is bound locally but is also a table this manifest governs; "
             "rebinding a governed name is not allowed"
         )
+
+
+def _bare(key: str) -> str:
+    """``bronze.schools`` -> ``schools``; a bare key is its own bare name."""
+    return key.rsplit(".", 1)[-1]
+
+
+def _grant_key(table: exp.Table, granted: set[str]) -> str | None:
+    """The manifest key that grants this table reference, matched exactly.
+
+    A grant key is either bare (``orders``) or schema-qualified
+    (``bronze.schools``), and it grants only what it names:
+
+    * a qualified key grants exactly ``schema.table``. A bare ``schools`` is
+      not that table (it resolves through the search path, possibly to
+      ``main.schools``), and neither is ``other.schools``;
+    * a bare key grants the table in the default schema: a bare reference or
+      ``main.table``, which is what a bare reference resolves to. Any other
+      schema is a different relation and is not granted.
+
+    Matching on ``table.name`` alone used to let a bare grant for ``schools``
+    wave through ``secret_schema.schools``, and made a qualified grant key
+    unmatchable. Three-part names are refused before this is reached.
+    """
+    name = table.name.lower()
+    schema = (table.db or "").lower()
+    if schema:
+        qualified = f"{schema}.{name}"
+        if qualified in granted:
+            return qualified
+        if schema == "main" and name in granted:
+            return name
+        return None
+    return name if name in granted else None
 
 
 def _refuse_ungranted_tables(
@@ -916,10 +950,14 @@ def _refuse_ungranted_tables(
     """
     for table in _named_tables(root):
         name = table.name.lower()
-        if not name or name in bound:
-            continue  # a CTE or derived relation this statement defines itself
-        if name not in granted:
-            raise PathNotAllowed(f"table {table.name!r} is not named by this manifest")
+        if not name:
+            continue
+        if not table.db and name in bound:
+            continue  # a CTE this statement defines itself (never schema-qualified)
+        if _grant_key(table, granted) is None:
+            raise PathNotAllowed(
+                f"table {table.sql(dialect='duckdb')!r} is not named by this manifest"
+            )
 
 
 def _refuse_schema_qualified_columns(root: exp.Expression, granted: set[str]) -> None:
@@ -931,10 +969,11 @@ def _refuse_schema_qualified_columns(root: exp.Expression, granted: set[str]) ->
     table that "does not exist". Refusing here turns a confusing failure
     downstream into a clear one at the gate, and says which reference to change.
     """
+    bare_granted = {_bare(key) for key in granted}
     for column in root.find_all(exp.Column):
         table = (column.args.get("table").name if column.args.get("table") else "").lower()
         schema = column.args.get("db")
-        if schema is not None and table in granted:
+        if schema is not None and table in bare_granted:
             raise SqlNotAnalyzable(
                 f"{schema.name}.{table}.{column.name} is schema-qualified through a table this "
                 "manifest filters; reference it as "
@@ -1010,7 +1049,8 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
     # Table, so a lazy walk would also be sound here — but the list makes that
     # a local guarantee rather than a fact about sqlglot's traversal order.
     for table in list(_named_tables(root)):
-        predicate = predicates.get(table.name.lower())
+        key = _grant_key(table, granted)
+        predicate = predicates.get(key) if key is not None else None
         if predicate is None:
             continue
         try:
