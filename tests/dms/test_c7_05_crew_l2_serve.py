@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -281,3 +282,103 @@ async def test_unbound_manifest_abstains_by_name(monkeypatch) -> None:
     assert body["values"] == []
     assert body["answer_step"] == "manifest_check"
     assert "SessionUnbound" in body["answer"]
+
+
+class _HeldoutBridge:
+    session_id = SESSION
+    space_id = None
+
+    async def ask(self, question: str) -> dict[str, Any]:
+        from CortexOS.dms.answer_engine import answer
+
+        return answer(question)
+
+
+async def _score_insights_heldout(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    enable_l2: bool,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Score the frozen corpus through run_insights and its real L2 call site."""
+    from bench.accuracy import _ensure_db_loaded
+    from bench.heldout import load_heldout, score_envelope, summarize
+    from CortexOS.dms.answer_engine import clear_session
+
+    _ensure_db_loaded()
+    _armed(monkeypatch)
+    _bind()
+    monkeypatch.setenv("DMS_L2_ENABLED", "1" if enable_l2 else "0")
+    clear_session()
+
+    # This fixed, non-oracle probe makes every item reach the real gate stack
+    # without pretending that this environment has a live FreeRoute model.
+    complete = _complete("SELECT 1 AS probe FROM inventory")
+    items = load_heldout()
+    envelopes: dict[str, dict[str, Any]] = {}
+    scored = []
+    for item in items:
+        envelope = await insights.run_insights(
+            item.question,
+            bridge=_HeldoutBridge(),
+            ask=True,
+            generate=True,
+            complete=complete,
+        )
+        envelopes[item.id] = envelope
+        scored.append(score_envelope(item, envelope))
+
+    report = summarize(scored)
+    raw = json.dumps(
+        envelopes, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode()
+    report["envelopes_sha256"] = hashlib.sha256(raw).hexdigest()
+    report["l2_named_steps"] = sum(
+        bool(envelope.get("answer_step")) for envelope in envelopes.values()
+    )
+    return report, envelopes
+
+
+@pytest.mark.asyncio
+async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> None:
+    off, off_envelopes = await _score_insights_heldout(monkeypatch, enable_l2=False)
+    on, on_envelopes = await _score_insights_heldout(monkeypatch, enable_l2=True)
+
+    for report in (off, on):
+        assert report["g_abs_recall"] == 1.0
+        assert report["incorrect_rate"] == 0.0
+        assert report["g_env_violations"] == 0
+        assert report["totals"]["incorrect"] == 0
+
+    assert off["l2_named_steps"] == 0
+    assert on["l2_named_steps"] > 0
+    assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
+    assert on_envelopes["ma_workday_payroll_cube"]["values"] == []
+    assert on_envelopes["ma_workday_payroll_cube"]["answer_step"] == "plan_shape"
+
+
+def test_c7_04_preexisting_misroute_value_unchanged_pending_288(
+    monkeypatch,
+) -> None:
+    """Pin the parent's wrong value until Cortex #288 replaces it with abstention."""
+    from bench.accuracy import _ensure_db_loaded
+    from bench.heldout import load_heldout, score_envelope
+    from CortexOS.dms.answer_engine import answer, clear_session
+
+    item = next(row for row in load_heldout() if row.id == "ma_workday_payroll_cube")
+    _ensure_db_loaded()
+    clear_session()
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    envelope = answer(item.question)
+    rows = envelope["rows"]
+    digest = hashlib.sha256(
+        json.dumps(
+            rows, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode()
+    ).hexdigest()
+
+    scored = score_envelope(item, envelope)
+    assert scored.outcome == "incorrect"
+    assert len(rows) == 1000
+    assert rows[0] == {"quantity_kg": 1.0, "sku": "SKU-00168"}
+    assert rows[-1] == {"quantity_kg": 20.0, "sku": "SKU-00186"}
+    assert digest == "5837092823105b19163897d7063ecdd7ebe08c536dcdcd3b86a8f63dc106caaa"
