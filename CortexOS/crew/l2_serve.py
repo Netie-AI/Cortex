@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import sqlglot
 import yaml
@@ -68,6 +69,17 @@ def _canonical(sql: str) -> str | None:
         return None
 
 
+def _matches_stored(generated_sql: str, stored_sql: str) -> bool:
+    """Accept only stored SQL, plus the validator's deterministic safety cap."""
+    generated = _canonical(generated_sql)
+    stored = _canonical(stored_sql)
+    return bool(
+        generated
+        and stored
+        and (generated == stored or generated == f"{stored} LIMIT 1000")
+    )
+
+
 def _docs(pack_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     semantic = pack_dir / "semantic"
     metrics = yaml.safe_load((semantic / "metrics.yaml").read_text(encoding="utf-8")) or {}
@@ -95,22 +107,61 @@ def _stored_plan(
         for row in certified_doc.get("certified") or []
         if isinstance(row, dict)
     }
+    ranked_certified_refs = [
+        row for row in ranking.get("certified") or [] if isinstance(row, dict)
+    ]
+    ranked_certified_refs.sort(
+        key=lambda row: -int((row.get("importance") or {}).get("score") or 0)
+    )
     ranked_certified = [
-        certified_by_id.get(str(row.get("id") or ""))
-        for row in ranking.get("certified") or []
-        if isinstance(row, dict)
+        certified_by_id.get(str(row.get("id") or "")) for row in ranked_certified_refs
     ]
     ranked_certified = [row for row in ranked_certified if row]
     if ranked_certified:
-        stored_sql = str(ranked_certified[0].get("sql") or "").strip()
-        if not stored_sql or _canonical(generated_sql) != _canonical(stored_sql):
+        exact = next(
+            (
+                row
+                for row in ranked_certified
+                if _matches_stored(generated_sql, str(row.get("sql") or ""))
+            ),
+            None,
+        )
+        measure = str((query_plan or {}).get("measure") or "").strip()
+        metric = next(
+            (
+                row
+                for row in metrics_doc.get("metrics") or []
+                if isinstance(row, dict) and str(row.get("id") or "") == measure
+            ),
+            None,
+        )
+        measure_columns = {
+            str(item).strip().lower()
+            for item in (metric or {}).get("result_columns") or []
+            if str(item).strip()
+        }
+        planned = next(
+            (
+                row
+                for row in ranked_certified
+                if (
+                    (shape := _shape(str(row.get("sql") or ""))) is not None
+                    and measure_columns
+                    and measure_columns <= shape[0]
+                )
+            ),
+            ranked_certified[0],
+        )
+        selected = exact or planned
+        stored_sql = str(selected.get("sql") or "").strip()
+        if exact is None or not stored_sql:
             return None, None, None, (
-                f"certified_measure_not_used:{ranked_certified[0].get('id')}"
+                f"certified_measure_not_used:{selected.get('id')}"
             )
         shape = _shape(stored_sql)
         if shape is None:
             return None, None, None, "stored certified query has no provable shape"
-        return stored_sql, shape[0], shape[1], f"certified:{ranked_certified[0].get('id')}"
+        return stored_sql, shape[0], shape[1], f"certified:{selected.get('id')}"
 
     metrics_by_id = {
         str(row.get("id") or ""): row

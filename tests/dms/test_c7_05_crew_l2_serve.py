@@ -177,7 +177,10 @@ async def test_parent_wrong_value_now_serves_gated_value_and_real_stamp(
         query_plan={"measure": "sku_count", "group_by": [], "filters": []},
     )
 
-    assert calls == ["manifest_check", "explain", "plausibility"]
+    assert calls == ["manifest_check", "explain", "plausibility"], (
+        body["answer"],
+        (body.get("generative") or {}).get("sql"),
+    )
     assert body["values"] == [{"sku_count": 4}]
     assert body["status"] == "CERTIFIED"
     assert body["layer"] == "generated"
@@ -210,7 +213,7 @@ async def test_wrong_columns_abstain_at_named_plan_shape(monkeypatch) -> None:
     )
     assert body["status"] == "ABSTAIN"
     assert body["values"] == []
-    assert body["answer_step"] == "plan_shape"
+    assert body["answer_step"] == "plan_shape", body["answer"]
     assert "expected columns=['sku_count']" in body["answer"]
 
 

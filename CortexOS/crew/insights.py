@@ -1518,7 +1518,7 @@ async def _run_insights(
 
     l2 = l2_serve.serve_on_miss(
         intent=text, generated=gen, ranking=ranking, bridge=bridge,
-        query_plan=query_plan, pack_dir=Path(pack_dir) if pack_dir else pack_dir_for(),
+        query_plan=query_plan, pack_dir=_pack_dir(pack_dir),
     )
     if l2 is not None:
         return _attach_generative(l2, gen)
