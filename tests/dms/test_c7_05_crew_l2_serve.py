@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
 from cortex_contract.execution import Manifest
 
 from CortexOS.crew import insights
+from CortexOS.execution import warehouse
 from CortexOS.execution.manifest import VerifiedManifest
 from CortexOS.execution.pool import PoolConfig, reset_read_pool_for_tests
 from CortexOS.execution.session_manifests import (
@@ -20,6 +22,11 @@ from CortexOS.execution.session_manifests import (
 
 SESSION = "c7-05-l2-serve"
 SQL = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+PHASE1B_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "c7_05_phase1b_l2_cases.json"
+)
+PHASE1B = json.loads(PHASE1B_FIXTURE.read_text(encoding="utf-8"))
+PHASE1B_CASES = PHASE1B["cases"]
 
 
 class _MissBridge:
@@ -57,7 +64,13 @@ def _bind() -> None:
                 pool_id="default",
                 issuer_key_id="int-1",
                 allowed_paths=["/data/pool/acme/**"],
-                row_predicates={"inventory": "1=1"},
+                row_predicates={
+                    "inventory": "1=1",
+                    "locations": "1=1",
+                    "shipments": "1=1",
+                    "suppliers": "1=1",
+                    "transactions": "1=1",
+                },
                 issued_at=now.isoformat(),
                 expires_at=(now + timedelta(minutes=5)).isoformat(),
                 signature="not-checked-here",
@@ -113,6 +126,82 @@ def _clean_registry():
     reset_session_registry_for_tests()
     yield
     reset_session_registry_for_tests()
+
+
+@pytest.fixture(scope="module")
+def phase1b_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the checked-in minimal fixture; absence or malformed SQL must fail."""
+    assert len(PHASE1B_CASES) == 15
+    assert all(row["sql_origin"] == "hand-written, same shape" for row in PHASE1B_CASES)
+    path = tmp_path_factory.mktemp("c7-05-phase1b") / "phase1b.duckdb"
+    con = warehouse.get_connection(path)
+    try:
+        for statement in PHASE1B["setup_sql"]:
+            con.execute(statement)
+    finally:
+        con.close()
+    return path
+
+
+def _row_multiset(rows: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
+        for row in rows
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    PHASE1B_CASES,
+    ids=[row["id"] for row in PHASE1B_CASES],
+)
+async def test_phase1b_wrong_shape_replays_reach_real_l2_and_never_serve_wrong(
+    monkeypatch: pytest.MonkeyPatch,
+    phase1b_db: Path,
+    case: dict[str, Any],
+) -> None:
+    """Replay all published Phase 1b stand-in shapes through the real miss path."""
+    from CortexOS.crew import l2_serve
+    from CortexOS.execution import submit
+
+    _armed(monkeypatch)
+    _bind()
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    monkeypatch.setattr(submit, "DEFAULT_DB", phase1b_db)
+
+    calls = 0
+    real_serve = l2_serve.serve_on_miss
+
+    def counted_serve(**kwargs: Any) -> dict[str, Any] | None:
+        nonlocal calls
+        calls += 1
+        return real_serve(**kwargs)
+
+    monkeypatch.setattr(l2_serve, "serve_on_miss", counted_serve)
+    body = await insights.run_insights(
+        case["question"],
+        bridge=_MissBridge(),
+        ask=True,
+        generate=True,
+        complete=_complete(case["sql"]),
+    )
+
+    assert calls == 1, "the real L2 miss call must run; a badge is not proof"
+    assert body["answer_step"] == case["answer_step"], body["answer"]
+    if body["status"] == "ABSTAIN":
+        assert body["values"] == []
+        assert body["answer_step"] in {
+            "manifest_check",
+            "explain",
+            "plausibility",
+            "plan_shape",
+        }
+    else:
+        assert body["status"] == "CERTIFIED"
+        assert body["layer"] == "generated"
+        assert body["badge"] == "L2_VALIDATED"
+        assert _row_multiset(body["values"]) == _row_multiset(case["oracle"])
 
 
 @pytest.mark.asyncio
