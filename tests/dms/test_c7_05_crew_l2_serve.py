@@ -132,6 +132,9 @@ def _clean_registry():
 def phase1b_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Build the checked-in minimal fixture; absence or malformed SQL must fail."""
     assert len(PHASE1B_CASES) == 15
+    assert PHASE1B["source"]["evidence_scope"].startswith(
+        "test-only, writer-authored UNIT evidence"
+    )
     assert all(row["sql_origin"] == "hand-written, same shape" for row in PHASE1B_CASES)
     path = tmp_path_factory.mktemp("c7-05-phase1b") / "phase1b.duckdb"
     con = warehouse.get_connection(path)

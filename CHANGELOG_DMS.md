@@ -15,6 +15,12 @@ The frozen real-Insights harness has 0 #104-scope wrong answers with the
 flag on or off. Real shadow traffic is still absent, so G-sh is not met.
 The unchanged L0/L1 Workday misroute predates this branch and is tracked
 separately in Cortex #288.
+Fifteen checked-in Phase 1b question-shape stand-ins now replay
+hand-written same-shape SQL through the real miss path and a minimal
+DuckDB fixture. Every head case counts one L2 call and either matches its
+oracle multiset or names a gated abstention. Parent `279cbd85` instead
+abstains all 15 at `ask`; it does not reproduce the external DMS report's
+old wrong values, so that historical-parent evidence remains unmet.
 
 ## CORTEX-276 SERVED-PASSTHROUGH — 2026-10-01
 

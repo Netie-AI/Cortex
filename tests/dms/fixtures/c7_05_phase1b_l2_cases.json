@@ -1,5 +1,6 @@
 {
   "source": {
+    "evidence_scope": "test-only, writer-authored UNIT evidence that L2 fires and gates correctly; not C7-04 G-* or WRONG evidence and not part of the C7-04 corpus",
     "questions": "Netie-AI/dms tests/fixtures/curated_ceo/questions.yaml at 3f0353a6",
     "phase1b_report": "https://github.com/Netie-AI/dms/issues/299#issuecomment-5933137681",
     "note": "The report records 15/52 ORACLE_WRONG but does not publish attempt SQL or the 15 IDs. Each checked-in row is therefore a curated question-shape stand-in and its SQL is hand-written, same shape, using the corresponding Cortex certified query."
