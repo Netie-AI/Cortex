@@ -2,6 +2,16 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
+
+Crew Insights now serves generated SQL on an L0/L1 miss only when
+`DMS_L2_ENABLED=1`. The new isolated gate resolves the bound manifest,
+uses the existing manifest -> EXPLAIN execution seam, runs plausibility,
+and checks output columns and grain against the ontology plan before
+stamping `L2_VALIDATED`. Certified SQL must match its stored query.
+Gate failures are named abstentions; served provenance copies the model
+call's real RouteStamp. The flag remains off by default.
+
 ## CORTEX-276 SERVED-PASSTHROUGH — 2026-10-01
 
 Cortex #276. `POST /v1/insights` was calling `stamp_router_fingerprint`

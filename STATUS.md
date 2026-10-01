@@ -12,6 +12,14 @@
 > edit arming, `complete()`, the store, or the guard banned sets. Not
 > PASS. Not COMPLETE. Did not close #276. Off freeze #4/#41-#44.
 
+> **2026-10-01 (CORTEX-104 C7-05):** Flag-off Crew Insights is unchanged.
+> With `DMS_L2_ENABLED=1`, an L0/L1 miss may serve generated SQL only
+> after the bound manifest, EXPLAIN, plausibility, and deterministic
+> plan-shape gates. Certified queries must match stored SQL. Every L2
+> result names its answering or abstaining step and keeps the generating
+> model call's RouteStamp. Numeric gates remain to be measured; no PASS
+> or COMPLETE claim and #104 stays open.
+
 > **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
 > Arming accepts an OpenVault-reported local spendable hop. RouteStamp
 > `served_provider` / `served_model` / `served_local` come from the
