@@ -221,9 +221,28 @@ def test_l2_defaults_off_and_no_checked_in_setting_enables_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from CortexOS.crew import l2_serve
+    from CortexOS.dms import answer_engine, l2_generation
 
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
     assert l2_serve.enabled() is False
+    assert l2_generation._env_on("DMS_L2_ENABLED") is False
+    assert l2_generation.attempt_l2("default-off direct check") is None
+
+    calls: list[dict[str, Any]] = []
+    real_attempt = l2_generation.attempt_l2
+
+    def observed_attempt(question: str, **kwargs: Any) -> Any:
+        calls.append(dict(kwargs))
+        return real_attempt(question, **kwargs)
+
+    monkeypatch.setattr(l2_generation, "attempt_l2", observed_attempt)
+    answer = answer_engine.answer(
+        "Correlate supplier ESG scores with weather anomalies",
+        session_id="c7-05-answer-engine-default-off",
+    )
+    assert calls == [{"verified": None, "promote": False}]
+    assert answer.get("layer") != "generated"
+    assert answer.get("badge") != "L2_VALIDATED"
 
     assignment = re.compile(
         r"""^\s*(?:-\s*)?(?:export\s+)?["']?DMS_L2_ENABLED["']?\s*"""
