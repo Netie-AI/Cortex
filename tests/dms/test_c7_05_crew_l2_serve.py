@@ -307,6 +307,11 @@ async def _score_insights_heldout(
     _ensure_db_loaded()
     _armed(monkeypatch)
     _bind()
+    # Keep the fingerprint's path environmental field identical across the
+    # detached parent worktree and this checkout for byte-for-byte comparison.
+    monkeypatch.setenv(
+        "CORTEX_FREEROUTE_SCOREBOARD", "/tmp/c7-05-fixed-routes.db"
+    )
     monkeypatch.setenv("DMS_L2_ENABLED", "1" if enable_l2 else "0")
     clear_session()
 
@@ -351,6 +356,10 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
 
     assert off["l2_named_steps"] == 0
     assert on["l2_named_steps"] > 0
+    assert (
+        off["envelopes_sha256"]
+        == "f5b041bd6df0ef16852d9175a8a4567713f48b48579903a261f04f25d434d845"
+    )
     assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["answer_step"] == "plan_shape"
