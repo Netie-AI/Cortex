@@ -1,5 +1,16 @@
 # STATUS.md
-**Last updated:** 2026-09-25 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#272 LOCAL-1 local not proven**; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+**Last updated:** 2026-10-01 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#276 SERVED-PASSTHROUGH draft**; **#272 LOCAL-1 local not proven**; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+
+> **2026-10-01 (CORTEX-276 SERVED-PASSTHROUGH):** `stamp_api` now passes
+> the RouteStamp of the `freeroute.complete()` call whose SQL was served
+> into `stamp_router_fingerprint`. `model_called` is true only when that
+> call ran. Ranking with no model call: `model_called=false`, `served_*`
+> empty, reason `no model called`. Model answer: vault `served_*`
+> unchanged. Model called but ranking or abstain answered:
+> `model_called=true`, `served_*` empty, reason names the call.
+> `plan_source` unchanged. Empty-stamp fingerprint unchanged. Did not
+> edit arming, `complete()`, the store, or the guard banned sets. Not
+> PASS. Not COMPLETE. Did not close #276. Off freeze #4/#41-#44.
 
 > **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
 > Arming accepts an OpenVault-reported local spendable hop. RouteStamp

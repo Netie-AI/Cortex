@@ -2,6 +2,22 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-276 SERVED-PASSTHROUGH — 2026-10-01
+
+Cortex #276. `POST /v1/insights` was calling `stamp_router_fingerprint`
+with no RouteStamp, so `router_fingerprint(None)` wrote null/false and
+`SERVED_PENDING_272` over the vault stamp already on the envelope.
+`run_insights` now records whether `freeroute.complete()` ran
+(`model_called`). `stamp_api` passes the RouteStamp of the call whose
+SQL was served. Ranking with no model call keeps `served_*` empty and
+`served_reason` `no model called`. A model call whose SQL was not the
+answer (ranking or abstain served) keeps `served_*` empty and names
+that call. Missing vault fields stay null. `served_local` stays true
+only for JSON boolean true. `plan_source` is unchanged. `router_fingerprint(None)` still returns
+`SERVED_PENDING_272`. `router_fingerprint` and `stamp_router_fingerprint`
+already copy a RouteStamp, so this change does not edit `freeroute.py`.
+Did not close #276. Not COMPLETE. Off freeze #4/#41-#44.
+
 ## CORTEX-272 LOCAL-1 served_* + local hop arming + LOCAL_ONLY — 2026-09-25
 
 Cortex #272 LOCAL-1 (FreeRoute region only). `arming()` may accept an

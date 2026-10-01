@@ -25,6 +25,8 @@ STATUSES = ("CERTIFIED", "ABSTAIN", "REFUSE")
 STABLE_ASK = "POST /v1/insights"
 AIRGPT_ALIAS = "POST /dms/sidecar/insights"
 CREW_ALIAS = "POST /crew/insights"
+# Ranking/certified with no freeroute.complete() call. Not SERVED_PENDING_272.
+NO_MODEL_CALLED = "no model called"
 
 
 class InsightsAskIn(BaseModel):
@@ -60,16 +62,64 @@ def _caller_refused(purpose: str) -> JSONResponse:
     return JSONResponse(body, status_code=401)
 
 
+def _unserved_model_reason(gen: dict[str, Any]) -> str:
+    """Name the complete() call whose SQL was not served. No provider guess."""
+    stamp = gen.get("stamp") if isinstance(gen.get("stamp"), dict) else {}
+    task = str(stamp.get("task") or "freeroute").strip() or "freeroute"
+    call_id = str(stamp.get("call_id") or "unknown").strip() or "unknown"
+    if gen.get("ok"):
+        return f"model call rejected ({task} {call_id}): ranking or abstain answered"
+    detail = str(gen.get("refuse_reason") or stamp.get("error") or "failed").strip() or "failed"
+    return f"model call failed ({task} {call_id}): {detail}"
+
+
+def _empty_served_stamp(reason: str) -> Any:
+    from CortexOS.integrations import freeroute as core
+
+    return core.RouteStamp(
+        call_id="unserved",
+        task="insights",
+        requested="",
+        served_provider=None,
+        served_model=None,
+        served_local=False,
+        served_reason=reason,
+    )
+
+
 def stamp_api(
     envelope: dict[str, Any],
     *,
     consumer: str = "dms",
     alias: str | None = None,
 ) -> dict[str, Any]:
+    """Stamp served_* from the call whose SQL was served, then the API block.
+
+    model_called is true only when this ask invoked freeroute.complete().
+    served_* copy that call's RouteStamp when its SQL was the answer.
+    A ranking answer with no model call stays empty and says no model was called.
+    A model call whose SQL was not served stays empty and names that call.
+    Never filled from the requested model, the pin, or route.model.
+    """
+    from CortexOS.crew import insights as insights_mod
     from CortexOS.integrations import freeroute as core
 
     out = dict(envelope)
-    core.stamp_router_fingerprint(out)
+    model_called = out.get("model_called") is True
+    sql_served = out.get("plan_source") == insights_mod.PLAN_SOURCE_ONTOLOGY
+    gen = out.get("generative") if isinstance(out.get("generative"), dict) else {}
+    served_stamp = None
+    if model_called and sql_served:
+        served_stamp = insights_mod._route_stamp_for_fingerprint(out, gen or None)
+    if served_stamp is not None:
+        core.stamp_router_fingerprint(out, served_stamp)
+    elif model_called:
+        core.stamp_router_fingerprint(out, _empty_served_stamp(_unserved_model_reason(gen)))
+    elif str(out.get("status") or "") == "CERTIFIED":
+        core.stamp_router_fingerprint(out, _empty_served_stamp(NO_MODEL_CALLED))
+    else:
+        core.stamp_router_fingerprint(out)
+    out["model_called"] = model_called
     out["api"] = {
         "stable": STABLE_ASK,
         "alias": alias,
