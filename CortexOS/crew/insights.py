@@ -17,6 +17,7 @@ Keys stay on the OpenVault-armed Crew engine bridge. No second vault.
 
 from __future__ import annotations
 
+import contextvars
 import re
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,11 @@ from CortexOS.crew.config import BACKEND_CF_COMPUTER
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
+
+# Calls to freeroute.complete() during run_insights. None outside that call.
+_model_calls: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "insights_model_calls", default=None
+)
 
 LAW = (
     "Intent then ontology (where to get data + which data is more important) "
@@ -1155,6 +1161,11 @@ def stamp_plan_source(
         envelope.pop("query_sql", None)
     if isinstance(attached, dict):
         attached["plan_source"] = source
+    calls = _model_calls.get()
+    if calls is not None:
+        # True exactly when this ask invoked freeroute.complete(), even if the
+        # SQL was not the answer. Direct stamp_plan_source callers leave it unset.
+        envelope["model_called"] = bool(calls)
     from CortexOS.integrations import freeroute as core
 
     return core.stamp_router_fingerprint(envelope, _route_stamp_for_fingerprint(envelope, gen))
@@ -1241,6 +1252,36 @@ async def run_insights(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Count freeroute.complete() calls, then run the ontology / ask / generate spine."""
+    token = _model_calls.set([])
+    try:
+        return await _run_insights(
+            intent,
+            bridge=bridge,
+            ask=ask,
+            generate=generate,
+            complete=complete,
+            shell_public=shell_public,
+            pack_dir=pack_dir,
+            bearer=bearer,
+            query_plan=query_plan,
+        )
+    finally:
+        _model_calls.reset(token)
+
+
+async def _run_insights(
+    intent: str,
+    *,
+    bridge: EngineBridge,
+    ask: bool = True,
+    generate: bool = False,
+    complete: Any | None = None,
+    shell_public: dict[str, Any] | None = None,
+    pack_dir: Path | str | None = None,
+    bearer: str | None = None,
+    query_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
 
     ``bearer`` only matters with ``generate``: an HTTP caller's own OpenVault
@@ -1278,8 +1319,29 @@ async def run_insights(
                 reason="no ontology path or metric for intent",
                 shell_public=shell_public,
             )
+
+        async def _tracked_complete(
+            messages: list[dict[str, Any]] | None = None,
+            *,
+            purpose: str = "",
+            prompt: str = "",
+            **kwargs: Any,
+        ) -> Any:
+            from CortexOS.crew import freeroute as fr
+
+            fn = complete or fr.complete
+            out = await fn(messages, purpose=purpose, prompt=prompt, **kwargs)
+            bucket = _model_calls.get()
+            if bucket is not None and isinstance(out, dict):
+                bucket.append(out)
+            return out
+
         gen = await generative_ask(
-            text, ranking, complete=complete, bearer=bearer, query_plan=query_plan
+            text,
+            ranking,
+            complete=_tracked_complete,
+            bearer=bearer,
+            query_plan=query_plan,
         )
         if not gen.get("ok"):
             return _attach_generative(
