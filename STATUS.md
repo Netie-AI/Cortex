@@ -12,13 +12,15 @@
 > edit arming, `complete()`, the store, or the guard banned sets. Not
 > PASS. Not COMPLETE. Did not close #276. Off freeze #4/#41-#44.
 
-> **2026-10-01 (CORTEX-104 C7-05):** Flag-off Crew Insights is unchanged.
-> With `DMS_L2_ENABLED=1`, an L0/L1 miss may serve generated SQL only
-> after the bound manifest, EXPLAIN, plausibility, and deterministic
-> plan-shape gates. Certified queries must match stored SQL. Every L2
-> result names its answering or abstaining step and keeps the generating
-> model call's RouteStamp. Numeric gates remain to be measured; no PASS
-> or COMPLETE claim and #104 stays open.
+> **2026-10-01 (CORTEX-104 C7-05):** Flag-off Crew Insights matches parent
+> byte-for-byte after normalizing the checkout-root fingerprint path. With
+> `DMS_L2_ENABLED=1`, generated SQL reaches the bound manifest, EXPLAIN,
+> plausibility, and deterministic plan-shape gates before `L2_VALIDATED`.
+> The real-Insights frozen scorer has G-abs 12/12, G-err 0/28, and G-env 0
+> with the flag on and off; G-man is 229 passed on the same commit. G-sh is
+> NOT MET: no real shadow traffic exists. The direct C7-04 scorer's Workday
+> WRONG=1 is byte-identical on parent and head and is tracked in #288. No COMPLETE
+> claim; #104 stays open.
 
 > **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
 > Arming accepts an OpenVault-reported local spendable hop. RouteStamp

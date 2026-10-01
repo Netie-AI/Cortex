@@ -11,6 +11,10 @@ and checks output columns and grain against the ontology plan before
 stamping `L2_VALIDATED`. Certified SQL must match its stored query.
 Gate failures are named abstentions; served provenance copies the model
 call's real RouteStamp. The flag remains off by default.
+The frozen real-Insights harness has 0 #104-scope wrong answers with the
+flag on or off. Real shadow traffic is still absent, so G-sh is not met.
+The unchanged L0/L1 Workday misroute predates this branch and is tracked
+separately in Cortex #288.
 
 ## CORTEX-276 SERVED-PASSTHROUGH — 2026-10-01
 
