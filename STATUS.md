@@ -12,6 +12,23 @@
 > edit arming, `complete()`, the store, or the guard banned sets. Not
 > PASS. Not COMPLETE. Did not close #276. Off freeze #4/#41-#44.
 
+> **2026-10-01 (CORTEX-104 C7-05):** Flag-off Crew Insights matches parent
+> byte-for-byte after normalizing the checkout-root fingerprint path. With
+> `DMS_L2_ENABLED=1`, generated SQL reaches the bound manifest, EXPLAIN,
+> plausibility, and deterministic plan-shape gates before `L2_VALIDATED`.
+> The real-Insights frozen scorer has G-abs 12/12, G-err 0/28, and G-env 0
+> with the flag on and off; G-man is 229 passed on the same commit. G-sh is
+> NOT MET: no real shadow traffic exists. The direct C7-04 scorer's Workday
+> WRONG=1 is byte-identical on parent and head and is tracked in #288. No COMPLETE
+> claim; #104 stays open. The checked-in Phase 1b gate has 15 no-skip
+> real-path cases: every head case counts one L2 call and either matches
+> its oracle multiset or names a gated abstention. The source report did
+> not publish its 15 IDs or SQL, so these are explicitly labeled
+> hand-written same-shape stand-ins. Parent `279cbd85` abstains all 15 at
+> `ask`; all 15 copied tests fail there because no L2 call is counted.
+> This is unit evidence only and does not replay or count the external
+> report's wrong values; route not recorded in the dms#231 trace.
+
 > **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
 > Arming accepts an OpenVault-reported local spendable hop. RouteStamp
 > `served_provider` / `served_model` / `served_local` come from the

@@ -1,0 +1,157 @@
+{
+  "source": {
+    "evidence_scope": "test-only, writer-authored UNIT evidence that L2 fires and gates correctly; not C7-04 G-* or WRONG evidence and not part of the C7-04 corpus",
+    "questions": "Netie-AI/dms tests/fixtures/curated_ceo/questions.yaml at 3f0353a6",
+    "phase1b_report": "https://github.com/Netie-AI/dms/issues/299#issuecomment-5933137681",
+    "note": "The report records 15/52 ORACLE_WRONG but does not publish attempt SQL or the 15 IDs. Each checked-in row is therefore a curated question-shape stand-in and its SQL is hand-written, same shape, using the corresponding Cortex certified query."
+  },
+  "setup_sql": [
+    "CREATE TABLE locations (location_id VARCHAR, location_code VARCHAR, capacity_kg DOUBLE, current_load_kg DOUBLE, is_cold_storage BOOLEAN, cctv_camera_id VARCHAR)",
+    "INSERT INTO locations VALUES ('L1', 'WH-A', 100.0, 95.0, true, 'CAM-A'), ('L2', 'WH-B', 200.0, 100.0, false, 'CAM-B')",
+    "CREATE TABLE suppliers (supplier_id VARCHAR, country VARCHAR, risk_score DOUBLE, lead_time_days INTEGER)",
+    "INSERT INTO suppliers VALUES ('S1', 'MY', 0.9, 30), ('S2', 'SG', 0.2, 10)",
+    "CREATE TABLE inventory (sku VARCHAR, category VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE, supplier_id VARCHAR, location_id VARCHAR, reorder_level_kg DOUBLE, expiry_date DATE)",
+    "INSERT INTO inventory VALUES ('SKU-A', 'CHEMICALS', 5.0, 2.0, 'S1', 'L1', 10.0, DATE '2020-01-01'), ('SKU-B', 'FOOD', 20.0, 3.0, 'S2', 'L2', 10.0, DATE '2099-01-01')",
+    "CREATE TABLE transactions (sku VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE, txn_type VARCHAR)",
+    "INSERT INTO transactions VALUES ('SKU-A', 2.0, 2.0, 'OUT'), ('SKU-B', 4.0, 3.0, 'OUT')",
+    "CREATE TABLE shipments (shipment_id VARCHAR, destination_location_id VARCHAR, cost_myr DOUBLE)",
+    "INSERT INTO shipments VALUES ('SH-1', 'L1', 25.0)"
+  ],
+  "cases": [
+    {
+      "id": "cq_spend_by_country",
+      "question": "What is our total spend by supplier country?",
+      "stands_in_for": "curated Phase 1b spend-by-country question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT s.country, SUM(i.quantity_kg * i.unit_cost_myr) AS total_spend_myr FROM inventory i JOIN suppliers s ON i.supplier_id = s.supplier_id GROUP BY s.country",
+      "answer_step": "plausibility",
+      "oracle": [{"country": "MY", "total_spend_myr": 10.0}, {"country": "SG", "total_spend_myr": 60.0}]
+    },
+    {
+      "id": "cq_stock_value_by_category",
+      "question": "What is total stock value by category?",
+      "stands_in_for": "curated Phase 1b stock-value-by-category question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT category, SUM(quantity_kg * unit_cost_myr) AS total_value_myr FROM inventory GROUP BY category",
+      "answer_step": "plausibility",
+      "oracle": [{"category": "CHEMICALS", "total_value_myr": 10.0}, {"category": "FOOD", "total_value_myr": 60.0}]
+    },
+    {
+      "id": "cq_sales_top5_value",
+      "question": "Top 5 selling SKUs by revenue",
+      "stands_in_for": "curated Phase 1b top-sales-value question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr FROM transactions WHERE txn_type = 'OUT' GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"sku": "SKU-B", "sales_value_myr": 12.0}, {"sku": "SKU-A", "sales_value_myr": 4.0}]
+    },
+    {
+      "id": "cq_sku_count",
+      "question": "How many SKUs do we have in inventory?",
+      "stands_in_for": "curated Phase 1b SKU-count question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"sku_count": 2}]
+    },
+    {
+      "id": "cq_capacity_utilisation",
+      "question": "Show warehouse capacity utilisation",
+      "stands_in_for": "curated Phase 1b capacity-utilisation question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT location_code, ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used FROM locations",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"location_code": "WH-A", "pct_used": 95.0}, {"location_code": "WH-B", "pct_used": 50.0}]
+    },
+    {
+      "id": "cq_sales_top3_volume",
+      "question": "Top 3 SKUs by quantity sold",
+      "stands_in_for": "curated Phase 1b top-sales-volume question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT sku, SUM(quantity_kg) AS total_sold_kg FROM transactions WHERE txn_type = 'OUT' GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"sku": "SKU-B", "total_sold_kg": 4.0}, {"sku": "SKU-A", "total_sold_kg": 2.0}]
+    },
+    {
+      "id": "cq_sku_count_by_category",
+      "question": "Show SKU count by category",
+      "stands_in_for": "curated Phase 1b category-count question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT category, COUNT(*) AS sku_count FROM inventory GROUP BY category",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"category": "CHEMICALS", "sku_count": 1}, {"category": "FOOD", "sku_count": 1}]
+    },
+    {
+      "id": "cq_low_stock_wh_a",
+      "question": "Which SKUs are below reorder level in warehouse A?",
+      "stands_in_for": "curated Phase 1b low-stock question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT i.sku, i.quantity_kg FROM inventory i JOIN locations l ON i.location_id = l.location_id WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0 AND l.location_code = 'WH-A' ORDER BY i.quantity_kg ASC",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"sku": "SKU-A", "quantity_kg": 5.0}]
+    },
+    {
+      "id": "ops_shipment_cost",
+      "question": "Show shipment cost by destination",
+      "stands_in_for": "curated Phase 1b shipment-cost question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT l.location_code, SUM(s.cost_myr) AS total_cost_myr FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id GROUP BY l.location_code",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"location_code": "WH-A", "total_cost_myr": 25.0}]
+    },
+    {
+      "id": "cq_cold_storage",
+      "question": "Which locations are cold storage?",
+      "stands_in_for": "curated Phase 1b cold-storage question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT location_code FROM locations WHERE is_cold_storage = true",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"location_code": "WH-A"}]
+    },
+    {
+      "id": "cq_capacity_above_90",
+      "question": "Which locations are above 90 percent capacity?",
+      "stands_in_for": "curated Phase 1b capacity-threshold question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT location_code FROM locations WHERE 100.0 * current_load_kg / capacity_kg > 90",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"location_code": "WH-A"}]
+    },
+    {
+      "id": "cq_expired_items",
+      "question": "Which items are expired?",
+      "stands_in_for": "curated Phase 1b expired-items question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT sku FROM inventory WHERE expiry_date IS NOT NULL AND CAST(expiry_date AS DATE) < CURRENT_DATE",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"sku": "SKU-A"}]
+    },
+    {
+      "id": "cq_chemicals_list",
+      "question": "List chemicals in inventory",
+      "stands_in_for": "curated Phase 1b chemicals-list question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT sku FROM inventory WHERE category = 'CHEMICALS' ORDER BY sku",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"sku": "SKU-A"}]
+    },
+    {
+      "id": "cq_supplier_ranking",
+      "question": "Rank suppliers by combined risk and lead time score",
+      "stands_in_for": "curated Phase 1b supplier-ranking question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT supplier_id, ROUND((risk_score * 0.65) + ((lead_time_days / 60.0) * 0.35), 3) AS ranking_score FROM suppliers ORDER BY ranking_score DESC, risk_score DESC, lead_time_days DESC LIMIT 10",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"supplier_id": "S1", "ranking_score": 0.76}, {"supplier_id": "S2", "ranking_score": 0.188}]
+    },
+    {
+      "id": "cq_cctv_wh_a",
+      "question": "Show the CCTV camera for warehouse A",
+      "stands_in_for": "curated Phase 1b CCTV question shape",
+      "sql_origin": "hand-written, same shape",
+      "sql": "SELECT location_code, cctv_camera_id FROM locations WHERE location_code = 'WH-A'",
+      "answer_step": "l2_plausibility",
+      "oracle": [{"location_code": "WH-A", "cctv_camera_id": "CAM-A"}]
+    }
+  ]
+}
