@@ -239,3 +239,45 @@ async def test_certified_measure_mismatch_abstains_before_execute(monkeypatch) -
     assert body["status"] == "ABSTAIN"
     assert body["answer_step"] == "l2_plan"
     assert "certified_measure_not_used:cq_sku_count" in body["answer"]
+
+
+@pytest.mark.asyncio
+async def test_missing_real_route_stamp_abstains_by_name(monkeypatch) -> None:
+    _armed(monkeypatch)
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+
+    async def no_stamp(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        del messages, purpose, prompt, kwargs
+        return {"ok": True, "text": SQL}
+
+    body = await insights.run_insights(
+        "how many skus",
+        bridge=_MissBridge(),
+        ask=True,
+        generate=True,
+        complete=no_stamp,
+        query_plan={"measure": "sku_count", "group_by": [], "filters": []},
+    )
+    assert body["status"] == "ABSTAIN"
+    assert body["values"] == []
+    assert body["answer_step"] == "route_stamp"
+    assert body["model_called"] is True
+    assert "RouteStamp call_id" in body["answer"]
+
+
+@pytest.mark.asyncio
+async def test_unbound_manifest_abstains_by_name(monkeypatch) -> None:
+    _armed(monkeypatch)
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    body = await insights.run_insights(
+        "how many skus",
+        bridge=_MissBridge(),
+        ask=True,
+        generate=True,
+        complete=_complete(),
+        query_plan={"measure": "sku_count", "group_by": [], "filters": []},
+    )
+    assert body["status"] == "ABSTAIN"
+    assert body["values"] == []
+    assert body["answer_step"] == "manifest_check"
+    assert "SessionUnbound" in body["answer"]

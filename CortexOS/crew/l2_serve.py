@@ -102,6 +102,18 @@ def _stored_plan(
     except (OSError, ValueError, yaml.YAMLError) as exc:
         return None, None, None, f"plan unreadable: {type(exc).__name__}"
 
+    metrics_by_id = {
+        str(row.get("id") or ""): row
+        for row in metrics_doc.get("metrics") or []
+        if isinstance(row, dict)
+    }
+    measure = str((query_plan or {}).get("measure") or "").strip()
+    metric = metrics_by_id.get(measure)
+    measure_columns = {
+        str(item).strip().lower()
+        for item in (metric or {}).get("result_columns") or []
+        if str(item).strip()
+    }
     certified_by_id = {
         str(row.get("id") or ""): row
         for row in certified_doc.get("certified") or []
@@ -117,42 +129,25 @@ def _stored_plan(
         certified_by_id.get(str(row.get("id") or "")) for row in ranked_certified_refs
     ]
     ranked_certified = [row for row in ranked_certified if row]
-    if ranked_certified:
-        exact = next(
-            (
-                row
-                for row in ranked_certified
-                if _matches_stored(generated_sql, str(row.get("sql") or ""))
-            ),
-            None,
+    exact = next(
+        (
+            row
+            for row in ranked_certified
+            if _matches_stored(generated_sql, str(row.get("sql") or ""))
+        ),
+        None,
+    )
+    planned = [
+        row
+        for row in ranked_certified
+        if (
+            (shape := _shape(str(row.get("sql") or ""))) is not None
+            and measure_columns
+            and measure_columns <= shape[0]
         )
-        measure = str((query_plan or {}).get("measure") or "").strip()
-        metric = next(
-            (
-                row
-                for row in metrics_doc.get("metrics") or []
-                if isinstance(row, dict) and str(row.get("id") or "") == measure
-            ),
-            None,
-        )
-        measure_columns = {
-            str(item).strip().lower()
-            for item in (metric or {}).get("result_columns") or []
-            if str(item).strip()
-        }
-        planned = next(
-            (
-                row
-                for row in ranked_certified
-                if (
-                    (shape := _shape(str(row.get("sql") or ""))) is not None
-                    and measure_columns
-                    and measure_columns <= shape[0]
-                )
-            ),
-            ranked_certified[0],
-        )
-        selected = exact or planned
+    ]
+    if exact is not None or planned:
+        selected = exact or planned[0]
         stored_sql = str(selected.get("sql") or "").strip()
         if exact is None or not stored_sql:
             return None, None, None, (
@@ -163,18 +158,11 @@ def _stored_plan(
             return None, None, None, "stored certified query has no provable shape"
         return stored_sql, shape[0], shape[1], f"certified:{selected.get('id')}"
 
-    metrics_by_id = {
-        str(row.get("id") or ""): row
-        for row in metrics_doc.get("metrics") or []
-        if isinstance(row, dict)
-    }
-    measure = str((query_plan or {}).get("measure") or "").strip()
     ranked_ids = [
         str(row.get("id") or "")
         for row in ranking.get("metrics") or []
         if isinstance(row, dict)
     ]
-    metric = metrics_by_id.get(measure)
     if metric is None:
         metric = next((metrics_by_id[mid] for mid in ranked_ids if mid in metrics_by_id), None)
     if metric is None:
@@ -221,12 +209,22 @@ def serve_on_miss(
     if not enabled():
         return None
 
+    stamp = (generated or {}).get("stamp")
     model_called = bool(generated)
+    stamped_call = isinstance(stamp, Mapping) and bool(
+        str(stamp.get("call_id") or "").strip()
+    )
     sql = str((generated or {}).get("sql") or "").strip()
     if not (generated or {}).get("ok") or not sql:
         return _step_abstain(
             "l2_generation",
             str((generated or {}).get("refuse_reason") or "no SQL"),
+            model_called=model_called,
+        )
+    if not stamped_call:
+        return _step_abstain(
+            "route_stamp",
+            "generated SQL has no RouteStamp call_id",
             model_called=model_called,
         )
 
@@ -249,13 +247,24 @@ def serve_on_miss(
         )
 
     try:
+        from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+        from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
         # execute_sql is the ordered security seam: enforce_manifest -> EXPLAIN -> fetch.
         rows, _, _ = execute_sql(verified, executable, explain_gate=True)
-    except Exception as exc:  # noqa: BLE001 - includes manifest and EXPLAIN refusals
-        step = "explain" if "explain" in str(exc).lower() else "manifest_check"
-        return _step_abstain(step, f"{type(exc).__name__}: {exc}", model_called=model_called)
+    except ManifestError as exc:
+        return _step_abstain(
+            "manifest_check", f"{type(exc).__name__}: {exc}", model_called=model_called
+        )
+    except SqlGateAbstain as exc:
+        return _step_abstain(
+            "explain", f"{type(exc).__name__}: {exc}", model_called=model_called
+        )
+    except Exception as exc:  # noqa: BLE001 - execution errors are named abstentions
+        return _step_abstain(
+            "execute", f"{type(exc).__name__}: {exc}", model_called=model_called
+        )
 
     from CortexOS.dms.l2_plausibility import assess_plausibility, sql_table_names
 
@@ -266,9 +275,14 @@ def serve_on_miss(
             if isinstance(row, dict)
         }
     )
-    plausible = assess_plausibility(
-        intent, executable, rows, retrieved_tables=[item for item in retrieved if item]
-    )
+    try:
+        plausible = assess_plausibility(
+            intent, executable, rows, retrieved_tables=[item for item in retrieved if item]
+        )
+    except Exception as exc:  # noqa: BLE001 - a broken gate must fail closed
+        return _step_abstain(
+            "plausibility", f"{type(exc).__name__}: {exc}", model_called=model_called
+        )
     if not plausible.ok:
         return _step_abstain(
             "plausibility", plausible.reason or plausible.code, model_called=model_called
