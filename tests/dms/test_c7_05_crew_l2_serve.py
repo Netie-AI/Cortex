@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
+import re
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 from cortex_contract.execution import Manifest
+from fastapi.testclient import TestClient
 
 from CortexOS.crew import insights
 from CortexOS.execution import warehouse
@@ -165,7 +169,6 @@ async def test_phase1b_wrong_shape_replays_reach_real_l2_and_never_serve_wrong(
     case: dict[str, Any],
 ) -> None:
     """Replay all published Phase 1b stand-in shapes through the real miss path."""
-    from CortexOS.crew import l2_serve
     from CortexOS.execution import submit
 
     _armed(monkeypatch)
@@ -174,14 +177,21 @@ async def test_phase1b_wrong_shape_replays_reach_real_l2_and_never_serve_wrong(
     monkeypatch.setattr(submit, "DEFAULT_DB", phase1b_db)
 
     calls = 0
-    real_serve = l2_serve.serve_on_miss
+    try:
+        l2_serve = importlib.import_module("CortexOS.crew.l2_serve")
+    except ModuleNotFoundError:
+        # Parent 279cbd85 has no Insights L2 call site. Continue through its
+        # real path so the assertion below fails with calls=0, not ImportError.
+        l2_serve = None
+    if l2_serve is not None:
+        real_serve = l2_serve.serve_on_miss
 
-    def counted_serve(**kwargs: Any) -> dict[str, Any] | None:
-        nonlocal calls
-        calls += 1
-        return real_serve(**kwargs)
+        def counted_serve(**kwargs: Any) -> dict[str, Any] | None:
+            nonlocal calls
+            calls += 1
+            return real_serve(**kwargs)
 
-    monkeypatch.setattr(l2_serve, "serve_on_miss", counted_serve)
+        monkeypatch.setattr(l2_serve, "serve_on_miss", counted_serve)
     body = await insights.run_insights(
         case["question"],
         bridge=_MissBridge(),
@@ -205,6 +215,87 @@ async def test_phase1b_wrong_shape_replays_reach_real_l2_and_never_serve_wrong(
         assert body["layer"] == "generated"
         assert body["badge"] == "L2_VALIDATED"
         assert _row_multiset(body["values"]) == _row_multiset(case["oracle"])
+
+
+def test_l2_defaults_off_and_no_checked_in_setting_enables_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from CortexOS.crew import l2_serve
+
+    monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
+    assert l2_serve.enabled() is False
+
+    assignment = re.compile(
+        r"""^\s*(?:-\s*)?(?:export\s+)?["']?DMS_L2_ENABLED["']?\s*"""
+        r"""(?:=|:)\s*["']?(?:1|true|yes)["']?\s*(?:#.*)?$""",
+        re.IGNORECASE,
+    )
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z"], text=True
+    ).split("\0")
+    enabled_by: list[str] = []
+    for relative in tracked:
+        if not relative:
+            continue
+        path = Path(relative)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if any(assignment.match(line) for line in lines):
+            enabled_by.append(relative)
+    assert enabled_by == [], f"checked-in configuration enables L2: {enabled_by}"
+
+
+def test_flag_unset_http_insights_envelope_matches_parent_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pin the complete POST envelope measured on parent 279cbd85."""
+    from packs.dms.security.rate_limit import reset_limiter
+
+    from CortexOS.crew.engine_bridge import LocalEngineBridge
+
+    async def fake_ask(self, question: str) -> dict[str, Any]:  # noqa: ARG001
+        return {
+            "ok": True,
+            "answer": "There are 12 skus.",
+            "badge": "governed_metric",
+            "layer": "governed_metric",
+            "metric_id": "sku_count",
+            "audit_id": "audit-sku",
+            "row_count": 1,
+            "rows": [{"sku_count": 12}],
+            "sources": ["inventory"],
+            "sql_used": SQL,
+            "truncated": False,
+        }
+
+    monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
+    monkeypatch.setenv("PACK", "dms")
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    monkeypatch.setenv(
+        "CORTEX_FREEROUTE_SCOREBOARD", "/tmp/c7-05-http-flag-off-v1.db"
+    )
+    monkeypatch.setattr(LocalEngineBridge, "ask", fake_ask)
+    reset_limiter(per_minute=240)
+
+    from CortexOS.api.app import create_app
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/v1/insights",
+            json={"intent": "how many skus", "ask": True, "generate": False},
+        )
+    assert response.status_code == 200, response.text
+    raw = json.dumps(
+        response.json(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode()
+    assert (
+        hashlib.sha256(raw).hexdigest()
+        == "378442dd9b839fe7a2be3eb1b40992ef9114a80ad9c81b9d88154345cc59e4db"
+    )
 
 
 @pytest.mark.asyncio
