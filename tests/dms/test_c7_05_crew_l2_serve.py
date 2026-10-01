@@ -252,9 +252,8 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
     tmp_path: Path,
 ) -> None:
     """Pin the complete POST envelope measured on parent 279cbd85."""
-    from packs.dms.security.rate_limit import reset_limiter
-
     from CortexOS.crew.engine_bridge import LocalEngineBridge
+    from packs.dms.security.rate_limit import reset_limiter
 
     async def fake_ask(self, question: str) -> dict[str, Any]:  # noqa: ARG001
         return {
