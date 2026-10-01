@@ -196,7 +196,10 @@ def _served(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_ranking_no_model_call_leaves_served_empty(api, monkeypatch) -> None:
-    """Case a. Ranking certified the number. No freeroute.complete() call."""
+    """Regression guard, not the fail-at-parent proof.
+
+    Ranking certified the number. No freeroute.complete() call.
+    """
     _patch_bridge(monkeypatch, _certified_engine())
     body = _post(api, {"intent": "how many skus", "ask": True, "generate": False})
     assert body["status"] == "CERTIFIED"
@@ -214,8 +217,39 @@ def test_ranking_no_model_call_leaves_served_empty(api, monkeypatch) -> None:
     assert "gpt-oss" not in dumped
 
 
+def test_proof_model_answer_served_equals_vault_reply(api, local_vault) -> None:
+    """Fail-at-parent proof. Does not read model_called.
+
+    POST /v1/insights served_provider, served_model, and served_local must
+    equal the vault reply that produced the SQL. On 27f79ea8 they are null.
+    """
+    vault_reply = {
+        "served_provider": VAULT_PROVIDER,
+        "served_model": VAULT_MODEL,
+        "served_local": True,
+    }
+    _queue_think_then_sql(
+        local_vault,
+        provider=vault_reply["served_provider"],
+        model=vault_reply["served_model"],
+        local=vault_reply["served_local"],
+        include_local=True,
+    )
+    body = _post(
+        api,
+        {"intent": "how many skus", "ask": False, "generate": True},
+        bearer=BEARER,
+    )
+    got = {
+        "served_provider": body.get("served_provider"),
+        "served_model": body.get("served_model"),
+        "served_local": body.get("served_local"),
+    }
+    assert got == vault_reply
+
+
 def test_model_answer_keeps_vault_served_fields(api, local_vault) -> None:
-    """Case b. The SQL call's vault stamp reaches the response unchanged."""
+    """Model answered. Vault served_* reach the response unchanged."""
     _queue_think_then_sql(local_vault, local=True, include_local=True)
     body = _post(
         api,
@@ -321,7 +355,10 @@ def test_served_local_true_only_for_json_boolean(
 def test_model_called_but_ranking_or_abstain_answered(
     api, local_vault, monkeypatch, engine: str, status: str
 ) -> None:
-    """Case c. complete() ran, but ranking or abstain served the answer."""
+    """Regression guard, not the fail-at-parent proof.
+
+    complete() ran, but ranking or abstain served the answer.
+    """
     _patch_bridge(
         monkeypatch,
         _certified_engine() if engine == "certified" else _abstain_engine(),
