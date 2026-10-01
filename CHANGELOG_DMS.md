@@ -21,8 +21,7 @@ DuckDB fixture. Every head case counts one L2 call and either matches its
 oracle multiset or names a gated abstention. Parent `279cbd85` instead
 has no Insights L2 call: all 15 copied tests fail on `calls == 1` with
 `calls=0`. The unit fixture does not replay or count the external DMS
-report's wrong values. The dms#231 trace for Cortex `f0c4afc8` records
-the prove path as loopback `POST /v1/insights`.
+report's wrong values; route not recorded in the dms#231 trace.
 
 ## CORTEX-276 SERVED-PASSTHROUGH — 2026-10-01
 

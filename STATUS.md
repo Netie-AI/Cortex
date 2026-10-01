@@ -27,8 +27,7 @@
 > hand-written same-shape stand-ins. Parent `279cbd85` abstains all 15 at
 > `ask`; all 15 copied tests fail there because no L2 call is counted.
 > This is unit evidence only and does not replay or count the external
-> report's wrong values. The dms#231 trace for Cortex `f0c4afc8` records
-> the prove route as loopback `POST /v1/insights`.
+> report's wrong values; route not recorded in the dms#231 trace.
 
 > **2026-09-25 (CORTEX-272 LOCAL-1):** Cortex half of local-through-OpenVault.
 > Arming accepts an OpenVault-reported local spendable hop. RouteStamp
