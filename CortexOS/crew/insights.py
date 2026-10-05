@@ -28,11 +28,7 @@ import yaml
 from CortexOS.crew.config import BACKEND_CF_COMPUTER
 from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
-from CortexOS.insights.caller_ontology import (
-    SOURCE_CALLER,
-    SOURCE_PACK,
-    CallerCatalog,
-)
+from CortexOS.insights.caller_ontology import SOURCE_CALLER, CallerCatalog
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
 
 # Calls to freeroute.complete() during run_insights. None outside that call.
@@ -1323,7 +1319,7 @@ async def generative_ask(
     ``complete`` and ``validate_sql`` only. ``query_plan`` is a caller-typed
     ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
-    from CortexOS.crew import certified_serve, cot_climb
+    from CortexOS.crew import certified_serve, cot_climb, l2_serve
 
     # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
     # served as stored (or the ask abstains by name); the model is not asked to
@@ -1334,8 +1330,6 @@ async def generative_ask(
     # only, off by default), #287's l2_serve owns the miss path and checks the
     # model's SQL against the stored plan itself; certified serve steps aside
     # so that path stays as #287 measured it.
-    from CortexOS.crew import l2_serve
-
     hit = None
     if ranking.get("source") != SOURCE_CALLER and not l2_serve.enabled():
         hit = certified_serve.resolve(

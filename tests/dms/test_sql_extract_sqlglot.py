@@ -38,7 +38,14 @@ def test_hand_written_statement_scanner_is_gone() -> None:
         f"Here is the query you asked for:\n```sql\n{TWO_CTES}\n```\nIt counts schools.",
         f"Sure. {TWO_CTES}; This returns one row per county.",
     ],
-    ids=["bare", "bare_semicolon", "fenced", "fenced_duckdb", "fenced_with_prose", "unfenced_prose"],
+    ids=[
+        "bare",
+        "bare_semicolon",
+        "fenced",
+        "fenced_duckdb",
+        "fenced_with_prose",
+        "unfenced_prose",
+    ],
 )
 def test_top_level_with_two_ctes_extracts_whole(text: str) -> None:
     assert extract_select(text) == TWO_CTES
@@ -81,7 +88,10 @@ def test_two_statements_refuse_by_name(text: str, reason: str) -> None:
     [
         ("INSERT INTO bronze.schools SELECT * FROM a", "INSERT"),
         ("DELETE FROM bronze.schools WHERE cdscode IN (SELECT cdscode FROM a)", "DELETE"),
-        ("UPDATE bronze.schools SET county = 'x' FROM a WHERE a.cdscode = schools.cdscode", "UPDATE"),
+        (
+            "UPDATE bronze.schools SET county = 'x' FROM a WHERE a.cdscode = schools.cdscode",
+            "UPDATE",
+        ),
     ],
     ids=["insert", "delete", "update"],
 )
