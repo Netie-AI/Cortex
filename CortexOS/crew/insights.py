@@ -629,9 +629,9 @@ def select_ranking(
     """
     if caller is not None:
         return ranking_from_caller(intent, caller)
-    ranking = retrieve_ontology(intent, pack_dir=pack_dir)
-    ranking.setdefault("source", SOURCE_PACK)
-    return ranking
+    # No "source" key on the engine-pack path: the demo envelope stays
+    # byte-identical to its parent (#287 pins its digest).
+    return retrieve_ontology(intent, pack_dir=pack_dir)
 
 
 def constrain_trials(ranking: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1330,8 +1330,14 @@ async def generative_ask(
     # re-derive a formula that is already law.
     # A caller-ontology ranking never consults the engine pack's certified
     # queries: they are another Space's law.
+    # While the round-2 L2 cutover is switched on (DMS_L2_ENABLED, run-time
+    # only, off by default), #287's l2_serve owns the miss path and checks the
+    # model's SQL against the stored plan itself; certified serve steps aside
+    # so that path stays as #287 measured it.
+    from CortexOS.crew import l2_serve
+
     hit = None
-    if ranking.get("source") != SOURCE_CALLER:
+    if ranking.get("source") != SOURCE_CALLER and not l2_serve.enabled():
         hit = certified_serve.resolve(
             intent, ranking, query_plan=query_plan, pack_dir=pack_dir
         )
@@ -1417,6 +1423,7 @@ async def run_insights(
             pack_dir=pack_dir,
             bearer=bearer,
             query_plan=query_plan,
+            caller=caller,
         )
     finally:
         _model_calls.reset(token)
@@ -1433,6 +1440,7 @@ async def _run_insights(
     pack_dir: Path | str | None = None,
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
+    caller: CallerCatalog | None = None,
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
 

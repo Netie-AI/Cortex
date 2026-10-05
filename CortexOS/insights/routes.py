@@ -223,6 +223,12 @@ def stamp_api(
         core.stamp_router_fingerprint(out, _empty_served_stamp(_unserved_model_reason(gen)))
     elif str(out.get("status") or "") == "CERTIFIED":
         core.stamp_router_fingerprint(out, _empty_served_stamp(NO_MODEL_CALLED))
+    elif str(gen.get("check") or "").startswith("certified_query:"):
+        # GEN-CERTIFIED-MEASURE-01: the stored certified query was served and
+        # no model was called; name that query instead of the pending text.
+        stamp = gen.get("stamp") if isinstance(gen.get("stamp"), dict) else {}
+        reason = str(stamp.get("served_reason") or "") or NO_MODEL_CALLED
+        core.stamp_router_fingerprint(out, _empty_served_stamp(reason))
     else:
         core.stamp_router_fingerprint(out)
     out["model_called"] = model_called
@@ -353,11 +359,17 @@ async def execute_insights(
         query_plan=query_plan,
         caller=caller,
     )
+    # A plain demo body (no request-extension field) gets exactly the envelope
+    # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
+    # only for callers that sent an extension field.
+    extended = bool(set(wire.model_fields_set) - set(InsightsAskIn.model_fields))
     ranking = result.get("ontology") if isinstance(result, dict) else None
     source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
-    result["ontology_source"] = source
+    if extended:
+        result["ontology_source"] = source
     out = stamp_api(result, consumer=consumer, alias=alias)
-    out["api"]["received"] = _received(wire, source)
+    if extended:
+        out["api"]["received"] = _received(wire, source)
     return out
 
 
