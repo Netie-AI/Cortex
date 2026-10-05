@@ -15,7 +15,6 @@ from CortexOS.result import Ok
 from CortexOS.routing.adapters.base import AdapterRequest, AdapterResponse, LLMAdapter
 from CortexOS.routing.cost_ledger import CostLedger
 
-
 _RUNTIME_LOG_FILES = {
     name: Path(__file__).resolve().parents[2] / "data" / "engine" / name
     for name in ("tier_decisions.jsonl", "tier_shadow.jsonl")

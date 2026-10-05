@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 _RUNTIME_LOG_ENV = {
     "CORTEX_DECISION_LOG_PATH": "tier_decisions.jsonl",
     "CORTEX_KEV_SHADOW_PATH": "tier_shadow.jsonl",
