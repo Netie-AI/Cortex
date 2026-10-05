@@ -41,6 +41,19 @@ _C_STAMP_289_EXACT_DIFF = {
         ),
     ),
 }
+# #277 Epic ruling (2026-10-05, c5994673962): one-file exception, same shape as
+# #289's. The extractor pin may allow sqlglot for sql_extract.py only; any other
+# edit to tests/test_freeroute_core.py needs its own exception.
+_EXTRACT_PIN_277_BASE = "44efa32d99125ab0c7c72474cf27faa5b5e7ae68"
+_EXTRACT_PIN_277_BRANCH_EXCEPTIONS = {
+    "claude/dms-agi-db-accuracy-rw5en9": frozenset({"tests/test_freeroute_core.py"})
+}
+_EXTRACT_PIN_277_EXACT_DIFF = {
+    "tests/test_freeroute_core.py": (
+        "0589a84604b5221ce0c564b57e989071f7f3aa4f8aa582b565599d07f1f71679",
+        ("_EXTRACT_EXTRA", '"CortexOS/integrations/freeroute.py") == []'),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -189,8 +202,41 @@ def _is_exact_c_stamp_289_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_extract_pin_277(path: str) -> bool:
+    """Allow only #277's frozen sqlglot allowance in the FreeRoute-core pin."""
+    if path not in _EXTRACT_PIN_277_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset()):
+        return False
+    expected_digest, symbols = _EXTRACT_PIN_277_EXACT_DIFF[path]
+    if _git("cat-file", "-e", f"{_EXTRACT_PIN_277_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _EXTRACT_PIN_277_BASE)  # shallow CI clone
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_EXTRACT_PIN_277_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    for symbol in symbols:
+        assert symbol in diff.stdout, f"#277 pin exception missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"#277 exception covers only the sqlglot allowance for sql_extract.py in {path}; "
+        "any other edit needs its own exception"
+    )
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
-    return sorted(path for path in names if not _is_exact_c_stamp_289_seam(path))
+    return sorted(
+        path
+        for path in names
+        if not (_is_exact_c_stamp_289_seam(path) or _is_exact_extract_pin_277(path))
+    )
 
 
 def test_branch_does_not_dual_write_freeroute_layer() -> None:
@@ -236,6 +282,19 @@ def test_other_branch_editing_answer_engine_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/memory-290-not-c-stamp")
     path = "CortexOS/dms/answer_engine.py"
     assert _held_freeroute_paths({path}) == [path]
+
+
+def test_other_branch_editing_freeroute_core_pin_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/284-freeroute-cte-scope")
+    path = "tests/test_freeroute_core.py"
+    assert _held_freeroute_paths({path}) == [path]
+    # #277's exception does not stretch to any other banned file.
+    monkeypatch.setenv("GITHUB_HEAD_REF", "claude/dms-agi-db-accuracy-rw5en9")
+    assert _held_freeroute_paths({"CortexOS/crew/freeroute.py"}) == [
+        "CortexOS/crew/freeroute.py"
+    ]
 
 
 @pytest.mark.asyncio
