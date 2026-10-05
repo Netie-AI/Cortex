@@ -115,7 +115,7 @@ _C7_05_104P2_BRANCH_EXCEPTIONS = {
 }
 _C7_05_104P2_EXACT_DIFF = {
     "CortexOS/dms/l2_plan_gates.py": (
-        "PENDING_L2_PLAN_GATES",
+        "0dc14f112a75485f7ca60b7d8a432458519d00729ecd02355b7d13366a56fd8b",
         (
             "class L2ServePlan",
             "def ask_ranking(",
@@ -125,15 +125,15 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
     "CortexOS/dms/answer_engine.py": (
-        "PENDING_ANSWER_ENGINE",
+        "9acf58a418a7a33af0c95d4f51fa65ff9096794390032e841393602b159ee0c9",
         ("l2_plan_gates", "ask_ranking", "L2 plan gate", "L2 plan shape"),
     ),
     "CortexOS/crew/l2_serve.py": (
-        "PENDING_CREW_DELEGATE",
+        "f19797ae7db70bc41f8c6ca110585e4ff65fc5df64ed4cdd5cdbb1ccd43e215d",
         ("from CortexOS.dms.l2_plan_gates import", "prepare_plan", "plan_shape_violation"),
     ),
     "tests/dms/test_c7_05_ask_l2_serve.py": (
-        "PENDING_ASK_TEST",
+        "39c74797a91901a160780bfe78f1c49679657dbb9d4ba69bdcc6fdb4e53d98a3",
         (
             "test_ask_l2_serves_only_after_plausibility_columns_and_grain",
             "test_ask_l2_certified_measure_mismatch_abstains_before_execute",
