@@ -70,7 +70,7 @@ _C7_04_288_EXACT_DIFF = {
     ),
 }
 # #254 Epic ruling (2026-10-05, 5999107355): exact runtime-log isolation seam.
-_H2_254_BASE = "6529d9ad50b8efa5bde3d94c278703599546cdc2"
+_H2_254_BASE = "8c603ae80352f7084ab4ed33ff0bbc4620e67dd2"
 _H2_254_BRANCH_EXCEPTIONS = {
     "cursor/h2-test-isolation-254-45db": frozenset({"tests/conftest.py"})
 }
