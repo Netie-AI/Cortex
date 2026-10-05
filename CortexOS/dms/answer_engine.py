@@ -1886,16 +1886,19 @@ def answer(
             l2_kwargs["require_route_stamp"] = True
         l2_out = attempt_l2(question, **l2_kwargs)
         if l2_out is not None and l2_out.sql:
-            from CortexOS.config import get_config
             from CortexOS.crew import insights, l2_serve
 
-            pack_dir = (
-                Path(__file__).resolve().parents[2] / "packs" / get_config().pack
-            )
+            pack_dir = Path(__file__).resolve().parents[2] / "packs" / "dms"
             ranking = insights.select_ranking(question, pack_dir=pack_dir)
-            l2_serve_plan, plan_reason = l2_serve.prepare_plan(
-                ranking, None, l2_out.sql, pack_dir
+            l2_serve_plan, listing_reason = l2_serve.prepare_listing_plan(
+                ranking, l2_out.sql
             )
+            if l2_serve_plan is None:
+                l2_serve_plan, plan_reason = l2_serve.prepare_plan(
+                    ranking, None, l2_out.sql, pack_dir
+                )
+                if listing_reason and plan_reason:
+                    plan_reason = f"{plan_reason}; {listing_reason}"
             if l2_serve_plan is None:
                 result = _abstain(
                     question,

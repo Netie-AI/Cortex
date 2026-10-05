@@ -224,6 +224,61 @@ def prepare_plan(
     )
 
 
+def prepare_listing_plan(
+    ranking: Mapping[str, Any],
+    generated_sql: str,
+) -> tuple[L2ServePlan | None, str]:
+    """Build a schema-grounded oracle for a non-numeric listing.
+
+    Certified measures still go through ``prepare_plan``. This fallback only
+    accepts direct catalog columns from ranked tables, with no aggregation.
+    """
+    try:
+        tree = sqlglot.parse_one(generated_sql, read="duckdb")
+    except Exception:  # noqa: BLE001
+        return None, "generated listing is not parseable"
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    if select is None or any(item.find(exp.AggFunc) for item in select.expressions):
+        return None, "generated SQL is not a schema listing"
+    shape = _shape(generated_sql)
+    if shape is None:
+        return None, "generated listing has no provable shape"
+
+    catalog = {
+        str((row.get("where") or {}).get("table") or "").strip().lower(): {
+            str(column).strip().lower()
+            for column in (row.get("where") or {}).get("columns") or []
+            if str(column).strip()
+        }
+        for row in ranking.get("locations") or []
+        if isinstance(row, Mapping)
+    }
+    tables = {
+        str(table.name or "").strip().lower()
+        for table in tree.find_all(exp.Table)
+        if str(table.name or "").strip()
+    }
+    columns = {
+        str(column.name or "").strip().lower()
+        for column in select.find_all(exp.Column)
+        if str(column.name or "").strip()
+    }
+    allowed_columns = set().union(*(catalog.get(table, set()) for table in tables))
+    if not tables or not tables <= catalog.keys():
+        return None, "generated listing reads outside ranked tables"
+    if not columns or not columns <= allowed_columns:
+        return None, "generated listing uses columns outside the ranked schema"
+    return (
+        L2ServePlan(
+            sql=generated_sql,
+            expected_columns=frozenset(shape[0]),
+            expected_grain=frozenset(shape[1]),
+            name=f"schema_listing:{','.join(sorted(tables))}",
+        ),
+        "",
+    )
+
+
 def plan_shape_violation(
     plan: L2ServePlan,
     rows: Sequence[Mapping[str, Any]],
@@ -383,6 +438,7 @@ __all__ = [
     "L2ServePlan",
     "enabled",
     "plan_shape_violation",
+    "prepare_listing_plan",
     "prepare_plan",
     "serve_on_miss",
 ]

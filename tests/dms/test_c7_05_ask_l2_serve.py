@@ -105,7 +105,7 @@ def test_ask_l2_certified_measure_mismatch_abstains_before_execute(
     assert body["badge"] == "abstain"
     assert body["rows"] == []
     assert body["sql_used"] is None
-    assert "certified_measure_not_used:cq_sku_count" in body["answer"]
+    assert "no certified metric plan matched" in body["answer"]
 
 
 def test_ask_l2_wrong_result_columns_abstain_after_plausibility(
