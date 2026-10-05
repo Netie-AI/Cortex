@@ -40,7 +40,7 @@ def _append_batch(
         result_queue.put((worker_id, os.getpid(), None))
 
 
-def test_sqlite_busy_timeout_is_at_least_30_seconds(tmp_path: Path) -> None:
+def test_connect_sets_busy_timeout_of_at_least_30s(tmp_path: Path) -> None:
     con = ledger._connect(tmp_path / "busy-timeout.db")
     try:
         busy_timeout_ms = con.execute("PRAGMA busy_timeout").fetchone()[0]
@@ -50,7 +50,7 @@ def test_sqlite_busy_timeout_is_at_least_30_seconds(tmp_path: Path) -> None:
     assert busy_timeout_ms >= 30_000
 
 
-def test_four_processes_append_one_gapless_chain(
+def test_four_processes_append_25_each_yield_gap_free_verified_chain(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
