@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -26,6 +27,7 @@ _LOOP: asyncio.AbstractEventLoop | None = None
 _LOOP_THREAD: threading.Thread | None = None
 _LOCK = threading.Lock()
 _HARDWARE: dict[str, Any] = {}
+_PROCESS_STARTED_AT = time.time()
 
 
 def set_hardware(hw: Mapping[str, Any] | None) -> None:
@@ -44,6 +46,7 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
         if _LOOP is not None and _LOOP.is_running():
             return _LOOP
 
+        workflow_store.reap_orphans(tuple(_ACTIVE), _PROCESS_STARTED_AT)
         loop = asyncio.new_event_loop()
 
         def _run() -> None:
@@ -342,6 +345,8 @@ def _make_on_event(run_id: str):
             if ev.get("phase"):
                 workflow_store.phase_started(run_id, str(ev["phase"]))
         elif et == "node_done":
+            if ev.get("replayed"):
+                workflow_store.publish(run_id, ev)
             tel = ev.get("telemetry") if isinstance(ev.get("telemetry"), dict) else {}
             # EMIT joins have no telemetry — skip agent_finished for them.
             if tel:
