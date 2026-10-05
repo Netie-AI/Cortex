@@ -352,30 +352,8 @@ def _sqlite_verify(*, db_path: Path, start_seq: int) -> VerifyResult:
             seq = int(row["seq"])
             if seq != expected_seq:
                 return VerifyResult(ok=False, broken_at=seq)
-            payload_raw = row["payload"]
-            if isinstance(payload_raw, (dict, Mapping)):
-                payload = payload_raw
-            elif isinstance(payload_raw, (str, bytes)):
-                payload = json.loads(payload_raw)
-            else:
-                raise TypeError(f"Unsupported ledger payload type: {type(payload_raw).__name__}")
-            created_at_raw = row["created_at"]
-            if isinstance(created_at_raw, datetime):
-                if created_at_raw.tzinfo is None:
-                    raise ValueError("Postgres ledger created_at must be timezone-aware")
-                created_at_iso = created_at_raw.astimezone(timezone.utc).isoformat()
-            elif isinstance(created_at_raw, str):
-                created_at_iso = created_at_raw
-            else:
-                raise TypeError(
-                    f"Unsupported ledger created_at type: {type(created_at_raw).__name__}"
-                )
-            expected = compute_entry_hash(
-                seq,
-                prev_hash or GENESIS_HASH,
-                payload,
-                created_at_iso,
-            )
+            payload = json.loads(row["payload"])
+            expected = compute_entry_hash(seq, prev_hash or GENESIS_HASH, payload, row["created_at"])
             if row["entry_hash"] != expected or row["prev_hash"] != (prev_hash or GENESIS_HASH):
                 return VerifyResult(ok=False, broken_at=seq)
             prev_hash = row["entry_hash"]
@@ -418,8 +396,30 @@ def _postgres_verify(*, start_seq: int) -> VerifyResult:
             seq = int(row["seq"])
             if seq != expected_seq:
                 return VerifyResult(ok=False, broken_at=seq)
-            payload = json.loads(row["payload"])
-            expected = compute_entry_hash(seq, prev_hash or GENESIS_HASH, payload, row["created_at"])
+            payload_raw = row["payload"]
+            if isinstance(payload_raw, (dict, Mapping)):
+                payload = payload_raw
+            elif isinstance(payload_raw, (str, bytes)):
+                payload = json.loads(payload_raw)
+            else:
+                raise TypeError(f"Unsupported ledger payload type: {type(payload_raw).__name__}")
+            created_at_raw = row["created_at"]
+            if isinstance(created_at_raw, datetime):
+                if created_at_raw.tzinfo is None:
+                    raise ValueError("Postgres ledger created_at must be timezone-aware")
+                created_at_iso = created_at_raw.astimezone(timezone.utc).isoformat()
+            elif isinstance(created_at_raw, str):
+                created_at_iso = created_at_raw
+            else:
+                raise TypeError(
+                    f"Unsupported ledger created_at type: {type(created_at_raw).__name__}"
+                )
+            expected = compute_entry_hash(
+                seq,
+                prev_hash or GENESIS_HASH,
+                payload,
+                created_at_iso,
+            )
             if row["entry_hash"] != expected or row["prev_hash"] != (prev_hash or GENESIS_HASH):
                 return VerifyResult(ok=False, broken_at=seq)
             prev_hash = row["entry_hash"]
