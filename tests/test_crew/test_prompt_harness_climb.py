@@ -45,6 +45,34 @@ _C_STAMP_289_EXACT_DIFF = {
         ),
     ),
 }
+# #288 Epic contingent ruling (2026-10-05): exact C7-04 subject-guard seam.
+_C7_04_288_BASE = "c2b599f5bef7cc82e9b3f1f7f1e6117adf2d5ef5"
+_C7_04_288_BRANCH_EXCEPTIONS = {
+    "cursor/c7-04-288-subject-guard-c3fd": frozenset(
+        {
+            "CortexOS/dms/answer_engine.py",
+            "tests/dms/test_c7_02_manifest_before_explain.py",
+            "tests/dms/test_c7_05_crew_l2_serve.py",
+        }
+    )
+}
+_C7_04_288_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "c056338f16d35bb344054929be86123ef8b0ebf6bc866144ae4f8fbe16b462cd",
+        ("_metric_subject_mismatch", "does not match", "def _metric_subject_mismatch("),
+    ),
+    "tests/dms/test_c7_02_manifest_before_explain.py": (
+        "77a51b62cca39985a8cfdb4b57ff6a665435d231513d4f701a97aea3d79e4d76",
+        (
+            "test_contract_ask_c7_04_workday_stockouts_abstains_by_name",
+            "ma_workday_payroll_cube",
+        ),
+    ),
+    "tests/dms/test_c7_05_crew_l2_serve.py": (
+        "cc5f23b660c7dfa6af25d5ecf64f0792be92278c5f79a3b95f86fe2bb7b39e1c",
+        ("test_c7_04_subject_misroute_now_abstains", "subject 'overtime'"),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -266,6 +294,39 @@ def _is_exact_c_stamp_289_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_c7_04_288_seam(path: str) -> bool:
+    """Allow only #288's frozen C7-04 diff on its licensed branch."""
+    allowed = _C7_04_288_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    expected = _C7_04_288_EXACT_DIFF.get(path)
+    if expected is None:
+        return False
+    if _git("cat-file", "-e", f"{_C7_04_288_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _C7_04_288_BASE)
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_C7_04_288_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
+        assert symbol in diff.stdout, f"#288 C7-04 seam missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"#288 exception covers only its exact C7-04 subject seam in {path}; "
+        "any other edit needs its own exception"
+    )
+    return True
+
+
 def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
     if _git("rev-parse", "--verify", "origin/main").returncode != 0:
         pytest.skip("origin/main missing")
@@ -283,8 +344,23 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
         "packages/cortex_contract/execution.py",
     }
     overlap = sorted(names & banned)
-    held = [path for path in overlap if not _is_exact_c_stamp_289_seam(path)]
+    held = [
+        path
+        for path in overlap
+        if not (
+            _is_exact_c_stamp_289_seam(path)
+            or _is_exact_c7_04_288_seam(path)
+        )
+    ]
     assert held == [], f"dual-write of frozen/other-seat files: {held}"
+
+
+def test_other_branch_editing_answer_engine_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-04-288-other-branch")
+    path = "CortexOS/dms/answer_engine.py"
+    assert _is_exact_c7_04_288_seam(path) is False
 
 
 @pytest.mark.asyncio
