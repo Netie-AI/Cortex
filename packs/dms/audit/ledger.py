@@ -8,6 +8,7 @@ import os
 import sqlite3
 import threading
 import uuid
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from typing import Any
 
 GENESIS_HASH = "0" * 64
 _LOCK = threading.Lock()
+_SQLITE_BUSY_TIMEOUT_MS = 30_000
 _POSTGRES_MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "002_ledger_postgres.sql"
 _pg_engine = None
 _pg_engine_dsn: str | None = None
@@ -98,8 +100,13 @@ def compute_entry_hash(seq: int, prev_hash: str, payload: dict[str, Any], create
 def _connect(db_path: Path | str) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(path), check_same_thread=False)
+    con = sqlite3.connect(
+        str(path),
+        timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000,
+        check_same_thread=False,
+    )
     con.row_factory = sqlite3.Row
+    con.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA foreign_keys = ON")
     return con
 
@@ -389,8 +396,30 @@ def _postgres_verify(*, start_seq: int) -> VerifyResult:
             seq = int(row["seq"])
             if seq != expected_seq:
                 return VerifyResult(ok=False, broken_at=seq)
-            payload = json.loads(row["payload"])
-            expected = compute_entry_hash(seq, prev_hash or GENESIS_HASH, payload, row["created_at"])
+            payload_raw = row["payload"]
+            if isinstance(payload_raw, (dict, Mapping)):
+                payload = payload_raw
+            elif isinstance(payload_raw, (str, bytes)):
+                payload = json.loads(payload_raw)
+            else:
+                raise TypeError(f"Unsupported ledger payload type: {type(payload_raw).__name__}")
+            created_at_raw = row["created_at"]
+            if isinstance(created_at_raw, datetime):
+                if created_at_raw.tzinfo is None:
+                    raise ValueError("Postgres ledger created_at must be timezone-aware")
+                created_at_iso = created_at_raw.astimezone(timezone.utc).isoformat()
+            elif isinstance(created_at_raw, str):
+                created_at_iso = created_at_raw
+            else:
+                raise TypeError(
+                    f"Unsupported ledger created_at type: {type(created_at_raw).__name__}"
+                )
+            expected = compute_entry_hash(
+                seq,
+                prev_hash or GENESIS_HASH,
+                payload,
+                created_at_iso,
+            )
             if row["entry_hash"] != expected or row["prev_hash"] != (prev_hash or GENESIS_HASH):
                 return VerifyResult(ok=False, broken_at=seq)
             prev_hash = row["entry_hash"]
