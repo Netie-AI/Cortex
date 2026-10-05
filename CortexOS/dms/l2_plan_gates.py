@@ -284,7 +284,7 @@ def prepare_listing_plan(
     }
     allowed_columns = set().union(*(catalog.get(table, set()) for table in tables))
     if not tables or not tables <= catalog.keys():
-        return None, "generated listing reads outside ranked tables"
+        return None, "retrieval miss: generated listing reads outside ranked tables"
     if not columns or not columns <= allowed_columns:
         return None, "generated listing uses columns outside the ranked schema"
     return (
