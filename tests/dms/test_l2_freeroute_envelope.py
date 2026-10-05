@@ -67,14 +67,14 @@ def _store_rows() -> list[tuple[Any, ...]]:
         con.close()
 
 
-def _reply_with_actual_stamp(
+def _reply_with_served_stamp(
     fake,
     content: str,
     *,
     provider: str,
     model: str,
 ) -> None:
-    """Replay OpenVault's actual response stamp, including fallback model identity."""
+    """Queue explicit served fields; each caller states whether they are constructed or recorded."""
     fake.reply(content, model=model)
     status, raw = fake.replies.pop()
     body = dict(raw or {})
@@ -190,10 +190,10 @@ def test_g_armed_serve_names_served_model_and_credits_plausibility(armed_openvau
 def test_contract_l2_stamps_actual_response_not_requested_model(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:
-    """POST /v1/contract/ask copies the response stamp, never the configured pin."""
+    """Constructed must-fail: response identity differs from the requested model."""
     actual_provider = "fallback-provider"
     actual_model = "fallback/model-that-served"
-    _reply_with_actual_stamp(
+    _reply_with_served_stamp(
         armed_openvault,
         "SELECT sku FROM inventory LIMIT 5",
         provider=actual_provider,
@@ -213,6 +213,40 @@ def test_contract_l2_stamps_actual_response_not_requested_model(
     assert body.get("served_provider") == actual_provider, body
     assert body.get("served_model") == actual_model, body
     assert body.get("served_model") != requested
+    assert body.get("rows")
+    assert body.get("answer")
+
+
+def test_contract_l2_replays_recorded_openvault_response(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    """Replay Platform's 2026-10-01 OpenVault 0d0ef3f0 response record.
+
+    Source run: Netie-AI/dms PR #324, "Platform live call on that commit".
+    Recorded log line:
+    x-openvault-served-provider=groq
+    x-openvault-served-model=openai/gpt-oss-120b
+    """
+    recorded_provider = "groq"
+    recorded_model = "openai/gpt-oss-120b"
+    _reply_with_served_stamp(
+        armed_openvault,
+        "SELECT sku FROM inventory LIMIT 5",
+        provider=recorded_provider,
+        model=recorded_model,
+    )
+    dms_http.bind_session("c-stamp-recorded", {"inventory": "TRUE"})
+
+    response = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": "c-stamp-recorded"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body.get("served_provider") == recorded_provider, body
+    assert body.get("served_model") == recorded_model, body
+    assert body.get("served_local") is False
     assert body.get("rows")
     assert body.get("answer")
 

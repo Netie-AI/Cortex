@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -20,15 +21,30 @@ from tests.test_crew.conftest import FakeLLM
 HARNESS_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "prompt_harness_climb.py"
 ROOT = Path(__file__).resolve().parents[2]
 _C_STAMP_289_BASE = "5a5d728c4d6e376ace4a8b1af17f1a15f45b6af1"
-_C_STAMP_289_ANSWER_DIFF = (
-    "460bd61eafa2b7f8a41f6534e93f7ebe204ebb4a7cfacbf6266785281e8a0f6c"
-)
-_C_STAMP_289_ANSWER_SYMBOLS = (
-    "stamp_l2_route",
-    "def _stamp_l2(",
-    "stamp_l2_envelope",
-    "require_route_stamp",
-)
+_C_STAMP_289_BRANCH_EXCEPTIONS = {
+    "cursor/c-stamp-289-bc64": frozenset(
+        {
+            "CortexOS/dms/answer_engine.py",
+            "CortexOS/dms/l2_generation.py",
+        }
+    )
+}
+_C_STAMP_289_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "460bd61eafa2b7f8a41f6534e93f7ebe204ebb4a7cfacbf6266785281e8a0f6c",
+        ("stamp_l2_route", "def _stamp_l2(", "stamp_l2_envelope", "require_route_stamp"),
+    ),
+    "CortexOS/dms/l2_generation.py": (
+        "a76d33e8ad397bece6d6452e1102116b242097d53f833772a3a1596eb334b9ff",
+        (
+            "L2_ROUTE_STAMP_MISSING_PREFIX",
+            "require_route_stamp",
+            "route_stamp",
+            "def _missing_served_fields(",
+            "def stamp_l2_envelope(",
+        ),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -211,9 +227,21 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _is_exact_c_stamp_289_answer_seam(path: str) -> bool:
-    """Allow only #289's frozen answer stamp diff; #290/#291 remain banned."""
-    if path != "CortexOS/dms/answer_engine.py":
+def _branch_name() -> str:
+    from_ci = os.environ.get("GITHUB_HEAD_REF", "").strip()
+    if from_ci:
+        return from_ci
+    result = _git("branch", "--show-current")
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _is_exact_c_stamp_289_seam(path: str) -> bool:
+    """Allow only #289's frozen stamp diff on #289's branch."""
+    allowed = _C_STAMP_289_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    expected = _C_STAMP_289_EXACT_DIFF.get(path)
+    if expected is None:
         return False
     diff = _git(
         "diff",
@@ -224,12 +252,13 @@ def _is_exact_c_stamp_289_answer_seam(path: str) -> bool:
         path,
     )
     assert diff.returncode == 0, diff.stderr
-    for symbol in _C_STAMP_289_ANSWER_SYMBOLS:
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
         assert symbol in diff.stdout, f"#289 stamp seam missing {symbol!r} in {path}"
     digest = hashlib.sha256(diff.stdout.encode()).hexdigest()
-    assert digest == _C_STAMP_289_ANSWER_DIFF, (
-        "#289 exception covers only its exact contract-ask answer stamp seam; "
-        "#290/#291 or any other answer_engine edit needs its own exception"
+    assert digest == expected_digest, (
+        f"#289 exception covers only its exact contract-ask stamp seam in {path}; "
+        "#290/#291 or any other edit needs its own exception"
     )
     return True
 
@@ -247,10 +276,11 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
         # #269 ROUTER-1 owns the FreeRoute store schema/_write_row/_stats/pick.
         "CortexOS/execution/distill_harness.py",
         "CortexOS/dms/answer_engine.py",
+        "CortexOS/dms/l2_generation.py",
         "packages/cortex_contract/execution.py",
     }
     overlap = sorted(names & banned)
-    held = [path for path in overlap if not _is_exact_c_stamp_289_answer_seam(path)]
+    held = [path for path in overlap if not _is_exact_c_stamp_289_seam(path)]
     assert held == [], f"dual-write of frozen/other-seat files: {held}"
 
 
