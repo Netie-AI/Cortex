@@ -1,0 +1,1 @@
+{"model":"openai/gpt-oss-120b","strict":true,"messages":[{"role":"system","content":"You write one SQLite SELECT and nothing else."},{"role":"user","content":"Table inventory(sku TEXT, qty INTEGER). List 5 skus."}],"max_tokens":512}
