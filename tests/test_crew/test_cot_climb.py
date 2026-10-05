@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +15,23 @@ from CortexOS.execution.gen_cfsm import DECISION_TERMINATE
 
 COT_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "cot_climb.py"
 ROOT = Path(__file__).resolve().parents[2]
+_C_STAMP_289_BASE = "5a5d728c4d6e376ace4a8b1af17f1a15f45b6af1"
+_C_STAMP_289_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "460bd61eafa2b7f8a41f6534e93f7ebe204ebb4a7cfacbf6266785281e8a0f6c",
+        ("stamp_l2_route", "def _stamp_l2(", "stamp_l2_envelope", "require_route_stamp"),
+    ),
+    "CortexOS/dms/l2_generation.py": (
+        "a76d33e8ad397bece6d6452e1102116b242097d53f833772a3a1596eb334b9ff",
+        (
+            "L2_ROUTE_STAMP_MISSING_PREFIX",
+            "require_route_stamp",
+            "route_stamp",
+            "def _missing_served_fields(",
+            "def stamp_l2_envelope(",
+        ),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -123,6 +141,31 @@ def _diff_names_vs_main() -> set[str]:
     return {line.strip() for line in diff.stdout.splitlines() if line.strip()}
 
 
+def _is_exact_c_stamp_289_seam(path: str) -> bool:
+    """Allow only #289's frozen stamp diff; #290/#291 need new exceptions."""
+    expected = _C_STAMP_289_EXACT_DIFF.get(path)
+    if expected is None:
+        return False
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_C_STAMP_289_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
+        assert symbol in diff.stdout, f"#289 stamp seam missing {symbol!r} in {path}"
+    digest = hashlib.sha256(diff.stdout.encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"#289 exception covers only its exact contract-ask stamp seam in {path}; "
+        "#290/#291 or any other edit needs its own exception"
+    )
+    return True
+
+
 def test_branch_does_not_dual_write_freeroute_layer() -> None:
     banned = {
         "CortexOS/crew/freeroute.py",
@@ -130,8 +173,8 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "CortexOS/crew/config.py",
         "CortexOS/crew/llm.py",
         "CortexOS/crew/mcp_client.py",
-        # #289 owns only the contract-ask L2 stamp seam in answer_engine and
-        # l2_generation; FreeRoute routing/custody remains banned below.
+        "CortexOS/dms/answer_engine.py",
+        "CortexOS/dms/l2_generation.py",
         # #269 ROUTER-1 owns store schema / _write_row / _stats / pick in
         # CortexOS/integrations/freeroute.py. Arming + RouteStamp served_*
         # stay #272. Do not put crew/freeroute.py back on this allow.
@@ -145,7 +188,8 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "tests/test_freeroute_core.py",
     }
     overlap = sorted(_diff_names_vs_main() & banned)
-    assert overlap == [], f"dual-write of #215 FreeRoute files: {overlap}"
+    held = [path for path in overlap if not _is_exact_c_stamp_289_seam(path)]
+    assert held == [], f"dual-write of #215 FreeRoute files: {held}"
     # server.py may gain unrelated crew routes (liberty seek #223). The
     # FreeRoute spend handlers themselves must not be rewritten.
     if "CortexOS/crew/server.py" in _diff_names_vs_main():
