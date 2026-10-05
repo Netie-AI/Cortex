@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+from itertools import pairwise
 from pathlib import Path
 from queue import Empty
 from typing import Any
@@ -104,5 +105,5 @@ def test_four_processes_append_one_gapless_chain(
     assert entries[0].prev_hash == ledger.GENESIS_HASH
     assert all(
         current.prev_hash == previous.entry_hash
-        for previous, current in zip(entries, entries[1:])
+        for previous, current in pairwise(entries)
     )
