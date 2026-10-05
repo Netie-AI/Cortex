@@ -303,6 +303,30 @@ def request_cancel(run_id: str) -> bool:
     return True
 
 
+def reap_orphans(active_ids: set[str] | tuple[str, ...] | list[str], started_before: float) -> int:
+    """Make workflow rows left by an earlier process resumable."""
+    init()
+    active = tuple(str(run_id) for run_id in active_ids)
+    where = (
+        "status IN ('queued','running') "
+        "AND COALESCE(started_at,created_at) < ?"
+    )
+    params: list[Any] = [float(started_before)]
+    if active:
+        where += f" AND id NOT IN ({','.join('?' for _ in active)})"
+        params.extend(active)
+    with _lock, _conn() as conn:
+        cursor = conn.execute(
+            f"UPDATE wf_runs SET status='error', error=?, finished_at=? WHERE {where}",
+            (
+                "Workflow interrupted by process restart; this run is resumable.",
+                time.time(),
+                *params,
+            ),
+        )
+    return max(0, int(cursor.rowcount))
+
+
 def is_cancelled(run_id: str) -> bool:
     run = get_run(run_id)
     return bool(run) and run.get("status") == "stopped"
