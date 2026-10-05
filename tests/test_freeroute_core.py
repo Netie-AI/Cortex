@@ -457,6 +457,9 @@ def test_public_status_never_reserves_hop_rows(armed_openvault) -> None:
 # -- import pin (the core must stay engine-safe) ------------------------------------
 
 _ALLOWED_PREFIXES = ("CortexOS.integrations", "CortexOS.paths")
+# #277 Epic ruling (2026-10-05, c5994673962): sqlglot owns statement boundaries
+# in the extractor. A base dependency, not an optional plane; sql_extract.py only.
+_EXTRACT_EXTRA = frozenset({"sqlglot"})
 
 
 def _imports(path: Path) -> list[str]:
@@ -470,12 +473,12 @@ def _imports(path: Path) -> list[str]:
     return mods
 
 
-def _bad_imports(path: Path) -> list[str]:
+def _bad_imports(path: Path, extra: frozenset[str] = frozenset()) -> list[str]:
     stdlib = set(sys.stdlib_module_names) | {"__future__"}
     bad = []
     for mod in _imports(path):
         top = mod.split(".", 1)[0]
-        if top in stdlib or mod.startswith(_ALLOWED_PREFIXES):
+        if top in stdlib or top in extra or mod.startswith(_ALLOWED_PREFIXES):
             continue
         bad.append(mod)
     return bad
@@ -491,8 +494,8 @@ def _crew_imports(paths: list[Path]) -> list[str]:
 
 
 def test_core_imports_only_stdlib_integrations_and_paths(tmp_path) -> None:
-    for rel in ("CortexOS/integrations/freeroute.py", "CortexOS/dms/sql_extract.py"):
-        assert _bad_imports(ROOT / rel) == [], rel
+    assert _bad_imports(ROOT / "CortexOS/integrations/freeroute.py") == []
+    assert _bad_imports(ROOT / "CortexOS/dms/sql_extract.py", _EXTRACT_EXTRA) == []
     engine = [
         p
         for folder in ("CortexOS/integrations", "CortexOS/dms", "CortexOS/api")
@@ -504,3 +507,7 @@ def test_core_imports_only_stdlib_integrations_and_paths(tmp_path) -> None:
     poison.write_text("import httpx\nfrom CortexOS.crew import freeroute\n", encoding="utf-8")
     assert _bad_imports(poison) == ["httpx", "CortexOS.crew"]
     assert _crew_imports([ROOT / "CortexOS/integrations/freeroute.py"]) == []
+    # The extractor's allowance is sqlglot alone, and the core gets none.
+    poison.write_text("import sqlglot\nimport httpx\n", encoding="utf-8")
+    assert _bad_imports(poison, _EXTRACT_EXTRA) == ["httpx"]
+    assert _bad_imports(poison) == ["sqlglot", "httpx"]

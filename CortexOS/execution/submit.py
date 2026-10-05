@@ -30,6 +30,10 @@ from CortexOS.execution.warehouse import (
     warehouse_path,
 )
 
+SQL_GATE_ABSTAIN = "sql_gate_abstain"
+# The SQL passed EXPLAIN but the engine failed running it (bad cast, overflow).
+SQL_RUNTIME_ERROR = "sql_runtime_error"
+
 
 class PoolMismatch(ManifestError):
     code = "pool_mismatch"
@@ -93,6 +97,10 @@ def _plan_kind(plan: dict[str, Any]) -> str:
 
 def submit_request(body: SubmitRequest) -> QueryResult:
     """HTTP/contract entry: bind and/or execute under a signed manifest."""
+    import duckdb
+
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+
     run_id = new_run_id()
     kind = _plan_kind(dict(body.plan or {}))
     session_id = body.manifest.session_id
@@ -169,6 +177,23 @@ def submit_request(body: SubmitRequest) -> QueryResult:
             error=str(exc),
         )
         return QueryResult(ok=False, status=code, run_id=run_id, error=str(exc))
+    except (SqlGateAbstain, duckdb.Error) as exc:
+        # EXPLAIN refused the SQL (a column the lake does not have), or the
+        # engine failed running it (a bad cast, an overflow). Either way it is a
+        # named refusal for the caller to abstain on, never an HTTP 500.
+        status = SQL_GATE_ABSTAIN if isinstance(exc, SqlGateAbstain) else SQL_RUNTIME_ERROR
+        record_run(
+            run_id=run_id,
+            kind=kind,
+            status=status,
+            session_id=session_id,
+            pool_id=pool_id,
+            queue_ms=queue_ms,
+            exec_ms=exec_ms,
+            issuer_kid=issuer_kid,
+            error=str(exc),
+        )
+        return QueryResult(ok=False, status=status, run_id=run_id, error=str(exc))
 
 
 def execute_sql(
@@ -257,6 +282,8 @@ def execute_count(
 
 
 __all__ = [
+    "SQL_GATE_ABSTAIN",
+    "SQL_RUNTIME_ERROR",
     "PoolMismatch",
     "PoolRequired",
     "SqlRequired",
