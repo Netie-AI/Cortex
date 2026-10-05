@@ -28,17 +28,10 @@ def _jpeg_b64() -> str:
 
 
 def _jpeg_with_gps_b64() -> str:
-    piexif = pytest.importorskip("piexif")
     img = Image.new("RGB", (32, 32), color=(40, 50, 60))
-    exif = piexif.dump(
-        {
-            "0th": {piexif.ImageIFD.Make: b"TestCam"},
-            "GPS": {
-                piexif.GPSIFD.GPSLatitudeRef: b"N",
-                piexif.GPSIFD.GPSLatitude: ((3, 1), (0, 1), (0, 1)),
-            },
-        }
-    )
+    exif = Image.Exif()
+    exif[0x010F] = "TestCam"
+    exif[0x8825] = {1: "N", 2: (3.0, 0.0, 0.0)}
     buf = io.BytesIO()
     img.save(buf, format="JPEG", exif=exif)
     return base64.b64encode(buf.getvalue()).decode("ascii")
@@ -82,28 +75,39 @@ def test_intake_stores_item_photo_and_ledger(ops_db):
     assert result["item"]["sku"] == "SKU-001"
     assert result["ledger_event"] == "item.intake"
 
+    photo_path = ops_db.parent / result["item"]["photo_uri"]
+    persisted = photo_path.read_bytes()
+    with Image.open(io.BytesIO(persisted)) as photo:
+        assert photo.format == "JPEG"
+        photo.verify()
+
     entries = list_entries(db_path=ops_db, event_type="item.intake")
     assert len(entries) == 1
     assert entries[0].payload["sku"] == "SKU-001"
 
 
 def test_exif_gps_stripped(ops_db):
-    from packs.dms.security.photo_sanitize import has_gps_exif, strip_exif_gps
+    from packs.dms.security.photo_sanitize import has_gps_exif
     from packs.dms.vision import intake, locations
 
     locations.build_location(kind="bin", code="BIN-EXIF", db_path=ops_db)
-    raw = base64.b64decode(_jpeg_with_gps_b64())
+    photo_b64 = _jpeg_with_gps_b64()
+    raw = base64.b64decode(photo_b64)
     assert has_gps_exif(raw)
-    clean = strip_exif_gps(raw)
-    assert not has_gps_exif(clean)
 
-    intake.intake_item(
+    result = intake.intake_item(
         sku="SKU-EXIF",
         label="GPS test",
         location_code="BIN-EXIF",
-        photo_b64=base64.b64encode(clean).decode("ascii"),
+        photo_b64=photo_b64,
         db_path=ops_db,
     )
+    photo_path = ops_db.parent / result["item"]["photo_uri"]
+    persisted = photo_path.read_bytes()
+    assert not has_gps_exif(persisted)
+    with Image.open(io.BytesIO(persisted)) as photo:
+        assert photo.format == "JPEG"
+        photo.verify()
 
 
 def test_scan_move_updates_and_records(ops_db):
