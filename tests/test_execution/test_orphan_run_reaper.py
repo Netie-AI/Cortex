@@ -101,6 +101,7 @@ def test_ensure_loop_reaps_once_with_active_ids(monkeypatch) -> None:
         lambda active_ids, started_before: calls.append((tuple(active_ids), started_before)),
     )
     monkeypatch.setattr(workflow_runner.asyncio, "new_event_loop", lambda: loop)
+    monkeypatch.setattr(workflow_runner.asyncio, "set_event_loop", lambda _loop: None)
     monkeypatch.setattr(workflow_runner.threading, "Thread", FakeThread)
 
     assert workflow_runner._ensure_loop() is loop
