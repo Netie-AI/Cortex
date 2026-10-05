@@ -566,10 +566,10 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
     assert on_envelopes["ma_workday_payroll_cube"]["answer_step"] == "plan_shape"
 
 
-def test_c7_04_preexisting_misroute_value_unchanged_pending_288(
+def test_c7_04_subject_misroute_now_abstains(
     monkeypatch,
 ) -> None:
-    """Pin the parent's wrong value until Cortex #288 replaces it with abstention."""
+    """Only the C7-04 pin changes: Workday/payroll no longer serves low_stock."""
     from bench.accuracy import _ensure_db_loaded
     from bench.heldout import load_heldout, score_envelope
     from CortexOS.dms.answer_engine import answer, clear_session
@@ -579,16 +579,10 @@ def test_c7_04_preexisting_misroute_value_unchanged_pending_288(
     clear_session()
     monkeypatch.setenv("DMS_L2_ENABLED", "1")
     envelope = answer(item.question)
-    rows = envelope["rows"]
-    digest = hashlib.sha256(
-        json.dumps(
-            rows, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        ).encode()
-    ).hexdigest()
 
     scored = score_envelope(item, envelope)
-    assert scored.outcome == "incorrect"
-    assert len(rows) == 1000
-    assert rows[0] == {"quantity_kg": 1.0, "sku": "SKU-00168"}
-    assert rows[-1] == {"quantity_kg": 20.0, "sku": "SKU-00186"}
-    assert digest == "5837092823105b19163897d7063ecdd7ebe08c536dcdcd3b86a8f63dc106caaa"
+    assert scored.outcome == "abstained"
+    assert envelope["rows"] == []
+    assert envelope["sql_used"] is None
+    assert envelope["badge"] == "abstain"
+    assert "subject 'overtime'" in envelope["answer"]

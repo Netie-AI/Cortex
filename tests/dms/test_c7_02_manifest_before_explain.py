@@ -298,3 +298,25 @@ def test_contract_ask_sku_count_on_inventory_grant(dms_http):
     assert cbody.get("sql_used")
     assert "inventory" in str(cbody.get("sql_used")).lower()
     assert cbody.get("audit_id") or (cbody.get("provenance") or {}).get("audit_id")
+
+
+def test_contract_ask_c7_04_workday_stockouts_abstains_by_name(dms_http):
+    """C7-04: a Workday/payroll subject must not serve inventory low_stock."""
+    from bench.heldout import load_heldout
+
+    item = next(row for row in load_heldout() if row.id == "ma_workday_payroll_cube")
+    dms_http.bind_session(SESSION, {"inventory": "TRUE", "locations": "TRUE"})
+    contract = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": item.question, "session_id": SESSION},
+    )
+    assert contract.status_code == 200, contract.text
+    body = contract.json()
+    assert body.get("rows") == [], (
+        f"wrong low_stock value served: {(body.get('rows') or [None])[0]}"
+    )
+    assert _badge(body).lower() == "abstain"
+    assert body.get("route") == "needs_clarification"
+    assert body.get("sql_used") is None
+    assert body.get("drillthrough_token") is None
+    assert "subject" in (body.get("answer") or "").lower()

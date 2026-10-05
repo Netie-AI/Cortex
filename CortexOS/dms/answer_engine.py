@@ -568,6 +568,33 @@ def _subject_allows_sales_rank(q: str) -> bool:
     return subject in _SKU_SUBJECTS
 
 
+def _metric_subject_mismatch(question: str, plan: MetricPlan) -> str | None:
+    """Named comparison subject that the matched metric does not cover.
+
+    A secondary warehouse phrase must not take over routing for the primary
+    subject before ``versus`` / ``against``. For example, "list overtime hours
+    versus stockouts" is about overtime, not an inventory low-stock listing.
+    """
+    from packs.dms.semantic.vocabulary import normalize_for_routing
+
+    q = normalize_for_routing(question)
+    parts = re.split(r"\b(?:versus|vs\.?|against)\b", q, maxsplit=1)
+    if len(parts) == 1:
+        return None
+    primary = parts[0]
+    subject = _named_subject(primary)
+    if subject is None:
+        return None
+    metric_subjects = {
+        alias
+        for table in plan.tables
+        for alias in _TABLE_SUBJECT_ALIASES.get(table.lower(), ())
+    }
+    if not metric_subjects or subject in metric_subjects:
+        return None
+    return subject
+
+
 def _wants_sales_rank(q: str, q_raw: str) -> bool:
     if not _subject_allows_sales_rank(q):
         return False
@@ -1791,6 +1818,12 @@ def answer(
             if plan is not None:
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
+                mismatch = _metric_subject_mismatch(question, plan)
+                if mismatch:
+                    return _abs(
+                        f"question subject '{mismatch}' does not match "
+                        f"metric '{plan.metric_id}' subject"
+                    )
                 try:
                     sql = compile_metric(load_all(), plan.metric_id, plan.slots)
                     layer, badge = "governed_metric", "governed_metric"
