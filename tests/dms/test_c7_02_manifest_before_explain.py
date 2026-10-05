@@ -305,7 +305,7 @@ def test_contract_ask_c7_04_workday_stockouts_abstains_by_name(dms_http):
     from bench.heldout import load_heldout
 
     item = next(row for row in load_heldout() if row.id == "ma_workday_payroll_cube")
-    dms_http.bind_session(SESSION, {"inventory": "TRUE"})
+    dms_http.bind_session(SESSION, {"inventory": "TRUE", "locations": "TRUE"})
     contract = dms_http.post(
         "/v1/contract/ask",
         json={"question": item.question, "session_id": SESSION},
