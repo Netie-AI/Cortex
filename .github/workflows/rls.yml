@@ -1,4 +1,5 @@
 # Postgres RLS proof (F7 remainder / C-SEC-2) — fails closed without a green DSN job.
+# TRUST-05 (#261): every proof writes junit and must contain only passed tests.
 name: RLS Proof
 
 on:
@@ -43,4 +44,28 @@ jobs:
           python -m pip install --upgrade pip wheel
           pip install -e ".[dev,api,dms,postgres]"
       - name: RLS deny proof
-        run: pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short
+        run: >-
+          pytest tests/dms/test_rls_blocks_out_of_scope_read.py -q --tb=short -rA
+          -p no:cacheprovider --junitxml=rls-deny-junit.xml
+      - name: RLS deny test must be PASSED, never SKIPPED
+        run: >-
+          python scripts/check_junit_all_passed.py --junit rls-deny-junit.xml
+          --expect test_rls_blocks_out_of_scope_read
+      - name: Postgres ledger proof (chain, 20-way concurrency, append-only trigger)
+        run: >-
+          pytest tests/dms/test_f1_ledger.py -k postgres -q --tb=short -rA
+          -p no:cacheprovider --junitxml=ledger-pg-junit.xml
+      - name: Postgres ledger tests must be PASSED, never SKIPPED
+        run: >-
+          python scripts/check_junit_all_passed.py --junit ledger-pg-junit.xml
+          --expect test_postgres_chain_append_and_verify_ok,test_postgres_concurrent_appends_consistent,test_postgres_append_only_trigger
+      - name: Multi-process SQLite ledger proof
+        env:
+          DMS_LEDGER_DSN: ""
+        run: >-
+          pytest tests/dms/test_f1_ledger_multiprocess.py -q --tb=short -rA
+          -p no:cacheprovider --junitxml=ledger-mp-junit.xml
+      - name: Multi-process SQLite ledger tests must be PASSED, never SKIPPED
+        run: >-
+          python scripts/check_junit_all_passed.py --junit ledger-mp-junit.xml
+          --expect test_connect_sets_busy_timeout_of_at_least_30s,test_four_processes_append_25_each_yield_gap_free_verified_chain
