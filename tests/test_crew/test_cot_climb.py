@@ -130,8 +130,8 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "CortexOS/crew/config.py",
         "CortexOS/crew/llm.py",
         "CortexOS/crew/mcp_client.py",
-        "CortexOS/dms/answer_engine.py",
-        "CortexOS/dms/l2_generation.py",
+        # #289 owns only the contract-ask L2 stamp seam in answer_engine and
+        # l2_generation; FreeRoute routing/custody remains banned below.
         # #269 ROUTER-1 owns store schema / _write_row / _stats / pick in
         # CortexOS/integrations/freeroute.py. Arming + RouteStamp served_*
         # stay #272. Do not put crew/freeroute.py back on this allow.
