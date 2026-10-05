@@ -31,11 +31,11 @@ _C_STAMP_289_BRANCH_EXCEPTIONS = {
 }
 _C_STAMP_289_EXACT_DIFF = {
     "CortexOS/dms/answer_engine.py": (
-        "460bd61eafa2b7f8a41f6534e93f7ebe204ebb4a7cfacbf6266785281e8a0f6c",
+        "73ef4932b5634681214769c8a798dd2849835b39337d44fbeee27f02a2fcc5c5",
         ("stamp_l2_route", "def _stamp_l2(", "stamp_l2_envelope", "require_route_stamp"),
     ),
     "CortexOS/dms/l2_generation.py": (
-        "a76d33e8ad397bece6d6452e1102116b242097d53f833772a3a1596eb334b9ff",
+        "b9f1fb9fdb51c4d36aab1116921d27861cddc27d3f32ec4c74b4f073cac47e4e",
         (
             "L2_ROUTE_STAMP_MISSING_PREFIX",
             "require_route_stamp",
@@ -255,7 +255,10 @@ def _is_exact_c_stamp_289_seam(path: str) -> bool:
     expected_digest, seam_symbols = expected
     for symbol in seam_symbols:
         assert symbol in diff.stdout, f"#289 stamp seam missing {symbol!r} in {path}"
-    digest = hashlib.sha256(diff.stdout.encode()).hexdigest()
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
     assert digest == expected_digest, (
         f"#289 exception covers only its exact contract-ask stamp seam in {path}; "
         "#290/#291 or any other edit needs its own exception"
