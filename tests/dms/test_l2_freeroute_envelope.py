@@ -9,8 +9,11 @@ must name the OpenVault cause instead of "L2 not wired" or a bare NO_CANDIDATE
 
 from __future__ import annotations
 
+import hashlib
+import json
 import socket
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,6 +24,12 @@ from tests.dms.test_c7_02_manifest_before_explain import _badge, dms_http  # noq
 
 QUESTION = "list some skus from inventory stock"
 TOKEN = "ov_" + "Hq3Lm8Rt5Wy2Kd7Np4Vx"
+_C_STAMP_CAPTURE = Path(__file__).parent / "fixtures" / "c_stamp_289"
+_C_STAMP_CAPTURE_SHA256 = {
+    "req.json": "565f7c50ea2267f3eed60787c3c72a5fdc384bbcbccbf6281d0a3a33f0fe6445",
+    "resp_headers.txt": "a2bed15d41f779c56471ebaff05054082b0bfc4fbdf8283973c11e04d85bbc32",
+    "resp_body.json": "1e3e7cb43f91f816079cfd66befc9f73761ec6e8d3fca3fbae3e667f6977a3fc",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +74,32 @@ def _store_rows() -> list[tuple[Any, ...]]:
         return con.execute("select requested, served, status, verdict, shadow from routes").fetchall()
     finally:
         con.close()
+
+
+def _reply_with_served_stamp(
+    fake,
+    content: str,
+    *,
+    provider: str,
+    model: str,
+) -> None:
+    """Queue explicit served fields; each caller states whether they are constructed or recorded."""
+    fake.reply(content, model=model)
+    status, raw = fake.replies.pop()
+    body = dict(raw or {})
+    body.update(
+        served_provider=provider,
+        served_model=model,
+        served_local=False,
+        served_reason="",
+    )
+    fake.replies.append((status, body))
+
+
+def _capture_bytes(name: str) -> bytes:
+    captured = (_C_STAMP_CAPTURE / name).read_bytes()
+    assert hashlib.sha256(captured).hexdigest() == _C_STAMP_CAPTURE_SHA256[name]
+    return captured
 
 
 # -- (a)-(f) refusals are named in the customer answer ----------------------------
@@ -165,6 +200,118 @@ def test_g_armed_serve_names_served_model_and_credits_plausibility(armed_openvau
     assert f"asked {body['model']}, served {served}" in assumptions
     assert "n=" not in assumptions and "score" not in assumptions
     assert _store_rows() == [(body["model"], served, 200, "plausible", 0)]
+
+
+def test_contract_l2_stamps_actual_response_not_requested_model(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    """Synthetic must-fail: response identity differs from the requested model."""
+    actual_provider = "fallback-provider"
+    actual_model = "fallback/model-that-served"
+    _reply_with_served_stamp(
+        armed_openvault,
+        "SELECT sku FROM inventory LIMIT 5",
+        provider=actual_provider,
+        model=actual_model,
+    )
+    dms_http.bind_session("c-stamp-actual", {"inventory": "TRUE"})
+
+    response = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": "c-stamp-actual"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    requested = armed_openvault.chat_calls[0]["body"]["model"]
+    assert actual_model != requested
+    assert body.get("served_provider") == actual_provider, body
+    assert body.get("served_model") == actual_model, body
+    assert body.get("served_model") != requested
+    assert body.get("rows")
+    assert body.get("answer")
+
+
+def test_contract_l2_replays_recorded_openvault_response(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    """Replay the unedited capture from Cortex PR #292 comment 5993423988.
+
+    UTC 2026-10-05T11:21:37Z. Groq completion id
+    chatcmpl-6a7f6117-d408-4cd6-b283-504a21d03bb1; no OpenVault request id
+    on this capture. SHA-256 request/headers/body:
+    565f7c50...6445 / a2bed15d...c32 / 1e3e7cb4...a3fc.
+    """
+    request_record = json.loads(_capture_bytes("req.json"))
+    header_lines = _capture_bytes("resp_headers.txt").decode("ascii").splitlines()
+    response_record = json.loads(_capture_bytes("resp_body.json"))
+    response_headers = {
+        name.lower(): value
+        for line in header_lines[1:]
+        if ": " in line
+        for name, value in (line.split(": ", 1),)
+    }
+    recorded_provider = response_headers["x-openvault-served-provider"]
+    recorded_model = response_headers["x-openvault-served-model"]
+    recorded_sql = response_record["choices"][0]["message"]["content"]
+
+    assert header_lines[0] == "HTTP/1.1 200 OK"
+    assert response_headers["date"] == "Mon, 05 Oct 2026 11:21:37 GMT"
+    assert response_record["id"] == "chatcmpl-6a7f6117-d408-4cd6-b283-504a21d03bb1"
+    assert request_record["model"] == recorded_model
+    assert request_record["strict"] is True
+    assert recorded_sql == "SELECT sku FROM inventory LIMIT 5;"
+    assert response_record["served_provider"] == recorded_provider
+    assert response_record["served_model"] == recorded_model
+    assert response_record["served_local"] is False
+    armed_openvault.replies.append((200, response_record))
+    dms_http.bind_session("c-stamp-recorded", {"inventory": "TRUE"})
+
+    response = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": "c-stamp-recorded"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body.get("served_provider") == recorded_provider, body
+    assert body.get("served_model") == recorded_model, body
+    assert body.get("served_local") is False
+    assert str(body.get("sql_used") or "").rstrip(";") == recorded_sql.rstrip(";")
+    assert body.get("rows")
+    assert body.get("answer")
+
+
+def test_contract_l2_without_actual_response_stamp_is_refused(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    """A usable SQL response without served_provider/model is not an L2 answer."""
+    armed_openvault.reply(
+        "SELECT sku FROM inventory LIMIT 5",
+        model="fallback/model-without-stamp",
+    )
+    dms_http.bind_session("c-stamp-missing", {"inventory": "TRUE"})
+
+    response = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": "c-stamp-missing"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert _badge(body).lower() == "abstain", body
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
+    reason = " ".join(
+        [
+            str(body.get("answer") or ""),
+            " ".join(body.get("assumptions") or []),
+            str(body.get("served_reason") or ""),
+        ]
+    )
+    assert "L2_ROUTE_STAMP_MISSING" in reason
+    assert "served_provider" in reason
+    assert "served_model" in reason
 
 
 def test_h_implausible_serve_abstains_and_is_credited(armed_openvault, monkeypatch) -> None:

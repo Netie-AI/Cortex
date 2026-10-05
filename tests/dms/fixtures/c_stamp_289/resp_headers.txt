@@ -1,0 +1,13 @@
+HTTP/1.1 200 OK
+date: Mon, 05 Oct 2026 11:21:37 GMT
+server: uvicorn
+x-ratelimit-tier: free
+x-ratelimit-limit: 40000
+x-ratelimit-remaining: 40000
+x-ratelimit-reset: 0
+x-openvault-served-provider: groq
+x-openvault-served-model: openai/gpt-oss-120b
+x-openvault-served-local: false
+content-length: 946
+content-type: application/json
+

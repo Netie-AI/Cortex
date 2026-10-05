@@ -879,3 +879,11 @@ normalization). Suite **668 passed, 6 skipped, 0 failures** with
 - Files: `docs/`, `.cursor/rules/`, `.cursor/skills/`, `.cursor/AGENTS.md`, `.cursor/hooks/`
 - Repo reorganized; planning docs under `docs/dms/`
 - Smoke: DMS tests pass (`pytest tests/test_dms/`)
+
+## CORTEX-289 C-STAMP -- 2026-10-05
+
+Contract `/v1/contract/ask` L2 answers now copy `served_provider` and
+`served_model` from the actual FreeRoute response RouteStamp, including
+fallback-model mismatches. An L2 SQL response without both fields is refused
+as `L2_ROUTE_STAMP_MISSING`; configured, requested, and pinned models are never
+used as substitutes. Non-contract and non-L2 answer behavior remains unchanged.
