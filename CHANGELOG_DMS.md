@@ -2,17 +2,6 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
-## CORTEX-104 C7-05 ask-route L2 gates part 2 -- 2026-10-05
-
-The `/v1/contract/ask` L2 path now uses the same stored-plan and result-shape
-gate helpers as Crew Insights before stamping `L2_VALIDATED`. Numeric SQL must
-resolve to the ranked certified/metric plan; direct listings may use only
-columns from ranked schema tables. After manifest enforcement, EXPLAIN, and
-execution, plausibility and exact output-column/grain checks must pass.
-Failures return an abstain with no rows or SQL. `DMS_L2_ENABLED` remains
-runtime-only and off by default, its checked-in guard is unedited, and prove
-stays pinned to `279cbd85`. Draft A/B evidence only; nothing PASS or COMPLETE.
-
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 
 Crew Insights now serves generated SQL on an L0/L1 miss only when
