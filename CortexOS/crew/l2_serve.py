@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -190,6 +191,66 @@ def _stored_plan(
     return generated_sql, expected_columns, expected_grain, f"metric:{metric.get('id')}"
 
 
+@dataclass(frozen=True, slots=True)
+class L2ServePlan:
+    """Stored numeric plan that generated SQL must preserve."""
+
+    sql: str
+    expected_columns: frozenset[str]
+    expected_grain: frozenset[str]
+    name: str
+
+
+def prepare_plan(
+    ranking: Mapping[str, Any],
+    query_plan: Mapping[str, Any] | None,
+    generated_sql: str,
+    pack_dir: Path,
+) -> tuple[L2ServePlan | None, str]:
+    """Resolve the shared certified-measure, column, and grain oracle."""
+    executable, columns, grain, name = _stored_plan(
+        ranking, query_plan, generated_sql, pack_dir
+    )
+    if executable is None or columns is None or grain is None:
+        return None, name
+    return (
+        L2ServePlan(
+            sql=executable,
+            expected_columns=frozenset(columns),
+            expected_grain=frozenset(grain),
+            name=name,
+        ),
+        "",
+    )
+
+
+def plan_shape_violation(
+    plan: L2ServePlan,
+    rows: Sequence[Mapping[str, Any]],
+) -> str | None:
+    """Name a generated result that changes the stored columns or grain."""
+    actual = _shape(plan.sql)
+    row_columns = {
+        str(key).strip().lower()
+        for row in rows
+        for key in row
+    }
+    if (
+        actual is not None
+        and actual[0] == plan.expected_columns
+        and actual[1] == plan.expected_grain
+        and (not rows or row_columns == plan.expected_columns)
+    ):
+        return None
+    return (
+        f"{plan.name} expected columns={sorted(plan.expected_columns)} "
+        f"grain={sorted(plan.expected_grain)}; "
+        f"got columns={sorted(actual[0]) if actual else []} "
+        f"grain={sorted(actual[1]) if actual else []} "
+        f"row_columns={sorted(row_columns)}"
+    )
+
+
 def _render_rows(rows: list[dict[str, Any]]) -> str:
     return "; ".join(
         ", ".join(f"{key}={value}" for key, value in row.items()) for row in rows
@@ -228,11 +289,12 @@ def serve_on_miss(
             model_called=model_called,
         )
 
-    executable, expected_columns, expected_grain, plan_name = _stored_plan(
+    plan, plan_reason = prepare_plan(
         ranking, query_plan, sql, pack_dir
     )
-    if executable is None or expected_columns is None or expected_grain is None:
-        return _step_abstain("l2_plan", plan_name, model_called=model_called)
+    if plan is None:
+        return _step_abstain("l2_plan", plan_reason, model_called=model_called)
+    executable = plan.sql
 
     try:
         from CortexOS.execution.session_manifests import get_session_registry
@@ -288,20 +350,8 @@ def serve_on_miss(
             "plausibility", plausible.reason or plausible.code, model_called=model_called
         )
 
-    actual = _shape(executable)
-    row_columns = {str(key).strip().lower() for row in rows for key in row}
-    if (
-        actual is None
-        or actual[0] != expected_columns
-        or actual[1] != expected_grain
-        or (rows and row_columns != expected_columns)
-    ):
-        detail = (
-            f"{plan_name} expected columns={sorted(expected_columns)} "
-            f"grain={sorted(expected_grain)}; "
-            f"got columns={sorted(actual[0]) if actual else []} "
-            f"grain={sorted(actual[1]) if actual else []} row_columns={sorted(row_columns)}"
-        )
+    detail = plan_shape_violation(plan, rows)
+    if detail is not None:
         return _step_abstain("plan_shape", detail, model_called=model_called)
 
     audit_id = str(uuid.uuid4())
@@ -329,4 +379,10 @@ def serve_on_miss(
     }
 
 
-__all__ = ["enabled", "serve_on_miss"]
+__all__ = [
+    "L2ServePlan",
+    "enabled",
+    "plan_shape_violation",
+    "prepare_plan",
+    "serve_on_miss",
+]
