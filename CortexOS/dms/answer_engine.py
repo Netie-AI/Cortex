@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import sqlglot
@@ -1750,6 +1751,7 @@ def answer(
     l2_retrieved: tuple[str, ...] = ()
     l2_route_call = ""
     l2_out: Any = None
+    l2_serve_plan: Any = None
 
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
@@ -1884,7 +1886,30 @@ def answer(
             l2_kwargs["require_route_stamp"] = True
         l2_out = attempt_l2(question, **l2_kwargs)
         if l2_out is not None and l2_out.sql:
-            sql = l2_out.sql
+            from CortexOS.dms import l2_plan_gates
+
+            pack_dir = Path(__file__).resolve().parents[2] / "packs" / "dms"
+            ranking = l2_plan_gates.ask_ranking(
+                l2_out.sql, l2_out.retrieved_tables, pack_dir
+            )
+            l2_serve_plan, listing_reason = l2_plan_gates.prepare_listing_plan(
+                ranking, l2_out.sql
+            )
+            if l2_serve_plan is None:
+                l2_serve_plan, plan_reason = l2_plan_gates.prepare_plan(
+                    ranking, None, l2_out.sql, pack_dir
+                )
+                if listing_reason and plan_reason:
+                    plan_reason = f"{plan_reason}; {listing_reason}"
+            if l2_serve_plan is None:
+                result = _abstain(
+                    question,
+                    audit_id,
+                    reason=f"L2 plan gate: {plan_reason}",
+                    granted_sources=granted_sources or None,
+                )
+                return _done(_stamp_l2(result, l2_out, sql_served=False))
+            sql = l2_serve_plan.sql
             layer = "generated"
             # Fail closed: L2Attempt.badge is L2_VALIDATED before execute.
             # Serve that token only after assess_plausibility (below).
@@ -2031,6 +2056,17 @@ def answer(
                 question,
                 audit_id,
                 reason=trip.reason,
+                granted_sources=granted_sources or None,
+            )
+            return _done(_stamp_l2(result, l2_out, sql_served=False))
+        from CortexOS.dms.l2_plan_gates import plan_shape_violation
+
+        shape_reason = plan_shape_violation(l2_serve_plan, rows)
+        if shape_reason is not None:
+            result = _abstain(
+                question,
+                audit_id,
+                reason=f"L2 plan shape: {shape_reason}",
                 granted_sources=granted_sources or None,
             )
             return _done(_stamp_l2(result, l2_out, sql_served=False))
