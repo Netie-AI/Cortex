@@ -74,7 +74,7 @@ _C7_04_288_EXACT_DIFF = {
     ),
 }
 # #104 part 2 Lead climb GO (2026-10-05): exact ask-route L2 gate seam.
-_C7_05_104P2_BASE = "d49e83f6f8d284fd166f5858b5d623d8652e86d6"
+_C7_05_104P2_BASE = "f9adf4ad15fd9b080e95618a4b6042cdb8759914"
 _C7_05_104P2_BRANCH_EXCEPTIONS = {
     "cursor/c7-05-104p2-l2-ab-a1f3": frozenset(
         {
