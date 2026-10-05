@@ -101,7 +101,7 @@ _EXTRACT_PIN_277_EXACT_DIFF = {
     ),
 }
 # #104 part 2 Lead climb YES (2026-10-06): exact ask-route L2 gate seam.
-_C7_05_104P2_BASE = "2b09223b91caa924678f05c11b3630e46ee99fa2"
+_C7_05_104P2_BASE = "8e0269e553bb83d246c6ab331f89d16a51033ade"
 _C7_05_104P2_BRANCH_EXCEPTIONS = {
     "cursor/c7-05-104p2-l2-ab-a1f3": frozenset(
         {
