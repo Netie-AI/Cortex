@@ -312,9 +312,11 @@ def test_contract_ask_c7_04_workday_stockouts_abstains_by_name(dms_http):
     )
     assert contract.status_code == 200, contract.text
     body = contract.json()
+    assert body.get("rows") == [], (
+        f"wrong low_stock value served: {(body.get('rows') or [None])[0]}"
+    )
     assert _badge(body).lower() == "abstain"
     assert body.get("route") == "needs_clarification"
-    assert body.get("rows") == []
     assert body.get("sql_used") is None
     assert body.get("drillthrough_token") is None
     assert "subject" in (body.get("answer") or "").lower()
