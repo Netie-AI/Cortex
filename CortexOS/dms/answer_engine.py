@@ -578,7 +578,10 @@ def _metric_subject_mismatch(question: str, plan: MetricPlan) -> str | None:
     from packs.dms.semantic.vocabulary import normalize_for_routing
 
     q = normalize_for_routing(question)
-    primary = re.split(r"\b(?:versus|vs\.?|against)\b", q, maxsplit=1)[0]
+    parts = re.split(r"\b(?:versus|vs\.?|against)\b", q, maxsplit=1)
+    if len(parts) == 1:
+        return None
+    primary = parts[0]
     subject = _named_subject(primary)
     if subject is None:
         return None
