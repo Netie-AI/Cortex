@@ -16,6 +16,7 @@ from typing import Any
 
 GENESIS_HASH = "0" * 64
 _LOCK = threading.Lock()
+_SQLITE_BUSY_TIMEOUT_MS = 30_000
 _POSTGRES_MIGRATION = Path(__file__).resolve().parents[1] / "sql" / "002_ledger_postgres.sql"
 _pg_engine = None
 _pg_engine_dsn: str | None = None
@@ -98,8 +99,13 @@ def compute_entry_hash(seq: int, prev_hash: str, payload: dict[str, Any], create
 def _connect(db_path: Path | str) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(path), check_same_thread=False)
+    con = sqlite3.connect(
+        str(path),
+        timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000,
+        check_same_thread=False,
+    )
     con.row_factory = sqlite3.Row
+    con.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA foreign_keys = ON")
     return con
 
