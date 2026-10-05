@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from CortexOS.dms.l2_generation import L2Attempt
@@ -26,16 +24,6 @@ def _ask_l2_miss(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _ranking(*, certified: bool = False) -> dict[str, Any]:
-    row = {"id": "cq_sku_count" if certified else "sku_count", "importance": {"score": 9}}
-    return {
-        "ok": True,
-        "locations": [{"id": "inventory", "where": {"table": "inventory"}}],
-        "metrics": [] if certified else [row],
-        "certified": [row] if certified else [],
-    }
-
-
 def _attempt(sql: str = SQL) -> L2Attempt:
     return L2Attempt(
         sql=sql,
@@ -55,10 +43,6 @@ def test_ask_l2_serves_only_after_plausibility_columns_and_grain(
     monkeypatch.setattr(
         "CortexOS.dms.l2_generation.attempt_l2",
         lambda *a, **k: calls.append("manifest_explain") or _attempt(),
-    )
-    monkeypatch.setattr(
-        "CortexOS.crew.insights.select_ranking",
-        lambda *a, **k: _ranking(),
     )
     monkeypatch.setattr(
         "CortexOS.execution.submit.execute_sql",
@@ -90,10 +74,6 @@ def test_ask_l2_certified_measure_mismatch_abstains_before_execute(
         lambda *a, **k: _attempt("SELECT COUNT(*) AS sku_count FROM inventory"),
     )
     monkeypatch.setattr(
-        "CortexOS.crew.insights.select_ranking",
-        lambda *a, **k: _ranking(certified=True),
-    )
-    monkeypatch.setattr(
         "CortexOS.execution.submit.execute_sql",
         lambda *a, **k: executed.append("execute"),
     )
@@ -117,9 +97,6 @@ def test_ask_l2_wrong_result_columns_abstain_after_plausibility(
     calls: list[str] = []
     monkeypatch.setattr(
         "CortexOS.dms.l2_generation.attempt_l2", lambda *a, **k: _attempt()
-    )
-    monkeypatch.setattr(
-        "CortexOS.crew.insights.select_ranking", lambda *a, **k: _ranking()
     )
     monkeypatch.setattr(
         "CortexOS.execution.submit.execute_sql",

@@ -100,6 +100,47 @@ _EXTRACT_PIN_277_EXACT_DIFF = {
         ("_EXTRACT_EXTRA", '"CortexOS/integrations/freeroute.py") == []'),
     ),
 }
+# #104 part 2 Lead climb YES (2026-10-06): exact ask-route L2 gate seam.
+_C7_05_104P2_BASE = "3335dcbf52346ffa89f6f6aac96b7ce743b6a249"
+_C7_05_104P2_BRANCH_EXCEPTIONS = {
+    "cursor/c7-05-104p2-l2-ab-a1f3": frozenset(
+        {
+            "CortexOS/dms/l2_plan_gates.py",
+            "CortexOS/dms/answer_engine.py",
+            "CortexOS/crew/l2_serve.py",
+            "tests/dms/test_c7_05_ask_l2_serve.py",
+            "tests/test_crew/test_cot_climb.py",
+        }
+    )
+}
+_C7_05_104P2_EXACT_DIFF = {
+    "CortexOS/dms/l2_plan_gates.py": (
+        "PENDING_L2_PLAN_GATES",
+        (
+            "class L2ServePlan",
+            "def ask_ranking(",
+            "def prepare_plan(",
+            "def prepare_listing_plan(",
+            "def plan_shape_violation(",
+        ),
+    ),
+    "CortexOS/dms/answer_engine.py": (
+        "PENDING_ANSWER_ENGINE",
+        ("l2_plan_gates", "ask_ranking", "L2 plan gate", "L2 plan shape"),
+    ),
+    "CortexOS/crew/l2_serve.py": (
+        "PENDING_CREW_DELEGATE",
+        ("from CortexOS.dms.l2_plan_gates import", "prepare_plan", "plan_shape_violation"),
+    ),
+    "tests/dms/test_c7_05_ask_l2_serve.py": (
+        "PENDING_ASK_TEST",
+        (
+            "test_ask_l2_serves_only_after_plausibility_columns_and_grain",
+            "test_ask_l2_certified_measure_mismatch_abstains_before_execute",
+            "test_ask_l2_wrong_result_columns_abstain_after_plausibility",
+        ),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -343,6 +384,49 @@ def _is_exact_extract_pin_277(path: str) -> bool:
     return True
 
 
+def _is_exact_c7_05_104p2_seam(path: str) -> bool:
+    """Allow only #104p2's Lead-licensed ask-route L2 gate reshape."""
+    allowed = _C7_05_104P2_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    for frozen_path, (expected_digest, seam_symbols) in (
+        _C7_05_104P2_EXACT_DIFF.items()
+    ):
+        diff = _git(
+            "diff",
+            "--no-ext-diff",
+            "--unified=0",
+            f"{_C7_05_104P2_BASE}..HEAD",
+            "--",
+            frozen_path,
+        )
+        assert diff.returncode == 0, diff.stderr
+        for symbol in seam_symbols:
+            assert symbol in diff.stdout, (
+                f"#104p2 L2 gate seam missing {symbol!r} in {frozen_path}"
+            )
+        stable_diff = "\n".join(
+            line for line in diff.stdout.splitlines() if not line.startswith("index ")
+        )
+        digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+        assert digest == expected_digest, (
+            f"#104p2 exception covers only its exact L2 gate seam in {frozen_path}; "
+            "any other edit needs a new license"
+        )
+    license_diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_C7_05_104P2_BASE}..HEAD",
+        "--",
+        "tests/test_crew/test_cot_climb.py",
+    )
+    assert license_diff.returncode == 0, license_diff.stderr
+    assert "_is_exact_c7_05_104p2_seam" in license_diff.stdout
+    assert "test_other_branch_editing_c7_05_seam_still_trips_guard" in license_diff.stdout
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
     return sorted(
         path
@@ -352,6 +436,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_c7_04_288_seam(path)
             or _is_exact_h2_254_seam(path)
             or _is_exact_extract_pin_277(path)
+            or _is_exact_c7_05_104p2_seam(path)
         )
     )
 
@@ -399,6 +484,14 @@ def test_other_branch_editing_answer_engine_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/memory-290-not-c-stamp")
     path = "CortexOS/dms/answer_engine.py"
     assert _held_freeroute_paths({path}) == [path]
+
+
+def test_other_branch_editing_c7_05_seam_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-05-other-branch")
+    path = "CortexOS/dms/answer_engine.py"
+    assert _is_exact_c7_05_104p2_seam(path) is False
 
 
 def test_other_branch_editing_conftest_still_trips_guard(
