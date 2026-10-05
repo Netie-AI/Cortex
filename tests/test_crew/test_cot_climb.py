@@ -115,7 +115,7 @@ _C7_05_104P2_BRANCH_EXCEPTIONS = {
 }
 _C7_05_104P2_EXACT_DIFF = {
     "CortexOS/dms/l2_plan_gates.py": (
-        "0dc14f112a75485f7ca60b7d8a432458519d00729ecd02355b7d13366a56fd8b",
+        "cf72356273261dc164f1cafdd90a43ae49f3d1feae69ac4c6c792d376efd57a7",
         (
             "class L2ServePlan",
             "def ask_ranking(",
