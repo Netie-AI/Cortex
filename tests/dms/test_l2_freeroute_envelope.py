@@ -67,6 +67,26 @@ def _store_rows() -> list[tuple[Any, ...]]:
         con.close()
 
 
+def _reply_with_actual_stamp(
+    fake,
+    content: str,
+    *,
+    provider: str,
+    model: str,
+) -> None:
+    """Replay OpenVault's actual response stamp, including fallback model identity."""
+    fake.reply(content, model=model)
+    status, raw = fake.replies.pop()
+    body = dict(raw or {})
+    body.update(
+        served_provider=provider,
+        served_model=model,
+        served_local=False,
+        served_reason="",
+    )
+    fake.replies.append((status, body))
+
+
 # -- (a)-(f) refusals are named in the customer answer ----------------------------
 
 
@@ -165,6 +185,69 @@ def test_g_armed_serve_names_served_model_and_credits_plausibility(armed_openvau
     assert f"asked {body['model']}, served {served}" in assumptions
     assert "n=" not in assumptions and "score" not in assumptions
     assert _store_rows() == [(body["model"], served, 200, "plausible", 0)]
+
+
+def test_contract_l2_stamps_actual_response_not_requested_model(
+    armed_openvault, dms_http
+) -> None:  # noqa: F811
+    """POST /v1/contract/ask copies the response stamp, never the configured pin."""
+    requested = "deepseek-v4-pro"
+    actual_provider = "fallback-provider"
+    actual_model = "fallback/model-that-served"
+    _reply_with_actual_stamp(
+        armed_openvault,
+        "SELECT sku FROM inventory LIMIT 5",
+        provider=actual_provider,
+        model=actual_model,
+    )
+    dms_http.bind_session("c-stamp-actual", {"inventory": "TRUE"})
+
+    response = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": "c-stamp-actual"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert armed_openvault.chat_calls[0]["body"]["model"] == requested
+    assert actual_model != requested
+    assert body.get("served_provider") == actual_provider, body
+    assert body.get("served_model") == actual_model, body
+    assert body.get("served_model") != requested
+    assert body.get("rows")
+    assert body.get("answer")
+
+
+def test_contract_l2_without_actual_response_stamp_is_refused(
+    armed_openvault, dms_http
+) -> None:  # noqa: F811
+    """A usable SQL response without served_provider/model is not an L2 answer."""
+    armed_openvault.reply(
+        "SELECT sku FROM inventory LIMIT 5",
+        model="fallback/model-without-stamp",
+    )
+    dms_http.bind_session("c-stamp-missing", {"inventory": "TRUE"})
+
+    response = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": "c-stamp-missing"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert _badge(body).lower() == "abstain", body
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
+    reason = " ".join(
+        [
+            str(body.get("answer") or ""),
+            " ".join(body.get("assumptions") or []),
+            str(body.get("served_reason") or ""),
+        ]
+    )
+    assert "L2_ROUTE_STAMP_MISSING" in reason
+    assert "served_provider" in reason
+    assert "served_model" in reason
 
 
 def test_h_implausible_serve_abstains_and_is_credited(armed_openvault, monkeypatch) -> None:
