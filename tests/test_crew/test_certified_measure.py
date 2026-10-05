@@ -434,3 +434,24 @@ def test_generate_exception_is_a_named_200_abstain(
     assert body["refuse_reason"] == "generative_error:KeyError"
     assert _no_digits(body["answer"], "generative_error:KeyError")
     assert "query_sql" not in body
+
+
+def test_known_gap_reworded_certified_ask_still_reaches_the_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KNOWN GAP (#277 Epic amendment item 3), pinned so it is not silent.
+
+    Binding is an exact certified phrase or synonym. A reworded ask for the
+    certified supplier ranking does not bind, so the model is asked and its own
+    formula comes back as ontology_plan SQL (dms#231 F3 for rewordings). The
+    fix belongs in plan-level binding (the ontology plan's measure id), not in
+    phrase matching. When that lands this test must flip to _assert_served.
+    """
+    q = "Order the suppliers from riskiest to safest using risk and lead time"
+    res, prompts = _ask(client, monkeypatch, q, INVENTED)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert prompts, "a reworded certified ask still reaches the model (known gap)"
+    assert not str((body.get("generative") or {}).get("check") or "").startswith(
+        "certified_query:"
+    )

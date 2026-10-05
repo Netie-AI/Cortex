@@ -4,16 +4,19 @@ Engine generative-ask and Crew Insights generate both read model output through
 this, so a fix to extraction lands once. Extraction is not validation: callers
 still run the SQL gate / guardrail on what comes back.
 
-A statement starts at a top-level ``WITH <name> AS (`` head when one comes
-before the first ``SELECT``, otherwise at the first ``SELECT``. Starting at the
-first ``SELECT`` alone cut ``WITH a AS (SELECT ..) SELECT ..`` down to the CTE
-body plus a stray ``)``, which every validator refused as a parse error.
+Epic amendment on #277 (2026-10-01): a regex only finds the fenced block in
+model prose (and the keyword offsets where a statement may start). Statement
+boundaries, the one-statement rule and the SELECT / WITH-SELECT check come from
+``sqlglot.parse(..., read="duckdb")``, not from a hand-written scanner:
 
-It ends at the first ``;`` outside quotes and comments. What follows must be
-nothing, comments, or (outside a fence) prose: another SQL statement after it
--- a second ``SELECT``, a ``DROP``, an ``INSERT`` -- is a named refusal, never
-silently trimmed off. The statement must contain ``FROM`` outside string
-literals, quoted identifiers and comments.
+* a fenced block must parse as exactly one query (``SELECT``, ``WITH ...
+  SELECT``, a set operation) with a ``FROM``; anything else in the fence -- a
+  second statement before or after it, DDL/DML behind a ``WITH`` -- refuses;
+* unfenced text is tried from each ``SELECT`` / ``WITH`` keyword offset; the
+  longest prefix (cut at ``;``, a newline or the end) that sqlglot parses as one
+  query is the statement. Trailing or leading text that sqlglot parses as a
+  statement of its own is a named refusal, never silently trimmed off; text
+  sqlglot cannot parse (prose) is ignored.
 """
 
 from __future__ import annotations
@@ -21,30 +24,21 @@ from __future__ import annotations
 import re
 from typing import NamedTuple
 
+import sqlglot
+from sqlglot import exp
+
 _SQL_FENCE = re.compile(r"```(?:sql|duckdb)?\s*(.*?)```", re.I | re.S)
 _FENCE_MARK = re.compile(r"```(?:sql|duckdb)?", re.I)
-_SELECT = re.compile(r"\bSELECT\b", re.I)
-# ``WITH [RECURSIVE] name [(cols)] AS [[NOT] MATERIALIZED] (`` then a query
-# keyword: specific enough that the English word "with" in prose never matches.
-_WITH_HEAD = re.compile(
-    r"\bWITH\s+(?:RECURSIVE\s+)?"
-    r"(?:\"[^\"]+\"|[A-Za-z_][\w$]*)\s*(?:\([^()]*\)\s*)?"
-    r"AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(\s*(?:SELECT|WITH|VALUES|FROM)\b",
-    re.I,
-)
-_FROM = re.compile(r"\bfrom\b", re.I)
-#: Words that open a SQL statement. Text after a top-level ``;`` that starts with
-#: one of these (as SQL writes it: all upper or all lower case) is a second
-#: statement; sentence-case ("Show", "With") outside a fence is prose.
-_STATEMENT_START = re.compile(
-    r"(?:SELECT|WITH|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|ATTACH|DETACH|COPY|"
-    r"PRAGMA|SET|RESET|INSTALL|LOAD|CALL|EXPORT|IMPORT|TRUNCATE|MERGE|REPLACE|"
-    r"UPSERT|GRANT|REVOKE|VACUUM|CHECKPOINT|BEGIN|COMMIT|ROLLBACK|ABORT|USE|"
-    r"EXPLAIN|DESCRIBE|SHOW|SUMMARIZE|VALUES|TABLE|PIVOT|UNPIVOT|FROM|EXECUTE|"
-    r"PREPARE|DEALLOCATE)\b",
-    re.I,
-)
+#: Offsets where a statement may begin. Only a start finder: whether the text
+#: from there is one query, and where it ends, is sqlglot's answer.
+_START = re.compile(r"\b(?:SELECT|WITH)\b", re.I)
+_CUT = re.compile(r"[;\n]")
+_DIALECT = "duckdb"
 _MULTI = "more than one statement"
+#: Bounds on the work a hostile model output can cause (starts x cuts parses).
+_MAX_TEXT = 50_000
+_MAX_STARTS = 20
+_MAX_CUTS = 60
 
 
 class Extracted(NamedTuple):
@@ -54,87 +48,116 @@ class Extracted(NamedTuple):
     reason: str
 
 
-def _scan(text: str, start: int) -> tuple[int, str]:
-    """(index of the first top-level ``;`` at/after ``start``, or len; code-only text).
-
-    Code-only text is ``text[start:end]`` with string literals, quoted
-    identifiers, ``$$`` strings and comments blanked, so keyword checks see
-    only real SQL and a ``;`` inside a literal never ends the statement.
-    """
-    out: list[str] = []
-    i, n = start, len(text)
-    while i < n:
-        ch = text[i]
-        two = text[i : i + 2]
-        if ch == ";":
-            return i, "".join(out)
-        close = {"--": "\n", "/*": "*/", "$$": "$$"}.get(two)
-        if close is not None:
-            j = text.find(close, i + 2)
-            j = n if j < 0 else j + (0 if close == "\n" else len(close))
-        elif ch in ("'", '"'):
-            j = i + 1
-            while j < n:
-                if text[j] == ch:
-                    if text[j + 1 : j + 2] == ch:  # a doubled quote escapes itself
-                        j += 2
-                        continue
-                    break
-                j += 1
-            j = min(j + 1, n)
-        else:
-            out.append(ch)
-            i += 1
-            continue
-        out.append(" " * (j - i))
-        i = j
-    return n, "".join(out)
-
-
-def _after_statement(text: str) -> str:
-    """What trails a statement, minus whitespace, comments and bare ``;``."""
-    rest = text
-    while True:
-        rest = rest.lstrip().lstrip(";").lstrip()
-        if rest.startswith("--"):
-            j = rest.find("\n")
-            rest = "" if j < 0 else rest[j:]
-        elif rest.startswith("/*"):
-            j = rest.find("*/")
-            rest = "" if j < 0 else rest[j + 2 :]
-        else:
-            return rest
-
-
-def _second_statement(rest: str, *, fenced: bool) -> str | None:
-    """The keyword of a second statement in ``rest``, or None when there is none."""
-    if not rest:
+def _statements(text: str) -> list[exp.Expression] | None:
+    """sqlglot's statements for ``text`` (empty ones dropped), or None if it does not parse."""
+    try:
+        parsed = sqlglot.parse(text, read=_DIALECT)
+    except Exception:  # noqa: BLE001 - any parse/token error means "not SQL here"
         return None
-    found = _STATEMENT_START.match(rest)
-    if found:
-        word = found.group(0)
-        if fenced or word.isupper() or word.islower():
-            return word.upper()
-    return "text" if fenced else None
+    # A bare ``;`` (or one carrying only a comment) parses as Semicolon: not a statement.
+    return [node for node in parsed if node is not None and not isinstance(node, exp.Semicolon)]
 
 
-def _one_statement(body: str, *, fenced: bool) -> Extracted:
-    select = _SELECT.search(body)
-    head = _WITH_HEAD.search(body)
-    if head and (select is None or head.start() < select.start()):
-        start = head.start()
-    elif select:
-        start = select.start()
-    else:
+def _query_reason(node: exp.Expression) -> str:
+    """Empty when ``node`` is a read-only query with FROM; else why not."""
+    if not isinstance(node, exp.Query) or isinstance(node, exp.Values):
+        return f"not a SELECT query ({type(node).__name__.upper()} refused)"
+    if node.find(exp.From) is None:
+        return "extracted query has no FROM"
+    return ""
+
+
+def _kind(node: exp.Expression) -> str:
+    """Statement keyword for ``node``; ``text`` when it is an expression, not a statement."""
+    if isinstance(node, exp.Condition):
+        return "text"  # a bare word or expression: sqlglot parses it, SQL does not run it
+    if isinstance(node, exp.Command):
+        return str(node.this or "COMMAND").upper()
+    return type(node).__name__.upper()
+
+
+def _prose_command(node: exp.Expression, raw: str) -> bool:
+    """sqlglot's fallback Command for a sentence-case word ("Show this to ...")."""
+    if not isinstance(node, exp.Command):
+        return False
+    word = raw.strip().split(None, 1)[0] if raw.strip() else ""
+    return bool(word) and not (word.isupper() or word.islower())
+
+
+def _sql_statement_in(text: str) -> str | None:
+    """Keyword of the first SQL statement sqlglot finds in unfenced ``text``; None for prose."""
+    for piece in text.split(";"):
+        body = piece.strip()
+        if not body:
+            continue
+        nodes = _statements(body)
+        if not nodes:
+            continue
+        node = nodes[0]
+        if isinstance(node, exp.Condition) or _prose_command(node, body):
+            continue
+        return _kind(node)
+    return None
+
+
+def _trim_tail(sql: str) -> str:
+    """Drop a trailing ``;`` and anything after it that sqlglot reads as no statement."""
+    text = sql.strip()
+    for pos in reversed([m.start() for m in re.finditer(";", text)]):
+        head, tail = text[:pos], text[pos + 1 :]
+        if _statements(tail) == [] and len(_statements(head) or []) == 1:
+            text = head.rstrip()
+    return text
+
+
+def _fenced(body: str) -> Extracted:
+    nodes = _statements(body)
+    if nodes is None:
+        return Extracted(None, "fenced SQL does not parse")
+    if not nodes:
         return Extracted(None, "no SELECT or WITH query in model output")
-    end, code = _scan(body, start)
-    if end < len(body):
-        second = _second_statement(_after_statement(body[end + 1 :]), fenced=fenced)
-        if second:
-            return Extracted(None, f"{_MULTI} in model output (trailing {second} refused)")
-    if not _FROM.search(code):
-        return Extracted(None, "extracted query has no FROM")
-    return Extracted(body[start:end].strip(), "")
+    if len(nodes) > 1:
+        if isinstance(nodes[0], exp.Query):
+            where, other = "trailing", nodes[1]
+        else:
+            where, other = "leading", nodes[0]
+        return Extracted(None, f"{_MULTI} in model output ({where} {_kind(other)} refused)")
+    reason = _query_reason(nodes[0])
+    if reason:
+        return Extracted(None, reason)
+    return Extracted(_trim_tail(body), "")
+
+
+def _unfenced(text: str) -> Extracted:
+    reason = "no SELECT or WITH query in model output"
+    for count, start in enumerate(m.start() for m in _START.finditer(text)):
+        if count >= _MAX_STARTS:
+            break
+        cuts = [m.start() for m in _CUT.finditer(text, start)][:_MAX_CUTS]
+        ends = sorted({*cuts, len(text)}, reverse=True)  # longest prefix first
+        for end in ends:
+            candidate = text[start:end]
+            nodes = _statements(candidate)
+            if not nodes or len(nodes) != 1:
+                continue
+            why = _query_reason(nodes[0])
+            if why:
+                reason = why
+                if not why.startswith("extracted query has no FROM"):
+                    # A WITH that parses as INSERT/DELETE/...: DDL/DML behind a
+                    # WITH is a named refusal, not something to look past.
+                    return Extracted(None, why)
+                continue
+            before = text[:start]
+            if ";" in before:
+                kind = _sql_statement_in(before[: before.rfind(";")].split(";")[-1])
+                if kind:
+                    return Extracted(None, f"{_MULTI} in model output (leading {kind} refused)")
+            kind = _sql_statement_in(text[end:])
+            if kind:
+                return Extracted(None, f"{_MULTI} in model output (trailing {kind} refused)")
+            return Extracted(_trim_tail(candidate), "")
+    return Extracted(None, reason)
 
 
 def extract_statement(text: str) -> Extracted:
@@ -142,25 +165,29 @@ def extract_statement(text: str) -> Extracted:
 
     Tried in order: each fenced block, the text with fenced blocks removed, the
     text with only the fence markers removed, the raw text. Models often fence
-    only the SELECT list and leave ``FROM t i`` outside the fence; that parsed
-    as ``SELECT i.sku LIMIT 1000`` and EXPLAIN died on alias ``i``, so a
-    candidate without FROM falls through to the next form. A second statement
-    is final: output that carries one is refused, not rescued from another form.
+    only the SELECT list and leave ``FROM t i`` outside the fence; a candidate
+    without FROM falls through to the next form. A second statement is final:
+    output that carries one is refused, not rescued from another form.
     """
     if not text:
         return Extracted(None, "empty model output")
-    blobs = [(m.group(1).strip(), True) for m in _SQL_FENCE.finditer(text)]
-    blobs.append((_SQL_FENCE.sub(" ", text).strip(), False))
-    blobs.append((_FENCE_MARK.sub(" ", text).strip(), False))
-    blobs.append((text.strip(), False))
+    if len(text) > _MAX_TEXT:
+        return Extracted(None, f"model output longer than {_MAX_TEXT} characters")
     reason = ""
-    for body, fenced in blobs:
-        got = _one_statement(body, fenced=fenced)
-        if got.sql or got.reason.startswith(_MULTI):
+    for match in _SQL_FENCE.finditer(text):
+        got = _fenced(match.group(1))
+        if got.sql or not got.reason.startswith(
+            ("extracted query has no FROM", "no SELECT or WITH")
+        ):
+            return got
+        reason = reason or got.reason
+    for body in (_SQL_FENCE.sub(" ", text), _FENCE_MARK.sub(" ", text), text):
+        got = _unfenced(body)
+        if got.sql or got.reason.startswith((_MULTI, "not a SELECT")):
             return got
         if not reason or reason.startswith("no SELECT"):
             reason = got.reason
-    return Extracted(None, reason)
+    return Extracted(None, reason or "no SELECT or WITH query in model output")
 
 
 def extract_select(text: str) -> str | None:
