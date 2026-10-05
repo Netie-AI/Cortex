@@ -1,10 +1,52 @@
 import importlib.util
+import os
 import socket
 import sys
 import types
 from pathlib import Path
 
 import pytest
+
+_RUNTIME_LOG_ENV = {
+    "CORTEX_DECISION_LOG_PATH": "tier_decisions.jsonl",
+    "CORTEX_KEV_SHADOW_PATH": "tier_shadow.jsonl",
+}
+_RUNTIME_LOG_FILES = {
+    name: Path(__file__).resolve().parents[1] / "data" / "engine" / name
+    for name in _RUNTIME_LOG_ENV.values()
+}
+
+
+def _runtime_log_state() -> dict[str, tuple[int, int] | None]:
+    state: dict[str, tuple[int, int] | None] = {}
+    for name, path in _RUNTIME_LOG_FILES.items():
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            state[name] = None
+        else:
+            state[name] = (stat.st_size, stat.st_mtime_ns)
+    return state
+
+
+@pytest.fixture(scope="session", autouse=True)
+def runtime_log_snapshot():
+    """Keep synthetic test decisions out of the runtime calibration corpus."""
+    before = _runtime_log_state()
+    yield before
+    assert _runtime_log_state() == before
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_logs(monkeypatch, tmp_path):
+    """Redirect decision and shadow logs before each test's fixtures run."""
+    paths = {
+        env_name: tmp_path / filename
+        for env_name, filename in _RUNTIME_LOG_ENV.items()
+    }
+    for env_name, path in paths.items():
+        monkeypatch.setenv(env_name, os.fspath(path))
+    return paths
 
 
 def _freeroute_fake():

@@ -69,6 +69,24 @@ _C7_04_288_EXACT_DIFF = {
         ("test_c7_04_subject_misroute_now_abstains", "subject 'overtime'"),
     ),
 }
+# #254 Epic ruling (2026-10-05, 5999107355): exact runtime-log isolation seam.
+_H2_254_BASE = "8c603ae80352f7084ab4ed33ff0bbc4620e67dd2"
+_H2_254_BRANCH_EXCEPTIONS = {
+    "cursor/h2-test-isolation-254-45db": frozenset({"tests/conftest.py"})
+}
+_H2_254_EXACT_DIFF = {
+    "tests/conftest.py": (
+        "c2a2ca0174f5655f78be834d5d450ed331a6363b323e9d7da23867fb7deadfd7",
+        (
+            "CORTEX_DECISION_LOG_PATH",
+            "CORTEX_KEV_SHADOW_PATH",
+            "tier_decisions.jsonl",
+            "tier_shadow.jsonl",
+            "@pytest.fixture(autouse=True)",
+            "def isolate_runtime_logs(",
+        ),
+    )
+}
 # #277 Epic ruling (2026-10-05, c5994673962): one-file exception, same shape as
 # #289's. The extractor pin may allow sqlglot for sql_extract.py only; any other
 # edit to tests/test_freeroute_core.py needs its own exception.
@@ -263,6 +281,39 @@ def _is_exact_c7_04_288_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_h2_254_seam(path: str) -> bool:
+    """Allow only #254's frozen test-log isolation diff on its licensed branch."""
+    allowed = _H2_254_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    expected = _H2_254_EXACT_DIFF.get(path)
+    if expected is None:
+        return False
+    if _git("cat-file", "-e", f"{_H2_254_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _H2_254_BASE)
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_H2_254_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
+        assert symbol in diff.stdout, f"#254 isolation seam missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"#254 exception covers only its exact runtime-log isolation seam in {path}; "
+        "any other edit needs its own exception"
+    )
+    return True
+
+
 def _is_exact_extract_pin_277(path: str) -> bool:
     """Allow only #277's frozen sqlglot allowance in the FreeRoute-core pin."""
     if path not in _EXTRACT_PIN_277_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset()):
@@ -299,6 +350,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
         if not (
             _is_exact_c_stamp_289_seam(path)
             or _is_exact_c7_04_288_seam(path)
+            or _is_exact_h2_254_seam(path)
             or _is_exact_extract_pin_277(path)
         )
     )
@@ -346,6 +398,14 @@ def test_other_branch_editing_answer_engine_still_trips_guard(
 ) -> None:
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/memory-290-not-c-stamp")
     path = "CortexOS/dms/answer_engine.py"
+    assert _held_freeroute_paths({path}) == [path]
+
+
+def test_other_branch_editing_conftest_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/h2-test-isolation-254-unlicensed")
+    path = "tests/conftest.py"
     assert _held_freeroute_paths({path}) == [path]
 
 
