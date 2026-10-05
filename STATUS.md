@@ -2,6 +2,13 @@
 **Last updated:** 2026-10-01 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#276 SERVED-PASSTHROUGH draft**; **#272 LOCAL-1 local not proven**; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
 > **2026-10-05 (CORTEX-289 C-STAMP):** Contract-ask L2 copies only the actual FreeRoute response stamp and refuses `L2_ROUTE_STAMP_MISSING`; draft evidence only, nothing PASS or COMPLETE.
 
+> **2026-10-05 (CORTEX-104 C7-05 part 2 draft):** Contract ask-route L2 now
+> reuses the Insights stored-plan oracle before serving: numeric SQL must match
+> certified/metric columns and grain, direct listings stay within ranked schema
+> tables/columns, and returned rows must preserve that shape after plausibility.
+> `DMS_L2_ENABLED` remains runtime-only and off by default; its checked-in guard
+> is unedited. Prove remains pinned to `279cbd85`. Nothing PASS or COMPLETE.
+
 > **2026-10-01 (CORTEX-276 SERVED-PASSTHROUGH):** `stamp_api` now passes
 > the RouteStamp of the `freeroute.complete()` call whose SQL was served
 > into `stamp_router_fingerprint`. `model_called` is true only when that
