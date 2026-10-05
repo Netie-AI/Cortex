@@ -188,10 +188,9 @@ def test_g_armed_serve_names_served_model_and_credits_plausibility(armed_openvau
 
 
 def test_contract_l2_stamps_actual_response_not_requested_model(
-    armed_openvault, dms_http
-) -> None:  # noqa: F811
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
     """POST /v1/contract/ask copies the response stamp, never the configured pin."""
-    requested = "deepseek-v4-pro"
     actual_provider = "fallback-provider"
     actual_model = "fallback/model-that-served"
     _reply_with_actual_stamp(
@@ -209,7 +208,7 @@ def test_contract_l2_stamps_actual_response_not_requested_model(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert armed_openvault.chat_calls[0]["body"]["model"] == requested
+    requested = armed_openvault.chat_calls[0]["body"]["model"]
     assert actual_model != requested
     assert body.get("served_provider") == actual_provider, body
     assert body.get("served_model") == actual_model, body
@@ -219,8 +218,8 @@ def test_contract_l2_stamps_actual_response_not_requested_model(
 
 
 def test_contract_l2_without_actual_response_stamp_is_refused(
-    armed_openvault, dms_http
-) -> None:  # noqa: F811
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
     """A usable SQL response without served_provider/model is not an L2 answer."""
     armed_openvault.reply(
         "SELECT sku FROM inventory LIMIT 5",

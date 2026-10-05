@@ -81,6 +81,7 @@ def _load_active_pack() -> None:
 
 #: Stable prefix so answer() can emit refused, not coverage abstain (C7-02).
 L2_MANIFEST_REASON_PREFIX = "L2_MANIFEST:"
+L2_ROUTE_STAMP_MISSING_PREFIX = "L2_ROUTE_STAMP_MISSING:"
 
 
 @dataclass(slots=True)
@@ -97,6 +98,7 @@ class L2Attempt:
     retrieved_tables: tuple[str, ...] = ()
     route: dict[str, Any] | None = None
     route_call: str = ""
+    route_stamp: Any = None
 
 
 def _env_on(name: str) -> bool:
@@ -126,6 +128,7 @@ def attempt_l2(
     verified: Any = None,
     force: bool = False,
     promote: bool = True,
+    require_route_stamp: bool = False,
 ) -> L2Attempt | None:
     """Run L2 through the registered port. ``None`` when the L2 flag is off.
 
@@ -220,13 +223,28 @@ def attempt_l2(
     # Serve pre-enforce SQL so execute_sql / enforce_manifest runs once.
     # Post-enforce SQL re-submitted as a candidate collides local bind + grant.
     sql = gate.source_sql or gate.safe_sql
+    tables = tuple((reduced.get("tables") or {}).keys())
+    served = _last_usable(stamps)
+    missing_stamp = _missing_served_fields(served)
+    if require_route_stamp and missing_stamp:
+        reason = (
+            f"{L2_ROUTE_STAMP_MISSING_PREFIX} actual FreeRoute response omitted "
+            + " and ".join(missing_stamp)
+        )
+        return L2Attempt(
+            reason=reason,
+            layer="refused",
+            badge="refused",
+            refused=True,
+            route=served.public() if served is not None else None,
+            route_call=served.call_id if served is not None else "",
+            route_stamp=served,
+        )
     if promote:
         try:
             l2.record_validated(question, sql)
         except Exception:  # noqa: BLE001 — promotion signal must not block answers
             pass
-    tables = tuple((reduced.get("tables") or {}).keys())
-    served = _last_usable(stamps)
     assumptions = f"L2 FreeRoute SQL over reduced schema tables={list(tables)}"
     if served is not None:
         assumptions += f"; {served.line()}"
@@ -236,6 +254,7 @@ def attempt_l2(
         retrieved_tables=tables,
         route=served.public() if served is not None else None,
         route_call=served.call_id if served is not None else "",
+        route_stamp=served,
     )
 
 
@@ -253,6 +272,41 @@ def _unarmed_reason(port: Any) -> str:
 def _last_usable(stamps: list[Any]) -> Any:
     usable = [s for s in stamps if getattr(s, "usable", False)]
     return usable[-1] if usable else None
+
+
+def _missing_served_fields(stamp: Any) -> list[str]:
+    if stamp is None:
+        return ["served_provider", "served_model"]
+    return [
+        name
+        for name in ("served_provider", "served_model")
+        if not str(getattr(stamp, name, "") or "").strip()
+    ]
+
+
+def stamp_l2_envelope(
+    envelope: dict[str, Any],
+    attempt: L2Attempt,
+    *,
+    sql_served: bool,
+) -> dict[str, Any]:
+    """Apply the actual L2 response stamp, or an explicit empty-stamp reason."""
+    from CortexOS.integrations import freeroute
+
+    stamp = attempt.route_stamp
+    if sql_served and not _missing_served_fields(stamp):
+        return freeroute.stamp_router_fingerprint(envelope, stamp)
+    reason = attempt.reason or "L2 model call did not produce the served answer"
+    empty = freeroute.RouteStamp(
+        call_id="unserved",
+        task="dms-l2",
+        requested="",
+        served_provider=None,
+        served_model=None,
+        served_local=False,
+        served_reason=reason,
+    )
+    return freeroute.stamp_router_fingerprint(envelope, empty)
 
 
 def _credit_gate(stamps: list[Any], *, passed: bool) -> None:
@@ -424,10 +478,12 @@ __all__ = [
     "L2GenerationPort",
     "L2NotRegistered",
     "L2_MANIFEST_REASON_PREFIX",
+    "L2_ROUTE_STAMP_MISSING_PREFIX",
     "attempt_l2",
     "clear_l2_generation",
     "maybe_record_l2_shadow",
     "note_l2_plausibility",
     "register_l2_generation",
     "resolve_l2_generation",
+    "stamp_l2_envelope",
 ]

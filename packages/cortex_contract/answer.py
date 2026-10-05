@@ -60,6 +60,11 @@ class Answer(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     contributing_sources: list[ContributingSource] = Field(default_factory=list)
     drillthrough_token: str | None = None
+    # 1.3.0: actual FreeRoute response identity for model-served L2 answers.
+    served_provider: str | None = None
+    served_model: str | None = None
+    served_local: bool = False
+    served_reason: str | None = None
 
 
 class DrillthroughRequest(BaseModel):

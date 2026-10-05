@@ -1630,6 +1630,7 @@ def answer(
     space_id: str | None = None,
     verified: VerifiedManifest | None = None,
     require_grounding: bool = False,
+    stamp_l2_route: bool = False,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
@@ -1674,6 +1675,18 @@ def answer(
             )
         )
 
+    def _stamp_l2(
+        result: dict[str, Any],
+        attempt: Any,
+        *,
+        sql_served: bool,
+    ) -> dict[str, Any]:
+        if not stamp_l2_route:
+            return result
+        from CortexOS.dms.l2_generation import stamp_l2_envelope
+
+        return stamp_l2_envelope(result, attempt, sql_served=sql_served)
+
     route = route_question(question)
 
     if route == "blocked":
@@ -1709,6 +1722,7 @@ def answer(
     planned_tables: tuple[str, ...] = ()
     l2_retrieved: tuple[str, ...] = ()
     l2_route_call = ""
+    l2_out: Any = None
 
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
@@ -1832,7 +1846,10 @@ def answer(
         from CortexOS.dms.l2_generation import L2_MANIFEST_REASON_PREFIX, attempt_l2
 
         # promote=False: steward recording waits until plausibility passes.
-        l2_out = attempt_l2(question, verified=verified, promote=False)
+        l2_kwargs: dict[str, Any] = {"verified": verified, "promote": False}
+        if stamp_l2_route:
+            l2_kwargs["require_route_stamp"] = True
+        l2_out = attempt_l2(question, **l2_kwargs)
         if l2_out is not None and l2_out.sql:
             sql = l2_out.sql
             layer = "generated"
@@ -1853,6 +1870,7 @@ def answer(
                 ):
                     refused = _abstain_refused(question, audit_id, reason=l2_out.reason)
                     refused["violations_blocked"] = list(l2_out.violations or [])
+                    refused = _stamp_l2(refused, l2_out, sql_served=False)
                     return _done(refused)
             doc = _space_doc_rag()
             if doc is not None:
@@ -1976,7 +1994,13 @@ def answer(
         # Credit the verdict to the FreeRoute call by id: safe_sql may differ from its text.
         note_l2_plausibility(l2_route_call, ok=trip.ok)
         if not trip.ok:
-            return _abs(trip.reason)
+            result = _abstain(
+                question,
+                audit_id,
+                reason=trip.reason,
+                granted_sources=granted_sources or None,
+            )
+            return _done(_stamp_l2(result, l2_out, sql_served=False))
         badge = "L2_VALIDATED"
         try:
             resolve_l2_generation().record_validated(question, used_sql)
@@ -2018,7 +2042,7 @@ def answer(
             layer=layer,
         )
 
-    return _done({
+    result = {
         "answer": answer_text,
         "sql_used": guard_result.safe_sql,
         "chart_spec": build_chart_spec(rows, question),
@@ -2043,4 +2067,7 @@ def answer(
             assumptions=assumptions,
         ),
         "audit": {"timestamp": entry.timestamp, "passed": entry.passed, "violations": entry.violations},
-    })
+    }
+    if layer == "generated" and l2_out is not None:
+        result = _stamp_l2(result, l2_out, sql_served=True)
+    return _done(result)
