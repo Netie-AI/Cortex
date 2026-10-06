@@ -284,6 +284,7 @@ async def contract_ask(body: AskRequest) -> Answer:
             verified=verified,
             require_grounding=True,
             stamp_l2_route=True,
+            scored_pack_id=body.scored_pack_id,
         )
     except ManifestError as exc:
         code = getattr(exc, "code", "manifest_error")

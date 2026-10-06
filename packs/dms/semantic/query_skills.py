@@ -3,6 +3,10 @@
 No LLM on the hot path: bag-of-words hash embeddings (same as F6 skill capture)
 match a question to a stored metric_id+params (or certified SQL), then the
 caller recompiles through Q1 + sql_guardrail.
+
+Off unless ``CORTEX_QUERY_SKILL=1`` (#340). Even when on, the store is scoped
+per Space and never touched during a scored round: a read or write with no
+Space, or with a ``scored_pack_id`` / ``CORTEX_SCORED_ROUND``, is a no-op.
 """
 from __future__ import annotations
 
@@ -20,10 +24,32 @@ from packs.dms.skills.capture import cosine_similarity, normalize_trigger, text_
 # High bar: avoid false skill hits that would skip a better metric route.
 DEFAULT_THRESHOLD = 0.72
 
+ENABLED_ENV = "CORTEX_QUERY_SKILL"
+# Same knob C-MEM honours (CortexOS.memory.space_memory.SCORED_ROUND_ENV).
+SCORED_ROUND_ENV = "CORTEX_SCORED_ROUND"
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def query_skill_enabled() -> bool:
+    return os.environ.get(ENABLED_ENV, "0").strip().lower() in _TRUTHY
+
 
 def capture_enabled() -> bool:
+    if not query_skill_enabled():
+        return False
     raw = os.environ.get("DMS_QUERY_SKILL_CAPTURE", "1").strip().lower()
     return raw not in ("0", "false", "no", "off")
+
+
+def _skill_space(space_id: str | None, scored_pack_id: str | None) -> str | None:
+    """The Space this read/write is scoped to, or None when the store is off-limits."""
+    if not query_skill_enabled():
+        return None
+    if (scored_pack_id or "").strip():
+        return None
+    if os.environ.get(SCORED_ROUND_ENV, "").strip().lower() in _TRUTHY:
+        return None
+    return (space_id or "").strip() or None
 
 
 # Resolved once: Path.resolve() is a filesystem syscall, and this ran on every
@@ -105,6 +131,14 @@ def init_query_skills_schema(con: sqlite3.Connection | None = None) -> None:
             ON dms_query_skills(active);
         """
     )
+    # Additive: rows written before #340 keep space_id NULL and are never read.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(dms_query_skills)")}
+    if "space_id" not in cols:
+        con.execute("ALTER TABLE dms_query_skills ADD COLUMN space_id TEXT")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dms_query_skills_space "
+        "ON dms_query_skills(space_id, active)"
+    )
     con.commit()
     if own:
         con.close()
@@ -117,9 +151,14 @@ def _now() -> str:
 def find(
     question: str,
     *,
+    space_id: str | None = None,
+    scored_pack_id: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
 ) -> dict[str, Any] | None:
-    """Return best active skill above threshold, or None."""
+    """Return this Space's best active skill above threshold, or None."""
+    space = _skill_space(space_id, scored_pack_id)
+    if space is None:
+        return None
     text = normalize_trigger(question)
     if not text:
         return None
@@ -128,7 +167,8 @@ def find(
     try:
         ensure_schema(con)
         rows = con.execute(
-            "SELECT * FROM dms_query_skills WHERE active = 1"
+            "SELECT * FROM dms_query_skills WHERE active = 1 AND space_id = ?",
+            (space,),
         ).fetchall()
         best: dict[str, Any] | None = None
         best_score = 0.0
@@ -169,8 +209,8 @@ def find(
             return None
         con.execute(
             "UPDATE dms_query_skills SET support_count = support_count + 1, "
-            "last_used_at = ? WHERE id = ?",
-            (_now(), best["id"]),
+            "last_used_at = ? WHERE id = ? AND space_id = ?",
+            (_now(), best["id"], space),
         )
         con.commit()
         return best
@@ -185,9 +225,14 @@ def capture(
     params: dict[str, Any] | None = None,
     sql: str | None = None,
     layer: str = "governed_metric",
+    space_id: str | None = None,
+    scored_pack_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Persist a successful answer as a reusable skill (idempotent on trigger)."""
     if not capture_enabled():
+        return None
+    space = _skill_space(space_id, scored_pack_id)
+    if space is None:
         return None
     text = normalize_trigger(question)
     if not text or (not metric_id and not sql):
@@ -199,15 +244,19 @@ def capture(
     try:
         ensure_schema(con)
         existing = con.execute(
-            "SELECT id, support_count FROM dms_query_skills WHERE trigger_text = ?",
+            "SELECT id, space_id FROM dms_query_skills WHERE trigger_text = ?",
             (text,),
         ).fetchone()
         if existing:
+            # UNIQUE(trigger_text) predates Space scoping: a trigger owned by
+            # another Space (or an unscoped legacy row) is left untouched.
+            if existing["space_id"] != space:
+                return None
             con.execute(
                 "UPDATE dms_query_skills SET support_count = support_count + 1, "
                 "last_used_at = ?, metric_id = COALESCE(?, metric_id), "
                 "params_json = ?, sql_template = COALESCE(?, sql_template), "
-                "layer = ?, embedding = ? WHERE id = ?",
+                "layer = ?, embedding = ? WHERE id = ? AND space_id = ?",
                 (
                     now,
                     metric_id,
@@ -216,6 +265,7 @@ def capture(
                     layer,
                     json.dumps(emb),
                     existing["id"],
+                    space,
                 ),
             )
             con.commit()
@@ -223,8 +273,8 @@ def capture(
         con.execute(
             "INSERT INTO dms_query_skills "
             "(id, trigger_text, embedding, metric_id, params_json, sql_template, "
-            "layer, support_count, active, last_used_at, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)",
+            "layer, support_count, active, last_used_at, created_at, space_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)",
             (
                 skill_id,
                 text,
@@ -235,6 +285,7 @@ def capture(
                 layer,
                 now,
                 now,
+                space,
             ),
         )
         con.commit()

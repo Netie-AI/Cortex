@@ -63,7 +63,7 @@ Ordered. Each state's `layer` and `metric_id` are reported honestly in
 | 1 | `session` | prior turn in this `session_id` **and** anaphora (`them`/`those`/`average of them`) | `0.88` | `"Top 5 selling SKUs by revenue"` → `"average of them"` = `avg_sales_value_myr 590996.79` |
 | 2 | `certified` (L0) | **exact** normalized match in `certified_queries.yaml` | `0.95` | `"Top 5 selling SKUs by revenue"` → `cq_sales_top5_value` |
 | 3 | `governed_metric` (L1) | `route_to_metric()` matches a rule → compile `metrics.yaml` template | `0.95` | `"last month sales"` → `revenue_last_month` |
-| 4 | `query_skill` | similarity ≥ 0.72 against a previously answered question | `max(0.72, score)` | **never observed in production traffic — see §4** |
+| 4 | `query_skill` | `CORTEX_QUERY_SKILL=1` **and** similarity ≥ 0.72 against a previously answered question in the same Space (§4) | `max(0.72, score)` | **never observed in production traffic — see §4** |
 | 5 | L2 freeform | `DMS_L2_ENABLED` set **and** a model wired | — | **unreachable: no model is wired; the flag only changes the abstain reason** |
 | 6 | `abstain` (L3) | nothing above produced SQL | none | `"how profitable was the Berlin office in 1997"` |
 
@@ -84,7 +84,7 @@ Not layers, but they change what the user sees:
 | State | Trigger | Disclosure |
 |---|---|---|
 | `truncated` | `len(rows) >= 1000` and true total is larger | answer text is prefixed `"N rows match; showing the first 1000."` |
-| skill graduation | any `certified`/`governed_metric`/`query_skill` answer | question + metric + params written to `dms_query_skills` |
+| skill graduation | any `certified`/`governed_metric`/`query_skill` answer, only with `CORTEX_QUERY_SKILL=1`, a Space, and no scored round (§4) | question + metric + params + `space_id` written to `dms_query_skills` |
 
 ---
 
@@ -142,6 +142,29 @@ by constructing a hit directly; it does not prove the layer is *reachable*.
 Two honest options: give it real sentence embeddings (then it becomes the L1.5
 recall layer it was meant to be), or delete the read path and keep the table as
 a usage log. Leaving it as-is means shipping a learning loop that does not learn.
+
+### Gate (#340): off by default
+
+`CORTEX_QUERY_SKILL` turns the layer on, for both capture and read. It is unset
+by default, so the router goes straight from L1 to L2/abstain and nothing is
+written to `dms_query_skills`. `DMS_QUERY_SKILL_CAPTURE=0` still turns off
+capture alone.
+
+Even with `CORTEX_QUERY_SKILL=1`:
+
+- A read or write needs a Space. The engine uses the Space named in the signed
+  session grant, and `find()` with no Space returns nothing.
+- Rows are scoped by a nullable `space_id` column, added with an additive
+  `ALTER TABLE` on first open. Rows written before #340 keep `NULL`, are never
+  read, and are never deleted.
+- `UNIQUE(trigger_text)` predates Space scoping. If another Space (or a legacy
+  row) already holds a question, the capture in this Space is skipped.
+- A scored round writes and reads nothing. That means a `scored_pack_id` on
+  `/v1/contract/ask` (now passed through to the engine) or
+  `CORTEX_SCORED_ROUND=1`, the same rule C-MEM follows.
+
+Tests: `tests/dms/test_query_skill_gate_340.py`. Retiring the layer in favour
+of C-MEM solution memory is #340b.
 
 ---
 
