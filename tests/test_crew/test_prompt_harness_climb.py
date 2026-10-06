@@ -88,6 +88,18 @@ _C7_05_104P2_EXACT_DIFF = {
         ("l2_plan_gates", "ask_ranking", "L2 plan gate", "L2 plan shape"),
     ),
 }
+# #105 C7-06 refresh of #128: exact L1 serve-chooser seam. Pending Lead CLEAR;
+# the PR stays draft until the C7-06 held-out gate is met.
+_C7_06_105_BASE = "c7469da4e87cb49f56930242189b10817cba7d04"
+_C7_06_105_BRANCH_EXCEPTIONS = {
+    "cursor/c7-06-refresh-c7469da-9556": frozenset({"CortexOS/dms/answer_engine.py"})
+}
+_C7_06_105_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "07e79c66ef08c4091201cea8aef974bdcf4996f13bf8190d39cf4f81c6e4b806",
+        ("choose_governed_metric", "cascade_retired"),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -373,6 +385,37 @@ def _is_exact_c7_05_104p2_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_c7_06_105_seam(path: str) -> bool:
+    """Allow only #105 C7-06's exact L1 serve-chooser seam on its branch."""
+    allowed = _C7_06_105_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    expected = _C7_06_105_EXACT_DIFF.get(path)
+    if expected is None:
+        return False
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_C7_06_105_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
+        assert symbol in diff.stdout, f"#105 C7-06 seam missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"#105 C7-06 exception covers only its exact L1 chooser seam in {path}; "
+        "any other edit needs its own exception"
+    )
+    return True
+
+
 def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
     if _git("rev-parse", "--verify", "origin/main").returncode != 0:
         pytest.skip("origin/main missing")
@@ -397,6 +440,7 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
             _is_exact_c_stamp_289_seam(path)
             or _is_exact_c7_04_288_seam(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or _is_exact_c7_06_105_seam(path)
         )
     ]
     assert held == [], f"dual-write of frozen/other-seat files: {held}"
@@ -416,6 +460,14 @@ def test_other_branch_editing_c7_05_seam_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-05-other-branch")
     path = "CortexOS/dms/answer_engine.py"
     assert _is_exact_c7_05_104p2_seam(path) is False
+
+
+def test_other_branch_editing_c7_06_seam_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-06-other-branch")
+    path = "CortexOS/dms/answer_engine.py"
+    assert _is_exact_c7_06_105_seam(path) is False
 
 
 @pytest.mark.asyncio
