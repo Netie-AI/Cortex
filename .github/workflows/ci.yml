@@ -146,8 +146,11 @@ jobs:
       statuses: read
     continue-on-error: true
     steps:
+      # The decision script comes from the base, never from the PR under decision.
       - uses: actions/checkout@v4
-      - name: Squash-merge if perfect
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Squash-merge if tier:fast + exact-head CLEAR + different-family AGREE
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
