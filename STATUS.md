@@ -1,5 +1,6 @@
 # STATUS.md
 **Last updated:** 2026-10-01 | **Gate:** G2.3 OSR **SHIPPED** | **Active:** C7-02..06; EPIC-015 RAG served-path; GOLD-01 founder TTY; **#276 SERVED-PASSTHROUGH draft**; **#272 LOCAL-1 local not proven**; **#269 ROUTER-1 INCOMPLETE**; **#211 NARROW plan_source INCOMPLETE**; **#212 CoT covering INCOMPLETE**; CREW-8020-FACTS
+> **2026-10-06 (CORTEX-290 C-MEM):** Per-Space memory (tables/formulas/tools/solutions) with scored-pack write refuse and Space isolation must-fails; contract 1.4.0 adds `memory_ids_read`/`memory_reads`/`reused`. Memory off by default; draft evidence only, nothing PASS or COMPLETE, no gain claim.
 > **2026-10-05 (CORTEX-289 C-STAMP):** Contract-ask L2 copies only the actual FreeRoute response stamp and refuses `L2_ROUTE_STAMP_MISSING`; draft evidence only, nothing PASS or COMPLETE.
 
 > **2026-10-01 (CORTEX-276 SERVED-PASSTHROUGH):** `stamp_api` now passes
