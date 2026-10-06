@@ -298,6 +298,9 @@ async def contract_ask(body: AskRequest) -> Answer:
         data = dict(result)
     data.update(memory_fields)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
+    from CortexOS.suggest.ask import attach_followups
+
+    data = attach_followups(data, question=body.question, verified=verified)
     return Answer.model_validate(data)
 
 
