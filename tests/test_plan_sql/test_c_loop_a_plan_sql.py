@@ -277,6 +277,67 @@ def test_payload_ask_with_join_replays_recorded_openvault_response(
     assert "- transactions.sku = inventory.sku (many_to_one)" in prompt
 
 
+# -- no overclaim: a plan_sql answer is never L2_VALIDATED ----------------------
+
+# Every token through which an envelope becomes L2_VALIDATED: the L2 badge
+# itself, and what contract_routes maps onto DMS's L2_VALIDATED (_FLAT_BADGE).
+_L2_TOKENS = ("l2_validated", "query_skill", "generated")
+
+
+def _overclaims(body: dict[str, Any]) -> list[str]:
+    prov = body.get("provenance") or {}
+    found = [
+        f"{field}={value}"
+        for field, value in (
+            ("badge", body.get("badge")),
+            ("layer", body.get("layer")),
+            ("provenance.badge", prov.get("badge")),
+            ("provenance.layer", prov.get("layer")),
+        )
+        if str(value or "").lower() in _L2_TOKENS
+    ]
+    if "l2_validated" in json.dumps(body).lower():
+        found.append("L2_VALIDATED in envelope")
+    return found
+
+
+class _L2PortTripwire:
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"plan_sql ask touched the L2 port ({name})")
+
+
+def test_overclaim_detector_flags_a_real_l2_envelope() -> None:
+    assert _overclaims({"layer": "generated", "badge": "L2_VALIDATED"})
+    assert _overclaims({"provenance": {"layer": "plan_sql", "badge": "query_skill"}})
+    assert _overclaims({"answer": "ok", "assumptions": ["badge L2_VALIDATED"]})
+    assert _overclaims({"provenance": {"layer": "plan_sql", "badge": "session"}}) == []
+
+
+@pytest.mark.parametrize("l2_flag", ["", "1"], ids=["l2_off", "l2_on"])
+def test_plan_sql_session_success_never_stamps_l2_validated(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, l2_flag: str  # noqa: F811
+) -> None:
+    from CortexOS.dms import l2_generation
+
+    monkeypatch.setenv("DMS_L2_ENABLED", l2_flag)
+    monkeypatch.setattr(l2_generation, "_port", _L2PortTripwire())
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    resp = _ask(dms_http)
+    body = _json(resp)
+
+    assert body["rows"] and body["sql_used"].startswith(GOOD_SQL)
+    assert body["provenance"]["layer"] == "plan_sql"
+    assert body["provenance"]["badge"] == "session"
+    assert _overclaims(body) == [], _overclaims(body)
+    assert b"l2_validated" not in resp.content.lower()
+    assert "Not validated for accuracy" in body["provenance"]["assumptions"]
+    assert "Not validated for accuracy" in body["assumptions"][-1]
+    assert len(armed_openvault.chat_calls) == 2
+
+
 def test_response_without_served_stamp_is_refused(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
