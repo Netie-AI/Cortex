@@ -1,0 +1,100 @@
+{
+ "captured_on": "c7469da4e87cb49f56930242189b10817cba7d04",
+ "responses": [
+  {
+   "method": "POST",
+   "path": "/v1/contract/ask",
+   "request": {
+    "question": "top 5 skus by sales",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"Top 5 sales result(s), ranked by value:\\n  · SKU-00173: MYR 700638.47\\n  · SKU-00241: MYR 594317.77\\n  · SKU-00028: MYR 585415.2\\n  · SKU-00071: MYR 553849.85\\n  · SKU-00452: MYR 520762.68\",\"sql_used\":\"SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr FROM transactions WHERE txn_type = 'OUT' GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5\",\"audit_id\":\"<uuid>\",\"route\":\"sql\",\"row_count\":5,\"rows\":[{\"sku\":\"SKU-00173\",\"sales_value_myr\":700638.47},{\"sku\":\"SKU-00241\",\"sales_value_myr\":594317.77},{\"sku\":\"SKU-00028\",\"sales_value_myr\":585415.2},{\"sku\":\"SKU-00071\",\"sales_value_myr\":553849.85},{\"sku\":\"SKU-00452\",\"sales_value_myr\":520762.68}],\"provenance\":{\"layer\":\"governed_metric\",\"badge\":\"governed_metric\",\"metric_id\":\"sales_by_value\",\"query_source\":null,\"assumptions\":\"SKUs ranked by sales value\"},\"suggestions\":[],\"answer_id\":\"<uuid>\",\"assumptions\":[\"SKUs ranked by sales value\"],\"contributing_sources\":[{\"ref_id\":\"transactions\",\"container\":\"warehouse\",\"member\":\"transactions\",\"kind\":\"table\",\"row_count\":5,\"contribution\":1.0}],\"drillthrough_token\":\"<drillthrough_token>\",\"served_provider\":null,\"served_model\":null,\"served_local\":false,\"served_reason\":null,\"memory_ids_read\":[],\"memory_reads\":[],\"reused\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/v1/contract/ask",
+   "request": {
+    "question": "what is our total revenue",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"Result: revenue_myr = 80787598.3\",\"sql_used\":\"SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr FROM transactions WHERE txn_type = 'OUT' LIMIT 1000\",\"audit_id\":\"<uuid>\",\"route\":\"sql\",\"row_count\":1,\"rows\":[{\"revenue_myr\":80787598.3}],\"provenance\":{\"layer\":\"governed_metric\",\"badge\":\"governed_metric\",\"metric_id\":\"revenue_total\",\"query_source\":null,\"assumptions\":\"total outbound revenue\"},\"suggestions\":[],\"answer_id\":\"<uuid>\",\"assumptions\":[\"total outbound revenue\"],\"contributing_sources\":[{\"ref_id\":\"transactions\",\"container\":\"warehouse\",\"member\":\"transactions\",\"kind\":\"table\",\"row_count\":1,\"contribution\":1.0}],\"drillthrough_token\":\"<drillthrough_token>\",\"served_provider\":null,\"served_model\":null,\"served_local\":false,\"served_reason\":null,\"memory_ids_read\":[],\"memory_reads\":[],\"reused\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/v1/contract/ask",
+   "request": {
+    "question": "revenue by month",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"I can't answer that from the DMS semantic layer with confidence (no governed metric or certified query matched). This session can answer over: transactions.\",\"sql_used\":null,\"audit_id\":\"<uuid>\",\"route\":\"needs_clarification\",\"row_count\":null,\"rows\":[],\"provenance\":{\"layer\":\"abstain\",\"badge\":\"abstain\",\"metric_id\":null,\"query_source\":null,\"assumptions\":\"no governed metric or certified query matched\"},\"suggestions\":[],\"answer_id\":\"<uuid>\",\"assumptions\":[\"no governed metric or certified query matched\"],\"contributing_sources\":[],\"drillthrough_token\":null,\"served_provider\":null,\"served_model\":null,\"served_local\":false,\"served_reason\":null,\"memory_ids_read\":[],\"memory_reads\":[],\"reused\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/v1/contract/ask",
+   "request": {
+    "question": "Which SKUs are below reorder level?",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"I can't answer that from the sources bound to this session - the closest governed answer would read inventory, locations, which this session did not bind. This session can answer over: transactions. Ask about those, or bind the source you meant and ask again.\",\"sql_used\":null,\"audit_id\":\"<uuid>\",\"route\":\"needs_clarification\",\"row_count\":null,\"rows\":[],\"provenance\":{\"layer\":\"abstain\",\"badge\":\"abstain\",\"metric_id\":null,\"query_source\":null,\"assumptions\":\"question resolves to ungranted source(s): inventory, locations\"},\"suggestions\":[],\"answer_id\":\"<uuid>\",\"assumptions\":[\"question resolves to ungranted source(s): inventory, locations\"],\"contributing_sources\":[],\"drillthrough_token\":null,\"served_provider\":null,\"served_model\":null,\"served_local\":false,\"served_reason\":null,\"memory_ids_read\":[],\"memory_reads\":[],\"reused\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/dms/query",
+   "request": {
+    "question": "top 5 skus by sales",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"Top 5 sales result(s), ranked by value:\\n  · SKU-00173: MYR 700638.47\\n  · SKU-00241: MYR 594317.77\\n  · SKU-00028: MYR 585415.2\\n  · SKU-00071: MYR 553849.85\\n  · SKU-00452: MYR 520762.68\",\"sql_used\":\"SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr FROM transactions WHERE txn_type = 'OUT' GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5\",\"chart_spec\":{\"type\":\"bar\",\"data\":[{\"name\":\"SKU-00173\",\"value\":700638.47},{\"name\":\"SKU-00241\",\"value\":594317.77},{\"name\":\"SKU-00028\",\"value\":585415.2},{\"name\":\"SKU-00071\",\"value\":553849.85},{\"name\":\"SKU-00452\",\"value\":520762.68}],\"x_label\":\"sku\",\"y_label\":\"sales_value_myr\",\"title\":\"top 5 skus by sales\",\"more_count\":0},\"audit_id\":\"<uuid>\",\"violations_blocked\":[],\"route\":\"sql\",\"sources\":null,\"row_count\":5,\"rows\":[{\"sku\":\"SKU-00173\",\"sales_value_myr\":700638.47},{\"sku\":\"SKU-00241\",\"sales_value_myr\":594317.77},{\"sku\":\"SKU-00028\",\"sales_value_myr\":585415.2},{\"sku\":\"SKU-00071\",\"sales_value_myr\":553849.85},{\"sku\":\"SKU-00452\",\"sales_value_myr\":520762.68}],\"source_table\":\"transactions\",\"alerts_summary\":null,\"audit\":{\"timestamp\":\"<ts>\",\"passed\":true,\"violations\":[]},\"query_plan\":{\"intent\":\"sales_by_value\",\"confidence\":0.95,\"limit\":5,\"source_table\":\"transactions\",\"sort\":\"sales_value_myr DESC\",\"candidates\":[{\"intent\":\"sales_rank\",\"score\":0.36,\"rationale\":\"Matches outbound transaction sales/revenue language.\"},{\"intent\":\"inventory_lookup\",\"score\":0.12,\"rationale\":\"Matches inventory table lookup language.\"},{\"intent\":\"delayed_shipments\",\"score\":0.0,\"rationale\":\"Matches delayed shipment status and lateness ranking language.\"},{\"intent\":\"supplier_ranking\",\"score\":0.0,\"rationale\":\"Matches supplier risk/lead-time score comparison language.\"},{\"intent\":\"warehouse_capacity\",\"score\":0.0,\"rationale\":\"Matches warehouse capacity/utilisation language.\"}],\"runtime\":{\"name\":\"cortex-secured-dms-runtime\",\"tier\":\"T1\",\"reason\":\"heuristic routing fallback\",\"guardrails\":[\"semantic_table_allowlist\",\"read_only_sql\",\"max_limit_1000\",\"sensitive_column_masking\",\"audit_log\",\"pii_redaction\"]},\"layer\":\"governed_metric\",\"metric_id\":\"sales_by_value\",\"skill_score\":null,\"assumptions\":\"SKUs ranked by sales value\",\"grant_kind\":\"session\",\"granted_sources\":[\"transactions\"]},\"layer\":\"governed_metric\",\"badge\":\"governed_metric\",\"metric_id\":\"sales_by_value\",\"total_count\":496,\"truncated\":false,\"assumptions\":\"SKUs ranked by sales value\",\"suggestions\":null,\"query_source\":\"warehouse_synced_from_lake_silver\",\"grant_kind\":\"session\",\"granted_sources\":[\"transactions\"]}"
+  },
+  {
+   "method": "POST",
+   "path": "/dms/query",
+   "request": {
+    "question": "what is our total revenue",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"Result: revenue_myr = 80787598.3\",\"sql_used\":\"SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr FROM transactions WHERE txn_type = 'OUT' LIMIT 1000\",\"chart_spec\":{\"type\":\"bignum\",\"value\":80787598.3,\"label\":\"REVENUE MYR\",\"title\":\"what is our total revenue\",\"data\":[]},\"audit_id\":\"<uuid>\",\"violations_blocked\":[],\"route\":\"sql\",\"sources\":null,\"row_count\":1,\"rows\":[{\"revenue_myr\":80787598.3}],\"source_table\":\"transactions\",\"alerts_summary\":null,\"audit\":{\"timestamp\":\"<ts>\",\"passed\":true,\"violations\":[]},\"query_plan\":{\"intent\":\"revenue_total\",\"confidence\":0.95,\"limit\":5,\"source_table\":\"transactions\",\"sort\":\"sales_value_myr DESC\",\"candidates\":[{\"intent\":\"sales_rank\",\"score\":0.12,\"rationale\":\"Matches outbound transaction sales/revenue language.\"},{\"intent\":\"delayed_shipments\",\"score\":0.0,\"rationale\":\"Matches delayed shipment status and lateness ranking language.\"},{\"intent\":\"supplier_ranking\",\"score\":0.0,\"rationale\":\"Matches supplier risk/lead-time score comparison language.\"},{\"intent\":\"warehouse_capacity\",\"score\":0.0,\"rationale\":\"Matches warehouse capacity/utilisation language.\"},{\"intent\":\"alerts\",\"score\":0.0,\"rationale\":\"Matches operational alert language.\"}],\"runtime\":{\"name\":\"cortex-secured-dms-runtime\",\"tier\":\"T1\",\"reason\":\"heuristic routing fallback\",\"guardrails\":[\"semantic_table_allowlist\",\"read_only_sql\",\"max_limit_1000\",\"sensitive_column_masking\",\"audit_log\",\"pii_redaction\"]},\"layer\":\"governed_metric\",\"metric_id\":\"revenue_total\",\"skill_score\":null,\"assumptions\":\"total outbound revenue\",\"grant_kind\":\"session\",\"granted_sources\":[\"transactions\"]},\"layer\":\"governed_metric\",\"badge\":\"governed_metric\",\"metric_id\":\"revenue_total\",\"total_count\":1,\"truncated\":false,\"assumptions\":\"total outbound revenue\",\"suggestions\":null,\"query_source\":\"warehouse_synced_from_lake_silver\",\"grant_kind\":\"session\",\"granted_sources\":[\"transactions\"]}"
+  },
+  {
+   "method": "POST",
+   "path": "/dms/query",
+   "request": {
+    "question": "revenue by month",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"I can't answer that from the DMS semantic layer with confidence (no governed metric or certified query matched). This session can answer over: transactions.\",\"sql_used\":null,\"chart_spec\":null,\"audit_id\":\"<uuid>\",\"violations_blocked\":[],\"route\":\"needs_clarification\",\"sources\":null,\"row_count\":null,\"rows\":[],\"source_table\":null,\"alerts_summary\":null,\"audit\":null,\"query_plan\":null,\"layer\":\"abstain\",\"badge\":\"abstain\",\"metric_id\":null,\"total_count\":0,\"truncated\":null,\"assumptions\":\"no governed metric or certified query matched\",\"suggestions\":[],\"query_source\":\"warehouse_synced_from_lake_silver\",\"grant_kind\":\"session\",\"granted_sources\":[\"transactions\"]}"
+  },
+  {
+   "method": "POST",
+   "path": "/dms/query",
+   "request": {
+    "question": "Which SKUs are below reorder level?",
+    "session_id": "c-loop-c-golden",
+    "space_id": "alpha"
+   },
+   "status": 200,
+   "body": "{\"answer\":\"I can't answer that from the sources bound to this session - the closest governed answer would read inventory, locations, which this session did not bind. This session can answer over: transactions. Ask about those, or bind the source you meant and ask again.\",\"sql_used\":null,\"chart_spec\":null,\"audit_id\":\"<uuid>\",\"violations_blocked\":[],\"route\":\"needs_clarification\",\"sources\":null,\"row_count\":null,\"rows\":[],\"source_table\":null,\"alerts_summary\":null,\"audit\":null,\"query_plan\":null,\"layer\":\"abstain\",\"badge\":\"abstain\",\"metric_id\":null,\"total_count\":0,\"truncated\":null,\"assumptions\":\"question resolves to ungranted source(s): inventory, locations\",\"suggestions\":[],\"query_source\":\"warehouse_synced_from_lake_silver\",\"grant_kind\":\"session\",\"granted_sources\":[\"transactions\"]}"
+  },
+  {
+   "method": "GET",
+   "path": "/v1/contract/tools",
+   "request": null,
+   "status": 200,
+   "body": "{\"tools\":[{\"id\":\"export_pptx\",\"class_name\":\"apply\",\"description\":\"export_pptx\"}]}"
+  }
+ ]
+}
