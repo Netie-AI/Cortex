@@ -9,6 +9,7 @@ request that actually crossed the wire. It models OpenVault#147 (Refs #135):
 * live key: ``{ok: true, valid: true, key_id, tier}``; otherwise ``{ok: true, valid: false}``.
 
 Security bars for #312 are tagged ``BAR-1`` .. ``BAR-5`` on the tests that hold them.
+All tokens here are fakes.
 """
 
 from __future__ import annotations
@@ -32,14 +33,16 @@ from fastapi.testclient import TestClient
 from packs.dms.security import api_auth
 from packs.dms.security.api_auth import Caller, get_caller, resolve_caller
 
-SERVICE_TOKEN = "svc-cortex-0123456789abcdefSERVICE"
-ADMIN_TOKEN = "adm-openvault-0123456789abcdefADMIN"
-USER_KEY = "ov_user_live_secret_0123456789"
+SERVICE_TOKEN = "fake-cortex-service-bearer-0123"
+ADMIN_TOKEN = "fake-openvault-admin-token-0123"
+USER_KEY = "ov_fake_user_key_0123"
 _ENVS = (
     "OPENVAULT_BASE_URL",
     "OPENVAULT_URL",
     "CREW_OPENVAULT_URL",
+    "OPENVAULT_ADMIN_TOKEN",
     "OPENVAULT_ADMIN_TOKEN_PATH",
+    "OPENVAULT_HOME",
     "CORTEX_OV_VERIFY_URL",
     "DMS_API_KEYS",
     "DMS_AUTH_DISABLED",
@@ -200,8 +203,16 @@ def test_ov_429_denies_ov_verify_rate_limited(ov: FakeOpenVault) -> None:
     assert resolve_auth(USER_KEY) == Deny("ov_verify_rate_limited")
 
 
-def test_ov_500_denies_unexpected_status(ov: FakeOpenVault) -> None:
-    ov.status = 500
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 599])
+def test_ov_5xx_denies_ov_verify_server_error(ov: FakeOpenVault, status: int) -> None:
+    ov.status = status
+    assert resolve_auth(USER_KEY) == Deny("ov_verify_server_error")
+    assert _app().get("/who", headers={"X-API-Key": USER_KEY}).status_code == 401
+
+
+@pytest.mark.parametrize("status", [201, 204, 302, 404, 405, 418])
+def test_ov_other_status_denies_unexpected_status(ov: FakeOpenVault, status: int) -> None:
+    ov.status = status
     assert resolve_auth(USER_KEY) == Deny("ov_verify_unexpected_status")
 
 
@@ -276,7 +287,7 @@ def test_malformed_response_denies_ov_verify_malformed(ov: FakeOpenVault, body: 
 # -- BAR-1: service token custody ---------------------------------------------
 
 
-@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o660, 0o700, 0o400, 0o666])
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o660, 0o700, 0o400, 0o666], ids=oct)
 def test_service_token_file_must_be_mode_0600(
     ov: FakeOpenVault, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: int
 ) -> None:
@@ -345,14 +356,22 @@ def test_token_with_header_breaking_chars_denies_without_http(
     assert ov.requests == []
 
 
+def _plant_admin_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Every place an admin token could be found. Cortex must use none of them."""
+    admin = tmp_path / "vault" / "admin_token"
+    admin.parent.mkdir()
+    _write_secret(admin, ADMIN_TOKEN)
+    monkeypatch.setenv("OPENVAULT_ADMIN_TOKEN", ADMIN_TOKEN)
+    monkeypatch.setenv("OPENVAULT_ADMIN_TOKEN_PATH", str(admin))
+    monkeypatch.setenv("OPENVAULT_HOME", str(admin.parent))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def test_bearer_is_exactly_the_service_token_never_admin(
     ov: FakeOpenVault, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """BAR-1: one Authorization Bearer, the service token; no admin header, no admin value."""
-    admin = tmp_path / "vault" / "admin_token"
-    admin.parent.mkdir()
-    _write_secret(admin, ADMIN_TOKEN)
-    monkeypatch.setenv("OPENVAULT_ADMIN_TOKEN_PATH", str(admin))
+    _plant_admin_token(monkeypatch, tmp_path)
     assert isinstance(resolve_auth(USER_KEY), Caller)
     (sent,) = ov.requests
     headers = {k.lower(): v for k, v in sent["headers"].items()}
@@ -367,18 +386,34 @@ def test_bearer_is_exactly_the_service_token_never_admin(
 def test_admin_token_file_is_refused_as_service_token(
     ov: FakeOpenVault, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """BAR-1: never the admin token, even at 0600 and even under another name."""
-    admin = _write_secret(tmp_path / "custody.secret", ADMIN_TOKEN)
-    monkeypatch.setenv("OPENVAULT_ADMIN_TOKEN_PATH", str(admin))
-    monkeypatch.setenv("CORTEX_OV_SERVICE_TOKEN_FILE", str(admin))
-    assert resolve_auth(USER_KEY) == Deny("ov_service_token_is_admin")
-
+    """BAR-1: pointing the service file at OpenVault's admin_token is refused unread."""
     default_named = tmp_path / ".openvault" / "admin_token"
     default_named.parent.mkdir()
     _write_secret(default_named, ADMIN_TOKEN)
-    monkeypatch.delenv("OPENVAULT_ADMIN_TOKEN_PATH")
     monkeypatch.setenv("CORTEX_OV_SERVICE_TOKEN_FILE", str(default_named))
     assert resolve_auth(USER_KEY) == Deny("ov_service_token_is_admin")
+    assert ov.requests == []
+
+
+def test_no_admin_token_path_exists_in_cortex() -> None:
+    """MUST-FAIL: Cortex has no code that names, reads or sends the OpenVault admin token."""
+    source = Path(api_auth.__file__).read_text(encoding="utf-8")
+    assert "OPENVAULT_ADMIN_TOKEN" not in source
+    assert "x-openvault-admin" not in source.lower()
+    assert "OPENVAULT_HOME" not in source
+    assert re.search(r"\.openvault[/\\\"']", source) is None
+
+
+def test_missing_service_bearer_is_a_closed_deny_with_no_admin_fallback(
+    ov: FakeOpenVault, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """MUST-FAIL: no service bearer -> closed deny, even with an admin token on hand."""
+    _plant_admin_token(monkeypatch, tmp_path)
+    monkeypatch.delenv("CORTEX_OV_SERVICE_TOKEN_FILE")
+    assert resolve_auth(USER_KEY) == Deny("ov_service_token_missing")
+    res = _app().get("/who", headers={"X-API-Key": USER_KEY})
+    assert res.status_code == 401
+    assert "ov_service_token_missing" in res.json()["detail"]
     assert ov.requests == []
 
 
@@ -428,7 +463,7 @@ def test_tokens_absent_from_logs_errors_reasons_and_reprs(
     assert [getattr(d, "reason", None) for d in decisions[1:]] == [
         "ov_verify_forbidden",
         "ov_verify_rate_limited",
-        "ov_verify_unexpected_status",
+        "ov_verify_server_error",
         "ov_verify_malformed",
         "invalid_key",
         "ov_verify_unauthorized",

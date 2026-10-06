@@ -42,7 +42,6 @@ OV_VERIFY_URL_ENV: Final[str] = "CORTEX_OV_VERIFY_URL"
 OV_VERIFY_DEFAULT_URL: Final[str] = "http://127.0.0.1:8080"
 OV_VERIFY_PATH: Final[str] = "/api/apikeys/verify"
 _OV_REFUSED_PORT: Final[int] = 5000
-_OV_ADMIN_TOKEN_PATH_ENV: Final[str] = "OPENVAULT_ADMIN_TOKEN_PATH"
 _OV_ADMIN_TOKEN_FILENAME: Final[str] = "admin_token"
 _OV_SERVICE_TOKEN_MODE: Final[int] = 0o600
 _OV_SERVICE_TOKEN_MAX_BYTES: Final[int] = 4096
@@ -63,6 +62,7 @@ DENY_OV_SERVICE_TOKEN_IS_ADMIN: Final[str] = "ov_service_token_is_admin"
 DENY_OV_VERIFY_UNAUTHORIZED: Final[str] = "ov_verify_unauthorized"
 DENY_OV_VERIFY_FORBIDDEN: Final[str] = "ov_verify_forbidden"
 DENY_OV_VERIFY_RATE_LIMITED: Final[str] = "ov_verify_rate_limited"
+DENY_OV_VERIFY_SERVER_ERROR: Final[str] = "ov_verify_server_error"
 DENY_OV_VERIFY_UNREACHABLE: Final[str] = "ov_verify_unreachable"
 DENY_OV_VERIFY_UNEXPECTED_STATUS: Final[str] = "ov_verify_unexpected_status"
 DENY_OV_VERIFY_MALFORMED: Final[str] = "ov_verify_malformed"
@@ -169,19 +169,6 @@ def ov_verify_base_url() -> str | Deny:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def _is_ov_admin_token_file(path: Path) -> bool:
-    if path.name == _OV_ADMIN_TOKEN_FILENAME:
-        return True
-    admin = (os.environ.get(_OV_ADMIN_TOKEN_PATH_ENV) or "").strip()
-    if not admin:
-        return False
-    admin_path = Path(admin).expanduser()
-    try:
-        return os.path.samefile(path, admin_path)
-    except OSError:
-        return path.resolve() == admin_path.resolve()
-
-
 def _read_service_token_file(path: Path) -> str | Deny:
     """Mode and type are read from the open descriptor, so they describe the bytes read."""
     try:
@@ -215,7 +202,8 @@ def ov_service_token() -> str | Deny:
     if not raw:
         return Deny(DENY_OV_SERVICE_TOKEN_MISSING)
     path = Path(raw).expanduser()
-    if _is_ov_admin_token_file(path):
+    # Refused by name only. Cortex never reads, locates or falls back to the admin token.
+    if path.name == _OV_ADMIN_TOKEN_FILENAME:
         return Deny(DENY_OV_SERVICE_TOKEN_IS_ADMIN)
     token = _read_service_token_file(path)
     if isinstance(token, Deny):
@@ -274,6 +262,8 @@ def verify_openvault_key(token: str) -> Caller | Deny:
         return _ov_deny(DENY_OV_VERIFY_FORBIDDEN, status)
     if status == 429:
         return _ov_deny(DENY_OV_VERIFY_RATE_LIMITED, status)
+    if 500 <= status <= 599:
+        return _ov_deny(DENY_OV_VERIFY_SERVER_ERROR, status)
     if status != 200:
         return _ov_deny(DENY_OV_VERIFY_UNEXPECTED_STATUS, status)
     return _caller_from_verify_body(body)
