@@ -15,10 +15,12 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import duckdb
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from CortexOS.crew import cot_climb, insights
@@ -31,6 +33,7 @@ INVENTED = (
     "FROM suppliers ORDER BY ranking_score DESC LIMIT 10"
 )
 CANNOT = "certified_measure_cannot_express"
+SERVE_SET = Path(__file__).resolve().parents[2] / "packs" / "dms" / "semantic" / "certified_queries.yaml"
 
 # The six certified measures (outer SELECT computes arithmetic) and the ask
 # that resolves to each one.
@@ -42,6 +45,12 @@ MEASURES = {
     "cq_capacity_utilisation": "Show warehouse capacity utilisation",
     "cq_top3_category_sales": "show top 3 category sales",
 }
+
+
+def _stored(cid: str) -> str:
+    """The certified SQL as stored in the L0 serve set. Not climb gold (#343)."""
+    rows = yaml.safe_load(SERVE_SET.read_text(encoding="utf-8"))["certified"]
+    return next(str(row["sql"]).strip() for row in rows if row["id"] == cid)
 
 
 def _stub(sql: str, prompts: list[str]) -> Any:
@@ -184,18 +193,18 @@ def _assert_served(body: dict[str, Any], mid: str, prompts: list[str]) -> str:
 
 
 @pytest.mark.parametrize("mid", sorted(MEASURES))
-def test_certified_measure_is_served_and_rows_equal_the_oracle(
+def test_certified_measure_is_served_and_rows_equal_the_stored_query(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, mid: str
 ) -> None:
     # The model would invent a formula; it is never asked.
     res, prompts = _ask(client, monkeypatch, MEASURES[mid], INVENTED)
     assert res.status_code == 200, res.text
     sql = _assert_served(res.json(), mid, prompts)
-    oracle = cot_climb.gold_sql_for(mid)
-    assert sql == oracle
-    got, want = _rows(sql), _rows(oracle)
+    stored = _stored(mid)
+    assert sql == stored
+    got, want = _rows(sql), _rows(stored)
     assert got
-    if "ORDER BY" in oracle.upper():
+    if "ORDER BY" in stored.upper():
         assert got == want
     else:
         assert Counter(got) == Counter(want)
@@ -205,12 +214,12 @@ def test_invented_formula_is_not_what_dms_executes(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """dms#231 F3: the invented weight ranks differently; DMS gets the certified rows."""
-    oracle = _rows(cot_climb.gold_sql_for("cq_supplier_ranking"))
-    assert Counter(_rows(INVENTED)) != Counter(oracle)
+    stored = _rows(_stored("cq_supplier_ranking"))
+    assert Counter(_rows(INVENTED)) != Counter(stored)
     res, prompts = _ask(client, monkeypatch, RANK_Q.upper() + "?", INVENTED)
     assert res.status_code == 200, res.text
     sql = _assert_served(res.json(), "cq_supplier_ranking", prompts)
-    assert _rows(sql) == oracle
+    assert _rows(sql) == stored
     assert "0.65" in sql and "0.5 " not in sql  # in addition to the rows
 
 
@@ -280,7 +289,7 @@ def test_politeness_around_the_certified_phrase_still_serves(
     res, prompts = _ask(client, monkeypatch, q, INVENTED)
     assert res.status_code == 200, res.text
     sql = _assert_served(res.json(), "cq_capacity_utilisation", prompts)
-    assert Counter(_rows(sql)) == Counter(_rows(cot_climb.gold_sql_for("cq_capacity_utilisation")))
+    assert Counter(_rows(sql)) == Counter(_rows(_stored("cq_capacity_utilisation")))
 
 
 @pytest.mark.parametrize("limit", [True, 2.9, "3", 10**30, 0, -1])
@@ -361,8 +370,8 @@ def test_declared_top_n_is_the_only_parameter_applied(
     res, prompts = _ask(crew_client, monkeypatch, RANK_Q, INVENTED, query_plan=plan)
     assert res.status_code == 200, res.text
     sql = _assert_served(res.json(), "cq_supplier_ranking", prompts)
-    oracle = _rows(cot_climb.gold_sql_for("cq_supplier_ranking"))
-    assert _rows(sql) == oracle[:3]
+    stored = _rows(_stored("cq_supplier_ranking"))
+    assert _rows(sql) == stored[:3]
 
 
 def test_matching_plan_and_dms_default_limit_serve_unchanged(
@@ -375,7 +384,7 @@ def test_matching_plan_and_dms_default_limit_serve_unchanged(
     assert res.status_code == 200, res.text
     sql = _assert_served(res.json(), "cq_stock_value_by_category", prompts)
     assert Counter(_rows(sql)) == Counter(
-        _rows(cot_climb.gold_sql_for("cq_stock_value_by_category"))
+        _rows(_stored("cq_stock_value_by_category"))
     )
 
 

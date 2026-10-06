@@ -31,7 +31,7 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from CortexOS.crew import certified_serve, cot_climb, insights
+from CortexOS.crew import certified_serve, insights
 from CortexOS.insights.routes import InsightsAskIn
 from packs.dms.security.rate_limit import reset_limiter
 
@@ -502,7 +502,7 @@ DEMO_BODIES = [
 def test_demo_certified_question_is_served_end_to_end_unchanged(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, ontology: Any
 ) -> None:
-    """Pin: RANK_Q is served as the stored certified query, rows equal the oracle."""
+    """Pin: RANK_Q is served as the stored certified query, rows equal the stored query."""
     res, prompts = _post(client, monkeypatch, dms_body(RANK_Q, ontology), sql="SELECT 1")
     assert res.status_code == 200, res.text
     body = res.json()
@@ -514,10 +514,10 @@ def test_demo_certified_question_is_served_end_to_end_unchanged(
     assert "Served certified query cq_supplier_ranking" in body["answer"]
     assert body["generative"]["check"] == "certified_query:cq_supplier_ranking"
     assert not _gen_prompts(prompts)  # the model is never asked for a certified measure
-    oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
-    assert body["query_sql"] == oracle
+    stored = str(certified_serve._certified_rows(None)["cq_supplier_ranking"]["sql"]).strip()
+    assert body["query_sql"] == stored
     rows = _lake_demo().execute(body["query_sql"]).fetchall()
-    assert rows and rows == _lake_demo().execute(oracle).fetchall()
+    assert rows and rows == _lake_demo().execute(stored).fetchall()
     assert {row["where"]["table"] for row in body["ontology"]["locations"]} <= DEMO_TABLES
 
 
