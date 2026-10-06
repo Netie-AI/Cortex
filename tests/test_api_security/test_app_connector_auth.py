@@ -463,12 +463,21 @@ def test_startup_warns_on_auth_bypass(env, monkeypatch, caplog):
     assert "SECURITY WARNING" in caplog.text
 
 
-def test_startup_warns_when_published_demo_keys_authenticate(env, monkeypatch):
+def test_startup_warns_when_no_key_is_configured(env, monkeypatch):
     monkeypatch.delenv("DMS_API_KEYS", raising=False)
     monkeypatch.delenv("DMS_REFUSE_DEMO_KEYS", raising=False)
-    assert any("dms-demo-" in w for w in auth_port.startup_warnings())
+    warnings = auth_port.startup_warnings()
+    assert any("no usable key" in w for w in warnings)
+    assert any("dms-demo-" in w for w in warnings)
     monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
-    assert auth_port.startup_warnings() == []
+    warnings = auth_port.startup_warnings()
+    assert any("no usable key" in w for w in warnings)
+    assert not any("dms-demo-" in w for w in warnings)
+
+
+def test_startup_warns_when_only_published_keys_are_configured(env, monkeypatch):
+    monkeypatch.setenv("DMS_API_KEYS", "viewer:dms-demo-viewer-key;admin:replace_with_admin_key")
+    assert any("no usable key" in w for w in auth_port.startup_warnings())
 
 
 def test_startup_is_quiet_with_configured_keys(env):
