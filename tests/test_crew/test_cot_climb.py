@@ -13,8 +13,9 @@ import pytest
 
 from CortexOS.crew import cot_climb, insights
 from CortexOS.execution.gen_cfsm import DECISION_TERMINATE
+from tests.test_crew import cx3_pre_310_license
 
-COT_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "cot_climb.py"
+COT_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "agentplane" / "cot_climb.py"
 ROOT = Path(__file__).resolve().parents[2]
 _C_STAMP_289_BASE = "5a5d728c4d6e376ace4a8b1af17f1a15f45b6af1"
 _C_STAMP_289_BRANCH_EXCEPTIONS = {
@@ -437,6 +438,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_h2_254_seam(path)
             or _is_exact_extract_pin_277(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or cx3_pre_310_license.is_exact_move(path)
         )
     )
 
@@ -447,6 +449,10 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         "CortexOS/crew/openvault.py",
         "CortexOS/crew/config.py",
         "CortexOS/crew/llm.py",
+        "CortexOS/agentplane/freeroute.py",
+        "CortexOS/agentplane/openvault.py",
+        "CortexOS/agentplane/config.py",
+        "CortexOS/agentplane/llm.py",
         "CortexOS/crew/mcp_client.py",
         "CortexOS/dms/answer_engine.py",
         "CortexOS/dms/l2_generation.py",
@@ -513,6 +519,14 @@ def test_other_branch_editing_freeroute_core_pin_still_trips_guard(
     assert _held_freeroute_paths({"CortexOS/crew/freeroute.py"}) == [
         "CortexOS/crew/freeroute.py"
     ]
+
+
+def test_other_branch_moving_freeroute_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/cx3-other-branch")
+    paths = {"CortexOS/crew/freeroute.py", "CortexOS/agentplane/freeroute.py"}
+    assert _held_freeroute_paths(paths) == sorted(paths)
 
 
 @pytest.mark.asyncio

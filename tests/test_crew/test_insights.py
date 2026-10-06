@@ -16,7 +16,7 @@ from CortexOS.crew.server import create_app
 from tests.test_crew.conftest import FakeLLM, wait_run_done
 from tests.test_crew.test_runtime import _tc
 
-INSIGHTS_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "insights.py"
+INSIGHTS_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "agentplane" / "insights.py"
 
 
 class ScriptedBridge:
