@@ -276,8 +276,18 @@ async def contract_ask(body: AskRequest) -> Answer:
         verified=verified,
         scored_pack_id=body.scored_pack_id,
     )
+    from CortexOS.dms.sql_self_correct_ask import self_correct_answer, sql_self_correct_enabled
+
+    looped = None
+    if reused is None and sql_self_correct_enabled():
+        looped = self_correct_answer(
+            body.question,
+            session_id=body.session_id,
+            space_id=body.space_id,
+            verified=verified,
+        )
     try:
-        result = reused if reused is not None else answer_engine(
+        result = reused if reused is not None else looped if looped is not None else answer_engine(
             body.question,
             session_id=body.session_id,
             space_id=body.space_id,
