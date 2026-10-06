@@ -12,12 +12,12 @@ Before coding, read:
 4. `ARCHITECTURE.md` — honest built vs partial inventory
 5. `PARKING_LOT.md` — do not build from here
 
-After shipping: update `STATUS.md`, append `CHANGELOG_DMS.md`, run `pytest -q`, then `python scripts/handoff.py --write`.
-After gate PASS/FAIL: refresh `CLAUDE_HANDOFF.md` via `--write`.
+After shipping: update `STATUS.md`, append `CHANGELOG_DMS.md`, run `pytest -q`.
+Do not run `handoff.py --write` or commit `*_HANDOFF.md` in a PR; handoff files stay out of PR diffs (#300 precedent).
 
 ## Git push (required)
 
-After any ship, gate update, or handoff refresh that changes tracked files:
+After any ship or gate update that changes tracked files:
 
 1. `git status` — stage only intentional changes (never `key.md`, `env.local`, `.next/`, secrets).
 2. Commit with a concise message (why, not file list).
