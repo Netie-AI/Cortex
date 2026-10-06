@@ -267,8 +267,17 @@ async def contract_ask(body: AskRequest) -> Answer:
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
 
+    from CortexOS.dms.space_memory_ask import try_solution_reuse
+
+    reused, memory_fields = try_solution_reuse(
+        body.question,
+        session_id=body.session_id,
+        space_id=body.space_id,
+        verified=verified,
+        scored_pack_id=body.scored_pack_id,
+    )
     try:
-        result = answer_engine(
+        result = reused if reused is not None else answer_engine(
             body.question,
             session_id=body.session_id,
             space_id=body.space_id,
@@ -287,6 +296,7 @@ async def contract_ask(body: AskRequest) -> Answer:
         data = result.model_dump()
     else:
         data = dict(result)
+    data.update(memory_fields)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
     return Answer.model_validate(data)
 

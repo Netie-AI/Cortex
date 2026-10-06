@@ -78,3 +78,24 @@ forbidden_modules =
     langflow
     langgraph
     gencfsm
+
+[importlinter:contract:4]
+name = per-Space memory never reaches a model, a pack, a DB driver or the answer plane (C-MEM #290)
+type = forbidden
+source_modules =
+    CortexOS.memory.space_memory
+forbidden_modules =
+    packs
+    duckdb
+    litellm
+    httpx
+    CortexOS.integrations
+    CortexOS.crew
+    CortexOS.nlp
+    CortexOS.execution
+    CortexOS.dms
+    CortexOS.api
+# The store holds entries and stamps only. Reuse and real-result checks run SQL
+# through an executor the caller injects, so the store never holds a source-DB
+# handle, never calls a model, and can never serve an answer it did not re-run.
+# Must-fail: tests/test_memory/test_c_mem_import_contract.py.
