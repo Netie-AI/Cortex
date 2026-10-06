@@ -10,6 +10,7 @@ from .answer import (
     ContributingSource,
     DrillthroughRequest,
     DrillthroughResponse,
+    FollowUp,
     MemoryRead,
     Provenance,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "ContributingSource",
     "DrillthroughRequest",
     "DrillthroughResponse",
+    "FollowUp",
     "MemoryRead",
     "Provenance",
     "ContractError",

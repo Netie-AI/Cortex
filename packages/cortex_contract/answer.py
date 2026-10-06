@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
 
 
 class Badge(str, Enum):
@@ -50,6 +50,32 @@ class MemoryRead(BaseModel):
     served_at: str
 
 
+class FollowUp(BaseModel):
+    """1.5.0 SUGGEST (#308): one follow-up question grounded in an answered result.
+
+    ``tables`` are granted tables in the schema. ``columns`` are ``table.column``
+    schema columns of those tables, or bare column names the result returned.
+    ``values`` are cells the result returned. Nothing else may be named.
+    """
+
+    question: str
+    kind: str
+    tables: list[str] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    values: list[str] = Field(default_factory=list)
+    served_by: str
+    served_at: str
+    served_reason: str
+    served_provider: str | None = None
+    served_model: str | None = None
+    served_local: bool = False
+
+
+# 1.5.0 fields that stay off the wire unless the engine set them, so an answer
+# with follow-ups switched off serialises to the same bytes as 1.4.0.
+_SET_ONLY_FIELDS = ("followups", "followups_reason")
+
+
 class ContributingSource(BaseModel):
     """One source card for the Sources panel (architecture §4.7 / §4.8)."""
 
@@ -86,6 +112,21 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0 SUGGEST (#308): follow-ups grounded in this result; never on an
+    # abstain or a clarify. Absent when follow-ups are off. ``followups_reason``
+    # says why the list is empty when they are on.
+    followups: list[FollowUp] = Field(default_factory=list)
+    followups_reason: str | None = None
+
+    # No return annotation: pydantic would publish it as the serialization schema.
+    @model_serializer(mode="wrap")
+    def _omit_unset_followups(self, handler: SerializerFunctionWrapHandler):
+        out = handler(self)
+        if isinstance(out, dict):
+            for name in _SET_ONLY_FIELDS:
+                if name not in self.model_fields_set:
+                    out.pop(name, None)
+        return out
 
 
 class DrillthroughRequest(BaseModel):
