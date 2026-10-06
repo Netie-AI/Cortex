@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from CortexOS.integrations.harness import secrets as harness_secrets
+
 KNOWN = (
     "ANTHROPIC_API_KEY",
     "OPENROUTER_API_KEY",
@@ -90,21 +92,29 @@ def save(data_dir: Path, updates: dict[str, str | None]) -> dict[str, Any]:
                     keep_local = False
                     os.environ.pop("CREW_VAULT_LAST_ERROR", None)
                 else:
-                    os.environ["CREW_VAULT_LAST_ERROR"] = str(
-                        vaulted.get("detail") or "vault upsert failed"
+                    os.environ["CREW_VAULT_LAST_ERROR"] = harness_secrets.redact_secrets(
+                        str(vaulted.get("detail") or "vault upsert failed").replace(stripped, harness_secrets.REDACTED)
                     )
             if keep_local:
                 current[key] = stripped
             else:
                 current.pop(key, None)
     data_dir.mkdir(parents=True, exist_ok=True)
-    path = _path(data_dir)
-    path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    _write_private(_path(data_dir), json.dumps(current, indent=2))
+    return status()
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Create or replace ``path`` with mode 0600 from the first byte (no 0644 window)."""
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
     try:
-        os.chmod(path, 0o600)
+        os.chmod(tmp, 0o600)
     except OSError:
         pass
-    return status()
+    os.replace(tmp, path)
 
 
 def status() -> dict[str, Any]:

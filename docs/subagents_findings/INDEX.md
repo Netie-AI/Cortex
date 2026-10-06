@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-10-06 | hx01-secret-hygiene-ov | harness, secret_env_names, scrub, child_env, _FILE custody, OpenVault catalogue, ov_key_envs, drift, public_only, SSRF, cot_climb bearer, decision_log 0600, keys.json 0600, #280, #282, HX-01 | No Cortex provider registry: a read-only name list mirrors OV's key env catalogue (pinned SHA, AST drift test). Every child (MCP, app runner, crew shell, gh) loses those secrets; GH_TOKEN kept. Freeroute token can come from a _FILE, never written to os.environ. OV has no endpoint returning alias names. | `2026-10-06_hx01-secret-hygiene-ov.md` |
 | 2026-09-25 | cortex-272-local-1 | freeroute, served_local, LOCAL_ONLY, local_qwen, openvault, #272, #71 | Cortex stamps served_* from OV response; local hop arming; LOCAL_ONLY fail-closed. OV#71 edead3c4; JSON boolean true only; local not proven. | `2026-09-25_cortex-272-local-1.md` |
 | 2026-09-25 | cortex-269-router1 | freeroute, router, held-out, shadow, split, token cost, insights, #269 | Additive token/split store; shadow/heldout/benchmark never train pick; Insights served_* unproven until #272; baseline refuses unless LEARN is explicit. | `2026-09-25_cortex-269-router1.md` |
 | 2026-09-25 | cortex-211-narrow-plan-source | insights, plan_source, ontology_plan, generative-ask, #211, #231 | Insights stamps plan_source=ontology_plan only for validated ontology generate SQL. Missing stamp was why Studio scored other. | `2026-09-25_cortex-211-narrow-plan-source.md` |

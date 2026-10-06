@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.integrations import freeroute_ov_local, openvault_client
+from CortexOS.integrations.harness import secrets as harness_secrets
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
@@ -131,14 +132,13 @@ def fingerprint(value: str) -> str:
 
 
 def _token() -> str:
-    return (os.environ.get(TOKEN_ENV) or "").strip()
+    """The OpenVault-issued key from ``CORTEX_FREEROUTE_TOKEN`` or a mounted ``..._FILE``."""
+    return harness_secrets.read_key((TOKEN_ENV,))[0]
 
 
 def child_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Copy of ``env`` without the Cortex OpenVault key, for any subprocess."""
-    out = dict(os.environ if env is None else env)
-    out.pop(TOKEN_ENV, None)
-    return out
+    """Copy of ``env`` without the Cortex OpenVault key or any provider secret, for any subprocess."""
+    return harness_secrets.scrub(os.environ if env is None else env)
 
 
 def auth_headers(bearer: str | None = None) -> dict[str, str]:
