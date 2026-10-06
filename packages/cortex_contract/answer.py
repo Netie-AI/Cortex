@@ -3,7 +3,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
+
+from .schema_retrieval import SchemaRetrieval
 
 
 class Badge(str, Enum):
@@ -86,6 +88,19 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0 SCHEMA-RETRIEVE: set only when retrieval ran. Unset, the key is left
+    # out of the JSON entirely so an answer with retrieval off serialises to the
+    # same bytes as 1.4.0.
+    schema_retrieval: SchemaRetrieval | None = None
+
+    # No return annotation on purpose: pydantic then keeps the field schema for
+    # serialisation, so the published spec is unchanged by this hook.
+    @model_serializer(mode="wrap")
+    def _omit_unset_schema_retrieval(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("schema_retrieval") is None:
+            data.pop("schema_retrieval", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):

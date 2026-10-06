@@ -24,6 +24,13 @@ from .execution import (
 )
 from .ledger import ChainVerification, LedgerEntry, LedgerWriter
 from .proposal import Diff, GateResult, Proposal, ProposalVersion
+from .schema_retrieval import (
+    RetrievalCandidate,
+    RetrievedColumn,
+    RetrievedJoinPath,
+    RetrievedTable,
+    SchemaRetrieval,
+)
 from .tools import ToolCall, ToolClass, ToolResult, ToolRuntime, ToolSpec
 from .version import CONTRACT_VERSION
 
@@ -64,6 +71,11 @@ __all__ = [
     "DrillthroughResponse",
     "MemoryRead",
     "Provenance",
+    "RetrievalCandidate",
+    "RetrievedColumn",
+    "RetrievedJoinPath",
+    "RetrievedTable",
+    "SchemaRetrieval",
     "ContractError",
     "UnauthorizedError",
     "ValidationError",
