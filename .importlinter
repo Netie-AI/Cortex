@@ -99,3 +99,19 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:serve-never-reads-oracle]
+name = serving never reaches the climb/score oracle (CERT-ORACLE-SPLIT #343)
+type = forbidden
+source_modules =
+    CortexOS.dms.answer_engine
+    CortexOS.api.contract_routes
+forbidden_modules =
+    bench
+    CortexOS.crew.score_oracle
+    CortexOS.crew.cot_climb
+# The answer path and contract /ask serve from packs/dms/semantic (L0 certified
+# queries included). Gold lives in bench/oracle and is read only through
+# score_oracle / cot_climb.gold_sql_for. This catches the import route; file
+# reads are invisible to grimp, so the IO guard is the stricter check.
+# Must-fail: tests/test_crew/test_cert_oracle_split.py.
