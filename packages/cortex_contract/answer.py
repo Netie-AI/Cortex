@@ -29,6 +29,43 @@ class Provenance(BaseModel):
     assumptions: str | None = None
 
 
+class AskPayloadColumn(BaseModel):
+    """1.5.0: one column of a table the consumer selected for this ask."""
+
+    name: str = Field(min_length=1)
+    type: str | None = None
+    description: str | None = None
+
+
+class AskPayloadTable(BaseModel):
+    """1.5.0: one selected table and its schema."""
+
+    name: str = Field(min_length=1)
+    columns: list[AskPayloadColumn] = Field(default_factory=list)
+    description: str | None = None
+
+
+class AskPayloadJoin(BaseModel):
+    """1.5.0: one ontology join between two selected tables."""
+
+    left_table: str = Field(min_length=1)
+    left_column: str = Field(min_length=1)
+    right_table: str = Field(min_length=1)
+    right_column: str = Field(min_length=1)
+    relation: str | None = None
+
+
+class AskPayload(BaseModel):
+    """1.5.0: selected tables, their schema and ontology joins for one question.
+
+    The payload can only narrow what the signed grant allows: a table or join
+    outside the grant is refused before any model call.
+    """
+
+    tables: list[AskPayloadTable] = Field(min_length=1)
+    joins: list[AskPayloadJoin] = Field(default_factory=list)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     session_id: str = "demo"
@@ -36,6 +73,8 @@ class AskRequest(BaseModel):
     # 1.4.0: set on every ask of a scored round. Solution memory stays empty and
     # nothing is written to memory while it is set.
     scored_pack_id: str | None = None
+    # 1.5.0: ignored unless the engine runs with its plan+SQL path switched on.
+    dms_payload: AskPayload | None = None
 
 
 class MemoryRead(BaseModel):
