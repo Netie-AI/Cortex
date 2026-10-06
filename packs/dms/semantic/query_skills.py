@@ -7,6 +7,8 @@ caller recompiles through Q1 + sql_guardrail.
 Off unless ``CORTEX_QUERY_SKILL=1`` (#340). Even when on, the store is scoped
 per Space and never touched during a scored round: a read or write with no
 Space, or with a ``scored_pack_id`` / ``CORTEX_SCORED_ROUND``, is a no-op.
+Space and scored pack come from explicit arguments or the ask scope
+(``CortexOS.dms.ask_scope``) that ``POST /v1/contract/ask`` opens.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from CortexOS.dms.ask_scope import current_ask_scope
 from packs.dms.skills.capture import cosine_similarity, normalize_trigger, text_embedding
 
 # High bar: avoid false skill hits that would skip a better metric route.
@@ -42,14 +45,20 @@ def capture_enabled() -> bool:
 
 
 def _skill_space(space_id: str | None, scored_pack_id: str | None) -> str | None:
-    """The Space this read/write is scoped to, or None when the store is off-limits."""
+    """The Space this read/write is scoped to, or None when the store is off-limits.
+
+    The engine calls ``find``/``capture`` with the question only; the Space and
+    scored pack then come from the ask scope ``POST /v1/contract/ask`` opens.
+    """
     if not query_skill_enabled():
         return None
-    if (scored_pack_id or "").strip():
+    scope = current_ask_scope()
+    if (scored_pack_id or "").strip() or scope.scored_pack_id:
         return None
     if os.environ.get(SCORED_ROUND_ENV, "").strip().lower() in _TRUTHY:
         return None
-    return (space_id or "").strip() or None
+    space = space_id if space_id is not None else scope.space_id
+    return (space or "").strip() or None
 
 
 # Resolved once: Path.resolve() is a filesystem syscall, and this ran on every

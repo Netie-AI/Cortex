@@ -276,16 +276,20 @@ async def contract_ask(body: AskRequest) -> Answer:
         verified=verified,
         scored_pack_id=body.scored_pack_id,
     )
+    from CortexOS.dms.ask_scope import ask_scope
+
     try:
-        result = reused if reused is not None else answer_engine(
-            body.question,
-            session_id=body.session_id,
-            space_id=body.space_id,
-            verified=verified,
-            require_grounding=True,
-            stamp_l2_route=True,
-            scored_pack_id=body.scored_pack_id,
-        )
+        with ask_scope(
+            space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
+        ):
+            result = reused if reused is not None else answer_engine(
+                body.question,
+                session_id=body.session_id,
+                space_id=body.space_id,
+                verified=verified,
+                require_grounding=True,
+                stamp_l2_route=True,
+            )
     except ManifestError as exc:
         code = getattr(exc, "code", "manifest_error")
         raise HTTPException(

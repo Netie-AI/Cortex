@@ -3,8 +3,9 @@ never written during a scored round.
 
 Assertions are on the HTTP envelope DMS receives from ``POST /v1/contract/ask``
 (``provenance.layer``, rows, answer text) plus a row count read straight from
-``dms_query_skills``. Env names are literals so this file fails on its
-assertions, not on an import, when run against a tree without the gate.
+``dms_query_skills``. Env names are literals and the must-fails touch no new
+API before their first assertion, so they fail on that assertion, not on an
+import, when run against a tree without the gate.
 """
 
 from __future__ import annotations
@@ -263,6 +264,20 @@ def test_must_fail_find_without_space_returns_nothing(
     assert query_skills.find(REVENUE_Q, space_id="  ") is None
     hit = query_skills.find(REVENUE_Q, space_id="alpha")
     assert hit is not None and hit["score"] == 1.0
+
+
+def test_ask_scope_closes_after_the_request(
+    ask_http, skills_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.dms.ask_scope import AskScope, current_ask_scope
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv(FLAG, "1")
+    ask_http.bind_session("alpha")
+    _governed_answer(_ask(ask_http, "alpha", scored_pack_id="curated_ceo"))
+    assert current_ask_scope() == AskScope()
+    assert query_skills.capture(REVENUE_Q, metric_id="revenue_total") is None
+    assert _rows(skills_db) == 0
 
 
 def test_capture_without_space_writes_nothing(skills_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:

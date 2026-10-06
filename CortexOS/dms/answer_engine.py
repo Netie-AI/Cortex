@@ -1659,7 +1659,6 @@ def answer(
     verified: VerifiedManifest | None = None,
     require_grounding: bool = False,
     stamp_l2_route: bool = False,
-    scored_pack_id: str | None = None,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
@@ -1682,9 +1681,6 @@ def answer(
             return _abstain_unbound(
                 question, audit_id, reason=str(exc), space_id=space_id
             )
-    # Query skills key on the signed grant's Space; the caller's string only
-    # counts on ungrounded in-process calls, which hold no grant at all.
-    skill_space = verified.manifest.space_id if verified is not None else space_id
 
     def _done(result: dict[str, Any]) -> dict[str, Any]:
         if require_grounding and "grant_kind" not in result:
@@ -1841,9 +1837,7 @@ def answer(
                     return _abs(f"could not resolve inputs: {exc}")
 
     if sql is None:
-        hit = query_skills.find(
-            question, space_id=skill_space, scored_pack_id=scored_pack_id
-        )
+        hit = query_skills.find(question)
         if hit is not None:
             skill_score = float(hit["score"])
             if hit.get("metric_id"):
@@ -2115,8 +2109,6 @@ def answer(
             params=metric_slots,
             sql=guard_result.safe_sql,
             layer=layer,
-            space_id=skill_space,
-            scored_pack_id=scored_pack_id,
         )
 
     result = {

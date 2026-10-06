@@ -152,16 +152,19 @@ capture alone.
 
 Even with `CORTEX_QUERY_SKILL=1`:
 
-- A read or write needs a Space. The engine uses the Space named in the signed
-  session grant, and `find()` with no Space returns nothing.
+- A read or write needs a Space. `/v1/contract/ask` opens an ask scope
+  (`CortexOS/dms/ask_scope.py`) around the engine call that carries the Space
+  named in the signed session grant, plus the request's `scored_pack_id`.
+  Outside that scope (other doors, in-process calls) there is no Space, and
+  `find()` with no Space returns nothing.
 - Rows are scoped by a nullable `space_id` column, added with an additive
   `ALTER TABLE` on first open. Rows written before #340 keep `NULL`, are never
   read, and are never deleted.
 - `UNIQUE(trigger_text)` predates Space scoping. If another Space (or a legacy
   row) already holds a question, the capture in this Space is skipped.
 - A scored round writes and reads nothing. That means a `scored_pack_id` on
-  `/v1/contract/ask` (now passed through to the engine) or
-  `CORTEX_SCORED_ROUND=1`, the same rule C-MEM follows.
+  `/v1/contract/ask` (handed to the engine's skill calls through the ask
+  scope) or `CORTEX_SCORED_ROUND=1`, the same rule C-MEM follows.
 
 Tests: `tests/dms/test_query_skill_gate_340.py`. Retiring the layer in favour
 of C-MEM solution memory is #340b.
