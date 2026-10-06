@@ -2,7 +2,7 @@
 
 Use this when returning to Claude (or any external verifier) between milestones. **Do not start the next feature until the gate passes.**
 
-PR merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers.
+PR merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers is the canonical bar. Until #339 lands, CI `auto-merge` merges any non-draft green PR, so no PR leaves draft before its tier's pre-merge steps are done on its exact head, and a `tier:full` PR stays draft until its manual squash.
 
 ---
 
