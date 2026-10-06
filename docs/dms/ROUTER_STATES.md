@@ -160,14 +160,33 @@ Even with `CORTEX_QUERY_SKILL=1`:
 - Rows are scoped by a nullable `space_id` column, added with an additive
   `ALTER TABLE` on first open. Rows written before #340 keep `NULL`, are never
   read, and are never deleted.
-- `UNIQUE(trigger_text)` predates Space scoping. If another Space (or a legacy
-  row) already holds a question, the capture in this Space is skipped.
+- A trigger is unique per Space: new tables are created with
+  `UNIQUE (space_id, trigger_text)`, and every table gets the additive unique
+  index `idx_dms_query_skills_space_trigger` on the same pair. The same
+  question asked in two Spaces keeps one row in each, and each Space is only
+  ever served its own.
+- A table created before #340 keeps its original global `UNIQUE(trigger_text)`
+  (SQLite cannot drop it without a table rebuild, which is not additive). There,
+  a capture whose question another Space or a legacy `NULL` row already holds
+  writes nothing and returns a stamped abstain: `served_op="abstain"`, the
+  capturing Space, and `served_reason` `QUERY_SKILL_CROSS_SPACE_COLLISION` or
+  `QUERY_SKILL_LEGACY_ROW_COLLISION`, logged at warning. The stamp never names
+  the other Space, and the holder's row is not touched.
 - A scored round writes and reads nothing. That means a `scored_pack_id` on
   `/v1/contract/ask` (handed to the engine's skill calls through the ask
-  scope) or `CORTEX_SCORED_ROUND=1`, the same rule C-MEM follows.
+  scope) or `CORTEX_SCORED_ROUND=1`, the same rule C-MEM follows. DMS's
+  generated `AskRequest` has no `scored_pack_id`, so a scored round driven
+  through DMS needs `CORTEX_SCORED_ROUND=1` on the Cortex process.
+- `packs.dms.semantic.query_skills -> CortexOS.dms.ask_scope` is the only
+  engine import on the pack side; import-linter contract `query-skill-scope`
+  keeps `ask_scope` a stdlib leaf.
 
-Tests: `tests/dms/test_query_skill_gate_340.py`. Retiring the layer in favour
-of C-MEM solution memory is #340b.
+Tests: `tests/dms/test_query_skill_gate_340.py`,
+`tests/dms/test_query_skill_scored_packs_340.py`,
+`tests/dms/test_query_skill_scope_contract_340.py`, and
+`tests/dms/test_ask_flag_off_golden_340.py` (flag unset: every bench answer
+byte-identical to main). Retiring the layer in favour of C-MEM solution memory
+is #340b.
 
 ---
 

@@ -99,3 +99,29 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:query-skill-scope]
+name = the query_skill ask scope packs may import stays a stdlib leaf (QUERY-SKILL #340)
+type = forbidden
+source_modules =
+    CortexOS.dms.ask_scope
+forbidden_modules =
+    packs
+    CortexOS.api
+    CortexOS.dms.answer_engine
+    CortexOS.dms.query_service
+    CortexOS.execution
+    CortexOS.memory
+    CortexOS.integrations
+    CortexOS.crew
+    CortexOS.nlp
+    duckdb
+    litellm
+    httpx
+# packs -> CortexOS is not forbidden by any contract above (contract 1 is the
+# reverse direction), so packs.dms.semantic.query_skills -> CortexOS.dms.ask_scope
+# is allowed. This pins that the edge cannot carry a pack back into the engine or
+# the engine into the pack: ask_scope is a stdlib-only ContextVar that
+# contract_routes opens and query_skills reads. grimp cannot see the packs side
+# (packs/dms/semantic has no __init__.py), so the test pins that side by AST.
+# Must-fail: tests/dms/test_query_skill_scope_contract_340.py.
