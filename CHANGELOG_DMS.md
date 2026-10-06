@@ -887,18 +887,3 @@ Contract `/v1/contract/ask` L2 answers now copy `served_provider` and
 fallback-model mismatches. An L2 SQL response without both fields is refused
 as `L2_ROUTE_STAMP_MISSING`; configured, requested, and pinned models are never
 used as substitutes. Non-contract and non-L2 answer behavior remains unchanged.
-
-## CORTEX-290 C-MEM -- 2026-10-06
-
-Per-Space memory (`CortexOS/memory/space_memory.py`) for tables, formulas,
-tools and solutions. Every entry carries source, version, written_at and Space
-id; every read, write, view, delete, reuse and refusal is stamped (`served_*`).
-Writes tagged with a scored pack id are refused (`MEMORY_SCORED_PACK_WRITE`);
-Space B never reads, derives from or deletes Space A's entries
-(`MEMORY_NOT_IN_SPACE`). Solutions enter only by steward confirm or a
-real-result check; reuse re-runs SQL on current data under the session
-manifest and sets `reused`, which is never a validation. Scored rounds write
-nothing and read only table/formula memory. Contract 1.4.0 (additive):
-`Answer.memory_ids_read` (`[]` when memory is off), `memory_reads`, `reused`;
-`AskRequest.scored_pack_id`. New import-linter contract 4 with must-fail.
-Memory is off unless `CORTEX_SPACE_MEMORY=1`. No accuracy or memory-gain claim.
