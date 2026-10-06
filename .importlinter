@@ -99,3 +99,48 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:5]
+name = the plan+SQL path reaches a model only through OpenVault FreeRoute (C-LOOP-A #303)
+type = forbidden
+source_modules =
+    CortexOS.plan_sql
+forbidden_modules =
+    openai
+    anthropic
+    groq
+    litellm
+    cohere
+    mistralai
+    together
+    ollama
+    cerebras
+    google
+    vertexai
+    boto3
+    botocore
+    huggingface_hub
+    transformers
+    httpx
+    requests
+    aiohttp
+    urllib3
+    langchain
+    langchain_core
+    langchain_community
+    langgraph
+    llama_index
+    CortexOS.routing
+    CortexOS.crew
+    CortexOS.nlp
+    CortexOS.fabrication
+    packs
+    duckdb
+    CortexOS.execution
+    CortexOS.dms
+    CortexOS.api
+# The generator builds prompts and reads model text. Its one model path is
+# CortexOS.integrations.freeroute (OpenVault custody, arming, served_* stamps);
+# no provider SDK, HTTP client, or other Cortex model router. It holds no
+# executor or DB handle: CortexOS.dms.plan_sql_ask gates and executes the SQL.
+# Must-fail: tests/test_plan_sql/test_c_loop_a_import_contract.py.

@@ -276,8 +276,14 @@ async def contract_ask(body: AskRequest) -> Answer:
         verified=verified,
         scored_pack_id=body.scored_pack_id,
     )
+    served = reused
+    if served is None and body.dms_payload is not None:
+        from CortexOS.dms.plan_sql_ask import try_plan_sql
+
+        # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
+        served = try_plan_sql(body, verified=verified)
     try:
-        result = reused if reused is not None else answer_engine(
+        result = served if served is not None else answer_engine(
             body.question,
             session_id=body.session_id,
             space_id=body.space_id,
