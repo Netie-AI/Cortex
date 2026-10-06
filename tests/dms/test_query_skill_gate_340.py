@@ -26,6 +26,9 @@ from CortexOS.execution.manifest import JwksCache, ManifestVerifier, canonical_m
 FLAG = "CORTEX_QUERY_SKILL"
 SESSION = "qs-340"
 GRANT = {"transactions": "TRUE"}
+WAREHOUSE_GRANT = {
+    t: "TRUE" for t in ("inventory", "suppliers", "locations", "shipments", "transactions", "alerts")
+}
 REVENUE_Q = "what is our total revenue"
 # All four land on certified / governed_metric under GRANT, so each one is a
 # capture candidate. Order matches the 87ee2c60 probe shape: 4 scored asks.
@@ -104,7 +107,7 @@ def ask_http(skills_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_limiter(10_000)
     reset_space_memory_for_tests()
 
-    def _bind(space_id: str) -> None:
+    def _bind(space_id: str, grant: dict[str, str] = GRANT) -> None:
         now = datetime.now(timezone.utc)
         manifest = Manifest(
             session_id=SESSION,
@@ -113,7 +116,7 @@ def ask_http(skills_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             pool_id="default",
             issuer_key_id="int-1",
             allowed_paths=["/data/pool/acme/**"],
-            row_predicates=GRANT,
+            row_predicates=grant,
             issued_at=now.isoformat(),
             expires_at=(now + timedelta(minutes=5)).isoformat(),
             signature="",
@@ -306,20 +309,69 @@ def test_must_fail_space_alpha_skill_never_visible_from_beta(
     assert query_skills.find(REVENUE_Q, space_id="beta") is None
 
 
-def test_beta_capture_never_overwrites_alpha_row(
+def _table(db: Path, sql: str) -> list[tuple[Any, ...]]:
+    con = sqlite3.connect(str(db))
+    try:
+        return con.execute(sql).fetchall()
+    finally:
+        con.close()
+
+
+def test_same_question_keeps_one_row_per_space(
     ask_http, skills_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """UNIQUE(space_id, trigger_text): beta's capture is its own row, alpha's is untouched."""
     monkeypatch.setenv(FLAG, "1")
     ask_http.bind_session("alpha")
     ask_http.bind_session("beta")
     _governed_answer(_ask(ask_http, "alpha"))
     _governed_answer(_ask(ask_http, "beta"))
-    con = sqlite3.connect(str(skills_db))
-    try:
-        rows = con.execute("SELECT space_id, support_count FROM dms_query_skills").fetchall()
-    finally:
-        con.close()
-    assert rows == [("alpha", 1)]
+    _governed_answer(_ask(ask_http, "beta"))
+    rows = _table(skills_db, "SELECT space_id, support_count FROM dms_query_skills ORDER BY space_id")
+    assert rows == [("alpha", 1), ("beta", 2)]
+
+
+def test_must_fail_same_question_each_space_served_only_its_own_skill(
+    ask_http, skills_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both Spaces hold a skill for the same question; each is served its own."""
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv(FLAG, "1")
+    ask_http.bind_session("alpha")
+    ask_http.bind_session("beta")
+    _governed_answer(_ask(ask_http, "alpha"))
+    wrote = query_skills.capture(REVENUE_Q, metric_id="sales_by_volume", space_id="beta")
+    assert wrote is not None and wrote["updated"] is False and wrote["id"]
+
+    _only_skills_can_answer(monkeypatch)
+    alpha = _ask(ask_http, "alpha")
+    beta = _ask(ask_http, "beta")
+    _skill_answer(alpha)
+    assert alpha["provenance"]["metric_id"] == "revenue_total"
+    assert beta["provenance"]["layer"] == "query_skill", beta["provenance"]
+    assert beta["provenance"]["metric_id"] == "sales_by_volume"
+    assert beta["rows"] and "total_sold_kg" in beta["rows"][0]
+    assert "revenue_myr" not in beta["rows"][0]
+
+
+_LEGACY_TABLE = """
+    CREATE TABLE dms_query_skills (
+        id TEXT PRIMARY KEY, trigger_text TEXT NOT NULL,
+        embedding TEXT NOT NULL DEFAULT '[]', metric_id TEXT,
+        params_json TEXT NOT NULL DEFAULT '{}', sql_template TEXT,
+        layer TEXT NOT NULL DEFAULT 'governed_metric',
+        support_count INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 1,
+        last_used_at TEXT, created_at TEXT NOT NULL, UNIQUE (trigger_text)
+    );
+"""
+
+
+def _legacy_table(db: Path, *inserts: str) -> None:
+    con = sqlite3.connect(str(db))
+    con.executescript(_LEGACY_TABLE + "".join(inserts))
+    con.commit()
+    con.close()
 
 
 def test_legacy_unscoped_rows_survive_and_are_never_read(
@@ -328,36 +380,54 @@ def test_legacy_unscoped_rows_survive_and_are_never_read(
     """Additive ALTER: a pre-#340 table keeps every row; NULL-Space rows stay dark."""
     from packs.dms.semantic import query_skills
 
-    con = sqlite3.connect(str(skills_db))
-    con.executescript(
-        """
-        CREATE TABLE dms_query_skills (
-            id TEXT PRIMARY KEY, trigger_text TEXT NOT NULL,
-            embedding TEXT NOT NULL DEFAULT '[]', metric_id TEXT,
-            params_json TEXT NOT NULL DEFAULT '{}', sql_template TEXT,
-            layer TEXT NOT NULL DEFAULT 'governed_metric',
-            support_count INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 1,
-            last_used_at TEXT, created_at TEXT NOT NULL, UNIQUE (trigger_text)
-        );
-        INSERT INTO dms_query_skills (id, trigger_text, metric_id, created_at)
-            VALUES ('legacy-1', 'what is our total revenue', 'revenue_total', '2026-10-01T00:00:00+00:00');
-        """
+    _legacy_table(
+        skills_db,
+        "INSERT INTO dms_query_skills (id, trigger_text, metric_id, created_at) VALUES "
+        "('legacy-1', 'what is our total revenue', 'revenue_total', '2026-10-01T00:00:00+00:00');",
     )
-    con.commit()
-    con.close()
-
     monkeypatch.setenv(FLAG, "1")
     assert query_skills.find(REVENUE_Q, space_id="alpha") is None
-    assert query_skills.capture(REVENUE_Q, metric_id="revenue_total", space_id="alpha") is None
+    stamp = query_skills.capture(REVENUE_Q, metric_id="revenue_total", space_id="alpha")
+    assert stamp is not None and stamp["written"] is False
+    assert stamp["served_reason"] == "QUERY_SKILL_LEGACY_ROW_COLLISION"
+    assert stamp["served_space_id"] == "alpha" and stamp["served_at"]
 
-    con = sqlite3.connect(str(skills_db))
-    try:
-        cols = [r[1] for r in con.execute("PRAGMA table_info(dms_query_skills)")]
-        rows = con.execute("SELECT id, space_id, support_count FROM dms_query_skills").fetchall()
-    finally:
-        con.close()
+    cols = [r[1] for r in _table(skills_db, "PRAGMA table_info(dms_query_skills)")]
     assert cols[-1] == "space_id"
-    assert rows == [("legacy-1", None, 1)]
+    assert _table(skills_db, "SELECT id, space_id, support_count FROM dms_query_skills") == [
+        ("legacy-1", None, 1)
+    ]
+    indexes = {r[1]: r[2] for r in _table(skills_db, "PRAGMA index_list(dms_query_skills)")}
+    assert indexes.get("idx_dms_query_skills_space_trigger") == 1
+
+
+def test_must_fail_legacy_table_cross_space_collision_is_a_stamped_abstain(
+    ask_http, skills_db: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Pre-#340 table: beta's capture of alpha's question abstains by name, and
+    beta is still never served alpha's skill."""
+    import logging
+
+    from packs.dms.semantic import query_skills
+
+    _legacy_table(skills_db)
+    monkeypatch.setenv(FLAG, "1")
+    ask_http.bind_session("alpha")
+    ask_http.bind_session("beta")
+    _governed_answer(_ask(ask_http, "alpha"))
+    with caplog.at_level(logging.WARNING, logger="packs.dms.semantic.query_skills"):
+        _governed_answer(_ask(ask_http, "beta"))
+    assert "QUERY_SKILL_CROSS_SPACE_COLLISION" in caplog.text
+    assert "'beta'" in caplog.text and "alpha" not in caplog.text
+    assert _table(skills_db, "SELECT space_id, support_count FROM dms_query_skills") == [("alpha", 1)]
+
+    stamp = query_skills.capture(REVENUE_Q, metric_id="revenue_total", space_id="beta")
+    assert stamp is not None and stamp["served_reason"] == "QUERY_SKILL_CROSS_SPACE_COLLISION"
+    assert stamp["written"] is False and stamp["served_space_id"] == "beta"
+
+    _only_skills_can_answer(monkeypatch)
+    _skill_answer(_ask(ask_http, "alpha"))
+    _not_skill_answer(_ask(ask_http, "beta"))
 
 
 # ── the 87ee2c60 probe, committed (#340) ─────────────────────────────────────
