@@ -4,9 +4,12 @@ import sys
 
 from .answer import (
     AbstainReason,
+    AmbiguityType,
     Answer,
     AskRequest,
     Badge,
+    Clarify,
+    ClarifyOption,
     ContributingSource,
     DrillthroughRequest,
     DrillthroughResponse,
@@ -56,9 +59,12 @@ if __name__ != "cortex_contract":
 __all__ = [
     "CONTRACT_VERSION",
     "AbstainReason",
+    "AmbiguityType",
     "Answer",
     "AskRequest",
     "Badge",
+    "Clarify",
+    "ClarifyOption",
     "ContributingSource",
     "DrillthroughRequest",
     "DrillthroughResponse",
