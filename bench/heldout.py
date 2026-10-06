@@ -720,7 +720,12 @@ def score_engine(
     run on L0/L1 miss. The previous env value is restored. Cutover still
     requires G-abs/G-err/G-env/G-man/G-sh on a real report.
     """
-    rows = items if items is not None else load_heldout()
+    from CortexOS.crew import score_oracle
+
+    rows, excluded = score_oracle.split_scored(
+        items if items is not None else load_heldout(),
+        lambda i: (i.id, i.question),
+    )
     live_ask = ask is None
     if live_ask:
         from bench.accuracy import _ensure_db_loaded
@@ -754,7 +759,7 @@ def score_engine(
                 os.environ.pop("DMS_L2_ENABLED", None)
             else:
                 os.environ["DMS_L2_ENABLED"] = prev
-    report = summarize(results)
+    report = _stamp_excluded(summarize(results), excluded)
     report["engine"] = True
     report["l2_enabled_for_run"] = enable_l2
     if count_shadow:
@@ -774,6 +779,17 @@ def score_engine(
     return report
 
 
+def _stamp_excluded(report: dict[str, Any], excluded: list[dict[str, str]]) -> dict[str, Any]:
+    """Serve-set cases (#343) are in no total; each is named with its reason."""
+    from CortexOS.crew import score_oracle
+
+    score_oracle.stamp(report, excluded)
+    if excluded and not report["totals"]["total"]:
+        reasons = sorted({row["reason"] for row in excluded})
+        report["refuse_reason"] = f"{score_oracle.ALL_EXCLUDED}:" + ",".join(reasons)
+    return report
+
+
 def load_fixture(path: Path | str) -> tuple[list[HeldoutItem], dict[str, dict[str, Any]]]:
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     items = load_heldout(path) if "items" in data else []
@@ -785,7 +801,10 @@ def load_fixture(path: Path | str) -> tuple[list[HeldoutItem], dict[str, dict[st
 
 def score_fixture(path: Path | str) -> dict[str, Any]:
     """CI entry: score canned envelopes. No engine, no L2, no DuckDB."""
+    from CortexOS.crew import score_oracle
+
     items, envelopes = load_fixture(path)
+    items, excluded = score_oracle.split_scored(items, lambda i: (i.id, i.question))
     results: list[HeldoutResult] = []
     for item in items:
         env = envelopes.get(item.id)
@@ -798,7 +817,7 @@ def score_fixture(path: Path | str) -> dict[str, Any]:
             )
             continue
         results.append(score_envelope(item, env))
-    report = summarize(results)
+    report = _stamp_excluded(summarize(results), excluded)
     report["fixture"] = str(path)
     return report
 
@@ -855,6 +874,9 @@ def main() -> None:
         report = score_engine(enable_l2=args.enable_l2)
         print(json.dumps({
             "totals": report["totals"],
+            "excluded_n": report["excluded_n"],
+            "excluded": report["excluded"],
+            "counts_toward_score": report["counts_toward_score"],
             "gates": report["gates"],
             "cutover": report["cutover"],
             "shadow_lines": report["shadow_lines"],
@@ -867,7 +889,7 @@ def main() -> None:
         }))
     elif args.fixture:
         report = score_fixture(args.fixture)
-        print(json.dumps(report["totals"]))
+        print(json.dumps({**report["totals"], "excluded": report["excluded"]}))
     else:
         parser.error("pass --fixture PATH, --engine, --shadow-replay, or --shadow-report")
     if args.json:
