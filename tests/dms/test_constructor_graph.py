@@ -396,12 +396,21 @@ def test_demo_keys_rejected_when_refused(monkeypatch):
     assert resolve_caller("dms-demo-viewer-key") is None
 
 
-def test_ov_token_resolves_via_openvault(monkeypatch):
+def _ov_verify_returns(monkeypatch, tmp_path, body):
     monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
     monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    token_file = tmp_path / "cortex_ov_service_token"
+    token_file.write_text("svc-test-token", encoding="utf-8")
+    monkeypatch.setenv("CORTEX_OV_SERVICE_TOKEN_FILE", str(token_file))
     monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        lambda *a, **k: {"ok": True, "key": {"key_id": "k1", "tier": "free"}},
+        "CortexOS.integrations.openvault_client.request_json",
+        lambda *a, **k: (200, body),
+    )
+
+
+def test_ov_token_resolves_via_openvault(monkeypatch, tmp_path):
+    _ov_verify_returns(
+        monkeypatch, tmp_path, {"ok": True, "valid": True, "key_id": "k1", "tier": "free"}
     )
     from packs.dms.security.api_auth import resolve_caller
 
@@ -411,24 +420,16 @@ def test_ov_token_resolves_via_openvault(monkeypatch):
     assert caller.actor == "ov_k1"
 
 
-def test_ov_token_rejects_valid_false(monkeypatch):
-    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
-    monkeypatch.delenv("DMS_API_KEYS", raising=False)
-    monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        lambda *a, **k: {"ok": True, "valid": False},
-    )
+def test_ov_token_rejects_valid_false(monkeypatch, tmp_path):
+    _ov_verify_returns(monkeypatch, tmp_path, {"ok": True, "valid": False})
     from packs.dms.security.api_auth import resolve_caller
 
     assert resolve_caller("ov_dead") is None
 
 
-def test_ov_token_accepts_flat_valid_true(monkeypatch):
-    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
-    monkeypatch.delenv("DMS_API_KEYS", raising=False)
-    monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        lambda *a, **k: {"ok": True, "valid": True, "key_id": "flat1", "tier": "free"},
+def test_ov_token_accepts_flat_valid_true(monkeypatch, tmp_path):
+    _ov_verify_returns(
+        monkeypatch, tmp_path, {"ok": True, "valid": True, "key_id": "flat1", "tier": "free"}
     )
     from packs.dms.security.api_auth import resolve_caller
 
