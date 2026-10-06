@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
 
 
 class Badge(str, Enum):
@@ -86,6 +86,19 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0 VERIFIED-QUERY: the steward-confirmed query this answer re-ran.
+    # Omitted from the serialized answer when unset, so an answer that used no
+    # verified query is byte-for-byte what 1.4.0 sent.
+    verified_query_id: str | None = None
+
+    # No return annotation: pydantic derives the serialization schema from it,
+    # and the published Answer schema must stay the field list above.
+    @model_serializer(mode="wrap")
+    def _omit_unset_verified_query_id(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("verified_query_id") is None:
+            data.pop("verified_query_id", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):

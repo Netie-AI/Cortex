@@ -268,8 +268,16 @@ async def contract_ask(body: AskRequest) -> Answer:
         ) from exc
 
     from CortexOS.dms.space_memory_ask import try_solution_reuse
+    from CortexOS.dms.verified_query_ask import try_verified_query
 
-    reused, memory_fields = try_solution_reuse(
+    verified_hit = try_verified_query(
+        body.question,
+        session_id=body.session_id,
+        space_id=body.space_id,
+        verified=verified,
+        scored_pack_id=body.scored_pack_id,
+    )
+    reused, memory_fields = verified_hit if verified_hit is not None else try_solution_reuse(
         body.question,
         session_id=body.session_id,
         space_id=body.space_id,
