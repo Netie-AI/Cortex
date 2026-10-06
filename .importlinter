@@ -99,3 +99,52 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:5]
+name = deterministic schema retrieval never reaches a model, a pack, a DB driver or the answer plane (SCHEMA-RETRIEVE #306)
+type = forbidden
+source_modules =
+    CortexOS.schema_retrieve.core
+    CortexOS.schema_retrieve.catalog
+forbidden_modules =
+    packs
+    duckdb
+    litellm
+    openai
+    anthropic
+    httpx
+    CortexOS.integrations
+    CortexOS.crew
+    CortexOS.nlp
+    CortexOS.execution
+    CortexOS.dms
+    CortexOS.api
+# Retrieval is bounded by a grant the caller hands in and by memory read through
+# the #290 store port, so it never opens a source DB, never calls a model, and
+# never reaches back into the answer plane that consumes it.
+# Must-fail: tests/test_schema_retrieve/test_import_contracts.py.
+
+[importlinter:contract:6]
+name = schema retrieval reaches a model only through OV FreeRoute, never a provider SDK, a pack or a DB driver (SCHEMA-RETRIEVE #306)
+type = forbidden
+source_modules =
+    CortexOS.schema_retrieve
+forbidden_modules =
+    packs
+    duckdb
+    litellm
+    openai
+    anthropic
+    groq
+    cohere
+    mistralai
+    httpx
+    requests
+    CortexOS.crew
+    CortexOS.nlp
+    CortexOS.execution
+    CortexOS.dms
+    CortexOS.api
+# The optional reranker calls CortexOS.integrations.freeroute (stdlib transport to
+# OpenVault) and nothing else that can reach a model.
+# Must-fail: tests/test_schema_retrieve/test_import_contracts.py.
