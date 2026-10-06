@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.execution.app_package import DEFAULT_API_BASE
+from CortexOS.integrations.harness import secrets as harness_secrets
 
 # app_id -> live Popen (in-process; reaped on stop / stale pid check)
 _PROCS: dict[str, subprocess.Popen[Any]] = {}
@@ -124,7 +125,7 @@ def start(
     if not start_cmd:
         return {"ok": False, "error": "no_start_command"}
 
-    env = os.environ.copy()
+    env = harness_secrets.scrub()
     env["PORT"] = str(port)
     env["API_BASE"] = DEFAULT_API_BASE
     env.setdefault("PYTHONUNBUFFERED", "1")
