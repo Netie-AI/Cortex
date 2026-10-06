@@ -61,8 +61,6 @@ Builder. **F7 remainder in progress** — F6 PASS (2026-07-03). F8 blocked.
 ## Build loop
 1. Smallest diff per slice → `pytest -q` → CHANGELOG → STATUS → `handoff.py --write` → **git push**
 
-Merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers.
-
 ## Demo
 ```powershell
 .\demo\run_demo.ps1 -Fast
