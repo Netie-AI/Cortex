@@ -10,7 +10,10 @@ text, rows, badge, and the ``analysis_loop`` round record.
   stub serves a wrong total; the loop's evaluate step catches it against the
   Space's steward formula and the customer receives a named abstain.
 * ``test_must_fail_contract_ask_abstain_carries_named_reason`` — every loop
-  abstain on the wire names a ``LoopAbstainReason``.
+  abstain on the wire ends with an abstain step naming its reason code.
+
+The generator here is the default engine-cascade adapter, self-correct is the
+no-retry default and the packager is the passthrough (C-LOOP-A/-B/-C replace them).
 
 No model is called.
 """
@@ -20,9 +23,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cortex_contract.answer import Answer, LoopAbstainReason
+from cortex_contract.answer import Answer
 
 from CortexOS.loop import ENABLED_ENV
+from CortexOS.loop.interfaces import LoopReason
 from CortexOS.memory import space_memory as sm
 from tests.dms import test_c_mem_contract_ask as c_mem
 from tests.test_loop.flag_off_cases import CASES, load_golden, run_cases
@@ -55,6 +59,12 @@ def _ask(client, space_id: str, question: str = REVENUE_Q, **extra: Any) -> dict
 
 def _steps(body: dict[str, Any]) -> list[tuple[str, str]]:
     return [(s["served_step"], s["served_status"]) for s in body["analysis_loop"]["steps"]]
+
+
+def _abstain_code(body: dict[str, Any]) -> str:
+    last = body["analysis_loop"]["steps"][-1]
+    assert (last["served_step"], last["served_status"]) == ("abstain", "abstain")
+    return last["served_reason"].split(": ", 1)[0]
 
 
 def _formula(space: str) -> str:
@@ -99,7 +109,7 @@ def test_loop_on_envelope_lists_every_step(ask_http, loop_on) -> None:
     assert body["answer"].startswith("Result: revenue_myr = ")
     assert body["provenance"]["badge"] == "governed_metric"
     loop = body["analysis_loop"]
-    assert loop["outcome"] == "answer" and loop["abstain_reason"] is None
+    assert set(loop) == {"outcome", "steps"} and loop["outcome"] == "answer"
     assert _steps(body) == [
         ("plan", "ok"),
         ("memory_lookup", "ok"),
@@ -114,11 +124,11 @@ def test_loop_on_envelope_lists_every_step(ask_http, loop_on) -> None:
     assert by["sql"]["served_sql"] == [body["sql_used"]]
     assert by["sql"]["served_by"] == "engine:governed_metric"
     assert by["evaluate"]["served_memory_ids"] == [formula_id]
-    assert loop["sql_run"] == [body["sql_used"], RIGHT_SQL]
-    assert body["memory_ids_read"] == loop["memory_ids_read"] == [formula_id]
+    assert by["evaluate"]["served_sql"] == [RIGHT_SQL]
+    assert by["ontology_lookup"]["served_tool"] == "data_map"
+    assert by["answer"]["served_by"] == "packager:passthrough"
+    assert body["memory_ids_read"] == [formula_id]
     assert body["memory_reads"][0]["kind"] == "formula"
-    assert [t["tool"] for t in loop["tools"]] == ["data_map"]
-    assert loop["tools"][0]["output"]["nodes"][0]["table"] == "transactions"
     assert body["drillthrough_token"]
 
 
@@ -127,10 +137,13 @@ def test_loop_on_chart_tool_on_the_envelope(ask_http, loop_on) -> None:
     body = _ask(ask_http, "alpha", question="chart our total revenue")
     if body["analysis_loop"]["outcome"] != "answer":
         pytest.skip(f"engine does not route this phrasing: {body['answer']}")
-    chart = next(t for t in body["analysis_loop"]["tools"] if t["tool"] == "chart_spec")
-    assert chart["served_status"] == "ok"
-    assert chart["output"]["type"] == "bignum"
-    assert chart["output"]["value"] == body["rows"][0]["revenue_myr"]
+    chart = next(s for s in body["analysis_loop"]["steps"] if s["served_step"] == "chart_spec")
+    assert (chart["served_status"], chart["served_tool"], chart["served_by"]) == (
+        "ok",
+        "chart_spec",
+        "tool:chart_spec",
+    )
+    assert "chart_spec" not in body["analysis_loop"], "chart output on the wire is C-LOOP-C's"
 
 
 # -- must-fail: a wrong answer is never served ---------------------------------
@@ -164,14 +177,15 @@ def test_must_fail_contract_ask_wrong_answer_becomes_abstain(
     body = _ask(ask_http, "alpha")
 
     assert body["analysis_loop"]["outcome"] == "abstain", "a wrong total reached the customer"
-    assert body["analysis_loop"]["abstain_reason"] == LoopAbstainReason.FORMULA_MISMATCH.value
+    assert _abstain_code(body) == LoopReason.FORMULA_MISMATCH.value
     assert body["provenance"]["badge"] == "abstain"
     assert body["rows"] == [] and body["sql_used"] is None and body["drillthrough_token"] is None
     assert body["contributing_sources"] == []
     assert "formula_mismatch" in body["answer"] and "Result:" not in body["answer"]
     assert body["assumptions"][0].startswith("analysis loop abstain: formula_mismatch: ")
     by = {s["served_step"]: s for s in body["analysis_loop"]["steps"]}
-    assert by["evaluate"]["served_status"] == "abstain"
+    assert by["evaluate"]["served_status"] == "failed"
+    assert by["self_correct"]["served_status"] == "skipped"
     assert by["evaluate"]["served_memory_ids"] == [formula_id]
     assert "txn_type" not in by["sql"]["served_sql"][0]
     assert "answer" not in by
@@ -181,18 +195,18 @@ def test_must_fail_contract_ask_wrong_answer_becomes_abstain(
 @pytest.mark.parametrize(
     ("question", "reason"),
     [
-        ("drop table inventory", LoopAbstainReason.POLICY_BLOCKED),
-        ("what is the weather in penang", LoopAbstainReason.NO_TRUSTWORTHY_PATH),
+        ("drop table inventory", LoopReason.POLICY_BLOCKED),
+        ("what is the weather in penang", LoopReason.NO_TRUSTWORTHY_PATH),
     ],
 )
 def test_must_fail_contract_ask_abstain_carries_named_reason(
-    ask_http, loop_on, question: str, reason: LoopAbstainReason
+    ask_http, loop_on, question: str, reason: LoopReason
 ) -> None:
     ask_http.bind_session(SESSION, "alpha")
     body = _ask(ask_http, "alpha", question=question)
     loop = body["analysis_loop"]
     assert loop["outcome"] == "abstain"
-    assert loop["abstain_reason"] == reason.value, loop
+    assert _abstain_code(body) == reason.value, loop
     assert body["provenance"]["badge"] in {"abstain", "blocked"}
     assert body["rows"] == [] and body["sql_used"] is None
     assert body["assumptions"][0].startswith(f"analysis loop abstain: {reason.value}: ")

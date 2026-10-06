@@ -1,11 +1,18 @@
-"""C-LOOP (#291) ask seam: the analysis loop on ``POST /v1/contract/ask``.
+"""C-LOOP (#291) ask seam: the analysis-loop orchestrator on ``POST /v1/contract/ask``.
 
 Runs only when ``CORTEX_ANALYSIS_LOOP`` is on; otherwise contract ask is
 unchanged. Everything the loop reads comes from the *signed* grant: the Space
 that keys memory, the tables on the data map, and the session manifest every
 SQL statement runs under (``run_gate`` then ``execute_sql``, the same gate as
-the loop-off ask). The engine cascade is the SQL proposer; any model call in it
-goes through OpenVault FreeRoute and is not chosen here.
+the loop-off ask).
+
+Until the sibling tickets land, the injected stages are:
+
+* generator — :func:`engine_generator`, the existing engine cascade (C-LOOP-A
+  #303 replaces it); its SQL is re-run through the gate, never trusted as rows.
+* self-correct — :func:`CortexOS.loop.interfaces.no_self_correct` (C-LOOP-B #304).
+* packager — :func:`passthrough_packager`: the generator's own envelope, or the
+  C-MEM reuse envelope (C-LOOP-C #305 replaces it).
 
 ``served_sql`` on a step is the SQL submitted to the session gate.
 """
@@ -16,17 +23,25 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from cortex_contract.answer import LoopAbstainReason
-
 from CortexOS.execution.manifest import VerifiedManifest
-from CortexOS.loop.runner import Candidate, LoopPorts, LoopResult, run_analysis_loop
+from CortexOS.loop.interfaces import (
+    Candidate,
+    Checked,
+    Generator,
+    LoopReason,
+    Packager,
+    PlanContext,
+    SelfCorrect,
+    no_self_correct,
+)
+from CortexOS.loop.orchestrator import LoopPorts, LoopResult, run_analysis_loop
 from CortexOS.memory.space_memory import get_space_memory, space_memory_enabled
 
 _SERVED_FIELDS = ("served_provider", "served_model", "served_local", "served_reason")
 
 
 def engine_candidate(result: Mapping[str, Any]) -> Candidate:
-    """Read the engine's flat answer as a loop candidate. Abstains stay named."""
+    """Read the engine's flat answer as a candidate. Engine abstains stay named."""
     route = str(result.get("route") or "").lower()
     badge = str(result.get("badge") or "").lower()
     layer = str(result.get("layer") or "").lower()
@@ -34,23 +49,71 @@ def engine_candidate(result: Mapping[str, Any]) -> Candidate:
     raw = result.get("assumptions")
     reason = "; ".join(str(a) for a in raw) if isinstance(raw, list) else str(raw or "")
     sql = result.get("sql_used") if isinstance(result.get("sql_used"), str) else None
-    rows = [dict(r) for r in result.get("rows") or []]
-    served_by = f"engine:{layer or route or 'unknown'}"
-    abstain: LoopAbstainReason | None = None
+    abstain: LoopReason | None = None
     if "blocked" in tokens:
-        abstain = LoopAbstainReason.POLICY_BLOCKED
+        abstain = LoopReason.POLICY_BLOCKED
     elif "refused" in tokens:
-        abstain = LoopAbstainReason.ENGINE_REFUSED
+        abstain = LoopReason.ENGINE_REFUSED
     elif tokens & {"abstain", "needs_clarification"}:
-        abstain = LoopAbstainReason.NO_TRUSTWORTHY_PATH
+        abstain = LoopReason.NO_TRUSTWORTHY_PATH
     return Candidate(
         sql=sql,
-        rows=rows,
-        served_by=served_by,
-        abstain=abstain,
+        served_by=f"engine:{layer or route or 'unknown'}",
+        abstain=abstain.value if abstain else None,
         reason=reason or ("engine abstained" if abstain else ""),
         envelope=dict(result),
     )
+
+
+def engine_generator(*, session_id: str, space_id: str | None, verified: VerifiedManifest) -> Generator:
+    def generate(context: PlanContext) -> Candidate:
+        from CortexOS.dms.answer_engine import answer as answer_engine
+
+        return engine_candidate(
+            answer_engine(
+                context.question,
+                session_id=session_id,
+                space_id=space_id,
+                verified=verified,
+                require_grounding=True,
+                stamp_l2_route=True,
+            )
+        )
+
+    generate.served_by = "engine_cascade"  # type: ignore[attr-defined]
+    return generate
+
+
+def passthrough_packager(audit_id: str) -> Packager:
+    def package(context: PlanContext, checked: Checked) -> dict[str, Any]:
+        cand = checked.candidate
+        if not checked.reused:
+            served = cand.envelope.get("sql_used")
+            if served != checked.sql:
+                raise ValueError("the generator's envelope does not carry the SQL that was checked")
+            return dict(cand.envelope)
+        from CortexOS.dms.query_service import synthesize_answer
+
+        return {
+            "answer": synthesize_answer(checked.rows, context.question),
+            "sql_used": checked.sql,
+            "audit_id": audit_id,
+            "route": "memory_reuse",
+            "row_count": len(checked.rows),
+            "rows": checked.rows,
+            "provenance": {
+                "layer": "memory_reuse",
+                "badge": "session",
+                "query_source": cand.served_by,
+                "assumptions": (
+                    f"Re-ran a {cand.envelope.get('validation')} solution from this Space on "
+                    "current data, then checked it. Reuse is not a validation."
+                ),
+            },
+        }
+
+    package.served_by = "passthrough"  # type: ignore[attr-defined]
+    return package
 
 
 def _gated_executor(grant: VerifiedManifest | None, semantic: Mapping[str, Any]):
@@ -81,8 +144,8 @@ def _memory_fields(result: LoopResult) -> dict[str, Any]:
 
 
 def _abstain_envelope(result: LoopResult, audit_id: str) -> dict[str, Any]:
-    assert result.abstain_reason is not None
-    code = result.abstain_reason.value
+    code = result.reason
+    assert code is not None
     out: dict[str, Any] = {
         "answer": f"I can't answer that with confidence ({code}: {result.detail}).",
         "sql_used": None,
@@ -107,32 +170,6 @@ def _abstain_envelope(result: LoopResult, audit_id: str) -> dict[str, Any]:
     return out
 
 
-def _answer_envelope(result: LoopResult, audit_id: str, question: str) -> dict[str, Any]:
-    from CortexOS.dms.query_service import synthesize_answer
-
-    cand = result.candidate
-    assert cand is not None and cand.sql
-    if not result.reused:
-        return dict(cand.envelope)
-    return {
-        "answer": synthesize_answer(cand.rows, question),
-        "sql_used": cand.sql,
-        "audit_id": audit_id,
-        "route": "memory_reuse",
-        "row_count": len(cand.rows),
-        "rows": cand.rows,
-        "provenance": {
-            "layer": "memory_reuse",
-            "badge": "session",
-            "query_source": cand.served_by,
-            "assumptions": (
-                f"Re-ran a {cand.envelope.get('validation')} solution from this Space on "
-                "current data, then checked it. Reuse is not a validation."
-            ),
-        },
-    }
-
-
 def loop_ask(
     question: str,
     *,
@@ -140,10 +177,12 @@ def loop_ask(
     space_id: str | None,
     verified: VerifiedManifest,
     scored_pack_id: str | None = None,
+    generator: Generator | None = None,
+    self_correct: SelfCorrect = no_self_correct,
+    packager: Packager | None = None,
 ) -> dict[str, Any]:
     """Flat answer dict for one contract ask, carrying ``analysis_loop``."""
     from CortexOS.dms.answer_engine import UngroundedSession, resolve_product_grant
-    from CortexOS.dms.answer_engine import answer as answer_engine
     from CortexOS.dms.query_service import route_question
     from CortexOS.dms.warehouse_db import load_semantic_layer
 
@@ -159,33 +198,22 @@ def loop_ask(
     space = ((grant.manifest.space_id or "").strip() if grant else "") or None
     semantic = load_semantic_layer()
 
-    def _propose(q: str) -> Candidate:
-        return engine_candidate(
-            answer_engine(
-                q,
-                session_id=session_id,
-                space_id=space_id,
-                verified=verified,
-                require_grounding=True,
-                stamp_l2_route=True,
-            )
-        )
-
     ports = LoopPorts(
         space_id=space,
         granted=granted,
         schema=semantic,
         execute=_gated_executor(grant, semantic),
-        propose=_propose,
+        generate=generator or engine_generator(session_id=session_id, space_id=space_id, verified=verified),
+        package=packager or passthrough_packager(audit_id),
+        self_correct=self_correct,
         memory=get_space_memory() if space_memory_enabled() and space else None,
         grant_error=grant_error,
         blocked=route_question(question) == "blocked",
     )
-    result = run_analysis_loop(
-        question, ports=ports, audit_id=audit_id, scored_pack_id=scored_pack_id
-    )
+    result = run_analysis_loop(question, ports=ports, audit_id=audit_id, scored_pack_id=scored_pack_id)
     if result.outcome == "answer":
-        data = _answer_envelope(result, audit_id, question)
+        assert result.envelope is not None
+        data = result.envelope
     else:
         data = _abstain_envelope(result, audit_id)
     data.update(_memory_fields(result))

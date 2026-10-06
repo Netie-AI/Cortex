@@ -140,25 +140,8 @@
         "type": "object"
       },
       "AnalysisLoop": {
-        "description": "1.5.0 C-LOOP: the round record of one analysis-loop ask.\n\nAn abstain always carries a named ``abstain_reason``; an answer never does.",
+        "description": "1.5.0 C-LOOP: the stamped steps of one analysis-loop ask, in run order.\n\nThe last step is ``answer`` (ok) or ``abstain``; an abstain step's\n``served_reason`` is ``\"<named_code>: <detail>\"``.",
         "properties": {
-          "abstain_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LoopAbstainReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "memory_ids_read": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Memory Ids Read",
-            "type": "array"
-          },
           "outcome": {
             "enum": [
               "answer",
@@ -167,25 +150,11 @@
             "title": "Outcome",
             "type": "string"
           },
-          "sql_run": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Sql Run",
-            "type": "array"
-          },
           "steps": {
             "items": {
               "$ref": "#/components/schemas/LoopStep"
             },
             "title": "Steps",
-            "type": "array"
-          },
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/LoopToolOutput"
-            },
-            "title": "Tools",
             "type": "array"
           }
         },
@@ -1055,26 +1024,8 @@
         "type": "object"
       },
       "ContractAnalysisLoop": {
-        "description": "1.5.0 C-LOOP: the round record of one analysis-loop ask.\n\nAn abstain always carries a named ``abstain_reason``; an answer never does.",
+        "description": "1.5.0 C-LOOP: the stamped steps of one analysis-loop ask, in run order.\n\nThe last step is ``answer`` (ok) or ``abstain``; an abstain step's\n``served_reason`` is ``\"<named_code>: <detail>\"``.",
         "properties": {
-          "abstain_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LoopAbstainReason"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "memory_ids_read": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Memory Ids Read",
-            "type": "array"
-          },
           "outcome": {
             "enum": [
               "answer",
@@ -1083,25 +1034,11 @@
             "title": "Outcome",
             "type": "string"
           },
-          "sql_run": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Sql Run",
-            "type": "array"
-          },
           "steps": {
             "items": {
               "$ref": "#/components/schemas/LoopStep"
             },
             "title": "Steps",
-            "type": "array"
-          },
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/LoopToolOutput"
-            },
-            "title": "Tools",
             "type": "array"
           }
         },
@@ -1617,26 +1554,6 @@
         "title": "LedgerEntry",
         "type": "object"
       },
-      "ContractLoopAbstainReason": {
-        "description": "1.5.0 C-LOOP: every analysis-loop abstain names one of these.",
-        "enum": [
-          "ungrounded_session",
-          "policy_blocked",
-          "engine_refused",
-          "no_trustworthy_path",
-          "not_a_sql_answer",
-          "tool_failed",
-          "sql_not_analysable",
-          "ungranted_table",
-          "empty_result",
-          "null_result",
-          "non_finite_value",
-          "formula_mismatch",
-          "formula_unverifiable"
-        ],
-        "title": "LoopAbstainReason",
-        "type": "string"
-      },
       "ContractLoopStep": {
         "description": "1.5.0 C-LOOP: one stamped step of the analysis loop, in run order.",
         "properties": {
@@ -1719,49 +1636,6 @@
           "served_at"
         ],
         "title": "LoopStep",
-        "type": "object"
-      },
-      "ContractLoopToolOutput": {
-        "description": "1.5.0 C-LOOP: output of one registered loop tool (chart spec, data map).",
-        "properties": {
-          "output": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Output"
-          },
-          "served_reason": {
-            "default": "",
-            "title": "Served Reason",
-            "type": "string"
-          },
-          "served_status": {
-            "enum": [
-              "ok",
-              "skipped",
-              "failed",
-              "refused"
-            ],
-            "title": "Served Status",
-            "type": "string"
-          },
-          "tool": {
-            "title": "Tool",
-            "type": "string"
-          }
-        },
-        "required": [
-          "tool",
-          "served_status"
-        ],
-        "title": "LoopToolOutput",
         "type": "object"
       },
       "ContractManifest": {
@@ -3752,26 +3626,6 @@
         "title": "LedgerVerifyRequest",
         "type": "object"
       },
-      "LoopAbstainReason": {
-        "description": "1.5.0 C-LOOP: every analysis-loop abstain names one of these.",
-        "enum": [
-          "ungrounded_session",
-          "policy_blocked",
-          "engine_refused",
-          "no_trustworthy_path",
-          "not_a_sql_answer",
-          "tool_failed",
-          "sql_not_analysable",
-          "ungranted_table",
-          "empty_result",
-          "null_result",
-          "non_finite_value",
-          "formula_mismatch",
-          "formula_unverifiable"
-        ],
-        "title": "LoopAbstainReason",
-        "type": "string"
-      },
       "LoopStep": {
         "description": "1.5.0 C-LOOP: one stamped step of the analysis loop, in run order.",
         "properties": {
@@ -3852,48 +3706,6 @@
           "served_at"
         ],
         "title": "LoopStep",
-        "type": "object"
-      },
-      "LoopToolOutput": {
-        "description": "1.5.0 C-LOOP: output of one registered loop tool (chart spec, data map).",
-        "properties": {
-          "output": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output"
-          },
-          "served_reason": {
-            "default": "",
-            "title": "Served Reason",
-            "type": "string"
-          },
-          "served_status": {
-            "enum": [
-              "ok",
-              "skipped",
-              "failed",
-              "refused"
-            ],
-            "title": "Served Status",
-            "type": "string"
-          },
-          "tool": {
-            "title": "Tool",
-            "type": "string"
-          }
-        },
-        "required": [
-          "tool",
-          "served_status"
-        ],
-        "title": "LoopToolOutput",
         "type": "object"
       },
       "Manifest": {

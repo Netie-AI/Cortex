@@ -86,10 +86,10 @@ supported:
     status: current
     contract_surface: true
     notes: >
-      Additive C-LOOP (#291) analysis loop: Answer gains optional
-      analysis_loop (outcome, a named abstain_reason from LoopAbstainReason,
-      stamped steps in run order, tool outputs, sql_run, memory_ids_read). It
-      is present only when CORTEX_ANALYSIS_LOOP is on and is omitted from the
+      Additive C-LOOP (#291) analysis loop orchestrator: Answer gains optional
+      analysis_loop (outcome and served_* stamped steps in run order; an
+      abstain's last step names its reason as "<code>: <detail>"). It is
+      present only when CORTEX_ANALYSIS_LOOP is on and is omitted from the
       wire otherwise, so a loop-off answer is a 1.4.0 answer. 1.4 clients
       ignore the new field. canonical_manifest_bytes unchanged.
 

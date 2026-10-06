@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any, Literal
 
@@ -56,22 +57,7 @@ class MemoryRead(BaseModel):
     served_at: str
 
 
-class LoopAbstainReason(str, Enum):
-    """1.5.0 C-LOOP: every analysis-loop abstain names one of these."""
-
-    UNGROUNDED_SESSION = "ungrounded_session"
-    POLICY_BLOCKED = "policy_blocked"
-    ENGINE_REFUSED = "engine_refused"
-    NO_TRUSTWORTHY_PATH = "no_trustworthy_path"
-    NOT_A_SQL_ANSWER = "not_a_sql_answer"
-    TOOL_FAILED = "tool_failed"
-    SQL_NOT_ANALYSABLE = "sql_not_analysable"
-    UNGRANTED_TABLE = "ungranted_table"
-    EMPTY_RESULT = "empty_result"
-    NULL_RESULT = "null_result"
-    NON_FINITE_VALUE = "non_finite_value"
-    FORMULA_MISMATCH = "formula_mismatch"
-    FORMULA_UNVERIFIABLE = "formula_unverifiable"
+_NAMED_ABSTAIN = re.compile(r"^[a-z][a-z0-9_]*: \S")
 
 
 class LoopStep(BaseModel):
@@ -89,34 +75,28 @@ class LoopStep(BaseModel):
     served_row_count: int | None = None
 
 
-class LoopToolOutput(BaseModel):
-    """1.5.0 C-LOOP: output of one registered loop tool (chart spec, data map)."""
-
-    tool: str
-    served_status: Literal["ok", "skipped", "failed", "refused"]
-    served_reason: str = ""
-    output: dict[str, Any] | None = None
-
-
 class AnalysisLoop(BaseModel):
-    """1.5.0 C-LOOP: the round record of one analysis-loop ask.
+    """1.5.0 C-LOOP: the stamped steps of one analysis-loop ask, in run order.
 
-    An abstain always carries a named ``abstain_reason``; an answer never does.
+    The last step is ``answer`` (ok) or ``abstain``; an abstain step's
+    ``served_reason`` is ``"<named_code>: <detail>"``.
     """
 
     outcome: Literal["answer", "abstain"]
-    abstain_reason: LoopAbstainReason | None = None
     steps: list[LoopStep] = Field(default_factory=list)
-    tools: list[LoopToolOutput] = Field(default_factory=list)
-    sql_run: list[str] = Field(default_factory=list)
-    memory_ids_read: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _abstain_is_named(self) -> AnalysisLoop:
-        if self.outcome == "abstain" and self.abstain_reason is None:
-            raise ValueError("an analysis-loop abstain must name its abstain_reason")
-        if self.outcome == "answer" and self.abstain_reason is not None:
-            raise ValueError("an analysis-loop answer carries no abstain_reason")
+        last = self.steps[-1] if self.steps else None
+        if self.outcome == "abstain":
+            if last is None or (last.served_step, last.served_status) != ("abstain", "abstain"):
+                raise ValueError("an analysis-loop abstain must end with an abstain step")
+            if not _NAMED_ABSTAIN.match(last.served_reason):
+                raise ValueError("an analysis-loop abstain must name its reason as '<code>: <detail>'")
+        elif last is None or (last.served_step, last.served_status) != ("answer", "ok"):
+            raise ValueError("an analysis-loop answer must end with an ok answer step")
+        if any(s.served_status == "abstain" for s in self.steps[:-1]):
+            raise ValueError("only the last analysis-loop step may abstain")
         return self
 
 

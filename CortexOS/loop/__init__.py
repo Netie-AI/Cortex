@@ -1,4 +1,4 @@
-"""C-LOOP (#291) — analysis loop runner and tool registry. Off unless ``CORTEX_ANALYSIS_LOOP``."""
+"""C-LOOP (#291) — analysis loop orchestrator and tool registry. Off unless ``CORTEX_ANALYSIS_LOOP``."""
 
 from __future__ import annotations
 

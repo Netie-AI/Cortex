@@ -9,6 +9,7 @@ without its guard is not testing the guard.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-UNIT = "tests/test_loop/test_c_loop_runner.py"
+UNIT = "tests/test_loop/test_c_loop_orchestrator.py"
 SANDBOX = "tests/test_loop/test_c_loop_sandbox.py"
 HTTP = "tests/dms/test_c_loop_contract_ask.py"
 
@@ -74,8 +75,9 @@ CASES = {
 }
 
 
-def _pytest(node_ids: list[str], guard_off: str | None) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
+def _pytest(node_ids: list[str], guard_off: str | None, warehouse: Path) -> subprocess.CompletedProcess[str]:
+    # This process may hold the warehouse's DuckDB lock; the child gets its own copy.
+    env = {**os.environ, "DMS_WAREHOUSE_DB": str(warehouse)}
     args = [sys.executable, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider", *node_ids]
     if guard_off:
         env["C_LOOP_GUARD_OFF"] = guard_off
@@ -89,9 +91,13 @@ def _pytest(node_ids: list[str], guard_off: str | None) -> subprocess.CompletedP
 
 
 @pytest.mark.parametrize("guard", sorted(CASES))
-def test_must_fail_tests_fail_without_their_guard(guard: str) -> None:
+def test_must_fail_tests_fail_without_their_guard(guard: str, tmp_path: Path) -> None:
     node_ids, must_fail = CASES[guard]
-    off = _pytest(node_ids, guard)
+    source = Path(os.environ.get("DMS_WAREHOUSE_DB") or ROOT / "data" / "dms_demo.duckdb")
+    warehouse = tmp_path / "warehouse.duckdb"
+    if source.exists():
+        shutil.copyfile(source, warehouse)
+    off = _pytest(node_ids, guard, warehouse)
     failed = [line for line in off.stdout.splitlines() if line.startswith("FAILED ")]
     assert off.returncode == 1, off.stdout + off.stderr
     for name in must_fail:
@@ -99,5 +105,5 @@ def test_must_fail_tests_fail_without_their_guard(guard: str) -> None:
             f"{name} passed with guard {guard} off:\n{off.stdout}"
         )
 
-    on = _pytest(node_ids, None)
+    on = _pytest(node_ids, None, warehouse)
     assert on.returncode == 0, on.stdout + on.stderr
