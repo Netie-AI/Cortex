@@ -7,7 +7,7 @@ asks for a numbered plan, ``sql()`` asks for one SELECT that carries it out
 
 The generator only produces text. It holds no executor and no DB handle, and
 it reaches a model only through ``CortexOS.integrations.freeroute`` (import
-contract 5). The caller gates and executes, and refuses any step whose route
+contract ``plan-sql-freeroute-only``). The caller gates and executes, and refuses any step whose route
 stamp FreeRoute did not journal.
 """
 

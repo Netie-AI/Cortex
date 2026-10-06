@@ -100,7 +100,7 @@ forbidden_modules =
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
 
-[importlinter:contract:5]
+[importlinter:contract:plan-sql-freeroute-only]
 name = the plan+SQL path reaches a model only through OpenVault FreeRoute (C-LOOP-A #303)
 type = forbidden
 source_modules =
@@ -143,4 +143,4 @@ forbidden_modules =
 # CortexOS.integrations.freeroute (OpenVault custody, arming, served_* stamps);
 # no provider SDK, HTTP client, or other Cortex model router. It holds no
 # executor or DB handle: CortexOS.dms.plan_sql_ask gates and executes the SQL.
-# Must-fail: tests/test_plan_sql/test_c_loop_a_import_contract.py.
+# Must-fail: tests/test_plan_sql/test_c_loop_a_import_contract.py::test_must_fail_import_contract_breaks.

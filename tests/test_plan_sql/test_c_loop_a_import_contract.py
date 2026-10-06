@@ -1,8 +1,8 @@
-"""C-LOOP-A (#303) import contract 5: the plan+SQL path reaches a model only
-through OpenVault FreeRoute.
+"""C-LOOP-A (#303) import contract ``plan-sql-freeroute-only``: the plan+SQL
+path reaches a model only through OpenVault FreeRoute.
 
 ``test_must_fail_import_contract_breaks`` runs the real ``lint-imports`` against
-a scratch tree carrying contract 5 copied verbatim from the repo's
+a scratch tree carrying the contract copied verbatim from the repo's
 ``.importlinter``: each forbidden import must BREAK it and the clean tree (which
 imports FreeRoute) must keep it, so the gate can fail. The AST tests are a
 second net on the real files, including the ask seam outside the contract.
@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SECTION = "importlinter:contract:5"
+SECTION = "importlinter:contract:plan-sql-freeroute-only"
 SOURCE = "CortexOS.plan_sql"
 PROVIDER_SDKS = (
     "openai",
@@ -74,7 +74,7 @@ def _lines(raw: str) -> list[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-def test_import_contract_5_is_present_and_scoped() -> None:
+def test_import_contract_is_present_named_and_scoped() -> None:
     section = _contract()
     assert section["type"] == "forbidden"
     assert "C-LOOP-A #303" in section["name"]
