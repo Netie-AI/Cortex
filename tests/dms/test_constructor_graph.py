@@ -401,7 +401,9 @@ def _ov_verify_returns(monkeypatch, tmp_path, body):
     monkeypatch.delenv("DMS_API_KEYS", raising=False)
     token_file = tmp_path / "cortex_ov_service_token"
     token_file.write_text("svc-test-token", encoding="utf-8")
+    token_file.chmod(0o600)
     monkeypatch.setenv("CORTEX_OV_SERVICE_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("CORTEX_OV_VERIFY_URL", raising=False)
     monkeypatch.setattr(
         "CortexOS.integrations.openvault_client.request_json",
         lambda *a, **k: (200, body),

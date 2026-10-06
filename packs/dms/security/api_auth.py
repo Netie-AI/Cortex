@@ -1,7 +1,11 @@
 """F7 remainder — API-key RBAC (viewer / steward / admin).
 
-``ov_`` keys are checked against OpenVault ``POST /api/apikeys/verify`` with
-Cortex's own OpenVault service bearer, read from ``CORTEX_OV_SERVICE_TOKEN_FILE``.
+``ov_`` keys are checked against OpenVault ``POST /api/apikeys/verify`` on the
+loopback-bound verify listener (``CORTEX_OV_VERIFY_URL``, default :8080) with
+Cortex's own OpenVault service bearer, read from the mode-0600 file named by
+``CORTEX_OV_SERVICE_TOKEN_FILE``. OpenVault registered that bearer under
+service_id ``cortex`` and admits it only when ``cortex`` is listed in
+``OPENVAULT_VERIFY_SERVICES``; the id travels as the bearer, not as a field.
 That bearer is never the OpenVault admin token, and neither it nor the key
 being verified is ever logged, put in an error, or returned.
 """
@@ -11,6 +15,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import stat
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -30,22 +36,33 @@ _DEMO_KEYS: Final[str] = (
     "admin:dms-demo-admin-key"
 )
 
+OV_SERVICE_ID: Final[str] = "cortex"
 OV_SERVICE_TOKEN_FILE_ENV: Final[str] = "CORTEX_OV_SERVICE_TOKEN_FILE"
+OV_VERIFY_URL_ENV: Final[str] = "CORTEX_OV_VERIFY_URL"
 OV_VERIFY_DEFAULT_URL: Final[str] = "http://127.0.0.1:8080"
 OV_VERIFY_PATH: Final[str] = "/api/apikeys/verify"
+_OV_REFUSED_PORT: Final[int] = 5000
 _OV_ADMIN_TOKEN_PATH_ENV: Final[str] = "OPENVAULT_ADMIN_TOKEN_PATH"
 _OV_ADMIN_TOKEN_FILENAME: Final[str] = "admin_token"
+_OV_SERVICE_TOKEN_MODE: Final[int] = 0o600
+_OV_SERVICE_TOKEN_MAX_BYTES: Final[int] = 4096
 _OV_VERIFY_TIMEOUT_S = 3.0
 _OV_ID = re.compile(r"[A-Za-z0-9_.:\-]{1,128}")
 
 DENY_MISSING_KEY: Final[str] = "missing_key"
 DENY_INVALID_KEY: Final[str] = "invalid_key"
-DENY_OV_BASE_URL_CONFLICT: Final[str] = "ov_base_url_conflict"
+DENY_OV_VERIFY_URL_INVALID: Final[str] = "ov_verify_url_invalid"
+DENY_OV_VERIFY_URL_NOT_LOOPBACK: Final[str] = "ov_verify_url_not_loopback"
+DENY_OV_VERIFY_URL_PORT_5000: Final[str] = "ov_verify_url_port_5000"
 DENY_OV_SERVICE_TOKEN_MISSING: Final[str] = "ov_service_token_missing"
+DENY_OV_SERVICE_TOKEN_UNREADABLE: Final[str] = "ov_service_token_unreadable"
+DENY_OV_SERVICE_TOKEN_NOT_FILE: Final[str] = "ov_service_token_not_file"
+DENY_OV_SERVICE_TOKEN_BAD_MODE: Final[str] = "ov_service_token_bad_mode"
 DENY_OV_SERVICE_TOKEN_INVALID: Final[str] = "ov_service_token_invalid"
 DENY_OV_SERVICE_TOKEN_IS_ADMIN: Final[str] = "ov_service_token_is_admin"
 DENY_OV_VERIFY_UNAUTHORIZED: Final[str] = "ov_verify_unauthorized"
 DENY_OV_VERIFY_FORBIDDEN: Final[str] = "ov_verify_forbidden"
+DENY_OV_VERIFY_RATE_LIMITED: Final[str] = "ov_verify_rate_limited"
 DENY_OV_VERIFY_UNREACHABLE: Final[str] = "ov_verify_unreachable"
 DENY_OV_VERIFY_UNEXPECTED_STATUS: Final[str] = "ov_verify_unexpected_status"
 DENY_OV_VERIFY_MALFORMED: Final[str] = "ov_verify_malformed"
@@ -115,19 +132,41 @@ def extract_api_key(
 
 
 def _ov_deny(reason: str, status: int | None = None) -> Deny:
-    log.warning("openvault key verify denied: reason=%s status=%s", reason, status)
+    log.warning(
+        "openvault key verify denied: reason=%s status=%s service_id=%s",
+        reason,
+        status,
+        OV_SERVICE_ID,
+    )
     return Deny(reason)
 
 
 def ov_verify_base_url() -> str | Deny:
-    """The one OpenVault this Cortex uses; the :8080 vault when none is configured."""
-    from CortexOS.integrations import openvault_client
+    """The loopback-bound OpenVault verify listener. Never the :5000 listener."""
+    from CortexOS.integrations.openvault_client import is_loopback_url
 
-    if openvault_client.openvault_base_url_conflict():
-        return Deny(DENY_OV_BASE_URL_CONFLICT)
-    if any((os.environ.get(name) or "").strip() for name in openvault_client._BASE_URL_ENVS):
-        return openvault_client.openvault_base_url()
-    return OV_VERIFY_DEFAULT_URL
+    raw = (os.environ.get(OV_VERIFY_URL_ENV) or "").strip() or OV_VERIFY_DEFAULT_URL
+    try:
+        parts = urllib.parse.urlsplit(raw)
+        port = parts.port
+    except ValueError:
+        return Deny(DENY_OV_VERIFY_URL_INVALID)
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or port is None
+        or parts.username is not None
+        or parts.password is not None
+        or parts.path not in ("", "/")
+        or parts.query
+        or parts.fragment
+    ):
+        return Deny(DENY_OV_VERIFY_URL_INVALID)
+    if port == _OV_REFUSED_PORT:
+        return Deny(DENY_OV_VERIFY_URL_PORT_5000)
+    if not is_loopback_url(raw):
+        return Deny(DENY_OV_VERIFY_URL_NOT_LOOPBACK)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def _is_ov_admin_token_file(path: Path) -> bool:
@@ -143,18 +182,44 @@ def _is_ov_admin_token_file(path: Path) -> bool:
         return path.resolve() == admin_path.resolve()
 
 
+def _read_service_token_file(path: Path) -> str | Deny:
+    """Mode and type are read from the open descriptor, so they describe the bytes read."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:
+        return Deny(DENY_OV_SERVICE_TOKEN_MISSING)
+    except OSError:
+        return Deny(DENY_OV_SERVICE_TOKEN_UNREADABLE)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return Deny(DENY_OV_SERVICE_TOKEN_NOT_FILE)
+        if stat.S_IMODE(st.st_mode) != _OV_SERVICE_TOKEN_MODE:
+            return Deny(DENY_OV_SERVICE_TOKEN_BAD_MODE)
+        raw = os.read(fd, _OV_SERVICE_TOKEN_MAX_BYTES + 1)
+    except OSError:
+        return Deny(DENY_OV_SERVICE_TOKEN_UNREADABLE)
+    finally:
+        os.close(fd)
+    if len(raw) > _OV_SERVICE_TOKEN_MAX_BYTES:
+        return Deny(DENY_OV_SERVICE_TOKEN_INVALID)
+    try:
+        return raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return Deny(DENY_OV_SERVICE_TOKEN_INVALID)
+
+
 def ov_service_token() -> str | Deny:
-    """Cortex's own OpenVault service bearer from its secret file. Never the admin token."""
+    """Cortex's own OpenVault service bearer from its 0600 secret file. Never the admin token."""
     raw = (os.environ.get(OV_SERVICE_TOKEN_FILE_ENV) or "").strip()
     if not raw:
         return Deny(DENY_OV_SERVICE_TOKEN_MISSING)
     path = Path(raw).expanduser()
     if _is_ov_admin_token_file(path):
         return Deny(DENY_OV_SERVICE_TOKEN_IS_ADMIN)
-    try:
-        token = path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):
-        return Deny(DENY_OV_SERVICE_TOKEN_MISSING)
+    token = _read_service_token_file(path)
+    if isinstance(token, Deny):
+        return token
     if not token:
         return Deny(DENY_OV_SERVICE_TOKEN_MISSING)
     if not token.isprintable() or any(ch.isspace() for ch in token):
@@ -207,6 +272,8 @@ def verify_openvault_key(token: str) -> Caller | Deny:
         return _ov_deny(DENY_OV_VERIFY_UNAUTHORIZED, status)
     if status == 403:
         return _ov_deny(DENY_OV_VERIFY_FORBIDDEN, status)
+    if status == 429:
+        return _ov_deny(DENY_OV_VERIFY_RATE_LIMITED, status)
     if status != 200:
         return _ov_deny(DENY_OV_VERIFY_UNEXPECTED_STATUS, status)
     return _caller_from_verify_body(body)
