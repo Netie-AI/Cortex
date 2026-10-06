@@ -99,3 +99,35 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:5]
+name = analysis loop never routes a model, reaches a pack, a DB driver or the network (C-LOOP #291)
+type = forbidden
+source_modules =
+    CortexOS.loop
+forbidden_modules =
+    packs
+    duckdb
+    litellm
+    httpx
+    requests
+    aiohttp
+    urllib3
+    openai
+    anthropic
+    groq
+    mistralai
+    cohere
+    ollama
+    CortexOS.integrations
+    CortexOS.routing
+    CortexOS.nlp
+    CortexOS.crew
+    CortexOS.execution
+    CortexOS.dms
+    CortexOS.api
+# The loop runner and its tools hold no model client, no provider choice, no
+# source-DB handle and no network client. Model calls, if any, happen inside the
+# engine cascade the caller injects as the proposer, through OpenVault FreeRoute.
+# SQL runs through an executor the caller injects. Must-fail:
+# tests/test_loop/test_c_loop_import_contract.py.
