@@ -38,3 +38,4 @@ that used to live here.
 ## Reference
 - `docs/dms/BUILD_PLAN.md` § FEATURE 7
 - `docs/dms/GATE_F8_PACKET.md` (after F7)
+- Merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers.

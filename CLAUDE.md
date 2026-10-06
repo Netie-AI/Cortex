@@ -81,6 +81,7 @@ reads the corpus as proof that it can.
 ## 6. Working alongside other lanes
 
 See `AGENTS.md`.
+Merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers.
 
 ## 7. Verifying, honestly
 

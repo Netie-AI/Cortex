@@ -13,6 +13,16 @@ When a PR is perfect, squash-merge it. Do not wait for a human. Cloud-agent `gh`
 
 Do **not** merge when any required check failed, the PR is draft, dirty/behind, or it weakens a refusal / reclassifies hostile SQL / hand-edits `contract/*.json` / adds `_C2_ALLOWLIST` names. Those are not perfect.
 
+## Merge tiers
+
+Approved 2026-10-06 12:02 MYT (FAST LANE, relayed by Netie Lead).
+
+1. `tier:fast` applies to UI, docs, tests, cleanup that keeps an attic copy of what it removes, and features behind a flag that is off by default and byte-identical when off. A `tier:fast` PR merges on green required CI (the 5 push checks: `lint-type-test`, `base-install`, `protected-paths`, `rls-proof`, `secrets-scan`) plus one second-model AGREE on the exact head SHA. PR Bot's CLEAR is the CI result, not a separate serial wait. Post-merge R-0003 (Cortex Check) still runs on the merge SHA.
+2. `tier:full` applies to everything else, and always to any PR touching auth or grants, keys, routing, prove pins (the proving baseline pin `279cbd85`), the contract or import-linter invariants, or scoring, eval and abstain paths. It keeps the existing bars unchanged: PR Bot CLEAR on the exact head, a different-family AGREE on the exact head as a separate comment, and post-merge R-0003 by Cortex Check, then Lead DONE/BLOCKED. A head move voids CLEAR and AGREE in both tiers.
+3. PR Bot bounces any `tier:fast` PR that touches the paths in rule 2 to `tier:full`. If no label is present, the PR is `tier:full`.
+4. No CI check is weakened, skipped or made optional by either tier. Every existing invariant stays as-is: one writer per branch, nothing declared PASS, `DMS_L2_ENABLED=1` never committed, protected-paths rules.
+5. GitHub labels `tier:fast` and `tier:full` already exist in the repo.
+
 ## Remove useless work
 
 - Do not add LangGraph, CrewAI, n8n, Money Gainer, or Outlier scraping.

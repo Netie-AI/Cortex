@@ -24,6 +24,8 @@ After any ship, gate update, or handoff refresh that changes tracked files:
 3. **`git push origin HEAD`** — always push; do not leave shipped work local-only.
 4. When the PR is **perfect** (CI green, not draft, mergeable, no conflicts), squash-merge it. Cloud-agent `gh` cannot merge; CI job `auto-merge` does. Do not sit on a green PR.
 
+Merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers.
+
 If push fails (auth, conflict), report the error and fix before ending the session.
 
 ## Subagents

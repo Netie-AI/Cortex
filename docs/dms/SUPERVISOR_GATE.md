@@ -2,6 +2,8 @@
 
 Use this when returning to Claude (or any external verifier) between milestones. **Do not start the next feature until the gate passes.**
 
+PR merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers.
+
 ---
 
 ## Gate 0 — Repo governance (one-time)
