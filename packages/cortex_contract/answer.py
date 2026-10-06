@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 
 class Badge(str, Enum):
@@ -50,6 +56,70 @@ class MemoryRead(BaseModel):
     served_at: str
 
 
+class LoopAbstainReason(str, Enum):
+    """1.5.0 C-LOOP: every analysis-loop abstain names one of these."""
+
+    UNGROUNDED_SESSION = "ungrounded_session"
+    POLICY_BLOCKED = "policy_blocked"
+    ENGINE_REFUSED = "engine_refused"
+    NO_TRUSTWORTHY_PATH = "no_trustworthy_path"
+    NOT_A_SQL_ANSWER = "not_a_sql_answer"
+    TOOL_FAILED = "tool_failed"
+    SQL_NOT_ANALYSABLE = "sql_not_analysable"
+    UNGRANTED_TABLE = "ungranted_table"
+    EMPTY_RESULT = "empty_result"
+    NULL_RESULT = "null_result"
+    NON_FINITE_VALUE = "non_finite_value"
+    FORMULA_MISMATCH = "formula_mismatch"
+    FORMULA_UNVERIFIABLE = "formula_unverifiable"
+
+
+class LoopStep(BaseModel):
+    """1.5.0 C-LOOP: one stamped step of the analysis loop, in run order."""
+
+    seq: int
+    served_step: str
+    served_status: Literal["ok", "skipped", "failed", "refused", "abstain"]
+    served_by: str
+    served_at: str
+    served_reason: str = ""
+    served_tool: str | None = None
+    served_memory_ids: list[str] = Field(default_factory=list)
+    served_sql: list[str] = Field(default_factory=list)
+    served_row_count: int | None = None
+
+
+class LoopToolOutput(BaseModel):
+    """1.5.0 C-LOOP: output of one registered loop tool (chart spec, data map)."""
+
+    tool: str
+    served_status: Literal["ok", "skipped", "failed", "refused"]
+    served_reason: str = ""
+    output: dict[str, Any] | None = None
+
+
+class AnalysisLoop(BaseModel):
+    """1.5.0 C-LOOP: the round record of one analysis-loop ask.
+
+    An abstain always carries a named ``abstain_reason``; an answer never does.
+    """
+
+    outcome: Literal["answer", "abstain"]
+    abstain_reason: LoopAbstainReason | None = None
+    steps: list[LoopStep] = Field(default_factory=list)
+    tools: list[LoopToolOutput] = Field(default_factory=list)
+    sql_run: list[str] = Field(default_factory=list)
+    memory_ids_read: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _abstain_is_named(self) -> AnalysisLoop:
+        if self.outcome == "abstain" and self.abstain_reason is None:
+            raise ValueError("an analysis-loop abstain must name its abstain_reason")
+        if self.outcome == "answer" and self.abstain_reason is not None:
+            raise ValueError("an analysis-loop answer carries no abstain_reason")
+        return self
+
+
 class ContributingSource(BaseModel):
     """One source card for the Sources panel (architecture §4.7 / §4.8)."""
 
@@ -86,6 +156,17 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0 C-LOOP: present only when the analysis loop ran. Left off the wire
+    # when absent, so a loop-off answer is byte-for-byte a 1.4.0 answer.
+    analysis_loop: AnalysisLoop | None = None
+
+    # No return annotation: one would replace Answer's published response schema.
+    @model_serializer(mode="wrap")
+    def _omit_absent_loop(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        if self.analysis_loop is None and isinstance(data, dict):
+            data.pop("analysis_loop", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):
