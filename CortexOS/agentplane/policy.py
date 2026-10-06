@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from CortexOS.crew.config import BACKEND_CF_COMPUTER, BACKEND_LAPTOP, FLAG_CF_COMPUTER
+from CortexOS.agentplane.config import BACKEND_CF_COMPUTER, BACKEND_LAPTOP, FLAG_CF_COMPUTER
 
 # Windows-MCP capture/timing tools that observe but do not act. Everything not
 # listed here is treated as mutating - fail closed on unknown tools.

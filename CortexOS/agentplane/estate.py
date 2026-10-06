@@ -520,7 +520,7 @@ def snapshot(*, live: bool | None = None, org: str | None = None) -> dict[str, A
     live_names: list[str] = []
     live_detail = "CREW_LIVE_PROBES=0; static catalog only"
     if use_live:
-        from CortexOS.crew import github
+        from CortexOS.agentplane import github
 
         listed = github.list_org_repos(org_name)
         live_detail = str(listed.get("detail") or "")

@@ -75,7 +75,7 @@ _NUM = re.compile(r"\b\d+\b")
 
 
 def _certified_rows(pack_dir: Path | str | None) -> dict[str, Mapping[str, Any]]:
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
 
     base = insights_mod._pack_dir(pack_dir)
     doc = insights_mod._read_yaml(base / "semantic" / "certified_queries.yaml")
@@ -139,7 +139,7 @@ def _limit(stmt: Any) -> int | None:
 
 def _bound(intent_norm: str, ranking: Mapping[str, Any], rows: Mapping[str, Mapping[str, Any]]) -> tuple[str, str] | None:
     """(certified id, matched phrase): longest certified phrase inside the intent."""
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
 
     best: tuple[int, str, str] | None = None
     for ranked in ranking.get("certified") or []:
@@ -174,7 +174,7 @@ def resolve(
     Else ``{"action": "serve", "id", "sql"}`` or
     ``{"action": "abstain", "id", "reason"}``.
     """
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
 
     intent_norm = insights_mod._norm(intent)
     rows = _certified_rows(pack_dir)
@@ -238,7 +238,7 @@ def resolve(
 
 def served_envelope(hit: Mapping[str, Any]) -> dict[str, Any]:
     """generative_ask body for a served certified query. No model was called."""
-    from CortexOS.crew import cot_climb
+    from CortexOS.agentplane import cot_climb
 
     cid = str(hit.get("id") or "")
     reason = f"{CHECK}:{cid} (no model called)"
@@ -272,7 +272,7 @@ def served_envelope(hit: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def abstain_envelope(hit: Mapping[str, Any]) -> dict[str, Any]:
-    from CortexOS.crew import cot_climb
+    from CortexOS.agentplane import cot_climb
 
     return {
         "ok": False,

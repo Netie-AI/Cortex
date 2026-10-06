@@ -25,9 +25,9 @@ from typing import Any
 
 import yaml
 
-from CortexOS.crew.config import BACKEND_CF_COMPUTER
-from CortexOS.crew.engine_bridge import EngineBridge
-from CortexOS.crew.shell import CF_COMPUTER_SOURCE
+from CortexOS.agentplane.config import BACKEND_CF_COMPUTER
+from CortexOS.agentplane.engine_bridge import EngineBridge
+from CortexOS.agentplane.shell import CF_COMPUTER_SOURCE
 from CortexOS.insights.caller_ontology import SOURCE_CALLER, CallerCatalog
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
 
@@ -136,7 +136,7 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 def _cot_public_map() -> dict[str, Any]:
     """GET stamp for #212. Consumes cot_climb.public_map; never claims COMPLETE."""
-    from CortexOS.crew import cot_climb
+    from CortexOS.agentplane import cot_climb
 
     body = cot_climb.public_map()
     return {
@@ -159,7 +159,7 @@ def _cot_public_map() -> dict[str, Any]:
 
 def _prompt_harness_public_map() -> dict[str, Any]:
     """GET stamp for #227. Consumes prompt_harness_climb; never closes #212."""
-    from CortexOS.crew import prompt_harness_climb as harness
+    from CortexOS.agentplane import prompt_harness_climb as harness
 
     body = harness.public_map()
     return {
@@ -1319,7 +1319,7 @@ async def generative_ask(
     ``complete`` and ``validate_sql`` only. ``query_plan`` is a caller-typed
     ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
-    from CortexOS.crew import certified_serve, cot_climb, l2_serve
+    from CortexOS.agentplane import certified_serve, cot_climb, l2_serve
 
     # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
     # served as stored (or the ask abstains by name); the model is not asked to
@@ -1488,7 +1488,7 @@ async def _run_insights(
             prompt: str = "",
             **kwargs: Any,
         ) -> Any:
-            from CortexOS.crew import freeroute as fr
+            from CortexOS.agentplane import freeroute as fr
 
             fn = complete or fr.complete
             out = await fn(messages, purpose=purpose, prompt=prompt, **kwargs)
@@ -1706,7 +1706,7 @@ async def _run_insights(
                 gen,
             )
 
-    from CortexOS.crew import l2_serve
+    from CortexOS.agentplane import l2_serve
 
     l2 = l2_serve.serve_on_miss(
         intent=text, generated=gen, ranking=ranking, bridge=bridge,

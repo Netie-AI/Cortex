@@ -22,8 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from CortexOS.crew import policy
-from CortexOS.crew.config import (
+from CortexOS.agentplane import policy
+from CortexOS.agentplane.config import (
     BACKEND_CF_COMPUTER,
     BACKEND_LAPTOP,
     FLAG_CF_COMPUTER,

@@ -82,7 +82,7 @@ def save(data_dir: Path, updates: dict[str, str | None]) -> dict[str, Any]:
             os.environ[key] = stripped
             keep_local = True
             if key.endswith("_API_KEY"):
-                from CortexOS.crew.openvault import upsert_env_key
+                from CortexOS.agentplane.openvault import upsert_env_key
 
                 vaulted = upsert_env_key(key, stripped)
                 if vaulted.get("ok"):

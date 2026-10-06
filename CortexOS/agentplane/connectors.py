@@ -95,7 +95,7 @@ def _row(
 
 
 def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dict[str, Any]]:
-    from CortexOS.crew.openvault import vault_sources
+    from CortexOS.agentplane.openvault import vault_sources
 
     sources = vault_sources()
     out: list[dict[str, Any]] = []
@@ -106,7 +106,7 @@ def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dic
             connected = bool(uacc_enabled and uacc_armed)
             detail = "UACC armed" if connected else "UACC not armed"
         elif row["slug"] == "github":
-            from CortexOS.crew import github as github_mod
+            from CortexOS.agentplane import github as github_mod
 
             if os.environ.get("CREW_LIVE_PROBES", "1") == "0":
                 connected, detail = False, "CREW_LIVE_PROBES=0"
@@ -114,7 +114,7 @@ def catalog(*, uacc_enabled: bool = False, uacc_armed: bool = False) -> list[dic
                 connected = github_mod.available()
                 detail = "gh auth ok" if connected else "gh auth failed or missing"
         elif row["slug"] == "gmail":
-            from CortexOS.crew import inbox as inbox_mod
+            from CortexOS.agentplane import inbox as inbox_mod
 
             connected = inbox_mod.configured()
             detail = "IMAP configured" if connected else "IMAP unset; drop .eml"
@@ -216,7 +216,7 @@ def arm(slug: str, armed: bool) -> dict[str, Any]:
         )
     if needle not in _ARMABLE:
         raise ConnectorError(f"unknown connector '{slug}' (no silent fallback)")
-    from CortexOS.crew.openvault import arm_source
+    from CortexOS.agentplane.openvault import arm_source
 
     label = "openai-compatible" if needle == "openai" else needle
     result = arm_source(label, armed, slug=needle)

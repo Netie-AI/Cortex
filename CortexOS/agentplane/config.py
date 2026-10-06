@@ -76,7 +76,7 @@ class CrewSettings:
     engine_session: str
     data_dir: Path
     master_computer_control: bool
-    ui_dir: Path = field(default_factory=lambda: Path(__file__).parent / "ui")
+    ui_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent / "crew" / "ui")
     max_agents_per_space: int = 8
     max_llm_calls_per_run: int = 40
     max_steps_per_agent: int = 12
@@ -100,7 +100,7 @@ class CrewSettings:
 def load_settings() -> CrewSettings:
     data_dir = Path(os.environ.get("CREW_DATA_DIR") or data_path("crew"))
     data_dir.mkdir(parents=True, exist_ok=True)
-    from CortexOS.crew.keys import apply_saved
+    from CortexOS.agentplane.keys import apply_saved
 
     apply_saved(data_dir)
     return CrewSettings(
@@ -177,7 +177,7 @@ def _wrap_freeroute(label: str, model: str, connector: str) -> str:
     if model.startswith("openvault/"):
         return model
     if label == "cursor":
-        from CortexOS.crew.openvault import cursor_model
+        from CortexOS.agentplane.openvault import cursor_model
 
         return "openvault/" + cursor_model()
     return "openvault/" + model
@@ -199,8 +199,8 @@ def resolve_providers() -> list[Provider]:
     ov_url = env.get("CREW_OPENVAULT_URL", "http://127.0.0.1:5000")
     vault: dict[str, dict] = {}
     if env.get("CREW_OPENVAULT", "1") != "0":
-        from CortexOS.crew.freeroute import arming as freeroute_arming
-        from CortexOS.crew.openvault import base_url, vault_sources
+        from CortexOS.agentplane.freeroute import arming as freeroute_arming
+        from CortexOS.agentplane.openvault import base_url, vault_sources
 
         # Armed means OpenVault's FreeRoute status says so (unsealed, pooled
         # keys, a spendable hop). Reachability and vault rows alone never arm.

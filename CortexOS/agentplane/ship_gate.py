@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from CortexOS.crew.estate import CATALOG, Fingerprint, by_slug, required_domains
+from CortexOS.agentplane.estate import CATALOG, Fingerprint, by_slug, required_domains
 
 PASS = "pass"
 FAIL = "fail"

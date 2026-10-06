@@ -207,7 +207,7 @@ def stamp_api(
     A model call whose SQL was not served stays empty and names that call.
     Never filled from the requested model, the pin, or route.model.
     """
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
     from CortexOS.integrations import freeroute as core
 
     out = dict(envelope)
@@ -246,7 +246,7 @@ def stamp_api(
 
 
 def public_law_body(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
 
     body = insights_mod.public_law(shell_public=shell_public)
     body["stable"] = STABLE_ASK
@@ -268,7 +268,7 @@ def public_keys_body() -> dict[str, Any]:
 
 
 def public_identity_body() -> dict[str, Any]:
-    from CortexOS.crew import freeroute as freeroute_mod
+    from CortexOS.agentplane import freeroute as freeroute_mod
 
     body = dict(freeroute_mod.public_identity())
     body["http"] = {
@@ -279,7 +279,7 @@ def public_identity_body() -> dict[str, Any]:
 
 
 def ontology_body(intent: str) -> dict[str, Any]:
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
 
     ranking = insights_mod.retrieve_ontology(intent)
     return {
@@ -299,9 +299,9 @@ async def execute_insights(
     consumer: str,
     alias: str | None = None,
 ) -> Any:
-    from CortexOS.crew import freeroute as freeroute_mod
-    from CortexOS.crew import insights as insights_mod
-    from CortexOS.crew.engine_bridge import LocalEngineBridge
+    from CortexOS.agentplane import freeroute as freeroute_mod
+    from CortexOS.agentplane import insights as insights_mod
+    from CortexOS.agentplane.engine_bridge import LocalEngineBridge
 
     intent = resolved_intent(body)
     if not intent:

@@ -88,7 +88,7 @@ def overlay_leases(
     return out
 
 
-PACKS_DIR = Path(__file__).resolve().parent / "skill_packs"
+PACKS_DIR = Path(__file__).resolve().parent.parent / "crew" / "skill_packs"
 
 
 def _skill_slug(title: str) -> str:

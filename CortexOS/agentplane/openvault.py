@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from CortexOS.crew.llm import LLMError, LLMResult, ToolCall, _parse_args
+from CortexOS.agentplane.llm import LLMError, LLMResult, ToolCall, _parse_args
 from CortexOS.integrations import freeroute as core
 from CortexOS.integrations import openvault_client
 
@@ -91,7 +91,7 @@ def require_live(timeout: float = 1.5) -> dict[str, Any]:
     answers its health probe and still cannot serve a model.
     """
     _ = timeout  # the core owns its probe timeout
-    from CortexOS.crew.freeroute import arming
+    from CortexOS.agentplane.freeroute import arming
 
     snap = arming()
     if not snap.get("armed"):
@@ -135,7 +135,7 @@ async def chat(
     actually served, not the one asked for.
     """
     _ = identity, measured
-    from CortexOS.crew.freeroute import complete_core
+    from CortexOS.agentplane.freeroute import complete_core
 
     requested = resolve_ov_model(model)
     pin = "" if requested == "auto" else requested

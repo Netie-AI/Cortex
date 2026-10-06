@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from CortexOS.crew.llm import LLMError
+from CortexOS.agentplane.llm import LLMError
 from CortexOS.dms.sql_extract import extract_select
 from CortexOS.integrations import freeroute as core
 

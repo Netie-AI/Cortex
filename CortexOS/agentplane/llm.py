@@ -201,7 +201,7 @@ def _refuse_unconfigured(row: Any, pick: str) -> None:
     if row.configured:
         return
     if row.label == "openvault":
-        from CortexOS.crew.freeroute import arming as freeroute_arming
+        from CortexOS.agentplane.freeroute import arming as freeroute_arming
 
         detail = str(freeroute_arming().get("detail") or "not armed")
         raise LLMError(f"OpenVault connector refused: {detail} (no silent fallback)")
@@ -213,12 +213,12 @@ def _refuse_unconfigured(row: Any, pick: str) -> None:
 def _assert_connector(row: Any) -> None:
     connector = _connector_for(row)
     if connector == "openvault" or row.label == "openvault":
-        from CortexOS.crew.openvault import require_live
+        from CortexOS.agentplane.openvault import require_live
 
         require_live()
         return
-    from CortexOS.crew.connectors import ConnectorError
-    from CortexOS.crew.connectors import require as require_connector
+    from CortexOS.agentplane.connectors import ConnectorError
+    from CortexOS.agentplane.connectors import require as require_connector
 
     slug = "openai" if row.label == "openai-compatible" else row.label
     if slug in {"explicit", "ollama"}:
@@ -234,7 +234,7 @@ def _route_from_row(row: Any, model_s: str) -> Route:
     chosen = model_s or row.model
     if connector == "openvault" and not chosen.startswith("openvault/"):
         if row.label == "cursor" and not model_s:
-            from CortexOS.crew.openvault import cursor_model
+            from CortexOS.agentplane.openvault import cursor_model
 
             chosen = "openvault/" + cursor_model()
         else:
@@ -256,7 +256,7 @@ def resolve_route(*, provider: str | None = None, model: str | None = None) -> R
     an optional litellm / OpenVault model string. A selected host that is unset
     or whose connector is down raises :class:`LLMError` with the reason.
     """
-    from CortexOS.crew.config import active_provider, resolve_providers
+    from CortexOS.agentplane.config import active_provider, resolve_providers
 
     pick = _norm_provider(provider or "")
     model_s = _rewrite_grok_fast(model or "")
@@ -340,7 +340,7 @@ async def chat(
 ) -> LLMResult:
     try:
         if str(model).startswith("openvault/"):
-            from CortexOS.crew import openvault as ov
+            from CortexOS.agentplane import openvault as ov
 
             return await ov.chat(
                 messages, tools=tools, max_tokens=max_tokens, timeout=timeout, model=model

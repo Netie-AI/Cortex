@@ -114,7 +114,7 @@ def _fmt_prs(blob: dict[str, Any]) -> str:
 def _build_slug(prompt: str) -> str:
     lowered = (prompt or "").lower()
     try:
-        from CortexOS.crew.estate import CATALOG
+        from CortexOS.agentplane.estate import CATALOG
 
         for fp in CATALOG:
             slug = str(getattr(fp, "slug", "") or "")
@@ -193,7 +193,7 @@ def run(
 
     if kinds & {"github", "review", "pr_create"}:
         if list_prs_fn is None:
-            from CortexOS.crew import github as github_mod
+            from CortexOS.agentplane import github as github_mod
 
             list_prs_fn = github_mod.list_prs
         listed = list_prs_fn()
@@ -206,7 +206,7 @@ def run(
 
         if "review" in kinds:
             if pr_diff_fn is None:
-                from CortexOS.crew import github as github_mod
+                from CortexOS.agentplane import github as github_mod
 
                 pr_diff_fn = github_mod.pr_diff
             prs = [p for p in (listed.get("prs") or []) if isinstance(p, dict)][:2]
@@ -224,7 +224,7 @@ def run(
 
         if "pr_create" in kinds:
             if create_pr_fn is None:
-                from CortexOS.crew import github as github_mod
+                from CortexOS.agentplane import github as github_mod
 
                 create_pr_fn = github_mod.create_pr
             created = create_pr_fn(title=(prompt or "Scheduled PR")[:120])
@@ -247,7 +247,7 @@ def run(
     if "build" in kinds:
         slug = _build_slug(prompt)
         if ship_fn is None:
-            from CortexOS.crew.ship_gate import render_slug
+            from CortexOS.agentplane.ship_gate import render_slug
 
             ship_fn = render_slug
         try:
@@ -261,7 +261,7 @@ def run(
 
     if "email" in kinds:
         if inbox_fn is None:
-            from CortexOS.crew import inbox as inbox_mod
+            from CortexOS.agentplane import inbox as inbox_mod
 
             inbox_fn = inbox_mod.fetch
         mail = inbox_fn(limit=8)

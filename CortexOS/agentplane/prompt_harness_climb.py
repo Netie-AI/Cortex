@@ -60,7 +60,7 @@ _NORMAL_FAMILIES = (
 
 
 def _baseline() -> dict[str, Any]:
-    from CortexOS.crew import freeroute as fr
+    from CortexOS.agentplane import freeroute as fr
 
     body = dict(fr.DMS_180_BASELINE)
     body.setdefault("cite", "DMS #180 Formal GREEN @ d2f116a6")
@@ -242,7 +242,7 @@ def _ban_reasons(
 
 def _like_with_like(corpus: str, ids: Sequence[str]) -> bool:
     """Delegate to cot_climb pin. Label + n==26 is not like-with-like."""
-    from CortexOS.crew import cot_climb
+    from CortexOS.agentplane import cot_climb
 
     return cot_climb.like_with_like(corpus, ids)
 
@@ -284,7 +284,7 @@ def _wrap_complete(
     async def gated(
         messages=None, *, purpose="", prompt="", **kwargs
     ):  # noqa: ANN001
-        from CortexOS.crew import freeroute as fr
+        from CortexOS.agentplane import freeroute as fr
 
         pick = kwargs.get("pick")
         if pick is None and inner is None:
@@ -349,8 +349,8 @@ async def run_harness(
     candidates: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Measure climb vs frozen #180. Stamp INCOMPLETE. Fail-closed when unarmed."""
-    from CortexOS.crew import cot_climb
-    from CortexOS.crew import freeroute as fr
+    from CortexOS.agentplane import cot_climb
+    from CortexOS.agentplane import freeroute as fr
 
     bans = _ban_reasons(
         claim_complete=claim_complete,

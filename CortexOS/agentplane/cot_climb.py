@@ -82,7 +82,7 @@ _BANNED_IDEA = ("langgraph", "langchain", "n8n", "langflow", "mybot")
 
 
 def _baseline() -> dict[str, Any]:
-    from CortexOS.crew import freeroute as fr
+    from CortexOS.agentplane import freeroute as fr
 
     body = dict(fr.DMS_180_BASELINE)
     body.setdefault("cite", "DMS #180 Formal GREEN @ d2f116a6")
@@ -230,7 +230,7 @@ def certified_gold_sql() -> dict[str, str]:
     global _GOLD
     if _GOLD is not None:
         return _GOLD
-    from CortexOS.crew import insights as insights_mod
+    from CortexOS.agentplane import insights as insights_mod
 
     doc = insights_mod._read_yaml(
         insights_mod._pack_dir() / "semantic" / "certified_queries.yaml"
@@ -600,7 +600,7 @@ async def climb(
     query_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
-    from CortexOS.crew import freeroute as fr
+    from CortexOS.agentplane import freeroute as fr
 
     text = (intent or "").strip()
     identity = fr.identity_for("generative_ask")
@@ -912,7 +912,7 @@ async def measure_climb(
         ranking = case.get("ranking") or {}
         if not ranking:
             if ranking_fn is None:
-                from CortexOS.crew import insights as insights_mod
+                from CortexOS.agentplane import insights as insights_mod
 
                 ranking_fn = insights_mod.retrieve_ontology
             ranking = ranking_fn(str(case.get("intent") or ""))

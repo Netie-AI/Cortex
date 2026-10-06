@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from CortexOS.crew.board import snapshot as board_snapshot
+from CortexOS.agentplane.board import snapshot as board_snapshot
 
 RunFn = Callable[..., subprocess.CompletedProcess[str]]
 
