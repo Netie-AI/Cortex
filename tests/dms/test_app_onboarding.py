@@ -164,13 +164,15 @@ def test_dockerize_unknown_app_is_handled():
 
 
 def test_routes_expose_folder_import_dockerize_and_about(tmp_path, monkeypatch):
+    # TRUST-01: auth stays on; the test sends a real admin key (import-folder is admin).
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "admin:onboarding-admin-key")
     from fastapi.testclient import TestClient
 
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "onboarding-admin-key"})
     project = _python_project(tmp_path)
 
     imported = client.post(
