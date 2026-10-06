@@ -113,17 +113,16 @@ def test_contract_ask_followups_stay_inside_the_grant(
     assert neighbour["columns"] == ["transactions.sku", "inventory.sku"]
 
 
+CLARIFY = "clarify: no follow-ups on a clarify"
+ABSTAIN = "abstain: no follow-ups on an abstain"
+
+
 @pytest.mark.parametrize(
-    ("question", "reason"),
-    [
-        ("revenue by location", "clarify: no follow-ups on a clarify"),
-        ("what is the weather", "clarify: no follow-ups on a clarify"),
-        ("drop table inventory", "abstain: no follow-ups on an abstain"),
-        ("stock by category", "abstain: no follow-ups on an abstain"),
-    ],
+    "question",
+    ["revenue by location", "what is the weather", "drop table inventory", "stock by category"],
 )
 def test_must_fail_contract_ask_abstain_or_clarify_carries_no_followups(
-    ask_http, monkeypatch: pytest.MonkeyPatch, question: str, reason: str
+    ask_http, monkeypatch: pytest.MonkeyPatch, question: str
 ) -> None:
     monkeypatch.setenv(suggest_ask.ENABLED_ENV, "1")
     ask_http.bind({"transactions": "TRUE"})
@@ -131,4 +130,7 @@ def test_must_fail_contract_ask_abstain_or_clarify_carries_no_followups(
     assert body["provenance"]["badge"] in {"abstain", "blocked"}
     assert body["answer"]
     assert body["followups"] == []
-    assert body["followups_reason"] == reason
+    clarify = body["route"] == "needs_clarification"
+    assert body["followups_reason"] == (CLARIFY if clarify else ABSTAIN)
+    if question == "drop table inventory":
+        assert body["route"] == "blocked" and body["followups_reason"] == ABSTAIN

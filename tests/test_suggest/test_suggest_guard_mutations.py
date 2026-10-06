@@ -86,8 +86,14 @@ CASES = {
 }
 
 
-def _pytest(node_ids: list[str], guard_off: str | None) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
+def _pytest(node_ids: list[str], guard_off: str | None, tmp: Path) -> subprocess.CompletedProcess[str]:
+    # Own warehouse and ops DB: this process may hold DuckDB's write lock on the shared one.
+    env = {
+        **os.environ,
+        "DMS_WAREHOUSE_DB": str(tmp / "warehouse.duckdb"),
+        "DMS_OPS_DB": str(tmp / "ops.db"),
+    }
+    tmp.mkdir(parents=True, exist_ok=True)
     args = [sys.executable, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider", *node_ids]
     if guard_off:
         env["SUGGEST_GUARD_OFF"] = guard_off
@@ -99,9 +105,9 @@ def _pytest(node_ids: list[str], guard_off: str | None) -> subprocess.CompletedP
 
 
 @pytest.mark.parametrize("guard", sorted(CASES))
-def test_must_fail_tests_fail_without_their_guard(guard: str) -> None:
+def test_must_fail_tests_fail_without_their_guard(guard: str, tmp_path: Path) -> None:
     node_ids, must_fail = CASES[guard]
-    off = _pytest(node_ids, guard)
+    off = _pytest(node_ids, guard, tmp_path / "off")
     failed = [line for line in off.stdout.splitlines() if line.startswith("FAILED ")]
     assert off.returncode == 1, off.stdout + off.stderr
     for name in must_fail:
@@ -109,5 +115,5 @@ def test_must_fail_tests_fail_without_their_guard(guard: str) -> None:
             f"{name} passed with guard {guard} off:\n{off.stdout}"
         )
 
-    on = _pytest(node_ids, None)
+    on = _pytest(node_ids, None, tmp_path / "on")
     assert on.returncode == 0, on.stdout + on.stderr
