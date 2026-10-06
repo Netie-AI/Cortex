@@ -290,7 +290,7 @@ def _literal_text(kind: str, value: Any) -> str:
     return value.isoformat() if kind == DATE_TYPE else str(value)
 
 
-def _parse_query(sql: str) -> exp.Expression:
+def _parse_query(sql: str) -> exp.Query:
     try:
         statements = [s for s in sqlglot.parse(sql, read="duckdb") if s is not None]
     except Exception as exc:  # noqa: BLE001 — any parse failure is a refusal
