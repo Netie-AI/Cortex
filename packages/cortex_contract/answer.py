@@ -33,6 +33,21 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     session_id: str = "demo"
     space_id: str | None = None
+    # 1.4.0: set on every ask of a scored round. Solution memory stays empty and
+    # nothing is written to memory while it is set.
+    scored_pack_id: str | None = None
+
+
+class MemoryRead(BaseModel):
+    """1.4.0: provenance of one per-Space memory entry an answer read."""
+
+    id: str
+    kind: str
+    space_id: str
+    source: str
+    version: int
+    written_at: str
+    served_at: str
 
 
 class ContributingSource(BaseModel):
@@ -65,6 +80,12 @@ class Answer(BaseModel):
     served_model: str | None = None
     served_local: bool = False
     served_reason: str | None = None
+    # 1.4.0 C-MEM: per-Space memory this answer read. [] when memory is off or
+    # nothing was read. ``reused`` marks a stored solution re-run on current
+    # data; it is never a validation by itself.
+    memory_ids_read: list[str] = Field(default_factory=list)
+    memory_reads: list[MemoryRead] = Field(default_factory=list)
+    reused: bool = False
 
 
 class DrillthroughRequest(BaseModel):

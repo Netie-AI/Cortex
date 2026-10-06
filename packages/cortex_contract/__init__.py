@@ -10,6 +10,7 @@ from .answer import (
     ContributingSource,
     DrillthroughRequest,
     DrillthroughResponse,
+    MemoryRead,
     Provenance,
 )
 from .errors import ContractError, UnauthorizedError, ValidationError
@@ -61,6 +62,7 @@ __all__ = [
     "ContributingSource",
     "DrillthroughRequest",
     "DrillthroughResponse",
+    "MemoryRead",
     "Provenance",
     "ContractError",
     "UnauthorizedError",
