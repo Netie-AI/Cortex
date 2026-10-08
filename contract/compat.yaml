@@ -97,8 +97,12 @@ supported:
       pick reasons are not a separate field; they are reason= text inside
       that string. Response gains usage (ContractInsightsUsage):
       prompt_tokens, completion_tokens, total_tokens, each null when omitted,
-      never 0 as a stand-in. Clients that omit schema_context keep the
-      279cbd85 envelope apart from usage. canonical_manifest_bytes unchanged.
+      never 0 as a stand-in.       Clients that omit schema_context keep the
+      279cbd85 envelope apart from usage.
+      #353: the same 1.5.0 line gains optional step_trace on the insights
+      request and optional steps on the 200 response (ContractInsightsTrace).
+      steps is omitted unless the caller asked and schema_context is present.
+      No version bump. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

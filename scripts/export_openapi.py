@@ -76,6 +76,8 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
     from cortex_contract.answer import (
         Answer,
         AskRequest,
+        ContractInsightsTrace,
+        ContractInsightsTraceRequest,
         ContributingSource,
         DrillthroughRequest,
         DrillthroughResponse,
@@ -105,6 +107,8 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
         ContributingSource,
         DrillthroughRequest,
         DrillthroughResponse,
+        ContractInsightsTrace,
+        ContractInsightsTraceRequest,
         InsightsSchemaContext,
         InsightsUsage,
         PoolSpec,
@@ -232,11 +236,12 @@ def build_spec() -> dict[str, Any]:
 
 
 def _pin_insights_wire(spec: dict[str, Any]) -> None:
-    """Pin schema_context and usage on POST /v1/insights in the exported spec.
+    """Pin schema_context, usage, and the step trace on POST /v1/insights.
 
-    ``InsightsAskIn`` stays the frozen component. The caller field lives on
-    ``InsightsWireIn`` and is published here as ``ContractInsightsSchemaContext``.
-    Pick reasons stay inside that string. ``usage`` is ``ContractInsightsUsage``.
+    ``InsightsAskIn`` stays the frozen component. ``schema_context`` is
+    ``ContractInsightsSchemaContext``. ``step_trace`` is
+    ``ContractInsightsTraceRequest``. ``usage`` is ``ContractInsightsUsage``.
+    ``steps`` is ``ContractInsightsTrace``. No version bump: this amends 1.5.0.
     """
     paths = spec.get("paths")
     if not isinstance(paths, dict):
@@ -266,6 +271,7 @@ def _pin_insights_wire(spec: dict[str, Any]) -> None:
         "allOf": [
             existing,
             {"$ref": "#/components/schemas/ContractInsightsSchemaContext"},
+            {"$ref": "#/components/schemas/ContractInsightsTraceRequest"},
         ]
     }
     responses = op.get("responses")
@@ -290,11 +296,14 @@ def _pin_insights_wire(spec: dict[str, Any]) -> None:
             "usage": {"$ref": "#/components/schemas/ContractInsightsUsage"},
         },
     }
+    trace_obj: dict[str, Any] = {
+        "$ref": "#/components/schemas/ContractInsightsTrace",
+    }
     prior = ok_json.get("schema")
     if isinstance(prior, dict):
-        ok_json["schema"] = {"allOf": [prior, usage_obj]}
+        ok_json["schema"] = {"allOf": [prior, usage_obj, trace_obj]}
     else:
-        ok_json["schema"] = usage_obj
+        ok_json["schema"] = {"allOf": [usage_obj, trace_obj]}
 
 
 def main(argv: list[str] | None = None) -> int:

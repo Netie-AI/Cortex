@@ -1400,6 +1400,21 @@ def _attach_generative(envelope: dict[str, Any], gen: dict[str, Any] | None) -> 
     return stamp_plan_source(envelope, gen)
 
 
+def _note_executed(envelope: dict[str, Any]) -> None:
+    """Record the SQL string the bridge returned. No reformat."""
+    from CortexOS.insights import step_trace
+
+    sql = envelope.get("sql_used")
+    if not isinstance(sql, str) or sql == "":
+        return
+    step_trace.note_execute(
+        sql,
+        envelope.get("rows"),
+        ok=bool(envelope.get("ok")),
+        stamp=envelope.get("stamp"),
+    )
+
+
 async def run_insights(
     intent: str,
     *,
@@ -1518,6 +1533,10 @@ async def _run_insights(
             bucket = _model_calls.get()
             if bucket is not None and isinstance(out, dict):
                 bucket.append(out)
+            if isinstance(out, dict):
+                from CortexOS.insights import step_trace
+
+                step_trace.note_model(purpose, out)
             return out
 
         try:
@@ -1651,6 +1670,7 @@ async def _run_insights(
     attempted: list[dict[str, Any]] = []
     for idx, trial in enumerate(trials):
         envelope = await bridge.ask(str(trial["question"]))
+        _note_executed(envelope)
         attempted.append(
             {
                 "id": trial["id"],

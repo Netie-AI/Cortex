@@ -1757,6 +1757,164 @@
         "title": "InsightsSchemaContext",
         "type": "object"
       },
+      "ContractInsightsTrace": {
+        "description": "Optional ``steps`` on the insights.ask 200 response.\n\nOmitted when the caller did not ask, or when ``schema_context`` is absent.",
+        "properties": {
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContractInsightsTraceStep"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Steps"
+          }
+        },
+        "title": "ContractInsightsTrace",
+        "type": "object"
+      },
+      "ContractInsightsTraceRequest": {
+        "description": "Optional ask for the step trace. Not a field of ``InsightsAskIn``.",
+        "properties": {
+          "step_trace": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When true and schema_context is present, the response includes steps. When omitted, false, or schema_context is absent, steps is omitted and the rest of the envelope stays byte-equal.",
+            "title": "Step Trace"
+          }
+        },
+        "title": "ContractInsightsTraceRequest",
+        "type": "object"
+      },
+      "ContractInsightsTraceStep": {
+        "description": "One governed step on POST /v1/insights. Additive on contract 1.5.0.\n\nkind is shortlist, think, generate, retry, execute, check, or refuse.\nrefusal is set when this step refused. shortlist is step 1.\nOn execute, sql is the executed string unchanged, and rows is the\ncapped, masked sample. row_cap and truncated are stamped there.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "N"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Refusal"
+          },
+          "row_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Row Cap"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rows"
+          },
+          "shortlist": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Shortlist"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sql"
+          },
+          "stamps": {
+            "additionalProperties": true,
+            "title": "Stamps",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Truncated"
+          }
+        },
+        "required": [
+          "kind",
+          "status"
+        ],
+        "title": "ContractInsightsTraceStep",
+        "type": "object"
+      },
       "ContractInsightsUsage": {
         "description": "1.5.0 response field ``usage`` on POST /v1/insights.\n\nSum of the counts each FreeRoute complete() call reported. A count is\nnull when it was omitted. A missing count is never stored as 0. The\nlive crew return carries prompt_tokens and completion_tokens. total_tokens\nis null when that return omits the key.",
         "properties": {
@@ -5651,6 +5809,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ContractInsightsSchemaContext"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ContractInsightsTraceRequest"
                   }
                 ]
               }
@@ -5674,6 +5835,9 @@
                         }
                       },
                       "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ContractInsightsTrace"
                     }
                   ]
                 }
@@ -5706,7 +5870,9 @@
             "ontology",
             "query_plan",
             "ranked_metric",
-            "schema_context"
+            "schema_context",
+            "shortlist",
+            "step_trace"
           ],
           "invalid_ontology": "422 ABSTAIN refuse_reason=caller_ontology_invalid:<code>",
           "model": "InsightsWireIn",

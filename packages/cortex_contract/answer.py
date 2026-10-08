@@ -166,6 +166,51 @@ class InsightsSchemaContext(BaseModel):
     )
 
 
+# Class names keep the Contract prefix so the exported $ref matches the
+# published component. A short name would point at a schema that is not emitted.
+class ContractInsightsTraceStep(BaseModel):
+    """One governed step on POST /v1/insights. Additive on contract 1.5.0.
+
+    kind is shortlist, think, generate, retry, execute, check, or refuse.
+    refusal is set when this step refused. shortlist is step 1.
+    On execute, sql is the executed string unchanged, and rows is the
+    capped, masked sample. row_cap and truncated are stamped there.
+    """
+
+    n: int | None = None
+    kind: str
+    status: str
+    refusal: str | None = None
+    stamps: dict[str, Any] = Field(default_factory=dict)
+    shortlist: list[dict[str, Any]] | None = None
+    sql: str | None = None
+    rows: list[dict[str, Any]] | None = None
+    row_cap: int | None = None
+    truncated: bool | None = None
+
+
+class ContractInsightsTrace(BaseModel):
+    """Optional ``steps`` on the insights.ask 200 response.
+
+    Omitted when the caller did not ask, or when ``schema_context`` is absent.
+    """
+
+    steps: list[ContractInsightsTraceStep] | None = None
+
+
+class ContractInsightsTraceRequest(BaseModel):
+    """Optional ask for the step trace. Not a field of ``InsightsAskIn``."""
+
+    step_trace: bool | None = Field(
+        default=None,
+        description=(
+            "When true and schema_context is present, the response includes "
+            "steps. When omitted, false, or schema_context is absent, steps "
+            "is omitted and the rest of the envelope stays byte-equal."
+        ),
+    )
+
+
 class InsightsUsage(BaseModel):
     """1.5.0 response field ``usage`` on POST /v1/insights.
 

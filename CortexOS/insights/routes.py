@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from CortexOS.insights import caller_ontology as caller_onto
 from CortexOS.insights import keys as insight_keys
 from CortexOS.insights import schema_context as schema_mod
+from CortexOS.insights import step_trace
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -77,6 +78,12 @@ class InsightsWireIn(InsightsAskIn):
     #: Granted-schema prompt (DMS ``schema_context``). Replaces the pack table
     #: list when present. Any so a non-string is a named 422, not a pydantic 422.
     schema_context: Any = None
+    #: Structured shortlist stand-in until #351 ships this field. Step 1 reads
+    #: it directly. Any so a bad shape is ignored, not a pydantic 422.
+    shortlist: Any = None
+    #: Ask for the governed step trace. True plus a present schema_context
+    #: attaches ``steps``. Anything else leaves the envelope unchanged.
+    step_trace: Any = None
 
 
 #: Documented on the (non-contract) ``insights.ask`` operation only.
@@ -366,29 +373,43 @@ async def execute_insights(
             )
             if bearer is None:
                 return _caller_refused("generative_ask")
-    result = await insights_mod.run_insights(
-        intent,
-        bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
-        ask=wire.ask,
-        generate=wire.generate,
-        bearer=bearer,
-        query_plan=query_plan,
-        caller=caller,
-        schema_context=schema_text,
-    )
-    # A plain demo body (no request-extension field) gets exactly the envelope
-    # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
-    # only for callers that sent an extension field.
-    extended = bool(set(wire.model_fields_set) - set(InsightsAskIn.model_fields))
-    ranking = result.get("ontology") if isinstance(result, dict) else None
-    source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
-    if extended:
-        result["ontology_source"] = source
-    out = stamp_api(result, consumer=consumer, alias=alias)
-    if extended:
-        out["api"]["received"] = _received(wire, source)
-    out["usage"] = schema_mod.consume_usage()
-    return out
+    tracing = wire.step_trace is True and schema_text is not None
+    if tracing:
+        step_trace.begin(wire.shortlist, schema_text)
+    try:
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
+            ask=wire.ask,
+            generate=wire.generate,
+            bearer=bearer,
+            query_plan=query_plan,
+            caller=caller,
+            schema_context=schema_text,
+        )
+        # A plain demo body (no request-extension field) gets exactly the envelope
+        # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
+        # only for callers that sent an extension field.
+        # step_trace alone must not mark the request extended. A trace ask with
+        # no schema_context stays byte-equal to the parent envelope.
+        extended = bool(
+            set(wire.model_fields_set) - set(InsightsAskIn.model_fields) - {"step_trace"}
+        )
+        ranking = result.get("ontology") if isinstance(result, dict) else None
+        source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
+        if extended:
+            result["ontology_source"] = source
+        out = stamp_api(result, consumer=consumer, alias=alias)
+        if extended:
+            out["api"]["received"] = _received(wire, source)
+        out["usage"] = schema_mod.consume_usage()
+        # No-op unless begin() ran. A replaced attach that always writes steps
+        # breaks the absent-field golden.
+        step_trace.attach(out)
+        return out
+    finally:
+        if tracing:
+            step_trace.clear()
 
 
 @router.get("", operation_id="insights.law")

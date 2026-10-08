@@ -165,6 +165,18 @@ async def _call_runner(
     return out if isinstance(out, dict) else {}
 
 
+def _trace_refuse(reason: str, stamp: Any = None) -> None:
+    from CortexOS.insights import step_trace
+
+    step_trace.note_refuse(reason, stamp)
+
+
+def _trace_check(ok: bool, reason: str, stamp: Any = None) -> None:
+    from CortexOS.insights import step_trace
+
+    step_trace.note_check(ok=ok, refusal=None if ok else reason, stamp=stamp)
+
+
 def _check_sql(
     fr: Any,
     sql: str,
@@ -623,44 +635,50 @@ async def climb(
     identity = fr.identity_for("generative_ask")
     arm = fr.arming()
     if not arm.get("armed"):
+        reason = (
+            "OpenVault FreeRoute unarmed: "
+            + str(arm.get("detail") or "unreachable")
+            + " (no invent-green keys; no invent-green CoT)"
+        )
+        _trace_refuse(reason)
         return _envelope(
             ok=False,
             status="REFUSE",
             arm=arm,
             identity=identity,
             climb=_climb_meta(final="UNARMED", reason="FreeRoute unarmed"),
-            refuse_reason=(
-                "OpenVault FreeRoute unarmed: "
-                + str(arm.get("detail") or "unreachable")
-                + " (no invent-green keys; no invent-green CoT)"
-            ),
+            refuse_reason=reason,
         )
 
     run_id = "cot-" + uuid.uuid4().hex[:8]
     g1 = await _g1_skeleton(text or "empty", run_id)
     if not g1.get("ok") and g1.get("stage") == "compile":
+        reason = "gen_cfsm compile refused the think-path IR"
+        _trace_refuse(reason)
         return _envelope(
             ok=False,
             status="REFUSE",
             arm=arm,
             identity=identity,
             climb=_climb_meta(final="G1_COMPILE_FAIL", g1=g1),
-            refuse_reason="gen_cfsm compile refused the think-path IR",
+            refuse_reason=reason,
         )
 
     supplied = schema_mod.supplied_schema(schema_context)
     allowed = schema_mod.schema_idents(supplied) if supplied else _allowed_tables(ranking)
     if not allowed:
+        reason = (
+            "no ranked ontology tables; cannot prove SQL stays in scope "
+            "(no invent-green CoT)"
+        )
+        _trace_refuse(reason)
         return _envelope(
             ok=False,
             status="REFUSE",
             arm=arm,
             identity=identity,
             climb=_climb_meta(final="NO_ONTOLOGY", g1=g1),
-            refuse_reason=(
-                "no ranked ontology tables; cannot prove SQL stays in scope "
-                "(no invent-green CoT)"
-            ),
+            refuse_reason=reason,
         )
     runner = complete or fr.complete
     columns = {} if supplied else _ranked_columns(ranking)
@@ -777,6 +795,7 @@ async def climb(
             if stop is None:
                 stop = schema_mod.brute_force_reason(extracted)
             if stop:
+                _trace_refuse(stop, gen.get("stamp"))
                 return _envelope(
                     ok=False,
                     status="REFUSE",
@@ -824,6 +843,7 @@ async def climb(
         stall = int(routed.get("stall_count") or 0)
         prev_collapse = collapse
         last_reason = str(checked.get("reason") or last_reason)
+        _trace_check(predicates_pass, last_reason, gen.get("stamp"))
         granted = DECISION_TERMINATE if predicates_pass else routed["decision"]
         steps.append(
             {
@@ -921,6 +941,12 @@ async def climb(
             continue
         break
 
+    reason = (
+        "CoT/route/improve exhausted horizon without ontology-valid SQL: "
+        + last_reason
+        + " (no invent-green SQL; not COMPLETE)"
+    )
+    _trace_refuse(reason)
     return _envelope(
         ok=False,
         status="REFUSE",
@@ -935,11 +961,7 @@ async def climb(
             g1_consumed=g1_consumed,
             prior_sql_consumed=prior_sql_consumed,
         ),
-        refuse_reason=(
-            "CoT/route/improve exhausted horizon without ontology-valid SQL: "
-            + last_reason
-            + " (no invent-green SQL; not COMPLETE)"
-        ),
+        refuse_reason=reason,
     )
 
 

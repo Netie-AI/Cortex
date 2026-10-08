@@ -16,6 +16,7 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 | Liberty | #222-#225 | Proxy JEPA (cosine / `action_value`) only; no trained world model. |
 | RSF | #151 #154 #155 #156 | COMPLETE needs an R-0003 different-run verify. |
 | Crew export / desktop | #197-#200 | HOLD. |
+| Insights step trace | #353 #351 #329 | Draft on #351 head `63d45ed`, not final. Rebuild on the #351 merge oid after #329 and #351 merge, then re-CLEAR and re-AGREE. Nothing here is PASS. |
 
 ## Standing constraints
 
