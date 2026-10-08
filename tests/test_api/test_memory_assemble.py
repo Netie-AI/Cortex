@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 def test_memory_assemble_endpoint(monkeypatch):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from netie.memory.store import InMemoryStore, MemoryRecord
 
     import CortexOS.api.memory_routes as memory_routes

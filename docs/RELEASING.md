@@ -26,6 +26,8 @@ Docker:
 - `Dockerfile.core` → `cortex:${VERSION}-core` (`CORTEX_PROFILE=core`)
 - `Dockerfile.full` → `cortex:${VERSION}-full` (`CORTEX_PROFILE=full`)
 
+Images do not set `DMS_AUTH_DISABLED`. If that variable is truthy (`1`, `true`, `yes`) and `CORTEX_DEV_MODE` is not, process startup raises `AUTH_DISABLED_WITHOUT_DEV_MODE` and logs that name. `PACK` and `CORTEX_PROFILE` are not dev mode. Local auth-off is `docker compose -f docker-compose.dev.yml` after `cp dev.env.example dev.env` (gitignored).
+
 ## Cutting a release
 
 1. Ensure CI green on `main` (ruff, mypy, pytest, import-linter, `check_versions.py`, OpenAPI drift, base-install).

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Public Constructor on /cortex. Auth stays on. Do not copy Dockerfile.core
-# (that image sets DMS_AUTH_DISABLED=1).
+# Public Constructor on /cortex. Auth stays on. This image does not set
+# DMS_AUTH_DISABLED. Startup refuses that flag unless CORTEX_DEV_MODE is set.
 # Hyperlift default path is Dockerfile (identical copy of this file).
 ARG PYTHON_VERSION=3.11
 FROM python:${PYTHON_VERSION}-slim

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from CortexOS.execution import app_store, routine_scheduler, scoreboard, workflow_store
 
     monkeypatch.setattr(scoreboard, "DB_PATH", tmp_path / "scoreboard.db")

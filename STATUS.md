@@ -17,6 +17,7 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 | Liberty | #222-#225 | Proxy JEPA (cosine / `action_value`) only; no trained world model. |
 | RSF | #151 #154 #155 #156 | COMPLETE needs an R-0003 different-run verify. |
 | Crew export / desktop | #197-#200 | HOLD. |
+| Image auth-off | #363 | IMAGE-AUTH-01 in draft. Images must not set `DMS_AUTH_DISABLED`. Startup refuses the flag without `CORTEX_DEV_MODE`. Not a CI claim. Not PASS. |
 
 ## Standing constraints
 

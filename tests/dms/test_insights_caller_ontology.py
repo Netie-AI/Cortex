@@ -151,6 +151,7 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
 
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setattr(
         fr,

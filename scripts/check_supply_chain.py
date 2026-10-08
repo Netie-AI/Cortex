@@ -17,6 +17,10 @@ Checks, all offline:
 5. Every shipped Dockerfile installs third-party code only with
    ``--require-hashes -r requirements/image-<variant>.lock.txt`` and installs the
    project only with ``--no-deps``.
+6. No Dockerfile and no compose file (``*.yml`` / ``*.yaml`` with ``services``)
+   sets ``DMS_AUTH_DISABLED``, via a Dockerfile ``ENV`` instruction, a compose
+   ``environment`` entry, or a compose ``env_file`` whose file literally assigns
+   it. The named failure is ``AUTH_DISABLED_IN_IMAGE``.
 
 Regenerate with ``uv lock`` and ``python scripts/lock_images.py``; never edit a
 lock by hand. This script reports. It never installs or regenerates anything.
@@ -24,10 +28,12 @@ lock by hand. This script reports. It never installs or regenerates anything.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 import tomllib
+import yaml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -56,6 +62,26 @@ DOCKERFILES: dict[str, str] = {
 
 _REQ_LINE = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?P<version>[^\s;\\]+)(?P<rest>.*)$")
 _HASH = re.compile(r"^--hash=sha256:[0-9a-f]{64}$")
+_AUTH_DISABLED_ASSIGN = re.compile(r"^(?:export\s+)?DMS_AUTH_DISABLED\s*=")
+AUTH_DISABLED_IN_IMAGE = "AUTH_DISABLED_IN_IMAGE"
+
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".next",
+        "data",
+        "dist",
+        "build",
+        ".eggs",
+    }
+)
 
 
 def _pyproject(root: Path) -> dict:
@@ -241,8 +267,207 @@ def check_dockerfile(root: Path, name: str, variant: str) -> list[str]:
     return problems
 
 
+def _rel(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _is_dockerfile(name: str) -> bool:
+    return name == "Dockerfile" or name.startswith("Dockerfile.")
+
+
+def _logical_dockerfile_lines(text: str) -> list[tuple[int, str]]:
+    logical: list[tuple[int, str]] = []
+    buf = ""
+    start = 1
+    for i, raw in enumerate(text.splitlines(), 1):
+        if not buf and (not raw.strip() or raw.lstrip().startswith("#")):
+            continue
+        if not buf:
+            start = i
+        piece = raw.strip()
+        if piece.endswith("\\"):
+            buf += piece[:-1].rstrip() + " "
+            continue
+        buf += piece
+        logical.append((start, buf.strip()))
+        buf = ""
+    return logical
+
+
+def _instruction(line: str) -> tuple[str, str]:
+    if line.split(None, 1)[0].upper() == "ONBUILD":
+        line = line.split(None, 1)[1] if " " in line else ""
+    if not line:
+        return "", ""
+    parts = line.split(None, 1)
+    return parts[0].upper(), (parts[1] if len(parts) > 1 else "")
+
+
+def _env_instruction_sets_flag(rest: str) -> bool:
+    tokens = rest.split()
+    if not tokens:
+        return False
+    if "=" not in tokens[0]:
+        return tokens[0] == "DMS_AUTH_DISABLED"
+    return any(token.split("=", 1)[0] == "DMS_AUTH_DISABLED" for token in tokens)
+
+
+def _environment_sets_flag(env: object) -> bool:
+    if isinstance(env, dict):
+        return "DMS_AUTH_DISABLED" in env
+    if isinstance(env, str):
+        env = [env]
+    if isinstance(env, list):
+        for item in env:
+            if isinstance(item, str) and item.split("=", 1)[0].strip() == "DMS_AUTH_DISABLED":
+                return True
+    return False
+
+
+def _env_file_entries(raw: object) -> list[str]:
+    items = raw if isinstance(raw, list) else [raw]
+    paths: list[str] = []
+    for item in items:
+        if isinstance(item, str) and item.strip():
+            paths.append(item.strip())
+        elif isinstance(item, dict):
+            path = item.get("path") or item.get("file")
+            if isinstance(path, str) and path.strip():
+                paths.append(path.strip())
+    return paths
+
+
+def _text_assigns_flag(text: str) -> bool:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if _AUTH_DISABLED_ASSIGN.match(stripped):
+            return True
+    return False
+
+
+def _file_assigns_flag(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return _text_assigns_flag(text)
+
+
+def _has_services(node: object) -> bool:
+    if isinstance(node, dict):
+        if isinstance(node.get("services"), dict):
+            return True
+        return any(_has_services(value) for value in node.values())
+    if isinstance(node, list):
+        return any(_has_services(value) for value in node)
+    return False
+
+
+def _iter_services(node: object):
+    if isinstance(node, dict):
+        services = node.get("services")
+        if isinstance(services, dict):
+            for name, spec in services.items():
+                if isinstance(spec, dict):
+                    yield str(name), spec
+        for value in node.values():
+            yield from _iter_services(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _iter_services(value)
+
+
+def _scan_dockerfile(root: Path, path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    rel = _rel(root, path)
+    problems: list[str] = []
+    for lineno, line in _logical_dockerfile_lines(text):
+        op, rest = _instruction(line)
+        if op == "ENV" and _env_instruction_sets_flag(rest):
+            problems.append(
+                f"{AUTH_DISABLED_IN_IMAGE}: {rel} sets DMS_AUTH_DISABLED via ENV (line {lineno})"
+            )
+    return problems
+
+
+def _scan_compose(root: Path, path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    if "services:" not in text and "services :" not in text:
+        return []
+    try:
+        docs = list(yaml.safe_load_all(text))
+    except yaml.YAMLError:
+        if _text_assigns_flag(text):
+            return [
+                f"{AUTH_DISABLED_IN_IMAGE}: {_rel(root, path)} sets DMS_AUTH_DISABLED "
+                "(compose YAML did not parse)"
+            ]
+        return []
+    if not any(_has_services(doc) for doc in docs):
+        return []
+    rel = _rel(root, path)
+    problems: list[str] = []
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        if _environment_sets_flag(doc.get("environment")):
+            problems.append(f"{AUTH_DISABLED_IN_IMAGE}: {rel} sets DMS_AUTH_DISABLED via environment")
+        for entry in _env_file_entries(doc.get("env_file")):
+            env_path = Path(entry)
+            if not env_path.is_absolute():
+                env_path = path.parent / env_path
+            if _file_assigns_flag(env_path):
+                problems.append(
+                    f"{AUTH_DISABLED_IN_IMAGE}: {rel} sets DMS_AUTH_DISABLED via env_file {entry}"
+                )
+        for name, spec in _iter_services(doc):
+            if _environment_sets_flag(spec.get("environment")):
+                problems.append(
+                    f"{AUTH_DISABLED_IN_IMAGE}: {rel} service {name} sets "
+                    "DMS_AUTH_DISABLED via environment"
+                )
+            for entry in _env_file_entries(spec.get("env_file")):
+                env_path = Path(entry)
+                if not env_path.is_absolute():
+                    env_path = path.parent / env_path
+                if _file_assigns_flag(env_path):
+                    problems.append(
+                        f"{AUTH_DISABLED_IN_IMAGE}: {rel} service {name} sets "
+                        f"DMS_AUTH_DISABLED via env_file {entry}"
+                    )
+    return problems
+
+
+def scan_dms_auth_disabled(root: Path) -> list[str]:
+    """Named ``AUTH_DISABLED_IN_IMAGE`` findings for Dockerfiles and compose files."""
+    problems: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.endswith(".egg-info")]
+        for name in filenames:
+            path = Path(dirpath) / name
+            if _is_dockerfile(name):
+                problems.extend(_scan_dockerfile(root, path))
+            elif name.endswith((".yml", ".yaml")):
+                problems.extend(_scan_compose(root, path))
+    return problems
+
+
 def run(root: Path = ROOT) -> list[str]:
-    problems = check_uv_lock(root)
+    problems = scan_dms_auth_disabled(root)
+    problems += check_uv_lock(root)
     for variant in VARIANTS:
         problems += check_image_lock(root, variant)
     for name, variant in DOCKERFILES.items():
@@ -250,17 +475,25 @@ def run(root: Path = ROOT) -> list[str]:
     return problems
 
 
-def main() -> int:
-    problems = run()
+def main(root: Path | None = None) -> int:
+    target = ROOT if root is None else root
+    if (target / "pyproject.toml").is_file():
+        problems = run(target)
+    else:
+        # Fixture trees and partial checkouts still fail closed on the auth flag.
+        problems = scan_dms_auth_disabled(target)
     for p in problems:
         print(f"FAIL {p}")
     if problems:
         print(f"supply chain: {len(problems)} problem(s)")
         return 1
-    print(
-        f"supply chain OK: uv.lock current, {len(VARIANTS)} hashed image locks, "
-        f"{len(DOCKERFILES)} Dockerfiles, denylist clean"
-    )
+    if (target / "pyproject.toml").is_file():
+        print(
+            f"supply chain OK: uv.lock current, {len(VARIANTS)} hashed image locks, "
+            f"{len(DOCKERFILES)} Dockerfiles, denylist clean, no DMS_AUTH_DISABLED in images"
+        )
+    else:
+        print("supply chain OK: no DMS_AUTH_DISABLED in Dockerfile or compose files")
     return 0
 
 

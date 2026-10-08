@@ -238,6 +238,7 @@ async def test_routing_learns_a_shape_only_after_handling_it():
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from fastapi.testclient import TestClient
 
     from CortexOS.execution import enterprise_goal, goal_audit, routine_scheduler

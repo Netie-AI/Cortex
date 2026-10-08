@@ -26,6 +26,7 @@ SAMPLE = {
 def client(monkeypatch):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     reset_limiter(per_minute=120)
     from CortexOS.api.app import create_app
 

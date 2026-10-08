@@ -13,6 +13,7 @@ from CortexOS.execution.preset_router import plan_for_request
 def engine_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from CortexOS.api.app import create_app
 
     return TestClient(create_app())

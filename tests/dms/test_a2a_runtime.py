@@ -29,6 +29,7 @@ def test_send_message_denies_unknown_agent():
 def test_a2a_message_endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
 
     from CortexOS.api.app import create_app
 

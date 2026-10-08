@@ -182,6 +182,7 @@ def _assert_exact_route_set(spec: dict[str, Any]) -> None:
 def _app_openapi() -> dict[str, Any]:
     os.environ.setdefault("PACK", "dms")
     os.environ.setdefault("DMS_AUTH_DISABLED", "1")
+    os.environ.setdefault("CORTEX_DEV_MODE", "1")
     # Full profile for export — never emit a core-shrunk route table.
     os.environ["CORTEX_PROFILE"] = "full"
     os.environ.setdefault("CORTEX_REQUIRE_AGENTIC_MARKER", "1")

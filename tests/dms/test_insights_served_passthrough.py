@@ -163,6 +163,7 @@ def _queue_think_then_sql(
 def api(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app

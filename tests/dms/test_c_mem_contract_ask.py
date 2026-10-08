@@ -64,6 +64,7 @@ def ask_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.delenv(sm.ENABLED_ENV, raising=False)
     monkeypatch.delenv(sm.SCORED_ROUND_ENV, raising=False)
     import netie.config

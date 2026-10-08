@@ -119,6 +119,7 @@ def test_memory_api_survives_store_reopen(tmp_path, monkeypatch):
 
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("CORTEX_MEMORY_BACKEND", "rawknn")
     monkeypatch.setenv("CORTEX_MEMORY_ROOT", str(tmp_path / "api-knn"))
     monkeypatch.setenv("CORTEX_MEMORY_DIM", "64")

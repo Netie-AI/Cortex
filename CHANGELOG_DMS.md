@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## IMAGE-AUTH-01 (#363) -- 2026-10-08
+
+`Dockerfile.core` and `Dockerfile.full` no longer set `DMS_AUTH_DISABLED`.
+Startup raises `AUTH_DISABLED_WITHOUT_DEV_MODE` and logs that name when the
+flag is truthy without `CORTEX_DEV_MODE`. `scripts/check_supply_chain.py`
+exits 1 with `AUTH_DISABLED_IN_IMAGE` if a Dockerfile or compose file sets
+the flag. Local auth-off is `docker-compose.dev.yml` plus gitignored
+`dev.env`. Draft only. Not a CI claim. Not PASS.
+
 ## BRAIN-FREEROUTE-01 -- 2026-10-08
 
 Cortex #350. `/dms/brain` model steps (`packs/dms/generative/brain.py` `_ai`

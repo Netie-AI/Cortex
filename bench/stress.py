@@ -229,6 +229,7 @@ def _make_stress_client(home: Path):
     """In-process FastAPI client with isolated engine DBs under *home*."""
     os.environ["PACK"] = "dms"
     os.environ["DMS_AUTH_DISABLED"] = "1"
+    os.environ["CORTEX_DEV_MODE"] = "1"
     from CortexOS.execution import app_store, routine_scheduler, scoreboard, workflow_store
     from CortexOS.api.app import create_app
     from fastapi.testclient import TestClient

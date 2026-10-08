@@ -213,6 +213,7 @@ def test_a_broken_commitment_store_never_breaks_a_seek(tmp_path, monkeypatch):
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from fastapi.testclient import TestClient
 
     from CortexOS.execution import (

@@ -33,9 +33,10 @@ def api_base(tmp_path_factory):
     # changed makes later failures depend on collection order, which is how a
     # green suite locally turns red in CI for no visible reason.
     previous_cwd = os.getcwd()
-    previous_env = {k: os.environ.get(k) for k in ("PACK", "DMS_AUTH_DISABLED")}
+    previous_env = {k: os.environ.get(k) for k in ("PACK", "DMS_AUTH_DISABLED", "CORTEX_DEV_MODE")}
     os.environ["PACK"] = "dms"
     os.environ["DMS_AUTH_DISABLED"] = "1"
+    os.environ["CORTEX_DEV_MODE"] = "1"
     home = tmp_path_factory.mktemp("pw_api")
     os.chdir(home)
 

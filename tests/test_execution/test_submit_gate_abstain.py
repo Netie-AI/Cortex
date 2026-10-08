@@ -65,6 +65,7 @@ def test_explain_refusal_over_http_is_not_a_5xx(
 ) -> None:
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     from CortexOS.api.app import create_app
 
@@ -102,6 +103,7 @@ def test_runtime_engine_error_over_http_is_not_a_5xx(
 
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     from CortexOS.api.app import create_app
 

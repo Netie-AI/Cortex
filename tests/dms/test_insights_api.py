@@ -37,6 +37,7 @@ def _certified_engine(**extra: Any) -> dict[str, Any]:
 def api_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app
@@ -234,6 +235,7 @@ def test_certified_ask_uses_local_bridge_and_returns_rows(api_client, monkeypatc
 def test_armed_generate_without_caller_key_is_401(armed_openvault, monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app

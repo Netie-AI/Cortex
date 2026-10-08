@@ -107,6 +107,7 @@ def test_reject_and_delete():
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setattr(app_store, "DB_PATH", tmp_path / "apps.db")
     monkeypatch.setattr(app_store, "APPS_ROOT", tmp_path / "apps")
     from CortexOS.api.app import create_app

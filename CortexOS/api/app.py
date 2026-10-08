@@ -8,6 +8,10 @@ from netie.packs.loader import load_pack, resolve_pack_dir
 
 
 def create_app() -> Any:
+    # Before FastAPI is constructed, so a refusal leaves no routes to serve.
+    from CortexOS.api.startup_auth import refuse_auth_disabled_without_dev_mode
+
+    refuse_auth_disabled_without_dev_mode()
     try:
         from fastapi import FastAPI, Request
     except ImportError as exc:  # pragma: no cover

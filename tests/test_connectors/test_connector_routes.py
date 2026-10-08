@@ -11,6 +11,7 @@ from CortexOS.connectors import agents, cursor_session
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL", raising=False)
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL_EXECUTE", raising=False)
     cursor_session.reset_for_tests(tmp_path / "chats.json")
