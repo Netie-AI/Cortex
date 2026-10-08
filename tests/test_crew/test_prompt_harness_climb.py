@@ -373,6 +373,42 @@ def _is_exact_c7_05_104p2_seam(path: str) -> bool:
     return True
 
 
+# SCHEMA-CONTEXT-01 (#347). Same usage-count seam as test_cot_climb. Not a
+# blanket allow of crew/freeroute.py.
+_SCHEMA_CONTEXT_347_BRANCHES = frozenset({"cursor/schema-context-01-5b41"})
+_SCHEMA_CONTEXT_347_FREEROUTE = "CortexOS/crew/freeroute.py"
+_SCHEMA_CONTEXT_347_DIFF = "8ea3acd2823201fb7e566719bdcf19cfa214c737936a56df1ab48ea4dfb8a981"
+_SCHEMA_CONTEXT_347_SYMBOLS = ("_reported_token", '"total_tokens"')
+
+
+def _is_exact_schema_context_347_seam(path: str) -> bool:
+    """Allow only the #347 usage-count copy on this branch."""
+    if path != _SCHEMA_CONTEXT_347_FREEROUTE:
+        return False
+    if _branch_name() not in _SCHEMA_CONTEXT_347_BRANCHES:
+        return False
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        "origin/main",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    for symbol in _SCHEMA_CONTEXT_347_SYMBOLS:
+        assert symbol in diff.stdout, f"#347 usage seam missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == _SCHEMA_CONTEXT_347_DIFF, (
+        f"#347 exception covers only the usage-count copy in {path}; "
+        f"any other edit needs its own exception ({digest})"
+    )
+    return True
+
+
 def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
     if _git("rev-parse", "--verify", "origin/main").returncode != 0:
         pytest.skip("origin/main missing")
@@ -397,6 +433,7 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
             _is_exact_c_stamp_289_seam(path)
             or _is_exact_c7_04_288_seam(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or _is_exact_schema_context_347_seam(path)
         )
     ]
     assert held == [], f"dual-write of frozen/other-seat files: {held}"
@@ -416,6 +453,18 @@ def test_other_branch_editing_c7_05_seam_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-05-other-branch")
     path = "CortexOS/dms/answer_engine.py"
     assert _is_exact_c7_05_104p2_seam(path) is False
+
+
+def test_schema_context_347_freeroute_seam_is_exact() -> None:
+    assert _branch_name() == "cursor/schema-context-01-5b41"
+    assert _is_exact_schema_context_347_seam(_SCHEMA_CONTEXT_347_FREEROUTE) is True
+
+
+def test_other_branch_editing_freeroute_usage_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/schema-context-01-other")
+    assert _is_exact_schema_context_347_seam(_SCHEMA_CONTEXT_347_FREEROUTE) is False
 
 
 @pytest.mark.asyncio
