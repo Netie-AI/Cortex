@@ -31,6 +31,7 @@ ranked by what it actually got. HTTP refusals are recorded but never scored.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import sqlite3
@@ -61,6 +62,13 @@ EXPLORE_REQUESTS = 2
 SCORE_WINDOW = 200
 MAX_CANDIDATES = 6
 PER_PROVIDER = 2
+# Pre-call scoreboard miss keeps these bounds. Not a learned tightening.
+DEFAULT_FALLBACK_CAPS = {
+    "max_tokens": 600,
+    "max_candidates": MAX_CANDIDATES,
+    "per_provider": PER_PROVIDER,
+    "explore_requests": EXPLORE_REQUESTS,
+}
 
 _LOOPBACK_IDENTITIES = frozenset({"", "local", "127.0.0.1", "::1", "localhost", "testclient"})
 
@@ -83,7 +91,9 @@ _REDACT = re.compile(
     r"(ov_[A-Za-z0-9_\-]+|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]+|[A-Za-z0-9_\-]{32,})"
 )
 
+_log = logging.getLogger(__name__)
 _lock = threading.Lock()
+_learn_failures = 0
 _arming_cache: dict[tuple[str, str], tuple[float, Arming]] = {}
 _vault_cache: dict[str, tuple[float, _Vault]] = {}
 _rejected: dict[tuple[str, str], tuple[float, str]] = {}
@@ -554,6 +564,26 @@ def _note_store_error(exc: BaseException) -> None:
         _store_error["error"] = redact(f"route store unavailable: {type(exc).__name__}: {exc}")
 
 
+def learn_row_failures() -> int:
+    """Learning-row writes that failed since process start or ``reset()``."""
+    with _lock:
+        return _learn_failures
+
+
+def _record_learn_failure(where: str, exc: BaseException) -> None:
+    """One learning-only miss: note it, count it, warn. No prompt text."""
+    global _learn_failures
+    _note_store_error(exc)
+    with _lock:
+        _learn_failures += 1
+    _log.warning(
+        "learn_row_failed where=%s error=%s: %s",
+        where,
+        type(exc).__name__,
+        redact(str(exc)),
+    )
+
+
 def store_error() -> str:
     with _lock:
         return _store_error.get("error", "")
@@ -652,58 +682,86 @@ def _write_row(
     scored: bool,
     usage: Mapping[str, Any] | None = None,
     split: str = SPLIT_PRODUCT,
-) -> None:
+) -> bool:
+    """Insert one learning row. False when that write fails. Never raises for it.
+
+    Spend, budget, grant, and ledger writes are not this function. A non-store
+    error still propagates.
+    """
     if not _learning():
-        return
+        return True
     prompt_tokens, completion_tokens, total_tokens = _usage_tokens(usage)
-    with _connect(write=True) as con:
-        if con is None:
-            return
-        con.execute(
-            "INSERT OR REPLACE INTO routes ("
-            "call_id, task, requested, served, status, usable, scored, verdict, "
-            "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
-            "total_tokens, split"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                stamp.call_id,
-                stamp.task,
-                stamp.requested,
-                stamp.served,
-                int(stamp.status),
-                1 if stamp.usable else 0,
-                1 if scored else 0,
-                None,
-                float(stamp.latency_ms),
-                stamp.impl,
-                1 if _shadow_var.get() else 0,
-                time.time(),
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                _normalize_split(split),
-            ),
-        )
+    missed = False
+
+    def _do() -> None:
+        nonlocal missed
+        with _connect(write=True) as con:
+            if con is None:
+                missed = True
+                return
+            con.execute(
+                "INSERT OR REPLACE INTO routes ("
+                "call_id, task, requested, served, status, usable, scored, verdict, "
+                "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
+                "total_tokens, split"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    stamp.call_id,
+                    stamp.task,
+                    stamp.requested,
+                    stamp.served,
+                    int(stamp.status),
+                    1 if stamp.usable else 0,
+                    1 if scored else 0,
+                    None,
+                    float(stamp.latency_ms),
+                    stamp.impl,
+                    1 if _shadow_var.get() else 0,
+                    time.time(),
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    _normalize_split(split),
+                ),
+            )
+
+    try:
+        _do()
+    except (sqlite3.Error, OSError) as exc:
+        _record_learn_failure("_write_row", exc)
+        return False
+    if missed:
+        _record_learn_failure("_write_row", OSError(store_error() or "route store unavailable"))
+        return False
+    return True
 
 
 def _rows(task: str) -> list[sqlite3.Row]:
-    """Learning rows only. Shadow / held-out / benchmark never train pick()."""
-    with _connect(write=False) as con:
-        if con is None:
-            return []
-        con.row_factory = sqlite3.Row
-        try:
-            return list(
-                con.execute(
-                    "SELECT * FROM routes WHERE task = ? AND "
-                    + _LEARNING_FILTER_SQL
-                    + " ORDER BY ts DESC LIMIT ?",
-                    (task, SCORE_WINDOW * MAX_CANDIDATES),
+    """Learning rows only. Shadow / held-out / benchmark never train pick().
+
+    A pre-call read failure is empty stats. ``pick`` then stays inside
+    ``DEFAULT_FALLBACK_CAPS`` instead of refusing the model call.
+    """
+    try:
+        with _connect(write=False) as con:
+            if con is None:
+                return []
+            con.row_factory = sqlite3.Row
+            try:
+                return list(
+                    con.execute(
+                        "SELECT * FROM routes WHERE task = ? AND "
+                        + _LEARNING_FILTER_SQL
+                        + " ORDER BY ts DESC LIMIT ?",
+                        (task, SCORE_WINDOW * DEFAULT_FALLBACK_CAPS["max_candidates"]),
+                    )
                 )
-            )
-        except sqlite3.Error as exc:
-            _note_store_error(exc)
-            return []
+            except (sqlite3.Error, OSError) as exc:
+                _note_store_error(exc)
+                return []
+    except (sqlite3.Error, OSError) as exc:
+        _note_store_error(exc)
+        return []
 
 
 def _validity(row: Mapping[str, Any]) -> float:
@@ -902,6 +960,7 @@ class RouteStamp:
     served_model: str | None = None
     served_local: bool = False
     served_reason: str = ""
+    learn_row_failed: bool = False
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -977,18 +1036,43 @@ def note_verdict(target: RouteStamp | str | list[RouteStamp] | None, verdict: st
         ids = [str(target)]
     if not ids:
         return
-    with _connect(write=True) as con:
-        if con is None:
-            return
-        for call_id in ids:
-            if verdict in _FINAL_VERDICTS:
-                con.execute("UPDATE routes SET verdict = ? WHERE call_id = ?", (verdict, call_id))
-            else:
-                con.execute(
-                    "UPDATE routes SET verdict = ? WHERE call_id = ? "
-                    "AND (verdict IS NULL OR verdict NOT IN ('plausible','implausible'))",
-                    (verdict, call_id),
-                )
+    missed = False
+
+    def _do() -> None:
+        nonlocal missed
+        with _connect(write=True) as con:
+            if con is None:
+                missed = True
+                return
+            for call_id in ids:
+                if verdict in _FINAL_VERDICTS:
+                    con.execute(
+                        "UPDATE routes SET verdict = ? WHERE call_id = ?",
+                        (verdict, call_id),
+                    )
+                else:
+                    con.execute(
+                        "UPDATE routes SET verdict = ? WHERE call_id = ? "
+                        "AND (verdict IS NULL OR verdict NOT IN ('plausible','implausible'))",
+                        (verdict, call_id),
+                    )
+
+    try:
+        _do()
+    except (sqlite3.Error, OSError) as exc:
+        _record_learn_failure("note_verdict", exc)
+        _mark_learn_failed(target)
+        return
+    if missed:
+        _record_learn_failure("note_verdict", OSError(store_error() or "route store unavailable"))
+        _mark_learn_failed(target)
+
+
+def _mark_learn_failed(target: RouteStamp | str | list[RouteStamp] | None) -> None:
+    items = target if isinstance(target, list) else [target]
+    for item in items:
+        if isinstance(item, RouteStamp):
+            item.learn_row_failed = True
 
 
 def last_line(stamps: list[RouteStamp] | None) -> str:
@@ -1021,7 +1105,7 @@ def complete(
     task: str,
     messages: list[dict[str, Any]],
     *,
-    max_tokens: int = 600,
+    max_tokens: int = DEFAULT_FALLBACK_CAPS["max_tokens"],
     temperature: float | None = None,
     timeout: float = 45.0,
     accept: Callable[[str], Any] | None = None,
@@ -1032,7 +1116,12 @@ def complete(
     bearer: str | None = None,
     split: str = "",
 ) -> Completion:
-    """One FreeRoute call. Never raises. Refusals are named and stamped."""
+    """One FreeRoute call. Refusals are named and stamped.
+
+    A learning-only store write that fails after the answer exists still
+    returns that answer and sets ``stamp.learn_row_failed``. Spend, budget,
+    grant, and ledger failures are not caught here.
+    """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
     credential = (
@@ -1202,12 +1291,13 @@ def complete(
             message = {}
             stamp.usable = False
     stamp.error = reason
-    _write_row(
+    if not _write_row(
         stamp,
         scored=scored,
         usage=usage,
         split=split or _split_var.get(),
-    )
+    ):
+        stamp.learn_row_failed = True
     _journal_add(stamp)
     return Completion(
         ok=status == 200 and stamp.usable,
@@ -1336,6 +1426,7 @@ def public_status(task: str | None = None) -> dict[str, Any]:
 
 def reset() -> None:
     """Drop in-process caches (arming, rejections, verification). The store stays."""
+    global _learn_failures
     with _lock:
         _arming_cache.clear()
         _vault_cache.clear()
@@ -1343,6 +1434,7 @@ def reset() -> None:
         _verified.clear()
         _last_arming.clear()
         _store_error.clear()
+        _learn_failures = 0
     with _store_lock:
         _initialized.clear()
 
@@ -1350,6 +1442,7 @@ def reset() -> None:
 __all__ = [
     "Arming",
     "Completion",
+    "DEFAULT_FALLBACK_CAPS",
     "IMPL",
     "LEARN_ENV",
     "LOCAL_ONLY_ENV",
@@ -1371,6 +1464,7 @@ __all__ = [
     "identity",
     "journal",
     "last_line",
+    "learn_row_failures",
     "learn_state",
     "leave_gate",
     "local_only_enabled",
