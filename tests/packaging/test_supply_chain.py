@@ -22,6 +22,7 @@ import pytest
 
 from scripts import check_supply_chain as sc
 from scripts import lock_images
+from tests.invariants.test_lock_skew_baseline import skew_lines_outside_baseline
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -211,6 +212,25 @@ def test_dockerfile_python_version_has_no_uv_resolution_entry(tree: Path) -> Non
         _set_python_version(tree, name, "3.99")
     problems = sc.run(tree)
     assert problems == ["uv.lock has no resolution entry for Python 3.99"]
+
+
+def test_new_mismatch_plus_skew_line_fails_frozen_baseline(tree: Path) -> None:
+    """A new mismatch plus its lock_skew line passes the checker and fails the ceiling.
+
+    ``check_version_agreement`` only requires the skew file to equal the
+    current mismatches, so appending the matching line hides the plant from
+    ``scripts/check_supply_chain.py``. The frozen baseline in
+    ``tests/invariants/test_lock_skew_baseline.py`` names the added line.
+    """
+    _plant_image_pin(tree, "boto3", "1.43.108", variant="core")
+    line = "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110"
+    path = tree / "requirements" / "lock_skew" / "image-core.txt"
+    path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
+    assert line in sc.mismatch_lines(tree)
+    assert sc.run(tree) == []
+    assert skew_lines_outside_baseline(tree) == [
+        f"new skew line not in frozen baseline: image-core: {line}"
+    ]
 
 
 def test_stale_skew_line_fails(tree: Path) -> None:
