@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## IMAGE-AUTH-01 (#363) -- 2026-10-08
+
+`Dockerfile.core` and `Dockerfile.full` no longer set `DMS_AUTH_DISABLED`.
+Startup raises `AUTH_DISABLED_WITHOUT_DEV_MODE` and logs that name when the
+flag is truthy without `CORTEX_DEV_MODE`. `scripts/check_supply_chain.py`
+exits 1 with `AUTH_DISABLED_IN_IMAGE` if a Dockerfile or compose file sets
+the flag, and with `DEV_MODE_IN_IMAGE` for `CORTEX_DEV_MODE` on ENV,
+environment, and env_file. On a git work tree that scan lists `git ls-files`
+only, so an untracked `dev.env` cannot change the verdict. If `.git` exists and `git ls-files` fails, the scan stops with `GIT_LS_FILES_FAILED` and does not walk. `Dockerfile.core` and `Dockerfile.full` set `DMS_REFUSE_DEMO_KEYS=1`. A shipped Dockerfile that omits it, or a tracked compose file or tracked env_file that sets it to anything other than `1`, exits 1 with `DEMO_KEYS_IN_IMAGE`. Auth assertions fail with
+`AUTH_TEST_IN_DEV_MODE` when `CORTEX_DEV_MODE` is set. Local auth-off is
+`docker-compose.dev.yml` plus gitignored `dev.env`. Draft only. Not a CI
+claim. Not PASS.
+
 ## BRAIN-FREEROUTE-01 -- 2026-10-08
 
 Cortex #350. `/dms/brain` model steps (`packs/dms/generative/brain.py` `_ai`

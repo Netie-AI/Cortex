@@ -28,7 +28,6 @@ SHARED_PATHS = (
 
 def _client(monkeypatch: pytest.MonkeyPatch, profile: str) -> TestClient:
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("CORTEX_PROFILE", profile)
     if profile == "full":
         monkeypatch.setenv("CORTEX_REQUIRE_AGENTIC_MARKER", "0")
@@ -38,7 +37,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, profile: str) -> TestClient:
     # Fresh app — packaging reads CORTEX_PROFILE at call time.
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 @pytest.mark.parametrize("profile", ["core", "full"])
@@ -109,7 +108,6 @@ def test_create_app_does_not_warn_duplicate_operation_ids(monkeypatch: pytest.Mo
     import warnings
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("CORTEX_PROFILE", "core")
     monkeypatch.delenv("CORTEX_REQUIRE_AGENTIC_MARKER", raising=False)
     from CortexOS.api.app import create_app

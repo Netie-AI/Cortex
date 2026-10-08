@@ -241,7 +241,6 @@ def _info_text(caplog: pytest.LogCaptureFixture) -> str:
 @pytest.fixture()
 def brain_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     # Parent reads this at import. Head ignores it. Non-empty, not a real key.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "present-for-parent-proof")
@@ -258,7 +257,7 @@ def brain_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
     reset_limiter(10_000)
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 @pytest.mark.parametrize("spec", HANDLERS, ids=[h["name"] for h in HANDLERS])
