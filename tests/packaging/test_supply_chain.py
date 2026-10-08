@@ -3,8 +3,11 @@
 The images used to run a bare ``pip install`` against floors with no upper pin,
 and ``uv.lock`` recorded ``netie`` 0.1.0 against 2.5.0 and ``litellm>=1`` against
 ``>=1.84.0``. ``scripts/check_supply_chain.py`` is what now fails the build on
-that. These tests run it on the real tree (green) and on planted copies of the
-tree (each must go red), so a checker stuck at "OK" cannot pass here.
+that, including when an image lock and ``uv.lock`` pin different litellm
+versions. These tests run it on the real tree (green) and on planted copies
+of the tree (each must go red), so a checker stuck at "OK" cannot pass here.
+The litellm skew plant also passes with that one check removed, so the
+failure is the agreement guard and not some other check.
 """
 
 from __future__ import annotations
@@ -154,3 +157,33 @@ def test_dockerfile_pointing_at_wrong_lock_fails(tree: Path) -> None:
 def test_missing_image_lock_fails(tree: Path) -> None:
     (tree / "requirements" / "image-full.lock.txt").unlink()
     assert any("image-full.lock.txt: missing" in p for p in sc.run(tree))
+
+
+def _plant_image_pin(tree: Path, package: str, version: str, variant: str = "core") -> None:
+    lock = tree / "requirements" / f"image-{variant}.lock.txt"
+    text = lock.read_text(encoding="utf-8")
+    new = re.sub(rf"^{package}==\S+", f"{package}=={version}", text, count=1, flags=re.M)
+    assert new != text, f"{package}=={version} did not change {lock.name}"
+    lock.write_text(new, encoding="utf-8")
+
+
+def test_image_uv_version_skew_fails(tree: Path) -> None:
+    """litellm only. Other packages already differ on main and are not this check."""
+    _plant_image_pin(tree, "litellm", "1.84.0")
+    problems = sc.run(tree)
+    assert any(
+        "image-core.lock.txt: litellm==1.84.0 disagrees with uv.lock" in p for p in problems
+    )
+
+
+def test_image_uv_version_skew_passes_when_agreement_guard_removed(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same plant as the litellm skew. With that check gone, the tree is clean.
+
+    The other checks still see an exact, hashed, in-specifier, non-denylisted
+    pin, so a pass here means the failure belongs to ``check_version_agreement``.
+    """
+    _plant_image_pin(tree, "litellm", "1.84.0")
+    monkeypatch.setattr(sc, "check_version_agreement", lambda _root: [])
+    assert sc.run(tree) == []

@@ -14,10 +14,13 @@ Checks, all offline:
    satisfies the ``pyproject.toml`` specifier.
 4. No denylisted version appears in any lock (litellm 1.82.7 and 1.82.8, the
    March 2026 compromise).
-5. Every shipped Dockerfile installs third-party code only with
+5. litellm in every image lock is the same version ``uv.lock`` resolves for
+   the image target (CPython 3.11, Linux x86_64). Other packages are not
+   compared: on main they already differ, and this check does not float them.
+6. Every shipped Dockerfile installs third-party code only with
    ``--require-hashes -r requirements/image-<variant>.lock.txt`` and installs the
    project only with ``--no-deps``.
-6. No Dockerfile and no compose file (``*.yml`` / ``*.yaml`` with ``services``)
+7. No Dockerfile and no compose file (``*.yml`` / ``*.yaml`` with ``services``)
    sets ``DMS_AUTH_DISABLED`` or ``CORTEX_DEV_MODE``, via a Dockerfile ``ENV``
    instruction, a compose ``environment`` entry, or a compose ``env_file`` whose
    file literally assigns it. Named failures: ``AUTH_DISABLED_IN_IMAGE`` and
@@ -53,6 +56,7 @@ from pathlib import Path
 
 import tomllib
 import yaml
+from packaging.markers import Marker, default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -63,6 +67,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DENYLIST: frozenset[tuple[str, str]] = frozenset(
     {("litellm", "1.82.7"), ("litellm", "1.82.8")}
 )
+
+#: Image pins that must match ``uv.lock`` for the image target. litellm only:
+#: the rest of the two locks already disagree on main, and a wider compare
+#: forces a tree-wide upgrade.
+AGREEMENT_PACKAGES: frozenset[str] = frozenset({"litellm"})
 
 #: variant -> extras the image installs. Mirrors ``scripts/lock_images.py``.
 VARIANTS: dict[str, tuple[str, ...]] = {
@@ -269,6 +278,89 @@ def check_image_lock(root: Path, variant: str) -> list[str]:
                 f"{path.name}: stale, {name}=={locked} does not satisfy {spec!r}; "
                 f"run `python scripts/lock_images.py {variant}`"
             )
+    return problems
+
+
+def _image_env() -> dict[str, str]:
+    """Marker env for the image locks: CPython 3.11, Linux x86_64.
+
+    ``scripts/lock_images.py`` compiles with ``--python-version 3.11`` and
+    ``--python-platform x86_64-unknown-linux-gnu``. ``uv.lock`` may pin a
+    different version per ``resolution-markers``; the image must match the
+    slice that environment selects, not whichever version happens to be first.
+    """
+    env = default_environment()
+    env.update(
+        {
+            "python_version": "3.11",
+            "python_full_version": "3.11.0",
+            "implementation_name": "cpython",
+            "implementation_version": "3.11.0",
+            "platform_system": "Linux",
+            "platform_machine": "x86_64",
+            "platform_python_implementation": "CPython",
+            "os_name": "posix",
+            "sys_platform": "linux",
+        }
+    )
+    return env
+
+
+def _marker_applies(markers: list[str], env: dict[str, str]) -> bool:
+    if not markers:
+        return True
+    return any(Marker(marker).evaluate(env) for marker in markers)
+
+
+def uv_versions_for_image(root: Path) -> tuple[dict[str, str], list[str]]:
+    """Return ({name: version}, problems) for the image target in ``uv.lock``."""
+    problems: list[str] = []
+    project_name = canonicalize_name(_pyproject(root)["project"]["name"])
+    lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    env = _image_env()
+    chosen: dict[str, str] = {}
+    for pkg in lock.get("package", []):
+        name = canonicalize_name(pkg["name"])
+        if name == project_name:
+            continue
+        if not _marker_applies(list(pkg.get("resolution-markers") or []), env):
+            continue
+        version = str(pkg.get("version", ""))
+        previous = chosen.get(name)
+        if previous is not None and previous != version:
+            problems.append(
+                f"uv.lock: {name} resolves to both {previous} and {version} "
+                "for the image target (CPython 3.11, Linux x86_64)"
+            )
+        chosen[name] = version
+    return chosen, problems
+
+
+def check_version_agreement(root: Path) -> list[str]:
+    """Fail when an image lock and ``uv.lock`` disagree on litellm.
+
+    Compared at the image target (CPython 3.11, Linux x86_64). Other packages
+    are left alone; see ``AGREEMENT_PACKAGES``.
+    """
+    versions, problems = uv_versions_for_image(root)
+    for variant in VARIANTS:
+        path = root / "requirements" / f"image-{variant}.lock.txt"
+        if not path.is_file():
+            continue
+        pins, _parse_problems = parse_lock(path)
+        for name in sorted(AGREEMENT_PACKAGES):
+            version = pins.get(name)
+            if version is None:
+                problems.append(f"{path.name}: {name} is not pinned")
+                continue
+            locked = versions.get(name)
+            if locked is None:
+                problems.append(f"{path.name}: {name}=={version} is not in uv.lock")
+                continue
+            if locked != version:
+                problems.append(
+                    f"{path.name}: {name}=={version} disagrees with uv.lock {name}=={locked}"
+                )
     return problems
 
 
@@ -753,6 +845,7 @@ def run(root: Path = ROOT) -> list[str]:
     problems += check_uv_lock(root)
     for variant in VARIANTS:
         problems += check_image_lock(root, variant)
+    problems += check_version_agreement(root)
     for name, variant in DOCKERFILES.items():
         problems += check_dockerfile(root, name, variant)
     return problems
@@ -773,7 +866,7 @@ def main(root: Path | None = None) -> int:
     if (target / "pyproject.toml").is_file():
         print(
             f"supply chain OK: uv.lock current, {len(VARIANTS)} hashed image locks, "
-            f"{len(DOCKERFILES)} Dockerfiles, denylist clean, "
+            f"litellm agrees with uv.lock, {len(DOCKERFILES)} Dockerfiles, denylist clean, "
             "no DMS_AUTH_DISABLED or CORTEX_DEV_MODE in images"
         )
     else:

@@ -10,12 +10,15 @@ fails the build when one goes stale.
 Target: CPython 3.11 on x86_64 Linux (``python:3.11-slim``), wheels only, so no
 sdist build can fetch an unhashed build backend. ``requirements/build.in`` adds
 the project's build backend so the ``--no-deps --no-build-isolation`` install of
-the project uses a hashed ``poetry-core`` too.
+the project uses a hashed ``poetry-core`` too. An existing output file keeps
+its pins. To move one package, pass ``--upgrade-package <name>`` (repeatable).
+There is no blanket ``--upgrade``: that floats every pin in the file.
 
 Needs network access to the package index. Usage::
 
-    python scripts/lock_images.py            # all variants
+    python scripts/lock_images.py            # all variants, pins kept
     python scripts/lock_images.py core full  # a subset
+    python scripts/lock_images.py --upgrade-package litellm
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ def lock_path(variant: str) -> Path:
     return ROOT / "requirements" / f"image-{variant}.lock.txt"
 
 
-def compile_command(variant: str) -> list[str]:
+def compile_command(variant: str, upgrade_packages: tuple[str, ...] = ()) -> list[str]:
     cmd = [
         "uv", "pip", "compile", "pyproject.toml", "requirements/build.in",
         "--generate-hashes",
@@ -50,19 +53,40 @@ def compile_command(variant: str) -> list[str]:
         "--quiet",
         "--output-file", str(lock_path(variant).relative_to(ROOT)),
     ]
+    for name in upgrade_packages:
+        cmd += ["--upgrade-package", name]
     for extra in VARIANTS[variant]:
         cmd += ["--extra", extra]
     return cmd
 
 
+def parse_args(argv: list[str]) -> tuple[list[str], tuple[str, ...]]:
+    """Split variant names from repeatable ``--upgrade-package <name>``."""
+    variants: list[str] = []
+    upgrade: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--upgrade-package":
+            if i + 1 >= len(argv):
+                raise SystemExit("--upgrade-package needs a package name")
+            upgrade.append(argv[i + 1])
+            i += 2
+            continue
+        variants.append(arg)
+        i += 1
+    return variants, tuple(upgrade)
+
+
 def main(argv: list[str]) -> int:
-    variants = argv or list(VARIANTS)
+    requested, upgrade_packages = parse_args(argv)
+    variants = requested or list(VARIANTS)
     unknown = [v for v in variants if v not in VARIANTS]
     if unknown:
         print(f"unknown variant(s): {', '.join(unknown)}; known: {', '.join(VARIANTS)}")
         return 2
     for variant in variants:
-        cmd = compile_command(variant)
+        cmd = compile_command(variant, upgrade_packages)
         print("+", " ".join(cmd))
         rc = subprocess.run(cmd, cwd=ROOT).returncode
         if rc != 0:
