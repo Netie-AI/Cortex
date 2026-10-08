@@ -92,7 +92,13 @@ def parse_exact_origin(value: str) -> tuple[str, str, int] | None:
     host = (parts.hostname or "").lower()
     if scheme not in ("http", "https") or not host:
         return None
-    port = parts.port if parts.port is not None else _default_port(scheme)
+    # urlsplit().port raises ValueError for a non-integer or out-of-range port.
+    # That is a bad Origin, not a server fault: the caller gets the named 403.
+    try:
+        raw_port = parts.port
+    except ValueError:
+        return None
+    port = raw_port if raw_port is not None else _default_port(scheme)
     return (scheme, host, port)
 
 

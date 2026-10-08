@@ -55,9 +55,15 @@ def _spend_not_configured() -> None:
 
 def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
     """``spend_auth`` is the pack ``require_spend_key`` dependency. This module
-    must not import ``packs`` (C2). Run and resume both enter the model runner.
-    The dependency does not honor ``DMS_AUTH_DISABLED``. These routes had no
-    auth on parent, so the flag must not start opening them.
+    must not import ``packs`` (C2).
+
+    Header key only (``X-API-Key`` or ``Bearer``), steward or above, on run,
+    resume, cancel, clear, recognize, and hardware. The dependency does not
+    read the cookie and does not honor ``DMS_AUTH_DISABLED``. These routes had
+    no auth on parent, so the flag must not start opening them. The session
+    cookie path is ``/cortex``, so a browser does not send it here.
+
+    GET list, tasks, task, and events are unchanged.
     """
     auth = spend_auth if spend_auth is not None else _spend_not_configured
 
@@ -100,7 +106,7 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
             raise HTTPException(status_code=400, detail=result.get("error") or "start failed")
         return result
 
-    @app.post("/api/workflows/cancel")
+    @app.post("/api/workflows/cancel", dependencies=[Depends(auth)])
     async def cancel_workflow(body: CancelBody) -> dict[str, Any]:
         tid = body.task_id or body.run_id
         result = workflow_runner.cancel(tid)
@@ -123,17 +129,17 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
             raise HTTPException(status_code=400, detail=result.get("error") or "resume failed")
         return result
 
-    @app.post("/api/workflows/clear")
+    @app.post("/api/workflows/clear", dependencies=[Depends(auth)])
     async def clear_finished() -> dict[str, Any]:
         return workflow_runner.clear_finished()
 
-    @app.post("/api/workflows/recognize")
+    @app.post("/api/workflows/recognize", dependencies=[Depends(auth)])
     async def recognize_prompt(body: RecognizeBody) -> dict[str, Any]:
         text = body.prompt or body.text or ""
         rec = recognize(text)
         return {"ok": True, **rec.as_dict()}
 
-    @app.post("/api/workflows/hardware")
+    @app.post("/api/workflows/hardware", dependencies=[Depends(auth)])
     async def push_hardware(body: HardwareBody) -> dict[str, Any]:
         workflow_runner.set_hardware(body.hardware)
         return {"ok": True, "hardware": workflow_runner.get_hardware()}

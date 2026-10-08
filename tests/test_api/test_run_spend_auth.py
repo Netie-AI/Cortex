@@ -649,3 +649,180 @@ def test_star_allowlist_is_rejected_at_load(monkeypatch):
         load_constructor_origin_allowlist("https://*")
     with pytest.raises(ConstructorOriginConfigError):
         _boot(monkeypatch, "dms", None, origin="*")
+
+
+@pytest.mark.parametrize("origin", ["https://allowed.com:99999", "https://allowed.com:not-a-port"])
+def test_malformed_origin_port_is_named_403(monkeypatch, sentinels, origin):
+    """``urlsplit().port`` raises ValueError. That must be the named 403, not a 500."""
+    app = _boot(monkeypatch, "dms", None, origin=_ALLOWED_ORIGIN)
+    with TestClient(app) as client:
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        before_n = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            CTOR_BODY,
+            {"Origin": origin, "Referer": _ALLOWED_ORIGIN},
+        )
+        assert res.status_code == 403, res.text
+        assert _detail(res) == ORIGIN_DENIED
+        assert _calls(sentinels) == before_n
+
+
+def test_empty_origin_allowlist_denies_cookie_constructor_post(monkeypatch, sentinels):
+    """Empty ``CONSTRUCTOR_ORIGIN_ALLOWLIST`` plus a cookie-only constructor POST is 403."""
+    app = _boot(monkeypatch, "dms", None, origin="")
+    with TestClient(app) as client:
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        before_n = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            CTOR_BODY,
+            {"Origin": "https://app.netie.ai"},
+        )
+        assert res.status_code == 403, res.text
+        assert _detail(res) == ORIGIN_DENIED
+        assert _calls(sentinels) == before_n
+
+
+def test_constructor_cookie_path_is_cortex(monkeypatch):
+    """The session cookie path stays ``/cortex``. A wider path would send it to ``/api``."""
+    from http.cookies import SimpleCookie
+
+    from packs.dms.constructor_routes import PREFIX
+
+    assert PREFIX == "/cortex"
+    app = _boot(monkeypatch, "dms", None)
+    with TestClient(app) as client:
+        res = client.post(
+            "/cortex/session",
+            json={"key": "sk-steward-test"},
+            follow_redirects=False,
+        )
+    assert res.status_code == 303, res.text
+    jar = SimpleCookie()
+    jar.load(res.headers["set-cookie"])
+    assert jar["cortex_api_key"]["path"] == "/cortex"
+
+
+_WF_CONTROL = (
+    ("POST /api/workflows/cancel", "/api/workflows/cancel", {"task_id": "no-such-task"}),
+    ("POST /api/workflows/clear", "/api/workflows/clear", {}),
+    ("POST /api/workflows/recognize", "/api/workflows/recognize", {"prompt": "summarise the ledger"}),
+    (
+        "POST /api/workflows/hardware",
+        "/api/workflows/hardware",
+        {"hardware": {"vram_gb": 80, "marker": "attacker"}},
+    ),
+)
+
+
+def test_workflow_control_posts_require_steward_header(monkeypatch):
+    """Cancel, clear, recognize, and hardware take a header key, steward or above.
+
+    No cookie branch. ``DMS_AUTH_DISABLED`` does not open them.
+    """
+    from CortexOS.execution import workflow_runner
+
+    workflow_runner.set_hardware({})
+    app = _boot(monkeypatch, "dms", None)
+    problems: list[str] = []
+    try:
+        with TestClient(app) as client:
+            for label, path, body in _WF_CONTROL:
+                res = _post(client, path, body)
+                if res.status_code != 401:
+                    problems.append(f"no-auth {label} status={res.status_code} body={res.text[:160]}")
+                res = _post(client, path, body, {"X-API-Key": "sk-viewer-test"})
+                if res.status_code != 403 or _detail(res) != VIEWER_REFUSAL:
+                    problems.append(
+                        f"viewer {label} status={res.status_code} detail={_detail(res)!r}"
+                    )
+                client.cookies.set("cortex_api_key", "sk-steward-test")
+                res = _post(client, path, body)
+                if res.status_code != 401:
+                    problems.append(f"cookie {label} status={res.status_code} body={res.text[:160]}")
+                client.cookies.clear()
+            if workflow_runner.get_hardware() != {}:
+                problems.append(f"hardware changed before a steward post: {workflow_runner.get_hardware()}")
+
+            monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+            for label, path, body in _WF_CONTROL:
+                res = _post(client, path, body)
+                if res.status_code != 401:
+                    problems.append(f"flag-on {label} status={res.status_code} body={res.text[:160]}")
+
+            steward = {"X-API-Key": "sk-steward-test"}
+            res = _post(client, "/api/workflows/cancel", {"task_id": "no-such-task"}, steward)
+            if res.status_code != 404:
+                problems.append(f"steward cancel status={res.status_code} body={res.text[:160]}")
+            res = _post(client, "/api/workflows/clear", {}, steward)
+            if res.status_code != 200:
+                problems.append(f"steward clear status={res.status_code} body={res.text[:160]}")
+            res = _post(client, "/api/workflows/recognize", {"prompt": "summarise the ledger"}, steward)
+            if res.status_code != 200:
+                problems.append(f"steward recognize status={res.status_code} body={res.text[:160]}")
+            res = _post(
+                client,
+                "/api/workflows/hardware",
+                {"hardware": {"vram_gb": 8, "marker": "steward"}},
+                steward,
+            )
+            if res.status_code != 200 or workflow_runner.get_hardware().get("marker") != "steward":
+                problems.append(
+                    f"steward hardware status={res.status_code} "
+                    f"stored={workflow_runner.get_hardware()}"
+                )
+    finally:
+        workflow_runner.set_hardware({})
+    assert not problems, "\n".join(problems)
+
+
+def test_unauth_hardware_does_not_reach_later_run_or_resume(monkeypatch):
+    """An unauthenticated hardware POST must not change what /run or /resume receives.
+
+    Both routes pass ``workflow_runner.get_hardware()`` into the runner.
+    """
+    from CortexOS.execution import workflow_runner
+
+    workflow_runner.set_hardware({"marker": "before"})
+    seen: dict[str, dict] = {}
+
+    def _start(*_args, **kwargs):
+        seen["run"] = dict(kwargs.get("hardware") or {})
+        return {"ok": True, "task_id": "stub", "run_id": "stub"}
+
+    def _resume(*_args, **kwargs):
+        seen["resume"] = dict(kwargs.get("hardware") or {})
+        return {"ok": False, "error": "unknown run: stub"}
+
+    monkeypatch.setattr(workflow_runner, "start", _start)
+    monkeypatch.setattr(workflow_runner, "resume", _resume)
+    app = _boot(monkeypatch, "dms", None)
+    problems: list[str] = []
+    try:
+        with TestClient(app) as client:
+            res = _post(
+                client,
+                "/api/workflows/hardware",
+                {"hardware": {"vram_gb": 1, "marker": "attacker"}},
+            )
+            stored = dict(workflow_runner.get_hardware())
+            if res.status_code != 401 or stored.get("marker") != "before":
+                problems.append(
+                    f"unauth hardware status={res.status_code} body={res.text[:180]} "
+                    f"get_hardware={stored}"
+                )
+            steward = {"X-API-Key": "sk-steward-test"}
+            run = _post(client, "/api/workflows/run", WF_BODY, steward)
+            resume = _post(client, "/api/workflows/resume", {"task_id": "stub"}, steward)
+            if seen.get("run", {}).get("marker") != "before":
+                problems.append(f"later /run received hardware={seen.get('run')} status={run.status_code}")
+            if seen.get("resume", {}).get("marker") != "before":
+                problems.append(
+                    f"later /resume received hardware={seen.get('resume')} status={resume.status_code}"
+                )
+    finally:
+        workflow_runner.set_hardware({})
+    assert not problems, "\n".join(problems)
