@@ -5,9 +5,10 @@ Unknown and ambiguous roles do not spend.
 
 ``POST /api/engine/run`` uses ``require_spend`` (``get_caller``), so
 ``DMS_AUTH_DISABLED`` still resolves to admin, matching parent.
-``POST /run``, workflow run/resume, and constructor ``/run`` use
-``require_spend_key``. Those routes did not call ``get_caller`` on parent,
-so the flag must not open them.
+``POST /run`` and workflow run/resume use ``require_spend_key``. Those routes
+did not call ``get_caller`` on parent, so the flag must not open them.
+Constructor ``/run`` uses its own spend dependency. It still ignores the
+flag, and it is the only place that reads the ``cortex_api_key`` cookie.
 
 These refusal cases fail on 0faede64: ``POST /run`` and ``POST /api/workflows/run``
 have no auth dependency, and ``/api/engine/run`` plus ``/cortex/constructor/run``
@@ -28,6 +29,12 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from CortexOS.execution.model_router import BIG_API_PLACEHOLDER
+from packs.dms.constructor_routes import (
+    ORIGIN_DENIED,
+    ConstructorOriginConfigError,
+    constructor_presented_caller,
+    load_constructor_origin_allowlist,
+)
 from packs.dms.security.api_auth import Caller, get_caller, get_presented_caller, parse_api_keys
 
 KEYS = "viewer:sk-viewer-test;steward:sk-steward-test;admin:sk-admin-test"
@@ -101,7 +108,14 @@ def _snap(counts: dict[str, int]) -> dict[str, int]:
     return dict(counts)
 
 
-def _boot(monkeypatch: pytest.MonkeyPatch, pack: str | None, netie_pack: str | None, *, keys: str = KEYS):
+def _boot(
+    monkeypatch: pytest.MonkeyPatch,
+    pack: str | None,
+    netie_pack: str | None,
+    *,
+    keys: str = KEYS,
+    origin: str | None = None,
+):
     import CortexOS.config as cfg
 
     monkeypatch.setattr(cfg, "get_config_path", lambda: Path("/tmp/no-such-netie-config.toml"))
@@ -116,6 +130,9 @@ def _boot(monkeypatch: pytest.MonkeyPatch, pack: str | None, netie_pack: str | N
     monkeypatch.setenv("DMS_API_KEYS", keys)
     monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
     monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.delenv("CONSTRUCTOR_ORIGIN_ALLOWLIST", raising=False)
+    if origin is not None:
+        monkeypatch.setenv("CONSTRUCTOR_ORIGIN_ALLOWLIST", origin)
     for name in ("CortexOS.config", "netie.config"):
         mod = sys.modules.get(name)
         if mod is not None and hasattr(mod, "_cached_config"):
@@ -275,21 +292,6 @@ def test_viewer_and_bad_roles_cannot_spend(monkeypatch, sentinels):
                     f"socket={sentinels['socket'] - before_sock}"
                 )
 
-        client.cookies.set("cortex_api_key", "sk-viewer-test")
-        before_n = _calls(sentinels)
-        res = _post(client, "/run", RUN_BODY)
-        detail = ""
-        try:
-            detail = str(res.json().get("detail"))
-        except Exception:
-            detail = res.text[:180]
-        if res.status_code != 403 or detail != VIEWER_REFUSAL or _calls(sentinels) != before_n:
-            problems.append(
-                f"viewer cookie POST /run status={res.status_code} detail={detail!r} "
-                f"model={_calls(sentinels) - before_n}"
-            )
-        client.cookies.clear()
-
         unknown = {"X-API-Key": "sk-oracle-test"}
         for label, path, body, _dms in SPEND_ROUTES:
             before_n = _calls(sentinels)
@@ -317,6 +319,7 @@ def test_viewer_and_bad_roles_cannot_spend(monkeypatch, sentinels):
 
     injected.dependency_overrides[get_caller] = _bad_caller
     injected.dependency_overrides[get_presented_caller] = _bad_caller
+    injected.dependency_overrides[constructor_presented_caller] = _bad_caller
     with TestClient(injected) as client:
         for label, path, body, _dms in SPEND_ROUTES:
             before_n = _calls(sentinels)
@@ -367,12 +370,6 @@ def test_steward_and_admin_can_spend(monkeypatch, sentinels):
             res = _post(client, "/api/workflows/resume", RESUME_BODY, headers)
             assert res.status_code == 400, res.text
             assert _calls(sentinels) == before
-
-        client.cookies.set("cortex_api_key", "sk-steward-test")
-        before = _calls(sentinels)
-        res = _post(client, "/run", {**RUN_BODY, "run_id": "spend_cookie"})
-        _assert_spent(res, sentinels, before, "steward cookie POST /run")
-        client.cookies.clear()
 
         before = _calls(sentinels)
         res = _post(
@@ -487,3 +484,168 @@ def test_auth_disabled_viewer_still_cannot_spend_where_flag_is_ignored(monkeypat
                     f"model={_calls(sentinels) - before_n}"
                 )
     assert not problems, "\n".join(problems)
+
+
+_COOKIE_HEADER_ROUTES = (
+    ("POST /run", "/run", RUN_BODY),
+    ("POST /api/workflows/run", "/api/workflows/run", WF_BODY),
+    ("POST /api/workflows/resume", "/api/workflows/resume", RESUME_BODY),
+    ("POST /api/engine/run", "/api/engine/run", ENGINE_BODY),
+)
+_MUTATING_CONSTRUCTOR = (
+    "/cortex/constructor/fetch",
+    "/cortex/constructor/ghost",
+    "/cortex/constructor/recommend",
+    "/cortex/constructor/generate",
+    "/cortex/constructor/run",
+)
+_ALLOWED_ORIGIN = "https://allowed.com"
+
+
+def _detail(res) -> str:
+    try:
+        return str(res.json().get("detail"))
+    except Exception:
+        return res.text[:180]
+
+
+def test_cookie_only_is_not_a_credential_off_constructor(monkeypatch, sentinels):
+    """Steward cookie and no header. These routes do not read the cookie.
+
+    Parent ``get_caller`` accepted only X-API-Key and Bearer, so engine
+    cookie-only was 401. Head keeps that. The spend gates on ``/run`` and
+    the workflow routes also ignore the cookie, so they are 401 with
+    sentinel 0. A cookie fallback in ``get_caller`` would spend.
+    """
+    app = _boot(monkeypatch, "dms", None)
+    problems: list[str] = []
+    with TestClient(app) as client:
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        for label, path, body in _COOKIE_HEADER_ROUTES:
+            before_n = _calls(sentinels)
+            before_sock = sentinels["socket"]
+            res = _post(client, path, body)
+            if res.status_code == 200:
+                _wait_model(sentinels, before_n, seconds=3.0)
+            if (
+                res.status_code != 401
+                or _calls(sentinels) != before_n
+                or sentinels["socket"] != before_sock
+            ):
+                problems.append(
+                    f"cookie {label} status={res.status_code} detail={_detail(res)!r} "
+                    f"model={_calls(sentinels) - before_n} "
+                    f"socket={sentinels['socket'] - before_sock}"
+                )
+    assert not problems, "\n".join(problems)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        None,
+        "null",
+        "https://evil.example",
+        "https://evil-allowed.com",
+        "https://allowed.com.evil",
+        "https://allowed.com:8443",
+        "http://allowed.com",
+    ],
+)
+def test_cookie_constructor_run_rejects_bad_origin(monkeypatch, sentinels, origin):
+    app = _boot(monkeypatch, "dms", None, origin=_ALLOWED_ORIGIN)
+    with TestClient(app) as client:
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        headers = {"Referer": _ALLOWED_ORIGIN}
+        if origin is not None:
+            headers["Origin"] = origin
+        before_n = _calls(sentinels)
+        res = _post(client, "/cortex/constructor/run", CTOR_BODY, headers)
+        if res.status_code == 200:
+            _wait_model(sentinels, before_n, seconds=3.0)
+        assert res.status_code == 403, res.text
+        assert _detail(res) == ORIGIN_DENIED
+        assert _calls(sentinels) == before_n
+
+
+def test_cookie_constructor_mutations_reject_missing_origin(monkeypatch, sentinels):
+    app = _boot(monkeypatch, "dms", None, origin=_ALLOWED_ORIGIN)
+    problems: list[str] = []
+    with TestClient(app) as client:
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        for path in _MUTATING_CONSTRUCTOR:
+            before_n = _calls(sentinels)
+            res = _post(client, path, CTOR_BODY)
+            if res.status_code != 403 or _detail(res) != ORIGIN_DENIED or _calls(sentinels) != before_n:
+                problems.append(
+                    f"{path} status={res.status_code} detail={_detail(res)!r} "
+                    f"model={_calls(sentinels) - before_n}"
+                )
+    assert not problems, "\n".join(problems)
+
+
+def test_cookie_allowlisted_origin_serves_constructor_run(monkeypatch, sentinels):
+    app = _boot(monkeypatch, "dms", None, origin=_ALLOWED_ORIGIN)
+    with TestClient(app) as client:
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        before = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            CTOR_BODY,
+            {"Origin": _ALLOWED_ORIGIN},
+        )
+        _assert_spent(res, sentinels, before, "allowlisted cookie constructor /run")
+        before = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            {**CTOR_BODY, "run_id": "ctor_port"},
+            {"Origin": "https://allowed.com:443"},
+        )
+        _assert_spent(res, sentinels, before, "default-port cookie constructor /run")
+
+
+def test_header_key_ignores_origin_and_cookie_cannot_upgrade(monkeypatch, sentinels):
+    app = _boot(monkeypatch, "dms", None, origin=_ALLOWED_ORIGIN)
+    with TestClient(app) as client:
+        before = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            CTOR_BODY,
+            {"X-API-Key": "sk-steward-test"},
+        )
+        _assert_spent(res, sentinels, before, "steward key, no Origin")
+
+        before = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            {**CTOR_BODY, "run_id": "ctor_bearer"},
+            {"Authorization": "Bearer sk-admin-test", "Origin": "https://evil.example"},
+        )
+        _assert_spent(res, sentinels, before, "admin bearer, foreign Origin")
+
+        client.cookies.set("cortex_api_key", "sk-steward-test")
+        before_n = _calls(sentinels)
+        res = _post(
+            client,
+            "/cortex/constructor/run",
+            CTOR_BODY,
+            {"X-API-Key": "sk-viewer-test", "Origin": _ALLOWED_ORIGIN},
+        )
+        assert res.status_code == 403, res.text
+        assert _detail(res) == VIEWER_REFUSAL
+        assert _calls(sentinels) == before_n
+
+
+def test_star_allowlist_is_rejected_at_load(monkeypatch):
+    with pytest.raises(ConstructorOriginConfigError):
+        load_constructor_origin_allowlist("*")
+    with pytest.raises(ConstructorOriginConfigError):
+        load_constructor_origin_allowlist("https://allowed.com,*")
+    with pytest.raises(ConstructorOriginConfigError):
+        load_constructor_origin_allowlist("https://*")
+    with pytest.raises(ConstructorOriginConfigError):
+        _boot(monkeypatch, "dms", None, origin="*")

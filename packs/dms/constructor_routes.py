@@ -7,8 +7,10 @@ HTML GET needs a valid API key cookie or X-API-Key. Login form is the only open 
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -19,13 +21,16 @@ from packs.dms.security.api_auth import (
     SESSION_COOKIE,
     Caller,
     extract_api_key,
-    require_spend_key,
     resolve_caller,
     role_at_least,
 )
 
 COOKIE = SESSION_COOKIE
 PREFIX = "/cortex"
+# Exact origins, comma-separated. Empty denies every cookie-only mutation.
+# DevOps sets this to the constructor UI origin, for example https://app.netie.ai
+ORIGIN_ALLOWLIST_ENV = "CONSTRUCTOR_ORIGIN_ALLOWLIST"
+ORIGIN_DENIED = "constructor_origin_denied"
 SKIN_NAMES = frozenset(
     {"index.html", "app.js", "styles.css", "engine.js", "README.md", "favicon.ico", "favicon.svg"}
 )
@@ -61,6 +66,88 @@ def _skin_dir() -> Path:
     return constructor_skin_dir()
 
 
+class ConstructorOriginConfigError(ValueError):
+    """``CONSTRUCTOR_ORIGIN_ALLOWLIST`` contains ``*`` or a non-origin."""
+
+
+def _default_port(scheme: str) -> int:
+    return 443 if scheme == "https" else 80
+
+
+def parse_exact_origin(value: str) -> tuple[str, str, int] | None:
+    """Scheme, host, and port. No userinfo, path, query, or fragment.
+
+    Default ports are filled in so ``https://host`` and ``https://host:443``
+    are the same triple. Comparison is that triple, not a prefix.
+    """
+    text = value.strip()
+    if not text or text.lower() == "null" or "*" in text:
+        return None
+    parts = urlsplit(text)
+    if parts.username or parts.password or parts.query or parts.fragment:
+        return None
+    if parts.path not in ("", "/"):
+        return None
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if scheme not in ("http", "https") or not host:
+        return None
+    port = parts.port if parts.port is not None else _default_port(scheme)
+    return (scheme, host, port)
+
+
+def load_constructor_origin_allowlist(raw: str | None = None) -> frozenset[tuple[str, str, int]]:
+    """Parse ``CONSTRUCTOR_ORIGIN_ALLOWLIST``. Empty by default.
+
+    ``*`` is a config error at load time. It is never an allow-all.
+    """
+    if raw is None:
+        raw = os.environ.get(ORIGIN_ALLOWLIST_ENV, "")
+    text = raw.strip()
+    if not text:
+        return frozenset()
+    if "*" in text:
+        raise ConstructorOriginConfigError(
+            f"{ORIGIN_ALLOWLIST_ENV} rejects '*'; list exact origins"
+        )
+    found: set[tuple[str, str, int]] = set()
+    for part in text.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        parsed = parse_exact_origin(item)
+        if parsed is None:
+            raise ConstructorOriginConfigError(
+                f"{ORIGIN_ALLOWLIST_ENV} entry is not an origin: {item!r}"
+            )
+        found.add(parsed)
+    return frozenset(found)
+
+
+def _origin_allowed(request: Request) -> bool:
+    """True only for an Origin header on the allowlist. No Referer fallback."""
+    allow = load_constructor_origin_allowlist()
+    raw = request.headers.get("origin")
+    if raw is None:
+        return False
+    parsed = parse_exact_origin(raw)
+    if parsed is None:
+        return False
+    return parsed in allow
+
+
+def _role_or_403(caller: Caller, min_role: str) -> Caller:
+    if not role_at_least(caller.role, min_role):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Requires role {min_role!r} or higher "
+                f"(caller={caller.role!r} actor={caller.actor!r})"
+            ),
+        )
+    return caller
+
+
 def _caller_from_request(
     request: Request,
     x_api_key: str | None,
@@ -71,6 +158,50 @@ def _caller_from_request(
     if caller is None:
         raise HTTPException(status_code=401, detail="Valid API key required (X-API-Key, Bearer, or session cookie)")
     return caller
+
+
+async def constructor_presented_caller(
+    request: Request,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+    authorization: str | None = Header(None),
+) -> Caller:
+    """Header key wins. Cookie is used only when no header key is present.
+
+    Cookie-only mutations must present an allowlisted Origin. The check is
+    here, before the handler creates a run or writes cost. ``DMS_AUTH_DISABLED``
+    is not consulted. Referer is not read.
+    """
+    header = extract_api_key(x_api_key, authorization)
+    if header:
+        caller = resolve_caller(header)
+        if caller is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Valid API key required (X-API-Key, Bearer, or session cookie)",
+            )
+        return caller
+    caller = resolve_caller(request.cookies.get(COOKIE))
+    if caller is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Valid API key required (X-API-Key, Bearer, or session cookie)",
+        )
+    if not _origin_allowed(request):
+        raise HTTPException(status_code=403, detail=ORIGIN_DENIED)
+    return caller
+
+
+def _require_constructor_role(min_role: str):
+    async def _dep(caller: Caller = Depends(constructor_presented_caller)) -> Caller:
+        return _role_or_403(caller, min_role)
+
+    return _dep
+
+
+# State-changing constructor routes. GETs that only read stay on
+# require_constructor_viewer and do not run the Origin check.
+require_constructor_mutate = _require_constructor_role("viewer")
+require_constructor_spend = _require_constructor_role("steward")
 
 
 async def require_constructor_viewer(
@@ -272,7 +403,7 @@ def constructor_asset(
 @router.post("/cortex/constructor/fetch")
 def constructor_fetch(
     body: ConstructorRunBody,
-    caller: Caller = Depends(require_constructor_viewer),
+    caller: Caller = Depends(require_constructor_mutate),
 ) -> dict[str, Any]:
     from packs.dms.constructor_fetch import fetch_slice
 
@@ -293,7 +424,7 @@ def constructor_fetch(
 @router.post("/cortex/constructor/ghost")
 def constructor_ghost(
     body: ConstructorRunBody,
-    caller: Caller = Depends(require_constructor_viewer),
+    caller: Caller = Depends(require_constructor_mutate),
 ) -> dict[str, Any]:
     from CortexOS.constructor_graph import ConstructorGraphError, compile_constructor_graph
 
@@ -322,7 +453,7 @@ def constructor_ghost(
 @router.post("/cortex/constructor/recommend")
 def constructor_recommend(
     body: ConstructorRunBody,
-    caller: Caller = Depends(require_constructor_viewer),
+    caller: Caller = Depends(require_constructor_mutate),
 ) -> dict[str, Any]:
     from CortexOS.constructor_graph import recommend_extras
     from CortexOS.execution import coordination_patterns
@@ -339,7 +470,7 @@ def constructor_recommend(
 @router.post("/cortex/constructor/generate")
 async def constructor_generate(
     request: Request,
-    caller: Caller = Depends(require_constructor_viewer),
+    caller: Caller = Depends(require_constructor_mutate),
 ) -> dict[str, Any]:
     """Compile a prompt onto a canvas. Ghost only. No DuckDB fetch. No run_dag."""
     from CortexOS.constructor_graph import ConstructorGraphError, generate_constructor_graph
@@ -365,7 +496,7 @@ async def constructor_generate(
 async def constructor_run(
     request: Request,
     body: ConstructorRunBody,
-    caller: Caller = Depends(require_spend_key),
+    caller: Caller = Depends(require_constructor_spend),
 ) -> dict[str, Any]:
     """Spend gate that ignores ``DMS_AUTH_DISABLED``.
 
@@ -447,4 +578,6 @@ async def constructor_run(
 
 
 def register_constructor_routes(app: Any) -> None:
+    # Fail at startup when the allowlist contains '*'.
+    load_constructor_origin_allowlist()
     app.include_router(router)

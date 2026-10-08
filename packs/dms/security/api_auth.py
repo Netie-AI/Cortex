@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException
 
 Role = Literal["viewer", "steward", "admin"]
 
@@ -115,14 +115,15 @@ def role_at_least(have: str, need: str) -> bool:
 
 
 async def get_caller(
-    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     authorization: str | None = Header(None),
 ) -> Caller:
     if not auth_required():
         return Caller(role="admin", actor="auth_disabled")
 
-    key = extract_api_key(x_api_key, authorization) or request.cookies.get(SESSION_COOKIE)
+    # Header only. The cortex_api_key cookie is read by constructor routes,
+    # as on parent. Accepting it here would open every get_caller route.
+    key = extract_api_key(x_api_key, authorization)
     caller = resolve_caller(key)
     if caller is None:
         raise HTTPException(status_code=401, detail="Valid API key required (X-API-Key or Bearer)")
@@ -148,7 +149,6 @@ def _refuse_unless(caller: Caller, min_role: str) -> Caller:
 
 
 async def get_presented_caller(
-    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     authorization: str | None = Header(None),
 ) -> Caller:
@@ -157,7 +157,7 @@ async def get_presented_caller(
     Routes that did not call ``get_caller`` on parent must not start honoring
     that flag. Honoring it would open them as admin.
     """
-    key = extract_api_key(x_api_key, authorization) or request.cookies.get(SESSION_COOKIE)
+    key = extract_api_key(x_api_key, authorization)
     caller = resolve_caller(key)
     if caller is None:
         raise HTTPException(status_code=401, detail="Valid API key required (X-API-Key or Bearer)")
