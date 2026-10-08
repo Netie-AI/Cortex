@@ -32,6 +32,13 @@ Checks, all offline:
    is not in that list and is never read. ``env_file`` is applied when the
    container runs and is not baked into the image, which is why a named
    exemption was considered and is not used.
+   Shipped Dockerfiles (``Dockerfile``, ``Dockerfile.constructor``,
+   ``Dockerfile.core``, ``Dockerfile.full``) must set ``DMS_REFUSE_DEMO_KEYS=1``.
+   A tracked compose file or tracked ``env_file`` that sets that key to any
+   other value, including empty, ``false``, ``0``, ``true``, or ``yes``, is
+   ``DEMO_KEYS_IN_IMAGE`` and names the file. A compose file that does not
+   mention the key is clean, because the image ``ENV`` still applies. The same
+   ``git ls-files`` list and ``GIT_LS_FILES_FAILED`` stop apply.
 
 Regenerate with ``uv lock`` and ``python scripts/lock_images.py``; never edit a
 lock by hand. This script reports. It never installs or regenerates anything.
@@ -78,7 +85,19 @@ _AUTH_DISABLED_ASSIGN = re.compile(r"^(?:export\s+)?DMS_AUTH_DISABLED\s*=")
 _DEV_MODE_ASSIGN = re.compile(r"^(?:export\s+)?CORTEX_DEV_MODE\s*=")
 AUTH_DISABLED_IN_IMAGE = "AUTH_DISABLED_IN_IMAGE"
 DEV_MODE_IN_IMAGE = "DEV_MODE_IN_IMAGE"
+DEMO_KEYS_IN_IMAGE = "DEMO_KEYS_IN_IMAGE"
 GIT_LS_FILES_FAILED = "GIT_LS_FILES_FAILED"
+_DEMO_KEY_NAME = "DMS_REFUSE_DEMO_KEYS"
+_DEMO_KEY_ASSIGN = re.compile(rf"^(?:export\s+)?{_DEMO_KEY_NAME}\s*=\s*(.*)$")
+# Exact repo-relative paths. Basename would also match night_shift/Dockerfile.
+_SHIPPED_DOCKERFILES = frozenset(
+    {
+        "Dockerfile",
+        "Dockerfile.constructor",
+        "Dockerfile.core",
+        "Dockerfile.full",
+    }
+)
 # (env name, finding, assignment regex). Lock comparison above does not read this.
 _IMAGE_ENV_FLAGS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("DMS_AUTH_DISABLED", AUTH_DISABLED_IN_IMAGE, _AUTH_DISABLED_ASSIGN),
@@ -410,6 +429,83 @@ def _env_instruction_sets_flag(rest: str, name: str) -> bool:
     return any(token.split("=", 1)[0] == name for token in tokens)
 
 
+def _env_flag_values(rest: str, name: str) -> list[str]:
+    tokens = rest.split()
+    if not tokens:
+        return []
+    if "=" not in tokens[0]:
+        if tokens[0] == name:
+            return [tokens[1] if len(tokens) > 1 else ""]
+        return []
+    found: list[str] = []
+    for token in tokens:
+        key, sep, val = token.partition("=")
+        if sep and key == name:
+            found.append(val)
+    return found
+
+
+def _demo_value_allowed(value: object) -> bool:
+    """True only for the exact value ``1``. ``true`` and ``yes`` are not enough."""
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        raw = value.strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'"', "'"}:
+            raw = raw[1:-1]
+        return raw == "1"
+    return False
+
+
+def _demo_value_shown(value: object) -> str:
+    if isinstance(value, str):
+        return value if value else "''"
+    return repr(value)
+
+
+def _env_text_bad_demo_values(text: str) -> list[str]:
+    bad: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _DEMO_KEY_ASSIGN.match(stripped)
+        if not match:
+            continue
+        if not _demo_value_allowed(match.group(1)):
+            bad.append(_demo_value_shown(match.group(1).strip()))
+    return bad
+
+
+def _file_bad_demo_values(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return _env_text_bad_demo_values(text)
+
+
+def _environment_demo_values(env: object) -> list[object]:
+    if isinstance(env, dict):
+        if _DEMO_KEY_NAME in env:
+            return [env[_DEMO_KEY_NAME]]
+        return []
+    if isinstance(env, str):
+        env = [env]
+    found: list[object] = []
+    if isinstance(env, list):
+        for item in env:
+            if isinstance(item, str):
+                key, sep, val = item.partition("=")
+                if sep and key.strip() == _DEMO_KEY_NAME:
+                    found.append(val)
+    return found
+
+
 def _environment_sets_flag(env: object, name: str) -> bool:
     if isinstance(env, dict):
         return name in env
@@ -479,13 +575,14 @@ def _iter_services(node: object):
             yield from _iter_services(value)
 
 
-def _scan_dockerfile(root: Path, path: Path) -> list[str]:
+def _scan_dockerfile(root: Path, path: Path, *, require_demo_key: bool) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return []
     rel = _rel(root, path)
     problems: list[str] = []
+    demo_values: list[str] = []
     for lineno, line in _logical_dockerfile_lines(text):
         op, rest = _instruction(line)
         if op != "ENV":
@@ -495,7 +592,30 @@ def _scan_dockerfile(root: Path, path: Path) -> list[str]:
                 problems.append(
                     f"{finding}: {rel} sets {flag} via ENV (line {lineno})"
                 )
+        demo_values.extend(_env_flag_values(rest, _DEMO_KEY_NAME))
+    saw_one = False
+    for val in demo_values:
+        if val == "1":
+            saw_one = True
+        else:
+            problems.append(
+                f"{DEMO_KEYS_IN_IMAGE}: {rel} sets {_DEMO_KEY_NAME} "
+                f"to {_demo_value_shown(val)} via ENV"
+            )
+    if require_demo_key and not saw_one and not demo_values:
+        problems.append(
+            f"{DEMO_KEYS_IN_IMAGE}: {rel} does not set {_DEMO_KEY_NAME}=1"
+        )
     return problems
+
+
+def _append_bad_demo(problems: list[str], rel: str, where: str, value: object) -> None:
+    if _demo_value_allowed(value):
+        return
+    problems.append(
+        f"{DEMO_KEYS_IN_IMAGE}: {rel} sets {_DEMO_KEY_NAME} "
+        f"to {_demo_value_shown(value)} {where}"
+    )
 
 
 def _scan_compose(root: Path, path: Path, tracked: set[str] | None) -> list[str]:
@@ -515,6 +635,12 @@ def _scan_compose(root: Path, path: Path, tracked: set[str] | None) -> list[str]
                     f"{finding}: {_rel(root, path)} sets {flag} "
                     "(compose YAML did not parse)"
                 )
+        rel = _rel(root, path)
+        for bad in _env_text_bad_demo_values(text):
+            problems.append(
+                f"{DEMO_KEYS_IN_IMAGE}: {rel} sets {_DEMO_KEY_NAME} "
+                f"to {bad} (compose YAML did not parse)"
+            )
         return problems
     if not any(_has_services(doc) for doc in docs):
         return []
@@ -544,6 +670,34 @@ def _scan_compose(root: Path, path: Path, tracked: set[str] | None) -> list[str]
                             f"{finding}: {rel} service {name} sets "
                             f"{flag} via env_file {entry}"
                         )
+        for value in _environment_demo_values(doc.get("environment")):
+            _append_bad_demo(problems, rel, "via environment", value)
+        for entry in _env_file_entries(doc.get("env_file")):
+            env_path = _env_path_if_scannable(root, path, entry, tracked)
+            if env_path is None:
+                continue
+            for bad in _file_bad_demo_values(env_path):
+                problems.append(
+                    f"{DEMO_KEYS_IN_IMAGE}: {rel} sets {_DEMO_KEY_NAME} "
+                    f"to {bad} via env_file {entry}"
+                )
+        for name, spec in _iter_services(doc):
+            for value in _environment_demo_values(spec.get("environment")):
+                if _demo_value_allowed(value):
+                    continue
+                problems.append(
+                    f"{DEMO_KEYS_IN_IMAGE}: {rel} service {name} sets "
+                    f"{_DEMO_KEY_NAME} to {_demo_value_shown(value)} via environment"
+                )
+            for entry in _env_file_entries(spec.get("env_file")):
+                env_path = _env_path_if_scannable(root, path, entry, tracked)
+                if env_path is None:
+                    continue
+                for bad in _file_bad_demo_values(env_path):
+                    problems.append(
+                        f"{DEMO_KEYS_IN_IMAGE}: {rel} service {name} sets "
+                        f"{_DEMO_KEY_NAME} to {bad} via env_file {entry}"
+                    )
     return problems
 
 
@@ -574,7 +728,7 @@ def scan_dms_auth_disabled(root: Path) -> list[str]:
             for name in filenames:
                 path = Path(dirpath) / name
                 if _is_dockerfile(name):
-                    problems.extend(_scan_dockerfile(root, path))
+                    problems.extend(_scan_dockerfile(root, path, require_demo_key=False))
                 elif name.endswith((".yml", ".yaml")):
                     problems.extend(_scan_compose(root, path, None))
         return problems
@@ -582,7 +736,13 @@ def scan_dms_auth_disabled(root: Path) -> list[str]:
         path = root / rel
         name = path.name
         if _is_dockerfile(name):
-            problems.extend(_scan_dockerfile(root, path))
+            problems.extend(
+                _scan_dockerfile(
+                    root,
+                    path,
+                    require_demo_key=rel in _SHIPPED_DOCKERFILES,
+                )
+            )
         elif name.endswith((".yml", ".yaml")):
             problems.extend(_scan_compose(root, path, tracked))
     return problems

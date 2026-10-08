@@ -10,7 +10,7 @@ flag is truthy without `CORTEX_DEV_MODE`. `scripts/check_supply_chain.py`
 exits 1 with `AUTH_DISABLED_IN_IMAGE` if a Dockerfile or compose file sets
 the flag, and with `DEV_MODE_IN_IMAGE` for `CORTEX_DEV_MODE` on ENV,
 environment, and env_file. On a git work tree that scan lists `git ls-files`
-only, so an untracked `dev.env` cannot change the verdict. If `.git` exists and `git ls-files` fails, the scan stops with `GIT_LS_FILES_FAILED` and does not walk. Auth assertions fail with
+only, so an untracked `dev.env` cannot change the verdict. If `.git` exists and `git ls-files` fails, the scan stops with `GIT_LS_FILES_FAILED` and does not walk. `Dockerfile.core` and `Dockerfile.full` set `DMS_REFUSE_DEMO_KEYS=1`. A shipped Dockerfile that omits it, or a tracked compose file or tracked env_file that sets it to anything other than `1`, exits 1 with `DEMO_KEYS_IN_IMAGE`. Auth assertions fail with
 `AUTH_TEST_IN_DEV_MODE` when `CORTEX_DEV_MODE` is set. Local auth-off is
 `docker-compose.dev.yml` plus gitignored `dev.env`. Draft only. Not a CI
 claim. Not PASS.

@@ -17,7 +17,7 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 | Liberty | #222-#225 | Proxy JEPA (cosine / `action_value`) only; no trained world model. |
 | RSF | #151 #154 #155 #156 | COMPLETE needs an R-0003 different-run verify. |
 | Crew export / desktop | #197-#200 | HOLD. |
-| Image auth-off | #363 | IMAGE-AUTH-01 in draft. Images must not set `DMS_AUTH_DISABLED` or `CORTEX_DEV_MODE`. Startup refuses auth-off without dev mode. Auth tests refuse dev mode. Image-auth scan lists `git ls-files` only. A repo whose `git ls-files` fails stops with `GIT_LS_FILES_FAILED` and does not walk. Not a CI claim. Not PASS. |
+| Image auth-off | #363 | IMAGE-AUTH-01 in draft. Images must not set `DMS_AUTH_DISABLED` or `CORTEX_DEV_MODE`. Startup refuses auth-off without dev mode. Auth tests refuse dev mode. Image-auth scan lists `git ls-files` only. A repo whose `git ls-files` fails stops with `GIT_LS_FILES_FAILED` and does not walk. Shipped Dockerfiles set `DMS_REFUSE_DEMO_KEYS=1`. Not a CI claim. Not PASS. |
 
 ## Standing constraints
 
