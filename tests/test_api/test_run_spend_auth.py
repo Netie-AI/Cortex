@@ -829,9 +829,44 @@ def test_unauth_hardware_does_not_reach_later_run_or_resume(monkeypatch):
     assert not problems, "\n".join(problems)
 
 
+# Every registered route under the constructor and workflow surface must be
+# in this table. Scope is ``/cortex`` and ``/cortex/*``, ``/api/workflows*``,
+# ``POST /run``, and engine ``POST /api/engine/run``. A route in that scope
+# that is missing here fails the walker.
+_LISTED_ROUTES = frozenset(
+    {
+        ("GET", "/cortex"),
+        ("GET", "/cortex/"),
+        ("GET", "/cortex/login"),
+        ("GET", "/cortex/constructor"),
+        ("GET", "/cortex/constructor/"),
+        ("GET", "/cortex/constructor/ontology"),
+        ("GET", "/cortex/constructor/{name}"),
+        ("POST", "/cortex/constructor/issue-key"),
+        ("POST", "/cortex/constructor/fetch"),
+        ("POST", "/cortex/constructor/ghost"),
+        ("POST", "/cortex/constructor/recommend"),
+        ("POST", "/cortex/constructor/generate"),
+        ("POST", "/cortex/constructor/run"),
+        ("POST", "/cortex/session"),
+        ("POST", "/cortex/session/clear"),
+        ("GET", "/api/workflows"),
+        ("GET", "/api/workflows/tasks"),
+        ("GET", "/api/workflows/task/{task_id}"),
+        ("GET", "/api/workflows/task/{task_id}/events"),
+        ("POST", "/api/workflows/run"),
+        ("POST", "/api/workflows/resume"),
+        ("POST", "/api/workflows/cancel"),
+        ("POST", "/api/workflows/clear"),
+        ("POST", "/api/workflows/recognize"),
+        ("POST", "/api/workflows/hardware"),
+        ("POST", "/run"),
+        ("POST", "/api/engine/run"),
+    }
+)
 # Model call, run creation, cost write, or store write. A viewer floor on any
-# of these is a failure. recognize is steward by Lead and is checked apart
-# from this set: recognize() does not call a model and does not write a store.
+# of these is a failure. recognize is steward by Lead and is in the table, but
+# recognize() does not call a model and does not write a store.
 _SPEND_OR_WRITE = frozenset(
     {
         ("POST", "/run"),
@@ -893,32 +928,54 @@ def _iter_registered_routes(app):
     yield from walk(app.router.routes, "")
 
 
-def test_spend_or_write_routes_are_not_on_viewer(monkeypatch):
-    """Fail when a spend or write route sits on the viewer dependency.
+def _in_walker_scope(path: str) -> bool:
+    """Constructor surface, workflow routes, ``POST /run``, and engine ``/run``."""
+    if path in {"/run", "/api/engine/run"}:
+        return True
+    return path == "/cortex" or path.startswith("/cortex/") or path.startswith("/api/workflows")
 
-    Also fail when that route has no steward or admin floor, so deleting the
-    dependency is a failure too. The walker must see included routers:
-    constructor ``/run`` and ``/api/engine/run`` are not on the flat route list.
-    """
-    app = _boot(monkeypatch, "dms", None)
+
+def _walker_problems(app) -> list[str]:
+    """Unlisted in-scope routes, and spend/write routes on a viewer floor."""
     found: dict[tuple[str, str], list[str]] = {}
-    recognize: list[str] | None = None
-    for method, path, floors in _iter_registered_routes(app):
-        key = (method, path)
-        if key in _SPEND_OR_WRITE:
-            found[key] = floors
-        if key == ("POST", "/api/workflows/recognize"):
-            recognize = floors
     problems: list[str] = []
-    for method, path in sorted(_SPEND_OR_WRITE):
+    for method, path, floors in _iter_registered_routes(app):
+        if not _in_walker_scope(path):
+            continue
+        key = (method, path)
+        if key not in _LISTED_ROUTES:
+            problems.append(f"unlisted {method} {path}")
+            continue
+        found[key] = floors
+    for method, path in sorted(_LISTED_ROUTES):
         floors = found.get((method, path))
         if floors is None:
             problems.append(f"walker missed {method} {path}")
             continue
-        if "viewer" in floors or not ({"steward", "admin"} & set(floors)):
+        if (method, path) in _SPEND_OR_WRITE and (
+            "viewer" in floors or not ({"steward", "admin"} & set(floors))
+        ):
             problems.append(f"{method} {path} floors={floors}")
-    if recognize is None or "viewer" in recognize or "steward" not in recognize:
-        problems.append(f"POST /api/workflows/recognize floors={recognize}")
+        if (method, path) == ("POST", "/api/workflows/recognize") and (
+            "viewer" in floors or "steward" not in floors
+        ):
+            problems.append(f"POST /api/workflows/recognize floors={floors}")
+    return problems
+
+
+def test_spend_or_write_routes_are_not_on_viewer(monkeypatch):
+    """Fail on an unlisted constructor or workflow route, or a viewer spend floor.
+
+    The table is ``_LISTED_ROUTES``. A registered route under ``/cortex``,
+    ``/api/workflows``, ``POST /run``, or ``POST /api/engine/run`` that is not
+    in that table fails, and the message names the route. Spend or write
+    routes still fail when their floor is viewer or is not steward or admin.
+    recognize stays steward and is not a spend/write route. Included routers
+    count: constructor routes and engine ``/run`` are not on the flat list.
+    """
+    assert _SPEND_OR_WRITE <= _LISTED_ROUTES
+    app = _boot(monkeypatch, "dms", None)
+    problems = _walker_problems(app)
     assert not problems, "\n".join(problems)
 
 

@@ -44,8 +44,11 @@ is a config error). A malformed Origin port is the same named refusal,
 `clear`, `recognize`, and `hardware` take a header key only, steward or
 above. The session cookie path stays `/cortex`. A steward cookie with no
 header is 401 on those four POSTs and the model sentinel stays 0.
-A registered-route walk fails if a spend or write route (model call, run
-creation, cost write, or store write) sits on the viewer dependency.
+A registered-route walk lists every constructor and workflow route, plus
+``POST /run`` and engine ``POST /api/engine/run``. A route in that scope
+that is not in the table fails the walk. A spend or write route (model
+call, run creation, cost write, or store write) still fails on the viewer
+dependency.
 recognize stays steward and is not in that spend/write set. Workflow GETs
 are unchanged. Draft only. Not a merge claim.
 
