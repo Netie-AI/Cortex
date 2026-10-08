@@ -267,8 +267,16 @@ async def contract_ask(body: AskRequest) -> Answer:
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
 
+    from CortexOS.dms.schema_retrieve_ask import schema_retrieval_fields
     from CortexOS.dms.space_memory_ask import try_solution_reuse
 
+    retrieval_fields = schema_retrieval_fields(
+        body.question,
+        session_id=body.session_id,
+        space_id=body.space_id,
+        verified=verified,
+        scored_pack_id=body.scored_pack_id,
+    )
     reused, memory_fields = try_solution_reuse(
         body.question,
         session_id=body.session_id,
@@ -297,6 +305,7 @@ async def contract_ask(body: AskRequest) -> Answer:
     else:
         data = dict(result)
     data.update(memory_fields)
+    data.update(retrieval_fields)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
     return Answer.model_validate(data)
 
