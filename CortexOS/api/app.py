@@ -140,6 +140,10 @@ def create_app() -> Any:
                 routes=[("POST", "/a2a/messages")],
             )
 
+    from CortexOS.security.auth_port import log_startup_warnings
+
+    log_startup_warnings()
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "pack": pack.name}

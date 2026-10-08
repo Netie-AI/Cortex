@@ -144,6 +144,7 @@ files = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-p tests.api_key_isolation"
 markers = [
     "corpus_expanded: full paraphrase expansion (slow; set CORPUS_EXPANDED=1)",
 ]

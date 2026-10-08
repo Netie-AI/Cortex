@@ -9,15 +9,17 @@ from CortexOS.connectors import agents, cursor_session
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
+    # TRUST-01: auth stays on; the client sends a real admin key.
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "admin:connector-admin-key")
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL", raising=False)
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL_EXECUTE", raising=False)
     cursor_session.reset_for_tests(tmp_path / "chats.json")
     agents.reset_for_tests()
     from CortexOS.api.app import create_app
 
-    with TestClient(create_app()) as c:
+    with TestClient(create_app(), headers={"X-API-Key": "connector-admin-key"}) as c:
         yield c
     cursor_session.reset_for_tests()
     agents.reset_for_tests()
