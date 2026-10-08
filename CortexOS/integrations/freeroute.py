@@ -587,6 +587,12 @@ def _open_for_write(path: Path) -> sqlite3.Connection:
 
 @contextmanager
 def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
+    """Yield the route store once. Cleanup runs in ``finally``.
+
+    An open failure yields ``None`` once. A failure after the yield, including
+    ``commit``, is noted and re-raised. A second yield would replace that error
+    with ``RuntimeError: generator didn't stop after throw()``.
+    """
     path = store_path()
     con: sqlite3.Connection | None = None
     held = False
@@ -594,20 +600,24 @@ def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
         if write:
             _store_lock.acquire()
             held = True
-            con = _open_for_write(path)
-        else:
-            if not path.is_file():
-                yield None
-                return
-            with _store_lock:
-                _init_file(path)
-            con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
-        yield con
-        if write:
-            con.commit()
-    except (sqlite3.Error, OSError) as exc:
-        _note_store_error(exc)
-        yield None
+            try:
+                con = _open_for_write(path)
+            except (sqlite3.Error, OSError) as exc:
+                _note_store_error(exc)
+        elif path.is_file():
+            try:
+                with _store_lock:
+                    _init_file(path)
+                con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
+            except (sqlite3.Error, OSError) as exc:
+                _note_store_error(exc)
+        try:
+            yield con
+            if write and con is not None:
+                con.commit()
+        except (sqlite3.Error, OSError) as exc:
+            _note_store_error(exc)
+            raise
     finally:
         if con is not None:
             con.close()
