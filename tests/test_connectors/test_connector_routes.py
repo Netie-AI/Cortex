@@ -10,15 +10,13 @@ from CortexOS.connectors import agents, cursor_session
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL", raising=False)
     monkeypatch.delenv("CORTEX_COMPUTER_CONTROL_EXECUTE", raising=False)
     cursor_session.reset_for_tests(tmp_path / "chats.json")
     agents.reset_for_tests()
     from CortexOS.api.app import create_app
 
-    with TestClient(create_app()) as c:
+    with TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"}) as c:
         yield c
     cursor_session.reset_for_tests()
     agents.reset_for_tests()

@@ -150,8 +150,6 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     from CortexOS.crew import freeroute as fr
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setattr(
         fr,
@@ -161,7 +159,7 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), client=("127.0.0.1", 5555))
+    return TestClient(create_app(), client=("127.0.0.1", 5555), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def _post(
@@ -660,7 +658,7 @@ def test_non_finite_schema_score_is_a_named_422_not_a_500(
     onto = json.dumps(space_ontology()).replace('"score": 4', f'"score": {raw_score}')
     assert raw_score in onto
     body = json.dumps(dms_body(Q)).rstrip("}") + ', "ontology": ' + onto + "}"
-    safe = TestClient(client.app, client=("127.0.0.1", 5555), raise_server_exceptions=False)
+    safe = TestClient(client.app, client=("127.0.0.1", 5555), raise_server_exceptions=False, headers={"X-API-Key": "dms-demo-admin-key"})
     res = safe.post("/v1/insights", content=body, headers={"content-type": "application/json"})
     assert res.status_code == 422, res.text
     out = res.json()

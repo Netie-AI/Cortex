@@ -18,9 +18,10 @@ Checks, all offline:
    ``--require-hashes -r requirements/image-<variant>.lock.txt`` and installs the
    project only with ``--no-deps``.
 6. No Dockerfile and no compose file (``*.yml`` / ``*.yaml`` with ``services``)
-   sets ``DMS_AUTH_DISABLED``, via a Dockerfile ``ENV`` instruction, a compose
-   ``environment`` entry, or a compose ``env_file`` whose file literally assigns
-   it. The named failure is ``AUTH_DISABLED_IN_IMAGE``.
+   sets ``DMS_AUTH_DISABLED`` or ``CORTEX_DEV_MODE``, via a Dockerfile ``ENV``
+   instruction, a compose ``environment`` entry, or a compose ``env_file`` whose
+   file literally assigns it. Named failures: ``AUTH_DISABLED_IN_IMAGE`` and
+   ``DEV_MODE_IN_IMAGE``.
 
 Regenerate with ``uv lock`` and ``python scripts/lock_images.py``; never edit a
 lock by hand. This script reports. It never installs or regenerates anything.
@@ -63,7 +64,14 @@ DOCKERFILES: dict[str, str] = {
 _REQ_LINE = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?P<version>[^\s;\\]+)(?P<rest>.*)$")
 _HASH = re.compile(r"^--hash=sha256:[0-9a-f]{64}$")
 _AUTH_DISABLED_ASSIGN = re.compile(r"^(?:export\s+)?DMS_AUTH_DISABLED\s*=")
+_DEV_MODE_ASSIGN = re.compile(r"^(?:export\s+)?CORTEX_DEV_MODE\s*=")
 AUTH_DISABLED_IN_IMAGE = "AUTH_DISABLED_IN_IMAGE"
+DEV_MODE_IN_IMAGE = "DEV_MODE_IN_IMAGE"
+# (env name, finding, assignment regex). Lock comparison above does not read this.
+_IMAGE_ENV_FLAGS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
+    ("DMS_AUTH_DISABLED", AUTH_DISABLED_IN_IMAGE, _AUTH_DISABLED_ASSIGN),
+    ("CORTEX_DEV_MODE", DEV_MODE_IN_IMAGE, _DEV_MODE_ASSIGN),
+)
 
 _SKIP_DIRS = frozenset(
     {
@@ -306,23 +314,23 @@ def _instruction(line: str) -> tuple[str, str]:
     return parts[0].upper(), (parts[1] if len(parts) > 1 else "")
 
 
-def _env_instruction_sets_flag(rest: str) -> bool:
+def _env_instruction_sets_flag(rest: str, name: str) -> bool:
     tokens = rest.split()
     if not tokens:
         return False
     if "=" not in tokens[0]:
-        return tokens[0] == "DMS_AUTH_DISABLED"
-    return any(token.split("=", 1)[0] == "DMS_AUTH_DISABLED" for token in tokens)
+        return tokens[0] == name
+    return any(token.split("=", 1)[0] == name for token in tokens)
 
 
-def _environment_sets_flag(env: object) -> bool:
+def _environment_sets_flag(env: object, name: str) -> bool:
     if isinstance(env, dict):
-        return "DMS_AUTH_DISABLED" in env
+        return name in env
     if isinstance(env, str):
         env = [env]
     if isinstance(env, list):
         for item in env:
-            if isinstance(item, str) and item.split("=", 1)[0].strip() == "DMS_AUTH_DISABLED":
+            if isinstance(item, str) and item.split("=", 1)[0].strip() == name:
                 return True
     return False
 
@@ -340,24 +348,24 @@ def _env_file_entries(raw: object) -> list[str]:
     return paths
 
 
-def _text_assigns_flag(text: str) -> bool:
+def _text_assigns_flag(text: str, assign: re.Pattern[str]) -> bool:
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if _AUTH_DISABLED_ASSIGN.match(stripped):
+        if assign.match(stripped):
             return True
     return False
 
 
-def _file_assigns_flag(path: Path) -> bool:
+def _file_assigns_flag(path: Path, assign: re.Pattern[str]) -> bool:
     if not path.is_file():
         return False
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return False
-    return _text_assigns_flag(text)
+    return _text_assigns_flag(text, assign)
 
 
 def _has_services(node: object) -> bool:
@@ -393,10 +401,13 @@ def _scan_dockerfile(root: Path, path: Path) -> list[str]:
     problems: list[str] = []
     for lineno, line in _logical_dockerfile_lines(text):
         op, rest = _instruction(line)
-        if op == "ENV" and _env_instruction_sets_flag(rest):
-            problems.append(
-                f"{AUTH_DISABLED_IN_IMAGE}: {rel} sets DMS_AUTH_DISABLED via ENV (line {lineno})"
-            )
+        if op != "ENV":
+            continue
+        for flag, finding, _assign in _IMAGE_ENV_FLAGS:
+            if _env_instruction_sets_flag(rest, flag):
+                problems.append(
+                    f"{finding}: {rel} sets {flag} via ENV (line {lineno})"
+                )
     return problems
 
 
@@ -410,49 +421,55 @@ def _scan_compose(root: Path, path: Path) -> list[str]:
     try:
         docs = list(yaml.safe_load_all(text))
     except yaml.YAMLError:
-        if _text_assigns_flag(text):
-            return [
-                f"{AUTH_DISABLED_IN_IMAGE}: {_rel(root, path)} sets DMS_AUTH_DISABLED "
-                "(compose YAML did not parse)"
-            ]
-        return []
+        problems: list[str] = []
+        for flag, finding, assign in _IMAGE_ENV_FLAGS:
+            if _text_assigns_flag(text, assign):
+                problems.append(
+                    f"{finding}: {_rel(root, path)} sets {flag} "
+                    "(compose YAML did not parse)"
+                )
+        return problems
     if not any(_has_services(doc) for doc in docs):
         return []
     rel = _rel(root, path)
-    problems: list[str] = []
+    problems = []
     for doc in docs:
         if not isinstance(doc, dict):
             continue
-        if _environment_sets_flag(doc.get("environment")):
-            problems.append(f"{AUTH_DISABLED_IN_IMAGE}: {rel} sets DMS_AUTH_DISABLED via environment")
-        for entry in _env_file_entries(doc.get("env_file")):
-            env_path = Path(entry)
-            if not env_path.is_absolute():
-                env_path = path.parent / env_path
-            if _file_assigns_flag(env_path):
-                problems.append(
-                    f"{AUTH_DISABLED_IN_IMAGE}: {rel} sets DMS_AUTH_DISABLED via env_file {entry}"
-                )
-        for name, spec in _iter_services(doc):
-            if _environment_sets_flag(spec.get("environment")):
-                problems.append(
-                    f"{AUTH_DISABLED_IN_IMAGE}: {rel} service {name} sets "
-                    "DMS_AUTH_DISABLED via environment"
-                )
-            for entry in _env_file_entries(spec.get("env_file")):
+        for flag, finding, assign in _IMAGE_ENV_FLAGS:
+            if _environment_sets_flag(doc.get("environment"), flag):
+                problems.append(f"{finding}: {rel} sets {flag} via environment")
+            for entry in _env_file_entries(doc.get("env_file")):
                 env_path = Path(entry)
                 if not env_path.is_absolute():
                     env_path = path.parent / env_path
-                if _file_assigns_flag(env_path):
+                if _file_assigns_flag(env_path, assign):
                     problems.append(
-                        f"{AUTH_DISABLED_IN_IMAGE}: {rel} service {name} sets "
-                        f"DMS_AUTH_DISABLED via env_file {entry}"
+                        f"{finding}: {rel} sets {flag} via env_file {entry}"
                     )
+            for name, spec in _iter_services(doc):
+                if _environment_sets_flag(spec.get("environment"), flag):
+                    problems.append(
+                        f"{finding}: {rel} service {name} sets {flag} via environment"
+                    )
+                for entry in _env_file_entries(spec.get("env_file")):
+                    env_path = Path(entry)
+                    if not env_path.is_absolute():
+                        env_path = path.parent / env_path
+                    if _file_assigns_flag(env_path, assign):
+                        problems.append(
+                            f"{finding}: {rel} service {name} sets "
+                            f"{flag} via env_file {entry}"
+                        )
     return problems
 
 
 def scan_dms_auth_disabled(root: Path) -> list[str]:
-    """Named ``AUTH_DISABLED_IN_IMAGE`` findings for Dockerfiles and compose files."""
+    """Image-auth findings for Dockerfiles and compose files.
+
+    ``AUTH_DISABLED_IN_IMAGE`` when ``DMS_AUTH_DISABLED`` is set.
+    ``DEV_MODE_IN_IMAGE`` when ``CORTEX_DEV_MODE`` is set.
+    """
     problems: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.endswith(".egg-info")]
@@ -490,10 +507,14 @@ def main(root: Path | None = None) -> int:
     if (target / "pyproject.toml").is_file():
         print(
             f"supply chain OK: uv.lock current, {len(VARIANTS)} hashed image locks, "
-            f"{len(DOCKERFILES)} Dockerfiles, denylist clean, no DMS_AUTH_DISABLED in images"
+            f"{len(DOCKERFILES)} Dockerfiles, denylist clean, "
+            "no DMS_AUTH_DISABLED or CORTEX_DEV_MODE in images"
         )
     else:
-        print("supply chain OK: no DMS_AUTH_DISABLED in Dockerfile or compose files")
+        print(
+            "supply chain OK: no DMS_AUTH_DISABLED or CORTEX_DEV_MODE "
+            "in Dockerfile or compose files"
+        )
     return 0
 
 

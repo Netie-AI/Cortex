@@ -230,13 +230,11 @@ def test_idle_seek_respects_the_engine_budget(monkeypatch):
 
 def test_seek_route_works_with_an_empty_body(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from fastapi.testclient import TestClient
 
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
     created = client.post(
         "/api/goals",

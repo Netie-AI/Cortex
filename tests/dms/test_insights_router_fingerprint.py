@@ -147,13 +147,11 @@ def test_http_insights_and_401_carry_fingerprint(
     monkeypatch, tmp_path, armed_openvault
 ) -> None:
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"}) as client:
         refused = client.post(
             "/v1/insights",
             json={"intent": "what is our ARR", "ask": True},
@@ -164,7 +162,7 @@ def test_http_insights_and_401_carry_fingerprint(
         assert body["values"] == []
         _assert_unproven_served(body)
 
-    with TestClient(create_app(), client=("10.0.0.5", 5555)) as remote:
+    with TestClient(create_app(), client=("10.0.0.5", 5555), headers={"X-API-Key": "dms-demo-admin-key"}) as remote:
         res = remote.post(
             "/v1/insights",
             json={"intent": "how many skus", "ask": False, "generate": True},

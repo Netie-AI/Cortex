@@ -9,8 +9,6 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from CortexOS.execution import app_store, routine_scheduler, scoreboard, workflow_store
 
     monkeypatch.setattr(scoreboard, "DB_PATH", tmp_path / "scoreboard.db")
@@ -25,7 +23,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(action_value, "DB_PATH", tmp_path / "action_value.db")
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def test_engine_auto_races_cold_goal(client):

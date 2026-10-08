@@ -33,10 +33,8 @@ def api_base(tmp_path_factory):
     # changed makes later failures depend on collection order, which is how a
     # green suite locally turns red in CI for no visible reason.
     previous_cwd = os.getcwd()
-    previous_env = {k: os.environ.get(k) for k in ("PACK", "DMS_AUTH_DISABLED", "CORTEX_DEV_MODE")}
+    previous_env = {k: os.environ.get(k) for k in ("PACK",)}
     os.environ["PACK"] = "dms"
-    os.environ["DMS_AUTH_DISABLED"] = "1"
-    os.environ["CORTEX_DEV_MODE"] = "1"
     home = tmp_path_factory.mktemp("pw_api")
     os.chdir(home)
 
@@ -83,7 +81,7 @@ def api_base(tmp_path_factory):
 
 def test_playwright_health(api_base):
     with sync_playwright() as p:
-        req = p.request.new_context()
+        req = p.request.new_context(extra_http_headers={"X-API-Key": "dms-demo-admin-key"})
         res = req.get(f"{api_base}/health")
         assert res.ok
         body = res.json()
@@ -95,7 +93,7 @@ def test_playwright_health(api_base):
 def test_playwright_find_skills_api(api_base):
     payload = json.dumps({"goal": "playwright e2e stress testing", "top_k": 5, "evolve": False})
     with sync_playwright() as p:
-        req = p.request.new_context()
+        req = p.request.new_context(extra_http_headers={"X-API-Key": "dms-demo-admin-key"})
         res = req.post(
             f"{api_base}/api/discovery/find-skills",
             headers={"Content-Type": "application/json"},
@@ -114,7 +112,7 @@ def test_playwright_mcp_find_skills(api_base):
         {"name": "find_skills", "arguments": {"goal": "security audit skill", "top_k": 3}}
     )
     with sync_playwright() as p:
-        req = p.request.new_context()
+        req = p.request.new_context(extra_http_headers={"X-API-Key": "dms-demo-admin-key"})
         res = req.post(
             f"{api_base}/mcp/call",
             headers={"Content-Type": "application/json"},
@@ -132,6 +130,7 @@ def test_playwright_browser_renders_inline_finder(api_base):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
+        page.set_extra_http_headers({"X-API-Key": "dms-demo-admin-key"})
         page.goto(f"{api_base}/api/discovery/playground")
         page.click("#go")
         page.wait_for_function(

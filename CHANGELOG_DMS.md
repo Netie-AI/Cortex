@@ -8,8 +8,11 @@ Agents append one section per shipped feature. Sequential build log.
 Startup raises `AUTH_DISABLED_WITHOUT_DEV_MODE` and logs that name when the
 flag is truthy without `CORTEX_DEV_MODE`. `scripts/check_supply_chain.py`
 exits 1 with `AUTH_DISABLED_IN_IMAGE` if a Dockerfile or compose file sets
-the flag. Local auth-off is `docker-compose.dev.yml` plus gitignored
-`dev.env`. Draft only. Not a CI claim. Not PASS.
+the flag, and with `DEV_MODE_IN_IMAGE` for `CORTEX_DEV_MODE` on ENV,
+environment, and env_file. Auth assertions fail with
+`AUTH_TEST_IN_DEV_MODE` when `CORTEX_DEV_MODE` is set. Local auth-off is
+`docker-compose.dev.yml` plus gitignored `dev.env`. Draft only. Not a CI
+claim. Not PASS.
 
 ## BRAIN-FREEROUTE-01 -- 2026-10-08
 

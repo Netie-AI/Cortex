@@ -291,8 +291,6 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
 
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv(
         "CORTEX_FREEROUTE_SCOREBOARD", "/tmp/c7-05-http-flag-off-v1.db"
@@ -302,7 +300,7 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
 
     from CortexOS.api.app import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"}) as client:
         response = client.post(
             "/v1/insights",
             json={"intent": "how many skus", "ask": True, "generate": False},

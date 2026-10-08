@@ -213,8 +213,6 @@ def test_stop_all_reaps_supervised_children():
 
 def test_activity_lists_running(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     from CortexOS.execution import routine_scheduler, scoreboard, workflow_store
     from fastapi.testclient import TestClient
     from CortexOS.api.app import create_app
@@ -231,7 +229,7 @@ def test_activity_lists_running(monkeypatch, tmp_path):
     assert started["ok"] is True
 
     try:
-        client = TestClient(create_app())
+        client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
         activity = client.get("/api/engine/activity").json()
         assert activity["ok"] is True
         running = activity["apps"]["running"]

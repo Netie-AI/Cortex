@@ -64,12 +64,10 @@ def test_explain_refusal_over_http_is_not_a_5xx(
     verifier, issuer, lake, monkeypatch, tmp_path  # noqa: F811
 ) -> None:
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app(), raise_server_exceptions=False)
+    client = TestClient(create_app(), raise_server_exceptions=False, headers={"X-API-Key": "dms-demo-admin-key"})
     req = _request(issuer, MISSING_COL_SQL)
     res = client.post("/v1/contract/submit", json=req.model_dump(mode="json"))
     assert res.status_code < 500, res.text
@@ -102,12 +100,10 @@ def test_runtime_engine_error_over_http_is_not_a_5xx(
     assert result.output is None
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    monkeypatch.setenv("CORTEX_DEV_MODE", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app(), raise_server_exceptions=False)
+    client = TestClient(create_app(), raise_server_exceptions=False, headers={"X-API-Key": "dms-demo-admin-key"})
     res = client.post("/v1/contract/submit", json=_request(issuer, sql).model_dump(mode="json"))
     assert res.status_code == 403, res.text
     assert res.json()["detail"]["code"] == "sql_runtime_error"
