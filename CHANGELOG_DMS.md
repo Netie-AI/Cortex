@@ -42,8 +42,12 @@ an exact Origin from `CONSTRUCTOR_ORIGIN_ALLOWLIST` (empty by default; `*`
 is a config error). A malformed Origin port is the same named refusal,
 `constructor_origin_denied`, not a 500. `POST /api/workflows/cancel`,
 `clear`, `recognize`, and `hardware` take a header key only, steward or
-above. The session cookie path stays `/cortex`. Workflow GETs are unchanged.
-Draft only. Not a merge claim.
+above. The session cookie path stays `/cortex`. A steward cookie with no
+header is 401 on those four POSTs and the model sentinel stays 0.
+A registered-route walk fails if a spend or write route (model call, run
+creation, cost write, or store write) sits on the viewer dependency.
+recognize stays steward and is not in that spend/write set. Workflow GETs
+are unchanged. Draft only. Not a merge claim.
 
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 

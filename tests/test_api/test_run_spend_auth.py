@@ -34,6 +34,7 @@ from packs.dms.constructor_routes import (
     ConstructorOriginConfigError,
     constructor_presented_caller,
     load_constructor_origin_allowlist,
+    require_constructor_viewer,
 )
 from packs.dms.security.api_auth import Caller, get_caller, get_presented_caller, parse_api_keys
 
@@ -826,3 +827,121 @@ def test_unauth_hardware_does_not_reach_later_run_or_resume(monkeypatch):
     finally:
         workflow_runner.set_hardware({})
     assert not problems, "\n".join(problems)
+
+
+# Model call, run creation, cost write, or store write. A viewer floor on any
+# of these is a failure. recognize is steward by Lead and is checked apart
+# from this set: recognize() does not call a model and does not write a store.
+_SPEND_OR_WRITE = frozenset(
+    {
+        ("POST", "/run"),
+        ("POST", "/api/engine/run"),
+        ("POST", "/api/workflows/run"),
+        ("POST", "/api/workflows/resume"),
+        ("POST", "/api/workflows/cancel"),
+        ("POST", "/api/workflows/clear"),
+        ("POST", "/api/workflows/hardware"),
+        ("POST", "/cortex/constructor/run"),
+    }
+)
+_ROLE_NAMES = frozenset({"viewer", "steward", "admin"})
+
+
+def _dependency_floors(route) -> list[str]:
+    """Role strings closed over by the route's own dependencies.
+
+    ``require_constructor_viewer`` is a plain function, not a closure, so it
+    is matched by identity. Scanning only ``app.routes`` misses routes that
+    live on an included router.
+    """
+    dep = getattr(route, "dependant", None)
+    if dep is None:
+        return []
+    floors: list[str] = []
+    for sub in dep.dependencies:
+        call = sub.call
+        if call is require_constructor_viewer:
+            floors.append("viewer")
+            continue
+        for cell in getattr(call, "__closure__", None) or ():
+            try:
+                val = cell.cell_contents
+            except ValueError:
+                continue
+            if isinstance(val, str) and val in _ROLE_NAMES:
+                floors.append(val)
+    return floors
+
+
+def _iter_registered_routes(app):
+    from fastapi.routing import APIRoute, _IncludedRouter
+
+    def walk(routes, prefix: str):
+        for route in routes:
+            if isinstance(route, _IncludedRouter):
+                child = prefix + (route.include_context.prefix or "")
+                yield from walk(route.original_router.routes, child)
+                continue
+            if not isinstance(route, APIRoute):
+                continue
+            path = prefix + route.path
+            for method in sorted(route.methods or ()):
+                if method == "HEAD":
+                    continue
+                yield method, path, _dependency_floors(route)
+
+    yield from walk(app.router.routes, "")
+
+
+def test_spend_or_write_routes_are_not_on_viewer(monkeypatch):
+    """Fail when a spend or write route sits on the viewer dependency.
+
+    Also fail when that route has no steward or admin floor, so deleting the
+    dependency is a failure too. The walker must see included routers:
+    constructor ``/run`` and ``/api/engine/run`` are not on the flat route list.
+    """
+    app = _boot(monkeypatch, "dms", None)
+    found: dict[tuple[str, str], list[str]] = {}
+    recognize: list[str] | None = None
+    for method, path, floors in _iter_registered_routes(app):
+        key = (method, path)
+        if key in _SPEND_OR_WRITE:
+            found[key] = floors
+        if key == ("POST", "/api/workflows/recognize"):
+            recognize = floors
+    problems: list[str] = []
+    for method, path in sorted(_SPEND_OR_WRITE):
+        floors = found.get((method, path))
+        if floors is None:
+            problems.append(f"walker missed {method} {path}")
+            continue
+        if "viewer" in floors or not ({"steward", "admin"} & set(floors)):
+            problems.append(f"{method} {path} floors={floors}")
+    if recognize is None or "viewer" in recognize or "steward" not in recognize:
+        problems.append(f"POST /api/workflows/recognize floors={recognize}")
+    assert not problems, "\n".join(problems)
+
+
+@pytest.mark.parametrize(("label", "path", "body"), _WF_CONTROL, ids=[row[0] for row in _WF_CONTROL])
+def test_steward_cookie_without_header_is_401_on_workflow_control(
+    monkeypatch, sentinels, label, path, body
+):
+    """A steward cookie and no header is not a credential on these four POSTs.
+
+    recognize stays steward. The cookie path is ``/cortex``, and these routes
+    do not read it. Status 401, model sentinel stays 0.
+    """
+    from CortexOS.execution import workflow_runner
+
+    workflow_runner.set_hardware({"marker": "before"})
+    app = _boot(monkeypatch, "dms", None)
+    before = _calls(sentinels)
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("cortex_api_key", "sk-steward-test")
+            res = _post(client, path, body)
+        assert res.status_code == 401, f"{label} status={res.status_code} body={res.text[:180]}"
+        assert _calls(sentinels) == before, f"{label} sentinel moved {_calls(sentinels) - before}"
+        assert workflow_runner.get_hardware().get("marker") == "before", label
+    finally:
+        workflow_runner.set_hardware({})
