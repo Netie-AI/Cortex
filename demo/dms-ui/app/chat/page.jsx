@@ -12,6 +12,7 @@ import {
   fetchThreadMessages,
   sendThreadMessage,
 } from "../../lib/api";
+import { suggestionRefusalLine } from "../../lib/brain-refusal";
 
 function threadLabel(thread) {
   return thread.customer_label || thread.external_ref || thread.id.slice(0, 8);
@@ -226,11 +227,19 @@ export default function ChatPage() {
                 <div style={{ marginTop: 16 }}>
                   <div className="cx-label" style={{ marginBottom: 8 }}>SUGGESTED TASKS (F4)</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {suggestions.map((s) => (
-                      <button key={s.task_id} type="button" className="cx-btn" disabled={busy} onClick={() => handleChooseTask(s)}>
-                        {s.title}
-                      </button>
-                    ))}
+                    {suggestions.map((s) => {
+                      const refusalLine = suggestionRefusalLine(s);
+                      return (
+                        <div key={s.task_id}>
+                          {refusalLine ? (
+                            <p data-testid="brain-refusal" className="cx-muted">{refusalLine}</p>
+                          ) : null}
+                          <button type="button" className="cx-btn" disabled={busy} onClick={() => handleChooseTask(s)}>
+                            {s.title}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
