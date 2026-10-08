@@ -15,13 +15,20 @@ Checks, all offline:
 4. No denylisted version appears in any lock (litellm 1.82.7 and 1.82.8, the
    March 2026 compromise).
 5. Every package that ``uv.lock`` and an image lock both contain is the
-   same version ``uv.lock`` resolves for that image's target (CPython 3.11,
-   Linux x86_64). A package ``uv.lock`` holds at more than one version is
-   compared at the version that target selects. Zero matches or more than one
-   match is a mismatch, never a match. Mismatches already present on main
-   0faede64, except litellm, are listed in ``requirements/lock_skew/`` and
-   that list may only shrink: a new mismatch fails, and a listed line that
-   no longer mismatches fails until it is deleted.
+   same version ``uv.lock`` resolves for the image target. The Python version
+   is ``ARG PYTHON_VERSION`` from the four shipped Dockerfiles; they must
+   agree, each must have the arg, and ``uv.lock`` must have a resolution
+   entry for that version. An entry is a top-level ``resolution-markers``
+   line that selects the version and names it (``== '3.11.*'`` is the
+   entry for 3.11; ``>= '3.15'`` is the entry for 3.15, not for 3.16 or
+   3.99). The platform stays Linux x86_64, which is what
+   ``scripts/lock_images.py`` compiles for.
+   A package ``uv.lock`` holds at more than one version is compared at the
+   version that target selects. Zero matches or more than one match is a
+   mismatch, never a match. Mismatches already present on main 0faede64,
+   except litellm, are listed in ``requirements/lock_skew/`` and that list
+   may only shrink: a new mismatch fails, and a listed line that no longer
+   mismatches fails until it is deleted.
 6. Every shipped Dockerfile installs third-party code only with
    ``--require-hashes -r requirements/image-<variant>.lock.txt`` and installs the
    project only with ``--no-deps``.
@@ -79,8 +86,11 @@ DENYLIST: frozenset[tuple[str, str]] = frozenset(
 #: 0faede64, with the litellm lines removed. May only shrink.
 SKEW_DIR = "requirements/lock_skew"
 
-#: Image target the locks were compiled for. See ``scripts/lock_images.py``.
-IMAGE_TARGET = "CPython 3.11, Linux x86_64"
+#: Platform half of the image target. Python comes from the Dockerfiles.
+#: The image locks are compiled for Linux x86_64 (``scripts/lock_images.py``).
+IMAGE_PLATFORM = "Linux x86_64"
+
+_PYTHON_ARG = re.compile(r"^ARG\s+PYTHON_VERSION=(?P<version>\d+\.\d+)\s*(?:#.*)?$")
 
 #: variant -> extras the image installs. Mirrors ``scripts/lock_images.py``.
 VARIANTS: dict[str, tuple[str, ...]] = {
@@ -290,21 +300,68 @@ def check_image_lock(root: Path, variant: str) -> list[str]:
     return problems
 
 
-def _image_env() -> dict[str, str]:
-    """Marker env for the image locks: CPython 3.11, Linux x86_64.
+def image_target_label(python_version: str) -> str:
+    return f"CPython {python_version}, {IMAGE_PLATFORM}"
 
-    ``scripts/lock_images.py`` compiles with ``--python-version 3.11`` and
-    ``--python-platform x86_64-unknown-linux-gnu``. ``uv.lock`` may pin a
-    different version per ``resolution-markers``; the image must match the
-    slice that environment selects, not whichever version happens to be first.
+
+def dockerfile_python_versions(root: Path) -> tuple[dict[str, str], list[str]]:
+    """``ARG PYTHON_VERSION`` from each shipped Dockerfile.
+
+    A missing arg is a named error. The returned map only holds files that
+    had exactly one version.
     """
+    found: dict[str, str] = {}
+    problems: list[str] = []
+    for name in DOCKERFILES:
+        path = root / name
+        if not path.is_file():
+            problems.append(f"{name}: PYTHON_VERSION arg is missing")
+            continue
+        versions = [
+            match.group("version")
+            for raw in path.read_text(encoding="utf-8").splitlines()
+            if (match := _PYTHON_ARG.match(raw.strip()))
+        ]
+        if not versions:
+            problems.append(f"{name}: PYTHON_VERSION arg is missing")
+            continue
+        if len(set(versions)) != 1:
+            problems.append(
+                f"{name}: PYTHON_VERSION arg disagrees with itself ({', '.join(versions)})"
+            )
+            continue
+        found[name] = versions[0]
+    return found, problems
+
+
+def agreed_image_python(root: Path) -> tuple[str | None, list[str]]:
+    """The one Python version the four Dockerfiles name, or a named error."""
+    found, problems = dockerfile_python_versions(root)
+    if problems:
+        return None, problems
+    unique = set(found.values())
+    if len(unique) != 1:
+        shown = ", ".join(f"{name}={found[name]}" for name in DOCKERFILES)
+        return None, [f"image Python version disagrees: {shown}"]
+    return next(iter(unique)), []
+
+
+def _image_env(python_version: str) -> dict[str, str]:
+    """Marker env for the image locks: the Dockerfiles' CPython, Linux x86_64.
+
+    ``scripts/lock_images.py`` compiles with ``--python-platform
+    x86_64-unknown-linux-gnu``. ``uv.lock`` may pin a different version per
+    ``resolution-markers``; the image must match the slice that environment
+    selects, not whichever version happens to be first.
+    """
+    full = f"{python_version}.0"
     env = default_environment()
     env.update(
         {
-            "python_version": "3.11",
-            "python_full_version": "3.11.0",
+            "python_version": python_version,
+            "python_full_version": full,
             "implementation_name": "cpython",
-            "implementation_version": "3.11.0",
+            "implementation_version": full,
             "platform_system": "Linux",
             "platform_machine": "x86_64",
             "platform_python_implementation": "CPython",
@@ -315,13 +372,56 @@ def _image_env() -> dict[str, str]:
     return env
 
 
+def _marker_names_version(marker: str, python_version: str) -> bool:
+    """True when ``marker`` names this X.Y, including the ``X.Y.*`` wildcard.
+
+    ``3.11`` matches ``== '3.11.*'``. ``3.15`` matches ``>= '3.15'`` and does
+    not match a 3.16 or 3.99 environment. ``3.1`` does not match inside
+    ``3.11``.
+    """
+    return (
+        re.search(
+            rf"(?<![\d.]){re.escape(python_version)}(?!\d)(?!\.\d)",
+            marker,
+        )
+        is not None
+    )
+
+
+def lock_has_resolution_entry(root: Path, python_version: str) -> bool:
+    """True when a top-level ``resolution-markers`` line is this version's entry.
+
+    The line must select the image environment and name that version. A range
+    that merely includes it is the entry for the version it names, not for
+    every version the range happens to cover. No markers is no entry.
+    """
+    lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    markers = list(lock.get("resolution-markers") or [])
+    env = _image_env(python_version)
+    return any(
+        _marker_names_version(marker, python_version) and Marker(marker).evaluate(env)
+        for marker in markers
+    )
+
+
+def resolve_image_target(root: Path) -> tuple[str | None, list[str]]:
+    """Dockerfile Python version, or the named error that blocks the compare."""
+    version, problems = agreed_image_python(root)
+    if version is None:
+        return None, problems
+    if not lock_has_resolution_entry(root, version):
+        problems.append(f"uv.lock has no resolution entry for Python {version}")
+        return None, problems
+    return version, []
+
+
 def _marker_applies(markers: list[str], env: dict[str, str]) -> bool:
     if not markers:
         return True
     return any(Marker(marker).evaluate(env) for marker in markers)
 
 
-def uv_resolution_for_image(root: Path) -> dict[str, set[str]]:
+def uv_resolution_for_image(root: Path, python_version: str) -> dict[str, set[str]]:
     """Every non-project ``uv.lock`` package -> versions selected for the image.
 
     The key set is every package name in ``uv.lock`` other than the project.
@@ -333,7 +433,7 @@ def uv_resolution_for_image(root: Path) -> dict[str, set[str]]:
     """
     project_name = canonicalize_name(_pyproject(root)["project"]["name"])
     lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
-    env = _image_env()
+    env = _image_env(python_version)
     chosen: dict[str, set[str]] = {}
     for pkg in lock.get("package", []):
         name = canonicalize_name(pkg["name"])
@@ -346,13 +446,22 @@ def uv_resolution_for_image(root: Path) -> dict[str, set[str]]:
 
 
 def mismatch_lines(root: Path) -> list[str]:
-    """One line per package that an image lock and ``uv.lock`` both contain and that disagrees.
+    """One line per shared package the image lock and ``uv.lock`` disagree on.
 
+    Returns nothing when the image Python target itself is unset: that failure
+    is the named error from ``resolve_image_target``, not a version skew.
     Packages only in one of the two locks are not compared. Lines are ordered
-    by image variant, then package name. This is the text ``requirements/lock_skew/``
-    was cut from (main 0faede64, litellm lines removed).
+    by image variant, then package name.
     """
-    resolved = uv_resolution_for_image(root)
+    version, problems = resolve_image_target(root)
+    if version is None or problems:
+        return []
+    return _mismatch_lines(root, version)
+
+
+def _mismatch_lines(root: Path, python_version: str) -> list[str]:
+    resolved = uv_resolution_for_image(root, python_version)
+    label = image_target_label(python_version)
     lines: list[str] = []
     for variant in VARIANTS:
         path = root / "requirements" / f"image-{variant}.lock.txt"
@@ -366,7 +475,7 @@ def mismatch_lines(root: Path) -> list[str]:
                 shown = ", ".join(sorted(versions)) if versions else "none"
                 lines.append(
                     f"{path.name}: {name}=={image_version} has no single uv.lock version "
-                    f"for {IMAGE_TARGET} (resolved: {shown})"
+                    f"for {label} (resolved: {shown})"
                 )
                 continue
             locked = next(iter(versions))
@@ -409,9 +518,14 @@ def check_version_agreement(root: Path) -> list[str]:
 
     Compared at the image target. A mismatch that is not listed fails. A
     listed line that no longer mismatches fails until it is deleted. The list
-    cannot grow.
+    cannot grow. When the Dockerfiles do not name one Python version that
+    ``uv.lock`` resolves, that named error is the whole result: the skew list
+    is not treated as stale.
     """
-    current = mismatch_lines(root)
+    version, problems = resolve_image_target(root)
+    if version is None or problems:
+        return problems
+    current = _mismatch_lines(root, version)
     current_set = set(current)
     problems: list[str] = []
     for variant in VARIANTS:
@@ -962,6 +1076,11 @@ def main(argv: list[str] | Path | None = None) -> int:
             print(f"unknown argument {arg}", file=sys.stderr)
             return 2
         if mismatches_only:
+            _version, problems = resolve_image_target(root)
+            for problem in problems:
+                print(f"FAIL {problem}")
+            if problems:
+                return 1
             for line in mismatch_lines(root):
                 print(line)
             return 0

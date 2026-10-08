@@ -191,6 +191,28 @@ def test_boto3_left_at_1_43_108_fails(tree: Path) -> None:
     )
 
 
+def _set_python_version(tree: Path, name: str, version: str) -> None:
+    _edit(tree / name, "ARG PYTHON_VERSION=3.11", f"ARG PYTHON_VERSION={version}")
+
+
+def test_dockerfile_python_versions_disagree(tree: Path) -> None:
+    """One image at 3.12 while the other three stay at 3.11 is a named error."""
+    _set_python_version(tree, "Dockerfile.full", "3.12")
+    problems = sc.run(tree)
+    assert problems == [
+        "image Python version disagrees: "
+        "Dockerfile=3.11, Dockerfile.constructor=3.11, Dockerfile.core=3.11, Dockerfile.full=3.12"
+    ]
+
+
+def test_dockerfile_python_version_has_no_uv_resolution_entry(tree: Path) -> None:
+    """3.99 has no resolution entry. ``>= '3.15'`` names 3.15, not 3.99."""
+    for name in sc.DOCKERFILES:
+        _set_python_version(tree, name, "3.99")
+    problems = sc.run(tree)
+    assert problems == ["uv.lock has no resolution entry for Python 3.99"]
+
+
 def test_stale_skew_line_fails(tree: Path) -> None:
     path = tree / "requirements" / "lock_skew" / "image-core.txt"
     path.write_text(
@@ -217,8 +239,14 @@ def _write_min_tree(tmp_path: Path, uv_packages: str, image_pin: str) -> None:
         '[project]\nname = "netie"\nversion = "2.5.0"\ndependencies = []\n',
         encoding="utf-8",
     )
+    for name in sc.DOCKERFILES:
+        (tmp_path / name).write_text("ARG PYTHON_VERSION=3.11\n", encoding="utf-8")
     (tmp_path / "uv.lock").write_text(
-        'version = 1\n\n[[package]]\nname = "netie"\nversion = "2.5.0"\n\n' + uv_packages,
+        "version = 1\n"
+        "resolution-markers = [\n"
+        '    "python_full_version == \'3.11.*\'",\n'
+        "]\n\n"
+        '[[package]]\nname = "netie"\nversion = "2.5.0"\n\n' + uv_packages,
         encoding="utf-8",
     )
     req = tmp_path / "requirements"
