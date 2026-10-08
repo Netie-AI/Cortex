@@ -29,6 +29,43 @@ class Provenance(BaseModel):
     assumptions: str | None = None
 
 
+class AskPayloadColumn(BaseModel):
+    """1.5.0: one column of a table the consumer selected for this ask."""
+
+    name: str = Field(min_length=1)
+    type: str | None = None
+    description: str | None = None
+
+
+class AskPayloadTable(BaseModel):
+    """1.5.0: one selected table and its schema."""
+
+    name: str = Field(min_length=1)
+    columns: list[AskPayloadColumn] = Field(default_factory=list)
+    description: str | None = None
+
+
+class AskPayloadJoin(BaseModel):
+    """1.5.0: one ontology join between two selected tables."""
+
+    left_table: str = Field(min_length=1)
+    left_column: str = Field(min_length=1)
+    right_table: str = Field(min_length=1)
+    right_column: str = Field(min_length=1)
+    relation: str | None = None
+
+
+class AskPayload(BaseModel):
+    """1.5.0: selected tables, their schema and ontology joins for one question.
+
+    The payload can only narrow what the signed grant allows: a table or join
+    outside the grant is refused before any model call.
+    """
+
+    tables: list[AskPayloadTable] = Field(min_length=1)
+    joins: list[AskPayloadJoin] = Field(default_factory=list)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     session_id: str = "demo"
@@ -36,6 +73,8 @@ class AskRequest(BaseModel):
     # 1.4.0: set on every ask of a scored round. Solution memory stays empty and
     # nothing is written to memory while it is set.
     scored_pack_id: str | None = None
+    # 1.5.0 (#329): ignored unless the engine runs with its plan+SQL path on.
+    dms_payload: AskPayload | None = None
 
 
 class MemoryRead(BaseModel):
@@ -100,3 +139,42 @@ class DrillthroughResponse(BaseModel):
     row_count: int
     total_count: int | None = None
     rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class InsightsSchemaContext(BaseModel):
+    """1.5.0 request field on POST /v1/insights.
+
+    The engine reads this on ``InsightsWireIn.schema_context``, not on
+    ``InsightsAskIn``. One optional string. Present: it replaces the pack
+    table list. Absent: the pack list stays, and the response stays
+    byte-equal to the 279cbd85 pin apart from ``usage``.
+
+    Shortlist pick reasons are not a sibling field. The caller writes them
+    into this string: a table line carries ``reason=score:<score>``, a
+    column line may carry ``reason=<why>``, and a join line carries
+    ``reason=<why>``.
+    """
+
+    schema_context: str | None = Field(
+        default=None,
+        description=(
+            "Caller shortlist. Replaces the pack table list when present. "
+            "Pick reasons live in this string, not in a separate field: "
+            "table lines use reason=score:<score>, column lines may include "
+            "reason=<why>, join lines include reason=<why>."
+        ),
+    )
+
+
+class InsightsUsage(BaseModel):
+    """1.5.0 response field ``usage`` on POST /v1/insights.
+
+    Sum of the counts each FreeRoute complete() call reported. A count is
+    null when it was omitted. A missing count is never stored as 0. The
+    live crew return carries prompt_tokens and completion_tokens. total_tokens
+    is null when that return omits the key.
+    """
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None

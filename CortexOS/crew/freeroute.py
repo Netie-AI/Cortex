@@ -400,16 +400,6 @@ async def complete_core(task: str, messages: list[dict[str, Any]], **kwargs: Any
     return await run_core(core.complete, task, messages, **kwargs)
 
 
-def _reported_token(usage: Any, key: str) -> int | None:
-    """Provider token count. Missing or non-numeric is None, never 0."""
-    if not isinstance(usage, dict):
-        return None
-    value = usage.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return int(value)
-
-
 def _refusal(purpose: str, refused: str, **extra: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "ok": False,
@@ -488,7 +478,7 @@ async def complete(
             stamp=stamp.public() if stamp else None,
             measured_baseline=dict(DMS_180_BASELINE),
         )
-    usage = completion.usage if isinstance(completion.usage, dict) else {}
+    usage = completion.usage
     return {
         "ok": True,
         "status": "OK",
@@ -503,7 +493,6 @@ async def complete(
         "stamp": stamp.public() if stamp else None,
         "live_5000_ci": False,
         "measured_baseline": dict(DMS_180_BASELINE),
-        "prompt_tokens": _reported_token(usage, "prompt_tokens"),
-        "completion_tokens": _reported_token(usage, "completion_tokens"),
-        "total_tokens": _reported_token(usage, "total_tokens"),
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
     }

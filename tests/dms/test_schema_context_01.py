@@ -346,6 +346,32 @@ def test_must_fail_usage_keeps_reported_counts_including_zero(
     }
 
 
+def test_must_fail_omitted_total_stays_null(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live crew complete() omits total_tokens. Do not invent 0 or a sum."""
+
+    async def complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+        del messages, prompt, kwargs
+        if purpose == "think":
+            return {
+                "ok": True,
+                "text": "use the supplied schema",
+                "prompt_tokens": 2,
+                "completion_tokens": 1,
+            }
+        return {"ok": True, "text": SQL_OK, "prompt_tokens": 5, "completion_tokens": 4}
+
+    _bind(monkeypatch, complete)
+    body = _post(
+        api,
+        {"intent": INTENT, "ask": False, "generate": True, "schema_context": SCHEMA},
+    )
+    assert body["usage"]["prompt_tokens"] == 7
+    assert body["usage"]["completion_tokens"] == 5
+    assert body["usage"]["total_tokens"] is None
+
+
 def test_must_fail_usage_sums_retries(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -710,3 +736,32 @@ def test_absent_schema_context_matches_parent_bytes(
     raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     digest = hashlib.sha256(raw).hexdigest()
     assert digest == _ABSENT_SHA256, digest
+
+
+def test_contract_15_pins_schema_context_string_and_usage() -> None:
+    """1.5.0 pins the insights wire. Pick reasons stay inside the string."""
+    from pathlib import Path
+
+    spec = json.loads(
+        (Path(__file__).resolve().parents[2] / "contract" / "openapi-1.5.0.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert spec["info"]["version"] == "1.5.0"
+    assert "insights.ask" in spec["info"]["x-cortex-contract-routes"]
+    schemas = spec["components"]["schemas"]
+    ask = schemas["InsightsAskIn"]["properties"]
+    assert "schema_context" not in ask
+    ctx = schemas["ContractInsightsSchemaContext"]["properties"]["schema_context"]
+    assert "reason=" in ctx["description"]
+    assert "schema_context" not in (
+        schemas["ContractInsightsSchemaContext"].get("required") or []
+    )
+    usage = schemas["ContractInsightsUsage"]["properties"]
+    assert set(usage) == {"prompt_tokens", "completion_tokens", "total_tokens"}
+    assert "dms_payload" in schemas["ContractAskRequest"]["properties"]
+    op = spec["paths"]["/v1/insights"]["post"]
+    assert op["operationId"] == "insights.ask"
+    blob = json.dumps(op)
+    assert "ContractInsightsSchemaContext" in blob
+    assert "ContractInsightsUsage" in blob

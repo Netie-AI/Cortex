@@ -1,9 +1,10 @@
 """Stable Cortex Insights API for DMS generative-ask and AirGPT skin.
 
-Sibling to ``/v1/contract/*`` (not a cortex-contract version bump). Same
-``run_insights`` as Crew chrome. Callers never send provider keys; OpenVault
-FreeRoute holds them. AirGPT uses this path (plus ``/dms/sidecar/insights``);
-there is no parallel invent stack.
+Sibling to ``/v1/contract/*``. ``schema_context`` and ``usage`` are pinned in
+contract 1.5.0 (``InsightsSchemaContext``, ``InsightsUsage``). ``InsightsAskIn``
+stays the frozen component. Same ``run_insights`` as Crew chrome. Callers
+never send provider keys; OpenVault FreeRoute holds them. AirGPT uses this
+path (plus ``/dms/sidecar/insights``); there is no parallel invent stack.
 
 Lives outside ``CortexOS/api`` so the engine API tree does not import Crew
 (AST pin in tests/test_freeroute_core.py).
