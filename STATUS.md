@@ -8,6 +8,7 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 
 | Area | Issues | Last recorded state |
 |---|---|---|
+| Brain FreeRoute | #350 | Writer lane: `/dms/brain` model calls go through `CortexOS.crew.freeroute.complete`. Named refusal `model_route_unavailable` when unarmed. Draft. Nothing PASS. |
 | C7 L2 serve / retire cascade | #17 #104 #105 #288 | #104 part 2 merged `b6bd559`; G-sh NOT MET (no real shadow traffic). Phase 1b gate cases are hand-written same-shape stand-ins, unit evidence only. #288 Workday WRONG=1 open. |
 | Contract-ask stamp | #289 | Merged; L2 copies only the actual FreeRoute RouteStamp, refuses `L2_ROUTE_STAMP_MISSING`. Draft evidence only. |
 | FreeRoute / router / keys | #211 #212 #267 #272 | #211: no live Studio re-prove, armed live path unproven. #212: INCOMPLETE (fixture 40.00% and pinned-26 exact 0.00% are this-run only). #272: merged `27f79ea8`, local not proven; header/SSE copies of `served_local` PENDING. |

@@ -92,8 +92,6 @@ _DEBT_CEILING: frozenset[str] = frozenset(
         "CortexOS/routing/adapters/anthropic.py",
         "CortexOS/routing/adapters/openai.py",
         "CortexOS/routing/adapters/vllm.py",
-        "packs/dms/generative/brain.py",
-        "packs/dms/tasks/suggest.py",
     }
 )
 
@@ -288,8 +286,8 @@ def test_every_model_egress_goes_through_freeroute_or_is_listed_debt() -> None:
 
 
 def test_debt_ceiling_size_is_frozen() -> None:
-    """7 at c7469da. Lower it when a path leaves; never raise it."""
-    assert len(_DEBT_CEILING) <= 7
+    """5 after BRAIN-FREEROUTE-01. Lower it when a path leaves; never raise it."""
+    assert len(_DEBT_CEILING) <= 5
 
 
 def test_freeroute_client_is_the_chokepoint() -> None:

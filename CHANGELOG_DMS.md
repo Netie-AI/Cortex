@@ -2,6 +2,17 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## BRAIN-FREEROUTE-01 -- 2026-10-08
+
+Cortex #350. `/dms/brain` model steps (`packs/dms/generative/brain.py` `_ai`
+and `packs/dms/tasks/suggest.py` `_llm_rank_and_explain`) call
+`CortexOS.crew.freeroute.complete`. `import anthropic` and `ANTHROPIC_API_KEY`
+are gone from both files. Unarmed or no OpenVault route returns
+`model_route_unavailable` with no provider call and no invented model prose.
+`suggest(use_llm=True)` keeps the deterministic ranking, stamps `llm_used=false`
+and that refusal. `served_provider` / `served_model` are copied from the
+FreeRoute stamp. Nothing PASS.
+
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 
 Crew Insights now serves generated SQL on an L0/L1 miss only when
