@@ -1,8 +1,13 @@
 """RUN-AUTH-01: model-reaching run routes fail closed before any adapter call.
 
-Spend is ``require_spend`` (``require_role("steward")``). A viewer, including
-actor ``api_viewer``, is a named 403. Unknown and ambiguous roles do not spend.
-``DMS_AUTH_DISABLED`` is the existing test/dev short-circuit to admin.
+Spend is steward. A viewer, including actor ``api_viewer``, is a named 403.
+Unknown and ambiguous roles do not spend.
+
+``POST /api/engine/run`` uses ``require_spend`` (``get_caller``), so
+``DMS_AUTH_DISABLED`` still resolves to admin, matching parent.
+``POST /run``, workflow run/resume, and constructor ``/run`` use
+``require_spend_key``. Those routes did not call ``get_caller`` on parent,
+so the flag must not open them.
 
 These refusal cases fail on 0faede64: ``POST /run`` and ``POST /api/workflows/run``
 have no auth dependency, and ``/api/engine/run`` plus ``/cortex/constructor/run``
@@ -23,7 +28,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from CortexOS.execution.model_router import BIG_API_PLACEHOLDER
-from packs.dms.security.api_auth import Caller, get_caller, parse_api_keys
+from packs.dms.security.api_auth import Caller, get_caller, get_presented_caller, parse_api_keys
 
 KEYS = "viewer:sk-viewer-test;steward:sk-steward-test;admin:sk-admin-test"
 VIEWER_REFUSAL = "Requires role 'steward' or higher (caller='viewer' actor='api_viewer')"
@@ -216,9 +221,29 @@ def test_unauth_spend_routes_make_zero_model_calls(
     assert not problems, "\n".join(problems)
 
 
-def test_ambiguous_key_does_not_resolve():
+def test_ambiguous_key_does_not_resolve(monkeypatch, sentinels):
+    """Ambiguous secret cannot spend. Posts every spend route, so removing the
+    route guard (no dependency) makes this red even if the parser still drops
+    the key. On the earlier guard-removed run this test stayed green because
+    it only inspected ``parse_api_keys`` and never hit a route.
+    """
     callers = parse_api_keys("viewer:same-key;steward:same-key")
     assert "same-key" not in callers
+
+    app = _boot(monkeypatch, "dms", None, keys="viewer:same-key;steward:same-key")
+    problems: list[str] = []
+    with TestClient(app) as client:
+        for label, path, body, _dms in SPEND_ROUTES:
+            before_n = _calls(sentinels)
+            res = _post(client, path, body, {"X-API-Key": "same-key"})
+            if res.status_code == 200:
+                _wait_model(sentinels, before_n, seconds=3.0)
+            if res.status_code != 401 or _calls(sentinels) != before_n:
+                problems.append(
+                    f"ambiguous {label} status={res.status_code} "
+                    f"model={_calls(sentinels) - before_n} body={res.text[:160]}"
+                )
+    assert not problems, "\n".join(problems)
 
 
 def test_viewer_and_bad_roles_cannot_spend(monkeypatch, sentinels):
@@ -291,6 +316,7 @@ def test_viewer_and_bad_roles_cannot_spend(monkeypatch, sentinels):
         return Caller(role="viewer steward", actor="api_ambiguous")  # type: ignore[arg-type]
 
     injected.dependency_overrides[get_caller] = _bad_caller
+    injected.dependency_overrides[get_presented_caller] = _bad_caller
     with TestClient(injected) as client:
         for label, path, body, _dms in SPEND_ROUTES:
             before_n = _calls(sentinels)
@@ -358,11 +384,106 @@ def test_steward_and_admin_can_spend(monkeypatch, sentinels):
         _assert_spent(res, sentinels, before, "admin bearer POST /run")
 
 
-def test_dms_auth_disabled_short_circuits_to_admin(monkeypatch, sentinels):
-    """Existing get_caller behavior: the flag is admin, so spend routes open."""
+def _assert_flag_closed(res, sentinels, before_n: int, before_sock: int, label: str, problems: list[str]) -> None:
+    if res.status_code == 200:
+        _wait_model(sentinels, before_n, seconds=3.0)
+    if (
+        res.status_code not in (401, 403, 404)
+        or _calls(sentinels) != before_n
+        or sentinels["socket"] != before_sock
+    ):
+        problems.append(
+            f"{label} status={res.status_code} model={_calls(sentinels) - before_n} "
+            f"socket={sentinels['socket'] - before_sock} body={res.text[:180]}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("label", "path", "body", "dms_only"),
+    SPEND_ROUTES,
+    ids=[row[0] for row in SPEND_ROUTES],
+)
+def test_auth_disabled_does_not_widen_spend(monkeypatch, sentinels, label, path, body, dms_only):
+    """Flag on, no key. Not wider than parent.
+
+    Parent opened ``/run`` and both workflow routes with no auth, and opened
+    ``/api/engine/run`` because ``get_caller`` honors the flag. Head keeps
+    that engine opening. The other four did not consult the flag, so head
+    refuses them (narrower than parent's open ``/run`` and workflow routes).
+    Constructor unauth was already 401 on parent and stays 401 here.
+    """
+    app = _boot(monkeypatch, "dms", None)
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    problems: list[str] = []
+    with TestClient(app) as client:
+        before_n = _calls(sentinels)
+        before_sock = sentinels["socket"]
+        res = _post(client, path, body)
+        if path == "/api/engine/run":
+            if res.status_code == 200 and _calls(sentinels) == before_n:
+                _wait_model(sentinels, before_n)
+            _drain_workflows()
+            if res.status_code != 200 or _calls(sentinels) <= before_n:
+                problems.append(
+                    f"{label} flag status={res.status_code} "
+                    f"model={_calls(sentinels) - before_n} body={res.text[:180]}"
+                )
+        else:
+            _assert_flag_closed(res, sentinels, before_n, before_sock, f"{label} flag", problems)
+            if path == "/cortex/constructor/run" and res.status_code != 401:
+                problems.append(f"{label} flag status={res.status_code} want 401")
+            if path != "/cortex/constructor/run" and res.status_code != 401:
+                problems.append(f"{label} flag status={res.status_code} want 401")
+    assert not problems, "\n".join(problems)
+
+
+def test_auth_disabled_constructor_unauth_is_404_off_dms(monkeypatch, sentinels):
+    """Non-dms pack does not mount constructor. Flag on, no key, 404, sentinel 0."""
     app = _boot(monkeypatch, "ruma", None)
     monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     with TestClient(app) as client:
-        before = _calls(sentinels)
-        res = _post(client, "/run", {**RUN_BODY, "run_id": "auth_disabled"})
-        _assert_spent(res, sentinels, before, "DMS_AUTH_DISABLED POST /run")
+        before_n = _calls(sentinels)
+        res = _post(client, "/cortex/constructor/run", CTOR_BODY)
+        assert res.status_code == 404, res.text
+        assert _calls(sentinels) == before_n
+
+
+def test_auth_disabled_viewer_still_cannot_spend_where_flag_is_ignored(monkeypatch, sentinels):
+    """Flag on plus a viewer key. Engine still spends (parent get_caller).
+    The other routes ignore the flag and keep the steward refusal.
+    """
+    app = _boot(monkeypatch, "dms", None)
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    viewer = {"X-API-Key": "sk-viewer-test"}
+    problems: list[str] = []
+    with TestClient(app) as client:
+        for label, path, body, _dms in SPEND_ROUTES:
+            before_n = _calls(sentinels)
+            before_sock = sentinels["socket"]
+            res = _post(client, path, body, viewer)
+            if path == "/api/engine/run":
+                if res.status_code == 200 and _calls(sentinels) == before_n:
+                    _wait_model(sentinels, before_n)
+                _drain_workflows()
+                if res.status_code != 200 or _calls(sentinels) <= before_n:
+                    problems.append(
+                        f"viewer {label} flag status={res.status_code} "
+                        f"model={_calls(sentinels) - before_n}"
+                    )
+                continue
+            detail = ""
+            try:
+                detail = str(res.json().get("detail"))
+            except Exception:
+                detail = res.text[:180]
+            if (
+                res.status_code != 403
+                or detail != VIEWER_REFUSAL
+                or _calls(sentinels) != before_n
+                or sentinels["socket"] != before_sock
+            ):
+                problems.append(
+                    f"viewer {label} flag status={res.status_code} detail={detail!r} "
+                    f"model={_calls(sentinels) - before_n}"
+                )
+    assert not problems, "\n".join(problems)

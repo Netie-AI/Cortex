@@ -33,9 +33,11 @@ Cortex #358. `POST /run`, `POST /api/workflows/run`, `POST /api/workflows/resume
 on the existing `require_spend` (`require_role("steward")`). Viewer `api_viewer`
 is HTTP 403 with the named detail and zero adapter calls. Unknown keys are 401.
 A secret mapped to two roles is dropped. A non-rank role string is 403.
-`DMS_AUTH_DISABLED` still short-circuits `get_caller` to admin, so it opens
-these routes, including constructor `/run`, which previously ignored the flag.
-Cookie `cortex_api_key` uses the same key store. Draft only. Not a merge claim.
+`POST /api/engine/run` still uses `get_caller`, so `DMS_AUTH_DISABLED` still
+opens that one route as admin, the same as parent. `POST /run`, workflow
+run/resume, and constructor `/run` use `require_spend_key` and do not honor
+the flag. Constructor unauth with the flag stays 401. Cookie `cortex_api_key`
+uses the same key store. Draft only. Not a merge claim.
 
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 

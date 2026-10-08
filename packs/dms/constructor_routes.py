@@ -19,7 +19,7 @@ from packs.dms.security.api_auth import (
     SESSION_COOKIE,
     Caller,
     extract_api_key,
-    require_spend,
+    require_spend_key,
     resolve_caller,
     role_at_least,
 )
@@ -365,8 +365,14 @@ async def constructor_generate(
 async def constructor_run(
     request: Request,
     body: ConstructorRunBody,
-    caller: Caller = Depends(require_spend),
+    caller: Caller = Depends(require_spend_key),
 ) -> dict[str, Any]:
+    """Spend gate that ignores ``DMS_AUTH_DISABLED``.
+
+    Parent used ``require_constructor_viewer``, which never called
+    ``get_caller``. Routing this through ``require_spend`` would open it
+    as admin when the flag is set.
+    """
     from netie.execution.dag_runner import ExecutionContext, run_dag
     from netie.execution.model_router import ModelRouter
 

@@ -54,8 +54,10 @@ def _spend_not_configured() -> None:
 
 
 def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
-    """``spend_auth`` is the pack ``require_spend`` dependency. This module
+    """``spend_auth`` is the pack ``require_spend_key`` dependency. This module
     must not import ``packs`` (C2). Run and resume both enter the model runner.
+    The dependency does not honor ``DMS_AUTH_DISABLED``. These routes had no
+    auth on parent, so the flag must not start opening them.
     """
     auth = spend_auth if spend_auth is not None else _spend_not_configured
 

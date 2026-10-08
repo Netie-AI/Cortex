@@ -201,7 +201,13 @@ async def engine_run(
     body: EngineRunIn,
     caller: Caller = Depends(require_spend),
 ) -> dict[str, Any]:
-    """Resolve the selected architecture and dispatch it to an existing runner."""
+    """Resolve the selected architecture and dispatch it to an existing runner.
+
+    Parent already gated this route with ``require_role("viewer")``, which
+    calls ``get_caller``. ``require_spend`` keeps that flag behavior:
+    ``DMS_AUTH_DISABLED`` still resolves to admin. Steward is the new floor
+    when the flag is off.
+    """
     if body.action_id and not role_at_least(caller.role, "steward"):
         raise HTTPException(status_code=403, detail="Actions require role 'steward' or higher")
     request_body = body.model_dump(exclude_none=True)

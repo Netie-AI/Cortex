@@ -65,13 +65,13 @@ def create_app() -> Any:
     )
     from CortexOS.insights.routes import register_insights_routes
     from CortexOS.packaging import extra_available
-    from packs.dms.security.api_auth import require_spend
+    from packs.dms.security.api_auth import require_spend_key
 
     register_contract_routes(app)
     register_insights_routes(app)
     register_connector_routes(app)
     register_search_routes(app)
-    register_dag_run_routes(app, spend_auth=require_spend)
+    register_dag_run_routes(app, spend_auth=require_spend_key)
     register_engine_routes(app)
     register_memory_routes(app)
     register_context_routes(app)
@@ -87,7 +87,7 @@ def create_app() -> Any:
         try:
             registrar = getattr(importlib.import_module(_mod), _reg)
             if _reg == "register_workflow_routes":
-                registrar(app, spend_auth=require_spend)
+                registrar(app, spend_auth=require_spend_key)
             else:
                 registrar(app)
         except ImportError:

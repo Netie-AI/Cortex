@@ -55,8 +55,10 @@ def _spend_not_configured() -> None:
 def register_dag_run_routes(app: Any, spend_auth: Any = None) -> None:
     """Always register ``POST /run`` — core profile returns HTTP 501.
 
-    ``spend_auth`` is ``require_spend`` from the pack auth module. This file
-    must not import ``packs`` (C2). Missing wiring refuses every call.
+    ``spend_auth`` is ``require_spend_key`` from the pack auth module. This
+    file must not import ``packs`` (C2). The dependency does not honor
+    ``DMS_AUTH_DISABLED``: this route had no auth on parent, so the flag
+    must not start opening it. Missing wiring refuses every call.
     """
     from CortexOS.api.feature_stubs import feature_not_installed_detail
 

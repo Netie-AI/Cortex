@@ -52,7 +52,11 @@ def test_shared_paths_present(monkeypatch: pytest.MonkeyPatch, profile: str) -> 
 def test_core_returns_501_for_agentic_and_rag(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client(monkeypatch, "core")
 
-    r_run = client.post("/run", json={"dag": {"nodes": []}})
+    r_run = client.post(
+        "/run",
+        json={"dag": {"nodes": []}},
+        headers={"X-API-Key": "dms-demo-steward-key"},
+    )
     assert r_run.status_code == 501
     assert r_run.json()["detail"]["extra"] == "agentic"
 

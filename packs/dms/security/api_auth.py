@@ -129,28 +129,58 @@ async def get_caller(
     return caller
 
 
-def require_role(min_role: Role):
-    async def _dep(caller: Caller = Depends(get_caller)) -> Caller:
-        if not role_at_least(caller.role, min_role):
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    f"Requires role {min_role!r} or higher "
-                    f"(caller={caller.role!r} actor={caller.actor!r})"
-                ),
-            )
-        try:
-            from packs.dms.audit.ledger import set_rls_context
+def _refuse_unless(caller: Caller, min_role: str) -> Caller:
+    if not role_at_least(caller.role, min_role):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Requires role {min_role!r} or higher "
+                f"(caller={caller.role!r} actor={caller.actor!r})"
+            ),
+        )
+    try:
+        from packs.dms.audit.ledger import set_rls_context
 
-            set_rls_context(role=caller.role, tenant_id="default")
-        except Exception:
-            pass
-        return caller
+        set_rls_context(role=caller.role, tenant_id="default")
+    except Exception:
+        pass
+    return caller
+
+
+async def get_presented_caller(
+    request: Request,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+    authorization: str | None = Header(None),
+) -> Caller:
+    """Same key store as ``get_caller``, without the ``DMS_AUTH_DISABLED`` short-circuit.
+
+    Routes that did not call ``get_caller`` on parent must not start honoring
+    that flag. Honoring it would open them as admin.
+    """
+    key = extract_api_key(x_api_key, authorization) or request.cookies.get(SESSION_COOKIE)
+    caller = resolve_caller(key)
+    if caller is None:
+        raise HTTPException(status_code=401, detail="Valid API key required (X-API-Key or Bearer)")
+    return caller
+
+
+def require_role(min_role: Role, *, honor_auth_disabled: bool = True):
+    if honor_auth_disabled:
+        async def _dep(caller: Caller = Depends(get_caller)) -> Caller:
+            return _refuse_unless(caller, min_role)
+    else:
+        async def _dep(caller: Caller = Depends(get_presented_caller)) -> Caller:
+            return _refuse_unless(caller, min_role)
 
     return _dep
 
 
 # Model spend. Viewer can look. Steward and admin can spend. Any other role
-# string fails closed inside role_at_least. DMS_AUTH_DISABLED still resolves
-# to admin via get_caller (test/dev only).
+# string fails closed inside role_at_least.
+# ``require_spend`` still follows ``get_caller``, so ``DMS_AUTH_DISABLED``
+# resolves to admin. That matches routes which already used ``get_caller``
+# on parent (``POST /api/engine/run``).
+# ``require_spend_key`` is the same rank and the same key store, and it does
+# not honor the flag. Use it on routes that did not call ``get_caller`` before.
 require_spend = require_role("steward")
+require_spend_key = require_role("steward", honor_auth_disabled=False)

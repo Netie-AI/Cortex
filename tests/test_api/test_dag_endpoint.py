@@ -10,7 +10,8 @@ from tests.test_execution.test_cost_ledger_and_executor import StubAdapter
 
 
 def test_judged_node_end_to_end_via_test_client(monkeypatch):
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "steward:sk-steward-dag")
     app = create_app()
 
     dag = {
@@ -47,6 +48,7 @@ def test_judged_node_end_to_end_via_test_client(monkeypatch):
                 "run_id": "api_run",
                 "context": {},
             },
+            headers={"X-API-Key": "sk-steward-dag"},
         )
     assert r.status_code == 200
     payload = r.json()
@@ -61,7 +63,8 @@ def test_judged_node_end_to_end_via_test_client(monkeypatch):
 
 
 def test_run_cost_endpoint_returns_total_and_records(monkeypatch):
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "steward:sk-steward-dag")
     app = create_app()
 
     with TestClient(app) as client:
@@ -90,7 +93,11 @@ def test_run_cost_endpoint_returns_total_and_records(monkeypatch):
                 {"id": "e1", "kind": "EMIT", "tier": 0, "inputs": ["j1"]},
             ],
         }
-        run = client.post("/run", json={"dag": dag, "run_id": "cost_probe"})
+        run = client.post(
+            "/run",
+            json={"dag": dag, "run_id": "cost_probe"},
+            headers={"X-API-Key": "sk-steward-dag"},
+        )
         assert run.status_code == 200
         cost = client.get("/api/engine/runs/cost_probe/cost")
     assert cost.status_code == 200
