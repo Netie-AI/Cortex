@@ -3,6 +3,7 @@
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. Leave next prompts in
 `docs/dms/packets/NEXT_LANES.md`. Live work is GitHub issues; this file only points at
 them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
+> **2026-10-06 (merge tiers):** `tier:fast` / `tier:full` -- `.cursor/rules/merge-perfect.mdc` § Merge tiers is the canonical bar.
 
 ## Live (open issues; last state recorded here)
 

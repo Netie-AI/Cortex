@@ -37,6 +37,8 @@ parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
 6. **Keep handoff files out of PR diffs** (`CLAUDE_HANDOFF.md`, `CURSOR_HANDOFF.md`,
    output of `scripts/handoff.py --write`).
 
+**PR merge tiers** (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers is the canonical bar. Until #339 lands, CI `auto-merge` merges any non-draft green PR, so no PR leaves draft before its tier's pre-merge steps are done on its exact head, and a `tier:full` PR stays draft until its manual squash.
+
 ## Working alongside other lanes
 
 - Run `git log --oneline -3` before `git commit --amend` or any rebase. Never rewrite a

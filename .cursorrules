@@ -46,6 +46,7 @@ looks local, and several of them fail silently.
   all of lint-type-test / base-install / protected-paths / rls-proof / secrets-scan
   SUCCESS, mergeable CLEAN. CI job `auto-merge` squash-merges. Do not keep dead
   drafts, LangGraph, Outlier scraping, or duplicate parked "review this capture" items.
+- Merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers is the canonical bar. Until #339 lands, CI `auto-merge` merges any non-draft green PR, so no PR leaves draft before its tier's pre-merge steps are done on its exact head, and a `tier:full` PR stays draft until its manual squash.
 
 ## Verify
 

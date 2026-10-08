@@ -81,6 +81,7 @@ reads the corpus as proof that it can.
 ## 6. Working alongside other lanes
 
 See `AGENTS.md`.
+Merge tiers (`tier:fast` / `tier:full`): `.cursor/rules/merge-perfect.mdc` § Merge tiers is the canonical bar. Until #339 lands, CI `auto-merge` merges any non-draft green PR, so no PR leaves draft before its tier's pre-merge steps are done on its exact head, and a `tier:full` PR stays draft until its manual squash.
 
 ## 7. Verifying, honestly
 
