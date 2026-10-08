@@ -194,13 +194,13 @@ attrs==26.1.0 \
     #   aiohttp
     #   jsonschema
     #   referencing
-boto3==1.43.108 \
-    --hash=sha256:03341f089158368acf83e921aca98b706095322ca52bc4c039a616940aa5ad41 \
-    --hash=sha256:19e9da95ef0c494e27052049a42137550e66730509bb613e76eaa30ddf9a7170
+boto3==1.43.110 \
+    --hash=sha256:0251b67d99cc0e7b958db48e7dd149094d453377fcd03299fde7329f975db2e6 \
+    --hash=sha256:74b811e6def4b30d685d4539a9ead3796f0e03a2112f00134e0f5e583ad8b098
     # via litellm
-botocore==1.43.108 \
-    --hash=sha256:ab9d16c6b4350aaa54ed28202dfa2998b2d735fdbf3247eb60af469d8d48a5b8 \
-    --hash=sha256:ee4f75cf3bdbb0da7912e089950e8112f692016539d939312c771499958e6cfd
+botocore==1.43.110 \
+    --hash=sha256:888cd54d59502e2195dac30805e5c08dd1be5416932a3793373e81b8f463e006 \
+    --hash=sha256:9f5ae5685b4d7129e32f6084ae8683d5857a1d60d77528b8da77bb53b9dff48f
     # via
     #   boto3
     #   s3transfer
