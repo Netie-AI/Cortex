@@ -161,6 +161,21 @@ def test_precall_read_failure_uses_default_fallback_caps(
     assert measured.requested == "model-b"
     assert "measured best" in measured.reason
 
+    armed_openvault.reply("CONTROL")
+    control = fr.complete(
+        "learn-soft",
+        [{"role": "user", "content": "control"}],
+        max_tokens=4000,
+    )
+    assert control.ok is True
+    assert control.stamp is not None
+    assert control.stamp.requested == "model-b"
+    assert control.stamp.route_source == ""
+    assert control.stamp.public()["route_source"] == ""
+    control_body = armed_openvault.chat_calls[-1]["body"]
+    assert control_body["max_tokens"] == 4000
+    assert control_body.get("route_source") != "default_fallback"
+
     real = sqlite3.connect
 
     class _ReadOSError:
@@ -184,7 +199,11 @@ def test_precall_read_failure_uses_default_fallback_caps(
 
     monkeypatch.setattr(sqlite3, "connect", _connect)
     armed_openvault.reply(SERVED)
-    out = fr.complete("learn-soft", [{"role": "user", "content": PROMPT}])
+    out = fr.complete(
+        "learn-soft",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+    )
     assert out.ok is True
     assert out.text == SERVED
     assert out.stamp is not None
@@ -193,7 +212,32 @@ def test_precall_read_failure_uses_default_fallback_caps(
     assert len(out.stamp.candidates) <= caps["max_candidates"]
     body = armed_openvault.chat_calls[-1]["body"]
     assert body["max_tokens"] == caps["max_tokens"]
+    assert body["route_source"] == "default_fallback"
+    assert out.stamp.route_source == "default_fallback"
+    assert out.stamp.public()["route_source"] == "default_fallback"
     assert out.stamp.learn_row_failed is False
+
+    armed_openvault.reply(SERVED)
+    via_core = asyncio.run(
+        complete_core(
+            "learn-soft",
+            [{"role": "user", "content": PROMPT}],
+            max_tokens=2048,
+        )
+    )
+    assert via_core.stamp is not None
+    assert via_core.stamp.route_source == "default_fallback"
+    core_body = armed_openvault.chat_calls[-1]["body"]
+    assert core_body["max_tokens"] == caps["max_tokens"]
+    assert core_body["route_source"] == "default_fallback"
+
+    armed_openvault.reply(SERVED)
+    via_crew = asyncio.run(crew_complete(prompt=PROMPT, purpose="think"))
+    assert via_crew["ok"] is True
+    assert via_crew["stamp"]["route_source"] == "default_fallback"
+    crew_body = armed_openvault.chat_calls[-1]["body"]
+    assert crew_body["max_tokens"] == caps["max_tokens"]
+    assert crew_body["route_source"] == "default_fallback"
 
 
 def test_pack_budget_refusal_stays_hard(armed_openvault) -> None:

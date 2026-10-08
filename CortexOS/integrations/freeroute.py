@@ -102,6 +102,7 @@ _last_arming: dict[tuple[str, str], Arming] = {}
 _store_error: dict[str, str] = {}
 
 _journal_var: ContextVar[list[RouteStamp] | None] = ContextVar("freeroute_journal", default=None)
+_precall_read_failed: ContextVar[bool] = ContextVar("freeroute_precall_read_failed", default=False)
 _shadow_var: ContextVar[bool] = ContextVar("freeroute_shadow", default=False)
 _split_var: ContextVar[str] = ContextVar("freeroute_split", default="product")
 _transport_var: ContextVar[tuple[Callable[..., Any], str] | None] = ContextVar(
@@ -739,12 +740,16 @@ def _write_row(
 def _rows(task: str) -> list[sqlite3.Row]:
     """Learning rows only. Shadow / held-out / benchmark never train pick().
 
-    A pre-call read failure is empty stats. ``pick`` then stays inside
-    ``DEFAULT_FALLBACK_CAPS`` instead of refusing the model call.
+    A pre-call read failure is empty stats and sets ``_precall_read_failed``.
+    ``pick`` then stays inside ``DEFAULT_FALLBACK_CAPS``. A missing store file
+    is not a failure.
     """
+    failed = False
     try:
+        path = store_path()
         with _connect(write=False) as con:
             if con is None:
+                failed = path.is_file()
                 return []
             con.row_factory = sqlite3.Row
             try:
@@ -758,10 +763,14 @@ def _rows(task: str) -> list[sqlite3.Row]:
                 )
             except (sqlite3.Error, OSError) as exc:
                 _note_store_error(exc)
+                failed = True
                 return []
     except (sqlite3.Error, OSError) as exc:
         _note_store_error(exc)
+        failed = True
         return []
+    finally:
+        _precall_read_failed.set(failed)
 
 
 def _validity(row: Mapping[str, Any]) -> float:
@@ -961,6 +970,7 @@ class RouteStamp:
     served_local: bool = False
     served_reason: str = ""
     learn_row_failed: bool = False
+    route_source: str = ""
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -1163,12 +1173,18 @@ def complete(
             return Completion(ok=False, stamp=stamp, reason=reason)
 
     chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+    fallback = _precall_read_failed.get()
+    token_limit = int(max_tokens)
+    if fallback:
+        token_limit = min(token_limit, int(DEFAULT_FALLBACK_CAPS["max_tokens"]))
     body: dict[str, Any] = {
         "model": chosen.requested,
         "messages": messages,
-        "max_tokens": int(max_tokens),
+        "max_tokens": token_limit,
         "stream": False,
     }
+    if fallback:
+        body["route_source"] = "default_fallback"
     if temperature is not None:
         body["temperature"] = float(temperature)
     if tools:
@@ -1291,6 +1307,8 @@ def complete(
             message = {}
             stamp.usable = False
     stamp.error = reason
+    if fallback:
+        stamp.route_source = "default_fallback"
     if not _write_row(
         stamp,
         scored=scored,
