@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from CortexOS.insights import caller_ontology as caller_onto
 from CortexOS.insights import keys as insight_keys
+from CortexOS.insights import schema_context as schema_mod
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -72,6 +73,9 @@ class InsightsWireIn(InsightsAskIn):
     query_plan: Any = None
     ranked_metric: Any = None
     generate_retry: Any = None
+    #: Granted-schema prompt (DMS ``schema_context``). Replaces the pack table
+    #: list when present. Any so a non-string is a named 422, not a pydantic 422.
+    schema_context: Any = None
 
 
 #: Documented on the (non-contract) ``insights.ask`` operation only.
@@ -124,6 +128,7 @@ def _caller_refused(purpose: str) -> JSONResponse:
         "values": [],
         "live_5000_ci": False,
     }
+    body["usage"] = schema_mod.consume_usage()
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
 
@@ -172,6 +177,7 @@ def _invalid_request(
         "sql_used": None,
         "audit_id": None,
         "live_5000_ci": False,
+        "usage": schema_mod.consume_usage(),
     }
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=status_code)
@@ -303,10 +309,19 @@ async def execute_insights(
     from CortexOS.crew import insights as insights_mod
     from CortexOS.crew.engine_bridge import LocalEngineBridge
 
+    schema_mod.clear_usage()
     intent = resolved_intent(body)
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     wire = await wire_body(body, request)
+    raw_schema = wire.schema_context
+    if isinstance(raw_schema, str):
+        schema_mod.log_schema_context(raw_schema)
+    schema_problem = schema_mod.problem(raw_schema)
+    if schema_problem is not None:
+        code, detail = schema_problem
+        return _invalid_request(code, detail, intent=intent)
+    schema_text = schema_mod.accepted_text(raw_schema)
     extras = sorted((wire.model_extra or {}).keys())
     if extras:
         return _invalid_request(
@@ -358,6 +373,7 @@ async def execute_insights(
         bearer=bearer,
         query_plan=query_plan,
         caller=caller,
+        schema_context=schema_text,
     )
     # A plain demo body (no request-extension field) gets exactly the envelope
     # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
@@ -370,6 +386,7 @@ async def execute_insights(
     out = stamp_api(result, consumer=consumer, alias=alias)
     if extended:
         out["api"]["received"] = _received(wire, source)
+    out["usage"] = schema_mod.consume_usage()
     return out
 
 
