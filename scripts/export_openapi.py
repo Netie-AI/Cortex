@@ -39,6 +39,7 @@ CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
         "ledger.verify",
         "tool.registry",
         "drillthrough",
+        "insights.ask",
     }
 )
 
@@ -75,9 +76,13 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
     from cortex_contract.answer import (
         Answer,
         AskRequest,
+        ContractInsightsTrace,
+        ContractInsightsTraceRequest,
         ContributingSource,
         DrillthroughRequest,
         DrillthroughResponse,
+        InsightsSchemaContext,
+        InsightsUsage,
         Provenance,
     )
     from cortex_contract.execution import (
@@ -102,6 +107,10 @@ def _contract_schemas() -> tuple[str, dict[str, Any]]:
         ContributingSource,
         DrillthroughRequest,
         DrillthroughResponse,
+        ContractInsightsTrace,
+        ContractInsightsTraceRequest,
+        InsightsSchemaContext,
+        InsightsUsage,
         PoolSpec,
         Manifest,
         SubmitRequest,
@@ -221,8 +230,80 @@ def build_spec() -> dict[str, Any]:
         schemas[key] = body
     components["schemas"] = schemas
     spec["components"] = components
+    _pin_insights_wire(spec)
 
     return json.loads(json.dumps(spec, sort_keys=True, default=str))
+
+
+def _pin_insights_wire(spec: dict[str, Any]) -> None:
+    """Pin schema_context, usage, and the step trace on POST /v1/insights.
+
+    ``InsightsAskIn`` stays the frozen component. ``schema_context`` is
+    ``ContractInsightsSchemaContext``. ``step_trace`` is
+    ``ContractInsightsTraceRequest``. ``usage`` is ``ContractInsightsUsage``.
+    ``steps`` is ``ContractInsightsTrace``. No version bump: this amends 1.5.0.
+    """
+    paths = spec.get("paths")
+    if not isinstance(paths, dict):
+        return
+    path_item = paths.get("/v1/insights")
+    if not isinstance(path_item, dict):
+        return
+    op = path_item.get("post")
+    if not isinstance(op, dict):
+        return
+    request = op.get("requestBody")
+    if not isinstance(request, dict):
+        request = {}
+        op["requestBody"] = request
+    content = request.get("content")
+    if not isinstance(content, dict):
+        content = {}
+        request["content"] = content
+    app_json = content.get("application/json")
+    if not isinstance(app_json, dict):
+        app_json = {}
+        content["application/json"] = app_json
+    existing = app_json.get("schema")
+    if not isinstance(existing, dict):
+        existing = {"$ref": "#/components/schemas/InsightsAskIn"}
+    app_json["schema"] = {
+        "allOf": [
+            existing,
+            {"$ref": "#/components/schemas/ContractInsightsSchemaContext"},
+            {"$ref": "#/components/schemas/ContractInsightsTraceRequest"},
+        ]
+    }
+    responses = op.get("responses")
+    if not isinstance(responses, dict):
+        responses = {}
+        op["responses"] = responses
+    ok = responses.get("200")
+    if not isinstance(ok, dict):
+        ok = {"description": "Insights envelope"}
+        responses["200"] = ok
+    ok_content = ok.get("content")
+    if not isinstance(ok_content, dict):
+        ok_content = {}
+        ok["content"] = ok_content
+    ok_json = ok_content.get("application/json")
+    if not isinstance(ok_json, dict):
+        ok_json = {}
+        ok_content["application/json"] = ok_json
+    usage_obj: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "usage": {"$ref": "#/components/schemas/ContractInsightsUsage"},
+        },
+    }
+    trace_obj: dict[str, Any] = {
+        "$ref": "#/components/schemas/ContractInsightsTrace",
+    }
+    prior = ok_json.get("schema")
+    if isinstance(prior, dict):
+        ok_json["schema"] = {"allOf": [prior, usage_obj, trace_obj]}
+    else:
+        ok_json["schema"] = {"allOf": [usage_obj, trace_obj]}
 
 
 def main(argv: list[str] | None = None) -> int:

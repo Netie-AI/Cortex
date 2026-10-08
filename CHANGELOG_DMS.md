@@ -2,6 +2,18 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## STEP-TRACE-01 -- 2026-10-08
+
+Cortex #353. `POST /v1/insights` can return `steps` when the caller sends
+`step_trace: true` and a `schema_context`. Step 1 reads the structured
+`shortlist` stand-in on `InsightsWireIn` (null reasons stay empty). With
+only `schema_context`, step 1 lists those tables with empty reasons and
+does not parse `reason=` tokens. Later steps are the think, generate,
+retry, check, refuse, and execute events that actually ran. Execute SQL
+is the string that ran. The row sample reuses the schema_context row cap
+and is PII-masked. No new model call. Contract stays 1.5.0. This head is
+not final until it is rebuilt on the #351 merge oid.
+
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 
 Crew Insights now serves generated SQL on an L0/L1 miss only when

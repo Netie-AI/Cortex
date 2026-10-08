@@ -41,6 +41,7 @@ from CortexOS.execution.gen_cfsm import (
     route_step,
 )
 from CortexOS.execution.scoreboard import embed_goal
+from CortexOS.insights import schema_context as schema_mod
 
 HORIZON = 3
 JEPA_PATH = "proxy"
@@ -162,6 +163,18 @@ async def _call_runner(
     except TypeError:
         out = await runner(None, purpose=purpose, prompt=prompt)
     return out if isinstance(out, dict) else {}
+
+
+def _trace_refuse(reason: str, stamp: Any = None) -> None:
+    from CortexOS.insights import step_trace
+
+    step_trace.note_refuse(reason, stamp)
+
+
+def _trace_check(ok: bool, reason: str, stamp: Any = None) -> None:
+    from CortexOS.insights import step_trace
+
+    step_trace.note_check(ok=ok, refusal=None if ok else reason, stamp=stamp)
 
 
 def _check_sql(
@@ -322,6 +335,19 @@ def _g1_plan_lines(g1: Mapping[str, Any] | None) -> list[str]:
     return lines
 
 
+def _prompt_ontology_lines(
+    ranking: Mapping[str, Any], schema_context: str | None
+) -> list[str]:
+    """Pack table lines, or the caller schema when one was sent.
+
+    The caller schema replaces the pack list. It is not appended to it.
+    """
+    text = schema_mod.supplied_schema(schema_context)
+    if text:
+        return [text]
+    return _ontology_lines(ranking)
+
+
 def _think_prompt(
     intent: str,
     ranking: Mapping[str, Any],
@@ -331,12 +357,13 @@ def _think_prompt(
     g1: Mapping[str, Any] | None = None,
     prior_sql: str = "",
     decision: str = "",
+    schema_context: str | None = None,
 ) -> str:
     lines = [
         "Think which ontology tables and metrics answer the intent.",
         "Do not emit SQL. Do not invent warehouse numbers, keys, or live CI.",
         "ONTOLOGY:",
-        *_ontology_lines(ranking),
+        *_prompt_ontology_lines(ranking, schema_context),
         *_g1_plan_lines(g1),
         f"INTENT: {intent}",
     ]
@@ -365,10 +392,11 @@ def _sql_prompt(
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    schema_context: str | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
-        *_ontology_lines(ranking),
+        *_prompt_ontology_lines(ranking, schema_context),
         *_g1_plan_lines(g1),
         "",
         f"INTENT: {intent}",
@@ -598,6 +626,7 @@ async def climb(
     bearer: str | None = None,
     ideas: Sequence[str] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
@@ -606,46 +635,53 @@ async def climb(
     identity = fr.identity_for("generative_ask")
     arm = fr.arming()
     if not arm.get("armed"):
+        reason = (
+            "OpenVault FreeRoute unarmed: "
+            + str(arm.get("detail") or "unreachable")
+            + " (no invent-green keys; no invent-green CoT)"
+        )
+        _trace_refuse(reason)
         return _envelope(
             ok=False,
             status="REFUSE",
             arm=arm,
             identity=identity,
             climb=_climb_meta(final="UNARMED", reason="FreeRoute unarmed"),
-            refuse_reason=(
-                "OpenVault FreeRoute unarmed: "
-                + str(arm.get("detail") or "unreachable")
-                + " (no invent-green keys; no invent-green CoT)"
-            ),
+            refuse_reason=reason,
         )
 
     run_id = "cot-" + uuid.uuid4().hex[:8]
     g1 = await _g1_skeleton(text or "empty", run_id)
     if not g1.get("ok") and g1.get("stage") == "compile":
+        reason = "gen_cfsm compile refused the think-path IR"
+        _trace_refuse(reason)
         return _envelope(
             ok=False,
             status="REFUSE",
             arm=arm,
             identity=identity,
             climb=_climb_meta(final="G1_COMPILE_FAIL", g1=g1),
-            refuse_reason="gen_cfsm compile refused the think-path IR",
+            refuse_reason=reason,
         )
 
-    allowed = _allowed_tables(ranking)
+    supplied = schema_mod.supplied_schema(schema_context)
+    allowed = schema_mod.schema_idents(supplied) if supplied else _allowed_tables(ranking)
     if not allowed:
+        reason = (
+            "no ranked ontology tables; cannot prove SQL stays in scope "
+            "(no invent-green CoT)"
+        )
+        _trace_refuse(reason)
         return _envelope(
             ok=False,
             status="REFUSE",
             arm=arm,
             identity=identity,
             climb=_climb_meta(final="NO_ONTOLOGY", g1=g1),
-            refuse_reason=(
-                "no ranked ontology tables; cannot prove SQL stays in scope "
-                "(no invent-green CoT)"
-            ),
+            refuse_reason=reason,
         )
     runner = complete or fr.complete
-    columns = _ranked_columns(ranking)
+    columns = {} if supplied else _ranked_columns(ranking)
     idea_list = _idea_lines(ideas)
     g1_consumed = bool(_g1_plan_lines(g1))
     prior_sql_consumed = False
@@ -655,7 +691,9 @@ async def climb(
     think = await _call_runner(
         runner,
         purpose="think",
-        prompt=_think_prompt(text, ranking, ideas=idea_list, g1=g1),
+        prompt=_think_prompt(
+            text, ranking, ideas=idea_list, g1=g1, schema_context=supplied
+        ),
         bearer=bearer,
     )
     if not think.get("ok"):
@@ -709,6 +747,7 @@ async def climb(
             ideas=idea_list,
             g1=g1,
             query_plan=query_plan,
+            schema_context=supplied,
         )
         if journal is not None:
             with journal as stamps:
@@ -749,10 +788,38 @@ async def climb(
         pulled = extract_statement(str(gen.get("text") or ""))
         sql = pulled.sql
         extracted = str(sql or "").strip()
+        if supplied and extracted:
+            # Refuse before any retry. A retry would put this SQL back in the
+            # next prompt. The reason names the gate and does not include SQL.
+            stop = schema_mod.ungranted_reason(extracted, supplied)
+            if stop is None:
+                stop = schema_mod.brute_force_reason(extracted)
+            if stop:
+                _trace_refuse(stop, gen.get("stamp"))
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="SCHEMA_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=stop,
+                )
         if sql is None:
             # Name why nothing was extracted (a second statement, no FROM)
             # instead of validating "" and reporting "empty sql".
             checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
+        elif supplied:
+            checked = fr.validate_sql(sql, allowed, columns={})
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
         last_sql = str(checked.get("sql") or sql or last_sql)
@@ -776,6 +843,7 @@ async def climb(
         stall = int(routed.get("stall_count") or 0)
         prev_collapse = collapse
         last_reason = str(checked.get("reason") or last_reason)
+        _trace_check(predicates_pass, last_reason, gen.get("stamp"))
         granted = DECISION_TERMINATE if predicates_pass else routed["decision"]
         steps.append(
             {
@@ -836,6 +904,7 @@ async def climb(
                     g1=g1,
                     prior_sql=last_sql,
                     decision=str(granted),
+                    schema_context=supplied,
                 ),
                 bearer=bearer,
             )
@@ -872,6 +941,12 @@ async def climb(
             continue
         break
 
+    reason = (
+        "CoT/route/improve exhausted horizon without ontology-valid SQL: "
+        + last_reason
+        + " (no invent-green SQL; not COMPLETE)"
+    )
+    _trace_refuse(reason)
     return _envelope(
         ok=False,
         status="REFUSE",
@@ -886,11 +961,7 @@ async def climb(
             g1_consumed=g1_consumed,
             prior_sql_consumed=prior_sql_consumed,
         ),
-        refuse_reason=(
-            "CoT/route/improve exhausted horizon without ontology-valid SQL: "
-            + last_reason
-            + " (no invent-green SQL; not COMPLETE)"
-        ),
+        refuse_reason=reason,
     )
 
 

@@ -1,9 +1,10 @@
 """Stable Cortex Insights API for DMS generative-ask and AirGPT skin.
 
-Sibling to ``/v1/contract/*`` (not a cortex-contract version bump). Same
-``run_insights`` as Crew chrome. Callers never send provider keys; OpenVault
-FreeRoute holds them. AirGPT uses this path (plus ``/dms/sidecar/insights``);
-there is no parallel invent stack.
+Sibling to ``/v1/contract/*``. ``schema_context`` and ``usage`` are pinned in
+contract 1.5.0 (``InsightsSchemaContext``, ``InsightsUsage``). ``InsightsAskIn``
+stays the frozen component. Same ``run_insights`` as Crew chrome. Callers
+never send provider keys; OpenVault FreeRoute holds them. AirGPT uses this
+path (plus ``/dms/sidecar/insights``); there is no parallel invent stack.
 
 Lives outside ``CortexOS/api`` so the engine API tree does not import Crew
 (AST pin in tests/test_freeroute_core.py).
@@ -19,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from CortexOS.insights import caller_ontology as caller_onto
 from CortexOS.insights import keys as insight_keys
+from CortexOS.insights import schema_context as schema_mod
+from CortexOS.insights import step_trace
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -72,6 +75,15 @@ class InsightsWireIn(InsightsAskIn):
     query_plan: Any = None
     ranked_metric: Any = None
     generate_retry: Any = None
+    #: Granted-schema prompt (DMS ``schema_context``). Replaces the pack table
+    #: list when present. Any so a non-string is a named 422, not a pydantic 422.
+    schema_context: Any = None
+    #: Structured shortlist stand-in until #351 ships this field. Step 1 reads
+    #: it directly. Any so a bad shape is ignored, not a pydantic 422.
+    shortlist: Any = None
+    #: Ask for the governed step trace. True plus a present schema_context
+    #: attaches ``steps``. Anything else leaves the envelope unchanged.
+    step_trace: Any = None
 
 
 #: Documented on the (non-contract) ``insights.ask`` operation only.
@@ -124,6 +136,7 @@ def _caller_refused(purpose: str) -> JSONResponse:
         "values": [],
         "live_5000_ci": False,
     }
+    body["usage"] = schema_mod.consume_usage()
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
 
@@ -172,6 +185,7 @@ def _invalid_request(
         "sql_used": None,
         "audit_id": None,
         "live_5000_ci": False,
+        "usage": schema_mod.consume_usage(),
     }
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=status_code)
@@ -303,10 +317,19 @@ async def execute_insights(
     from CortexOS.crew import insights as insights_mod
     from CortexOS.crew.engine_bridge import LocalEngineBridge
 
+    schema_mod.clear_usage()
     intent = resolved_intent(body)
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     wire = await wire_body(body, request)
+    raw_schema = wire.schema_context
+    if isinstance(raw_schema, str):
+        schema_mod.log_schema_context(raw_schema)
+    schema_problem = schema_mod.problem(raw_schema)
+    if schema_problem is not None:
+        code, detail = schema_problem
+        return _invalid_request(code, detail, intent=intent)
+    schema_text = schema_mod.accepted_text(raw_schema)
     extras = sorted((wire.model_extra or {}).keys())
     if extras:
         return _invalid_request(
@@ -350,27 +373,43 @@ async def execute_insights(
             )
             if bearer is None:
                 return _caller_refused("generative_ask")
-    result = await insights_mod.run_insights(
-        intent,
-        bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
-        ask=wire.ask,
-        generate=wire.generate,
-        bearer=bearer,
-        query_plan=query_plan,
-        caller=caller,
-    )
-    # A plain demo body (no request-extension field) gets exactly the envelope
-    # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
-    # only for callers that sent an extension field.
-    extended = bool(set(wire.model_fields_set) - set(InsightsAskIn.model_fields))
-    ranking = result.get("ontology") if isinstance(result, dict) else None
-    source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
-    if extended:
-        result["ontology_source"] = source
-    out = stamp_api(result, consumer=consumer, alias=alias)
-    if extended:
-        out["api"]["received"] = _received(wire, source)
-    return out
+    tracing = wire.step_trace is True and schema_text is not None
+    if tracing:
+        step_trace.begin(wire.shortlist, schema_text)
+    try:
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
+            ask=wire.ask,
+            generate=wire.generate,
+            bearer=bearer,
+            query_plan=query_plan,
+            caller=caller,
+            schema_context=schema_text,
+        )
+        # A plain demo body (no request-extension field) gets exactly the envelope
+        # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
+        # only for callers that sent an extension field.
+        # step_trace alone must not mark the request extended. A trace ask with
+        # no schema_context stays byte-equal to the parent envelope.
+        extended = bool(
+            set(wire.model_fields_set) - set(InsightsAskIn.model_fields) - {"step_trace"}
+        )
+        ranking = result.get("ontology") if isinstance(result, dict) else None
+        source = str((ranking or {}).get("source") or caller_onto.SOURCE_PACK)
+        if extended:
+            result["ontology_source"] = source
+        out = stamp_api(result, consumer=consumer, alias=alias)
+        if extended:
+            out["api"]["received"] = _received(wire, source)
+        out["usage"] = schema_mod.consume_usage()
+        # No-op unless begin() ran. A replaced attach that always writes steps
+        # breaks the absent-field golden.
+        step_trace.attach(out)
+        return out
+    finally:
+        if tracing:
+            step_trace.clear()
 
 
 @router.get("", operation_id="insights.law")

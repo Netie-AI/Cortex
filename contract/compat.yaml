@@ -71,7 +71,7 @@ supported:
 
   - version: "1.4"
     spec: openapi-1.4.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive C-MEM (#290) per-Space memory: Answer gains memory_ids_read
@@ -80,6 +80,29 @@ supported:
       reused (a stored solution re-run on current data; never a validation).
       AskRequest gains optional scored_pack_id. 1.3 clients ignore the new
       fields. canonical_manifest_bytes unchanged.
+
+  - version: "1.5"
+    spec: openapi-1.5.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Amends the 1.5.0 line #329 owns. Does not cut 1.6.0.
+      #329: AskRequest gains optional dms_payload (selected tables, columns,
+      ontology joins). New schemas AskPayload, AskPayloadTable,
+      AskPayloadColumn, AskPayloadJoin. This engine accepts the field and
+      does not run the plan+SQL path; that behavior stays on #329.
+      #347: POST /v1/insights (operationId insights.ask) is on the allowlist.
+      Request gains optional schema_context (ContractInsightsSchemaContext),
+      read on InsightsWireIn, not InsightsAskIn. It is one string. Shortlist
+      pick reasons are not a separate field; they are reason= text inside
+      that string. Response gains usage (ContractInsightsUsage):
+      prompt_tokens, completion_tokens, total_tokens, each null when omitted,
+      never 0 as a stand-in.       Clients that omit schema_context keep the
+      279cbd85 envelope apart from usage.
+      #353: the same 1.5.0 line gains optional step_trace on the insights
+      request and optional steps on the 200 response (ContractInsightsTrace).
+      steps is omitted unless the caller asked and schema_context is present.
+      No version bump. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.
