@@ -192,21 +192,24 @@ def test_session_sum_then_divide_top5():
 
 def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
     from CortexOS.dms.answer_engine import clear_session
+    from CortexOS.dms.ask_scope import ask_scope
     from packs.dms.semantic import query_skills
 
     db = tmp_path / "ops.db"
     monkeypatch.setenv("DMS_OPS_DB", str(db))
     monkeypatch.setenv("DMS_QUERY_SKILL_CAPTURE", "1")
+    monkeypatch.setenv(query_skills.ENABLED_ENV, "1")
     query_skills.clear_all()
     clear_session("skill-sess")
 
-    first = answer_question(
-        "average how many did it expired last month",
-        session_id="skill-sess",
-    )
+    with ask_scope(space_id="alpha", scored_pack_id=None):
+        first = answer_question(
+            "average how many did it expired last month",
+            session_id="skill-sess",
+        )
     assert first["route"] == "sql"
     assert first.get("metric_id") == "expired_last_month"
-    hit = query_skills.find("average how many did it expired last month")
+    hit = query_skills.find("average how many did it expired last month", space_id="alpha")
     assert hit is not None and hit["score"] >= 0.72
     assert hit.get("metric_id") == "expired_last_month"
 
@@ -217,11 +220,13 @@ def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
         params={},
         sql=None,
         layer="governed_metric",
+        space_id="alpha",
     )
-    third = answer_question(
-        "count vault spoilage for prior calendar month",
-        session_id="skill-force",
-    )
+    with ask_scope(space_id="alpha", scored_pack_id=None):
+        third = answer_question(
+            "count vault spoilage for prior calendar month",
+            session_id="skill-force",
+        )
     assert third["route"] == "sql"
     assert third["layer"] == "query_skill"
     assert third.get("metric_id") == "expired_last_month"
@@ -294,20 +299,24 @@ def test_top_sku_excludes_multiple_and_bare_token():
 
 def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
     from CortexOS.dms import answer_engine as ae
+    from CortexOS.dms.ask_scope import ask_scope
     from packs.dms.semantic import query_skills
 
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops_skills.db"))
+    monkeypatch.setenv(query_skills.ENABLED_ENV, "1")
     query_skills.capture(
         "what is the top 5 sku by revenue",
         metric_id="sales_by_value",
         params={"exclude_skus": ["SKU-00173"], "limit": 5, "direction": "DESC"},
         sql=None,
         layer="governed_metric",
+        space_id="alpha",
     )
     monkeypatch.setattr(ae, "match_certified", lambda _q: None)
     monkeypatch.setattr(ae, "route_to_metric", lambda _q: None)
 
-    r = ae.answer("what is the top 5 sku by revenue")
+    with ask_scope(space_id="alpha", scored_pack_id=None):
+        r = ae.answer("what is the top 5 sku by revenue")
     assert r["route"] == "sql"
     assert r["layer"] == "query_skill"
     sql = (r["sql_used"] or "").upper()
