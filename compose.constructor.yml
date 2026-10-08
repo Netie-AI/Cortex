@@ -1,6 +1,6 @@
 # Public Constructor on /cortex. Auth stays on.
 # Hyperlift: build this file, not docker-compose.yml (Qdrant).
-# Images do not set DMS_AUTH_DISABLED. Local auth-off is docker-compose.dev.yml.
+# Images do not set DMS_AUTH_DISABLED. Auth stays on.
 services:
   cortex:
     build:

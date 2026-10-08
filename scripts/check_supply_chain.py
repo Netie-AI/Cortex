@@ -21,7 +21,17 @@ Checks, all offline:
    sets ``DMS_AUTH_DISABLED`` or ``CORTEX_DEV_MODE``, via a Dockerfile ``ENV``
    instruction, a compose ``environment`` entry, or a compose ``env_file`` whose
    file literally assigns it. Named failures: ``AUTH_DISABLED_IN_IMAGE`` and
-   ``DEV_MODE_IN_IMAGE``.
+   ``DEV_MODE_IN_IMAGE``. When the scan root is its own git work tree, the file
+   list is ``git ls-files``. Untracked and gitignored files are never opened, so
+   CI and a machine that copied ``dev.env.example`` to ``dev.env`` match.
+   A directory with no ``.git`` is walked. If ``.git`` exists and ``git ls-files``
+   fails, the scan stops with ``DEV_MODE_IN_IMAGE: GIT_LS_FILES_FAILED`` and does
+   not walk. Walking after that failure would read an untracked ``dev.env``.
+   ``docker-compose.dev.yml`` is scanned like every other compose file. It does
+   not assign ``CORTEX_DEV_MODE``. Its ``env_file`` target is gitignored, so it
+   is not in that list and is never read. ``env_file`` is applied when the
+   container runs and is not baked into the image, which is why a named
+   exemption was considered and is not used.
 
 Regenerate with ``uv lock`` and ``python scripts/lock_images.py``; never edit a
 lock by hand. This script reports. It never installs or regenerates anything.
@@ -31,6 +41,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import tomllib
@@ -67,6 +78,7 @@ _AUTH_DISABLED_ASSIGN = re.compile(r"^(?:export\s+)?DMS_AUTH_DISABLED\s*=")
 _DEV_MODE_ASSIGN = re.compile(r"^(?:export\s+)?CORTEX_DEV_MODE\s*=")
 AUTH_DISABLED_IN_IMAGE = "AUTH_DISABLED_IN_IMAGE"
 DEV_MODE_IN_IMAGE = "DEV_MODE_IN_IMAGE"
+GIT_LS_FILES_FAILED = "GIT_LS_FILES_FAILED"
 # (env name, finding, assignment regex). Lock comparison above does not read this.
 _IMAGE_ENV_FLAGS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("DMS_AUTH_DISABLED", AUTH_DISABLED_IN_IMAGE, _AUTH_DISABLED_ASSIGN),
@@ -286,6 +298,81 @@ def _is_dockerfile(name: str) -> bool:
     return name == "Dockerfile" or name.startswith("Dockerfile.")
 
 
+def _git_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(key, None)
+    return env
+
+
+def _git_tracked(root: Path) -> tuple[set[str] | None, str | None]:
+    """Repo-relative paths from ``git ls-files``.
+
+    ``(None, None)`` only when ``root`` has no ``.git`` at all. The caller may
+    walk that tree. Fixture directories are in this set.
+
+    When ``.git`` exists, a failed ``git ls-files`` returns
+    ``(None, GIT_LS_FILES_FAILED)``. The caller must stop with that name and
+    must not walk. A walk would read an untracked ``dev.env``.
+    """
+    root = root.resolve()
+    if not (root / ".git").exists():
+        return None, None
+    env = _git_subprocess_env()
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            check=False,
+            env=env,
+        )
+    except OSError:
+        return None, GIT_LS_FILES_FAILED
+    if listed.returncode != 0:
+        return None, GIT_LS_FILES_FAILED
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            check=False,
+            env=env,
+        )
+    except OSError:
+        return None, GIT_LS_FILES_FAILED
+    if top.returncode != 0:
+        return None, GIT_LS_FILES_FAILED
+    top_text = top.stdout.decode().strip()
+    if not top_text or Path(top_text).resolve() != root:
+        return None, GIT_LS_FILES_FAILED
+    raw = listed.stdout.decode("utf-8", errors="surrogateescape")
+    return {p for p in raw.split("\0") if p}, None
+
+
+def _env_path_if_scannable(
+    root: Path, compose: Path, entry: str, tracked: set[str] | None
+) -> Path | None:
+    """Env file to open, or None when it must not be read.
+
+    A git work tree opens a path only when ``git ls-files`` lists it.
+    """
+    env_path = Path(entry)
+    if not env_path.is_absolute():
+        env_path = compose.parent / env_path
+    try:
+        resolved = env_path.resolve()
+    except OSError:
+        return None
+    if tracked is None:
+        return resolved
+    try:
+        rel = resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+    if rel not in tracked:
+        return None
+    return resolved
+
+
 def _logical_dockerfile_lines(text: str) -> list[tuple[int, str]]:
     logical: list[tuple[int, str]] = []
     buf = ""
@@ -411,7 +498,7 @@ def _scan_dockerfile(root: Path, path: Path) -> list[str]:
     return problems
 
 
-def _scan_compose(root: Path, path: Path) -> list[str]:
+def _scan_compose(root: Path, path: Path, tracked: set[str] | None) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -440,10 +527,8 @@ def _scan_compose(root: Path, path: Path) -> list[str]:
             if _environment_sets_flag(doc.get("environment"), flag):
                 problems.append(f"{finding}: {rel} sets {flag} via environment")
             for entry in _env_file_entries(doc.get("env_file")):
-                env_path = Path(entry)
-                if not env_path.is_absolute():
-                    env_path = path.parent / env_path
-                if _file_assigns_flag(env_path, assign):
+                env_path = _env_path_if_scannable(root, path, entry, tracked)
+                if env_path is not None and _file_assigns_flag(env_path, assign):
                     problems.append(
                         f"{finding}: {rel} sets {flag} via env_file {entry}"
                     )
@@ -453,10 +538,8 @@ def _scan_compose(root: Path, path: Path) -> list[str]:
                         f"{finding}: {rel} service {name} sets {flag} via environment"
                     )
                 for entry in _env_file_entries(spec.get("env_file")):
-                    env_path = Path(entry)
-                    if not env_path.is_absolute():
-                        env_path = path.parent / env_path
-                    if _file_assigns_flag(env_path, assign):
+                    env_path = _env_path_if_scannable(root, path, entry, tracked)
+                    if env_path is not None and _file_assigns_flag(env_path, assign):
                         problems.append(
                             f"{finding}: {rel} service {name} sets "
                             f"{flag} via env_file {entry}"
@@ -469,16 +552,39 @@ def scan_dms_auth_disabled(root: Path) -> list[str]:
 
     ``AUTH_DISABLED_IN_IMAGE`` when ``DMS_AUTH_DISABLED`` is set.
     ``DEV_MODE_IN_IMAGE`` when ``CORTEX_DEV_MODE`` is set.
+
+    ``docker-compose.dev.yml`` is tracked and scanned like any other compose
+    file. It does not assign ``CORTEX_DEV_MODE``. Its ``env_file`` target is
+    gitignored, so it is not in ``git ls-files`` and is never read. ``env_file``
+    is applied when the container runs and is not baked into the image, which
+    is why a named exemption was considered and rejected.
+
+    The full-tree walk runs only when ``root`` has no ``.git``. A real repo
+    whose ``git ls-files`` fails stops with ``GIT_LS_FILES_FAILED``.
     """
+    tracked, err = _git_tracked(root)
+    if err:
+        return [f"{DEV_MODE_IN_IMAGE}: {err}"]
     problems: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.endswith(".egg-info")]
-        for name in filenames:
-            path = Path(dirpath) / name
-            if _is_dockerfile(name):
-                problems.extend(_scan_dockerfile(root, path))
-            elif name.endswith((".yml", ".yaml")):
-                problems.extend(_scan_compose(root, path))
+    if tracked is None:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d for d in dirnames if d not in _SKIP_DIRS and not d.endswith(".egg-info")
+            ]
+            for name in filenames:
+                path = Path(dirpath) / name
+                if _is_dockerfile(name):
+                    problems.extend(_scan_dockerfile(root, path))
+                elif name.endswith((".yml", ".yaml")):
+                    problems.extend(_scan_compose(root, path, None))
+        return problems
+    for rel in sorted(tracked):
+        path = root / rel
+        name = path.name
+        if _is_dockerfile(name):
+            problems.extend(_scan_dockerfile(root, path))
+        elif name.endswith((".yml", ".yaml")):
+            problems.extend(_scan_compose(root, path, tracked))
     return problems
 
 
