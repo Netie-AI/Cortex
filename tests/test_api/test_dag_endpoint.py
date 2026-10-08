@@ -9,7 +9,8 @@ from netie.execution.model_router import BIG_API_PLACEHOLDER, ModelRouter
 from tests.test_execution.test_cost_ledger_and_executor import StubAdapter
 
 
-def test_judged_node_end_to_end_via_test_client():
+def test_judged_node_end_to_end_via_test_client(monkeypatch):
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     app = create_app()
 
     dag = {
@@ -59,7 +60,8 @@ def test_judged_node_end_to_end_via_test_client():
     assert j1_recs[0].cost_myr > 0
 
 
-def test_run_cost_endpoint_returns_total_and_records():
+def test_run_cost_endpoint_returns_total_and_records(monkeypatch):
+    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     app = create_app()
 
     with TestClient(app) as client:

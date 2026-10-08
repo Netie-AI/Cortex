@@ -16,13 +16,15 @@ from pydantic import BaseModel, Field
 
 from CortexOS.paths import constructor_skin_dir
 from packs.dms.security.api_auth import (
+    SESSION_COOKIE,
     Caller,
     extract_api_key,
+    require_spend,
     resolve_caller,
     role_at_least,
 )
 
-COOKIE = "cortex_api_key"
+COOKIE = SESSION_COOKIE
 PREFIX = "/cortex"
 SKIN_NAMES = frozenset(
     {"index.html", "app.js", "styles.css", "engine.js", "README.md", "favicon.ico", "favicon.svg"}
@@ -363,7 +365,7 @@ async def constructor_generate(
 async def constructor_run(
     request: Request,
     body: ConstructorRunBody,
-    caller: Caller = Depends(require_constructor_viewer),
+    caller: Caller = Depends(require_spend),
 ) -> dict[str, Any]:
     from netie.execution.dag_runner import ExecutionContext, run_dag
     from netie.execution.model_router import ModelRouter

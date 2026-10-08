@@ -6,12 +6,15 @@ import os
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 Role = Literal["viewer", "steward", "admin"]
 
 ROLES: Final[tuple[str, ...]] = ("viewer", "steward", "admin")
 _ROLE_RANK: Final[dict[str, int]] = {"viewer": 0, "steward": 1, "admin": 2}
+
+# Constructor session cookie. Same key store as X-API-Key / Bearer.
+SESSION_COOKIE = "cortex_api_key"
 
 _DEMO_KEYS: Final[str] = (
     "viewer:dms-demo-viewer-key;"
@@ -49,6 +52,7 @@ def parse_api_keys(source: str | None = None) -> dict[str, Caller]:
     """Parse ``role:secret`` pairs separated by ``;`` into key → Caller map."""
     raw = source if source is not None else _keys_source()
     mapping: dict[str, Caller] = {}
+    ambiguous: set[str] = set()
     for part in raw.split(";"):
         part = part.strip()
         if not part or ":" not in part:
@@ -56,7 +60,13 @@ def parse_api_keys(source: str | None = None) -> dict[str, Caller]:
         role, key = part.split(":", 1)
         role = role.strip().lower()
         key = key.strip()
-        if role not in _ROLE_RANK or not key:
+        if role not in _ROLE_RANK or not key or key in ambiguous:
+            continue
+        existing = mapping.get(key)
+        if existing is not None and existing.role != role:
+            # One secret, two roles: do not guess. The key cannot authenticate.
+            ambiguous.add(key)
+            del mapping[key]
             continue
         mapping[key] = Caller(role=role, actor=f"api_{role}")  # type: ignore[arg-type]
     return mapping
@@ -105,13 +115,14 @@ def role_at_least(have: str, need: str) -> bool:
 
 
 async def get_caller(
+    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     authorization: str | None = Header(None),
 ) -> Caller:
     if not auth_required():
         return Caller(role="admin", actor="auth_disabled")
 
-    key = extract_api_key(x_api_key, authorization)
+    key = extract_api_key(x_api_key, authorization) or request.cookies.get(SESSION_COOKIE)
     caller = resolve_caller(key)
     if caller is None:
         raise HTTPException(status_code=401, detail="Valid API key required (X-API-Key or Bearer)")
@@ -123,7 +134,10 @@ def require_role(min_role: Role):
         if not role_at_least(caller.role, min_role):
             raise HTTPException(
                 status_code=403,
-                detail=f"Requires role {min_role!r} or higher (caller={caller.role!r})",
+                detail=(
+                    f"Requires role {min_role!r} or higher "
+                    f"(caller={caller.role!r} actor={caller.actor!r})"
+                ),
             )
         try:
             from packs.dms.audit.ledger import set_rls_context
@@ -134,3 +148,9 @@ def require_role(min_role: Role):
         return caller
 
     return _dep
+
+
+# Model spend. Viewer can look. Steward and admin can spend. Any other role
+# string fails closed inside role_at_least. DMS_AUTH_DISABLED still resolves
+# to admin via get_caller (test/dev only).
+require_spend = require_role("steward")

@@ -20,7 +20,7 @@ from CortexOS.execution import architecture_presets, distill_options
 from CortexOS.execution.preset_router import plan_for_request
 from CortexOS.execution.run_plan import execute_run_plan
 from CortexOS.paths import data_path
-from packs.dms.security.api_auth import Caller, require_role, role_at_least
+from packs.dms.security.api_auth import Caller, require_role, require_spend, role_at_least
 
 router = APIRouter(prefix="/api/engine", tags=["engine"])
 
@@ -199,7 +199,7 @@ async def engine_config(
 @router.post("/run")
 async def engine_run(
     body: EngineRunIn,
-    caller: Caller = Depends(require_role("viewer")),
+    caller: Caller = Depends(require_spend),
 ) -> dict[str, Any]:
     """Resolve the selected architecture and dispatch it to an existing runner."""
     if body.action_id and not role_at_least(caller.role, "steward"):

@@ -26,6 +26,17 @@ are gone from both files. Unarmed or no OpenVault route returns
 and that refusal. `served_provider` / `served_model` are copied from the
 FreeRoute stamp. Nothing PASS.
 
+## RUN-AUTH-01 spend gate on model run routes -- 2026-10-08
+
+Cortex #358. `POST /run`, `POST /api/workflows/run`, `POST /api/workflows/resume`,
+`POST /api/engine/run`, and (pack dms) `POST /cortex/constructor/run` now depend
+on the existing `require_spend` (`require_role("steward")`). Viewer `api_viewer`
+is HTTP 403 with the named detail and zero adapter calls. Unknown keys are 401.
+A secret mapped to two roles is dropped. A non-rank role string is 403.
+`DMS_AUTH_DISABLED` still short-circuits `get_caller` to admin, so it opens
+these routes, including constructor `/run`, which previously ignored the flag.
+Cookie `cortex_api_key` uses the same key store. Draft only. Not a merge claim.
+
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 
 Crew Insights now serves generated SQL on an L0/L1 miss only when

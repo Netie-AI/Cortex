@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,20 @@ class HardwareBody(BaseModel):
     hardware: dict[str, Any] = Field(default_factory=dict)
 
 
-def register_workflow_routes(app: Any) -> None:
+def _spend_not_configured() -> None:
+    """Fail closed when the app forgot to pass the spend dependency."""
+    raise HTTPException(
+        status_code=401,
+        detail="Valid API key required (X-API-Key or Bearer)",
+    )
+
+
+def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
+    """``spend_auth`` is the pack ``require_spend`` dependency. This module
+    must not import ``packs`` (C2). Run and resume both enter the model runner.
+    """
+    auth = spend_auth if spend_auth is not None else _spend_not_configured
+
     @app.get("/api/workflows")
     async def list_workflows() -> dict[str, Any]:
         return {"ok": True, "workflows": workflow_runner.list_workflows()}
@@ -61,7 +74,7 @@ def register_workflow_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail="unknown task")
         return {"ok": True, "task": task}
 
-    @app.post("/api/workflows/run")
+    @app.post("/api/workflows/run", dependencies=[Depends(auth)])
     async def run_workflow(request: Request, body: RunBody) -> dict[str, Any]:
         ledger = getattr(request.app.state, "ledger", None)
         router = getattr(request.app.state, "model_router", None)
@@ -93,7 +106,7 @@ def register_workflow_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail=result.get("error") or "cancel failed")
         return result
 
-    @app.post("/api/workflows/resume")
+    @app.post("/api/workflows/resume", dependencies=[Depends(auth)])
     async def resume_workflow(request: Request, body: CancelBody) -> dict[str, Any]:
         """Re-run a finished run under its id; journaled nodes replay for free."""
         ledger = getattr(request.app.state, "ledger", None)

@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from netie.result import Ok
 from pydantic import BaseModel, Field
 
@@ -44,11 +44,25 @@ def _serialize_records(records: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
-def register_dag_run_routes(app: Any) -> None:
-    """Always register ``POST /run`` — core profile returns HTTP 501."""
+def _spend_not_configured() -> None:
+    """Fail closed when the app forgot to pass the spend dependency."""
+    raise HTTPException(
+        status_code=401,
+        detail="Valid API key required (X-API-Key or Bearer)",
+    )
+
+
+def register_dag_run_routes(app: Any, spend_auth: Any = None) -> None:
+    """Always register ``POST /run`` — core profile returns HTTP 501.
+
+    ``spend_auth`` is ``require_spend`` from the pack auth module. This file
+    must not import ``packs`` (C2). Missing wiring refuses every call.
+    """
     from CortexOS.api.feature_stubs import feature_not_installed_detail
 
-    @app.post("/run")
+    auth = spend_auth if spend_auth is not None else _spend_not_configured
+
+    @app.post("/run", dependencies=[Depends(auth)])
     async def run_inline_dag(request: Request, body: RunDAGRequest) -> dict[str, Any]:
         try:
             require_extra("agentic", feature="dag_run")
