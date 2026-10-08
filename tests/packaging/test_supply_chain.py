@@ -181,12 +181,12 @@ def test_image_uv_version_skew_fails(tree: Path) -> None:
     )
 
 
-def test_boto3_left_at_1_43_108_fails(tree: Path) -> None:
-    """boto3 1.43.108 is the pre-alignment image pin. It is not on the skew list."""
-    _plant_image_pin(tree, "boto3", "1.43.108")
+def test_unlisted_boto3_pin_fails(tree: Path) -> None:
+    """An unlisted boto3 pin disagrees with uv.lock 1.43.108 and is not on the skew list."""
+    _plant_image_pin(tree, "boto3", "1.43.109")
     problems = sc.run(tree)
     assert any(
-        "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110" in p
+        "image-core.lock.txt: boto3==1.43.109 disagrees with uv.lock boto3==1.43.108" in p
         and "may only shrink" in p
         for p in problems
     )
@@ -222,8 +222,8 @@ def test_new_mismatch_plus_skew_line_fails_frozen_baseline(tree: Path) -> None:
     ``scripts/check_supply_chain.py``. The frozen baseline in
     ``tests/invariants/test_lock_skew_baseline.py`` names the added line.
     """
-    _plant_image_pin(tree, "boto3", "1.43.108", variant="core")
-    line = "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110"
+    _plant_image_pin(tree, "boto3", "1.43.109", variant="core")
+    line = "image-core.lock.txt: boto3==1.43.109 disagrees with uv.lock boto3==1.43.108"
     path = tree / "requirements" / "lock_skew" / "image-core.txt"
     path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
     assert line in sc.mismatch_lines(tree)
