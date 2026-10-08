@@ -50,6 +50,7 @@ from CortexOS.integrations import freeroute_ov_local, openvault_client
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
 MODELS_ENV = "CORTEX_FREEROUTE_MODELS"
+FALLBACK_MAX_TOKENS_ENV = "CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS"
 STORE_ENV = "CORTEX_FREEROUTE_SCOREBOARD"
 LEARN_ENV = "CORTEX_FREEROUTE_LEARN"
 SWITCH_ENV = "CORTEX_FREEROUTE"
@@ -62,9 +63,12 @@ EXPLORE_REQUESTS = 2
 SCORE_WINDOW = 200
 MAX_CANDIDATES = 6
 PER_PROVIDER = 2
-# Pre-call scoreboard miss keeps these bounds. Not a learned tightening.
+# Default only. Call sites read fallback_max_tokens(), which honours
+# FALLBACK_MAX_TOKENS_ENV. Not a learned tightening.
+_FALLBACK_MAX_TOKENS_DEFAULT = 600
+# Candidate bounds used when a scoreboard miss must not widen the walk.
+# max_tokens is not in this map; it is fallback_max_tokens().
 DEFAULT_FALLBACK_CAPS = {
-    "max_tokens": 600,
     "max_candidates": MAX_CANDIDATES,
     "per_provider": PER_PROVIDER,
     "explore_requests": EXPLORE_REQUESTS,
@@ -740,9 +744,9 @@ def _write_row(
 def _rows(task: str) -> list[sqlite3.Row]:
     """Learning rows only. Shadow / held-out / benchmark never train pick().
 
-    A pre-call read failure is empty stats and sets ``_precall_read_failed``.
-    ``pick`` then stays inside ``DEFAULT_FALLBACK_CAPS``. A missing store file
-    is not a failure.
+    A pre-call read failure sets ``_precall_read_failed`` and returns no rows.
+    That signal is not an empty table and not a missing file: both of those
+    leave the flag false so ``pick`` still walks the catalogue.
     """
     failed = False
     try:
@@ -1111,11 +1115,41 @@ def _error_message(body: Any) -> str:
 # -- complete -------------------------------------------------------------------
 
 
+def fallback_max_tokens() -> int:
+    """Token cap after a failed pre-call read.
+
+    ``FALLBACK_MAX_TOKENS_ENV`` overrides it. Unset, blank, or not a positive
+    integer uses ``_FALLBACK_MAX_TOKENS_DEFAULT``.
+    """
+    raw = (os.environ.get(FALLBACK_MAX_TOKENS_ENV) or "").strip()
+    if not raw:
+        return _FALLBACK_MAX_TOKENS_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        return _FALLBACK_MAX_TOKENS_DEFAULT
+    if value < 1:
+        return _FALLBACK_MAX_TOKENS_DEFAULT
+    return value
+
+
+def _operator_model(pin: str) -> str:
+    """Operator pin, else the first ``MODELS_ENV`` id. Empty means catalogue."""
+    pinned = (pin or "").strip()
+    if pinned:
+        return pinned
+    for part in (os.environ.get(MODELS_ENV) or "").split(","):
+        model = part.strip()
+        if model:
+            return model
+    return ""
+
+
 def complete(
     task: str,
     messages: list[dict[str, Any]],
     *,
-    max_tokens: int = DEFAULT_FALLBACK_CAPS["max_tokens"],
+    max_tokens: int | None = None,
     temperature: float | None = None,
     timeout: float = 45.0,
     accept: Callable[[str], Any] | None = None,
@@ -1131,6 +1165,13 @@ def complete(
     A learning-only store write that fails after the answer exists still
     returns that answer and sets ``stamp.learn_row_failed``. Spend, budget,
     grant, and ledger failures are not caught here.
+
+    A failed pre-call read is its own signal. With no operator pin and no
+    ``MODELS_ENV`` bundle the body asks for ``auto`` and ``pick`` is not
+    called; a pin or bundle is sent instead. Either way ``max_tokens`` is
+    clamped to ``fallback_max_tokens()`` and ``route_source`` is set on the
+    stamp only (``default_fallback`` or ``operator_pin``). An empty readable
+    store is not that signal. The chat body never carries ``route_source``.
     """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
@@ -1172,19 +1213,36 @@ def complete(
             _journal_add(stamp)
             return Completion(ok=False, stamp=stamp, reason=reason)
 
-    chosen = pick(task, arm, pin=pin, pin_source=pin_source)
-    fallback = _precall_read_failed.get()
-    token_limit = int(max_tokens)
-    if fallback:
-        token_limit = min(token_limit, int(DEFAULT_FALLBACK_CAPS["max_tokens"]))
+    _rows(task)
+    read_failed = _precall_read_failed.get()
+    operator = _operator_model(pin)
+    if read_failed and operator:
+        pin_reason = (
+            f"operator pin {pin_source or 'pin'}"
+            if (pin or "").strip()
+            else f"operator bundle {MODELS_ENV}"
+        )
+        chosen = Pick(operator, pin_reason, "operator_pin", (operator,))
+        route_source = "operator_pin"
+    elif read_failed:
+        chosen = Pick(
+            "auto",
+            "scoreboard unreadable; delegated to OpenVault",
+            "default_fallback",
+            ("auto",),
+        )
+        route_source = "default_fallback"
+    else:
+        chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+        route_source = ""
+    asked = fallback_max_tokens() if max_tokens is None else int(max_tokens)
+    token_limit = min(asked, fallback_max_tokens()) if read_failed else asked
     body: dict[str, Any] = {
         "model": chosen.requested,
         "messages": messages,
         "max_tokens": token_limit,
         "stream": False,
     }
-    if fallback:
-        body["route_source"] = "default_fallback"
     if temperature is not None:
         body["temperature"] = float(temperature)
     if tools:
@@ -1307,8 +1365,7 @@ def complete(
             message = {}
             stamp.usable = False
     stamp.error = reason
-    if fallback:
-        stamp.route_source = "default_fallback"
+    stamp.route_source = route_source
     if not _write_row(
         stamp,
         scored=scored,
@@ -1461,6 +1518,7 @@ __all__ = [
     "Arming",
     "Completion",
     "DEFAULT_FALLBACK_CAPS",
+    "FALLBACK_MAX_TOKENS_ENV",
     "IMPL",
     "LEARN_ENV",
     "LOCAL_ONLY_ENV",
@@ -1478,6 +1536,7 @@ __all__ = [
     "candidates",
     "child_env",
     "complete",
+    "fallback_max_tokens",
     "fingerprint",
     "identity",
     "journal",

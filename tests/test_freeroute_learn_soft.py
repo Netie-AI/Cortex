@@ -4,8 +4,9 @@ Must-fails (red on main 886e119f, green on this head):
 
 - ``_write_row`` / ``note_verdict`` failure still returns the answer, stamps
   ``learn_row_failed``, logs a WARNING, and increments ``learn_row_failures``.
-- A pre-call scoreboard read failure still calls the model inside
-  ``DEFAULT_FALLBACK_CAPS``.
+- A pre-call scoreboard read failure clamps ``max_tokens`` to
+  ``fallback_max_tokens()`` and stamps ``route_source``. The chat body
+  never carries that field. No pin sends ``model="auto"`` without ``pick``.
 - Every non-DMS caller of ``complete`` / ``complete_core`` below is served.
 
 Spend, budget, grant, and ledger failures stay hard.
@@ -49,6 +50,20 @@ from tests.test_crew.conftest import FakeLLM
 SERVED = "SERVED-LEARN-SOFT"
 PROMPT = "PROMPT_SECRET_learn_soft"
 _LOG = "CortexOS.integrations.freeroute"
+# Keys complete() may put on POST /v1/chat/completions. route_source is not one.
+# local_only is the existing OV#71 field, sent only when local-only is on.
+_OV_CHAT_BODY_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "max_tokens",
+        "stream",
+        "temperature",
+        "tools",
+        "tool_choice",
+        "local_only",
+    }
+)
 
 
 def _only_models(fake, models: list[str]) -> None:
@@ -91,6 +106,57 @@ def _assert_served_stamp(stamp: fr.RouteStamp, *, failed: bool) -> None:
     assert stamp.public()["learn_row_failed"] is failed
 
 
+def _assert_chat_body(body: dict, *, max_tokens: int) -> None:
+    extra = sorted(set(body) - _OV_CHAT_BODY_KEYS)
+    assert not extra, extra
+    assert "route_source" not in body
+    assert body["max_tokens"] == max_tokens
+
+
+def _fail_scoreboard_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SELECT on the read-only scoreboard raises OSError. Writes still run."""
+    real = sqlite3.connect
+
+    class _ReadOSError:
+        def __init__(self, con: sqlite3.Connection) -> None:
+            self._con = con
+
+        def execute(self, *args, **kwargs):
+            sql = args[0] if args else ""
+            if isinstance(sql, str) and sql.lstrip().upper().startswith("SELECT"):
+                raise OSError("scoreboard unreadable")
+            return self._con.execute(*args, **kwargs)
+
+        def close(self) -> None:
+            self._con.close()
+
+    def _connect(target, *args, **kwargs):
+        con = real(target, *args, **kwargs)
+        if isinstance(target, str) and "mode=ro" in target:
+            return _ReadOSError(con)
+        return con
+
+    monkeypatch.setattr(sqlite3, "connect", _connect)
+
+
+def _spy_catalogue(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    seen = {"pick": 0, "candidates": 0}
+    real_pick = fr.pick
+    real_candidates = fr.candidates
+
+    def pick(*args, **kwargs):
+        seen["pick"] += 1
+        return real_pick(*args, **kwargs)
+
+    def candidates(*args, **kwargs):
+        seen["candidates"] += 1
+        return real_candidates(*args, **kwargs)
+
+    monkeypatch.setattr(fr, "pick", pick)
+    monkeypatch.setattr(fr, "candidates", candidates)
+    return seen
+
+
 def test_write_and_verdict_failure_serves_and_counts(
     armed_openvault,
     monkeypatch: pytest.MonkeyPatch,
@@ -125,23 +191,16 @@ def test_precall_read_failure_uses_default_fallback_caps(
     armed_openvault,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A scoreboard read error still sends the call at the default caps.
+    """Healthy read keeps the caller cap. A read miss with no pin sends auto.
 
-    Seeded rows would pick model-b. The read raises OSError, so pick explores
-    model-a and max_tokens stays the default fallback cap.
+    The miss clamps max_tokens, stamps default_fallback, and does not call
+    pick or candidates. route_source stays off the OpenVault body. Direct,
+    complete_core (2048), and crew think (2048) all take that path.
     """
-    caps = {
-        "max_tokens": 600,
-        "max_candidates": fr.MAX_CANDIDATES,
-        "per_provider": fr.PER_PROVIDER,
-        "explore_requests": fr.EXPLORE_REQUESTS,
-    }
-    live = getattr(fr, "DEFAULT_FALLBACK_CAPS", None)
-    if live is not None:
-        assert live == caps
-        caps = live
+    assert "max_tokens" not in fr.DEFAULT_FALLBACK_CAPS
+    cap = fr.fallback_max_tokens()
     _only_models(armed_openvault, ["model-a", "model-b"])
-    monkeypatch.setenv("CORTEX_FREEROUTE_MODELS", "model-a,model-b")
+    monkeypatch.setenv(fr.MODELS_ENV, "model-a,model-b")
     fr.reset()
     for pin, verdict in (
         ("model-a", "gate_fail"),
@@ -172,32 +231,11 @@ def test_precall_read_failure_uses_default_fallback_caps(
     assert control.stamp.requested == "model-b"
     assert control.stamp.route_source == ""
     assert control.stamp.public()["route_source"] == ""
-    control_body = armed_openvault.chat_calls[-1]["body"]
-    assert control_body["max_tokens"] == 4000
-    assert control_body.get("route_source") != "default_fallback"
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=4000)
 
-    real = sqlite3.connect
-
-    class _ReadOSError:
-        def __init__(self, con: sqlite3.Connection) -> None:
-            self._con = con
-
-        def execute(self, *args, **kwargs):
-            sql = args[0] if args else ""
-            if isinstance(sql, str) and sql.lstrip().upper().startswith("SELECT"):
-                raise OSError("scoreboard unreadable")
-            return self._con.execute(*args, **kwargs)
-
-        def close(self) -> None:
-            self._con.close()
-
-    def _connect(target, *args, **kwargs):
-        con = real(target, *args, **kwargs)
-        if isinstance(target, str) and "mode=ro" in target:
-            return _ReadOSError(con)
-        return con
-
-    monkeypatch.setattr(sqlite3, "connect", _connect)
+    monkeypatch.delenv(fr.MODELS_ENV, raising=False)
+    seen = _spy_catalogue(monkeypatch)
+    _fail_scoreboard_reads(monkeypatch)
     armed_openvault.reply(SERVED)
     out = fr.complete(
         "learn-soft",
@@ -207,12 +245,11 @@ def test_precall_read_failure_uses_default_fallback_caps(
     assert out.ok is True
     assert out.text == SERVED
     assert out.stamp is not None
-    assert out.stamp.requested == "model-a"
-    assert out.stamp.pick_reason.startswith("exploring")
-    assert len(out.stamp.candidates) <= caps["max_candidates"]
-    body = armed_openvault.chat_calls[-1]["body"]
-    assert body["max_tokens"] == caps["max_tokens"]
-    assert body["route_source"] == "default_fallback"
+    assert out.stamp.requested == "auto"
+    assert out.stamp.pick_reason.startswith("scoreboard unreadable")
+    assert seen == {"pick": 0, "candidates": 0}
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=cap)
+    assert armed_openvault.chat_calls[-1]["body"]["model"] == "auto"
     assert out.stamp.route_source == "default_fallback"
     assert out.stamp.public()["route_source"] == "default_fallback"
     assert out.stamp.learn_row_failed is False
@@ -226,18 +263,186 @@ def test_precall_read_failure_uses_default_fallback_caps(
         )
     )
     assert via_core.stamp is not None
+    assert via_core.stamp.requested == "auto"
     assert via_core.stamp.route_source == "default_fallback"
     core_body = armed_openvault.chat_calls[-1]["body"]
-    assert core_body["max_tokens"] == caps["max_tokens"]
-    assert core_body["route_source"] == "default_fallback"
+    _assert_chat_body(core_body, max_tokens=cap)
+    assert core_body["model"] == "auto"
 
     armed_openvault.reply(SERVED)
     via_crew = asyncio.run(crew_complete(prompt=PROMPT, purpose="think"))
     assert via_crew["ok"] is True
+    assert via_crew["stamp"]["requested"] == "auto"
     assert via_crew["stamp"]["route_source"] == "default_fallback"
     crew_body = armed_openvault.chat_calls[-1]["body"]
-    assert crew_body["max_tokens"] == caps["max_tokens"]
-    assert crew_body["route_source"] == "default_fallback"
+    _assert_chat_body(crew_body, max_tokens=cap)
+    assert crew_body["model"] == "auto"
+    assert seen == {"pick": 0, "candidates": 0}
+
+
+def test_failed_read_operator_pin_and_bundle_win(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pin or MODELS_ENV bundle beats auto. Both clamp and stamp operator_pin."""
+    cap = fr.fallback_max_tokens()
+    _only_models(armed_openvault, ["catalogue-model"])
+    fr.reset()
+    fr._init_file(fr.store_path())
+    seen = _spy_catalogue(monkeypatch)
+    _fail_scoreboard_reads(monkeypatch)
+
+    armed_openvault.reply(SERVED)
+    pinned = fr.complete(
+        "learn-soft",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+        pin="operator-chosen",
+        pin_source="desk",
+    )
+    assert pinned.ok is True
+    assert pinned.stamp is not None
+    assert pinned.stamp.requested == "operator-chosen"
+    assert pinned.stamp.route_source == "operator_pin"
+    assert pinned.stamp.public()["route_source"] == "operator_pin"
+    pin_body = armed_openvault.chat_calls[-1]["body"]
+    _assert_chat_body(pin_body, max_tokens=cap)
+    assert pin_body["model"] == "operator-chosen"
+
+    monkeypatch.setenv(fr.MODELS_ENV, "bundle-a,bundle-b")
+    armed_openvault.reply(SERVED)
+    bundled = fr.complete(
+        "learn-soft",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=2048,
+    )
+    assert bundled.stamp is not None
+    assert bundled.stamp.requested == "bundle-a"
+    assert bundled.stamp.route_source == "operator_pin"
+    bundle_body = armed_openvault.chat_calls[-1]["body"]
+    _assert_chat_body(bundle_body, max_tokens=cap)
+    assert bundle_body["model"] == "bundle-a"
+    assert seen == {"pick": 0, "candidates": 0}
+
+
+def test_empty_readable_store_is_not_default_fallback(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty table that reads is not a failed read: no stamp, no clamp."""
+    monkeypatch.delenv(fr.MODELS_ENV, raising=False)
+    fr.reset()
+    fr._init_file(fr.store_path())
+    armed_openvault.reply(SERVED)
+    out = fr.complete(
+        "learn-soft-empty",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+    )
+    assert out.ok is True
+    assert out.stamp is not None
+    assert out.stamp.route_source == ""
+    assert out.stamp.public()["route_source"] == ""
+    assert fr._precall_read_failed.get() is False
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=4000)
+    assert out.stamp.requested != "auto"
+
+
+def test_fallback_max_tokens_comes_from_env(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clamp reads FALLBACK_MAX_TOKENS_ENV. A healthy read ignores it."""
+    assert fr.fallback_max_tokens() == 600
+    monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, "250")
+    assert fr.fallback_max_tokens() == 250
+    fr.reset()
+    fr._init_file(fr.store_path())
+    armed_openvault.reply(SERVED)
+    healthy = fr.complete(
+        "learn-soft-cap",
+        [{"role": "user", "content": "healthy"}],
+        max_tokens=4000,
+    )
+    assert healthy.stamp is not None
+    assert healthy.stamp.route_source == ""
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=4000)
+
+    _fail_scoreboard_reads(monkeypatch)
+    armed_openvault.reply(SERVED)
+    missed = fr.complete(
+        "learn-soft-cap",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+    )
+    assert missed.stamp is not None
+    assert missed.stamp.route_source == "default_fallback"
+    assert missed.stamp.requested == "auto"
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=250)
+
+
+def test_outbound_body_keys_stay_on_openai_chat_allowlist(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct, complete_core, and crew bodies stay inside the chat allowlist.
+
+    Healthy reads and failed reads both. A stamp field on the body goes red.
+    """
+    monkeypatch.delenv(fr.MODELS_ENV, raising=False)
+    fr.reset()
+    fr._init_file(fr.store_path())
+    cap = fr.fallback_max_tokens()
+
+    def _healthy(kind: str) -> dict:
+        armed_openvault.reply(SERVED)
+        if kind == "direct":
+            out = fr.complete("allow", [{"role": "user", "content": "h"}], max_tokens=4000)
+            assert out.stamp is not None
+            assert out.stamp.route_source == ""
+        elif kind == "core":
+            out = asyncio.run(
+                complete_core("allow", [{"role": "user", "content": "h"}], max_tokens=2048)
+            )
+            assert out.stamp is not None
+            assert out.stamp.route_source == ""
+        else:
+            crew = asyncio.run(crew_complete(prompt="h", purpose="think"))
+            assert crew["ok"] is True
+            assert crew["stamp"]["route_source"] == ""
+        return armed_openvault.chat_calls[-1]["body"]
+
+    _assert_chat_body(_healthy("direct"), max_tokens=4000)
+    _assert_chat_body(_healthy("core"), max_tokens=2048)
+    _assert_chat_body(_healthy("crew"), max_tokens=2048)
+
+    _fail_scoreboard_reads(monkeypatch)
+
+    def _miss(kind: str) -> dict:
+        armed_openvault.reply(SERVED)
+        if kind == "direct":
+            out = fr.complete("allow", [{"role": "user", "content": "m"}], max_tokens=4000)
+            assert out.stamp is not None
+            assert out.stamp.route_source == "default_fallback"
+            assert out.stamp.requested == "auto"
+        elif kind == "core":
+            out = asyncio.run(
+                complete_core("allow", [{"role": "user", "content": "m"}], max_tokens=2048)
+            )
+            assert out.stamp is not None
+            assert out.stamp.route_source == "default_fallback"
+            assert out.stamp.requested == "auto"
+        else:
+            crew = asyncio.run(crew_complete(prompt="m", purpose="think"))
+            assert crew["ok"] is True
+            assert crew["stamp"]["route_source"] == "default_fallback"
+            assert crew["stamp"]["requested"] == "auto"
+        return armed_openvault.chat_calls[-1]["body"]
+
+    for kind in ("direct", "core", "crew"):
+        body = _miss(kind)
+        _assert_chat_body(body, max_tokens=cap)
+        assert body["model"] == "auto"
 
 
 def test_pack_budget_refusal_stays_hard(armed_openvault) -> None:
