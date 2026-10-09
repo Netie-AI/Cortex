@@ -99,3 +99,35 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:5]
+name = follow-up suggestions reach a model only through OpenVault FreeRoute (SUGGEST #308)
+type = forbidden
+source_modules =
+    CortexOS.suggest
+forbidden_modules =
+    anthropic
+    openai
+    litellm
+    httpx
+    requests
+    aiohttp
+    google
+    cohere
+    mistralai
+    groq
+    packs
+    duckdb
+    CortexOS.nlp
+    CortexOS.crew
+    CortexOS.dms
+    CortexOS.api
+    CortexOS.execution
+# The one model path is CortexOS.suggest.freeroute_rephrase -> CortexOS.integrations.freeroute.
+# Follow-ups never call a provider SDK, never open a database and never re-enter
+# the answer plane; the ask seam is handed the grant, rows and served SQL.
+# The one ignored edge is the ontology registry's compile_to_sqlite ledger path;
+# the schema loaders the seam calls never reach it.
+# Must-fail: tests/test_suggest/test_suggest_import_contract.py.
+ignore_imports =
+    CortexOS.ontology.registry -> packs.dms.audit.ledger

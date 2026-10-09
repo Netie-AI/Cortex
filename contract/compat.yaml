@@ -71,7 +71,7 @@ supported:
 
   - version: "1.4"
     spec: openapi-1.4.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive C-MEM (#290) per-Space memory: Answer gains memory_ids_read
@@ -80,6 +80,19 @@ supported:
       reused (a stored solution re-run on current data; never a validation).
       AskRequest gains optional scored_pack_id. 1.3 clients ignore the new
       fields. canonical_manifest_bytes unchanged.
+
+  - version: "1.5"
+    spec: openapi-1.5.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive SUGGEST (#308) follow-ups: Answer gains followups (FollowUp:
+      question, kind, tables, columns, values, served_by, served_at,
+      served_reason, served_provider, served_model, served_local) and
+      followups_reason. Both are absent from the wire unless follow-ups are
+      switched on (CORTEX_SUGGEST=1), so an answer with them off is
+      byte-identical to 1.4. 1.4 clients ignore the new fields.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.
