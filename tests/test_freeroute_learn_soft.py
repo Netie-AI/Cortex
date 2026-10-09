@@ -28,6 +28,7 @@ Non-DMS callers:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3
 from collections.abc import Iterator
@@ -381,6 +382,244 @@ def test_fallback_max_tokens_comes_from_env(
     _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=250)
 
 
+def _wire(body: dict) -> str:
+    """Canonical bytes for the outbound chat body. Same fields main sends."""
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+
+def _seed_measured_pair(armed_openvault) -> None:
+    """model-a fails twice, model-b passes twice. A healthy pick is model-b."""
+    _only_models(armed_openvault, ["model-a", "model-b"])
+    for pin, verdict in (
+        ("model-a", "gate_fail"),
+        ("model-a", "gate_fail"),
+        ("model-b", "gate_pass"),
+        ("model-b", "gate_pass"),
+    ):
+        seeded = fr.complete(
+            "learn-soft",
+            [{"role": "user", "content": "seed"}],
+            pin=pin,
+            accept=lambda text: True,
+        )
+        assert seeded.ok is True
+        fr.note_verdict(seeded.stamp, verdict)
+
+
+def _count_scoreboard_reads(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    seen = {"n": 0}
+    real = fr._rows
+
+    def _rows(task: str):
+        seen["n"] += 1
+        return real(task)
+
+    monkeypatch.setattr(fr, "_rows", _rows)
+    return seen
+
+
+def _fail_after_first_select(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """The first read-only SELECT succeeds. Every later one raises OSError."""
+    real = sqlite3.connect
+    seen = {"selects": 0}
+
+    class _Later:
+        def __init__(self, con: sqlite3.Connection) -> None:
+            self._con = con
+
+        @property
+        def row_factory(self):
+            return self._con.row_factory
+
+        @row_factory.setter
+        def row_factory(self, value) -> None:
+            self._con.row_factory = value
+
+        def execute(self, *args, **kwargs):
+            sql = args[0] if args else ""
+            if isinstance(sql, str) and sql.lstrip().upper().startswith("SELECT"):
+                seen["selects"] += 1
+                if seen["selects"] > 1:
+                    raise OSError("later scoreboard read failed")
+            return self._con.execute(*args, **kwargs)
+
+        def close(self) -> None:
+            self._con.close()
+
+    def _connect(target, *args, **kwargs):
+        con = real(target, *args, **kwargs)
+        if isinstance(target, str) and "mode=ro" in target:
+            return _Later(con)
+        return con
+
+    monkeypatch.setattr(sqlite3, "connect", _connect)
+    return seen
+
+
+def test_healthy_omitted_max_tokens_matches_main_body(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful read that omits max_tokens matches main 886e119f.
+
+    CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS=123 must not change those bytes.
+    Main sends max_tokens 600 for this call.
+    """
+    _only_models(armed_openvault, ["model-a"])
+    monkeypatch.setenv(fr.MODELS_ENV, "model-a")
+    fr.reset()
+    fr._init_file(fr.store_path())
+    messages = [{"role": "user", "content": "healthy-no-max"}]
+    main_body = {
+        "model": "model-a",
+        "messages": messages,
+        "max_tokens": fr.HEALTHY_MAX_TOKENS,
+        "stream": False,
+    }
+    main_bytes = _wire(main_body)
+    assert '"max_tokens":600' in main_bytes
+
+    monkeypatch.delenv(fr.FALLBACK_MAX_TOKENS_ENV, raising=False)
+    armed_openvault.reply(SERVED)
+    unset = fr.complete("healthy-bytes", messages)
+    unset_body = armed_openvault.chat_calls[-1]["body"]
+    assert unset.stamp is not None
+    assert unset.stamp.route_source == ""
+    assert _wire(unset_body) == main_bytes
+
+    monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, "123")
+    armed_openvault.reply(SERVED)
+    pinned = fr.complete("healthy-bytes", messages)
+    pinned_body = armed_openvault.chat_calls[-1]["body"]
+    assert pinned.stamp is not None
+    assert pinned.stamp.route_source == ""
+    assert _wire(pinned_body) == main_bytes
+    assert pinned_body["max_tokens"] == 600
+
+
+def test_complete_reads_the_scoreboard_once(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One complete() performs one scoreboard read, healthy or failed."""
+    fr.reset()
+    fr._init_file(fr.store_path())
+    seen = _count_scoreboard_reads(monkeypatch)
+    armed_openvault.reply(SERVED)
+    healthy = fr.complete("one-read", [{"role": "user", "content": "ok"}], max_tokens=4000)
+    assert healthy.ok is True
+    assert seen["n"] == 1
+
+    _fail_scoreboard_reads(monkeypatch)
+    armed_openvault.reply(SERVED)
+    missed = fr.complete("one-read", [{"role": "user", "content": "miss"}], max_tokens=4000)
+    assert missed.stamp is not None
+    assert missed.stamp.route_source == "default_fallback"
+    assert seen["n"] == 2
+
+
+def test_later_read_failure_keeps_the_healthy_pick(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second read must not exist. Stamp, model, and cap stay on the first read."""
+    monkeypatch.setenv(fr.MODELS_ENV, "model-a,model-b")
+    fr.reset()
+    _seed_measured_pair(armed_openvault)
+    armed_openvault.reply("CONTROL")
+    healthy = fr.complete(
+        "learn-soft",
+        [{"role": "user", "content": "control"}],
+        max_tokens=4000,
+    )
+    assert healthy.stamp is not None
+    assert healthy.stamp.requested == "model-b"
+    assert healthy.stamp.route_source == ""
+    healthy_body = dict(armed_openvault.chat_calls[-1]["body"])
+    assert healthy_body["model"] == "model-b"
+    assert healthy_body["max_tokens"] == 4000
+
+    seen = _fail_after_first_select(monkeypatch)
+    armed_openvault.reply(SERVED)
+    out = fr.complete(
+        "learn-soft",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+    )
+    assert out.ok is True
+    assert out.stamp is not None
+    assert out.stamp.requested == healthy.stamp.requested
+    assert out.stamp.route_source == healthy.stamp.route_source == ""
+    body = armed_openvault.chat_calls[-1]["body"]
+    assert body["model"] == healthy_body["model"]
+    assert body["max_tokens"] == healthy_body["max_tokens"]
+    assert "route_source" not in body
+    assert seen["selects"] == 1
+
+
+def test_unmeasured_first_model_is_not_served_without_a_stamp(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed read does not explore the unmeasured catalogue model.
+
+    The call takes the full fallback path: stamp, clamp, and model auto.
+    """
+    monkeypatch.delenv(fr.MODELS_ENV, raising=False)
+    _only_models(armed_openvault, ["unmeasured-first", "other"])
+    fr.reset()
+    fr._init_file(fr.store_path())
+    cap = fr.fallback_max_tokens()
+    _fail_scoreboard_reads(monkeypatch)
+    armed_openvault.reply(SERVED)
+    out = fr.complete(
+        "unmeasured",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+    )
+    assert out.ok is True
+    assert out.stamp is not None
+    assert out.stamp.requested == "auto"
+    assert out.stamp.route_source == "default_fallback"
+    assert out.stamp.public()["route_source"] == "default_fallback"
+    body = armed_openvault.chat_calls[-1]["body"]
+    _assert_chat_body(body, max_tokens=cap)
+    assert body["model"] == "auto"
+    assert body["model"] != "unmeasured-first"
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "601"])
+def test_fallback_cap_refuses_at_startup(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    """0, -1, abc, and 601 raise at the startup check. They are not clamped."""
+    monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, bad)
+    with pytest.raises(fr.FreeRouteFallbackCapInvalid) as raised:
+        fr.check_fallback_cap()
+    message = str(raised.value)
+    assert "FREEROUTE_FALLBACK_CAP_INVALID" in message
+    assert fr.FALLBACK_MAX_TOKENS_ENV in message
+    assert bad in message
+
+
+@pytest.mark.parametrize("cap", [1, 600])
+def test_fallback_cap_accepts_bounds(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+    cap: int,
+) -> None:
+    """1 and 600 are valid. A failed read clamps to that cap."""
+    monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, str(cap))
+    assert fr.check_fallback_cap() == cap
+    fr.reset()
+    fr._init_file(fr.store_path())
+    _fail_scoreboard_reads(monkeypatch)
+    armed_openvault.reply(SERVED)
+    out = fr.complete("cap-bound", [{"role": "user", "content": PROMPT}], max_tokens=4000)
+    assert out.stamp is not None
+    assert out.stamp.route_source == "default_fallback"
+    assert out.stamp.requested == "auto"
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=cap)
+
+
 def test_outbound_body_keys_stay_on_openai_chat_allowlist(
     armed_openvault,
     monkeypatch: pytest.MonkeyPatch,
@@ -415,6 +654,32 @@ def test_outbound_body_keys_stay_on_openai_chat_allowlist(
     _assert_chat_body(_healthy("direct"), max_tokens=4000)
     _assert_chat_body(_healthy("core"), max_tokens=2048)
     _assert_chat_body(_healthy("crew"), max_tokens=2048)
+
+    tool = {
+        "type": "function",
+        "function": {"name": "lookup", "parameters": {"type": "object", "properties": {}}},
+    }
+    armed_openvault.reply(SERVED)
+    acted = asyncio.run(crew_complete(prompt="use the tool", purpose="act", tools=[tool]))
+    assert acted["ok"] is True
+    act_body = armed_openvault.chat_calls[-1]["body"]
+    assert "tools" in act_body
+    assert act_body["tool_choice"] == "auto"
+    _assert_chat_body(act_body, max_tokens=2048)
+
+    local_hop = armed_openvault.hop("groq", 10)
+    local_hop["served_local"] = True
+    armed_openvault.hops = [local_hop]
+    armed_openvault.catalogue = {"groq": ["model-a"]}
+    fr.reset()
+    monkeypatch.setenv(fr.LOCAL_ONLY_ENV, "1")
+    armed_openvault.reply(SERVED, model="model-a")
+    local = fr.complete("allow-local", [{"role": "user", "content": "local"}], max_tokens=4000)
+    assert local.stamp is not None
+    local_body = armed_openvault.chat_calls[-1]["body"]
+    assert local_body["local_only"] is True
+    _assert_chat_body(local_body, max_tokens=4000)
+    monkeypatch.delenv(fr.LOCAL_ONLY_ENV, raising=False)
 
     _fail_scoreboard_reads(monkeypatch)
 

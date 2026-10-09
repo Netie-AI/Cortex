@@ -63,11 +63,12 @@ EXPLORE_REQUESTS = 2
 SCORE_WINDOW = 200
 MAX_CANDIDATES = 6
 PER_PROVIDER = 2
-# Default only. Call sites read fallback_max_tokens(), which honours
-# FALLBACK_MAX_TOKENS_ENV. Not a learned tightening.
-_FALLBACK_MAX_TOKENS_DEFAULT = 600
+# What main 886e119f sends when the caller omits max_tokens. Also the upper
+# bound of FALLBACK_MAX_TOKENS_ENV: a fallback must never spend more than a
+# healthy call. Healthy calls use this constant and do not read the env.
+HEALTHY_MAX_TOKENS = 600
 # Candidate bounds used when a scoreboard miss must not widen the walk.
-# max_tokens is not in this map; it is fallback_max_tokens().
+# max_tokens is not in this map. The live cap is fallback_max_tokens().
 DEFAULT_FALLBACK_CAPS = {
     "max_candidates": MAX_CANDIDATES,
     "per_provider": PER_PROVIDER,
@@ -822,8 +823,15 @@ def _row_cost(row: Mapping[str, Any]) -> float | None:
     return float(prompt or 0) + float(completion or 0)
 
 
-def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
-    rows = _rows(task)
+def _stats(
+    task: str,
+    models: list[str],
+    rows: list[sqlite3.Row] | None = None,
+) -> dict[str, ModelStats]:
+    # ``rows`` is the one snapshot for this call. Only a direct pick() that
+    # was not given one reads the store.
+    if rows is None:
+        rows = _rows(task)
     by_served: dict[str, list[Mapping[str, Any]]] = {}
     for row in rows:
         if row["scored"] and row["served"]:
@@ -885,7 +893,16 @@ class Pick:
     measured_score: float | None = None
 
 
-def candidates(arm: Arming, *, pin: str = "", pin_source: str = "") -> tuple[tuple[str, ...], str]:
+def candidates(
+    arm: Arming,
+    *,
+    pin: str = "",
+    pin_source: str = "",
+    rows: list[sqlite3.Row] | None = None,
+) -> tuple[tuple[str, ...], str]:
+    # The snapshot is accepted so a call cannot score a different read than
+    # the one complete() already took. Catalogue selection does not query it.
+    del rows
     pinned = (pin or "").strip()
     if pinned:
         return (pinned,), f"operator pin {pin_source or 'pin'}"
@@ -905,12 +922,19 @@ def candidates(arm: Arming, *, pin: str = "", pin_source: str = "") -> tuple[tup
     return ("auto",), "delegated to OpenVault (not measured by Cortex)"
 
 
-def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick:
-    models, source = candidates(arm, pin=pin, pin_source=pin_source)
+def pick(
+    task: str,
+    arm: Arming,
+    *,
+    pin: str = "",
+    pin_source: str = "",
+    rows: list[sqlite3.Row] | None = None,
+) -> Pick:
+    models, source = candidates(arm, pin=pin, pin_source=pin_source, rows=rows)
     if len(models) == 1:
-        st = _stats(task, list(models))[models[0]]
+        st = _stats(task, list(models), rows)[models[0]]
         return Pick(models[0], source, source, models, st.scored_n, st.score)
-    stats = _stats(task, list(models))
+    stats = _stats(task, list(models), rows)
     eligible = [m for m in models if not stats[m].ineligible]
     if not eligible:
         first = models[0]
@@ -1115,22 +1139,39 @@ def _error_message(body: Any) -> str:
 # -- complete -------------------------------------------------------------------
 
 
+class FreeRouteFallbackCapInvalid(ValueError):
+    """``CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS`` is outside 1..600. Not clamped."""
+
+
 def fallback_max_tokens() -> int:
     """Token cap after a failed pre-call read.
 
-    ``FALLBACK_MAX_TOKENS_ENV`` overrides it. Unset, blank, or not a positive
-    integer uses ``_FALLBACK_MAX_TOKENS_DEFAULT``.
+    Unset or blank is ``HEALTHY_MAX_TOKENS`` (600). A set value must be an
+    integer in 1..600. Anything else raises ``FreeRouteFallbackCapInvalid``
+    (``FREEROUTE_FALLBACK_CAP_INVALID``). This function does not clamp.
     """
-    raw = (os.environ.get(FALLBACK_MAX_TOKENS_ENV) or "").strip()
-    if not raw:
-        return _FALLBACK_MAX_TOKENS_DEFAULT
+    raw = os.environ.get(FALLBACK_MAX_TOKENS_ENV)
+    if raw is None or not str(raw).strip():
+        return HEALTHY_MAX_TOKENS
+    text = str(raw).strip()
     try:
-        value = int(raw)
+        value = int(text)
     except ValueError:
-        return _FALLBACK_MAX_TOKENS_DEFAULT
-    if value < 1:
-        return _FALLBACK_MAX_TOKENS_DEFAULT
+        value = None
+    if value is None or value < 1 or value > HEALTHY_MAX_TOKENS:
+        raise FreeRouteFallbackCapInvalid(
+            f"FREEROUTE_FALLBACK_CAP_INVALID: {FALLBACK_MAX_TOKENS_ENV}={text!r} "
+            f"is not an integer in 1..{HEALTHY_MAX_TOKENS}"
+        )
     return value
+
+
+def check_fallback_cap() -> int:
+    """Startup refusal. Import calls this before any model request is sent."""
+    return fallback_max_tokens()
+
+
+check_fallback_cap()
 
 
 def _operator_model(pin: str) -> str:
@@ -1166,12 +1207,15 @@ def complete(
     returns that answer and sets ``stamp.learn_row_failed``. Spend, budget,
     grant, and ledger failures are not caught here.
 
-    A failed pre-call read is its own signal. With no operator pin and no
+    A failed pre-call read is its own signal. The scoreboard is read once
+    and that snapshot is what ``pick`` scores. With no operator pin and no
     ``MODELS_ENV`` bundle the body asks for ``auto`` and ``pick`` is not
     called; a pin or bundle is sent instead. Either way ``max_tokens`` is
     clamped to ``fallback_max_tokens()`` and ``route_source`` is set on the
     stamp only (``default_fallback`` or ``operator_pin``). An empty readable
-    store is not that signal. The chat body never carries ``route_source``.
+    store is not that signal. A healthy call that omits ``max_tokens`` sends
+    ``HEALTHY_MAX_TOKENS`` and does not read the fallback env. The chat body
+    never carries ``route_source``.
     """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
@@ -1213,7 +1257,7 @@ def complete(
             _journal_add(stamp)
             return Completion(ok=False, stamp=stamp, reason=reason)
 
-    _rows(task)
+    snapshot = _rows(task)
     read_failed = _precall_read_failed.get()
     operator = _operator_model(pin)
     if read_failed and operator:
@@ -1233,10 +1277,15 @@ def complete(
         )
         route_source = "default_fallback"
     else:
-        chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+        chosen = pick(task, arm, pin=pin, pin_source=pin_source, rows=snapshot)
         route_source = ""
-    asked = fallback_max_tokens() if max_tokens is None else int(max_tokens)
-    token_limit = min(asked, fallback_max_tokens()) if read_failed else asked
+    # Omitted max_tokens on a healthy call is main's 600. The env is read
+    # only when this read failed.
+    asked = HEALTHY_MAX_TOKENS if max_tokens is None else int(max_tokens)
+    if read_failed:
+        token_limit = min(asked, fallback_max_tokens())
+    else:
+        token_limit = asked
     body: dict[str, Any] = {
         "model": chosen.requested,
         "messages": messages,
@@ -1519,6 +1568,8 @@ __all__ = [
     "Completion",
     "DEFAULT_FALLBACK_CAPS",
     "FALLBACK_MAX_TOKENS_ENV",
+    "FreeRouteFallbackCapInvalid",
+    "HEALTHY_MAX_TOKENS",
     "IMPL",
     "LEARN_ENV",
     "LOCAL_ONLY_ENV",
@@ -1534,6 +1585,7 @@ __all__ = [
     "arming",
     "auth_headers",
     "candidates",
+    "check_fallback_cap",
     "child_env",
     "complete",
     "fallback_max_tokens",
