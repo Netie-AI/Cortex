@@ -1,0 +1,32 @@
+{
+  "cite": {
+    "repo": "Netie-AI/dms",
+    "sha": "57d85c529aa363825aaa566f12b8822fd76a4215",
+    "executor": "packages/executor/dms_executor/__init__.py:889",
+    "models": "packages/cortex_client/cortex_client/models.py:17",
+    "client": "packages/cortex_client/cortex_client/client.py:115",
+    "generated_model": "generated/models/ask_request.py:46",
+    "generated_api": "generated/api/contract/ask.py:27"
+  },
+  "dms_executor_ask": {
+    "tenant_id": null,
+    "question": "how many transactions of each type",
+    "session_id": "dms-acl-session",
+    "space_id": "dms-space"
+  },
+  "rejected_wire_fields": ["model", "strict", "provider"],
+  "rejected_ask": {
+    "question": "how many transactions of each type",
+    "session_id": "c-loop-a-303",
+    "dms_payload": {
+      "tables": [
+        {
+          "name": "transactions",
+          "columns": [
+            {"name": "txn_type", "type": "VARCHAR", "description": "IN or OUT"}
+          ]
+        }
+      ]
+    }
+  }
+}
