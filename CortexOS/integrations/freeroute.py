@@ -198,6 +198,8 @@ class _Vault:
     catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
     local_spendable_hops: int = 0
     local_reason: str = ""
+    # Id from OpenVault status ``routes.stronger``. Empty when OV did not configure one.
+    stronger_route: str = ""
 
 
 @dataclass(frozen=True)
@@ -214,6 +216,8 @@ class Arming:
     probed: bool = True
     local_spendable_hops: int = 0
     local_reason: str = ""
+    # Copied from OpenVault status. Cortex does not choose this provider.
+    stronger_route: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -294,6 +298,8 @@ def _read_vault(url: str, timeout: float) -> _Vault:
     spendable = [h for h in hops if h["provider"] in catalogue]
     local_n = freeroute_ov_local.count_local_spendable(raw_hops, raw_specs, set(catalogue))
     local_reason = freeroute_ov_local.local_arming_reason(body)
+    routes = body.get("routes") if isinstance(body.get("routes"), dict) else {}
+    stronger = str(routes.get("stronger") or "").strip()
     pooled = body.get("pooled_key_count")
     pooled_keys = pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None
     pooled_ok = pooled_keys is not None and pooled_keys > 0
@@ -323,6 +329,7 @@ def _read_vault(url: str, timeout: float) -> _Vault:
         catalogue=tuple(sorted(catalogue.items())),
         local_spendable_hops=local_n,
         local_reason=local_reason,
+        stronger_route=stronger,
     )
 
 
@@ -421,6 +428,7 @@ def _armed_from(vault: _Vault, url: str, mode: str) -> Arming:
         checked_at=time.time(),
         local_spendable_hops=vault.local_spendable_hops,
         local_reason=vault.local_reason,
+        stronger_route=vault.stronger_route,
     )
 
 
@@ -791,6 +799,36 @@ def _same_model(requested: str, served: str) -> bool:
     if not requested or not served:
         return False
     return requested == served or requested.rsplit("/", 1)[-1] == served.rsplit("/", 1)[-1]
+
+
+# Named route refusals. Cortex does not substitute another provider.
+MODEL_NOT_ALLOWLISTED = "FREEROUTE_MODEL_NOT_ALLOWLISTED"
+MODEL_NOT_SERVED = "FREEROUTE_MODEL_NOT_SERVED"
+NO_STRONGER_ROUTE = "FREEROUTE_NO_STRONGER_ROUTE"
+
+
+def model_allowlist(arm: Arming) -> frozenset[str]:
+    """Chat model ids OpenVault listed on spendable hops. Not a Cortex choice."""
+    found: set[str] = set()
+    for _provider, models in arm.catalogue:
+        found.update(models)
+    return frozenset(found)
+
+
+def configured_stronger_route(arm: Arming) -> str:
+    """Stronger route from OpenVault status. Empty when OV did not configure one."""
+    return (arm.stronger_route or "").strip()
+
+
+def request_was_served(requested: str, served: str) -> bool:
+    """True for ``auto`` and for a served id that matches the request.
+
+    A concrete id OpenVault did not serve is not a match. Callers must not
+    treat the substitute as the answer.
+    """
+    if not (requested or "").strip() or requested.strip() == "auto":
+        return True
+    return _same_model(requested.strip(), (served or "").strip())
 
 
 @dataclass
@@ -1591,7 +1629,12 @@ __all__ = [
     "candidates",
     "check_fallback_cap",
     "child_env",
+    "MODEL_NOT_ALLOWLISTED",
+    "MODEL_NOT_SERVED",
+    "NO_STRONGER_ROUTE",
     "complete",
+    "configured_stronger_route",
+    "model_allowlist",
     "fallback_max_tokens",
     "fingerprint",
     "identity",
@@ -1603,6 +1646,7 @@ __all__ = [
     "local_only_enabled",
     "note_rejected",
     "note_verdict",
+    "request_was_served",
     "peek",
     "pick",
     "public_status",

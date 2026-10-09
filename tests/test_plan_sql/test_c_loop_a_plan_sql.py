@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from cortex_contract.answer import AskRequest
 
 from CortexOS.dms import plan_sql_ask
 from CortexOS.integrations import freeroute
@@ -76,6 +77,27 @@ def execute_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(submit, "execute_sql", spy)
     return calls
+
+
+def _stronger_route(fake, route: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Publish ``routes.stronger`` on the scripted status body. Not a request field.
+
+    ``__call__`` is looked up on the class, so the transport function is replaced.
+    """
+    fake.stronger_route = route
+    from CortexOS.integrations import openvault_client
+
+    current = openvault_client.request_json
+
+    def _call(method, path, **kwargs):  # noqa: ANN001
+        status, body = current(method, path, **kwargs)
+        if str(path).split("?", 1)[0].endswith("/api/freeroute/status") and isinstance(body, dict):
+            body = dict(body)
+            body["routes"] = {"stronger": fake.stronger_route}
+            return status, body
+        return status, body
+
+    monkeypatch.setattr(openvault_client, "request_json", _call)
 
 
 def _reply(fake, content: str, *, provider: str = PROVIDER, model: str = MODEL) -> None:
@@ -724,14 +746,17 @@ def test_implausible_all_null_rows_are_fed_back(
 
 
 def test_exhausted_retries_then_a_stronger_openvault_model(
-    armed_openvault, dms_http  # noqa: F811
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
+    # Not the next groq catalogue id. Cortex must ask for the route OV configured.
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT)
-    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, GOOD_SQL, model=configured)
     dms_http.bind_session(SESSION, GRANT)
 
     body = _json(_ask(dms_http))
@@ -740,9 +765,9 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
     models = [call["body"]["model"] for call in armed_openvault.chat_calls]
     assert len(models) == 5
     assert models[0] == models[1] == models[2]
-    assert models[3] == models[4]
+    assert models[3] == models[4] == configured
     assert models[3] != models[0]
-    assert models[3] != "auto"
+    assert "qwen/qwen3.6-27b" not in models
     retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
     strong = armed_openvault.chat_calls[4]["body"]["messages"][1]["content"]
     assert "UNKNOWN_COLUMN:no_such_col" in retry
@@ -757,17 +782,19 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
 
 
 def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
-    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     bad = "SELECT no_such_col FROM transactions"
     why = "the selected column is not in the table"
     closest = "how many transactions of each type"
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT)
-    _reply(armed_openvault, bad)
-    _reply(armed_openvault, f"WHY: {why}\nCLOSEST: {closest}")
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, bad, model=configured)
+    _reply(armed_openvault, f"WHY: {why}\nCLOSEST: {closest}", model=configured)
     dms_http.bind_session(SESSION, GRANT)
 
     body = _json(_ask(dms_http))
@@ -781,12 +808,12 @@ def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
     assert "not found in the database" in body["answer"]
     assert _ran(execute_spy) == []
     assert any(line.startswith("step reconfirm-strong:") for line in body["assumptions"])
-    assert body["served_provider"] == PROVIDER and body["served_model"] == MODEL
+    assert body["served_provider"] == PROVIDER and body["served_model"] == configured
     _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
 
 
 def test_ladder_rung_stamps_appear_on_the_answer(
-    armed_openvault, dms_http  # noqa: F811
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     """Each producing rung is on the customer envelope Check reads.
 
@@ -795,6 +822,8 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     answer, so this path does not add a WRONG.
     """
     bad = "SELECT no_such_col FROM transactions"
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
     dms_http.bind_session(SESSION, GRANT)
 
     _reply(armed_openvault, PLAN_TEXT)
@@ -812,20 +841,24 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT)
-    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, GOOD_SQL, model=configured)
     stronger = _json(_ask(dms_http, question="count types on the stronger model"))
     _assert_rung(stronger, "stronger-model")
     models = [call["body"]["model"] for call in armed_openvault.chat_calls]
     assert models[0] == planned_model
-    assert models[-1] != planned_model and models[-1] != "auto"
+    assert configured in models
 
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT)
-    _reply(armed_openvault, bad)
-    _reply(armed_openvault, "WHY: no grounded column\nCLOSEST: how many rows are in transactions")
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, bad, model=configured)
+    _reply(
+        armed_openvault,
+        "WHY: no grounded column\nCLOSEST: how many rows are in transactions",
+        model=configured,
+    )
     asked = _json(_ask(dms_http, question="count types until reconfirm"))
     _assert_rung(asked, "reconfirm")
     assert {planned["plan_sql_rung"], retried["plan_sql_rung"], stronger["plan_sql_rung"], asked["plan_sql_rung"]} == {
@@ -885,3 +918,102 @@ def test_pii_wording_is_not_an_abstain_and_is_not_masked(
     assert "abstain" not in body["answer"].lower()
     plan_prompt = armed_openvault.chat_calls[0]["body"]["messages"][1]["content"]
     assert "emails" in plan_prompt and "phone numbers" in plan_prompt
+
+
+@pytest.mark.parametrize("field", ["model", "strict", "provider"])
+def test_unknown_request_field_is_422(
+    armed_openvault, dms_http, field: str  # noqa: F811
+) -> None:
+    """Cortex does not model ``model`` or ``strict``. Unknown keys are 422."""
+    assert field not in AskRequest.model_fields
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": QUESTION, "session_id": SESSION, "dms_payload": PAYLOAD, field: "gpt"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert field in resp.text
+    assert armed_openvault.chat_calls == []
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_model_outside_allowlist_is_a_named_refusal_not_another_provider(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """OV route id that is not in the FreeRoute allowlist is refused. No substitute."""
+    missing = "not-a-catalogue-model"
+    _stronger_route(armed_openvault, missing, monkeypatch)
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["provenance"]["badge"] == "abstain"
+    assert freeroute.MODEL_NOT_ALLOWLISTED in body["answer"]
+    assert missing in body["answer"]
+    assert _ran(execute_spy) == []
+    asked = [call["body"]["model"] for call in armed_openvault.chat_calls]
+    assert missing not in asked
+    assert "qwen/qwen3.6-27b" not in asked
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_unserved_pin_reconfirms_and_names_the_missing_model(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """OV served a different model than the pinned route. That answer is not used."""
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    # Stronger plan and SQL: OV stamps a different model than the one it was asked for.
+    _reply(armed_openvault, PLAN_TEXT, model=MODEL)
+    _reply(armed_openvault, GOOD_SQL, model=MODEL)
+    _reply(armed_openvault, "WHY: ignored substitute\nCLOSEST: ignored substitute", model=MODEL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["provenance"]["badge"] == "reconfirm"
+    assert freeroute.MODEL_NOT_SERVED in body["answer"] or any(
+        freeroute.MODEL_NOT_SERVED in line for line in body["assumptions"]
+    )
+    assert configured in body["answer"] or any(configured in line for line in body["assumptions"])
+    assert "ignored substitute" not in body["answer"]
+    assert _ran(execute_spy) == []
+    assert body["sql_used"] is None
+    strong = [
+        call["body"]["model"]
+        for call in armed_openvault.chat_calls
+        if call["body"]["model"] == configured
+    ]
+    assert strong
+    served = next(line for line in body["assumptions"] if line.startswith("step plan-strong:"))
+    assert f"served_model={MODEL}" in served
+    assert f"served_provider={PROVIDER}" in served
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_unset_stronger_route_does_not_pick_a_provider(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    _stronger_route(armed_openvault, "", monkeypatch)
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["plan_sql_rung"] == plan_sql_ask.RUNG_RECONFIRM
+    assert freeroute.NO_STRONGER_ROUTE in " ".join(body["assumptions"])
+    asked = [call["body"]["model"] for call in armed_openvault.chat_calls]
+    assert asked
+    assert set(asked) == {MODEL}
+    assert _ran(execute_spy) == []
+    assert armed_openvault.non_openvault_calls == []

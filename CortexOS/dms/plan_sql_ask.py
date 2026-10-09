@@ -19,8 +19,9 @@ Order, each step stamped (``StepStamp``):
 5. On a SQL, execution, empty, or implausible result that is not an ungranted
    table and not destructive SQL: feed the error back and regenerate, up to
    ``SQL_ATTEMPTS`` writes on the same model.
-6. ``escalate``: one more plan+SQL pass pinned to the next OpenVault catalogue
-   model (a stronger retry) before any user reconfirm.
+6. ``escalate``: one more plan+SQL pass on the stronger route OpenVault
+   configured (``routes.stronger``). Cortex does not pick a provider. If OV
+   did not configure one, the ladder reconfirms and does not invent a model.
 7. ``reconfirm``: why this would abstain, plus the closest answerable question.
    ``plan_sql_confirm=yes`` runs that question. ``no`` answers
    ``not found in the database``.
@@ -342,7 +343,13 @@ def _remember(step: ModelStep, failed: set[str]) -> None:
 
 
 def _security_stop(step: ModelStep, journal: list[freeroute.RouteStamp]) -> tuple[str, str] | None:
-    """A trust failure, or a model call that was never sent. Else None."""
+    """A trust failure, or a model call that was never sent. Else None.
+
+    A missing OpenVault stronger route is not a trust failure: the ladder
+    reconfirms instead of inventing a provider.
+    """
+    if freeroute.NO_STRONGER_ROUTE in (step.reason or ""):
+        return None
     code, detail, refused = _model_refusal(step, journal)
     if code and (refused or step.route is None):
         return code, detail
@@ -437,19 +444,77 @@ def _sample_values(
     return found, f"columns={taken} values={nvals} errors={errors}"
 
 
-def _stronger_generator(failed: set[str]) -> FreeRoutePlanSqlGenerator:
-    """Next OpenVault catalogue model, still only through FreeRoute."""
+class _RouteRefusal:
+    """A stronger rung that must not call a model. No provider is chosen."""
+
+    def __init__(self, reason: str) -> None:
+        self.pin = ""
+        self._reason = reason
+
+    def _no(self, kind: str) -> ModelStep:
+        stamp = StepStamp.cortex(kind, "openvault-freeroute", self._reason)
+        return ModelStep(kind, False, "", self._reason, stamp, None)
+
+    def plan(self, request: plan_payload.PlanSqlRequest) -> ModelStep:
+        del request
+        return self._no("plan-strong")
+
+    def sql(
+        self,
+        request: plan_payload.PlanSqlRequest,
+        plan: ModelStep,
+        *,
+        prior_violations: Sequence[str] = (),
+    ) -> ModelStep:
+        del request, plan, prior_violations
+        return self._no("sql-strong")
+
+    def reconfirm(
+        self, request: plan_payload.PlanSqlRequest, failures: Sequence[str]
+    ) -> ModelStep:
+        del request, failures
+        return self._no("reconfirm-strong")
+
+
+def _stronger_generator(failed: set[str]) -> FreeRoutePlanSqlGenerator | _RouteRefusal:
+    """OpenVault's configured stronger route. Cortex does not pick a provider."""
+    del failed
     pin = ""
     try:
         arm = freeroute.arming()
-        models, _source = freeroute.candidates(arm)
-    except Exception:  # noqa: BLE001 - no catalogue still goes through FreeRoute
-        models = ()
-    for model in models:
-        if model and model not in failed and model != "auto":
-            pin = model
-            break
-    return FreeRoutePlanSqlGenerator(pin=pin, pin_source="plan-sql-stronger", tier="strong")
+        pin = freeroute.configured_stronger_route(arm)
+        if pin and pin not in freeroute.model_allowlist(arm):
+            return _RouteRefusal(f"{freeroute.MODEL_NOT_ALLOWLISTED}: {pin}")
+    except Exception:  # noqa: BLE001 - no status still does not invent a model
+        pin = ""
+    if not pin:
+        return _RouteRefusal(
+            f"{freeroute.NO_STRONGER_ROUTE}: OpenVault status has no routes.stronger"
+        )
+    return FreeRoutePlanSqlGenerator(
+        pin=pin,
+        pin_source="openvault-stronger-route",
+        tier="strong",
+    )
+
+
+def _not_served(step: ModelStep) -> str:
+    """Requested id OpenVault did not serve. Empty for ``auto`` and for a match."""
+    route = step.route
+    if route is None or not step.ok:
+        return ""
+    # A catalogue pick is not a pin. Only an id Cortex asked OV to serve
+    # (the stronger route, or an operator pin) is a promise OV can miss.
+    source = f"{route.source} {route.route_source}"
+    if "pin" not in source:
+        return ""
+    requested = (route.requested or "").strip()
+    if not requested or requested == "auto":
+        return ""
+    served = (route.served or step.stamp.served_model or "").strip()
+    if freeroute.request_was_served(requested, served):
+        return ""
+    return requested
 
 
 def _fallback_closest(request: plan_payload.PlanSqlRequest) -> str:
@@ -557,6 +622,10 @@ def plan_sql_answer(
         if not plan.ok:
             failures.append(f"{MODEL_UNAVAILABLE}: {plan.kind} step: {plan.reason}")
             return None
+        missed = _not_served(plan)
+        if missed:
+            failures.append(f"{freeroute.MODEL_NOT_SERVED}: {missed}")
+            return None
         priors = list(failures)
         for attempt in range(attempts):
             sql_step = active.sql(request, plan, prior_violations=priors)
@@ -567,6 +636,12 @@ def plan_sql_answer(
                 return stop(security[0], security[1], refused=security[0] != MODEL_UNAVAILABLE)
             if not sql_step.ok:
                 detail = f"{MODEL_UNAVAILABLE}: {sql_step.kind} step: {sql_step.reason}"
+                priors.append(detail)
+                failures.append(detail)
+                continue
+            missed = _not_served(sql_step)
+            if missed:
+                detail = f"{freeroute.MODEL_NOT_SERVED}: {missed}"
                 priors.append(detail)
                 failures.append(detail)
                 continue
@@ -708,7 +783,7 @@ def plan_sql_answer(
             StepStamp.cortex(
                 "escalate",
                 "openvault-freeroute",
-                f"stronger pin={strong.pin or 'openvault-pick'}",
+                f"stronger route={strong.pin or 'unset'}",
             )
         )
         request = replace(request, prior_failures=tuple(failures)[:8])
@@ -721,7 +796,12 @@ def plan_sql_answer(
         security = _security_stop(rec, journal)
         if security and security[0] != MODEL_UNAVAILABLE:
             return stop(security[0], security[1], refused=True)
-        why, closest = _parse_reconfirm(rec.text if rec.ok else "", failures, request)
+        missed = _not_served(rec)
+        if missed:
+            failures.append(f"{freeroute.MODEL_NOT_SERVED}: {missed}")
+        why, closest = _parse_reconfirm(
+            rec.text if rec.ok and not missed else "", failures, request
+        )
         _mark_rung(steps, RUNG_RECONFIRM)
         return _reconfirm_envelope(
             audit_id,

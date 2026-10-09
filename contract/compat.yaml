@@ -94,7 +94,9 @@ supported:
       AskPayloadColumn, AskPayloadJoin, PlanSqlReconfirm. Answer gains optional
       reconfirm, optional plan_sql_rung (plan, error-fed-retry-N, stronger-model,
       or reconfirm; null when this path did not answer) and Badge gains
-      reconfirm. 1.4 clients omit the fields and get the 1.4 behaviour.
+      reconfirm. AskRequest rejects unknown keys, including model and strict,
+      with 422. Routing stays in OpenVault route config, not a request field.
+      1.4 clients omit the fields and get the 1.4 behaviour.
       canonical_manifest_bytes unchanged.
 
 deprecated:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Badge(str, Enum):
@@ -83,6 +83,10 @@ class AskPayload(BaseModel):
 
 
 class AskRequest(BaseModel):
+    # Routing is OpenVault's route config. ``model`` and ``strict`` are not
+    # fields. Any unknown key, including those two, is a 422.
+    model_config = ConfigDict(extra="forbid")
+
     question: str = Field(min_length=1)
     session_id: str = "demo"
     space_id: str | None = None
