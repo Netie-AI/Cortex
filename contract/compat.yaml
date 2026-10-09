@@ -71,7 +71,7 @@ supported:
 
   - version: "1.4"
     spec: openapi-1.4.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive C-MEM (#290) per-Space memory: Answer gains memory_ids_read
@@ -80,6 +80,18 @@ supported:
       reused (a stored solution re-run on current data; never a validation).
       AskRequest gains optional scored_pack_id. 1.3 clients ignore the new
       fields. canonical_manifest_bytes unchanged.
+
+  - version: "1.5"
+    spec: openapi-1.5.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive C-LOOP-B (#304) self-correcting SQL loop: Answer gains optional
+      sql_loop (SqlLoop: served_outcome, served_abstain_reason,
+      served_retries, served_attempts[] of SqlAttempt). It is omitted from the
+      response unless the loop ran, so a 1.4 answer is unchanged. AbstainReason
+      gains seven named SQL-loop reasons. 1.4 clients ignore the new field.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

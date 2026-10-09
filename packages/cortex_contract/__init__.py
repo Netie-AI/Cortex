@@ -12,6 +12,9 @@ from .answer import (
     DrillthroughResponse,
     MemoryRead,
     Provenance,
+    SqlAttempt,
+    SqlLoop,
+    SqlLoopCheck,
 )
 from .errors import ContractError, UnauthorizedError, ValidationError
 from .execution import (
@@ -64,6 +67,9 @@ __all__ = [
     "DrillthroughResponse",
     "MemoryRead",
     "Provenance",
+    "SqlAttempt",
+    "SqlLoop",
+    "SqlLoopCheck",
     "ContractError",
     "UnauthorizedError",
     "ValidationError",
