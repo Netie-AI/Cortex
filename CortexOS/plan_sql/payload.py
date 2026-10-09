@@ -27,7 +27,7 @@ _PLAN_SYSTEM = (
     "Use only the tables, columns and joins listed. Do not write SQL."
 )
 _SQL_SYSTEM = (
-    "You write a single DuckDB SELECT that carries out the plan given. "
+    "You write a single DuckDB SELECT for the question. "
     "Use ONLY the tables, columns and joins listed. "
     "When sampled column values are listed, filter literals must come from them. "
     "No DDL/DML. No comments. Prefer LIMIT 50. "
@@ -58,6 +58,10 @@ class PlanSqlRequest:
     payload: AskPayload
     column_values: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
     prior_failures: tuple[str, ...] = ()
+    # SCHEMA-CONTEXT-01 string (PR #351). Absent: the payload schema is used.
+    # Present: the ask seam replaces the payload with grant ∩ this string
+    # before any prompt is built. Not a new contract field.
+    schema_context: str | None = None
 
     def table_names(self) -> frozenset[str]:
         return frozenset(_norm(t.name) for t in self.payload.tables)
@@ -158,11 +162,10 @@ def sql_messages(
     block = values_block(request)
     if block:
         parts.extend(["", block])
+    if plan:
+        parts.extend(["", "PLAN:", *plan])
     parts.extend(
         [
-            "",
-            "PLAN:",
-            *plan,
             "",
             f"QUESTION: {request.question}",
             "",

@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## GEN-GRANTED-CATALOG-01 -- 2026-10-09
+
+SQL generation on the plan+SQL path prompts with the signed grant intersected
+with the SCHEMA-CONTEXT-01 ``schema_context`` string (PR #351 shape). The
+string is read from the ask body without a contract bump. An unknown-column
+retry adds did-you-mean names from that catalog. Each attempt is one FreeRoute
+``complete``; the planner call is folded into it. Draft only. Not a CI claim.
+Not PASS. 52 effect not measured.
+
 ## IMAGE-AUTH-01 (#363) -- 2026-10-08
 
 `Dockerfile.core` and `Dockerfile.full` no longer set `DMS_AUTH_DISABLED`.

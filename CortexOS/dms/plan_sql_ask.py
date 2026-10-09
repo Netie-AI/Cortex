@@ -12,15 +12,18 @@ Order, each step stamped (``StepStamp``):
    grant. A payload that widens the grant is refused before any model call.
 3. ``sample``: distinct values from the granted payload columns, so filters can
    be grounded in what the tables actually hold. No model call.
-4. ``plan`` / ``sql``: model calls through the injected ``PlanSqlGenerator``
-   (default: OpenVault FreeRoute). A step whose route stamp FreeRoute did not
-   journal, or whose response omitted ``served_provider`` / ``served_model``,
-   is refused.
+4. ``sql``: one model call per attempt through the injected ``PlanSqlGenerator``
+   (default: OpenVault FreeRoute). The #329 planner call is folded into this
+   call: there is no serial planner or classifier before generation. A step
+   whose route stamp FreeRoute did not journal, or whose response omitted
+   ``served_provider`` / ``served_model``, is refused. The prompt is the
+   granted catalog intersected with ``schema_context`` when DMS sent one.
 5. On a SQL, execution, empty, or implausible result that is not an ungranted
    table and not destructive SQL: feed the error back and regenerate, up to
-   ``SQL_ATTEMPTS`` writes on the same model.
-6. ``escalate``: one more plan+SQL pass pinned to the next OpenVault catalogue
-   model (a stronger retry) before any user reconfirm.
+   ``SQL_ATTEMPTS`` writes on the same model. An unknown-column error also
+   carries did-you-mean hints from the granted catalog.
+6. ``escalate``: one more SQL pass pinned to the next OpenVault catalogue
+   model (a stronger retry, still one call) before any user reconfirm.
 7. ``reconfirm``: why this would abstain, plus the closest answerable question.
    ``plan_sql_confirm=yes`` runs that question. ``no`` answers
    ``not found in the database``.
@@ -51,6 +54,7 @@ from typing import Any
 from cortex_contract.answer import AskRequest
 
 from CortexOS.integrations import freeroute
+from CortexOS.plan_sql import catalog as plan_catalog
 from CortexOS.plan_sql import payload as plan_payload
 from CortexOS.plan_sql.generator import (
     FreeRoutePlanSqlGenerator,
@@ -79,7 +83,9 @@ NOT_FOUND_ANSWER = "not found in the database"
 
 # Same-model writes (the first, plus error-fed regenerations). The stronger
 # pass gets one write: the failures are already in its prompt.
+# Each write is one FreeRoute complete(). The planner is not a second call.
 SQL_ATTEMPTS = 2
+MODEL_CALLS_PER_ATTEMPT = 1
 STRONG_SQL_ATTEMPTS = 1
 RUNG_PLAN = "plan"
 RUNG_STRONG = "stronger-model"
@@ -115,12 +121,19 @@ def default_generator() -> PlanSqlGenerator:
     return FreeRoutePlanSqlGenerator()
 
 
-def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
+def try_plan_sql(
+    body: AskRequest,
+    *,
+    verified: Any,
+    schema_context: str | None = None,
+) -> dict[str, Any] | None:
     """Flat answer for the contract ask, or ``None`` when this path is off."""
     if body.dms_payload is None or not plan_sql_enabled():
         return None
     return plan_sql_answer(
-        plan_payload.PlanSqlRequest(body.question, body.dms_payload),
+        plan_payload.PlanSqlRequest(
+            body.question, body.dms_payload, schema_context=schema_context
+        ),
         session_id=body.session_id,
         space_id=body.space_id,
         verified=verified,
@@ -526,6 +539,10 @@ def plan_sql_answer(
     if widened:
         steps.append(StepStamp.cortex("payload", "cortex:payload-check", "refused"))
         return stop(widened[0].split(":", 1)[0], ", ".join(widened))
+    request, empty = plan_catalog.narrow(request, granted)
+    if empty:
+        steps.append(StepStamp.cortex("payload", "cortex:payload-check", "refused"))
+        return stop(empty, "schema_context names no granted table")
     selected = set(request.table_names())
     steps.append(
         StepStamp.cortex("payload", "cortex:payload-check", f"tables={sorted(selected)}")
@@ -543,23 +560,25 @@ def plan_sql_answer(
 
     gen = generator or default_generator()
 
+    def _hint(detail: str) -> str:
+        return plan_catalog.with_did_you_mean(detail, plan_catalog.column_names(request))
+
     def _round(
         active: PlanSqlGenerator,
         attempts: int,
         rung_of,
     ) -> dict[str, Any] | None:
-        plan = active.plan(request)
-        steps.append(plan.stamp)
-        _remember(plan, failed_models)
-        security = _security_stop(plan, journal)
-        if security:
-            return stop(security[0], security[1], refused=security[0] != MODEL_UNAVAILABLE)
-        if not plan.ok:
-            failures.append(f"{MODEL_UNAVAILABLE}: {plan.kind} step: {plan.reason}")
-            return None
+        # One freeroute.complete per attempt, inside sql(). plan() is not called.
+        folded = ModelStep(
+            "plan",
+            True,
+            "",
+            "folded into the sql call",
+            StepStamp.cortex("plan", "cortex:plan-folded", "folded into the sql call"),
+        )
         priors = list(failures)
         for attempt in range(attempts):
-            sql_step = active.sql(request, plan, prior_violations=priors)
+            sql_step = active.sql(request, folded, prior_violations=priors)
             steps.append(sql_step.stamp)
             _remember(sql_step, failed_models)
             security = _security_stop(sql_step, journal)
@@ -570,7 +589,7 @@ def plan_sql_answer(
                 priors.append(detail)
                 failures.append(detail)
                 continue
-            outcome = _use_sql(sql_step, plan, priors, rung_of(attempt))
+            outcome = _use_sql(sql_step, folded, priors, rung_of(attempt))
             if outcome is not None:
                 return outcome
         return None
@@ -604,7 +623,7 @@ def plan_sql_answer(
             freeroute.note_verdict(sql_step.route, "gate_fail")
             if code:
                 return stop(code, violations)
-            detail = f"{GATE_REFUSED}: {violations}"
+            detail = _hint(f"{GATE_REFUSED}: {violations}")
             priors.append(detail)
             failures.append(detail)
             return None
@@ -651,7 +670,7 @@ def plan_sql_answer(
             ):
                 code = MANIFEST_REFUSED
                 return stop(code, f"{type(exc).__name__}:{exc.code}")
-            detail = f"{EXECUTE_FAILED}: {type(exc).__name__}:{exc.code}"
+            detail = _hint(f"{EXECUTE_FAILED}: {type(exc).__name__}:{exc.code}")
             priors.append(detail)
             failures.append(detail)
             return None
@@ -663,7 +682,12 @@ def plan_sql_answer(
             return None
         except Exception as exc:  # noqa: BLE001 - an executor fault is retried, never a 500
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", type(exc).__name__))
-            detail = f"{EXECUTE_FAILED}: {type(exc).__name__}"
+            scanned = (
+                f"{EXECUTE_FAILED}: {type(exc).__name__}: "
+                f"{freeroute.redact(str(exc), limit=200)}"
+            )
+            hinted = _hint(scanned)
+            detail = hinted if hinted != scanned else f"{EXECUTE_FAILED}: {type(exc).__name__}"
             priors.append(detail)
             failures.append(detail)
             return None
