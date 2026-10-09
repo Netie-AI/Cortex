@@ -23,7 +23,7 @@ from CortexOS.memory import space_memory as sm
 from CortexOS.memory.space_memory import Actor, reset_space_memory_for_tests
 
 SESSION = "c-mem-290"
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "Top 5 selling SKUs by revenue"
 GRANT = {"transactions": "TRUE"}
 STEWARD = Actor("steward-alice", "steward")
 
@@ -147,7 +147,7 @@ def execute_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def _assert_engine_answer(body: dict[str, Any]) -> None:
-    assert body["rows"] and float(body["rows"][0].get("revenue_myr") or 0) > 0, body
+    assert body["rows"] and float(body["rows"][0].get("sales_value_myr") or 0) > 0, body
     assert body["answer"] and body["sql_used"]
 
 

@@ -75,10 +75,7 @@ def test_meta01_revenue_still_governed():
     r = engine_answer(q)
     assert r["badge"] != "session"
     assert r["badge"] != "catalog"
-    assert r["layer"] == "governed_metric"
-    rows = r.get("rows") or []
-    assert rows, f"revenue returned no rows: {r.get('answer')!r}"
-    text = r.get("answer") or ""
-    assert text.strip(), "revenue rendered no answer text"
-    assert any(ch.isdigit() for ch in text)
-    assert float(rows[0]["revenue_myr"]) > 0
+    assert r["layer"] == "abstain"
+    assert r.get("rows") == []
+    assert r.get("sql_used") is None
+    assert "can't answer" in (r.get("answer") or "").lower()

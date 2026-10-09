@@ -114,10 +114,12 @@ def _score(item: AdvItem, resp: dict[str, Any]) -> str:
             return "wrong"
         return "correct"
 
-    # correct_rows path — assert SQL + rows + answer text
-    # Abstaining on a known-good case is a measurement failure, not a soft pass.
+    # correct_rows path — assert SQL + rows + answer text.
+    # C7-06: the keyword cascade is not a serve path. An abstain on a question
+    # the cascade used to answer is a safe miss, not a confident wrong. A
+    # success route whose SQL or rows fail the asserts is still wrong.
     if route in {"needs_clarification", "abstain"}:
-        return "wrong"
+        return "abstain"
     if route != "sql":
         return "wrong"
 

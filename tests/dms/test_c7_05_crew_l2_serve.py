@@ -556,9 +556,11 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
 
     assert off["l2_named_steps"] == 0
     assert on["l2_named_steps"] > 0
+    # C7-06: L2-off envelopes no longer include keyword-cascade serves.
+    # Previous pin f5b041bd... was that cascade-serving snapshot.
     assert (
         off["envelopes_sha256"]
-        == "f5b041bd6df0ef16852d9175a8a4567713f48b48579903a261f04f25d434d845"
+        == "08cda5e0294c394f2e2d0d80343245b0398f5ad1c7adb413379e56c851e932af"
     )
     assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["values"] == []
@@ -584,4 +586,6 @@ def test_c7_04_subject_misroute_now_abstains(
     assert envelope["rows"] == []
     assert envelope["sql_used"] is None
     assert envelope["badge"] == "abstain"
-    assert "subject 'overtime'" in envelope["answer"]
+    text = (envelope["answer"] or "").lower()
+    assert "can't answer" in text or "no governed" in text
+    assert "low_stock" not in text

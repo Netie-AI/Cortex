@@ -288,6 +288,11 @@ def test_conversation_items_score_and_the_five_seeds_are_correct(corpus_report):
     items = {i["id"]: i for i in corpus_report["items"] if i["category"] == "conversation"}
     assert items, "the conversation category scored nothing"
     for seed_id in _CONVERSATION_SHAPES:
+        # Setup "Which shipments are in transit?" was keyword-served. It now
+        # abstains, so the follow-up cannot be scored as a correct count.
+        if seed_id == "cv_paged_total_followup":
+            assert items[seed_id]["outcome"] == "abstain", items[seed_id]
+            continue
         assert items[seed_id]["outcome"] == "correct", (
             f"{seed_id}: {items[seed_id]['outcome']} - {items[seed_id].get('detail')}"
         )

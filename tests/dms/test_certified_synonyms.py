@@ -45,6 +45,19 @@ def test_certified_synonym_hits_l0():
     assert int(rows[0]["sku_count"]) > 0
 
 
+def _assert_keyword_not_served(question: str):
+    """The cascade is not the server. Abstain, or a stored skill, not L1."""
+    from CortexOS.dms.answer_engine import answer
+
+    body = answer(question)
+    assert body["layer"] != "governed_metric", body.get("layer")
+    assert body["badge"] != "governed_metric"
+    if body["badge"] == "abstain":
+        assert body.get("rows") == []
+        assert body.get("sql_used") is None
+        assert "can't answer" in (body.get("answer") or "").lower()
+
+
 @pytest.mark.parametrize(
     "question",
     [
@@ -54,22 +67,13 @@ def test_certified_synonym_hits_l0():
     ],
 )
 def test_sku_count_metric_synonyms_hit_l1(question: str):
-    """metrics.yaml sku_count synonyms must answer, not only 'how many skus'."""
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    """metrics.yaml sku_count synonyms still classify. answer() does not keyword-serve."""
+    from CortexOS.dms.answer_engine import route_to_metric
 
     plan = route_to_metric(question)
     assert plan is not None, question
     assert plan.metric_id == "sku_count"
-    r = answer(question)
-    assert r["layer"] == "governed_metric"
-    rows = r.get("rows") or []
-    assert rows, f"{question!r} returned no rows: {r.get('answer')!r}"
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert any(ch.isdigit() for ch in text)
-    n = int(rows[0]["sku_count"])
-    assert n > 0
-    assert str(n) in text
+    _assert_keyword_not_served(question)
 
 
 @pytest.mark.parametrize(
@@ -110,17 +114,13 @@ def test_sku_count_metric_synonyms_hit_l1(question: str):
     ],
 )
 def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str):
-    """metrics.yaml phrases must select that metric, not an adjacent one."""
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    """metrics.yaml phrases still name that metric. answer() does not keyword-serve."""
+    from CortexOS.dms.answer_engine import route_to_metric
 
     plan = route_to_metric(question)
     assert plan is not None, question
     assert plan.metric_id == metric_id, (question, plan.metric_id)
-    r = answer(question)
-    assert r["badge"] != "abstain", r.get("answer")
-    assert r.get("rows"), r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
+    _assert_keyword_not_served(question)
 
 
 def test_null_expiry_count_does_not_compile_as_sku_count():
@@ -136,136 +136,75 @@ def test_null_expiry_count_does_not_compile_as_sku_count():
 
 def test_pending_high_risk_is_not_a_bare_risk_listing():
     """Nested 'high risk suppliers' must not steal the pending-shipment metric."""
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "pending deliveries from high risk vendors"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "high_risk_pending"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert "supplier_name" in rows[0]
-    assert "shipment_id" in rows[0]
-    assert str(rows[0]["supplier_name"]) in text
-    assert str(rows[0]["shipment_id"]) in text
+    _assert_keyword_not_served(q)
 
 
 def test_sku_count_per_category_is_grouped_not_scalar():
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "how many SKUs per category"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "sku_count_by_category"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert "category" in rows[0]
-    assert "sku_count" in rows[0]
-    assert str(rows[0]["category"]) in text
-    assert str(rows[0]["sku_count"]) in text.replace(",", "")
+    _assert_keyword_not_served(q)
 
 
 def test_freight_spend_per_destination_is_cost_not_count():
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "freight spend per destination"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "cost_by_destination"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert "location_code" in rows[0]
-    assert "total_cost_myr" in rows[0]
-    assert "shipment_count" not in rows[0]
-    assert str(rows[0]["location_code"]) in text
-    assert str(int(float(rows[0]["total_cost_myr"]))) in text.replace(",", "")
+    _assert_keyword_not_served(q)
 
 
 def test_spend_by_country_paraphrase_is_grouped_spend():
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "how much do we spend in each supplier country"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "spend_by_country"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert "country" in rows[0]
-    assert "total_spend_myr" in rows[0]
-    assert str(rows[0]["country"]) in text
-    assert str(int(float(rows[0]["total_spend_myr"]))) in text.replace(",", "")
+    _assert_keyword_not_served(q)
 
 
 def test_cctv_warehouse_a_returns_camera_id():
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "camera feed for warehouse A"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "cctv_by_location"
     assert plan.slots.get("location") == "WH-A"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert rows[0].get("location_code") == "WH-A"
-    assert rows[0].get("cctv_camera_id")
-    assert "WH-A" in text
-    assert str(rows[0]["cctv_camera_id"]) in text
+    _assert_keyword_not_served(q)
 
 
 def test_chemicals_paraphrase_lists_chemical_skus():
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "show me everything in the chemicals category"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "items_by_category"
     assert str(plan.slots.get("category")).upper() == "CHEMICALS"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert "sku" in rows[0]
-    assert str(rows[0]["sku"]) in text
+    _assert_keyword_not_served(q)
 
 
 def test_supplier_scorecard_paraphrase_ranks_suppliers():
-    from CortexOS.dms.answer_engine import answer, route_to_metric
+    from CortexOS.dms.answer_engine import route_to_metric
 
     q = "rank our vendors on risk and lead time together"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "supplier_ranking"
-    r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
-    rows = r.get("rows") or []
-    assert rows, r.get("answer")
-    text = r.get("answer") or ""
-    assert text.strip()
-    assert "supplier_id" in rows[0]
-    assert "ranking_score" in rows[0]
-    assert str(rows[0]["supplier_id"]) in text
+    _assert_keyword_not_served(q)
 
 
 def test_certified_sales_synonym_hits_l0():

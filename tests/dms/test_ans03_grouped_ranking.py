@@ -65,22 +65,29 @@ def test_grouped_ranking_does_not_return_the_warehouse_as_one_row(
 
 
 def test_sku_rank_that_names_total_revenue_still_ranks() -> None:
-    """R-0005 — "top 5 SKUs by total revenue" ranks SKUs; it is not a scalar."""
+    """R-0005 — this phrasing is not the certified top-5 question.
+
+    It must not return the warehouse-wide total. The keyword cascade and
+    stored-SQL replay are not serve paths, so it abstains.
+    """
     body = answer("top 5 SKUs by total revenue")
-    assert body["badge"] != "abstain", body.get("answer")
-    assert len(body.get("rows") or []) == 5
-    assert "sku" in body["rows"][0]
+    assert body["badge"] == "abstain", body.get("answer")
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
     assert not _warehouse_total_leaked(body)
-    rendered = body.get("answer") or ""
-    assert "SKU-" in rendered
+    assert "80375993" not in (body.get("answer") or "").replace(",", "")
 
 
 def test_bare_total_revenue_still_answers() -> None:
-    body = answer_question("what is our total revenue")
-    assert body["badge"] == "governed_metric"
-    assert body["rows"]
-    assert float(body["rows"][0]["revenue_myr"]) > 0
-    assert any(ch.isdigit() for ch in (body.get("answer") or ""))
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "what is our total revenue"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "revenue_total"
+    body = answer_question(q)
+    assert body["badge"] == "abstain"
+    assert body["rows"] == []
+    assert "80375993" not in str(body).replace(",", "")
 
 
 def test_unknown_subject_still_belongs_to_ans04() -> None:
