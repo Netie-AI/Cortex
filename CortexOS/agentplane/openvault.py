@@ -1,0 +1,607 @@
+"""Crew talks to OpenVault FreeRoute. Secrets stay in the vault.
+
+Chat goes through the one Cortex FreeRoute core (``CortexOS.integrations
+.freeroute``): armed only by OpenVault's own status, credential verified by
+OpenVault, requested and served model stamped. Crew never copies Groq /
+OpenRouter / Cursor secrets into its own process, and a refusal is raised
+with OpenVault's named reason rather than walked around.
+
+The key-management helpers below (vault rows, upsert, arm/disarm, seeded
+primary) still speak to the OpenVault key API directly; they list and edit
+rows, they never spend.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from CortexOS.agentplane.llm import LLMError, LLMResult, ToolCall, _parse_args
+from CortexOS.integrations import freeroute as core
+from CortexOS.integrations import openvault_client
+
+DEFAULT_URL = openvault_client.DEFAULT_OPENVAULT_URL
+
+
+DEFAULT_CURSOR_MODEL = "grok-4.6"
+
+
+def base_url() -> str:
+    explicit = os.environ.get("CREW_OPENVAULT_URL", "").strip()
+    return explicit.rstrip("/") if explicit else openvault_client.openvault_base_url()
+
+
+def cursor_model() -> str:
+    return os.environ.get("CREW_CURSOR_MODEL", DEFAULT_CURSOR_MODEL).strip() or DEFAULT_CURSOR_MODEL
+
+
+def cursor_key_status() -> dict[str, Any]:
+    """Public Cursor key presence. Never returns the secret."""
+    secret = os.environ.get("CURSOR_API_KEY", "").strip()
+    return {
+        "configured": bool(secret),
+        "chars": len(secret),
+        "model": cursor_model(),
+        "source": "env" if secret else "",
+    }
+
+
+def resolve_ov_model(model: str, *, measured: bool = False) -> str:
+    """Map crew model strings onto FreeRoute.
+
+    ``auto`` stays auto (the core picks a measured candidate) unless the
+    operator pinned ``CREW_OPENVAULT_MODEL``. A process-env Cursor/xAI key
+    never picks the model: env keys do not arm FreeRoute and must not steer
+    it. Grok-fast is always rewritten to high, never fast.
+    """
+    _ = measured  # #214 signature; every route is measured now
+    raw = (model or "").strip()
+    if raw.startswith("openvault/"):
+        raw = raw.split("/", 1)[1].strip()
+    if raw in {"", "auto"}:
+        return os.environ.get("CREW_OPENVAULT_MODEL", "").strip() or "auto"
+    if "fast" in raw.lower() and "grok" in raw.lower():
+        return cursor_model()
+    return raw
+
+
+def healthz(timeout: float = 1.5) -> dict[str, Any]:
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0"}
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(f"{base_url()}/api/healthz")
+        if resp.status_code != 200:
+            return {"ok": False, "detail": f"HTTP {resp.status_code}"}
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        return {"ok": True, "url": base_url(), "mesh": data.get("mesh")}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "url": base_url(), "detail": f"{type(exc).__name__}"}
+
+
+def require_live(timeout: float = 1.5) -> dict[str, Any]:
+    """FreeRoute must be armed for this turn. Never fall through to another host.
+
+    Reachability (``healthz``) is not arming: a sealed or key-less vault
+    answers its health probe and still cannot serve a model.
+    """
+    _ = timeout  # the core owns its probe timeout
+    from CortexOS.agentplane.freeroute import arming
+
+    snap = arming()
+    if not snap.get("armed"):
+        raise LLMError(
+            "OpenVault connector refused: "
+            + str(snap.get("detail") or "unreachable")
+            + " (no silent fallback)"
+        )
+    return snap
+
+
+def _tools_from_choice(message: dict[str, Any]) -> list[ToolCall]:
+    calls: list[ToolCall] = []
+    for i, tc in enumerate(message.get("tool_calls") or []):
+        fn = tc.get("function") or {}
+        calls.append(
+            ToolCall(
+                id=str(tc.get("id") or f"call_{i}"),
+                name=str(fn.get("name") or ""),
+                args=_parse_args(fn.get("arguments")),
+            )
+        )
+    return calls
+
+
+async def chat(
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    max_tokens: int = 2048,
+    timeout: int = 180,
+    model: str = "auto",
+    identity: str = "",
+    measured: bool = False,
+) -> LLMResult:
+    """One FreeRoute chat through the core. Raises ``LLMError`` with the named reason.
+
+    ``identity`` and ``measured`` stay in the signature for #214 callers and are
+    ignored: attribution is OpenVault's verdict on the bearer, never a header
+    Cortex writes about itself. ``LLMResult.model`` is the model OpenVault
+    actually served, not the one asked for.
+    """
+    _ = identity, measured
+    from CortexOS.agentplane.freeroute import complete_core
+
+    requested = resolve_ov_model(model)
+    pin = "" if requested == "auto" else requested
+    pinned_env = os.environ.get("CREW_OPENVAULT_MODEL", "").strip()
+    pin_source = "CREW_OPENVAULT_MODEL" if pin and pin == pinned_env else f"openvault/{pin}"
+    completion = await complete_core(
+        "crew-act" if tools else "crew-chat",
+        messages,
+        max_tokens=max_tokens,
+        timeout=float(timeout),
+        tools=tools,
+        pin=pin,
+        pin_source=pin_source if pin else "",
+    )
+    if not completion.ok:
+        raise LLMError(completion.reason)
+    usage = completion.usage
+    cost = usage.get("cost") or usage.get("total_cost") or usage.get("cost_usd")
+    try:
+        cost_usd = float(cost) if cost is not None else None
+    except (TypeError, ValueError):
+        cost_usd = None
+    message = completion.message
+    return LLMResult(
+        text=completion.text,
+        tool_calls=_tools_from_choice(message),
+        finish_reason="tool_calls" if message.get("tool_calls") else "stop",
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        cost_usd=cost_usd,
+        model=completion.stamp.served if completion.stamp else "",
+    )
+
+
+_ENV_TO_PROVIDER: dict[str, str] = {
+    "ANTHROPIC_API_KEY": "anthropic",
+    "OPENROUTER_API_KEY": "openrouter",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "OPENAI_API_KEY": "openai",
+    "CURSOR_API_KEY": "custom",
+    "XAI_API_KEY": "custom",
+    "GROQ_API_KEY": "groq",
+    "GOOGLE_API_KEY": "google",
+    "CEREBRAS_API_KEY": "cerebras",
+    "MISTRAL_API_KEY": "mistral",
+}
+
+_ENV_TO_LABEL: dict[str, str] = {
+    "ANTHROPIC_API_KEY": "anthropic",
+    "OPENROUTER_API_KEY": "openrouter",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "OPENAI_API_KEY": "openai-compatible",
+    "CURSOR_API_KEY": "cursor",
+    "XAI_API_KEY": "xai",
+    "GROQ_API_KEY": "groq",
+    "GOOGLE_API_KEY": "google",
+    "CEREBRAS_API_KEY": "cerebras",
+    "MISTRAL_API_KEY": "mistral",
+}
+
+_PROVIDER_TO_LABEL: dict[str, str] = {
+    "anthropic": "anthropic",
+    "openrouter": "openrouter",
+    "openai": "openai-compatible",
+    "deepseek": "deepseek",
+    "groq": "groq",
+    "google": "google",
+    "gemini": "google",
+    "cerebras": "cerebras",
+    "mistral": "mistral",
+    "xai": "xai",
+    "cursor": "cursor",
+}
+
+_VAULT_CACHE: tuple[float, tuple[dict[str, Any], ...]] = (0.0, ())
+
+
+def reset_vault_cache() -> None:
+    """Test hook. Arm/upsert also busts this so a new key is visible."""
+    global _VAULT_CACHE
+    _VAULT_CACHE = (0.0, ())
+
+
+def _crew_label(raw: dict[str, Any]) -> str:
+    env_key = str(raw.get("env_key") or "").strip()
+    if env_key in _ENV_TO_LABEL:
+        return _ENV_TO_LABEL[env_key]
+    label = str(raw.get("label") or "").strip()
+    if label in _ENV_TO_LABEL:
+        return _ENV_TO_LABEL[label]
+    provider = str(raw.get("provider") or "").strip().lower()
+    return _PROVIDER_TO_LABEL.get(provider, "")
+
+
+def _public_vault_row(raw: Any) -> dict[str, Any] | None:
+    """Strip secrets. Unknown shapes are dropped, not invented."""
+    if not isinstance(raw, dict):
+        return None
+    kid = str(raw.get("id") or "").strip()
+    if not kid:
+        return None
+    enabled = raw.get("enabled") is not False
+    return {
+        "id": kid,
+        "label": str(raw.get("label") or "").strip(),
+        "provider": str(raw.get("provider") or "").strip(),
+        "env_key": str(raw.get("env_key") or "").strip(),
+        "enabled": enabled,
+        "crew_label": _crew_label(raw),
+    }
+
+
+def list_vault_keys(
+    *, timeout: float = 1.5, ttl: float = 5.0, fresh: bool = False
+) -> list[dict[str, Any]]:
+    """Public vault rows. Never includes secret values. Empty if unarmed/down."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return []
+    global _VAULT_CACHE
+    now = time.monotonic()
+    if not fresh and _VAULT_CACHE[0] > 0 and now - _VAULT_CACHE[0] < ttl:
+        return [dict(row) for row in _VAULT_CACHE[1]]
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(f"{base_url()}/api/keys")
+        if resp.status_code != 200:
+            _VAULT_CACHE = (now, ())
+            return []
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001 - vault body is untrusted
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+    except httpx.HTTPError:
+        _VAULT_CACHE = (now, ())
+        return []
+    raw_keys = data.get("keys") if isinstance(data, dict) else None
+    if not isinstance(raw_keys, list):
+        raw_keys = []
+    out: list[dict[str, Any]] = []
+    for raw in raw_keys:
+        pub = _public_vault_row(raw)
+        if pub is not None:
+            out.append(pub)
+    _VAULT_CACHE = (now, tuple(out))
+    return [dict(row) for row in out]
+
+
+def vault_sources() -> dict[str, dict[str, Any]]:
+    """crew_label -> public vault row. Enabled wins when duplicates exist."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in list_vault_keys():
+        label = str(row.get("crew_label") or "")
+        if not label:
+            continue
+        prev = out.get(label)
+        if prev is None or (row.get("enabled") and not prev.get("enabled")):
+            out[label] = row
+    return out
+
+
+def vault_armed_labels() -> set[str]:
+    return {label for label, row in vault_sources().items() if row.get("enabled")}
+
+
+def list_models(*, timeout: float = 1.5) -> list[dict[str, Any]]:
+    """Public FreeRoute model ids. Empty if unarmed or down. Never invents rows."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return []
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(f"{base_url()}/v1/models")
+        if resp.status_code != 200:
+            return []
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001 - vault body is untrusted
+            return []
+    except httpx.HTTPError:
+        return []
+    raw: list[Any]
+    if isinstance(data, dict):
+        if isinstance(data.get("data"), list):
+            raw = list(data.get("data") or [])
+        elif isinstance(data.get("models"), list):
+            raw = list(data.get("models") or [])
+        else:
+            raw = []
+    elif isinstance(data, list):
+        raw = data
+    else:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if isinstance(item, str):
+            mid = item.strip()
+            owned = ""
+        elif isinstance(item, dict):
+            mid = str(item.get("id") or item.get("model") or "").strip()
+            owned = str(item.get("owned_by") or item.get("ownedBy") or "").strip()
+        else:
+            continue
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        row = {"id": mid}
+        if owned:
+            row["owned_by"] = owned
+        out.append(row)
+    return out
+
+
+def ratelimit(identity: str = "", *, timeout: float = 1.2) -> dict[str, Any]:
+    """FreeRoute budget snapshot for Cortex's own credential. Display only.
+
+    OpenVault names the identity it attributes the bearer to; a label Cortex
+    passes is echoed back for the UI and carries no authority. No secrets.
+    """
+    label = (identity or "").strip()
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "identity": label, "detail": "CREW_OPENVAULT=0"}
+    status, data = openvault_client.request_json(
+        "GET",
+        "/api/freeroute/ratelimit",
+        headers=core.auth_headers(),
+        timeout=timeout,
+        base=base_url(),
+    )
+    if status != 200 or not isinstance(data, dict):
+        detail = "unreachable" if status == 0 else f"HTTP {status}"
+        return {"ok": False, "identity": label, "detail": detail}
+    return {
+        "ok": True,
+        "identity": str(data.get("identity") or ""),
+        "label": label,
+        "tier": data.get("tier"),
+        "remaining": data.get("remaining_tokens", data.get("remaining")),
+    }
+
+
+def arm_source(label: str, armed: bool, *, slug: str | None = None) -> dict[str, Any]:
+    """Enable/disable matching OpenVault keys. Fail-closed; no silent fallback."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0 (no silent fallback)", "armed": False}
+    needle = (label or "").strip().lower()
+    if needle in {"openai", "openai-compatible"}:
+        needle = "openai-compatible"
+    if needle in {"ov", "vault"}:
+        needle = "openvault"
+    if needle == "openvault":
+        return {
+            "ok": False,
+            "detail": "OpenVault is the vault host, not an API key row (no silent fallback)",
+            "armed": False,
+        }
+    rows = [r for r in list_vault_keys(fresh=True) if r.get("crew_label") == needle]
+    if not rows:
+        return {
+            "ok": False,
+            "detail": f"connector {slug or needle} has no OpenVault key (no silent fallback)",
+            "armed": False,
+        }
+    patched: list[str] = []
+    errors: list[str] = []
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            for row in rows:
+                resp = client.patch(
+                    f"{base_url()}/api/keys/{row['id']}",
+                    json={"enabled": bool(armed)},
+                )
+                if resp.status_code >= 400:
+                    errors.append(f"{row['id']}: HTTP {resp.status_code}")
+                else:
+                    patched.append(str(row["id"]))
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "detail": f"{type(exc).__name__} (no silent fallback)",
+            "armed": False,
+        }
+    reset_vault_cache()
+    if errors and not patched:
+        return {
+            "ok": False,
+            "detail": "; ".join(errors) + " (no silent fallback)",
+            "armed": False,
+        }
+    return {
+        "ok": not errors,
+        "armed": bool(armed),
+        "slug": slug or needle,
+        "label": needle,
+        "ids": patched,
+        "detail": "armed" if armed else "disarmed",
+        "errors": errors,
+    }
+
+
+def upsert_env_key(env_key: str, secret: str) -> dict[str, Any]:
+    """Store one secret in OpenVault forever. Never logs the secret."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0"}
+    secret = secret.strip()
+    if not secret:
+        return {"ok": False, "detail": "empty secret"}
+    provider = _ENV_TO_PROVIDER.get(env_key, "custom")
+    payload: dict[str, Any] = {
+        "env_key": env_key,
+        "secret": secret,
+        "label": env_key,
+    }
+    if env_key == "CURSOR_API_KEY":
+        payload["base_url"] = os.environ.get("CREW_CURSOR_BASE_URL", "https://api.cursor.com/v1")
+        payload["provider"] = "custom"
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            resp = client.post(f"{base_url()}/api/keyvault/upsert", json=payload)
+        if resp.status_code >= 400:
+            return {"ok": False, "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+        data = resp.json()
+        first = (data.get("results") or [{}])[0]
+        key = first.get("key") or {}
+        ok = bool(data.get("ok") and first.get("ok"))
+        if ok:
+            reset_vault_cache()
+        return {
+            "ok": ok,
+            "label": env_key,
+            "id": key.get("id"),
+            "provider": key.get("provider") or provider,
+            "action": first.get("action"),
+        }
+    except httpx.HTTPError as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}"}
+
+
+def push_env_keys() -> dict[str, Any]:
+    """Copy any live process env keys into the vault. Values stay off logs."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "skipped": True, "detail": "CREW_OPENVAULT=0"}
+    pushed: list[str] = []
+    errors: list[str] = []
+    for env_key in _ENV_TO_PROVIDER:
+        secret = os.environ.get(env_key, "").strip()
+        if not secret:
+            continue
+        result = upsert_env_key(env_key, secret)
+        if result.get("ok"):
+            pushed.append(env_key)
+        else:
+            errors.append(f"{env_key}:{result.get('detail')}")
+    return {"ok": not errors, "pushed": pushed, "errors": errors}
+
+
+def ingest_cursor_from_files(root: Path | None = None) -> dict[str, Any]:
+    """Find CURSOR_API_KEY on disk or env and vault it. Never returns the secret."""
+    secret = os.environ.get("CURSOR_API_KEY", "").strip()
+    source = "env" if secret else ""
+    root = root or Path(os.environ.get("CREW_ROOT") or Path(__file__).resolve().parents[2])
+    if not secret:
+        keys_path = root / "data" / "crew" / "keys.json"
+        if keys_path.is_file():
+            try:
+                blob = json.loads(keys_path.read_text(encoding="utf-8"))
+                cand = blob.get("CURSOR_API_KEY") if isinstance(blob, dict) else None
+                if isinstance(cand, str) and cand.strip():
+                    secret, source = cand.strip(), "keys.json"
+            except (OSError, ValueError):
+                pass
+    if not secret:
+        for rel in (".env", ".env.local", "cursor.env"):
+            path = root / rel
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("CURSOR_API_KEY="):
+                    cand = stripped.split("=", 1)[1].strip().strip("'\"")
+                    if cand:
+                        secret, source = cand, rel
+                        break
+            if secret:
+                break
+    if not secret:
+        return {"ok": False, "detail": "CURSOR_API_KEY not found on disk or env"}
+    os.environ["CURSOR_API_KEY"] = secret
+    result = upsert_env_key("CURSOR_API_KEY", secret)
+    result["source"] = source
+    result["chars"] = len(secret)
+    return result
+
+
+def ingest_csv_drop(path: Path) -> dict[str, Any]:
+    """Vault rows from a dropped CSV. Never returns secret values.
+
+    Columns: env_key,secret  (optional label). Passkeys/WebAuthn stay in the
+    browser; this path is API keys and site passwords the operator chose to
+    drop. Do not commit the CSV. Do not print values.
+    """
+    import csv
+
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0"}
+    if not path.is_file():
+        return {"ok": False, "detail": f"missing {path.name}"}
+    pushed: list[str] = []
+    errors: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        return {"ok": False, "detail": str(exc)}
+    reader = csv.DictReader(text.splitlines())
+    if not reader.fieldnames:
+        return {"ok": False, "detail": "empty csv"}
+    fields = {str(f or "").strip().lower(): str(f or "") for f in reader.fieldnames}
+    key_col = fields.get("env_key") or fields.get("key") or fields.get("name")
+    secret_col = fields.get("secret") or fields.get("password") or fields.get("value")
+    if not key_col or not secret_col:
+        return {"ok": False, "detail": "need columns env_key,secret"}
+    for row in reader:
+        env_key = str(row.get(key_col) or "").strip()
+        secret = str(row.get(secret_col) or "").strip()
+        if not env_key or not secret:
+            continue
+        result = upsert_env_key(env_key, secret)
+        if result.get("ok"):
+            pushed.append(env_key)
+        else:
+            errors.append(f"{env_key}:{result.get('detail')}")
+    return {"ok": not errors, "pushed": pushed, "errors": errors, "n": len(pushed)}
+
+
+SEEDED_CORTEX_LABEL = "Netie Cortex (seeded)"
+
+
+def disable_seeded_cortex_primary() -> dict[str, Any]:
+    """Stop FreeRoute walking the dead Cortex seed key first (HTTP 404, non-retryable)."""
+    if os.environ.get("CREW_OPENVAULT", "1") == "0":
+        return {"ok": False, "detail": "CREW_OPENVAULT=0"}
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            listing = client.get(f"{base_url()}/api/keys")
+            if listing.status_code != 200:
+                return {"ok": False, "detail": f"list HTTP {listing.status_code}"}
+            rows = (listing.json() or {}).get("keys") or []
+            target = next(
+                (row for row in rows if str(row.get("label") or "") == SEEDED_CORTEX_LABEL),
+                None,
+            )
+            if target is None:
+                return {"ok": True, "detail": "seeded cortex key not present"}
+            if not target.get("enabled"):
+                return {"ok": True, "id": target.get("id"), "detail": "already disabled"}
+            resp = client.patch(
+                f"{base_url()}/api/keys/{target['id']}",
+                json={"enabled": False},
+            )
+        if resp.status_code >= 400:
+            return {"ok": False, "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+        return {"ok": True, "id": target.get("id"), "detail": "disabled"}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}"}

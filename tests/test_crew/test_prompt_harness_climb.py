@@ -16,9 +16,12 @@ from fastapi.testclient import TestClient
 from CortexOS.crew import insights
 from CortexOS.crew import prompt_harness_climb as harness
 from CortexOS.crew.server import create_app
+from tests.test_crew import cx3_pre_310_license
 from tests.test_crew.conftest import FakeLLM
 
-HARNESS_PY = Path(__file__).resolve().parents[2] / "CortexOS" / "crew" / "prompt_harness_climb.py"
+HARNESS_PY = (
+    Path(__file__).resolve().parents[2] / "CortexOS" / "agentplane" / "prompt_harness_climb.py"
+)
 ROOT = Path(__file__).resolve().parents[2]
 _C_STAMP_289_BASE = "5a5d728c4d6e376ace4a8b1af17f1a15f45b6af1"
 _C_STAMP_289_BRANCH_EXCEPTIONS = {
@@ -381,6 +384,7 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
     names = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
     banned = {
         "CortexOS/crew/freeroute.py",
+        "CortexOS/agentplane/freeroute.py",
         "CortexOS/crew/liberty_seek.py",
         "CortexOS/crew/liberty_routes.py",
         # #269 ROUTER-1 owns the FreeRoute store schema/_write_row/_stats/pick.
@@ -397,9 +401,18 @@ def test_branch_does_not_dual_write_freeze_or_liberty_or_freeroute() -> None:
             _is_exact_c_stamp_289_seam(path)
             or _is_exact_c7_04_288_seam(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or cx3_pre_310_license.is_exact_move(path)
         )
     ]
     assert held == [], f"dual-write of frozen/other-seat files: {held}"
+
+
+def test_other_branch_moving_freeroute_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/cx3-other-branch")
+    assert cx3_pre_310_license.is_exact_move("CortexOS/crew/freeroute.py") is False
+    assert cx3_pre_310_license.is_exact_move("CortexOS/agentplane/freeroute.py") is False
 
 
 def test_other_branch_editing_answer_engine_still_trips_guard(

@@ -99,3 +99,50 @@ forbidden_modules =
 # through an executor the caller injects, so the store never holds a source-DB
 # handle, never calls a model, and can never serve an answer it did not re-run.
 # Must-fail: tests/test_memory/test_c_mem_import_contract.py.
+
+[importlinter:contract:5]
+name = the engine never imports CortexOS.crew; it reaches relocated code via CortexOS.agentplane (CX-3-pre #310)
+type = forbidden
+source_modules =
+    CortexOS.a2a
+    CortexOS.agent_sdk
+    CortexOS.agentplane
+    CortexOS.api
+    CortexOS.audit
+    CortexOS.cas
+    CortexOS.cli
+    CortexOS.compliance
+    CortexOS.config
+    CortexOS.connectors
+    CortexOS.constructor_graph
+    CortexOS.context_engineering
+    CortexOS.crypto
+    CortexOS.db
+    CortexOS.discovery
+    CortexOS.dms
+    CortexOS.engine
+    CortexOS.execution
+    CortexOS.fabrication
+    CortexOS.insights
+    CortexOS.integrations
+    CortexOS.memory
+    CortexOS.nlp
+    CortexOS.ontology
+    CortexOS.packaging
+    CortexOS.packs
+    CortexOS.paths
+    CortexOS.personality
+    CortexOS.ponytail
+    CortexOS.rag
+    CortexOS.result
+    CortexOS.routing
+    CortexOS.rsf
+    CortexOS.security
+    CortexOS.skills
+forbidden_modules =
+    CortexOS.crew
+# Every CortexOS child except crew. The only CortexOS.crew -> CortexOS.agentplane
+# edges are the re-export shims named in
+# tests/test_agentplane/test_cx3_pre_relocation.py, which CX-3 deletes with the
+# crew server. That test fails if a new CortexOS child is missing from this list
+# and proves the contract BREAKs on a function-level engine -> crew import.
