@@ -371,10 +371,11 @@ class VerifiedQueryLibrary:
         actor: str,
         scored_pack_id: str | None = None,
     ) -> list[VerifiedExample]:
-        """Confirmed examples in this Space, oldest first, capped.
+        """Every confirmed example in this Space.
 
-        No text match. A scored round returns nothing. Unconfirmed, revoked
-        and other Spaces are absent.
+        No word rank and no recency rank. The ask path asks the model which
+        ids belong with the question. A scored round returns nothing.
+        Unconfirmed, revoked and other Spaces are absent.
         """
         sid = self.memory._space(space_id)
         if self.memory.is_scored_round(scored_pack_id):
@@ -385,8 +386,6 @@ class VerifiedQueryLibrary:
             entry, stamp = self._live_entry(query, actor, scored_pack_id)
             if entry is not None:
                 found.append(VerifiedExample(query=query, entry=entry, read_stamp=stamp))
-        if len(found) > EXAMPLE_CAP:
-            found = found[-EXAMPLE_CAP:]
         return found
 
 

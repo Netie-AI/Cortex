@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
 
@@ -13,6 +13,9 @@ class Badge(str, Enum):
     SESSION = "session"
     ABSTAIN = "abstain"
     BLOCKED = "blocked"
+    # 1.5.0 (#329): the plan+SQL loop could not ground an answer and is asking
+    # the user. Not an abstain. Older clients ignore the value.
+    RECONFIRM = "reconfirm"
 
 
 class AbstainReason(str, Enum):
@@ -29,6 +32,56 @@ class Provenance(BaseModel):
     assumptions: str | None = None
 
 
+class AskPayloadColumn(BaseModel):
+    """1.5.0 (#329): one column of a table the consumer selected for this ask."""
+
+    name: str = Field(min_length=1)
+    type: str | None = None
+    description: str | None = None
+
+
+class AskPayloadTable(BaseModel):
+    """1.5.0 (#329): one selected table and its schema."""
+
+    name: str = Field(min_length=1)
+    columns: list[AskPayloadColumn] = Field(default_factory=list)
+    description: str | None = None
+
+
+class AskPayloadJoin(BaseModel):
+    """1.5.0 (#329): one ontology join between two selected tables."""
+
+    left_table: str = Field(min_length=1)
+    left_column: str = Field(min_length=1)
+    right_table: str = Field(min_length=1)
+    right_column: str = Field(min_length=1)
+    relation: str | None = None
+
+
+class PlanSqlReconfirm(BaseModel):
+    """1.5.0 (#329): why the plan+SQL loop would abstain, and the closest question.
+
+    Present only when the loop could not ground an answer. Yes
+    (``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to
+    ``closest_question``) runs that question. No answers
+    ``not found in the database``. Older clients ignore the object.
+    """
+
+    why: str = Field(min_length=1)
+    closest_question: str = Field(min_length=1)
+
+
+class AskPayload(BaseModel):
+    """1.5.0 (#329): selected tables, their schema and ontology joins for one question.
+
+    The payload can only narrow what the signed grant allows: a table or join
+    outside the grant is refused before any model call.
+    """
+
+    tables: list[AskPayloadTable] = Field(min_length=1)
+    joins: list[AskPayloadJoin] = Field(default_factory=list)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     session_id: str = "demo"
@@ -36,6 +89,12 @@ class AskRequest(BaseModel):
     # 1.4.0: set on every ask of a scored round. Solution memory stays empty and
     # nothing is written to memory while it is set.
     scored_pack_id: str | None = None
+    # 1.5.0 (#329): ignored unless the engine runs with its plan+SQL path on.
+    dms_payload: AskPayload | None = None
+    # 1.5.0 (#329): decision on a prior plan+SQL reconfirm. Absent on a normal ask.
+    # ``yes`` runs ``question`` (the closest question). ``no`` answers
+    # ``not found in the database`` and does not call a model.
+    plan_sql_confirm: Literal["yes", "no"] | None = None
 
 
 class MemoryRead(BaseModel):
@@ -86,9 +145,15 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
-    # 1.5.0 VERIFIED-QUERY: examples that were in the SQL generator prompt.
-    # Omitted from the serialized answer when unset, so an answer that used no
-    # verified query keeps the 1.4.0 field set. Not a phrasing-match id.
+    # 1.5.0 (#329): set when the plan+SQL loop asks the user to confirm the
+    # closest question. Null on every other answer. 1.4 clients ignore it.
+    reconfirm: PlanSqlReconfirm | None = None
+    # 1.5.0 (#329): which ladder rung produced this plan+SQL answer.
+    # ``plan`` | ``error-fed-retry-<N>`` | ``stronger-model`` | ``reconfirm``.
+    # Null when this path did not answer (flag off, direct abstain, confirm-no).
+    plan_sql_rung: str | None = None
+    # 1.5.0 additive on #329, no version bump: examples that were in the SQL
+    # generator prompt. Omitted when unset. Not a phrasing-match id.
     verified_query_id: str | None = None
 
     # No return annotation: pydantic derives the serialization schema from it,

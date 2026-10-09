@@ -13,7 +13,8 @@ test_verified_query_guard_mutations.py):
    is called with the example in the prompt and returns its own SQL. The
    stored SQL is not the candidate.
 
-No phrasing lookup. Examples are every live pair in the Space, capped.
+No phrasing lookup. The library returns every live pair. The model picks
+which ids go into the SQL prompt.
 """
 
 from __future__ import annotations
@@ -135,14 +136,25 @@ def test_examples_are_not_chosen_by_phrasing(lib: VerifiedQueryLibrary) -> None:
     assert _ids(lib) == [query.id, other.id]
 
 
-def test_example_cap_bounds_the_prompt(lib: VerifiedQueryLibrary) -> None:
-    made = [
-        _confirmed(lib, question=f"question {i}", sql=f"SELECT {i} AS n FROM transactions")
-        for i in range(EXAMPLE_CAP + 1)
+def test_library_returns_every_live_example_without_a_word_rank(
+    lib: VerifiedQueryLibrary,
+) -> None:
+    """A shared-word decoy does not crowd out a live example the model has not seen."""
+    decoy = _confirmed(
+        lib,
+        question="total quantity_kg moved for SKU-00999 in June 2026",
+        sql="SELECT 1 AS n FROM transactions",
+    )
+    target = _confirmed(
+        lib,
+        question="hazardous carrier punctuality",
+        sql="SELECT 2 AS n FROM shipments",
+    )
+    rest = [
+        _confirmed(lib, question=f"question {i}", sql=f"SELECT {i + 3} AS n FROM transactions")
+        for i in range(EXAMPLE_CAP)
     ]
-    found = _ids(lib)
-    assert len(found) == EXAMPLE_CAP
-    assert set(found) < {q.id for q in made}
+    assert set(_ids(lib)) == {decoy.id, target.id, *(q.id for q in rest)}
 
 
 def test_confirmed_example_points_at_the_steward_solution(lib: VerifiedQueryLibrary) -> None:
@@ -301,6 +313,85 @@ def test_must_fail_revoked_query_never_reused_after_plain_solution_confirm(
 
 
 # -- must-fail 5: the generator writes the SQL -----------------------------------
+def _words(text: str) -> set[str]:
+    import re
+
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _word_overlap(left: str, right: str) -> int:
+    return len(_words(left) & _words(right))
+
+
+def test_pick_follows_the_model_not_shared_words(
+    lib: VerifiedQueryLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The certified/verified-query match is the model's id list, not shared words."""
+    from CortexOS.dms import verified_query_ask as vqa
+    from CortexOS.integrations import freeroute
+
+    ask = "total quantity_kg moved for SKU-00109 in June 2026"
+    decoy = _confirmed(
+        lib,
+        question="total quantity_kg moved for SKU-00999 in June 2026",
+        sql="SELECT SUM(quantity_kg) AS n FROM transactions WHERE sku = 'SKU-00999'",
+    )
+    target = _confirmed(
+        lib,
+        question="hazardous carrier punctuality",
+        sql="SELECT carrier, on_time_pct FROM shipments WHERE hazmat = true",
+    )
+    assert _word_overlap(ask, decoy.question) > _word_overlap(ask, target.question)
+    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    monkeypatch.setattr(vqa, "get_verified_queries", lambda: lib)
+    sent: list[str] = []
+
+    def mocked_complete(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> freeroute.Completion:
+        assert task == vqa.PICK_TASK
+        sent.append(task)
+        assert len(sent) == 1, "the pick is one FreeRoute call"
+        blob = json.dumps(messages)
+        assert decoy.question in blob and target.question in blob
+        return freeroute.Completion(ok=True, text=json.dumps([target.id]))
+
+    monkeypatch.setattr(freeroute, "complete", mocked_complete)
+    meta = vqa.generation_examples(space_id="alpha", question=ask)
+    assert meta is not None
+    assert meta["verified_query_id"] == target.id
+    assert target.sql in json.dumps(meta["prompt"])
+    assert "SKU-00999" not in json.dumps(meta["prompt"])
+
+
+def test_refused_pick_does_not_fall_back_to_shared_words(
+    lib: VerifiedQueryLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.dms import verified_query_ask as vqa
+    from CortexOS.integrations import freeroute
+
+    _confirmed(
+        lib,
+        question="total quantity_kg moved for SKU-00999 in June 2026",
+        sql="SELECT 1 AS n FROM transactions",
+    )
+    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    monkeypatch.setattr(vqa, "get_verified_queries", lambda: lib)
+    monkeypatch.setattr(
+        freeroute,
+        "complete",
+        lambda *a, **k: freeroute.Completion(ok=False, text=""),
+    )
+    assert vqa.generation_examples(
+        space_id="alpha",
+        question="total quantity_kg moved for SKU-00109 in June 2026",
+    ) is None
+
+
+def test_pick_source_has_no_word_rank() -> None:
+    source = (ROOT / "CortexOS" / "dms" / "verified_query_ask.py").read_text(encoding="utf-8")
+    for banned in ("jaccard", "word_overlap", "embed_goal", "text_embedding", "_STOPWORDS"):
+        assert banned not in source
+
+
 def test_prompt_carries_examples_for_an_unrelated_question() -> None:
     from CortexOS.dms.verified_query_ask import question_with_examples
     from packs.dms.generative.sql_generator import _build_prompt

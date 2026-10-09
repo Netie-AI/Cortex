@@ -233,6 +233,14 @@ def _reach_generator(monkeypatch: pytest.MonkeyPatch, sql: str = MODEL_SQL) -> l
 
     def mocked_complete(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> freeroute.Completion:
         sent.append({"task": task, "messages": messages})
+        if task == vqa.PICK_TASK:
+            import re
+
+            ids: list[str] = []
+            for token in re.findall(r"vq_[0-9a-f]{16}", json.dumps(messages)):
+                if token not in ids:
+                    ids.append(token)
+            return freeroute.Completion(ok=True, text=json.dumps(ids))
         stamp = freeroute.RouteStamp(
             call_id="mock",
             task=task,
@@ -266,7 +274,10 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     assert b"verified_query_id" not in resp.content
     body = resp.json()
     spec = json.loads((ROOT / "contract" / "openapi-1.4.0.json").read_text(encoding="utf-8"))
-    assert set(body) == set(spec["components"]["schemas"]["Answer"]["properties"])
+    base = set(spec["components"]["schemas"]["Answer"]["properties"])
+    # #329's 1.5.0 fields are present and null. verified_query_id stays omitted.
+    assert set(body) - base == {"reconfirm", "plan_sql_rung"}
+    assert body["reconfirm"] is None and body["plan_sql_rung"] is None
     assert list(body) == [f for f in Answer.model_fields if f != "verified_query_id"]
     _assert_not_verified(body)
     assert body["memory_ids_read"] == []
@@ -295,7 +306,9 @@ def test_verified_examples_feed_the_generator_and_current_data_is_executed(
     body = _ask(ask_http, "alpha")
     prompt = json.dumps(sent)
     assert query.id in prompt and VQ_SQL in prompt and VQ_Q in prompt
-    assert sent[0]["task"] == "gen-ask-sql"
+    sql_calls = [item for item in sent if item["task"] == "gen-ask-sql"]
+    assert sql_calls and sql_calls[0]["task"] == "gen-ask-sql"
+    assert any(item["task"] == vqa.PICK_TASK for item in sent)
     assert body["verified_query_id"] == query.id
     assert body["reused"] is False
     assert body["memory_ids_read"] == [query.entry_id]
@@ -434,7 +447,9 @@ def test_freeroute_is_the_only_model_call_and_it_sees_the_example_sql(
     query = _confirm("alpha")
     body = _ask(ask_http, "alpha", "how many kilos shifted, phrased differently")
     assert len(sent) >= 1
-    assert all(item["task"] == "gen-ask-sql" for item in sent)
+    assert {item["task"] for item in sent} <= {"gen-ask-sql", vqa.PICK_TASK}
+    assert any(item["task"] == vqa.PICK_TASK for item in sent)
+    assert any(item["task"] == "gen-ask-sql" for item in sent)
     prompt = json.dumps(sent)
     assert query.id in prompt and VQ_SQL in prompt
     assert body["verified_query_id"] == query.id

@@ -3,13 +3,14 @@
 Off unless ``CORTEX_VERIFIED_QUERY`` is set. When off, :func:`generation_examples`
 returns ``None`` before touching the library.
 
-Examples are question/SQL pairs. The generator (OpenVault FreeRoute, inside
-the L2 port) sees them in its prompt and writes new SQL. This module does
-not match phrasing, does not call a model, and does not execute stored SQL.
+Which examples belong with the question is one OpenVault FreeRoute pick
+(``vq-pick-examples``). That pick is not a word-overlap rank. The SQL
+generator then writes new SQL. This module does not execute stored SQL.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -19,6 +20,9 @@ from CortexOS.memory.verified_query import get_verified_queries
 
 ENABLED_ENV = "CORTEX_VERIFIED_QUERY"
 ASK_ACTOR = "cortex:contract-ask"
+PICK_TASK = "vq-pick-examples"
+# Token budget for the pick call. Id order, not similarity.
+CANDIDATE_BUDGET = 32
 
 _TRUTHY = {"1", "true", "on", "yes"}
 
@@ -27,16 +31,76 @@ def verified_query_enabled() -> bool:
     return (os.environ.get(ENABLED_ENV) or "").strip().lower() in _TRUTHY
 
 
+def _parse_ids(text: str, allowed: set[str]) -> list[str]:
+    """Ids the model named that are in ``allowed``, in the model's order."""
+    start = text.find("[")
+    end = text.rfind("]")
+    if start < 0 or end <= start:
+        return []
+    try:
+        raw = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        qid = str(item).strip()
+        if qid in allowed and qid not in seen:
+            seen.add(qid)
+            out.append(qid)
+    return out
+
+
+def pick_example_ids(question: str, candidates: list[tuple[str, str]]) -> list[str]:
+    """One FreeRoute pick. Empty on refusal. Never a shared-word ranking.
+
+    ``candidates`` is ``(id, question)``. At most :data:`CANDIDATE_BUDGET` are
+    shown, in id order, which is a token budget. The model chooses which of
+    those ids go into the SQL prompt, at most :data:`EXAMPLE_CAP`.
+    """
+    from CortexOS.integrations import freeroute
+    from CortexOS.memory.verified_query import EXAMPLE_CAP
+
+    by_id: dict[str, str] = {}
+    for qid, text in candidates:
+        key = str(qid).strip()
+        if key and key not in by_id:
+            by_id[key] = str(text or "")
+    if not by_id:
+        return []
+    shown = sorted(by_id)[:CANDIDATE_BUDGET]
+    lines = [f"{qid}\t{by_id[qid]}" for qid in shown]
+    prompt = (
+        "Choose verified-query ids for QUESTION. "
+        "Reply with a JSON array of ids and nothing else.\n"
+        "CANDIDATES:\n" + "\n".join(lines) + f"\nQUESTION:\n{question}"
+    )
+    out = freeroute.complete(
+        PICK_TASK,
+        [{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=200,
+        timeout=30.0,
+        egress="leave",
+    )
+    if not getattr(out, "ok", False) or not getattr(out, "text", None):
+        return []
+    return _parse_ids(str(out.text), set(shown))[:EXAMPLE_CAP]
+
+
 def generation_examples(
     *,
     space_id: str,
+    question: str,
     scored_pack_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Prompt examples for one Space, or ``None`` when off or none are live.
+    """Prompt examples for one Space, or ``None`` when off, empty, or unpicked.
 
-    ``prompt`` is what the SQL generator may put in front of the question.
-    ``verified_query_id`` names those examples. Memory fields name the C-MEM
-    solutions that were read.
+    The model names the ids. A refusal does not fall back to shared words.
+    ``verified_query_id`` names the picked examples. Memory fields name those
+    C-MEM solutions.
     """
     if not verified_query_enabled():
         return None
@@ -48,15 +112,22 @@ def generation_examples(
     )
     if not found:
         return None
+    chosen = pick_example_ids(
+        question, [(ex.query.id, ex.query.question) for ex in found]
+    )
+    by_id = {ex.query.id: ex for ex in found}
+    picked = [by_id[qid] for qid in chosen if qid in by_id]
+    if not picked:
+        return None
     prompt = [
-        {"id": ex.query.id, "question": ex.query.question, "sql": ex.query.sql} for ex in found
+        {"id": ex.query.id, "question": ex.query.question, "sql": ex.query.sql} for ex in picked
     ]
     return {
         "prompt": prompt,
         "verified_query_id": ",".join(item["id"] for item in prompt),
-        "memory_ids_read": [ex.entry.id for ex in found],
+        "memory_ids_read": [ex.entry.id for ex in picked],
         "memory_reads": [
-            {**ex.entry.provenance(), "served_at": ex.read_stamp.served_at} for ex in found
+            {**ex.entry.provenance(), "served_at": ex.read_stamp.served_at} for ex in picked
         ],
     }
 
@@ -124,7 +195,9 @@ class _ExamplePort:
         passed = schema
         if bound is not None:
             meta = generation_examples(
-                space_id=bound.space_id, scored_pack_id=bound.scored_pack_id
+                space_id=bound.space_id,
+                question=question,
+                scored_pack_id=bound.scored_pack_id,
             )
             if meta is not None:
                 asked = question_with_examples(question, list(meta["prompt"]))

@@ -86,12 +86,19 @@ supported:
     status: current
     contract_surface: true
     notes: >
-      Additive VERIFIED-QUERY (#309): Answer gains optional verified_query_id,
-      the steward-confirmed query an answer re-ran on current data (set
-      together with reused; never a validation). It is omitted from the
-      serialized answer when unset, so an answer that used no verified query
-      is unchanged on the wire. 1.4 clients ignore the field.
-      canonical_manifest_bytes unchanged.
+      #329 owns 1.5.0. Additive C-LOOP-A (#303) DMS payload: AskRequest gains
+      optional dms_payload (selected tables with columns, and ontology joins)
+      for the engine's plan+SQL path, which is off by default, and optional
+      plan_sql_confirm (yes runs the closest question, no answers
+      "not found in the database"). New schemas AskPayload, AskPayloadTable,
+      AskPayloadColumn, AskPayloadJoin, PlanSqlReconfirm. Answer gains optional
+      reconfirm, optional plan_sql_rung (plan, error-fed-retry-N, stronger-model,
+      or reconfirm; null when this path did not answer) and Badge gains
+      reconfirm. VERIFIED-QUERY (#309) is additive on that same 1.5.0, with no
+      version bump: Answer gains optional verified_query_id (examples that were
+      in the SQL prompt; omitted when unset; not a phrasing-match id).
+      1.4 clients ignore the new fields. canonical_manifest_bytes unchanged.
+      Breaking count versus #329's 1.5.0 is 0.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.
