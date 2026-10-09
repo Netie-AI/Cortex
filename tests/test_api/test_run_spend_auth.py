@@ -909,7 +909,14 @@ def _dependency_floors(route) -> list[str]:
 
 
 def _iter_registered_routes(app):
+    """Yield ``(kind, method, path, floors)`` for every route entry.
+
+    ``kind`` is ``api``, ``mount``, or ``other``. Included routers are expanded.
+    ``HEAD`` is not yielded. A ``Mount`` is one entry. A route that is not an
+    ``APIRoute`` (``app.add_route``) is ``other``.
+    """
     from fastapi.routing import APIRoute, _IncludedRouter
+    from starlette.routing import Mount, Route
 
     def walk(routes, prefix: str):
         for route in routes:
@@ -917,32 +924,65 @@ def _iter_registered_routes(app):
                 child = prefix + (route.include_context.prefix or "")
                 yield from walk(route.original_router.routes, child)
                 continue
-            if not isinstance(route, APIRoute):
+            path = prefix + getattr(route, "path", "")
+            if isinstance(route, Mount):
+                yield "mount", "", path, []
                 continue
-            path = prefix + route.path
-            for method in sorted(route.methods or ()):
-                if method == "HEAD":
-                    continue
-                yield method, path, _dependency_floors(route)
+            if isinstance(route, APIRoute):
+                for method in sorted(route.methods or ()):
+                    if method == "HEAD":
+                        continue
+                    yield "api", method, path, _dependency_floors(route)
+                continue
+            methods = sorted(getattr(route, "methods", None) or ())
+            if isinstance(route, Route) and methods:
+                for method in methods:
+                    if method == "HEAD":
+                        continue
+                    yield "other", method, path, []
+                continue
+            yield "other", "", path, []
 
     yield from walk(app.router.routes, "")
 
 
 def _in_walker_scope(path: str) -> bool:
-    """Constructor surface, workflow routes, ``POST /run``, and engine ``/run``."""
+    """Constructor surface, workflow routes, ``POST /run``, and engine ``/run``.
+
+    This is not every route on the app. ``/run2``, ``/api/run2``, and
+    ``/api/engine/run2`` are outside this set.
+    """
     if path in {"/run", "/api/engine/run"}:
         return True
     return path == "/cortex" or path.startswith("/cortex/") or path.startswith("/api/workflows")
 
 
 def _walker_problems(app) -> list[str]:
-    """Unlisted in-scope routes, and spend/write routes on a viewer floor."""
+    """In-scope mounts, raw routes, shadows, unlisted routes, and viewer floors.
+
+    The first entry for a method+path is the one Starlette matches. A later
+    duplicate does not replace it.
+    """
     found: dict[tuple[str, str], list[str]] = {}
+    seen: set[tuple[str, str]] = set()
     problems: list[str] = []
-    for method, path, floors in _iter_registered_routes(app):
+    for kind, method, path, floors in _iter_registered_routes(app):
         if not _in_walker_scope(path):
             continue
+        if kind == "mount":
+            problems.append(f"mount {path}")
+            continue
+        if kind != "api":
+            if method:
+                problems.append(f"non-APIRoute {method} {path}")
+            else:
+                problems.append(f"non-APIRoute {path}")
+            continue
         key = (method, path)
+        if key in seen:
+            problems.append(f"duplicate {method} {path}")
+            continue
+        seen.add(key)
         if key not in _LISTED_ROUTES:
             problems.append(f"unlisted {method} {path}")
             continue
@@ -964,14 +1004,16 @@ def _walker_problems(app) -> list[str]:
 
 
 def test_spend_or_write_routes_are_not_on_viewer(monkeypatch):
-    """Fail on an unlisted constructor or workflow route, or a viewer spend floor.
+    """Fail on an unlisted in-scope route, a mount, a raw route, a shadow, or a viewer floor.
 
-    The table is ``_LISTED_ROUTES``. A registered route under ``/cortex``,
-    ``/api/workflows``, ``POST /run``, or ``POST /api/engine/run`` that is not
-    in that table fails, and the message names the route. Spend or write
-    routes still fail when their floor is viewer or is not steward or admin.
-    recognize stays steward and is not a spend/write route. Included routers
-    count: constructor routes and engine ``/run`` are not on the flat list.
+    The table is ``_LISTED_ROUTES``. Coverage is ``/cortex``, ``/api/workflows``,
+    ``POST /run``, and ``POST /api/engine/run``, including included routers.
+    A ``Mount``, a route that is not an ``APIRoute``, or a second method+path
+    pair in that set fails, and the message names the route. The first
+    method+path wins, so an earlier unauthenticated ``POST /run`` is the one
+    that is checked. Spend or write routes still fail when their floor is
+    viewer or is not steward or admin. recognize stays steward and is not a
+    spend/write route. A route outside this set is not a failure here.
     """
     assert _SPEND_OR_WRITE <= _LISTED_ROUTES
     app = _boot(monkeypatch, "dms", None)
