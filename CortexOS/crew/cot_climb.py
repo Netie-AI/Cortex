@@ -835,7 +835,9 @@ async def climb(
                         g1_consumed=g1_consumed,
                         prior_sql_consumed=prior_sql_consumed,
                     ),
-                    refuse_reason=str(checked.get("reason") or "refused"),
+                    refuse_reason=schema_mod.public_sql_reason(
+                        str(checked.get("reason") or "refused")
+                    ),
                 )
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
