@@ -139,9 +139,9 @@ def _lake() -> duckdb.DuckDBPyConnection:
         "txn_type VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE)"
     )
     con.execute(
-        "INSERT INTO transactions VALUES ('T1','K1','L1','OUT',5,2.5),('T2','K2','L1','OUT',1,10),"
-        "('T3','K3','L2','IN',70,3),('T4','K4','L2','OUT',2,100),('T5','K5','L3','OUT',9,1),"
-        "('T6','K6','L3','OUT',1,9),('T7','K1','L1','OUT',3,2.5),('T8','K7','L1','OUT',1,4)"
+        "INSERT INTO transactions VALUES ('T1','K1','L1','outbound',5,2.5),('T2','K2','L1','outbound',1,10),"
+        "('T3','K3','L2','inbound',70,3),('T4','K4','L2','outbound',2,100),('T5','K5','L3','outbound',9,1),"
+        "('T6','K6','L3','outbound',1,9),('T7','K1','L1','outbound',3,2.5),('T8','K7','L1','outbound',1,4)"
     )
     con.execute(
         "CREATE TABLE locations (location_id VARCHAR, location_code VARCHAR, "

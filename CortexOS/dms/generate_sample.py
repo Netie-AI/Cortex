@@ -419,7 +419,7 @@ def generate_transactions(
     n: int = 5000,
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
-    types = ["IN", "OUT", "ADJUST", "WRITE_OFF"]
+    types = ["inbound", "outbound", "ADJUST", "WRITE_OFF"]
     now = datetime.now()
     for i in range(n):
         inv = rng.choice(inventory)
@@ -438,7 +438,7 @@ def generate_transactions(
             }
         )
     # Value dict reads sku from transactions. Named inventory SKUs must appear
-    # here or BETA cannot resolve to SKU-BETA. IN-only so OUT rankings stay put.
+    # here or BETA cannot resolve to SKU-BETA. inbound-only so outbound rankings stay put.
     named_ids = {sku for sku, _name, _cat in NAMED_SKUS}
     named_inv = [inv for inv in inventory if inv.get("sku") in named_ids]
     for j, inv in enumerate(named_inv):
@@ -447,7 +447,7 @@ def generate_transactions(
                 "txn_id": f"TXN-{210000 + j}",
                 "sku": inv["sku"],
                 "location_id": inv["location_id"],
-                "txn_type": "IN",
+                "txn_type": "inbound",
                 "quantity_kg": "1.0",
                 "unit_cost_myr": inv["unit_cost_myr"],
                 "operator_id": "OP-001",

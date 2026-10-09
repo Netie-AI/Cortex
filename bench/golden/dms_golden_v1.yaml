@@ -42,7 +42,7 @@ items:
     match: resultset
     canonical_sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type = 'OUT'
+      FROM transactions WHERE txn_type = 'outbound'
       GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
     key_columns: [sku, sales_value_myr]
     round: 2
@@ -55,7 +55,7 @@ items:
     match: resultset
     canonical_sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
+      FROM transactions WHERE txn_type = 'outbound' AND sku NOT IN ('SKU-BETA')
       GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
     key_columns: [sku, sales_value_myr]
     round: 2
@@ -69,7 +69,7 @@ items:
     match: resultset
     canonical_sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
+      FROM transactions WHERE txn_type = 'outbound' AND sku NOT IN ('SKU-BETA')
       GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
     key_columns: [sku, sales_value_myr]
     round: 2
@@ -82,7 +82,7 @@ items:
     match: resultset
     canonical_sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
-      FROM transactions WHERE txn_type = 'OUT'
+      FROM transactions WHERE txn_type = 'outbound'
       GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3
     key_columns: [sku, total_sold_kg]
     tags: [sales, rank]
@@ -336,7 +336,7 @@ items:
     canonical_sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
       FROM transactions
-      WHERE txn_type = 'OUT'
+      WHERE txn_type = 'outbound'
         AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL 30 DAY
     key_columns: [revenue_myr]
     round: 2

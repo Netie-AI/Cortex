@@ -12,7 +12,10 @@ from pathlib import Path
 import yaml
 from sqlglot import exp, parse_one
 
-from tests.dms.synthetic_demo_warehouse import open_synthetic_demo_warehouse
+from tests.dms.synthetic_demo_warehouse import (
+    open_mixed_convention_warehouse,
+    open_synthetic_demo_warehouse,
+)
 
 _YAML = Path(__file__).resolve().parents[2] / "packs" / "dms" / "semantic" / "certified_queries.yaml"
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -97,11 +100,15 @@ def _predicate_misses_data(con, node: exp.Expression, alias_to_table: dict[str, 
     return False
 
 
-def _rows_without_absent_literals(con, sql: str) -> list:
+def _oracle_rows(con, sql: str) -> list:
+    """Rows the query would return with string literals that miss the column removed.
+
+    When every literal is present, the oracle is the query itself.
+    """
     tree = parse_one(sql, read="duckdb")
     where = tree.args.get("where")
     if where is None:
-        return []
+        return con.execute(sql).fetchall()
     alias_to_table, tables = _alias_map(tree)
     changed = False
     for node in list(where.find_all(exp.EQ, exp.In)):
@@ -109,8 +116,13 @@ def _rows_without_absent_literals(con, sql: str) -> list:
             node.replace(exp.true())
             changed = True
     if not changed:
-        return []
+        return con.execute(sql).fetchall()
     return con.execute(tree.sql(dialect="duckdb")).fetchall()
+
+
+def _rows(con, sql: str) -> list[tuple]:
+    rows = [tuple(row) for row in con.execute(sql).fetchall()]
+    return sorted(rows, key=lambda row: tuple(repr(value) for value in row))
 
 
 def test_certified_queries_return_rows_when_demo_warehouse_has_rows() -> None:
@@ -124,20 +136,45 @@ def test_certified_queries_return_rows_when_demo_warehouse_has_rows() -> None:
             label = str(query.get("id") or sql[:40])
             try:
                 got = con.execute(sql).fetchall()
+                oracle = _oracle_rows(con, sql)
             except Exception as exc:
                 misses.append(f"{label}: query failed: {exc}")
                 continue
-            if got:
+            # Empty oracle: the demo seed has no rows for this query. Not a miss.
+            if not oracle:
                 continue
-            try:
-                relaxed = _rows_without_absent_literals(con, sql)
-            except Exception as exc:
-                misses.append(f"{label}: 0 rows and relaxed query failed: {exc}")
-                continue
-            if relaxed:
+            if not got:
                 misses.append(
-                    f"{label}: 0 rows but {len(relaxed)} rows once absent literals are dropped"
+                    f"{label}: 0 rows but oracle has {len(oracle)} rows"
                 )
     finally:
         con.close()
     assert not misses, "certified queries missed demo rows:\n" + "\n".join(misses)
+
+
+def test_certified_queries_do_not_count_old_txn_type_spelling() -> None:
+    """Same measures stored as the old spelling must not change any certified result."""
+    misses: list[str] = []
+    canonical = open_synthetic_demo_warehouse()
+    mixed = open_mixed_convention_warehouse()
+    try:
+        queries = _certified()
+        assert queries, f"no certified sql in {_YAML.name}"
+        for query in queries:
+            sql = str(query.get("sql") or "")
+            label = str(query.get("id") or sql[:40])
+            try:
+                canon_rows = _rows(canonical, sql)
+                mixed_rows = _rows(mixed, sql)
+            except Exception as exc:
+                misses.append(f"{label}: query failed: {exc}")
+                continue
+            if canon_rows != mixed_rows:
+                misses.append(
+                    f"{label}: canonical {canon_rows[:1]} != mixed {mixed_rows[:1]} "
+                    f"({len(canon_rows)} vs {len(mixed_rows)} rows)"
+                )
+    finally:
+        canonical.close()
+        mixed.close()
+    assert not misses, "certified queries counted a non-canonical txn_type:\n" + "\n".join(misses)

@@ -11,6 +11,30 @@ from __future__ import annotations
 import duckdb
 
 
+def open_mixed_convention_warehouse() -> duckdb.DuckDBPyConnection:
+    """Canonical demo rows plus the same measures under the old txn_type spelling.
+
+    A filter that matches both spellings doubles sales. A filter on the
+    canonical spelling alone does not.
+    """
+    con = open_synthetic_demo_warehouse()
+    con.execute(
+        """
+        INSERT INTO transactions
+        SELECT txn_id || '-old', sku, location_id,
+               CASE txn_type
+                 WHEN 'outbound' THEN 'OUT'
+                 WHEN 'inbound' THEN 'IN'
+                 ELSE txn_type
+               END,
+               quantity_kg, unit_cost_myr, ts
+        FROM transactions
+        WHERE txn_type IN ('outbound', 'inbound')
+        """
+    )
+    return con
+
+
 def open_synthetic_demo_warehouse() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(":memory:")
     con.execute(

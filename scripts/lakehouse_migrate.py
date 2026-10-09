@@ -91,7 +91,7 @@ def migrate_gold(con) -> dict[str, int]:
             "SELECT sku, SUM(quantity_kg) AS total_sold_kg, "
             "ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr, "
             "COUNT(*) AS transaction_count "
-            "FROM lake.silver.transactions WHERE txn_type = 'OUT' GROUP BY sku"),
+            "FROM lake.silver.transactions WHERE txn_type = 'outbound' GROUP BY sku"),
         "capacity_by_location": (
             "SELECT location_code, location_name, current_load_kg, capacity_kg, "
             "ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used, "

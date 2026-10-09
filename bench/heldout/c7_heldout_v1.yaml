@@ -49,7 +49,7 @@ items:
         SELECT s.sku
         FROM (
           SELECT sku, SUM(quantity_kg) AS out_kg
-          FROM transactions WHERE txn_type = 'OUT'
+          FROM transactions WHERE txn_type = 'outbound'
           GROUP BY sku
         ) s
         JOIN (
@@ -59,7 +59,7 @@ items:
           SELECT i2.category, AVG(s2.out_kg) AS avg_out
           FROM (
             SELECT sku, SUM(quantity_kg) AS out_kg
-            FROM transactions WHERE txn_type = 'OUT' GROUP BY sku
+            FROM transactions WHERE txn_type = 'outbound' GROUP BY sku
           ) s2
           JOIN (
             SELECT sku, MIN(category) AS category FROM inventory GROUP BY sku
@@ -269,10 +269,10 @@ items:
       FROM (
         SELECT t_in.sku, t_in.location_id
         FROM (
-          SELECT DISTINCT sku, location_id FROM transactions WHERE txn_type = 'IN'
+          SELECT DISTINCT sku, location_id FROM transactions WHERE txn_type = 'inbound'
         ) t_in
         JOIN (
-          SELECT DISTINCT sku, location_id FROM transactions WHERE txn_type = 'OUT'
+          SELECT DISTINCT sku, location_id FROM transactions WHERE txn_type = 'outbound'
         ) t_out
           ON t_out.sku = t_in.sku AND t_out.location_id = t_in.location_id
       ) x
@@ -316,7 +316,7 @@ items:
       WHERE sh.status = 'DELAYED'
         AND NOT EXISTS (
           SELECT 1 FROM transactions t
-          WHERE t.sku = sh.sku AND t.txn_type = 'OUT'
+          WHERE t.sku = sh.sku AND t.txn_type = 'outbound'
         )
 
   - id: spider_unresolved_critical_slow_supplier

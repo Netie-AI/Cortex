@@ -35,7 +35,7 @@ certified:
       - "Top 5 SKUs by revenue"
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type IN ('outbound', 'OUT')
+      FROM transactions WHERE txn_type = 'outbound'
       GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
     verified_by: seed
     verified_at: "2026-07-20"
@@ -45,7 +45,7 @@ certified:
     question: "Top 3 SKUs by quantity sold"
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
-      FROM transactions WHERE txn_type IN ('outbound', 'OUT')
+      FROM transactions WHERE txn_type = 'outbound'
       GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3
     verified_by: seed
     verified_at: "2026-07-20"
@@ -150,7 +150,7 @@ certified:
     sql: >
       SELECT DISTINCT s.supplier_name, sh.shipment_id
       FROM suppliers s JOIN shipments sh ON s.supplier_id = sh.supplier_id
-      WHERE s.risk_score > 0.7 AND sh.status IN ('PENDING', 'IN_TRANSIT', 'in_transit')
+      WHERE s.risk_score > 0.7 AND sh.status IN ('PENDING', 'IN_TRANSIT')
     verified_by: seed
     verified_at: "2026-07-20"
     tags: [suppliers, shipments]
@@ -185,7 +185,7 @@ certified:
              ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
       FROM transactions t
       JOIN (SELECT DISTINCT sku, category FROM inventory) c ON t.sku = c.sku
-      WHERE t.txn_type IN ('outbound', 'OUT')
+      WHERE t.txn_type = 'outbound'
       GROUP BY c.category
       ORDER BY sales_value_myr DESC, c.category ASC
       LIMIT 3

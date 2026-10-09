@@ -13,7 +13,7 @@
     "CREATE TABLE inventory (sku VARCHAR, category VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE, supplier_id VARCHAR, location_id VARCHAR, reorder_level_kg DOUBLE, expiry_date DATE)",
     "INSERT INTO inventory VALUES ('SKU-A', 'CHEMICALS', 5.0, 2.0, 'S1', 'L1', 10.0, DATE '2020-01-01'), ('SKU-B', 'FOOD', 20.0, 3.0, 'S2', 'L2', 10.0, DATE '2099-01-01')",
     "CREATE TABLE transactions (sku VARCHAR, quantity_kg DOUBLE, unit_cost_myr DOUBLE, txn_type VARCHAR)",
-    "INSERT INTO transactions VALUES ('SKU-A', 2.0, 2.0, 'OUT'), ('SKU-B', 4.0, 3.0, 'OUT')",
+    "INSERT INTO transactions VALUES ('SKU-A', 2.0, 2.0, 'outbound'), ('SKU-B', 4.0, 3.0, 'outbound')",
     "CREATE TABLE shipments (shipment_id VARCHAR, destination_location_id VARCHAR, cost_myr DOUBLE)",
     "INSERT INTO shipments VALUES ('SH-1', 'L1', 25.0)"
   ],
@@ -41,7 +41,7 @@
       "question": "Top 5 selling SKUs by revenue",
       "stands_in_for": "curated Phase 1b top-sales-value question shape",
       "sql_origin": "hand-written, same shape",
-      "sql": "SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr FROM transactions WHERE txn_type = 'OUT' GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5",
+      "sql": "SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr FROM transactions WHERE txn_type = 'outbound' GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5",
       "answer_step": "l2_plausibility",
       "oracle": [{"sku": "SKU-B", "sales_value_myr": 12.0}, {"sku": "SKU-A", "sales_value_myr": 4.0}]
     },
@@ -68,7 +68,7 @@
       "question": "Top 3 SKUs by quantity sold",
       "stands_in_for": "curated Phase 1b top-sales-volume question shape",
       "sql_origin": "hand-written, same shape",
-      "sql": "SELECT sku, SUM(quantity_kg) AS total_sold_kg FROM transactions WHERE txn_type = 'OUT' GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3",
+      "sql": "SELECT sku, SUM(quantity_kg) AS total_sold_kg FROM transactions WHERE txn_type = 'outbound' GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3",
       "answer_step": "l2_plausibility",
       "oracle": [{"sku": "SKU-B", "total_sold_kg": 4.0}, {"sku": "SKU-A", "total_sold_kg": 2.0}]
     },

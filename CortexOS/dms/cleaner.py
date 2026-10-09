@@ -39,6 +39,17 @@ def _normalize_sku(raw: str) -> str:
     return s
 
 
+def _canonical_txn_type(raw: str) -> str:
+    """Sales direction is outbound/inbound. ADJUST and WRITE_OFF stay uppercase."""
+    token = (raw or "").strip()
+    folded = token.upper()
+    if folded in {"OUT", "OUTBOUND"}:
+        return "outbound"
+    if folded in {"IN", "INBOUND"}:
+        return "inbound"
+    return folded
+
+
 def _normalize_unit(raw: str) -> float | None:
     if not raw or not str(raw).strip():
         return None
@@ -334,7 +345,7 @@ def clean_table(
         )
     elif table == "transactions":
         for row in rows:
-            row["txn_type"] = row.get("txn_type", "").strip().upper()
+            row["txn_type"] = _canonical_txn_type(row.get("txn_type", ""))
         rows = _apply_field_transforms(
             rows,
             table=table,
