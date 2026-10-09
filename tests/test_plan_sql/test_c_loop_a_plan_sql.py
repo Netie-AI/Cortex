@@ -920,11 +920,64 @@ def test_pii_wording_is_not_an_abstain_and_is_not_masked(
     assert "emails" in plan_prompt and "phone numbers" in plan_prompt
 
 
-@pytest.mark.parametrize("field", ["model", "strict", "provider"])
-def test_unknown_request_field_is_422(
-    armed_openvault, dms_http, field: str  # noqa: F811
+# Wire body from Netie-AI/dms@57d85c529aa363825aaa566f12b8822fd76a4215
+# packages/executor/dms_executor/__init__.py:889 (CortexClient.ask).
+# DMS AskRequest (packages/cortex_client/cortex_client/models.py:14) defaults
+# tenant_id to None. client.ask (client.py:115) dumps that model. The generated
+# client (generated/models/ask_request.py:46) emits additional_properties first,
+# then question, session_id and space_id, and posts /v1/contract/ask
+# (generated/api/contract/ask.py:27).
+_DMS_EXECUTOR_ASK = {
+    "tenant_id": None,
+    "question": QUESTION,
+    "session_id": "dms-acl-session",
+    "space_id": "dms-space",
+}
+
+
+def test_dms_executor_ask_body_matches_main_and_is_not_422(
+    armed_openvault, dms_http  # noqa: F811
 ) -> None:
-    """Cortex does not model ``model`` or ``strict``. Unknown keys are 422."""
+    """Must-fail: the DMS executor /ask body, tenant_id null included, is not a 422.
+
+    Cited from Netie-AI/dms@57d85c529aa363825aaa566f12b8822fd76a4215
+    ``packages/executor/dms_executor/__init__.py:889`` (``CortexClient.ask``).
+    The executor sends ``AskRequest(question=question, session_id=acl.session_id,
+    space_id=space_id)``. ``tenant_id`` defaults to None
+    (``packages/cortex_client/cortex_client/models.py:17``) and
+    ``CortexClient.ask`` (``packages/cortex_client/cortex_client/client.py:115``)
+    puts it on the wire. The status must match the same ask with that key
+    omitted, which is what main returns for an unbound session.
+    """
+    plain = {
+        "question": _DMS_EXECUTOR_ASK["question"],
+        "session_id": _DMS_EXECUTOR_ASK["session_id"],
+        "space_id": _DMS_EXECUTOR_ASK["space_id"],
+    }
+    main_status = dms_http.post("/v1/contract/ask", json=plain)
+    resp = dms_http.post("/v1/contract/ask", json=_DMS_EXECUTOR_ASK)
+    assert resp.status_code != 422, resp.text
+    assert resp.status_code == main_status.status_code, (resp.status_code, resp.text)
+    assert resp.status_code == 409, resp.text
+    assert armed_openvault.chat_calls == []
+    assert armed_openvault.non_openvault_calls == []
+
+
+@pytest.mark.parametrize("field", ["model", "strict", "provider"])
+def test_model_strict_or_provider_is_422_with_zero_complete_calls(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, field: str  # noqa: F811
+) -> None:
+    """Must-fail: each of model, strict and provider is a 422 and complete() is not called.
+
+    Named rejection of three wire fields. Not a scan of the question text.
+    """
+    calls: list[object] = []
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
+        raise AssertionError("complete() must not run")
+
+    monkeypatch.setattr(freeroute, "complete", _spy)
     assert field not in AskRequest.model_fields
     resp = dms_http.post(
         "/v1/contract/ask",
@@ -932,6 +985,37 @@ def test_unknown_request_field_is_422(
     )
     assert resp.status_code == 422, resp.text
     assert field in resp.text
+    assert calls == []
+    assert armed_openvault.chat_calls == []
+    assert armed_openvault.non_openvault_calls == []
+
+
+@pytest.mark.parametrize("field", ["tenant_id", "note"])
+def test_unknown_request_field_is_422(
+    armed_openvault, dms_http, field: str  # noqa: F811
+) -> None:
+    """Unknown keys other than model, strict and provider are ignored, as on main.
+
+    The three banned names are a wire-field list, not extra=forbid and not a
+    word rule. A question that merely contains those words is not a 422.
+    """
+    assert field not in AskRequest.model_fields
+    session = "unknown-key-unbound"
+    value: object = None if field == "tenant_id" else "kept-on-main"
+    plain = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "which model and provider, and how strict", "session_id": session},
+    )
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={
+            "question": "which model and provider, and how strict",
+            "session_id": session,
+            field: value,
+        },
+    )
+    assert resp.status_code != 422, resp.text
+    assert resp.status_code == plain.status_code, (resp.status_code, resp.text)
     assert armed_openvault.chat_calls == []
     assert armed_openvault.non_openvault_calls == []
 

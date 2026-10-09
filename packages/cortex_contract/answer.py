@@ -3,7 +3,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
 class Badge(str, Enum):
@@ -82,10 +83,42 @@ class AskPayload(BaseModel):
     joins: list[AskPayloadJoin] = Field(default_factory=list)
 
 
+# Named wire fields only. Not a scan of question text, and not extra=forbid.
+# Unknown keys are ignored, as on main. Full strictness is #388.
+_REJECTED_WIRE_FIELDS = ("model", "strict", "provider")
+
+
 class AskRequest(BaseModel):
-    # Routing is OpenVault's route config. ``model`` and ``strict`` are not
-    # fields. Any unknown key, including those two, is a 422.
-    model_config = ConfigDict(extra="forbid")
+    """Ask plane request.
+
+    Unknown keys are ignored, as on main. ``model``, ``strict`` and
+    ``provider`` are rejected by name before any model call. Routing stays
+    in OpenVault's route config. Full request strictness is a breaking
+    change tracked in #388.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_named_wire_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        errors: list[InitErrorDetails] = []
+        for name in _REJECTED_WIRE_FIELDS:
+            if name not in data:
+                continue
+            errors.append(
+                InitErrorDetails(
+                    type=PydanticCustomError(
+                        "rejected_wire_field",
+                        "wire field is not accepted",
+                    ),
+                    loc=(name,),
+                    input=data[name],
+                )
+            )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, errors)
+        return data
 
     question: str = Field(min_length=1)
     session_id: str = "demo"
