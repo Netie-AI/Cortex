@@ -946,47 +946,84 @@ def _iter_registered_routes(app):
     yield from walk(app.router.routes, "")
 
 
-def _in_walker_scope(path: str) -> bool:
-    """Constructor surface, workflow routes, ``POST /run``, and engine ``/run``.
+def _under(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "/")
 
-    This is not every route on the app. ``/run2``, ``/api/run2``, and
-    ``/api/engine/run2`` are outside this set.
+
+def _in_walker_scope(path: str) -> bool:
+    """Unlisted-route and floor checks. Not every route on the app.
+
+    ``/run2``, ``/api/run2``, and ``/api/engine/run2`` are outside this set.
     """
     if path in {"/run", "/api/engine/run"}:
         return True
     return path == "/cortex" or path.startswith("/cortex/") or path.startswith("/api/workflows")
 
 
-def _walker_problems(app) -> list[str]:
-    """In-scope mounts, raw routes, shadows, unlisted routes, and viewer floors.
+def _non_api_scope(path: str) -> bool:
+    """Raw ``add_route`` checks. Narrower than ``_in_walker_scope``.
 
-    The first entry for a method+path is the one Starlette matches. A later
-    duplicate does not replace it.
+    ``/api/workflows``, ``/cortex/constructor``, ``/run``, and the dag
+    registrar's cost read. ``/cortex/sub`` and ``/run2`` are outside it.
+    """
+    if path in {"/run", "/api/engine/runs/{run_id}/cost"}:
+        return True
+    return _under(path, "/api/workflows") or _under(path, "/cortex/constructor")
+
+
+# path -> why this Mount may stay. One line per entry.
+# create_app on pack dms registers no Mount, so the list is empty and any
+# Mount fails. /openapi.json, /docs, /docs/oauth2-redirect, and /redoc are
+# starlette Routes, not Mounts. Constructor skin files are FileResponse
+# routes, not a StaticFiles mount. night_shift's /assets mount is a
+# different app.
+_MOUNT_ALLOWLIST: tuple[tuple[str, str], ...] = ()
+
+
+def _walker_problems(app) -> list[str]:
+    """App-wide mounts and shadows; prefix-scoped raw routes and floors.
+
+    A ``Mount`` on any path fails unless ``_MOUNT_ALLOWLIST`` names it.
+    A duplicate method+path fails anywhere; the first entry is the one
+    Starlette matches. A non-``APIRoute`` fails only in ``_non_api_scope``.
+    Unlisted ``APIRoute`` checks stay in ``_in_walker_scope``.
     """
     found: dict[tuple[str, str], list[str]] = {}
     seen: set[tuple[str, str]] = set()
+    seen_mounts: set[str] = set()
     problems: list[str] = []
+    allow = dict(_MOUNT_ALLOWLIST)
+    for path, reason in allow.items():
+        if not str(reason).strip():
+            problems.append(f"mount allowlist {path} has no reason")
     for kind, method, path, floors in _iter_registered_routes(app):
-        if not _in_walker_scope(path):
-            continue
         if kind == "mount":
-            problems.append(f"mount {path}")
+            seen_mounts.add(path)
+            if path not in allow:
+                problems.append(f"mount {path}")
             continue
-        if kind != "api":
-            if method:
-                problems.append(f"non-APIRoute {method} {path}")
-            else:
-                problems.append(f"non-APIRoute {path}")
-            continue
-        key = (method, path)
-        if key in seen:
+        key = (method, path) if method else None
+        if key is not None and key in seen:
             problems.append(f"duplicate {method} {path}")
             continue
-        seen.add(key)
+        if key is not None:
+            seen.add(key)
+        if kind != "api":
+            if _non_api_scope(path):
+                if method:
+                    problems.append(f"non-APIRoute {method} {path}")
+                else:
+                    problems.append(f"non-APIRoute {path}")
+            continue
+        if not _in_walker_scope(path):
+            continue
         if key not in _LISTED_ROUTES:
             problems.append(f"unlisted {method} {path}")
             continue
         found[key] = floors
+    for path in allow:
+        if path not in seen_mounts:
+            problems.append(f"mount allowlist missed {path}")
     for method, path in sorted(_LISTED_ROUTES):
         floors = found.get((method, path))
         if floors is None:
@@ -1006,14 +1043,13 @@ def _walker_problems(app) -> list[str]:
 def test_spend_or_write_routes_are_not_on_viewer(monkeypatch):
     """Fail on an unlisted in-scope route, a mount, a raw route, a shadow, or a viewer floor.
 
-    The table is ``_LISTED_ROUTES``. Coverage is ``/cortex``, ``/api/workflows``,
-    ``POST /run``, and ``POST /api/engine/run``, including included routers.
-    A ``Mount``, a route that is not an ``APIRoute``, or a second method+path
-    pair in that set fails, and the message names the route. The first
-    method+path wins, so an earlier unauthenticated ``POST /run`` is the one
-    that is checked. Spend or write routes still fail when their floor is
-    viewer or is not steward or admin. recognize stays steward and is not a
-    spend/write route. A route outside this set is not a failure here.
+    ``Mount`` and duplicate method+path are app-wide. ``_MOUNT_ALLOWLIST`` is
+    the only mount exception, and each entry has a reason. A non-``APIRoute``
+    fails only under ``/api/workflows``, ``/cortex/constructor``, ``/run``,
+    and the dag registrar cost path. Unlisted ``APIRoute`` checks stay in
+    ``_in_walker_scope``. ``/run2``, ``/api/run2``, and ``/api/engine/run2``
+    are not failures here. The first method+path wins, so an earlier
+    unauthenticated ``POST /run`` is the one whose floor is checked.
     """
     assert _SPEND_OR_WRITE <= _LISTED_ROUTES
     app = _boot(monkeypatch, "dms", None)
