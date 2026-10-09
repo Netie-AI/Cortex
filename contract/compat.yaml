@@ -103,7 +103,17 @@ supported:
       with 422. Full request strictness is a declared breaking change (#388).
       Routing stays in OpenVault route config, not a request field.
       1.4 clients omit the fields and get the 1.4 behaviour.
-      canonical_manifest_bytes unchanged.
+      Additive on the same 1.5.0 line (#347): POST /v1/insights
+      (operationId insights.ask) is on the allowlist. The insights request
+      gains optional schema_context (ContractInsightsSchemaContext), read on
+      InsightsWireIn, not on AskRequest and not on InsightsAskIn. It is one
+      string. Shortlist pick reasons are reason= text inside that string.
+      The insights response gains optional usage (ContractInsightsUsage):
+      prompt_tokens, completion_tokens, total_tokens, each null when omitted,
+      never 0 as a stand-in. The key is omitted when schema_context is
+      absent or no count was reported. Clients that omit schema_context
+      keep the 279cbd85 envelope. schema_context maxLength is 8192;
+      the engine cap is 8192 UTF-8 bytes. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

@@ -41,6 +41,7 @@ from CortexOS.execution.gen_cfsm import (
     route_step,
 )
 from CortexOS.execution.scoreboard import embed_goal
+from CortexOS.insights import schema_context as schema_mod
 
 HORIZON = 3
 JEPA_PATH = "proxy"
@@ -164,6 +165,24 @@ async def _call_runner(
     return out if isinstance(out, dict) else {}
 
 
+def _cross_catalog_table(sql: str, outside: Any) -> bool:
+    """True when a parsed table names a catalog the caller does not hold."""
+    import sqlglot
+    from sqlglot import exp
+
+    try:
+        trees = sqlglot.parse(sql or "", read="duckdb")
+    except Exception:  # noqa: BLE001 - the validator names a parse failure
+        return False
+    for tree in trees or []:
+        if tree is None:
+            continue
+        for node in tree.find_all(exp.Table):
+            if outside(node):
+                return True
+    return False
+
+
 def _check_sql(
     fr: Any,
     sql: str,
@@ -175,8 +194,8 @@ def _check_sql(
 
     A caller catalog (``source=space``) is checked by the shared naming rule:
     qualified names exactly as declared, a bare name only when it resolves to
-    one declared table, columns only where the caller declared them. The engine
-    pack path is unchanged.
+    one declared table, columns only where the caller declared them. The pack
+    path refuses a catalog qualifier before the FreeRoute table check.
     """
     from CortexOS.insights.caller_ontology import SOURCE_CALLER
 
@@ -185,6 +204,19 @@ def _check_sql(
 
         declared = {t: list(columns.get(t) or []) for t in allowed}
         return validate_caller_sql(sql, declared)
+    # The pack session names no catalog. A three-part name is another database.
+    # Checked here so the frozen FreeRoute validator is not the allowlist for it.
+    from CortexOS.dms.sql_guardrail import catalog_outside_caller
+
+    outside = _cross_catalog_table(sql, catalog_outside_caller)
+    if outside:
+        return {
+            "ok": False,
+            "sql": None,
+            "tables": [],
+            "reason": "cross-catalog table reference refused",
+            "check": "refused",
+        }
     return fr.validate_sql(sql, allowed, columns=columns)
 
 
@@ -322,6 +354,19 @@ def _g1_plan_lines(g1: Mapping[str, Any] | None) -> list[str]:
     return lines
 
 
+def _prompt_ontology_lines(
+    ranking: Mapping[str, Any], schema_context: str | None
+) -> list[str]:
+    """Pack table lines, or the caller schema when one was sent.
+
+    The caller schema replaces the pack list. It is not appended to it.
+    """
+    text = schema_mod.supplied_schema(schema_context)
+    if text:
+        return [schema_mod.untrusted_schema_block(text)]
+    return _ontology_lines(ranking)
+
+
 def _think_prompt(
     intent: str,
     ranking: Mapping[str, Any],
@@ -331,12 +376,13 @@ def _think_prompt(
     g1: Mapping[str, Any] | None = None,
     prior_sql: str = "",
     decision: str = "",
+    schema_context: str | None = None,
 ) -> str:
     lines = [
         "Think which ontology tables and metrics answer the intent.",
         "Do not emit SQL. Do not invent warehouse numbers, keys, or live CI.",
         "ONTOLOGY:",
-        *_ontology_lines(ranking),
+        *_prompt_ontology_lines(ranking, schema_context),
         *_g1_plan_lines(g1),
         f"INTENT: {intent}",
     ]
@@ -365,10 +411,11 @@ def _sql_prompt(
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    schema_context: str | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
-        *_ontology_lines(ranking),
+        *_prompt_ontology_lines(ranking, schema_context),
         *_g1_plan_lines(g1),
         "",
         f"INTENT: {intent}",
@@ -598,6 +645,7 @@ async def climb(
     bearer: str | None = None,
     ideas: Sequence[str] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
@@ -631,7 +679,21 @@ async def climb(
             refuse_reason="gen_cfsm compile refused the think-path IR",
         )
 
-    allowed = _allowed_tables(ranking)
+    supplied = schema_mod.supplied_schema(schema_context)
+    declared: dict[str, list[str]] | None = None
+    if supplied:
+        # The string never becomes the allowlist. Parse declared tables and
+        # columns, then narrow the caller grant when one exists.
+        from CortexOS.insights.caller_ontology import SOURCE_CALLER
+
+        parsed = schema_mod.parsed_catalog(supplied)
+        if ranking.get("source") == SOURCE_CALLER:
+            declared = schema_mod.narrow_catalog(schema_mod.grant_catalog(ranking), parsed)
+        else:
+            declared = parsed
+        allowed = set(declared)
+    else:
+        allowed = _allowed_tables(ranking)
     if not allowed:
         return _envelope(
             ok=False,
@@ -655,7 +717,9 @@ async def climb(
     think = await _call_runner(
         runner,
         purpose="think",
-        prompt=_think_prompt(text, ranking, ideas=idea_list, g1=g1),
+        prompt=_think_prompt(
+            text, ranking, ideas=idea_list, g1=g1, schema_context=supplied
+        ),
         bearer=bearer,
     )
     if not think.get("ok"):
@@ -709,6 +773,7 @@ async def climb(
             ideas=idea_list,
             g1=g1,
             query_plan=query_plan,
+            schema_context=supplied,
         )
         if journal is not None:
             with journal as stamps:
@@ -749,13 +814,95 @@ async def climb(
         pulled = extract_statement(str(gen.get("text") or ""))
         sql = pulled.sql
         extracted = str(sql or "").strip()
+        if supplied and extracted:
+            # Refuse before any retry. A retry would put this SQL back in the
+            # next prompt. The reason names the gate and does not include SQL.
+            stop = schema_mod.ungranted_reason(extracted, supplied)
+            if stop is None:
+                stop = schema_mod.brute_force_reason(extracted)
+            if stop:
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="SCHEMA_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=stop,
+                )
         if sql is None:
             # Name why nothing was extracted (a second statement, no FROM)
             # instead of validating "" and reporting "empty sql".
             checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
+        elif supplied:
+            from CortexOS.insights.caller_sql import validate_caller_sql
+
+            checked = validate_caller_sql(sql, declared or {})
+            if not checked.get("ok"):
+                # Same refusal as the caller-catalog gate. sql stays unset so
+                # a refused statement is never copied into sql_used.
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="SCHEMA_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=schema_mod.public_sql_reason(
+                        str(checked.get("reason") or "refused")
+                    ),
+                )
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
-        last_sql = str(checked.get("sql") or sql or last_sql)
+            reason = str(checked.get("reason") or "")
+            if not checked.get("ok") and reason.startswith(
+                "cross-catalog table reference refused"
+            ):
+                # Same named refusal as the schema_context gate. sql stays
+                # unset, so a refused statement is not copied into a later
+                # prompt or into sql_used.
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="CROSS_CATALOG",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=schema_mod.public_sql_reason(reason),
+                )
+        if checked.get("ok"):
+            last_sql = str(checked.get("sql") or "")
+        elif not supplied:
+            # Pack path: the improve step still sees the prior statement.
+            # The schema_context path returns above, with sql left unset.
+            last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
 
@@ -836,6 +983,7 @@ async def climb(
                     g1=g1,
                     prior_sql=last_sql,
                     decision=str(granted),
+                    schema_context=supplied,
                 ),
                 bearer=bearer,
             )

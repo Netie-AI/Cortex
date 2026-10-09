@@ -1,9 +1,10 @@
 """Stable Cortex Insights API for DMS generative-ask and AirGPT skin.
 
-Sibling to ``/v1/contract/*`` (not a cortex-contract version bump). Same
-``run_insights`` as Crew chrome. Callers never send provider keys; OpenVault
-FreeRoute holds them. AirGPT uses this path (plus ``/dms/sidecar/insights``);
-there is no parallel invent stack.
+Sibling to ``/v1/contract/*``. ``schema_context`` and ``usage`` are pinned in
+contract 1.5.0 (``InsightsSchemaContext``, ``InsightsUsage``). ``InsightsAskIn``
+stays the frozen component. Same ``run_insights`` as Crew chrome. Callers
+never send provider keys; OpenVault FreeRoute holds them. AirGPT uses this
+path (plus ``/dms/sidecar/insights``); there is no parallel invent stack.
 
 Lives outside ``CortexOS/api`` so the engine API tree does not import Crew
 (AST pin in tests/test_freeroute_core.py).
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from CortexOS.insights import caller_ontology as caller_onto
 from CortexOS.insights import keys as insight_keys
+from CortexOS.insights import schema_context as schema_mod
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -72,6 +74,9 @@ class InsightsWireIn(InsightsAskIn):
     query_plan: Any = None
     ranked_metric: Any = None
     generate_retry: Any = None
+    #: Granted-schema prompt (DMS ``schema_context``). Replaces the pack table
+    #: list when present. Any so a non-string is a named 422, not a pydantic 422.
+    schema_context: Any = None
 
 
 #: Documented on the (non-contract) ``insights.ask`` operation only.
@@ -124,6 +129,8 @@ def _caller_refused(purpose: str) -> JSONResponse:
         "values": [],
         "live_5000_ci": False,
     }
+    # No model call has run, so there are no counts to report.
+    schema_mod.reported_usage(None)
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
 
@@ -173,6 +180,8 @@ def _invalid_request(
         "audit_id": None,
         "live_5000_ci": False,
     }
+    # A refused request did not report counts. Leave the key off.
+    schema_mod.reported_usage(None)
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=status_code)
 
@@ -303,10 +312,19 @@ async def execute_insights(
     from CortexOS.crew import insights as insights_mod
     from CortexOS.crew.engine_bridge import LocalEngineBridge
 
+    schema_mod.clear_usage()
     intent = resolved_intent(body)
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     wire = await wire_body(body, request)
+    raw_schema = wire.schema_context
+    if isinstance(raw_schema, str):
+        schema_mod.log_schema_context(raw_schema)
+    schema_problem = schema_mod.problem(raw_schema)
+    if schema_problem is not None:
+        code, detail = schema_problem
+        return _invalid_request(code, detail, intent=intent)
+    schema_text = schema_mod.accepted_text(raw_schema)
     extras = sorted((wire.model_extra or {}).keys())
     if extras:
         return _invalid_request(
@@ -358,6 +376,7 @@ async def execute_insights(
         bearer=bearer,
         query_plan=query_plan,
         caller=caller,
+        schema_context=schema_text,
     )
     # A plain demo body (no request-extension field) gets exactly the envelope
     # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
@@ -370,6 +389,9 @@ async def execute_insights(
     out = stamp_api(result, consumer=consumer, alias=alias)
     if extended:
         out["api"]["received"] = _received(wire, source)
+    usage = schema_mod.reported_usage(schema_text)
+    if usage is not None:
+        out["usage"] = usage
     return out
 
 

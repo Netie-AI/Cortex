@@ -1310,6 +1310,7 @@ async def generative_ask(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
     pack_dir: Path | str | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
@@ -1320,7 +1321,9 @@ async def generative_ask(
     ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
     from CortexOS.crew import certified_serve, cot_climb, l2_serve
+    from CortexOS.insights import schema_context as schema_mod
 
+    supplied = schema_mod.supplied_schema(schema_context)
     # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
     # served as stored (or the ask abstains by name); the model is not asked to
     # re-derive a formula that is already law.
@@ -1331,7 +1334,8 @@ async def generative_ask(
     # model's SQL against the stored plan itself; certified serve steps aside
     # so that path stays as #287 measured it.
     hit = None
-    if ranking.get("source") != SOURCE_CALLER and not l2_serve.enabled():
+    # A caller schema is another Space. Pack certified SQL is not its law.
+    if ranking.get("source") != SOURCE_CALLER and not l2_serve.enabled() and not supplied:
         hit = certified_serve.resolve(
             intent, ranking, query_plan=query_plan, pack_dir=pack_dir
         )
@@ -1341,7 +1345,12 @@ async def generative_ask(
         return certified_serve.abstain_envelope(hit)
 
     out = await cot_climb.climb(
-        intent, ranking, complete=complete, bearer=bearer, query_plan=query_plan
+        intent,
+        ranking,
+        complete=complete,
+        bearer=bearer,
+        query_plan=query_plan,
+        schema_context=supplied,
     )
     if out.get("ok"):
         check = str(out.get("check") or "")
@@ -1403,11 +1412,14 @@ async def run_insights(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
     caller: CallerCatalog | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """Count freeroute.complete() calls, then run the ontology / ask / generate spine."""
+    from CortexOS.insights import schema_context as schema_mod
+
     token = _model_calls.set([])
     try:
-        return await _run_insights(
+        out = await _run_insights(
             intent,
             bridge=bridge,
             ask=ask,
@@ -1418,7 +1430,14 @@ async def run_insights(
             bearer=bearer,
             query_plan=query_plan,
             caller=caller,
+            schema_context=schema_context,
         )
+        # Row cap is part of the schema_context result only. The pack path
+        # does not gain row_cap or truncated, so its envelope stays put.
+        if generate and schema_mod.supplied_schema(schema_context):
+            out = schema_mod.stamp_row_cap(out)
+        schema_mod.publish_usage(schema_mod.usage_from_calls(_model_calls.get() or []))
+        return out
     finally:
         _model_calls.reset(token)
 
@@ -1435,6 +1454,7 @@ async def _run_insights(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
     caller: CallerCatalog | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
 
@@ -1469,11 +1489,17 @@ async def _run_insights(
             )
         )
 
+    from CortexOS.insights import schema_context as schema_mod
+
     ranking = select_ranking(text, pack_dir=pack_dir, caller=caller)
     caller_mode = ranking.get("source") == SOURCE_CALLER
+    supplied = schema_mod.supplied_schema(schema_context)
     gen: dict[str, Any] | None = None
     if generate:
-        if not ranking.get("ok"):
+        # Pack ranking is the fallback only when no caller schema was sent.
+        # A supplied schema is the ontology the model writes against, including
+        # a Space whose question shares no tokens with the engine pack.
+        if not ranking.get("ok") and not supplied:
             return _refuse(
                 intent=text,
                 ranking=ranking,
@@ -1505,6 +1531,7 @@ async def _run_insights(
                 bearer=bearer,
                 query_plan=query_plan,
                 pack_dir=pack_dir,
+                schema_context=supplied,
             )
         except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
             # The caller sees a named abstain; operators still see the bug.
@@ -1531,7 +1558,7 @@ async def _run_insights(
                 ),
                 gen,
             )
-        if not ask or caller_mode:
+        if not ask or caller_mode or bool(supplied):
             validation = _validation(
                 status="ABSTAIN",
                 ranking=ranking,

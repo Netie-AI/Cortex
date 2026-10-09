@@ -330,7 +330,7 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
                 f"table identifier part {dotted!r} contains a dot; refused",
                 sorted(resolved),
             )
-        if node.catalog:
+        if sql_guardrail.catalog_outside_caller(node):
             return _refuse(
                 "cross-catalog table reference refused: " + node.sql(dialect="duckdb")[:80]
             )

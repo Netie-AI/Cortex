@@ -94,6 +94,8 @@ def query(
                 widened[tname] = {"columns": [c[0] for c in cols]}
         widened_semantic = dict(semantic)
         widened_semantic["tables"] = widened
+        # This route's catalog is the attached lake. Any other catalog is outside it.
+        widened_semantic["catalog"] = LAKE_ALIAS
 
         result = validate_sql(req.sql, widened_semantic)
         if not result.passed or not result.safe_sql:

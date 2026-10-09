@@ -1847,6 +1847,70 @@
         "title": "GateResult",
         "type": "object"
       },
+      "ContractInsightsSchemaContext": {
+        "description": "1.5.0 request field on POST /v1/insights.\n\nThe engine reads this on ``InsightsWireIn.schema_context``, not on\n``InsightsAskIn``. One optional string. Present: it replaces the pack\ntable list. Absent: the pack list stays, and the response stays\nbyte-equal to the 279cbd85 pin. The ``usage`` key is omitted when\n``schema_context`` is absent or no count was reported.\n\nShortlist pick reasons are not a sibling field. The caller writes them\ninto this string: a table line carries ``reason=score:<score>``, a\ncolumn line may carry ``reason=<why>``, and a join line carries\n``reason=<why>``.",
+        "properties": {
+          "schema_context": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Caller shortlist. Replaces the pack table list when present. Pick reasons live in this string, not in a separate field: table lines use reason=score:<score>, column lines may include reason=<why>, join lines include reason=<why>. maxLength 8192. The engine cap is 8192 UTF-8 bytes.",
+            "title": "Schema Context"
+          }
+        },
+        "title": "InsightsSchemaContext",
+        "type": "object"
+      },
+      "ContractInsightsUsage": {
+        "description": "1.5.0 response field ``usage`` on POST /v1/insights.\n\nSum of the counts each FreeRoute complete() call reported. A count is\nnull when it was omitted. A missing count is never stored as 0. The\nlive crew return carries prompt_tokens and completion_tokens. total_tokens\nis null when that return omits the key. The key itself is omitted when\nschema_context is absent or no count was reported.",
+        "properties": {
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Completion Tokens"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prompt Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Total Tokens"
+          }
+        },
+        "title": "InsightsUsage",
+        "type": "object"
+      },
       "ContractLedgerEntry": {
         "properties": {
           "actor": {
@@ -5476,12 +5540,13 @@
     }
   },
   "info": {
-    "description": "Allowlisted DMS\u2194engine contract surface (operationIds: ask, drillthrough, ledger.append, ledger.verify, submit, tool.registry). cortex_contract 1.5.0. Engine semver is independent (see CortexOS.__version__ / docs/RELEASING.md).",
+    "description": "Allowlisted DMS\u2194engine contract surface (operationIds: ask, drillthrough, insights.ask, ledger.append, ledger.verify, submit, tool.registry). cortex_contract 1.5.0. Engine semver is independent (see CortexOS.__version__ / docs/RELEASING.md).",
     "title": "Cortex Engine Contract API",
     "version": "1.5.0",
     "x-cortex-contract-routes": [
       "ask",
       "drillthrough",
+      "insights.ask",
       "ledger.append",
       "ledger.verify",
       "submit",
@@ -5723,6 +5788,84 @@
         "tags": [
           "contract"
         ]
+      }
+    },
+    "/v1/insights": {
+      "post": {
+        "description": "NL then ontology then SQL then validate. CERTIFIED|ABSTAIN|REFUSE.",
+        "operationId": "insights.ask",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/InsightsAskIn"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ContractInsightsSchemaContext"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "title": "Response Insights.Ask"
+                    },
+                    {
+                      "properties": {
+                        "usage": {
+                          "$ref": "#/components/schemas/ContractInsightsUsage"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Insights Ask",
+        "tags": [
+          "insights"
+        ],
+        "x-cortex-request-extension": {
+          "empty_ontology": "200 ABSTAIN refuse_reason=caller_ontology_empty",
+          "fields": [
+            "generate_retry",
+            "intent_slots",
+            "mode",
+            "model_preference",
+            "ontology",
+            "query_plan",
+            "ranked_metric",
+            "schema_context"
+          ],
+          "invalid_ontology": "422 ABSTAIN refuse_reason=caller_ontology_invalid:<code>",
+          "model": "InsightsWireIn",
+          "ontology_source": "ontology.source = demo (default when absent): engine pack ranking, ontology body unused; space: caller catalog only, tables named table or schema.table",
+          "unknown_fields": "422 ABSTAIN refuse_reason=unknown_request_fields"
+        }
       }
     }
   }
