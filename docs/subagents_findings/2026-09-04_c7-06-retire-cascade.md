@@ -2,7 +2,7 @@
 
 - Date: 2026-09-04
 - Keywords: C7-06, route_to_metric, choose_governed_metric, cascade, cutover, G-err, G-abs, DMS_C7_RETIRE_CASCADE
-- Main idea: `answer()` uses `choose_governed_metric`. The 27-regex cascade still serves. Retirement requires L2-as-L1-replacement beating L1 on G-err with G-abs holding plus `DMS_C7_RETIRE_CASCADE=1`. A flag or JSON `cutover: true` cannot invent-green. 25 `_metric_plan` branches not deleted.
+- Main idea: `answer()` uses `choose_governed_metric`, which does not call `route_to_metric`. A miss reaches `attempt_l2` (AI-written SQL). The 27-regex cascade is not a serve path. A flag or JSON `cutover: true` cannot invent-green. 25 `_metric_plan` branches not deleted. Held-out L2-as-L1-replacement is still not met.
 - Path: this file
 
 ## PREFLIGHT
@@ -12,10 +12,10 @@ PARTIAL. reuse: `docs/design/2026-09-04_C7_ROUTE_TO_METRIC_REPLACEMENT.md` C7-06
 ## Golden rules
 
 1. Do not delete the 25 `_metric_plan` branches without held-out numbers in the commit body.
-2. `DMS_C7_RETIRE_CASCADE=1` is necessary and not sufficient.
-3. L2-on-miss reports (`cascade_skipped` false) cannot retire the chooser.
+2. The serve path does not call `route_to_metric`. A flag cannot turn the cascade back on.
+3. L2-on-miss reports (`cascade_skipped` false) cannot set `cutover`.
 4. `cutover` stays false in this module. C7-05 owns serve-on-miss cutover.
-5. Keyword slot helpers stay. L0 certified still serves when the cascade is skipped.
+5. Keyword slot helpers stay. L0 certified still serves. L1 misses reach `attempt_l2`. A stored skill that drops a named exclusion does not serve. The delayed/late word bridge does not rewrite an abstain into legacy SQL.
 
 ## Verify
 

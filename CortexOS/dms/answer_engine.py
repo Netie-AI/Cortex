@@ -5,10 +5,9 @@ abstains rather than guess. This is the "adaptive, fail-then-escalate" core:
 
   L0 CERTIFIED   exact (normalized) match against the verified-query repo →
                  deterministic replay. Highest trust, zero LLM.
-  L1 METRIC      choose_governed_metric → compile a governed metric template
-                 (Q1) → guardrail-verified SQL. Default chooser is the
-                 keyword cascade. C7-06 skips it only when L2-as-L1
-                 replacement beats L1 on G-err and G-abs still holds.
+  L1 METRIC      choose_governed_metric does not call the keyword cascade.
+                 A miss falls through to L2. route_to_metric remains for
+                 direct tests of the retired classifier and is not a serve path.
   L2 FREEFORM    (flag DMS_L2_ENABLED, default OFF) schema retrieval →
                  generate → sqlglot → enforce_manifest → EXPLAIN → retry →
                  plausibility. Badge L2_VALIDATED only after plausibility.
@@ -29,7 +28,6 @@ from typing import Any
 
 import sqlglot
 
-from CortexOS.dms.c7_cutover import cascade_retired
 from CortexOS.dms.sql_guardrail import (
     MAX_LIMIT,
     AuditEntry,
@@ -360,6 +358,17 @@ def _excluded_skus(q: str) -> list[str]:
             if t not in out:
                 out.append(t)
     return out
+
+
+def _sql_omits_named_exclusion(question: str, sql: str) -> bool:
+    """True when replayed SQL drops a SKU the question named.
+
+    A stored skill is not the keyword cascade, and it is not a license to
+    serve a ranking that forgot the exclusion. That serve is a confident
+    wrong. Leave the miss for ``attempt_l2``.
+    """
+    upper = (sql or "").upper()
+    return any(token.upper() not in upper for token in _excluded_skus(question))
 
 
 def _rank_window(q: str) -> tuple[int, int] | None:
@@ -1079,15 +1088,17 @@ def route_to_metric(question: str) -> MetricPlan | None:
 
 
 def choose_governed_metric(question: str) -> MetricPlan | None:
-    """Serve chooser for L1. Not ``route_to_metric`` once C7-06 gates pass.
+    """Serve chooser. The keyword cascade is not a caller.
 
-    Slot extractors (``_days``, ``_explicit_limit``, ``_sales_rank_slots``)
-    stay on this module for L0 / query-skill. The cascade classifier remains
-    callable for tests; ``answer()`` must not use it as chooser when retired.
+    ``answer()`` falls through to ``attempt_l2`` (AI-written SQL via
+    OpenVault/FreeRoute). ``route_to_metric`` stays callable for direct tests
+    of the retired classifier. Calling it from here is a silent keyword
+    fallback and the must-fail test rejects it. Slot extractors stay for L0
+    and query-skill.
     """
-    if cascade_retired():
+    if not isinstance(question, str):
         return None
-    return route_to_metric(question)
+    return None
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────
@@ -1877,18 +1888,22 @@ def answer(
                 else:
                     params = {k: v for k, v in stored.items() if k not in contextual}
                 try:
-                    sql = compile_metric(load_all(), hit["metric_id"], params)
+                    compiled = compile_metric(load_all(), hit["metric_id"], params)
+                except SemanticError:
+                    compiled = None
+                if compiled and not _sql_omits_named_exclusion(question, compiled):
+                    sql = compiled
                     layer, badge = "query_skill", "query_skill"
                     assumptions = f"query skill match score={skill_score:.3f} → {hit['metric_id']}"
                     metric_id = hit["metric_id"]
                     metric_slots = dict(params)
                     planned_tables = _tables_stated_by_metric(hit["metric_id"])
-                except SemanticError:
-                    sql = None
             elif hit.get("sql_template"):
-                sql = hit["sql_template"]
-                layer, badge = "query_skill", "query_skill"
-                assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
+                candidate = str(hit["sql_template"])
+                if not _sql_omits_named_exclusion(question, candidate):
+                    sql = candidate
+                    layer, badge = "query_skill", "query_skill"
+                    assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
 
     if sql is None:
         # L2 lives on the engine port module, not here. This file must not

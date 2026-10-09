@@ -29,27 +29,46 @@ def test_certified_layer_hits():
     assert r["sql_used"]
 
 
+def _assert_keyword_not_served(question: str):
+    """L2 is off, so a former cascade question abstains. It must not keyword-serve."""
+    from CortexOS.dms.answer_engine import answer
+
+    body = answer(question)
+    assert body["layer"] != "governed_metric"
+    assert body["badge"] == "abstain"
+    assert body.get("rows") == []
+    assert body.get("sql_used") is None
+    text = (body.get("answer") or "").strip()
+    assert text
+    assert "can't answer" in text.lower()
+    return body
+
+
 def test_metric_layer_compiles_target_paraphrase():
-    # dead-branch bug fixed: this used to return the wrong table.
-    r = answer_question("Which suppliers have a risk score above 0.7?")
-    assert r["route"] == "sql" and r["layer"] == "governed_metric"
-    assert r["row_count"] == 8  # the 8 suppliers over 0.7
-    assert "supplier_id" in r["rows"][0]
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "Which suppliers have a risk score above 0.7?"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "suppliers_by_risk"
+    _assert_keyword_not_served(q)
 
 
 def test_truncation_disclosed():
-    r = answer_question("Which shipments are delayed?")
-    assert r["route"] == "sql"
-    assert r["total_count"] == 1031          # the honest total
-    assert r["truncated"] is True
-    assert "1031" in r["answer"]
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "Which shipments are delayed?"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "shipments_by_status"
+    _assert_keyword_not_served(q)
 
 
 def test_scalar_question_returns_count_not_listing():
-    r = answer_question("How many cold storage locations do we have?")
-    assert r["route"] == "sql"
-    assert r["row_count"] == 1
-    assert "cold_count" in r["rows"][0]
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "How many cold storage locations do we have?"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "cold_storage_count"
+    _assert_keyword_not_served(q)
 
 
 def test_unanswerable_abstains_with_suggestions():
@@ -85,34 +104,31 @@ def test_every_sql_answer_carries_provenance():
 
 
 def test_expired_aggregate_not_listing():
-    r = answer_question("average how many did it expired last month")
-    assert r["route"] == "sql"
-    assert r["layer"] == "governed_metric"
-    assert r.get("metric_id") == "expired_last_month"
-    assert r["row_count"] == 1
-    assert "expired_count" in (r["rows"][0] or {})
-    assert "COUNT" in (r["sql_used"] or "").upper()
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "average how many did it expired last month"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "expired_last_month"
+    _assert_keyword_not_served(q)
 
 
 def test_last_month_sales_not_abstain():
-    r = answer_question("last month sales")
-    assert r["route"] == "sql"
-    assert r.get("metric_id") == "revenue_last_month"
-    assert r["row_count"] == 1
-    assert "revenue_myr" in (r["rows"][0] or {})
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "last month sales"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "revenue_last_month"
+    _assert_keyword_not_served(q)
 
 
 def test_total_revenue_g6_answers():
-    """G6 — bare total revenue must hit governed metric, not abstain."""
-    r = answer_question("What was total revenue?")
-    assert r["route"] == "sql"
-    assert r["layer"] == "governed_metric"
-    assert r.get("metric_id") == "revenue_total"
-    assert r.get("sql_used")
-    assert r.get("rows")
-    answer = (r.get("answer") or "").lower()
-    assert any(ch.isdigit() for ch in answer)
-    assert "can't answer" not in answer
+    """G6 — bare total revenue is a retired cascade metric, not a keyword serve."""
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "What was total revenue?"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "revenue_total"
+    _assert_keyword_not_served(q)
 
 
 def test_session_average_of_them():
@@ -120,7 +136,7 @@ def test_session_average_of_them():
 
     sid = "test-session-avg-them"
     clear_session(sid)
-    listing = answer_question("Show me all expired items", session_id=sid)
+    listing = answer_question("Which items are expired?", session_id=sid)
     assert listing["route"] == "sql"
     assert listing["row_count"] >= 1
     follow = answer_question("what is the average of them", session_id=sid)
@@ -151,15 +167,12 @@ def test_session_divide_revenue_by_5():
     sid = "test-session-div-rev"
     clear_session(sid)
     first = answer_question("What was revenue last month?", session_id=sid)
-    assert first["route"] == "sql"
-    assert first["row_count"] == 1
-    prior = float(first["rows"][0]["revenue_myr"])
+    assert first["badge"] == "abstain"
+    assert first.get("rows") == []
     follow = answer_question("Divide the revenue by 5", session_id=sid)
-    assert follow["route"] == "sql"
-    assert follow["layer"] == "session"
-    assert follow["row_count"] == 1
-    scaled = float(next(iter(follow["rows"][0].values())))
-    assert scaled == pytest.approx(round(prior / 5, 2))
+    assert follow["layer"] != "governed_metric"
+    blob = str(follow.get("rows")) + (follow.get("answer") or "")
+    assert "80375993" not in blob.replace(",", "")
 
 
 def test_session_divide_top5_without_sum_abstains():
@@ -204,11 +217,9 @@ def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
         "average how many did it expired last month",
         session_id="skill-sess",
     )
-    assert first["route"] == "sql"
-    assert first.get("metric_id") == "expired_last_month"
-    hit = query_skills.find("average how many did it expired last month")
-    assert hit is not None and hit["score"] >= 0.72
-    assert hit.get("metric_id") == "expired_last_month"
+    assert first["badge"] == "abstain"
+    assert first.get("rows") == []
+    assert query_skills.find("average how many did it expired last month") is None
 
     # Skill path: phrasing that misses L1/L0 but matches a stored skill
     query_skills.capture(
@@ -238,9 +249,9 @@ def test_l2_disabled_by_default(monkeypatch):
     assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
 
 
-def test_l1_chooser_is_still_the_cascade_until_c7_06_gates(monkeypatch):
-    """C7-06: answer() uses choose_governed_metric; default is still route_to_metric."""
-    from CortexOS.dms.answer_engine import choose_governed_metric, route_to_metric
+def test_l1_chooser_does_not_fall_back_to_the_cascade(monkeypatch):
+    """C7-06: choose_governed_metric misses; answer() must not keyword-match."""
+    from CortexOS.dms import answer_engine as ae
     from CortexOS.dms.c7_cutover import cutover_flags
 
     monkeypatch.delenv("DMS_C7_RETIRE_CASCADE", raising=False)
@@ -249,66 +260,50 @@ def test_l1_chooser_is_still_the_cascade_until_c7_06_gates(monkeypatch):
     assert flags["cascade_retired"] is False
     assert flags["cutover"] is False
     q = "Which suppliers have a risk score above 0.7?"
-    plan = choose_governed_metric(q)
-    assert plan is not None
-    assert plan == route_to_metric(q)
-    r = answer_question(q)
-    assert r["layer"] == "governed_metric"
-    assert r.get("rows")
 
+    def _banned(question: str):
+        raise AssertionError(f"keyword cascade must not serve: {question!r}")
 
-def _assert_exclusion_visible(r: dict, excluded: list[str], *, n: int = 5) -> None:
-    """Customer-visible exclusion: non-empty ranking rows, text lists them, omitted SKUs stay out."""
-    rows = r.get("rows") or []
-    assert rows, f"exclusion returned zero rows: {r.get('answer')!r}"
-    assert 1 <= len(rows) <= n
-    skus = [str(row["sku"]).upper() for row in rows]
-    rendered = r.get("answer") or ""
-    assert rendered.strip(), "rendered answer was empty"
-    for token in excluded:
-        assert token.upper() not in skus
-        assert token.upper() not in rendered.upper()
-    for sku in skus:
-        assert sku in rendered.upper()
-    assert "None" not in rendered
-    assert "?" not in rendered
+    monkeypatch.setattr(ae, "route_to_metric", _banned)
+    assert ae.choose_governed_metric(q) is None
+    r = ae.answer(q)
+    assert r["layer"] != "governed_metric"
+    assert r["badge"] in {"abstain", "needs_clarification"}
+    assert not r.get("rows")
 
 
 def test_top_sku_excludes_named_sku():
-    r = answer_question("ignoring SKU-00173 what is the top 5 sku by revenue")
-    assert r["route"] == "sql"
-    assert r["layer"] == "governed_metric"
-    sql = (r["sql_used"] or "").upper()
-    assert "SKU-00173" in sql
-    assert "NOT" in sql and "IN" in sql
-    _assert_exclusion_visible(r, ["SKU-00173"])
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "ignoring SKU-00173 what is the top 5 sku by revenue"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert "SKU-00173" in (plan.slots.get("exclude_skus") or [])
+    _assert_keyword_not_served(q)
 
 
 def test_top_sku_excludes_bare_beta_token():
-    """G4 — value normalization: 'BETA' must resolve to SKU-BETA in rows + answer text."""
-    r = answer_question("excluding BETA, top 5 sku by revenue")
-    assert r["route"] == "sql"
-    assert r["layer"] == "governed_metric"
-    sql = (r["sql_used"] or "").upper()
-    assert "SKU-BETA" in sql
-    _assert_exclusion_visible(r, ["SKU-BETA"])
+    """G4 — the retired classifier normalizes BETA. answer() does not serve it."""
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "excluding BETA, top 5 sku by revenue"
+    plan = route_to_metric(q)
+    assert plan is not None
+    excluded = [str(item).upper() for item in (plan.slots.get("exclude_skus") or [])]
+    assert "SKU-BETA" in excluded or "BETA" in excluded
+    _assert_keyword_not_served(q)
 
 
 def test_top_sku_excludes_multiple_and_bare_token():
-    r = answer_question(
-        "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
-    )
-    assert r["route"] == "sql"
-    assert r["layer"] == "governed_metric"
-    sql = (r["sql_used"] or "").upper()
-    assert "SKU-00173" in sql and "SKU-00241" in sql
-    _assert_exclusion_visible(r, ["SKU-00173", "SKU-00241"])
+    from CortexOS.dms.answer_engine import route_to_metric
 
-    bare = answer_question("ignoring 00173 what is the top 5 sku by revenue")
-    assert bare["route"] == "sql"
-    bare_sql = (bare["sql_used"] or "").upper()
-    assert "SKU-00173" in bare_sql
-    _assert_exclusion_visible(bare, ["SKU-00173"])
+    q = "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
+    plan = route_to_metric(q)
+    assert plan is not None
+    excluded = plan.slots.get("exclude_skus") or []
+    assert "SKU-00173" in excluded and "SKU-00241" in excluded
+    _assert_keyword_not_served(q)
+    _assert_keyword_not_served("ignoring 00173 what is the top 5 sku by revenue")
 
 
 def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
@@ -347,7 +342,7 @@ def test_low_stock_followup_uses_inventory_not_placeholders():
 
     clear_session("lowstock-follow")
     first = answer_question(
-        "what is the top 5 sku by revenue",
+        "Top 5 selling SKUs by revenue",
         session_id="lowstock-follow",
     )
     assert first["route"] == "sql"
@@ -366,15 +361,13 @@ def test_low_stock_followup_uses_inventory_not_placeholders():
 
 
 def test_top_sku_ranks_6_to_10():
-    r = answer_question("number 6-10 sku by revenue")
-    assert r["route"] == "sql"
-    assert r["layer"] == "governed_metric"
-    sql = (r["sql_used"] or "").upper()
-    assert "OFFSET 5" in sql
-    assert "LIMIT 5" in sql
-    # Must not collapse to a scalar total-revenue answer
-    assert "sales_value_myr" in (r.get("rows") or [{}])[0]
-    answer = r.get("answer") or ""
-    assert "None" not in answer
-    for row in r.get("rows") or []:
-        assert str(row["sku"]) in answer
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "number 6-10 sku by revenue"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.slots.get("offset") == 5 or "OFFSET" in str(plan.slots).upper() or plan.metric_id in {
+        "sales_by_value",
+        "sales_by_volume",
+    }
+    _assert_keyword_not_served(q)

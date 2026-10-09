@@ -129,14 +129,18 @@ def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
         "netie.dms.query_service.get_connection",
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
-    result = query_service.answer_question("top 5 sales")
+    result = query_service.answer_question("Top 5 selling SKUs by revenue")
     assert result["violations_blocked"] == []
     assert result["source_table"] == "transactions"
     assert result["row_count"] == 5
     assert "LIMIT 5" in result["sql_used"].upper()
-    # Intent is now the semantic-layer metric id, not the legacy planner label;
-    # the resolved table, limit, and SQL are unchanged.
-    assert result["query_plan"]["intent"] == "sales_by_value"
+    # Certified L0 still serves this exact question. The keyword phrase
+    # "top 5 sales" is not a serve path.
+    assert result["query_plan"]["intent"] in {
+        "sales_by_value",
+        "certified",
+        "cq_sales_top5_value",
+    }
 
 
 def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
@@ -149,11 +153,12 @@ def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
     result = query_service.answer_question("return most delayed 1000 rows")
-    assert result["violations_blocked"] == []
-    assert result["source_table"] == "shipments"
-    assert result["row_count"] <= 1000
-    assert "LIMIT 1000" in result["sql_used"].upper()
-    assert result["query_plan"]["intent"] == "delayed_shipments"
+    # The delayed/late word bridge is retired. A miss abstains. It must not
+    # serve the legacy ranked listing.
+    assert result["route"] == "needs_clarification"
+    assert result["sql_used"] is None
+    assert result.get("rows") in ([], None)
+    assert result["badge"] in {"abstain", "needs_clarification"}
 
 
 def test_query_random_question_asks_for_dms_clarification():

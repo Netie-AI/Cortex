@@ -1,8 +1,9 @@
-"""C7-06 — route_to_metric is not the serve chooser until L2 beats L1.
+"""C7-06 — route_to_metric is not a serve path.
 
-Cutover flags stay honest: a flag, DMS_L2_ENABLED, or JSON cutover:true
-cannot invent-green. Keyword slot helpers remain. The 25 _metric_plan
-branches are not deleted in this ticket.
+The keyword cascade stays in the file for direct tests. ``answer()`` reaches
+``attempt_l2`` instead. A flag, DMS_L2_ENABLED, or JSON cutover:true cannot
+invent-green. Keyword slot helpers remain. The 25 _metric_plan branches are
+not deleted in this ticket.
 """
 from __future__ import annotations
 
@@ -150,19 +151,17 @@ def test_missing_report_file_fails_closed(tmp_path, monkeypatch):
     assert cascade_retired() is False
 
 
-def test_choose_governed_metric_uses_cascade_by_default():
+def test_choose_governed_metric_does_not_call_the_cascade():
     from CortexOS.dms.answer_engine import choose_governed_metric, route_to_metric
 
-    plan = choose_governed_metric(L1_Q)
-    assert plan is not None
-    assert plan == route_to_metric(L1_Q)
-    assert plan.metric_id == "suppliers_by_risk"
+    assert choose_governed_metric(L1_Q) is None
+    assert route_to_metric(L1_Q) is not None
+    assert route_to_metric(L1_Q).metric_id == "suppliers_by_risk"
 
 
-def test_choose_governed_metric_skips_cascade_when_retired(monkeypatch):
+def test_retired_classifier_still_plans_when_called_directly():
     from CortexOS.dms import answer_engine as ae
 
-    monkeypatch.setattr(ae, "cascade_retired", lambda: True)
     assert ae.choose_governed_metric(L1_Q) is None
     assert ae.route_to_metric(L1_Q) is not None
 
@@ -186,24 +185,37 @@ def ensure_db():
     yield
 
 
-def test_default_serve_still_uses_l1_cascade(ensure_db):
-    from CortexOS.dms.answer_engine import answer
+def test_default_serve_reaches_ai_sql_not_the_cascade(ensure_db, monkeypatch):
+    """Must fail if answer() falls back to the keyword cascade."""
+    from CortexOS.dms import answer_engine as ae
+    from packs.dms.semantic import query_skills
 
-    body = answer(L1_Q)
-    assert body["layer"] == "governed_metric"
-    assert body["badge"] == "governed_metric"
-    rows = body.get("rows") or []
-    assert rows
-    assert "supplier" in (body.get("answer") or "").lower() or "risk" in (
-        body.get("answer") or ""
-    ).lower()
+    def _banned(question: str):
+        raise AssertionError(f"keyword cascade must not serve: {question!r}")
+
+    from CortexOS.dms import l2_generation
+
+    seen: list[str] = []
+    real_attempt = l2_generation.attempt_l2
+
+    def _spy(question: str, **kwargs):
+        seen.append(question)
+        return real_attempt(question, **kwargs)
+
+    monkeypatch.setattr(ae, "route_to_metric", _banned)
+    monkeypatch.setattr(l2_generation, "attempt_l2", _spy)
+    monkeypatch.setattr(query_skills, "find", lambda _q: None)
+    body = ae.answer(L1_Q)
+    assert seen == [L1_Q]
+    assert body["layer"] != "governed_metric"
+    assert body["badge"] in {"abstain", "needs_clarification"}
+    assert body.get("rows") == []
 
 
 def test_retired_l1_miss_abstains_honestly(ensure_db, monkeypatch):
     from CortexOS.dms import answer_engine as ae
     from packs.dms.semantic import query_skills
 
-    monkeypatch.setattr(ae, "cascade_retired", lambda: True)
     monkeypatch.setattr(query_skills, "find", lambda _q: None)
     body = ae.answer(L1_Q)
     assert body["layer"] != "governed_metric"
@@ -217,7 +229,6 @@ def test_retired_l1_miss_abstains_honestly(ensure_db, monkeypatch):
 def test_retired_l0_certified_still_serves(ensure_db, monkeypatch):
     from CortexOS.dms import answer_engine as ae
 
-    monkeypatch.setattr(ae, "cascade_retired", lambda: True)
     body = ae.answer(L0_Q)
     assert body["layer"] == "certified"
     assert body["badge"] == "certified"
@@ -225,13 +236,19 @@ def test_retired_l0_certified_still_serves(ensure_db, monkeypatch):
     assert (body.get("answer") or "").strip()
 
 
-def test_l2_on_does_not_skip_cascade_without_retirement(ensure_db, monkeypatch):
-    from CortexOS.dms.answer_engine import answer
+def test_l2_on_does_not_fall_back_to_the_cascade(ensure_db, monkeypatch):
+    from CortexOS.dms import answer_engine as ae
+    from packs.dms.semantic import query_skills
 
+    def _banned(question: str):
+        raise AssertionError(f"keyword cascade must not serve: {question!r}")
+
+    monkeypatch.setattr(ae, "route_to_metric", _banned)
+    monkeypatch.setattr(query_skills, "find", lambda _q: None)
     monkeypatch.setenv("DMS_L2_ENABLED", "1")
-    body = answer(L1_Q)
-    assert body["layer"] == "governed_metric"
-    assert body.get("rows")
+    body = ae.answer(L1_Q)
+    assert body["layer"] != "governed_metric"
+    assert not body.get("rows")
 
 
 def test_c7_05_score_engine_report_cannot_retire_cascade():
@@ -262,6 +279,79 @@ def test_c7_05_score_engine_report_cannot_retire_cascade():
     assert cutover_flags({"l1": report, "l2_as_l1_replacement": report})[
         "cascade_retired"
     ] is False
+
+
+def test_stored_skill_must_not_drop_a_named_exclusion(ensure_db, monkeypatch):
+    """Must fail if a stored SQL template silently drops the named SKU."""
+    from CortexOS.dms import answer_engine as ae
+    from packs.dms.semantic import query_skills
+
+    question = "ignore SKU-BETA and also show the top 5 SKUs by revenue"
+    bare = (
+        "SELECT sku FROM transactions WHERE txn_type = 'OUT' "
+        "GROUP BY sku ORDER BY sku LIMIT 5"
+    )
+    monkeypatch.setattr(
+        query_skills,
+        "find",
+        lambda _q: {
+            "id": "bad-skill",
+            "trigger_text": question,
+            "metric_id": None,
+            "params": {},
+            "sql_template": bare,
+            "layer": "query_skill",
+            "score": 1.0,
+        },
+    )
+
+    def _banned(q: str):
+        raise AssertionError(f"keyword cascade must not serve: {q!r}")
+
+    monkeypatch.setattr(ae, "route_to_metric", _banned)
+    body = ae.answer(question)
+    assert body["layer"] != "governed_metric"
+    sql = body.get("sql_used") or ""
+    if sql:
+        assert "SKU-BETA" in sql.upper()
+    else:
+        assert body["badge"] in {"abstain", "needs_clarification"}
+        assert body.get("rows") in ([], None)
+
+
+def test_delayed_count_does_not_fall_back_to_legacy_sql(ensure_db):
+    """Must fail if the delayed/late word bridge serves a listing."""
+    from CortexOS.dms.query_service import answer_question
+
+    body = answer_question("how many delayed arrivals at each warehouse")
+    assert body.get("route") != "sql"
+    assert body.get("sql_used") is None
+    assert body.get("rows") in ([], None)
+
+
+def test_production_route_to_metric_call_must_fail() -> None:
+    """Must fail if any serve module calls the keyword cascade."""
+    import ast
+
+    root = Path(__file__).resolve().parents[2]
+    callers: list[str] = []
+    for base in (root / "CortexOS", root / "packs"):
+        for path in base.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if isinstance(func, ast.Name):
+                    name = func.id
+                elif isinstance(func, ast.Attribute):
+                    name = func.attr
+                else:
+                    continue
+                if name == "route_to_metric":
+                    rel = path.relative_to(root).as_posix()
+                    callers.append(f"{rel}:{node.lineno}")
+    assert callers == [], f"keyword cascade called from serve path: {callers}"
 
 
 def test_c7_cutover_does_not_import_packs() -> None:

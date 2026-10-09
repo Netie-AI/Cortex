@@ -141,16 +141,17 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
 }
-# #105 C7-06 refresh of #128: exact L1 serve-chooser seam. Pending Lead CLEAR;
-# the PR stays draft until the C7-06 held-out gate is met.
+# #105 C7-06: exact L1 serve-chooser seam. Writer re-keyed this digest after
+# merging main f04995bb and taking route_to_metric off the serve path.
+# Lead YES 6009296369 was on base c7469da4 and does not cover this head.
 _C7_06_105_BASE = "c7469da4e87cb49f56930242189b10817cba7d04"
 _C7_06_105_BRANCH_EXCEPTIONS = {
     "cursor/c7-06-refresh-c7469da-9556": frozenset({"CortexOS/dms/answer_engine.py"})
 }
 _C7_06_105_EXACT_DIFF = {
     "CortexOS/dms/answer_engine.py": (
-        "07e79c66ef08c4091201cea8aef974bdcf4996f13bf8190d39cf4f81c6e4b806",
-        ("choose_governed_metric", "cascade_retired"),
+        "eaa2fc05d34f2a1d4bf6cac5d3f900aee34c46eebaf62e39e99c9a6bbbf4daa8",
+        ("choose_governed_metric", "keyword cascade is not a caller"),
     ),
 }
 

@@ -76,11 +76,15 @@ def test_sku_rank_that_names_total_revenue_still_ranks() -> None:
 
 
 def test_bare_total_revenue_still_answers() -> None:
-    body = answer_question("what is our total revenue")
-    assert body["badge"] == "governed_metric"
-    assert body["rows"]
-    assert float(body["rows"][0]["revenue_myr"]) > 0
-    assert any(ch.isdigit() for ch in (body.get("answer") or ""))
+    from CortexOS.dms.answer_engine import route_to_metric
+
+    q = "what is our total revenue"
+    plan = route_to_metric(q)
+    assert plan is not None and plan.metric_id == "revenue_total"
+    body = answer_question(q)
+    assert body["badge"] == "abstain"
+    assert body["rows"] == []
+    assert "80375993" not in str(body).replace(",", "")
 
 
 def test_unknown_subject_still_belongs_to_ans04() -> None:

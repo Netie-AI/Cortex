@@ -20,6 +20,7 @@ def master_key_env(monkeypatch):
 
 def test_pii_redacted_before_prompt(monkeypatch):
     """Critical: raw PII must not reach JudgmentModel via the NL query choke-point."""
+    from CortexOS.dms import answer_engine as ae
     from CortexOS.dms.query_service import answer_question
     from CortexOS.dms.sql_guardrail import AuditEntry, GuardrailResult
     from CortexOS.routing.judgment_model import JudgmentModel
@@ -41,6 +42,13 @@ def test_pii_redacted_before_prompt(monkeypatch):
         )
         return GuardrailResult(passed=True, safe_sql=sql), [], entry
 
+    # Low-stock is no longer keyword-served, so that phrasing never reaches
+    # plan_query(). Serve the certified SKU-count SQL with this question so
+    # the same choke point (plan_query -> decide) still sees the raw text.
+    certified = ae.match_certified("How many SKUs do we have in inventory?")
+    assert certified is not None
+    monkeypatch.setattr(ae, "match_certified", lambda _question: certified)
+    monkeypatch.setenv("DMS_QUERY_SKILL_CAPTURE", "0")
     monkeypatch.setattr(JudgmentModel, "decide", spy_decide)
     monkeypatch.setattr("CortexOS.dms.query_service.guard_and_execute", fake_guard)
 

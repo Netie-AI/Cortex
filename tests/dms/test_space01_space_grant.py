@@ -39,7 +39,7 @@ from CortexOS.execution.session_manifests import (
 
 SESSION = "space01-sess"
 SA = ["transactions"]
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "Top 5 selling SKUs by revenue"
 OUTSIDE_SA_Q = "Which SKUs are below reorder level?"
 
 
@@ -178,7 +178,7 @@ def _assert_answered_over_sa(body: dict[str, Any], *, dms_grant: bool) -> None:
     assert _badge(body) not in {"abstain", "refused", "blocked"}, body
     rows = body.get("rows") or []
     assert rows, "a granted Space turn must still return rows"
-    assert float(rows[0].get("revenue_myr") or 0) > 0
+    assert float(rows[0].get("sales_value_myr") or 0) > 0
     assert body.get("answer")
     assert body.get("sql_used")
     if dms_grant:
