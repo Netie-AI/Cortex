@@ -25,10 +25,7 @@ Checks, all offline:
    ``scripts/lock_images.py`` compiles for.
    A package ``uv.lock`` holds at more than one version is compared at the
    version that target selects. Zero matches or more than one match is a
-   mismatch, never a match. Mismatches already present on main 0faede64,
-   except litellm, are listed in ``requirements/lock_skew/`` and that list
-   may only shrink: a new mismatch fails, and a listed line that no longer
-   mismatches fails until it is deleted.
+   mismatch, never a match. Any mismatch fails. There is no allow-list.
 6. Every shipped Dockerfile installs third-party code only with
    ``--require-hashes -r requirements/image-<variant>.lock.txt`` and installs the
    project only with ``--no-deps``.
@@ -80,11 +77,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DENYLIST: frozenset[tuple[str, str]] = frozenset(
     {("litellm", "1.82.7"), ("litellm", "1.82.8")}
 )
-
-#: Known image-vs-uv mismatches, one file per image. Frozen from
-#: ``python scripts/check_supply_chain.py --mismatches`` against main
-#: 0faede64, with the litellm lines removed. May only shrink.
-SKEW_DIR = "requirements/lock_skew"
 
 #: Platform half of the image target. Python comes from the Dockerfiles.
 #: The image locks are compiled for Linux x86_64 (``scripts/lock_images.py``).
@@ -486,63 +478,17 @@ def _mismatch_lines(root: Path, python_version: str) -> list[str]:
     return lines
 
 
-def skew_list_path(root: Path, variant: str) -> Path:
-    return root / SKEW_DIR / f"image-{variant}.txt"
-
-
-def load_skew_lines(root: Path, variant: str) -> tuple[list[str], list[str]]:
-    """Return (listed mismatch lines, problems) for one image's ratchet file."""
-    path = skew_list_path(root, variant)
-    rel = f"{SKEW_DIR}/image-{variant}.txt"
-    if not path.is_file():
-        return [], [f"{rel}: missing"]
-    lines: list[str] = []
-    problems: list[str] = []
-    seen: set[str] = set()
-    prefix = f"image-{variant}.lock.txt: "
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        line = raw.strip()
-        if line in seen:
-            problems.append(f"{rel}: listed twice: {line}")
-        seen.add(line)
-        if not line.startswith(prefix):
-            problems.append(f"{rel}: {line} is not an {prefix.strip()} mismatch")
-        lines.append(line)
-    return lines, problems
-
-
 def check_version_agreement(root: Path) -> list[str]:
-    """Fail unless image-vs-uv mismatches are exactly the shrink-only list.
+    """Fail on any shared package whose image pin is not the ``uv.lock`` version.
 
-    Compared at the image target. A mismatch that is not listed fails. A
-    listed line that no longer mismatches fails until it is deleted. The list
-    cannot grow. When the Dockerfiles do not name one Python version that
-    ``uv.lock`` resolves, that named error is the whole result: the skew list
-    is not treated as stale.
+    Compared at the image target. There is no allow-list: a mismatch fails
+    outright. When the Dockerfiles do not name one Python version that
+    ``uv.lock`` resolves, that named error is the whole result.
     """
     version, problems = resolve_image_target(root)
     if version is None or problems:
         return problems
-    current = _mismatch_lines(root, version)
-    current_set = set(current)
-    problems: list[str] = []
-    for variant in VARIANTS:
-        listed, load_problems = load_skew_lines(root, variant)
-        problems.extend(load_problems)
-        rel = f"{SKEW_DIR}/image-{variant}.txt"
-        listed_set = set(listed)
-        prefix = f"image-{variant}.lock.txt: "
-        for line in listed:
-            if line not in current_set:
-                problems.append(
-                    f"{line} is listed in {rel} but no longer mismatches; delete the line"
-                )
-        for line in current:
-            if line.startswith(prefix) and line not in listed_set:
-                problems.append(f"{line} (not in {rel}; lock skew may only shrink)")
-    return problems
+    return _mismatch_lines(root, version)
 
 
 def _pip_installs(dockerfile_text: str) -> list[str]:
@@ -1092,7 +1038,7 @@ def main(argv: list[str] | Path | None = None) -> int:
         return 1
     print(
         f"supply chain OK: uv.lock current, {len(VARIANTS)} hashed image locks, "
-        f"shared pins agree with uv.lock or are listed skew, "
+        f"shared pins agree with uv.lock, "
         f"{len(DOCKERFILES)} Dockerfiles, denylist clean, "
         "no DMS_AUTH_DISABLED or CORTEX_DEV_MODE in images"
     )

@@ -4,12 +4,11 @@ The images used to run a bare ``pip install`` against floors with no upper pin,
 and ``uv.lock`` recorded ``netie`` 0.1.0 against 2.5.0 and ``litellm>=1`` against
 ``>=1.84.0``. ``scripts/check_supply_chain.py`` is what now fails the build on
 that. It also compares every package an image lock and ``uv.lock`` both
-contain, at the image target. Mismatches frozen from main 0faede64 (litellm
-lines removed) live in ``requirements/lock_skew/`` and may only shrink. These
-tests run it on the real tree (green) and on planted copies of the tree (each
-must go red), so a checker stuck at "OK" cannot pass here. The skew plants
-also pass with that one check removed, so the failure is the agreement guard
-and not some other check.
+contain, at the image target. Any mismatch fails; there is no allow-list.
+These tests run it on the real tree (green) and on planted copies of the tree
+(each must go red), so a checker stuck at "OK" cannot pass here. The skew
+plants also pass with that one check removed, so the failure is the agreement
+guard and not some other check.
 """
 
 from __future__ import annotations
@@ -171,23 +170,21 @@ def _plant_image_pin(tree: Path, package: str, version: str, variant: str = "cor
 
 
 def test_image_uv_version_skew_fails(tree: Path) -> None:
-    """A litellm pin that is not the uv.lock version is a new, unlisted mismatch."""
+    """A litellm pin that is not the uv.lock version fails outright."""
     _plant_image_pin(tree, "litellm", "1.84.0")
     problems = sc.run(tree)
     assert any(
         "image-core.lock.txt: litellm==1.84.0 disagrees with uv.lock" in p
-        and "may only shrink" in p
         for p in problems
     )
 
 
 def test_unlisted_boto3_pin_fails(tree: Path) -> None:
-    """An unlisted boto3 pin disagrees with uv.lock 1.43.108 and is not on the skew list."""
+    """A boto3 pin that is not uv.lock 1.43.108 fails outright."""
     _plant_image_pin(tree, "boto3", "1.43.109")
     problems = sc.run(tree)
     assert any(
         "image-core.lock.txt: boto3==1.43.109 disagrees with uv.lock boto3==1.43.108" in p
-        and "may only shrink" in p
         for p in problems
     )
 
@@ -214,44 +211,56 @@ def test_dockerfile_python_version_has_no_uv_resolution_entry(tree: Path) -> Non
     assert problems == ["uv.lock has no resolution entry for Python 3.99"]
 
 
-def test_new_mismatch_plus_skew_line_fails_frozen_baseline(tree: Path) -> None:
-    """A new mismatch plus its lock_skew line passes the checker and fails the ceiling.
+def test_skew_line_does_not_hide_a_mismatch(tree: Path) -> None:
+    """A lock_skew line does not excuse a shared-package mismatch.
 
-    ``check_version_agreement`` only requires the skew file to equal the
-    current mismatches, so appending the matching line hides the plant from
-    ``scripts/check_supply_chain.py``. The frozen baseline in
-    ``tests/invariants/test_lock_skew_baseline.py`` names the added line.
+    The allow-list is gone, so ``scripts/check_supply_chain.py`` still fails.
+    The frozen baseline in ``tests/invariants/test_lock_skew_baseline.py``
+    names the added line, which is outside the ceiling.
     """
     _plant_image_pin(tree, "boto3", "1.43.109", variant="core")
     line = "image-core.lock.txt: boto3==1.43.109 disagrees with uv.lock boto3==1.43.108"
     path = tree / "requirements" / "lock_skew" / "image-core.txt"
-    path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(line + "\n", encoding="utf-8")
     assert line in sc.mismatch_lines(tree)
-    assert sc.run(tree) == []
+    assert any(line in problem for problem in sc.run(tree))
     assert skew_lines_outside_baseline(tree) == [
         f"new skew line not in frozen baseline: image-core: {line}"
     ]
 
 
-def test_stale_skew_line_fails(tree: Path) -> None:
+def test_stray_skew_line_is_not_a_supply_chain_failure(tree: Path) -> None:
+    """The checker does not read lock_skew. A stale line is not its failure."""
     path = tree / "requirements" / "lock_skew" / "image-core.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        path.read_text(encoding="utf-8")
-        + "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110\n",
+        "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110\n",
         encoding="utf-8",
     )
-    problems = sc.run(tree)
-    assert any("no longer mismatches" in p and "boto3==1.43.108" in p for p in problems)
+    assert sc.run(tree) == []
 
 
-def test_listed_skew_is_exactly_the_remaining_mismatches() -> None:
-    """The committed lines are the check's output, not a hand count."""
-    listed: list[str] = []
-    for variant in sc.VARIANTS:
-        lines, problems = sc.load_skew_lines(ROOT, variant)
-        assert problems == []
-        listed.extend(lines)
-    assert listed == sc.mismatch_lines(ROOT)
+def test_shared_pins_match_uv_lock() -> None:
+    """The committed image locks and uv.lock agree on every shared package."""
+    assert sc.mismatch_lines(ROOT) == []
+
+
+def test_align_uv_lock_flag_selects_constraints_not_a_blanket_upgrade(tmp_path: Path) -> None:
+    variants, upgrades, align = lock_images.parse_args(
+        ["--align-uv-lock", "core", "--upgrade-package", "litellm"]
+    )
+    assert variants == ["core"]
+    assert upgrades == ("litellm",)
+    assert align is True
+    constraints = tmp_path / "constraints.txt"
+    constraints.write_text("boto3==1.43.108\n", encoding="utf-8")
+    cmd = lock_images.compile_command("core", ("boto3",), constraints)
+    assert "--constraints" in cmd
+    assert "--overrides" not in cmd
+    assert str(constraints) in cmd
+    assert "--upgrade" not in cmd
+    assert cmd[cmd.index("--upgrade-package") + 1] == "boto3"
 
 
 def _write_min_tree(tmp_path: Path, uv_packages: str, image_pin: str) -> None:
