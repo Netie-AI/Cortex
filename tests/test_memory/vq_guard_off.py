@@ -41,16 +41,18 @@ def pytest_configure(config: Any) -> None:
     elif guard == "space_isolation":
         SpaceMemory._in_space = staticmethod(lambda space_id: ("1 = 1", []))  # type: ignore[method-assign]
         lib._in_space = staticmethod(lambda space_id: ("1 = 1", []))  # type: ignore[method-assign]
-    elif guard == "param_validation":
-        vq.validate_value = lambda kind, value: value
-    elif guard == "param_binding":
+    elif guard == "example_not_executed":
+        from packs.dms.generative import sql_generator
 
-        def interpolate(sql: str, params: Any, values: Any) -> tuple[str, tuple[Any, ...]]:
-            for p, v in zip(params, values, strict=True):
-                sql = sql.replace(f"'{p.literal}'", f"'{v}'")
-            return sql, ()
+        def bypass(question: str, schema_context: Any = None, **kwargs: Any) -> list[str]:
+            examples = []
+            if isinstance(schema_context, dict):
+                examples = list(schema_context.get("verified_examples") or [])
+            if examples:
+                return [str(examples[0]["sql"])]
+            return []
 
-        vq.bind_sql = interpolate
+        sql_generator.generate_candidates = bypass  # type: ignore[method-assign]
     elif guard == "grant_gate":
         from CortexOS.execution import submit
 

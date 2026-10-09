@@ -86,9 +86,9 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
-    # 1.5.0 VERIFIED-QUERY: the steward-confirmed query this answer re-ran.
+    # 1.5.0 VERIFIED-QUERY: examples that were in the SQL generator prompt.
     # Omitted from the serialized answer when unset, so an answer that used no
-    # verified query is byte-for-byte what 1.4.0 sent.
+    # verified query keeps the 1.4.0 field set. Not a phrasing-match id.
     verified_query_id: str | None = None
 
     # No return annotation: pydantic derives the serialization schema from it,

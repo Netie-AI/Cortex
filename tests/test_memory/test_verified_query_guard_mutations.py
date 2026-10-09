@@ -40,9 +40,10 @@ CASES: dict[str, list[str]] = {
         f"{UNIT}::test_must_fail_space_b_never_sees_space_a_verified_query",
         f"{HTTP}::test_must_fail_contract_ask_space_b_never_reuses_space_a_query",
     ],
-    "param_validation": [f"{UNIT}::test_must_fail_param_value_must_be_exactly_its_type"],
-    "param_binding": [f"{UNIT}::test_must_fail_bound_values_never_enter_sql_text"],
-    "grant_gate": [f"{HTTP}::test_must_fail_bound_query_never_widens_beyond_the_grant"],
+    "example_not_executed": [
+        f"{UNIT}::test_must_fail_stored_example_is_not_the_generated_sql",
+    ],
+    "grant_gate": [f"{HTTP}::test_must_fail_generated_sql_never_widens_beyond_the_grant"],
 }
 
 

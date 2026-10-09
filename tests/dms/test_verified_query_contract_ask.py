@@ -1,16 +1,13 @@
 """VERIFIED-QUERY (#309) on the served envelope: POST /v1/contract/ask.
 
-Assertions are on the HTTP response DMS receives (R-0001). With
+Assertions are on the HTTP response DMS receives. With
 ``CORTEX_VERIFIED_QUERY`` off the answer carries no ``verified_query_id`` key
-and has exactly the 1.4.0 field set. With it on, a steward-confirmed query is
-bound and re-run through ``run_gate`` + ``execute_sql`` under the session
-manifest (a spy proves the re-run, and rows are checked against the warehouse);
-the answer is ``reused`` with ``verified_query_id`` and keeps the session badge.
+and has exactly the 1.4.0 field set. The library is not read.
 
-Must-fails here: unconfirmed, scored pack, Space B, revoked, and a bound value
-cannot widen beyond the grant. No live model: the FreeRoute test replaces
-``freeroute.complete`` with a mock whose ``served_*`` copy the recorded C-STAMP
-OpenVault response (tests/dms/fixtures/c_stamp_289).
+With it on, confirmed examples are placed in the FreeRoute SQL prompt. The
+model writes new SQL. That SQL is executed under the session manifest. The
+stored example is not the query that runs. No live model: ``freeroute.complete``
+is mocked and its ``served_*`` copy the recorded C-STAMP response.
 """
 
 from __future__ import annotations
@@ -44,11 +41,8 @@ VQ_SQL = (
     "WHERE sku = 'SKU-00296' AND timestamp >= '2026-06-01' AND timestamp < '2026-07-01'"
 )
 ASK = "total quantity_kg moved for SKU-00109 in June 2026"
-LOC_Q = "What was the total quantity_kg moved at LOC-003 in June 2026?"
-LOC_SQL = (
-    "SELECT SUM(quantity_kg) AS total_kg, COUNT(*) AS txn_count FROM transactions "
-    "WHERE location_id = 'LOC-003' AND timestamp >= '2026-06-01' AND timestamp < '2026-07-01'"
-)
+MODEL_SQL = "SELECT sku, quantity_kg FROM transactions LIMIT 10"
+GRANT_SQL = "SELECT quantity_kg FROM transactions WHERE location_id = 'LOC-004' LIMIT 10"
 C_STAMP = ROOT / "tests" / "dms" / "fixtures" / "c_stamp_289" / "resp_body.json"
 
 
@@ -57,10 +51,18 @@ def _b64u(raw: bytes) -> str:
 
 
 def _jwk(kid: str, private: Ed25519PrivateKey) -> dict[str, object]:
-    raw = private.public_key().public_bytes(
-        serialization.Encoding.Raw, serialization.PublicFormat.Raw
-    )
-    return {"kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "use": "sig", "kid": kid, "x": _b64u(raw)}
+    return {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "alg": "EdDSA",
+        "use": "sig",
+        "kid": kid,
+        "x": _b64u(
+            private.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+        ),
+    }
 
 
 @pytest.fixture
@@ -80,8 +82,9 @@ def ask_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
-    for env in (vqa.ENABLED_ENV, vqa.MODEL_MATCH_ENV, sm.ENABLED_ENV, sm.SCORED_ROUND_ENV):
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.delenv("CORTEX_DEV_MODE", raising=False)
+    for env in (vqa.ENABLED_ENV, sm.ENABLED_ENV, sm.SCORED_ROUND_ENV, "DMS_L2_ENABLED"):
         monkeypatch.delenv(env, raising=False)
     import netie.config
 
@@ -118,7 +121,7 @@ def ask_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         get_session_registry().bind(verifier.verify(manifest))
         clear_session(SESSION, space_id=space_id)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 
@@ -145,7 +148,9 @@ def _ask(client, space_id: str, question: str = ASK, **extra: Any) -> dict[str, 
 
 def _confirm(space_id: str, question: str = VQ_Q, sql: str = VQ_SQL) -> vq.VerifiedQuery:
     lib = vq.get_verified_queries()
-    proposed = lib.propose(space_id=space_id, question=question, sql=sql, actor="analyst", source="ask:a1")
+    proposed = lib.propose(
+        space_id=space_id, question=question, sql=sql, actor="analyst", source="ask:a1"
+    )
     return lib.confirm(space_id=space_id, query_id=proposed.id, steward=STEWARD)
 
 
@@ -157,6 +162,17 @@ def _warehouse(sql: str, params: list[Any]) -> list[tuple[Any, ...]]:
         return con.execute(sql, params).fetchall()
     finally:
         con.close()
+
+
+def _recorded_served() -> dict[str, Any]:
+    body = json.loads(C_STAMP.read_text(encoding="utf-8"))
+    assert body["served_provider"] and body["served_model"]
+    return body
+
+
+def _assert_not_verified(body: dict[str, Any]) -> None:
+    assert "verified_query_id" not in body
+    assert body["reused"] is False
 
 
 @pytest.fixture
@@ -174,14 +190,67 @@ def execute_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     return calls
 
 
-def _vq_runs(calls: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
-    return [c for c in calls if "$1" in c[0]]
+def _reach_generator(monkeypatch: pytest.MonkeyPatch, sql: str = MODEL_SQL) -> list[dict[str, Any]]:
+    """L2 runs, FreeRoute is mocked, and the plan gate serves the model's SQL."""
+    from CortexOS.dms.l2_plan_gates import L2ServePlan
+    from CortexOS.dms.l2_plausibility import PlausibilityResult
+    from CortexOS.integrations import freeroute
+    from packs.dms.generative import sql_generator
 
+    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    monkeypatch.setattr("CortexOS.dms.answer_engine.match_certified", lambda q: None)
+    monkeypatch.setattr("CortexOS.dms.answer_engine.route_to_metric", lambda q: None)
+    monkeypatch.setattr("CortexOS.dms.answer_engine.undefined_subject", lambda q: None)
+    monkeypatch.setattr("CortexOS.dms.answer_engine._shape_refusal", lambda q: None)
+    monkeypatch.setattr("packs.dms.semantic.query_skills.find", lambda *a, **k: None)
+    monkeypatch.setattr("packs.dms.semantic.catalog_answer.is_catalog_intent", lambda q: False)
+    monkeypatch.setattr(sql_generator, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        "CortexOS.dms.l2_plan_gates.prepare_listing_plan",
+        lambda ranking, generated_sql: (None, "test serves the generated SQL"),
+    )
 
-def _assert_not_verified(body: dict[str, Any]) -> None:
-    assert "verified_query_id" not in body
-    assert body["provenance"]["layer"] != vqa.LAYER
-    assert body["reused"] is False
+    def _plan(ranking, query_plan, generated_sql, pack_dir):  # noqa: ANN001
+        return (
+            L2ServePlan(
+                sql=generated_sql,
+                expected_columns=frozenset(),
+                expected_grain=frozenset(),
+                name="vq-test",
+            ),
+            "",
+        )
+
+    monkeypatch.setattr("CortexOS.dms.l2_plan_gates.prepare_plan", _plan)
+    monkeypatch.setattr("CortexOS.dms.l2_plan_gates.plan_shape_violation", lambda plan, rows: None)
+    monkeypatch.setattr(
+        "CortexOS.dms.l2_plausibility.assess_plausibility",
+        lambda *a, **k: PlausibilityResult(ok=True),
+    )
+    recorded = _recorded_served()
+    sent: list[dict[str, Any]] = []
+
+    def mocked_complete(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> freeroute.Completion:
+        sent.append({"task": task, "messages": messages})
+        stamp = freeroute.RouteStamp(
+            call_id="mock",
+            task=task,
+            requested=str(recorded.get("model") or ""),
+            served=str(recorded.get("model") or ""),
+            status=200,
+            usable=True,
+            impl="test-mock (not OpenVault)",
+            served_provider=recorded["served_provider"],
+            served_model=recorded["served_model"],
+            served_local=bool(recorded.get("served_local")),
+            served_reason=str(recorded.get("served_reason") or ""),
+        )
+        freeroute._journal_add(stamp)
+        return freeroute.Completion(ok=True, text=sql, stamp=stamp)
+
+    monkeypatch.setattr(freeroute, "complete", mocked_complete)
+    return sent
 
 
 # -- off: unchanged on the wire ---------------------------------------------
@@ -215,38 +284,32 @@ def test_answer_serialization_omits_unset_verified_query_id() -> None:
     assert Answer.model_validate_json(got.model_dump_json()).verified_query_id == "vq_1"
 
 
-# -- on: re-run, never cached -------------------------------------------------
-def test_verified_query_reruns_bound_sql_on_current_data(
+# -- on: generate, never the stored example -----------------------------------
+def test_verified_examples_feed_the_generator_and_current_data_is_executed(
     ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
 ) -> None:
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    sent = _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     query = _confirm("alpha")
 
     body = _ask(ask_http, "alpha")
-    runs = _vq_runs(execute_spy)
-    assert len(runs) == 1, "a verified query is re-run, never served from storage"
-    sql, params = runs[0]
-    assert "SKU-00109" not in sql and params[0] == "SKU-00109"
+    prompt = json.dumps(sent)
+    assert query.id in prompt and VQ_SQL in prompt and VQ_Q in prompt
+    assert sent[0]["task"] == "gen-ask-sql"
     assert body["verified_query_id"] == query.id
-    assert body["reused"] is True
+    assert body["reused"] is False
     assert body["memory_ids_read"] == [query.entry_id]
     (read,) = body["memory_reads"]
     assert read["id"] == query.entry_id and read["kind"] == "solution" and read["space_id"] == "alpha"
     assert read["source"] == f"verified_query:{query.id};ask:a1"
-    assert body["provenance"]["badge"] == "session" and body["provenance"]["layer"] == vqa.LAYER
-    assert "not a validation" in body["provenance"]["assumptions"]
-    assert body["served_reason"] == f"verified_query:{query.id} (no model called)"
-    assert body["served_provider"] is None and body["served_model"] is None
-    assert "'SKU-00109'" in body["sql_used"]
-
-    expected = _warehouse(
-        "SELECT SUM(quantity_kg), COUNT(*) FROM transactions WHERE sku = ? "
-        "AND timestamp >= DATE '2026-06-01' AND timestamp < DATE '2026-07-01'",
-        ["SKU-00109"],
-    )
-    assert expected[0][1] > 0
-    assert [(r["total_kg"], r["txn_count"]) for r in body["rows"]] == expected
+    assert "Not a stored answer" in body["provenance"]["assumptions"]
+    assert body["served_provider"] == _recorded_served()["served_provider"]
+    assert body["served_model"] == _recorded_served()["served_model"]
+    assert execute_spy, "generated SQL is executed"
+    executed = "\n".join(sql for sql, _params in execute_spy)
+    assert "SKU-00296" not in executed
+    assert "quantity_kg" in executed.lower()
+    assert body["rows"]
     assert body["answer"]
 
 
@@ -255,22 +318,23 @@ def test_verified_query_never_serves_a_cached_answer(
 ) -> None:
     from CortexOS.execution import submit
 
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     query = _confirm("alpha")
     first = _ask(ask_http, "alpha")
     assert first["verified_query_id"] == query.id
+    assert first["rows"]
 
     real = submit.execute_sql
 
     def moved_on(verified, sql, **kwargs):  # noqa: ANN001
         rows, q_ms, e_ms = real(verified, sql, **kwargs)
-        return [{**r, "txn_count": r["txn_count"] + 1000} for r in rows], q_ms, e_ms
+        return [{**r, "quantity_kg": float(r.get("quantity_kg") or 0) + 1000} for r in rows], q_ms, e_ms
 
     monkeypatch.setattr(submit, "execute_sql", moved_on)
     second = _ask(ask_http, "alpha")
     assert second["verified_query_id"] == query.id
-    assert second["rows"][0]["txn_count"] == first["rows"][0]["txn_count"] + 1000
+    assert second["rows"][0]["quantity_kg"] == first["rows"][0]["quantity_kg"] + 1000
     assert second["answer_id"] != first["answer_id"]
 
 
@@ -278,61 +342,66 @@ def test_verified_query_never_serves_a_cached_answer(
 def test_must_fail_contract_ask_unconfirmed_query_never_reused(
     ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
 ) -> None:
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    sent = _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     vq.get_verified_queries().propose(
         space_id="alpha", question=VQ_Q, sql=VQ_SQL, actor="analyst", source="ask:a1"
     )
-    _assert_not_verified(_ask(ask_http, "alpha"))
-    _assert_not_verified(_ask(ask_http, "alpha", VQ_Q))
-    assert _vq_runs(execute_spy) == []
+    body = _ask(ask_http, "alpha")
+    _assert_not_verified(body)
+    assert VQ_SQL not in json.dumps(sent)
+    same = _ask(ask_http, "alpha", VQ_Q)
+    _assert_not_verified(same)
+    assert VQ_SQL not in json.dumps(sent)
 
 
 def test_must_fail_contract_ask_scored_pack_never_reads_verified_queries(
     ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
 ) -> None:
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    sent = _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     _confirm("alpha")
-    _assert_not_verified(_ask(ask_http, "alpha", scored_pack_id="curated_ceo"))
-    assert _vq_runs(execute_spy) == []
+    body = _ask(ask_http, "alpha", scored_pack_id="curated_ceo")
+    _assert_not_verified(body)
+    assert VQ_SQL not in json.dumps(sent)
     assert sm.get_space_memory().stamps(space_id="alpha")[-1].served_reason == sm.SCORED_ROUND_READ
 
 
 def test_must_fail_contract_ask_space_b_never_reuses_space_a_query(
     ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
 ) -> None:
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    sent = _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     ask_http.bind_session("beta")
     query = _confirm("alpha")
     beta = _ask(ask_http, "beta")
     _assert_not_verified(beta)
     assert beta["memory_ids_read"] == []
-    assert _vq_runs(execute_spy) == []
+    assert VQ_SQL not in json.dumps(sent)
+    sent.clear()
     assert _ask(ask_http, "alpha")["verified_query_id"] == query.id
+    assert VQ_SQL in json.dumps(sent)
 
 
 def test_must_fail_contract_ask_revoked_query_never_reused(
     ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
 ) -> None:
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     query = _confirm("alpha")
     assert _ask(ask_http, "alpha")["verified_query_id"] == query.id
     vq.get_verified_queries().revoke(space_id="alpha", query_id=query.id, steward=STEWARD)
     _assert_not_verified(_ask(ask_http, "alpha"))
-    assert len(_vq_runs(execute_spy)) == 1
 
 
-def test_must_fail_bound_query_never_widens_beyond_the_grant(
+def test_must_fail_generated_sql_never_widens_beyond_the_grant(
     ask_http, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from CortexOS.execution import submit
 
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    _reach_generator(monkeypatch, GRANT_SQL)
     ask_http.bind_session("alpha", LOC3_GRANT)
-    query = _confirm("alpha", LOC_Q, LOC_SQL)
+    query = _confirm("alpha", "quantity moved at LOC-003", VQ_SQL)
     enforced: list[str] = []
     real = submit.enforce_manifest
 
@@ -343,83 +412,30 @@ def test_must_fail_bound_query_never_widens_beyond_the_grant(
 
     monkeypatch.setattr(submit, "enforce_manifest", spy)
     visible = _warehouse(
-        "SELECT COUNT(*) FROM transactions WHERE location_id = 'LOC-004' "
-        "AND timestamp >= DATE '2026-06-01' AND timestamp < DATE '2026-07-01'",
+        "SELECT COUNT(*) FROM transactions WHERE location_id = 'LOC-004'",
         [],
     )[0][0]
     assert visible > 0, "LOC-004 has rows; the grant must hide them"
 
-    body = _ask(ask_http, "alpha", "total quantity_kg moved at LOC-004 in June 2026")
-    assert body["verified_query_id"] == query.id
-    assert body["rows"][0]["txn_count"] == 0
-    assert any("location_id = 'LOC-003'" in sql and "$1" in sql for sql in enforced)
-
-    own = _ask(ask_http, "alpha", "total quantity_kg moved at LOC-003 in June 2026")
-    assert own["verified_query_id"] == query.id and own["rows"][0]["txn_count"] > 0
-
-
-# -- model-assisted matching: FreeRoute only, mocked --------------------------
-def _recorded_served() -> dict[str, Any]:
-    body = json.loads(C_STAMP.read_text(encoding="utf-8"))
-    assert body["served_provider"] and body["served_model"]
-    return body
+    body = _ask(ask_http, "alpha", ASK)
+    assert body.get("verified_query_id") == query.id
+    assert body["row_count"] == 0
+    assert enforced
+    assert any("location_id = 'LOC-003'" in sql for sql in enforced)
+    assert any("LOC-004" in sql for sql in enforced)
+    assert all("SKU-00296" not in sql for sql in enforced)
 
 
-def test_model_match_goes_through_freeroute_only_and_stamps_served(
-    ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
+def test_freeroute_is_the_only_model_call_and_it_sees_the_example_sql(
+    ask_http, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from CortexOS.integrations import freeroute
-
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
-    monkeypatch.setenv(vqa.MODEL_MATCH_ENV, "1")
+    sent = _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     query = _confirm("alpha")
-    recorded = _recorded_served()
-    sent: list[dict[str, Any]] = []
-
-    def mocked_complete(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> freeroute.Completion:
-        sent.append({"task": task, "messages": messages})
-        assert kwargs["accept"](query.id)
-        stamp = freeroute.RouteStamp(
-            call_id="mock",
-            task=task,
-            requested=recorded["model"],
-            served=recorded["model"],
-            status=200,
-            usable=True,
-            impl="test-mock (not OpenVault)",
-            served_provider=recorded["served_provider"],
-            served_model=recorded["served_model"],
-            served_local=bool(recorded.get("served_local")),
-            served_reason=str(recorded.get("served_reason") or ""),
-        )
-        return freeroute.Completion(ok=True, text=query.id, stamp=stamp)
-
-    monkeypatch.setattr(freeroute, "complete", mocked_complete)
-    body = _ask(ask_http, "alpha", "how many kilos of SKU-00109 shifted during June 2026")
-    assert len(sent) == 1 and sent[0]["task"] == vqa.MODEL_TASK
-    prompt = json.dumps(sent[0]["messages"])
-    assert query.id in prompt and "SELECT" not in prompt and "rows" not in prompt
+    body = _ask(ask_http, "alpha", "how many kilos shifted, phrased differently")
+    assert len(sent) >= 1
+    assert all(item["task"] == "gen-ask-sql" for item in sent)
+    prompt = json.dumps(sent)
+    assert query.id in prompt and VQ_SQL in prompt
     assert body["verified_query_id"] == query.id
-    assert body["served_provider"] == recorded["served_provider"]
-    assert body["served_model"] == recorded["served_model"]
-    assert "model match" in body["provenance"]["assumptions"]
-    assert _vq_runs(execute_spy)[-1][1][0] == "SKU-00109"
-
-    sent.clear()
-    assert _ask(ask_http, "alpha")["verified_query_id"] == query.id
-    assert sent == [], "a deterministic hit never calls the model"
-
-
-def test_model_match_off_never_calls_freeroute(ask_http, monkeypatch: pytest.MonkeyPatch) -> None:
-    from CortexOS.integrations import freeroute
-
-    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
-    ask_http.bind_session("alpha")
-    _confirm("alpha")
-
-    def no_model(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("FreeRoute called with model matching off")
-
-    monkeypatch.setattr(freeroute, "complete", no_model)
-    _assert_not_verified(_ask(ask_http, "alpha", "how many kilos of SKU-00109 shifted during June 2026"))
+    assert body["served_provider"] == _recorded_served()["served_provider"]
