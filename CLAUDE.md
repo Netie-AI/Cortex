@@ -5,7 +5,8 @@ layer, context assembly. DMS is a consumer app. OpenVault is key custody.
 
 **Start at `AGENTS.md`**: index, merge flow, binding rules, lane rules and verify
 commands live there once and are not repeated here. This file holds the engine
-invariants. Section numbers are stable because tests cite them.
+invariants. Section numbers are stable because tests cite them. The AI-first
+answer path is section 9. The live merge list is `TASK.md`.
 
 If a rule here conflicts with an instruction you were given, say so before acting.
 
@@ -102,3 +103,17 @@ Cortex-side assertions are necessary and insufficient. For DMS, assert badge /
 abstained / values / sources / drillthrough_token / audit_id on the envelope from
 `POST /v1/chat/ask` (DMS `assert_envelope_valid`). A green badge on abstention prose
 is a P0.
+
+## 9. AI-first answer path
+
+The model writes SQL from ontology, schema, and verified-example context
+(DB-GPT / Genie style).
+
+Escalation ladder, in order: plan-then-solve, self-correct, a stronger OpenVault
+tier, reconfirm.
+
+Direct abstain only for an ungranted table or destructive SQL.
+
+Keyword cascades and word rules stay out of the answer path. Leave
+`route_to_metric` unextended; #313 retires it as the serve chooser. Merge order
+for the open chain is `TASK.md`.
