@@ -1,7 +1,8 @@
 # Cortex - agent index
 
-Read this first. Engine invariants live in `CLAUDE.md`; current state in `STATUS.md`;
-parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issues.
+Read this first. Engine invariants live in `CLAUDE.md` (AI-first answer path:
+section 9). Current state is `STATUS.md`. The live PR list is `TASK.md`.
+Parked work is `PARKING_LOT.md` (do not build from it). Live work is GitHub issues.
 
 ## Where things are
 
@@ -13,6 +14,7 @@ parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
 | Import boundaries | `.importlinter` (module-level net) + `tests/contract/test_import_boundaries.py` (AST, the stricter check) |
 | CI | `.github/workflows/` - required: `lint-type-test`, `base-install`, `protected-paths`, `rls-proof`, `secrets-scan` |
 | Subagents / DMS sequence | `.cursor/AGENTS.md`; sequence F1 -> F7 -> V0 -> V3, gate between milestones `docs/dms/SUPERVISOR_GATE.md`; distill trace `skill_distill/DISTILL.md` |
+| Live tasks | `TASK.md`. `docs/archive/task.md` is an old phase list and does not bind. |
 | Runtime state (gitignored, never commit) | `data/engine/`, `data/bench/`, `data/lakehouse/`, `CortexOS/data/` (per-device key), `packs/data/dms_ops.db` (rebuild: `python -m scripts.seed_ops_db`) |
 
 ## Binding rules
@@ -36,6 +38,8 @@ parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
    Remaining env/file key paths are debt tracked in #267.
 6. **Keep handoff files out of PR diffs** (`CLAUDE_HANDOFF.md`, `CURSOR_HANDOFF.md`,
    output of `scripts/handoff.py --write`).
+7. **AI-first answer path** is `CLAUDE.md` section 9. The text lives there once.
+   Keyword cascades and word rules stay out. Merge order is `TASK.md`.
 
 ## Working alongside other lanes
 

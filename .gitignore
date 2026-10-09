@@ -33,6 +33,7 @@ MANIFEST
 ~/.netie/
 .netie/
 .env
+dev.env
 env.local
 key.md
 # SOPS: only encrypted *.enc.* may be committed; plaintext secrets stay local

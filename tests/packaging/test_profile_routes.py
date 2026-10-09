@@ -28,7 +28,6 @@ SHARED_PATHS = (
 
 def _client(monkeypatch: pytest.MonkeyPatch, profile: str) -> TestClient:
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("CORTEX_PROFILE", profile)
     if profile == "full":
         monkeypatch.setenv("CORTEX_REQUIRE_AGENTIC_MARKER", "0")
@@ -38,7 +37,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, profile: str) -> TestClient:
     # Fresh app — packaging reads CORTEX_PROFILE at call time.
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 @pytest.mark.parametrize("profile", ["core", "full"])
@@ -53,7 +52,11 @@ def test_shared_paths_present(monkeypatch: pytest.MonkeyPatch, profile: str) -> 
 def test_core_returns_501_for_agentic_and_rag(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client(monkeypatch, "core")
 
-    r_run = client.post("/run", json={"dag": {"nodes": []}})
+    r_run = client.post(
+        "/run",
+        json={"dag": {"nodes": []}},
+        headers={"X-API-Key": "dms-demo-steward-key"},
+    )
     assert r_run.status_code == 501
     assert r_run.json()["detail"]["extra"] == "agentic"
 
@@ -109,7 +112,6 @@ def test_create_app_does_not_warn_duplicate_operation_ids(monkeypatch: pytest.Mo
     import warnings
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("CORTEX_PROFILE", "core")
     monkeypatch.delenv("CORTEX_REQUIRE_AGENTIC_MARKER", raising=False)
     from CortexOS.api.app import create_app
