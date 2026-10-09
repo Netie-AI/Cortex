@@ -86,16 +86,29 @@ supported:
     status: current
     contract_surface: true
     notes: >
-      Amends the 1.5.0 line #329 owns. Does not cut 1.6.0.
-      #329: AskRequest gains optional dms_payload (selected tables, columns,
-      ontology joins). New schemas AskPayload, AskPayloadTable,
-      AskPayloadColumn, AskPayloadJoin. This engine accepts the field and
-      does not run the plan+SQL path; that behavior stays on #329.
-      #347: POST /v1/insights (operationId insights.ask) is on the allowlist.
-      Request gains optional schema_context (ContractInsightsSchemaContext),
-      read on InsightsWireIn, not InsightsAskIn. It is one string. Shortlist
-      pick reasons are not a separate field; they are reason= text inside
-      that string. Response gains usage (ContractInsightsUsage):
+      Additive C-LOOP-A (#303) DMS payload: AskRequest gains optional
+      dms_payload (selected tables with columns, and ontology joins) for the
+      engine's plan+SQL path, which is off by default, and optional
+      plan_sql_confirm (yes runs the closest question, no answers
+      "not found in the database"). New schemas AskPayload, AskPayloadTable,
+      AskPayloadColumn, AskPayloadJoin, PlanSqlReconfirm. Answer gains optional
+      reconfirm, optional plan_sql_rung (plan, error-fed-retry-N, stronger-model,
+      or reconfirm; null when this path did not answer), optional model_calls
+      (logical complete() counts for plan, each error-fed-retry-N,
+      stronger-model and reconfirm, plus total; one per complete() the ladder
+      issues; transport or proxy retries such as an upstream 429 are not
+      counted; null when this path made no model call) and Badge
+      gains reconfirm (a new Badge enum value). AskRequest ignores unknown keys, as
+      on 1.4. The wire names model, strict and provider are rejected by name
+      with 422. Full request strictness is a declared breaking change (#388).
+      Routing stays in OpenVault route config, not a request field.
+      1.4 clients omit the fields and get the 1.4 behaviour.
+      Additive on the same 1.5.0 line (#347): POST /v1/insights
+      (operationId insights.ask) is on the allowlist. The insights request
+      gains optional schema_context (ContractInsightsSchemaContext), read on
+      InsightsWireIn, not on AskRequest and not on InsightsAskIn. It is one
+      string. Shortlist pick reasons are reason= text inside that string.
+      The insights response gains usage (ContractInsightsUsage):
       prompt_tokens, completion_tokens, total_tokens, each null when omitted,
       never 0 as a stand-in. Clients that omit schema_context keep the
       279cbd85 envelope apart from usage. canonical_manifest_bytes unchanged.

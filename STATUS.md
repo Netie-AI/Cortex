@@ -1,24 +1,67 @@
 # STATUS.md
-**Last updated:** 2026-10-08 | **Gate:** G2.3 OSR SHIPPED | Rules and merge flow: `AGENTS.md`
-**Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. Leave next prompts in
-`docs/dms/packets/NEXT_LANES.md`. Live work is GitHub issues; this file only points at
-them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 
-## Live (open issues; last state recorded here)
+**Last updated:** 2026-10-09 MYT | **Main:** `f04995bb` (#376 merged, lock-only)
+Rules and merge flow: `AGENTS.md`. Live list: `TASK.md`. AI-first law: `CLAUDE.md` section 9.
+This file records pointers. It does not certify a gate.
+
+## Founder direction
+
+AI-first, DB-GPT / Genie style. The model writes SQL from ontology, schema, and
+verified-example context. Escalation ladder, in order: plan-then-solve,
+self-correct, a stronger OpenVault tier, reconfirm. Direct abstain only for an
+ungranted table or destructive SQL. Keyword cascades and word rules stay out.
+
+## Open chain (one merge at a time)
+
+Engine `2.5.0` and contract `1.4.0` are separate lines. #329 is the PR that
+introduces contract `1.5.0`. Later PRs in this chain rebase onto it.
+
+| Order | PR | Item |
+|---|---|---|
+| 1 | #329 | C-LOOP-A. Plan then SQL via OpenVault FreeRoute. Owns contract 1.5.0. |
+| 2 | #351 | SCHEMA-CONTEXT. Prove pin `279cbd85` ignores DMS `schema_context`. A pin move needs evidence. Never tip-deploy prove. |
+| 3 | #321 | VERIFIED-QUERY. Steward-confirmed examples at ask time. |
+| 4 | #313 | C7-06. Retires the `route_to_metric` keyword cascade as the serve chooser. |
+
+## Leftovers
+
+| Item | What |
+|---|---|
+| #375 | Issue. `lock_images.py` hardcodes `--python-version 3.11` (follow-up to #360). |
+| #377 | Issue. `check_supply_chain` should fail on unlisted image-only packages (follow-up to #376). |
+| #383 | Issue. Drop unimported diskcache 5.6.3. |
+| trust_remote_code | Named ticket. No issue number was on the repo at this rewrite. `trust_remote_code=True` remains in `CortexOS/nlp/local_inference.py` and `scripts/finetune_dms_tone.py`. |
+| #378-#382 | Dependabot draft PRs (portalocker, nvidia-cusparse, nvidia-cufft, mpmath, dbos). |
+
+## PRs on main that this file used to call drafts
+
+The PRs merged. The issues were still open at this rewrite. A merged PR is not a closed issue.
+
+| PR | Merged (MYT) | Issue still open |
+|---|---|---|
+| #376 LOCK-ALIGN-01 (lock-only; this main) | 2026-10-09 10:32 | -- |
+| #352 BRAIN-FREEROUTE-01 | 2026-10-09 05:43 | #350 |
+| #366 IMAGE-AUTH-01 | 2026-10-09 07:54 | #363 |
+| #370 FREEROUTE-LEARN-SOFT-01 | 2026-10-09 08:44 | #369 |
+| #360 LITELLM-SKEW-01 | 2026-10-09 09:04 | #354 |
+| #362 RUN-AUTH-01 | 2026-10-09 09:21 | #358 |
+
+## Test baseline
+
+On `f04995bb`, CI job lint-type-test pytest reported `2752/10/4`: 2752 passed, 10 skipped, 4 xfailed. Local RLS skips without a DSN.
+
+## Still open (prior record, not re-audited here)
 
 | Area | Issues | Last recorded state |
 |---|---|---|
-| Brain FreeRoute | #350 | Writer lane: `/dms/brain` model calls go through `CortexOS.crew.freeroute.complete`. Named refusal `model_route_unavailable` when unarmed. Draft. Nothing PASS. |
-| RUN-AUTH-01 spend on model run routes | #358 | Draft PR #362. Steward spends. Viewer `api_viewer` is a named 403 and sentinel 0 on the five run routes. `get_caller` does not read the cookie. Constructor cookie mutations require `CONSTRUCTOR_ORIGIN_ALLOWLIST` (empty by default). A bad Origin port is `constructor_origin_denied`. Workflow cancel, clear, recognize, and hardware take a header key, steward or above. A steward cookie with no header is 401 on those four and the model sentinel stays 0. A route walk lists every constructor and workflow route plus `/run` and engine `/run`, and fails if one is missing from that table or if a spend or write route sits on the viewer dependency. Workflow GETs are unchanged (WORKFLOW-READ-AUTH-01). `DMS_AUTH_DISABLED` still opens only `POST /api/engine/run`. Not a CI claim. |
-| C7 L2 serve / retire cascade | #17 #104 #105 #288 | #104 part 2 merged `b6bd559`; G-sh NOT MET (no real shadow traffic). Phase 1b gate cases are hand-written same-shape stand-ins, unit evidence only. #288 Workday WRONG=1 open. |
+| C7 L2 serve / cascade | #17 #104 #105 #288 | Retirement is #313 in the chain above. #104 part 2 merged `b6bd559`; G-sh was not met (no real shadow traffic). Phase 1b gate cases are hand-written same-shape stand-ins, unit evidence only. #288 stays open. |
 | Contract-ask stamp | #289 | Merged; L2 copies only the actual FreeRoute RouteStamp, refuses `L2_ROUTE_STAMP_MISSING`. Draft evidence only. |
 | FreeRoute / router / keys | #211 #212 #267 #272 | #211: no live Studio re-prove, armed live path unproven. #212: INCOMPLETE (fixture 40.00% and pinned-26 exact 0.00% are this-run only). #272: merged `27f79ea8`, local not proven; header/SSE copies of `served_local` PENDING. |
 | Governed RAG | #33 #34 | RAG-02 PARTIAL (served path still `query_service.rag_answer` file scan). Do not read the 2026-08-25 close claim. |
 | GOLD-01 | #13 #18 | Founder TTY, not an agent. |
 | Liberty | #222-#225 | Proxy JEPA (cosine / `action_value`) only; no trained world model. |
-| RSF | #151 #154 #155 #156 | COMPLETE needs an R-0003 different-run verify. |
+| RSF | #151 #154 #155 #156 | A different run still has to verify. |
 | Crew export / desktop | #197-#200 | HOLD. |
-| Image auth-off | #363 | IMAGE-AUTH-01 in draft. Images must not set `DMS_AUTH_DISABLED` or `CORTEX_DEV_MODE`. Startup refuses auth-off without dev mode. Auth tests refuse dev mode. Image-auth scan lists `git ls-files` only. A repo whose `git ls-files` fails stops with `GIT_LS_FILES_FAILED` and does not walk. Shipped Dockerfiles set `DMS_REFUSE_DEMO_KEYS=1`. Not a CI claim. Not PASS. |
 
 ## Standing constraints
 
@@ -40,11 +83,6 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
   OpenVault P17a.
 - External `netie.bat` calls `START_ENGINE.bat`, never uvicorn directly.
 
-## Test baseline
-
-`python -m pytest tests/ -q` (the count lives in the last gate log, not this file;
-local RLS skips without a DSN). `python -m scripts.secrets_scan` -> 0 findings.
-
 ## Handoff
 
 North-star `docs/strategy/CORTEX_FINAL_GOAL.md` | G2 loop
@@ -52,22 +90,4 @@ North-star `docs/strategy/CORTEX_FINAL_GOAL.md` | G2 loop
 `docs/dms/packets/NEXT_LANES.md` | truth map `docs/dms/TRUTH_GROUND_MAP.md` | research
 `docs/research/findings/P0_INDEX.md` | context engineering `docs/CONTEXT_ENGINEERING.md`
 
-## Archive (shipped; detail in git history and `CHANGELOG_DMS.md`)
-
-- **2026-09 Crew / Insights / Liberty / RSF:** #116 Crew shell (memory API, policy
-  ladder, belt claim, router harden, A2A, life, facts.md, assign, AppShell); #196
-  Insights spine; #213 `/v1/insights`; scale/build (PR #210); #232 facts prove (live
-  `:8020` was NOT_PROVEN); #269 ROUTER-1; #276 served passthrough (PR #286); RSF-04/06/07
-  code landed (issues stay open above).
-- **2026-09-04 wave 1:** auto-merge on public `main`; PRs #98 Crew belt, #106 C7-01,
-  #108 EVAL-01, #111 CI hygiene, #107 SPACE-01; contract 1.2.0 release.
-- **2026-08 engine + DMS handoff:** DAG ledger rows / cost API (#87); ANS-01..04,
-  DOC-01, CONTRACT-01; unbound session abstains; refused route is `Badge.ABSTAIN`;
-  ledger append verifies against the chain; CI billing block resolved.
-- **2026-07 G1-G2.5:** G1 racing router, cFSM P0/P1, routines + governor, app package
-  and importer; G2.0 EnterpriseGoal (non-removable ethical floor), G2.1 seeker (silence
-  litmus), G2.2 action value + goal audit, G2.3 OSR, G2.4 ActionEvent telemetry, G2.5
-  commitments. Flaky golden benchmark root cause: DuckDB exclusive read-write lock.
-- **2026-07 O-series / E0 / CI:** O1-O5, O7 ontology + Agent SDK + sidecar + new-pack;
-  Oracle-scale E0 A1-A6; L0 DuckLake reconcile; context engineering; Find Skills;
-  skill_distill; F1-F7, V0-V1, Q1/Q2/L0-L2/S0/S1, F8 `export_pptx`; CI green 2026-07-22.
+History of older waves is in git and `CHANGELOG_DMS.md`. `docs/archive/task.md` does not bind.

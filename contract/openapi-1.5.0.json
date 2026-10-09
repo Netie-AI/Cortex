@@ -210,8 +210,44 @@
             "title": "Memory Reads",
             "type": "array"
           },
+          "model_calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.5.0 logical FreeRoute complete() calls per ladder step, plus total. One count per complete() the ladder issues. Transport or proxy retries (an upstream 429 retried by the cap proxy or the FreeRoute client) are not counted. Keys that ran: plan, error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. total is their sum. DMS reads per-step counts only from this object. Null when this path made no model call. 1.4 clients ignore it.",
+            "title": "Model Calls"
+          },
+          "plan_sql_rung": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Sql Rung"
+          },
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
+          },
+          "reconfirm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanSqlReconfirm"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reused": {
             "default": false,
@@ -494,6 +530,7 @@
         "type": "object"
       },
       "AskRequest": {
+        "description": "Ask plane request.\n\nUnknown keys are ignored, as on main. ``model``, ``strict`` and\n``provider`` are rejected by name before any model call. Routing stays\nin OpenVault's route config. Full request strictness is a breaking\nchange tracked in #388.",
         "properties": {
           "dms_payload": {
             "anyOf": [
@@ -504,6 +541,21 @@
                 "type": "null"
               }
             ]
+          },
+          "plan_sql_confirm": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Sql Confirm"
           },
           "question": {
             "minLength": 1,
@@ -730,7 +782,8 @@
           "query_skill",
           "session",
           "abstain",
-          "blocked"
+          "blocked",
+          "reconfirm"
         ],
         "title": "Badge",
         "type": "string"
@@ -1199,8 +1252,47 @@
             "title": "Memory Reads",
             "type": "array"
           },
+          "model_calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1.5.0 logical FreeRoute complete() calls per ladder step, plus total. One count per complete() the ladder issues. Transport or proxy retries (an upstream 429 retried by the cap proxy or the FreeRoute client) are not counted. Keys that ran: plan, error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. total is their sum. DMS reads per-step counts only from this object. Null when this path made no model call. 1.4 clients ignore it.",
+            "title": "Model Calls"
+          },
+          "plan_sql_rung": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Sql Rung"
+          },
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
+          },
+          "reconfirm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanSqlReconfirm"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "reused": {
             "default": false,
@@ -1453,6 +1545,7 @@
         "type": "object"
       },
       "ContractAskRequest": {
+        "description": "Ask plane request.\n\nUnknown keys are ignored, as on main. ``model``, ``strict`` and\n``provider`` are rejected by name before any model call. Routing stays\nin OpenVault's route config. Full request strictness is a breaking\nchange tracked in #388.",
         "properties": {
           "dms_payload": {
             "anyOf": [
@@ -1464,6 +1557,22 @@
               }
             ],
             "default": null
+          },
+          "plan_sql_confirm": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Sql Confirm"
           },
           "question": {
             "minLength": 1,
@@ -1513,7 +1622,8 @@
           "query_skill",
           "session",
           "abstain",
-          "blocked"
+          "blocked",
+          "reconfirm"
         ],
         "title": "Badge",
         "type": "string"
@@ -1995,6 +2105,27 @@
           "served_at"
         ],
         "title": "MemoryRead",
+        "type": "object"
+      },
+      "ContractPlanSqlReconfirm": {
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "properties": {
+          "closest_question": {
+            "minLength": 1,
+            "title": "Closest Question",
+            "type": "string"
+          },
+          "why": {
+            "minLength": 1,
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why",
+          "closest_question"
+        ],
+        "title": "PlanSqlReconfirm",
         "type": "object"
       },
       "ContractPoolSpec": {
@@ -4117,6 +4248,27 @@
           }
         },
         "title": "PauseBody",
+        "type": "object"
+      },
+      "PlanSqlReconfirm": {
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "properties": {
+          "closest_question": {
+            "minLength": 1,
+            "title": "Closest Question",
+            "type": "string"
+          },
+          "why": {
+            "minLength": 1,
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why",
+          "closest_question"
+        ],
+        "title": "PlanSqlReconfirm",
         "type": "object"
       },
       "PonytailRequest": {

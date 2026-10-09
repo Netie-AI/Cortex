@@ -17,6 +17,7 @@ from .answer import (
     InsightsSchemaContext,
     InsightsUsage,
     MemoryRead,
+    PlanSqlReconfirm,
     Provenance,
 )
 from .errors import ContractError, UnauthorizedError, ValidationError
@@ -75,6 +76,7 @@ __all__ = [
     "InsightsSchemaContext",
     "InsightsUsage",
     "MemoryRead",
+    "PlanSqlReconfirm",
     "Provenance",
     "ContractError",
     "UnauthorizedError",
