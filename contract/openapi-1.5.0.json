@@ -1848,7 +1848,7 @@
         "type": "object"
       },
       "ContractInsightsSchemaContext": {
-        "description": "1.5.0 request field on POST /v1/insights.\n\nThe engine reads this on ``InsightsWireIn.schema_context``, not on\n``InsightsAskIn``. One optional string. Present: it replaces the pack\ntable list. Absent: the pack list stays, and the response stays\nbyte-equal to the 279cbd85 pin apart from ``usage``.\n\nShortlist pick reasons are not a sibling field. The caller writes them\ninto this string: a table line carries ``reason=score:<score>``, a\ncolumn line may carry ``reason=<why>``, and a join line carries\n``reason=<why>``.",
+        "description": "1.5.0 request field on POST /v1/insights.\n\nThe engine reads this on ``InsightsWireIn.schema_context``, not on\n``InsightsAskIn``. One optional string. Present: it replaces the pack\ntable list. Absent: the pack list stays, and the response stays\nbyte-equal to the 279cbd85 pin. The ``usage`` key is omitted when\n``schema_context`` is absent or no count was reported.\n\nShortlist pick reasons are not a sibling field. The caller writes them\ninto this string: a table line carries ``reason=score:<score>``, a\ncolumn line may carry ``reason=<why>``, and a join line carries\n``reason=<why>``.",
         "properties": {
           "schema_context": {
             "anyOf": [
@@ -1869,7 +1869,7 @@
         "type": "object"
       },
       "ContractInsightsUsage": {
-        "description": "1.5.0 response field ``usage`` on POST /v1/insights.\n\nSum of the counts each FreeRoute complete() call reported. A count is\nnull when it was omitted. A missing count is never stored as 0. The\nlive crew return carries prompt_tokens and completion_tokens. total_tokens\nis null when that return omits the key.",
+        "description": "1.5.0 response field ``usage`` on POST /v1/insights.\n\nSum of the counts each FreeRoute complete() call reported. A count is\nnull when it was omitted. A missing count is never stored as 0. The\nlive crew return carries prompt_tokens and completion_tokens. total_tokens\nis null when that return omits the key. The key itself is omitted when\nschema_context is absent or no count was reported.",
         "properties": {
           "completion_tokens": {
             "anyOf": [

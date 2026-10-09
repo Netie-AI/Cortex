@@ -108,10 +108,11 @@ supported:
       gains optional schema_context (ContractInsightsSchemaContext), read on
       InsightsWireIn, not on AskRequest and not on InsightsAskIn. It is one
       string. Shortlist pick reasons are reason= text inside that string.
-      The insights response gains usage (ContractInsightsUsage):
+      The insights response gains optional usage (ContractInsightsUsage):
       prompt_tokens, completion_tokens, total_tokens, each null when omitted,
-      never 0 as a stand-in. Clients that omit schema_context keep the
-      279cbd85 envelope apart from usage. schema_context maxLength is 8192;
+      never 0 as a stand-in. The key is omitted when schema_context is
+      absent or no count was reported. Clients that omit schema_context
+      keep the 279cbd85 envelope. schema_context maxLength is 8192;
       the engine cap is 8192 UTF-8 bytes. canonical_manifest_bytes unchanged.
 
 deprecated:

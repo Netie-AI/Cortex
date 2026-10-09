@@ -306,17 +306,8 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
             json={"intent": "how many skus", "ask": True, "generate": False},
         )
     assert response.status_code == 200, response.text
-    body = response.json()
-    # SCHEMA-CONTEXT-01 adds usage on every POST. Absent schema_context stays
-    # byte-equal to 279cbd85 once that key is removed. Counts are null, not 0.
-    assert body["usage"] == {
-        "prompt_tokens": None,
-        "completion_tokens": None,
-        "total_tokens": None,
-    }
-    body.pop("usage")
     raw = json.dumps(
-        body, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        response.json(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode()
     assert (
         hashlib.sha256(raw).hexdigest()

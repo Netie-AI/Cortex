@@ -228,7 +228,8 @@ class InsightsSchemaContext(BaseModel):
     The engine reads this on ``InsightsWireIn.schema_context``, not on
     ``InsightsAskIn``. One optional string. Present: it replaces the pack
     table list. Absent: the pack list stays, and the response stays
-    byte-equal to the 279cbd85 pin apart from ``usage``.
+    byte-equal to the 279cbd85 pin. The ``usage`` key is omitted when
+    ``schema_context`` is absent or no count was reported.
 
     Shortlist pick reasons are not a sibling field. The caller writes them
     into this string: a table line carries ``reason=score:<score>``, a
@@ -255,7 +256,8 @@ class InsightsUsage(BaseModel):
     Sum of the counts each FreeRoute complete() call reported. A count is
     null when it was omitted. A missing count is never stored as 0. The
     live crew return carries prompt_tokens and completion_tokens. total_tokens
-    is null when that return omits the key.
+    is null when that return omits the key. The key itself is omitted when
+    schema_context is absent or no count was reported.
     """
 
     prompt_tokens: int | None = None

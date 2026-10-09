@@ -386,6 +386,22 @@ def consume_usage() -> dict[str, int | None]:
     return {key: _as_int(current.get(key)) for key in _USAGE_KEYS}
 
 
+def reported_usage(schema_context: str | None) -> dict[str, int | None] | None:
+    """Counts to attach, or None when the response must omit the key.
+
+    Nothing to report: no accepted schema, or every count is null. The key
+    is then absent, so a flag-off response with no schema stays byte-equal
+    to the parent envelope. An explicit 0 is a count. A missing count is
+    never stored as 0.
+    """
+    usage = consume_usage()
+    if supplied_schema(schema_context) is None:
+        return None
+    if not any(usage.get(key) is not None for key in _USAGE_KEYS):
+        return None
+    return usage
+
+
 def _statements(sql: str) -> list[exp.Expression] | None:
     try:
         trees = sqlglot.parse(sql or "", read="duckdb")

@@ -129,7 +129,8 @@ def _caller_refused(purpose: str) -> JSONResponse:
         "values": [],
         "live_5000_ci": False,
     }
-    body["usage"] = schema_mod.consume_usage()
+    # No model call has run, so there are no counts to report.
+    schema_mod.reported_usage(None)
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
 
@@ -178,8 +179,9 @@ def _invalid_request(
         "sql_used": None,
         "audit_id": None,
         "live_5000_ci": False,
-        "usage": schema_mod.consume_usage(),
     }
+    # A refused request did not report counts. Leave the key off.
+    schema_mod.reported_usage(None)
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=status_code)
 
@@ -387,7 +389,9 @@ async def execute_insights(
     out = stamp_api(result, consumer=consumer, alias=alias)
     if extended:
         out["api"]["received"] = _received(wire, source)
-    out["usage"] = schema_mod.consume_usage()
+    usage = schema_mod.reported_usage(schema_text)
+    if usage is not None:
+        out["usage"] = usage
     return out
 
 

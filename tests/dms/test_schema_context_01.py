@@ -293,9 +293,13 @@ def test_unranked_intent_still_sends_schema_context_to_openvault(
             "schema_context": SCHEMA,
         },
     )
+    think_calls = [msgs for task, msgs in captured if task == "crew-think"]
     sql_calls = [msgs for task, msgs in captured if task == "crew-insights-sql"]
-    assert sql_calls, body.get("refuse_reason")
-    assert SCHEMA in _user_message(sql_calls[0])
+    assert think_calls and sql_calls, body.get("refuse_reason")
+    for msgs in (think_calls[0], sql_calls[0]):
+        user = _user_message(msgs)
+        assert "alpha_ledger" in user
+        assert schema_mod.UNTRUSTED_BEGIN in user
     assert body["status"] == "ABSTAIN"
 
 
@@ -355,7 +359,7 @@ def test_must_fail_over_cap_is_named_422(
         {"intent": INTENT, "ask": False, "generate": False, "schema_context": huge},
     )
     assert body["refuse_reason"] == schema_mod.SCHEMA_CONTEXT_TOO_LARGE
-    assert body["usage"] == schema_mod.null_usage()
+    assert "usage" not in body
     assert marker not in json.dumps({k: v for k, v in body.items() if k != "detail"})
     # detail states the length, not the text
     assert marker not in str(body.get("detail") or "")
@@ -400,11 +404,7 @@ def test_must_fail_usage_null_when_provider_omits_counts(
         {"intent": INTENT, "ask": False, "generate": True, "schema_context": SCHEMA},
     )
     assert body["status"] == "ABSTAIN"
-    assert body["usage"] == {
-        "prompt_tokens": None,
-        "completion_tokens": None,
-        "total_tokens": None,
-    }
+    assert "usage" not in body
 
 
 def test_must_fail_usage_keeps_reported_counts_including_zero(
@@ -776,7 +776,7 @@ def test_guard_removed_usage_keeps_only_the_last_attempt(
 def test_absent_schema_context_matches_parent_bytes(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """Frozen uuid and time. Drop usage and the rest matches 279cbd85."""
+    """Frozen uuid and time. No schema_context, so usage is absent and the bytes match 279cbd85."""
     from CortexOS.crew.engine_bridge import LocalEngineBridge
 
     async def fake_ask(self, question: str) -> dict[str, Any]:  # noqa: ARG001
@@ -824,9 +824,8 @@ def test_absent_schema_context_matches_parent_bytes(
         )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["usage"] == schema_mod.null_usage()
+    assert "usage" not in body
     assert "row_cap" not in body
-    body.pop("usage")
     raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     digest = hashlib.sha256(raw).hexdigest()
     assert digest == _ABSENT_SHA256, digest
@@ -923,6 +922,53 @@ def test_must_fail_schema_context_does_not_widen_sql_gate(
     generated = (body.get("generative") or {}).get("sql")
     assert not generated
     assert sql not in str(generated or "")
+    assert sql not in json.dumps(body)
+
+
+@pytest.mark.parametrize(
+    ("sql", "needle"),
+    [
+        (
+            "SELECT qty FROM alpha_ledger l CROSS JOIN read_csv('/etc/passwd') f LIMIT 5",
+            "table function refused",
+        ),
+        (
+            "SELECT qty FROM alpha_ledger WHERE qty IN "
+            "(SELECT 1 FROM read_csv('/etc/passwd')) LIMIT 5",
+            "table function refused",
+        ),
+        (
+            "SELECT sum(amount) FROM otherdb.main.alpha_ledger",
+            "cross-catalog table reference refused",
+        ),
+        (
+            "SELECT secret_col FROM alpha_ledger LIMIT 5",
+            "column secret_col is not declared",
+        ),
+    ],
+    ids=[
+        "read_csv_join",
+        "read_csv_subquery",
+        "cross_catalog",
+        "undeclared_column",
+    ],
+)
+def test_must_fail_check_probe(
+    api: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    sql: str,
+    needle: str,
+) -> None:
+    """Check's probe set. schema_context is present. Each stays refused."""
+
+    def sql_for(_prompt: str) -> str:
+        return sql
+
+    body, _prompts = _generate(api, monkeypatch, SCHEMA, sql_for)
+    assert body["status"] == "REFUSE", body.get("answer")
+    assert needle in str(body.get("answer") or "")
+    assert not body.get("sql_used")
+    assert not (body.get("generative") or {}).get("sql")
     assert sql not in json.dumps(body)
 
 
