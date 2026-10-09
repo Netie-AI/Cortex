@@ -603,7 +603,7 @@ def test_http_get_stamps_incomplete_and_post_refuses_invent_complete(client) -> 
 
 
 @pytest.mark.asyncio
-async def test_pinned_26_like_with_like_stays_incomplete(
+async def test_pinned_26_excludes_serve_set_and_stays_incomplete(
     crew_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from CortexOS.crew import cot_climb
@@ -615,9 +615,12 @@ async def test_pinned_26_like_with_like_stays_incomplete(
         complete=fake,
     )
     assert out["ok"] is True
-    assert out["like_with_like"] is True
-    assert out["climb_measured"] is True
-    assert out["this_run"]["n"] == 26
+    # #343: 21 of the pinned 26 are in the L0 serve set and score nothing.
+    assert out["like_with_like"] is False
+    assert out["climb_measured"] is False
+    assert out["this_run"]["n"] == 5
+    assert out["excluded_n"] == 21
+    assert "cq_supplier_ranking" in out["excluded_ids"]
     assert out["this_run"]["gen"] == "0.00%"
     assert out["this_run"]["gen"] != "57.69%"
     assert out["this_run"]["exact"] == "0.00%"

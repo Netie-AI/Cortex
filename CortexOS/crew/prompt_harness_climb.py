@@ -412,6 +412,19 @@ async def run_harness(
         complete=None if prepared else gated,
     )
     this_run = dict(report.get("this_run") or {})
+    exclusions = {
+        key: report.get(key)
+        for key in ("excluded", "excluded_ids", "excluded_n", "counts_toward_score", "score_note")
+        if key in report
+    }
+    if report.get("status") == "REFUSE":
+        return _refuse(
+            str(report.get("refuse_reason") or "climb refused"),
+            arming=dict(arm),
+            distill=distilled,
+            this_run=this_run,
+            **exclusions,
+        )
     like = bool(report.get("like_with_like"))
     outcome_ids = [str(row.get("id") or "") for row in (report.get("outcomes") or [])]
     if like != _like_with_like(corpus, outcome_ids):
@@ -465,6 +478,7 @@ async def run_harness(
             "outcomes": list(report.get("outcomes") or []),
             "issue_212": "OPEN/INCOMPLETE",
             "values": [],
+            **exclusions,
         }
     )
     # Even a like-with-like improvement does not close #212 from this slice.

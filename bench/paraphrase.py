@@ -33,6 +33,7 @@ from bench.accuracy import (
     _ensure_db_loaded,
     load_golden,
     score_item,
+    stamp_golden,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,7 @@ def _run(
     per_item: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
     totals = {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0}
+    scored: list[GoldenItem] = []
 
     for gid, variants in sorted(paraphrases.items()):
         if gid in unknown or (only and gid != only):
@@ -105,7 +107,9 @@ def _run(
         parent = parents[gid]
         counts = {"total": 0, "correct": 0, "wrong": 0, "abstain": 0, "error": 0}
         for idx, question in enumerate(variants, start=1):
-            res = score_item(_variant(parent, question, idx))
+            variant = _variant(parent, question, idx)
+            scored.append(variant)
+            res = score_item(variant)
             counts["total"] += 1
             counts[res.outcome] += 1
             totals["total"] += 1
@@ -118,7 +122,7 @@ def _run(
         })
 
     answered = totals["correct"] + totals["wrong"]
-    return {
+    report = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "golden_set": str(golden_path or GOLDEN_PATH),
         "paraphrase_set": str(paraphrase_path or PARAPHRASE_PATH),
@@ -131,6 +135,8 @@ def _run(
         "per_item": per_item,
         "results": results,
     }
+    # Every variant inherits a dms_golden_v1 parent's gold, so none of it is a score (#343).
+    return stamp_golden(report, scored, golden_path)
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -138,6 +144,14 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines = [
         "# DMS paraphrase-robustness benchmark", "",
         f"Run: {report['generated_at']}", "",
+    ]
+    if report.get("counts_toward_score") is False:
+        lines += [
+            f"**NOT A SCORE.** {report.get('score_note')}. These paraphrases inherit "
+            f"its gold; {report['excluded_n']} variants are excluded from any score.",
+            "",
+        ]
+    lines += [
         "| total | correct | wrong | abstain | error | robustness | answered precision |",
         "|---|---|---|---|---|---|---|",
         f"| {t['total']} | {t['correct']} | {t['wrong']} | {t['abstain']} | {t['error']} "

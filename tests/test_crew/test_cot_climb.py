@@ -740,9 +740,10 @@ async def test_think_text_is_consumed_in_sql_prompt(
 
 
 @pytest.mark.asyncio
-async def test_pinned_26_is_like_with_like_without_inventing_percent(
+async def test_pinned_26_excludes_the_serve_set_without_inventing_percent(
     crew_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """#343: 21 of the pinned 26 are L0 serve-set ids or questions; they score nothing."""
     _armed(monkeypatch)
     assert len(cot_climb.DMS_180_CURATED) == 26
     fake = _script("", "", "")
@@ -750,8 +751,23 @@ async def test_pinned_26_is_like_with_like_without_inventing_percent(
         corpus=cot_climb.LIKE_WITH_LIKE_CORPUS,
         complete=fake,
     )
-    assert report["this_run"]["n"] == 26
-    assert report["like_with_like"] is True
+    kept = {
+        "trap_last_month",
+        "trap_short_paraphrase",
+        "trap_delayed_count",
+        "trap_stock_by_bin",
+        "trap_how_full_synonym",
+    }
+    assert report["this_run"]["n"] == 5
+    assert report["excluded_n"] == 21
+    assert set(report["excluded_ids"]) == set(cot_climb.DMS_180_IDS) - kept
+    assert {"cq_sku_count", "cq_sales_top3_volume", "cq_sku_count_by_category",
+            "cq_supplier_ranking", "trap_categoty"} <= set(report["excluded_ids"])
+    assert all(
+        row["reason"].startswith(("serve_set_id:", "serve_set_question:"))
+        for row in report["excluded"]
+    )
+    assert report["like_with_like"] is False
     assert report["this_run"]["validated"] == 0
     assert report["this_run"]["wrong"] == 0
     assert report["this_run"]["gen"] == "0.00%"
@@ -762,14 +778,14 @@ async def test_pinned_26_is_like_with_like_without_inventing_percent(
     assert report["this_run"]["exact"] != "38.46%"
     assert report["vs_baseline"]["this_run_exact"] == "0.00%"
     assert report["this_run"]["exact_matched"] == 0
-    assert report["this_run"]["gold_n"] >= 1
+    assert report["this_run"]["gold_n"] == 0
     assert report["complete"] is False
     assert report["status"] == "INCOMPLETE"
     assert report["replaces_baseline"] is False
     assert report["invented_better"] is False
     assert report["issue_212_complete"] is False
     ids = [str(row["id"]) for row in report["outcomes"]]
-    assert set(ids) == set(cot_climb.DMS_180_IDS)
+    assert set(ids) == kept
 
 
 @pytest.mark.asyncio
@@ -880,7 +896,7 @@ async def test_improve_think_consumes_prior_sql_and_route(
 
 
 @pytest.mark.asyncio
-async def test_exact_scores_certified_gold_without_replacing_baseline(
+async def test_exact_scores_pinned_gold_without_replacing_baseline(
     crew_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _armed(monkeypatch)
@@ -889,8 +905,8 @@ async def test_exact_scores_certified_gold_without_replacing_baseline(
     hit = await cot_climb.measure_climb(
         [
             {
-                "id": "cq_sku_count",
-                "intent": "How many SKUs do we have in inventory?",
+                "id": "fixture_sku_count",
+                "intent": "how many skus",
                 "ranking": ranking,
                 "expected_sql": gold,
                 "complete": _script(gold),
@@ -918,8 +934,8 @@ async def test_exact_scores_certified_gold_without_replacing_baseline(
     miss = await cot_climb.measure_climb(
         [
             {
-                "id": "cq_sku_count",
-                "intent": "How many SKUs do we have in inventory?",
+                "id": "fixture_sku_count",
+                "intent": "how many skus",
                 "ranking": ranking,
                 "expected_sql": gold,
                 "complete": _script("SELECT sku FROM inventory"),
@@ -942,9 +958,10 @@ def test_public_map_leftover_stays_incomplete_covering() -> None:
     assert "exact" in body["leftover"].lower() or "G1" in body["leftover"]
     assert body["complete"] is False
     assert body["issue_212_complete"] is False
-    gold = cot_climb.certified_gold_sql()
-    assert "cq_sku_count" in gold
-    assert cot_climb.sql_exact("", gold["cq_sku_count"]) is False
-    assert cot_climb.sql_exact(gold["cq_sku_count"], gold["cq_sku_count"]) is True
+    gold = cot_climb.oracle_gold_sql()
+    assert "cq_sku_count" not in gold  # the L0 serve set is never gold (#343)
+    sql = gold["spider_country_mean_lead_having"]
+    assert cot_climb.sql_exact("", sql) is False
+    assert cot_climb.sql_exact(sql, sql) is True
 
 

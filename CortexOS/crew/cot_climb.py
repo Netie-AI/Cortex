@@ -17,8 +17,10 @@ values. Validated SQL is ABSTAIN (not executed). Never CERTIFIED. Never
 COMPLETE. DMS #180 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 is the frozen
 baseline; this module does not replace it with a better %. Like-with-like is
 the pinned 26 ids from that covering SHA -- not a 5-item fixture, not a
-label-only n==26. this_run.exact scores against certified gold SQL when the
-case id / expected_sql is present; missing gold is not invented 38.46%.
+label-only n==26. this_run.exact scores against oracle gold SQL
+(``bench/oracle``, never the L0 serve set; #343) when the case id /
+expected_sql is present; missing gold is not invented 38.46%. A case whose id
+or question text is in the serve set is excluded from the score and named.
 """
 
 from __future__ import annotations
@@ -111,7 +113,7 @@ def public_map() -> dict[str, Any]:
         "like_with_like_corpus": LIKE_WITH_LIKE_CORPUS,
         "like_with_like_n": DMS_180_N,
         "leftover": (
-            "covering: exact vs certified gold + G1 plan consumed in think; "
+            "covering: exact vs oracle gold + G1 plan consumed in think; "
             "like-with-like only when pinned 26 ids @ d2f116a6; still INCOMPLETE"
         ),
         "jepa": "proxy cosine via gen_cfsm.collapse_score; no trained path named",
@@ -120,8 +122,8 @@ def public_map() -> dict[str, Any]:
             "G1 plan consumed in think/SQL"
         ),
         "exact": (
-            "this_run.exact vs certified gold when id/expected_sql present; "
-            "never invent 38.46%"
+            "this_run.exact vs oracle gold (bench/oracle) when id/expected_sql present; "
+            "serve-set cases excluded by name; never invent 38.46%"
         ),
         "freeroute": "consume crew.freeroute public API only; unarmed fail-closed",
         "prompt_harness": (
@@ -225,34 +227,22 @@ def sql_exact(got: str, gold: str) -> bool:
 _GOLD: dict[str, str] | None = None
 
 
-def certified_gold_sql() -> dict[str, str]:
-    """Certified query gold from the DMS pack YAML. Pack modules stay unimported."""
+def oracle_gold_sql() -> dict[str, str]:
+    """Gold from bench/oracle only. Never the L0 serve set (certified_queries.yaml, #343)."""
     global _GOLD
-    if _GOLD is not None:
-        return _GOLD
-    from CortexOS.crew import insights as insights_mod
+    if _GOLD is None:
+        from CortexOS.crew import score_oracle
 
-    doc = insights_mod._read_yaml(
-        insights_mod._pack_dir() / "semantic" / "certified_queries.yaml"
-    )
-    out: dict[str, str] = {}
-    for row in doc.get("certified") or []:
-        if not isinstance(row, Mapping):
-            continue
-        cid = str(row.get("id") or "").strip()
-        sql = str(row.get("sql") or "").strip()
-        if cid and sql:
-            out[cid] = sql
-    _GOLD = out
-    return out
+        _GOLD = score_oracle.oracle_gold_sql()
+    return _GOLD
 
 
 def gold_sql_for(case_id: str, expected_sql: str = "") -> str:
-    """Case expected_sql wins. Else certified YAML by id. Never invent gold."""
+    """Case expected_sql wins. Else the oracle by id. Never invent gold."""
     pinned = (expected_sql or "").strip()
     if pinned:
         return pinned
-    return certified_gold_sql().get(str(case_id or "").strip(), "")
+    return oracle_gold_sql().get(str(case_id or "").strip(), "")
 
 
 def curated_intents() -> list[dict[str, str]]:
@@ -404,8 +394,13 @@ def coverage_report(
     outcomes: Sequence[Mapping[str, Any]],
     *,
     corpus: str = "",
+    excluded: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Report this-run coverage vs frozen #180 baseline. Never replaces it."""
+    """Report this-run coverage vs frozen #180 baseline. Never replaces it.
+
+    ``excluded`` cases (serve-set id or question, #343) are not in any number
+    here; they are listed by id with their named reason.
+    """
     n = len(outcomes)
     validated = sum(1 for row in outcomes if row.get("valid"))
     wrong = sum(1 for row in outcomes if row.get("wrong"))
@@ -432,7 +427,13 @@ def coverage_report(
         if like
         else (corpus.strip() or "cortex-cot-climb fixture, not DMS #180 curated 26")
     )
-    return {
+    if like:
+        note = "like-with-like vs DMS #180 curated 26 @ d2f116a6; baseline not replaced"
+    elif excluded:
+        note = "serve-set cases excluded (#343); not like-with-like vs DMS #180"
+    else:
+        note = "different corpus; do not replace DMS #180 numbers"
+    report: dict[str, Any] = {
         "ok": True,
         "complete": False,
         "status": "INCOMPLETE",
@@ -460,11 +461,7 @@ def coverage_report(
             "this_run_exact": exact_label,
             "like_with_like": like,
             "improved": improved,
-            "note": (
-                "like-with-like vs DMS #180 curated 26 @ d2f116a6; baseline not replaced"
-                if like
-                else "different corpus; do not replace DMS #180 numbers"
-            ),
+            "note": note,
         },
         "jepa": JEPA_PATH,
         "issue_211_complete": False,
@@ -472,6 +469,19 @@ def coverage_report(
         "issue_227_complete": False,
         "outcomes": [dict(row) for row in outcomes],
     }
+    from CortexOS.crew import score_oracle
+
+    reasons = sorted({str(row.get("reason") or "") for row in excluded})
+    score_oracle.stamp(
+        report,
+        excluded,
+        counts_toward_score=score_oracle.GOLDEN_NOT_RESPLIT not in reasons,
+    )
+    if excluded and n == 0:
+        report["ok"] = False
+        report["status"] = "REFUSE"
+        report["refuse_reason"] = f"{score_oracle.ALL_EXCLUDED}:" + ",".join(reasons)
+    return report
 
 
 def _envelope(
@@ -902,9 +912,16 @@ async def measure_climb(
     complete: Any | None = None,
 ) -> dict[str, Any]:
     """Coverage vs frozen #180 baseline. Not a live :5000 CI claim."""
+    from CortexOS.crew import score_oracle
+
     rows: list[Mapping[str, Any]] = [c for c in (cases or []) if isinstance(c, Mapping)]
     if not rows and (corpus or "").strip() == LIKE_WITH_LIKE_CORPUS:
         rows = curated_intents()
+    rows, excluded = score_oracle.split_scored(
+        rows,
+        lambda c: (str(c.get("id") or ""), str(c.get("intent") or "")),
+        corpus=corpus,
+    )
     idea_list = _idea_lines(ideas)
     outcomes: list[dict[str, Any]] = []
     ranking_fn: Any = None
@@ -941,7 +958,7 @@ async def measure_climb(
                 "final": (out.get("climb") or {}).get("final"),
             }
         )
-    return coverage_report(outcomes, corpus=corpus)
+    return coverage_report(outcomes, corpus=corpus, excluded=excluded)
 
 
 assert HORIZON in ALLOWED_HORIZONS
