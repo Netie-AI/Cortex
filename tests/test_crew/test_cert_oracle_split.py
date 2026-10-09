@@ -129,7 +129,6 @@ def serving(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
         return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     netie.config._cached_config = None
     _ensure_db_loaded()
@@ -164,7 +163,10 @@ def serving(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     )
     manifest.signature = b64u(issuer.sign(canonical_manifest_bytes(manifest)))
     get_session_registry().bind(verifier.verify(manifest))
-    yield TestClient(create_app(), client=("127.0.0.1", 5555))
+    # A real key header, not auth off: #366 refuses DMS_AUTH_DISABLED outside dev mode.
+    yield TestClient(
+        create_app(), client=("127.0.0.1", 5555), headers={"X-API-Key": "dms-demo-admin-key"}
+    )
     set_verifier_for_tests(None)
     reset_session_registry_for_tests()
     reset_limiter()
