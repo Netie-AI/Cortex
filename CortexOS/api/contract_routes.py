@@ -276,15 +276,27 @@ async def contract_ask(body: AskRequest) -> Answer:
         verified=verified,
         scored_pack_id=body.scored_pack_id,
     )
+    from CortexOS.dms.clarify_ask import clarify_answer, try_clarify
+
+    turn = None if reused is not None else try_clarify(
+        body.question,
+        body.clarify_option_ids,
+        session_id=body.session_id,
+        space_id=body.space_id,
+        verified=verified,
+    )
     try:
-        result = reused if reused is not None else answer_engine(
-            body.question,
-            session_id=body.session_id,
-            space_id=body.space_id,
-            verified=verified,
-            require_grounding=True,
-            stamp_l2_route=True,
-        )
+        if turn is not None and turn.clarify is not None:
+            result = clarify_answer(turn)
+        else:
+            result = reused if reused is not None else answer_engine(
+                turn.question if turn is not None else body.question,
+                session_id=body.session_id,
+                space_id=body.space_id,
+                verified=verified,
+                require_grounding=True,
+                stamp_l2_route=True,
+            )
     except ManifestError as exc:
         code = getattr(exc, "code", "manifest_error")
         raise HTTPException(
@@ -297,6 +309,8 @@ async def contract_ask(body: AskRequest) -> Answer:
     else:
         data = dict(result)
     data.update(memory_fields)
+    if turn is not None and turn.applied:
+        data["clarify_resolved"] = list(turn.applied)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
     return Answer.model_validate(data)
 
