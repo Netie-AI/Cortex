@@ -268,6 +268,11 @@ async def contract_ask(body: AskRequest) -> Answer:
         ) from exc
 
     from CortexOS.dms.space_memory_ask import try_solution_reuse
+    from CortexOS.dms.verified_query_ask import (
+        bind_verified_examples,
+        stamp_verified_examples,
+        take_verified_examples,
+    )
 
     reused, memory_fields = try_solution_reuse(
         body.question,
@@ -276,6 +281,13 @@ async def contract_ask(body: AskRequest) -> Answer:
         verified=verified,
         scored_pack_id=body.scored_pack_id,
     )
+    manifest = getattr(verified, "manifest", None)
+    space = str(getattr(manifest, "space_id", "") or body.space_id or "")
+    tokens = None
+    if reused is None:
+        tokens = bind_verified_examples(
+            space_id=space, scored_pack_id=body.scored_pack_id
+        )
     try:
         result = reused if reused is not None else answer_engine(
             body.question,
@@ -291,12 +303,27 @@ async def contract_ask(body: AskRequest) -> Answer:
             status_code=_http_for_submit_status(code),
             detail={"code": code, "message": str(exc)},
         ) from exc
+    finally:
+        example_meta = take_verified_examples(tokens)
 
     if isinstance(result, Answer):
         data = result.model_dump()
     else:
         data = dict(result)
-    data.update(memory_fields)
+    # Examples land on a served L2 answer only. Empty C-MEM fields must not
+    # wipe those reads. C-MEM still wins when it reused a solution.
+    served_generated = (
+        example_meta is not None
+        and not _is_abstain_signal(data)
+        and data.get("layer") == "generated"
+        and data.get("badge") == "L2_VALIDATED"
+        and isinstance(data.get("sql_used"), str)
+        and bool(data["sql_used"].strip())
+    )
+    if served_generated and example_meta is not None:
+        stamp_verified_examples(data, example_meta)
+    if not data.get("verified_query_id"):
+        data.update(memory_fields)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
     return Answer.model_validate(data)
 
