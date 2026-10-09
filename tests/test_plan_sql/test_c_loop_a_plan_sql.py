@@ -94,8 +94,19 @@ def _reply(fake, content: str, *, provider: str = PROVIDER, model: str = MODEL) 
     )
 
 
-def _ask(client, *, payload: dict[str, Any] | None = PAYLOAD, **extra: Any):
-    body: dict[str, Any] = {"question": QUESTION, "session_id": SESSION, **extra}
+def _ran(spy: list[str]) -> list[str]:
+    """SQL the model produced. Sample probes are ``SELECT DISTINCT``."""
+    return [sql for sql in spy if not sql.lstrip().upper().startswith("SELECT DISTINCT")]
+
+
+def _ask(
+    client,
+    *,
+    payload: dict[str, Any] | None = PAYLOAD,
+    question: str = QUESTION,
+    **extra: Any,
+):
+    body: dict[str, Any] = {"question": question, "session_id": SESSION, **extra}
     if payload is not None:
         body["dms_payload"] = payload
     return client.post("/v1/contract/ask", json=body)
@@ -193,7 +204,8 @@ def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
         assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
     assert body["row_count"] == len(rows)
     assert body["sql_used"].startswith(GOOD_SQL)
-    assert execute_spy == [body["sql_used"]]
+    assert _ran(execute_spy) == [body["sql_used"]]
+    assert len(execute_spy) > 1  # distinct-value probes ran before the answer SQL
     assert body["provenance"]["layer"] == "plan_sql"
     assert body["provenance"]["badge"] == "session"
     assert "Not validated for accuracy" in body["provenance"]["assumptions"]
@@ -212,6 +224,7 @@ def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
     assert list(by_step) == [
         "step grant",
         "step payload",
+        "step sample",
         "step plan",
         "step sql",
         "step gate",
@@ -231,6 +244,9 @@ def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
     plan_prompt = calls[0]["body"]["messages"][1]["content"]
     sql_prompt = calls[1]["body"]["messages"][1]["content"]
     assert "transactions(txn_type VARCHAR -- IN or OUT, sku VARCHAR, quantity_kg DOUBLE)" in plan_prompt
+    assert "COLUMN VALUES" in plan_prompt
+    assert "transactions.txn_type:" in plan_prompt
+    assert any(token in plan_prompt for token in ("'IN'", "'OUT'", "'ADJUST'", "'WRITE_OFF'"))
     assert "Do not write SQL" in calls[0]["body"]["messages"][0]["content"]
     assert "PLAN:\n1. Read transactions." in sql_prompt
     assert [r[0] for r in _route_rows()] == [TASK_PLAN, TASK_SQL]
@@ -347,7 +363,7 @@ def test_response_without_served_stamp_is_refused(
     _assert_not_answered(body, plan_sql_ask.ROUTE_STAMP_MISSING)
     assert "served_provider and served_model" in body["answer"]
     assert len(armed_openvault.chat_calls) == 1
-    assert execute_spy == []
+    assert _ran(execute_spy) == []
 
 
 # -- must-fail 1: no model path but OpenVault FreeRoute ---------------------------
@@ -397,7 +413,7 @@ def test_must_fail_direct_provider_call_is_refused_not_executed(
     body = _json(_ask(dms_http))
     _assert_not_answered(body, plan_sql_ask.NOT_FREEROUTE)
     assert "not served through OpenVault FreeRoute" in body["answer"]
-    assert execute_spy == []
+    assert _ran(execute_spy) == []
 
 
 def test_must_fail_provider_env_keys_never_bypass_openvault(
@@ -430,7 +446,7 @@ def test_must_fail_provider_env_keys_never_bypass_openvault(
     assert armed_openvault.non_openvault_calls == []
     assert {c["path"] for c in armed_openvault.calls} == {"/api/freeroute/status"}
     assert connects == []
-    assert execute_spy == []
+    assert _ran(execute_spy) == []
 
 
 # -- must-fail 2: SQL that violates the gate is refused, not executed -------------
@@ -439,11 +455,6 @@ def test_must_fail_provider_env_keys_never_bypass_openvault(
 @pytest.mark.parametrize(
     ("sql", "code", "needle"),
     [
-        (
-            "SELECT no_such_col FROM transactions",
-            plan_sql_ask.GATE_REFUSED,
-            "UNKNOWN_COLUMN:no_such_col",
-        ),
         (
             "SELECT read_csv_auto('/etc/passwd') FROM transactions",
             plan_sql_ask.MANIFEST_REFUSED,
@@ -455,7 +466,7 @@ def test_must_fail_provider_env_keys_never_bypass_openvault(
             "MANIFEST:",
         ),
     ],
-    ids=["unknown_column", "file_read_function", "table_outside_grant"],
+    ids=["file_read_function", "table_outside_grant"],
 )
 def test_must_fail_gate_violating_sql_is_refused_not_executed(
     armed_openvault, dms_http, execute_spy: list[str], sql: str, code: str, needle: str  # noqa: F811
@@ -468,7 +479,8 @@ def test_must_fail_gate_violating_sql_is_refused_not_executed(
 
     _assert_not_answered(body, code)
     assert needle in body["answer"]
-    assert execute_spy == []
+    assert _ran(execute_spy) == []
+    assert all("read_csv" not in sql.lower() for sql in execute_spy)
     assert len(armed_openvault.chat_calls) == 2
     assert [r[2] for r in _route_rows()] == [None, "gate_fail"]
 
@@ -476,15 +488,27 @@ def test_must_fail_gate_violating_sql_is_refused_not_executed(
 def test_must_fail_sql_outside_payload_is_refused_even_inside_grant(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
+    outside = "SELECT sku FROM inventory LIMIT 5"
     _reply(armed_openvault, PLAN_TEXT)
-    _reply(armed_openvault, "SELECT sku FROM inventory LIMIT 5")
+    _reply(armed_openvault, outside)
+    _reply(armed_openvault, outside)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, outside)
+    _reply(armed_openvault, "WHY: inventory was not selected\nCLOSEST: how many transactions of each type")
     dms_http.bind_session(SESSION, {"transactions": "TRUE", "inventory": "TRUE"})
 
     body = _json(_ask(dms_http))
 
-    _assert_not_answered(body, plan_sql_ask.OUTSIDE_PAYLOAD)
-    assert "inventory" in body["answer"]
-    assert execute_spy == []
+    assert _badge(body) == "reconfirm", body
+    assert body["rows"] in ([], None)
+    assert body["reconfirm"]["closest_question"]
+    assert _ran(execute_spy) == []
+    assert all("inventory" not in sql.lower() for sql in execute_spy)
+    prompts = [
+        call["body"]["messages"][1]["content"] for call in armed_openvault.chat_calls
+    ]
+    assert any(plan_sql_ask.OUTSIDE_PAYLOAD in prompt for prompt in prompts)
+    assert len(armed_openvault.chat_calls) > 2
 
 
 def test_multi_statement_or_dml_never_reaches_execute(
@@ -495,7 +519,8 @@ def test_multi_statement_or_dml_never_reaches_execute(
     dms_http.bind_session(SESSION, GRANT)
     body = _json(_ask(dms_http))
     _assert_not_answered(body, plan_sql_ask.NO_SELECT)
-    assert execute_spy == []
+    assert _ran(execute_spy) == []
+    assert len(armed_openvault.chat_calls) == 2
 
 
 # -- must-fail 3: the payload cannot widen the signed grant -----------------------
@@ -595,3 +620,189 @@ def test_scored_round_writes_no_memory_and_never_trains_the_route(
     assert "write" not in ops
     assert sm.get_space_memory().read(space_id="alpha", kind="solution", actor="t")[0] == []
     assert [r[1] for r in _route_rows()] == [split, split]
+
+
+# -- thinking loop: sample, retry, stronger model, reconfirm ----------------------
+
+
+def test_must_fail_unknown_column_retries_and_does_not_execute_it(
+    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+) -> None:
+    """A column the gate rejects is fed back and rewritten. The bad SQL never runs."""
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, "SELECT no_such_col FROM transactions")
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["rows"] and body["sql_used"].startswith(GOOD_SQL)
+    assert all("no_such_col" not in sql.lower() for sql in execute_spy)
+    assert _ran(execute_spy) == [body["sql_used"]]
+    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    assert "UNKNOWN_COLUMN:no_such_col" in retry
+    assert len(armed_openvault.chat_calls) == 3
+
+
+def test_must_fail_empty_result_retries_where_the_old_head_abstained(
+    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+) -> None:
+    """The pre-thinking head abstained on zero rows after one SQL write.
+
+    This head feeds EMPTY_RESULT back and regenerates. One scripted empty
+    SELECT plus a follow-up that returns rows must answer, not abstain.
+    """
+    empty = (
+        "SELECT txn_type, COUNT(*) AS n FROM transactions "
+        "WHERE txn_type = 'NOT_A_TYPE' GROUP BY txn_type"
+    )
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, empty)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["rows"] and body["provenance"]["badge"] == "session"
+    assert plan_sql_ask.EMPTY_RESULT not in body["answer"]
+    assert len(armed_openvault.chat_calls) == 3
+    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    assert plan_sql_ask.EMPTY_RESULT in retry
+    assert "NOT_A_TYPE" in retry
+    assert _ran(execute_spy)[-1] == body["sql_used"]
+
+
+def test_implausible_all_null_rows_are_fed_back(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    from CortexOS.execution import submit
+
+    real = submit.execute_sql
+    state = {"nulls": True}
+
+    def fake(verified, sql, **kwargs):  # noqa: ANN001
+        if state["nulls"] and "COUNT(*)" in sql:
+            state["nulls"] = False
+            return ([{"n": None}], 0.0, 0.0)
+        return real(verified, sql, **kwargs)
+
+    monkeypatch.setattr(submit, "execute_sql", fake)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["rows"] and body["provenance"]["badge"] == "session"
+    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    assert plan_sql_ask.IMPLAUSIBLE_RESULT in retry
+
+
+def test_exhausted_retries_then_a_stronger_openvault_model(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["rows"] and body["sql_used"].startswith(GOOD_SQL)
+    models = [call["body"]["model"] for call in armed_openvault.chat_calls]
+    assert len(models) == 5
+    assert models[0] == models[1] == models[2]
+    assert models[3] == models[4]
+    assert models[3] != models[0]
+    assert models[3] != "auto"
+    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    strong = armed_openvault.chat_calls[4]["body"]["messages"][1]["content"]
+    assert "UNKNOWN_COLUMN:no_such_col" in retry
+    assert "UNKNOWN_COLUMN:no_such_col" in strong
+    assert any(line.startswith("step escalate:") for line in body["assumptions"])
+    assert any(line.startswith("step plan-strong:") for line in body["assumptions"])
+    assert "served_by=openvault-freeroute" in next(
+        line for line in body["assumptions"] if line.startswith("step plan-strong:")
+    )
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
+    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+) -> None:
+    bad = "SELECT no_such_col FROM transactions"
+    why = "the selected column is not in the table"
+    closest = "how many transactions of each type"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, f"WHY: {why}\nCLOSEST: {closest}")
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["provenance"]["badge"] == "reconfirm"
+    assert body["route"] == "reconfirm"
+    assert body["rows"] in ([], None) and body["sql_used"] is None
+    assert body["drillthrough_token"] is None
+    assert body["reconfirm"] == {"why": why, "closest_question": closest}
+    assert why in body["answer"] and closest in body["answer"]
+    assert "not found in the database" in body["answer"]
+    assert _ran(execute_spy) == []
+    assert any(line.startswith("step reconfirm-strong:") for line in body["assumptions"])
+    assert body["served_provider"] == PROVIDER and body["served_model"] == MODEL
+
+
+def test_confirm_yes_runs_the_closest_question(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    closest = "how many transactions of each type"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http, question=closest, plan_sql_confirm="yes"))
+
+    assert body["rows"] and body["provenance"]["badge"] == "session"
+    assert body["reconfirm"] is None
+    assert any(line.startswith("step confirm:") for line in body["assumptions"])
+    assert "confirm" in next(line for line in body["assumptions"] if line.startswith("step confirm:"))
+
+
+def test_confirm_no_answers_not_found_in_the_database(
+    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+) -> None:
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http, plan_sql_confirm="no"))
+
+    assert body["answer"] == "not found in the database"
+    assert body["provenance"]["badge"] == "session"
+    assert body["rows"] in ([], None) and body["sql_used"] is None
+    assert body["reconfirm"] is None
+    assert armed_openvault.chat_calls == []
+    assert execute_spy == []
+
+
+def test_pii_wording_is_not_an_abstain_and_is_not_masked(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    question = "list operator emails and phone numbers"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http, question=question))
+
+    assert body["rows"] and body["provenance"]["badge"] == "session"
+    assert "abstain" not in body["answer"].lower()
+    plan_prompt = armed_openvault.chat_calls[0]["body"]["messages"][1]["content"]
+    assert "emails" in plan_prompt and "phone numbers" in plan_prompt

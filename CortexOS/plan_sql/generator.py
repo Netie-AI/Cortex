@@ -20,10 +20,17 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from CortexOS.integrations import freeroute
-from CortexOS.plan_sql.payload import PlanSqlRequest, plan_lines, plan_messages, sql_messages
+from CortexOS.plan_sql.payload import (
+    PlanSqlRequest,
+    plan_lines,
+    plan_messages,
+    reconfirm_messages,
+    sql_messages,
+)
 
 TASK_PLAN = "plan-sql-plan"
 TASK_SQL = "plan-sql-sql"
+TASK_RECONFIRM = "plan-sql-reconfirm"
 SERVED_BY_FREEROUTE = freeroute.IMPL
 
 _SELECT = re.compile(r"\b(select|with)\b", re.IGNORECASE)
@@ -109,7 +116,7 @@ class PlanSqlGenerator(Protocol):
 def _step(kind: str, out: freeroute.Completion) -> ModelStep:
     reason = "" if out.ok else (out.reason or "FreeRoute returned no usable text")
     stamp = StepStamp.from_route(kind, out.stamp, reason)
-    plan = plan_lines(out.text) if kind == "plan" and out.ok else ()
+    plan = plan_lines(out.text) if kind.startswith("plan") and out.ok else ()
     return ModelStep(kind, out.ok, out.text if out.ok else "", reason, stamp, out.stamp, plan)
 
 
@@ -123,11 +130,18 @@ class FreeRoutePlanSqlGenerator:
         pin_source: str = "",
         max_tokens: int = 600,
         timeout: float = 45.0,
+        tier: str = "",
     ) -> None:
         self._pin = pin
         self._pin_source = pin_source
         self._max_tokens = max_tokens
         self._timeout = timeout
+        # "" is the first model. "strong" is the later OpenVault retry.
+        self._tier = tier
+        self.pin = pin
+
+    def _name(self, base: str) -> str:
+        return f"{base}-strong" if self._tier == "strong" else base
 
     def _complete(
         self, task: str, messages: list[dict[str, Any]], accept: Any
@@ -146,8 +160,10 @@ class FreeRoutePlanSqlGenerator:
         )
 
     def plan(self, request: PlanSqlRequest) -> ModelStep:
-        out = self._complete(TASK_PLAN, plan_messages(request), lambda t: bool(plan_lines(t)))
-        return _step("plan", out)
+        out = self._complete(
+            self._name(TASK_PLAN), plan_messages(request), lambda t: bool(plan_lines(t))
+        )
+        return _step(self._name("plan"), out)
 
     def sql(
         self,
@@ -157,8 +173,22 @@ class FreeRoutePlanSqlGenerator:
         prior_violations: Sequence[str] = (),
     ) -> ModelStep:
         messages = sql_messages(request, plan.plan, prior_violations=prior_violations)
-        out = self._complete(TASK_SQL, messages, lambda t: bool(_SELECT.search(t or "")))
-        return _step("sql", out)
+        out = self._complete(
+            self._name(TASK_SQL), messages, lambda t: bool(_SELECT.search(t or ""))
+        )
+        return _step(self._name("sql"), out)
+
+    def reconfirm(self, request: PlanSqlRequest, failures: Sequence[str]) -> ModelStep:
+        """Ask why this would abstain, and for the closest answerable question."""
+
+        def _accept(text: str) -> bool:
+            upper = (text or "").upper()
+            return "WHY:" in upper and "CLOSEST:" in upper
+
+        out = self._complete(
+            self._name(TASK_RECONFIRM), reconfirm_messages(request, failures), _accept
+        )
+        return _step(self._name("reconfirm"), out)
 
 
 __all__ = [
@@ -168,5 +198,6 @@ __all__ = [
     "SERVED_BY_FREEROUTE",
     "StepStamp",
     "TASK_PLAN",
+    "TASK_RECONFIRM",
     "TASK_SQL",
 ]

@@ -7,8 +7,8 @@ grant names, or the ask is refused before any model sees the schema.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from cortex_contract.answer import AskPayload
@@ -23,13 +23,21 @@ _PLAN_SYSTEM = (
     "You plan one read-only analytics query over the tables given. "
     "Reply with a numbered plan of 2 to 6 short steps, one per line. "
     "Name the tables, joins, filters, grouping and aggregation each step uses. "
+    "Ground every filter in the sampled column values when they are listed. "
     "Use only the tables, columns and joins listed. Do not write SQL."
 )
 _SQL_SYSTEM = (
     "You write a single DuckDB SELECT that carries out the plan given. "
     "Use ONLY the tables, columns and joins listed. "
+    "When sampled column values are listed, filter literals must come from them. "
     "No DDL/DML. No comments. Prefer LIMIT 50. "
     "Return SQL only."
+)
+_RECONFIRM_SYSTEM = (
+    "A read-only query over the listed tables could not be grounded. "
+    "Reply with exactly two lines and no SQL:\n"
+    "WHY: one sentence on why you would abstain\n"
+    "CLOSEST: one question the listed tables, joins and sampled values can answer"
 )
 
 
@@ -39,10 +47,17 @@ def _norm(name: str) -> str:
 
 @dataclass(frozen=True)
 class PlanSqlRequest:
-    """One question plus the payload DMS selected for it."""
+    """One question plus the payload DMS selected for it.
+
+    ``column_values`` is table -> column -> distinct values sampled from the
+    granted tables. ``prior_failures`` is what an earlier plan+SQL pass got
+    wrong, so a later pass can avoid it. Both default empty.
+    """
 
     question: str
     payload: AskPayload
+    column_values: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
+    prior_failures: tuple[str, ...] = ()
 
     def table_names(self) -> frozenset[str]:
         return frozenset(_norm(t.name) for t in self.payload.tables)
@@ -87,6 +102,26 @@ def schema_block(request: PlanSqlRequest) -> str:
     return "\n".join(lines)
 
 
+def values_block(request: PlanSqlRequest) -> str:
+    """Sampled distinct values, or ``""`` when nothing was sampled."""
+    if not request.column_values:
+        return ""
+    lines = [
+        "COLUMN VALUES (sampled distinct values from granted tables; ground filters in these):"
+    ]
+    for table, cols in request.column_values.items():
+        for col, vals in cols.items():
+            shown = ", ".join(repr(v) for v in vals[:12])
+            lines.append(f"- {table}.{col}: {shown}")
+    return "\n".join(lines)
+
+
+def _failure_lines(failures: Sequence[str]) -> list[str]:
+    if not failures:
+        return []
+    return ["PREVIOUS FAILURES (avoid these):", *[f"- {v}" for v in list(failures)[:8]]]
+
+
 def plan_lines(text: str) -> tuple[str, ...]:
     """Numbered plan steps from model text, bounded. ``()`` when there are none."""
     out: list[str] = []
@@ -101,10 +136,15 @@ def plan_lines(text: str) -> tuple[str, ...]:
 
 
 def plan_messages(request: PlanSqlRequest) -> list[dict[str, Any]]:
-    user = f"{schema_block(request)}\n\nQUESTION: {request.question}"
+    parts = [schema_block(request)]
+    block = values_block(request)
+    if block:
+        parts.extend(["", block])
+    parts.extend(_failure_lines(request.prior_failures))
+    parts.extend(["", f"QUESTION: {request.question}"])
     return [
         {"role": "system", "content": _PLAN_SYSTEM},
-        {"role": "user", "content": user},
+        {"role": "user", "content": "\n".join(parts)},
     ]
 
 
@@ -114,21 +154,41 @@ def sql_messages(
     *,
     prior_violations: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
-    parts = [
-        schema_block(request),
-        "",
-        "PLAN:",
-        *plan,
-        "",
-        f"QUESTION: {request.question}",
-        "",
-        "Emit one DuckDB SELECT.",
-    ]
+    parts = [schema_block(request)]
+    block = values_block(request)
+    if block:
+        parts.extend(["", block])
+    parts.extend(
+        [
+            "",
+            "PLAN:",
+            *plan,
+            "",
+            f"QUESTION: {request.question}",
+            "",
+            "Emit one DuckDB SELECT.",
+        ]
+    )
     if prior_violations:
         parts.append("PREVIOUS VALIDATION ERRORS (fix these):")
         parts.extend(f"- {v}" for v in list(prior_violations)[:8])
     return [
         {"role": "system", "content": _SQL_SYSTEM},
+        {"role": "user", "content": "\n".join(parts)},
+    ]
+
+
+def reconfirm_messages(
+    request: PlanSqlRequest, failures: Sequence[str]
+) -> list[dict[str, Any]]:
+    parts = [schema_block(request)]
+    block = values_block(request)
+    if block:
+        parts.extend(["", block])
+    parts.extend(["", f"QUESTION: {request.question}", ""])
+    parts.extend(_failure_lines(failures) or ["FAILURES:", "- the query could not be grounded"])
+    return [
+        {"role": "system", "content": _RECONFIRM_SYSTEM},
         {"role": "user", "content": "\n".join(parts)},
     ]
 
@@ -139,7 +199,9 @@ __all__ = [
     "PlanSqlRequest",
     "plan_lines",
     "plan_messages",
+    "reconfirm_messages",
     "schema_block",
     "sql_messages",
+    "values_block",
     "widening",
 ]

@@ -26,11 +26,14 @@ CASES = {
         ["test_must_fail_direct_provider_call_is_refused_not_executed"],
     ),
     "sql_gate": (
-        [f"{HTTP}::test_must_fail_gate_violating_sql_is_refused_not_executed"],
         [
-            "test_must_fail_gate_violating_sql_is_refused_not_executed[unknown_column]",
+            f"{HTTP}::test_must_fail_gate_violating_sql_is_refused_not_executed",
+            f"{HTTP}::test_must_fail_unknown_column_retries_and_does_not_execute_it",
+        ],
+        [
             "test_must_fail_gate_violating_sql_is_refused_not_executed[file_read_function]",
             "test_must_fail_gate_violating_sql_is_refused_not_executed[table_outside_grant]",
+            "test_must_fail_unknown_column_retries_and_does_not_execute_it",
         ],
     ),
     "payload_grant": (

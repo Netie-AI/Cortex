@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,9 @@ class Badge(str, Enum):
     SESSION = "session"
     ABSTAIN = "abstain"
     BLOCKED = "blocked"
+    # 1.5.0: the plan+SQL loop could not ground an answer and is asking the user.
+    # Not an abstain. Older clients ignore the value.
+    RECONFIRM = "reconfirm"
 
 
 class AbstainReason(str, Enum):
@@ -55,6 +58,19 @@ class AskPayloadJoin(BaseModel):
     relation: str | None = None
 
 
+class PlanSqlReconfirm(BaseModel):
+    """1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.
+
+    Present only when the loop could not ground an answer. Yes
+    (``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to
+    ``closest_question``) runs that question. No answers
+    ``not found in the database``. Older clients ignore the object.
+    """
+
+    why: str = Field(min_length=1)
+    closest_question: str = Field(min_length=1)
+
+
 class AskPayload(BaseModel):
     """1.5.0: selected tables, their schema and ontology joins for one question.
 
@@ -75,6 +91,10 @@ class AskRequest(BaseModel):
     scored_pack_id: str | None = None
     # 1.5.0: ignored unless the engine runs with its plan+SQL path switched on.
     dms_payload: AskPayload | None = None
+    # 1.5.0: decision on a prior plan+SQL reconfirm. Absent on a normal ask.
+    # ``yes`` runs ``question`` (the closest question). ``no`` answers
+    # ``not found in the database`` and does not call a model.
+    plan_sql_confirm: Literal["yes", "no"] | None = None
 
 
 class MemoryRead(BaseModel):
@@ -125,6 +145,9 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0: set when the plan+SQL loop asks the user to confirm the closest
+    # question. Null on every other answer. 1.4 clients ignore it.
+    reconfirm: PlanSqlReconfirm | None = None
 
 
 class DrillthroughRequest(BaseModel):

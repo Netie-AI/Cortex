@@ -213,6 +213,16 @@
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
           },
+          "reconfirm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanSqlReconfirm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reused": {
             "default": false,
             "title": "Reused",
@@ -505,6 +515,21 @@
               }
             ]
           },
+          "plan_sql_confirm": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Sql Confirm"
+          },
           "question": {
             "minLength": 1,
             "title": "Question",
@@ -730,7 +755,8 @@
           "query_skill",
           "session",
           "abstain",
-          "blocked"
+          "blocked",
+          "reconfirm"
         ],
         "title": "Badge",
         "type": "string"
@@ -1202,6 +1228,17 @@
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
           },
+          "reconfirm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanSqlReconfirm"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "reused": {
             "default": false,
             "title": "Reused",
@@ -1465,6 +1502,22 @@
             ],
             "default": null
           },
+          "plan_sql_confirm": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Sql Confirm"
+          },
           "question": {
             "minLength": 1,
             "title": "Question",
@@ -1513,7 +1566,8 @@
           "query_skill",
           "session",
           "abstain",
-          "blocked"
+          "blocked",
+          "reconfirm"
         ],
         "title": "Badge",
         "type": "string"
@@ -1932,6 +1986,27 @@
           "served_at"
         ],
         "title": "MemoryRead",
+        "type": "object"
+      },
+      "ContractPlanSqlReconfirm": {
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "properties": {
+          "closest_question": {
+            "minLength": 1,
+            "title": "Closest Question",
+            "type": "string"
+          },
+          "why": {
+            "minLength": 1,
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why",
+          "closest_question"
+        ],
+        "title": "PlanSqlReconfirm",
         "type": "object"
       },
       "ContractPoolSpec": {
@@ -4054,6 +4129,27 @@
           }
         },
         "title": "PauseBody",
+        "type": "object"
+      },
+      "PlanSqlReconfirm": {
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "properties": {
+          "closest_question": {
+            "minLength": 1,
+            "title": "Closest Question",
+            "type": "string"
+          },
+          "why": {
+            "minLength": 1,
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why",
+          "closest_question"
+        ],
+        "title": "PlanSqlReconfirm",
         "type": "object"
       },
       "PonytailRequest": {

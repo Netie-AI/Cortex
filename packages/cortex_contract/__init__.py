@@ -15,6 +15,7 @@ from .answer import (
     DrillthroughRequest,
     DrillthroughResponse,
     MemoryRead,
+    PlanSqlReconfirm,
     Provenance,
 )
 from .errors import ContractError, UnauthorizedError, ValidationError
@@ -71,6 +72,7 @@ __all__ = [
     "DrillthroughRequest",
     "DrillthroughResponse",
     "MemoryRead",
+    "PlanSqlReconfirm",
     "Provenance",
     "ContractError",
     "UnauthorizedError",

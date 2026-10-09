@@ -103,6 +103,7 @@ _FLAT_BADGE: dict[str, Badge] = {
     "abstain": Badge.ABSTAIN,
     "refused": Badge.ABSTAIN,  # F40 — contract has no REFUSED badge; never SESSION
     "blocked": Badge.BLOCKED,
+    "reconfirm": Badge.RECONFIRM,  # C-LOOP-A: asking, not an abstain and not SESSION
 }
 
 
