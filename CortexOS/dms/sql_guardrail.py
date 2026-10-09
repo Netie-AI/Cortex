@@ -66,6 +66,19 @@ def _sensitive_columns(semantic: dict[str, Any]) -> set[str]:
     return set(semantic.get("sensitive_columns") or [])
 
 
+def catalog_outside_caller(table: exp.Table, own_catalog: str = "") -> bool:
+    """True when a table names a catalog other than the caller's.
+
+    A bare name and ``schema.table`` stay in the session catalog. A three-part
+    name is another catalog, except the one catalog this caller already holds
+    (empty means the caller named none, so every catalog qualifier is outside).
+    """
+    catalog = str(table.catalog or "").strip().lower()
+    if not catalog:
+        return False
+    return catalog != own_catalog
+
+
 def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
     violations: list[str] = []
     try:
@@ -100,12 +113,17 @@ def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
 
     tables = _allowed_tables(semantic)
     sensitive = _sensitive_columns(semantic)
+    own_catalog = str(semantic.get("catalog") or "").strip().lower()
 
     referenced_tables: set[str] = set()
     referenced_columns: set[str] = set()
     all_cols = _all_allowed_columns(semantic)
 
     for table in stmt.find_all(exp.Table):
+        if catalog_outside_caller(table, own_catalog):
+            # The name of the gate, not the SQL. The statement is not safe_sql.
+            violations.append("cross-catalog table reference refused")
+            return GuardrailResult(False, violations, None)
         name = table.name
         referenced_tables.add(name)
         if name not in tables:

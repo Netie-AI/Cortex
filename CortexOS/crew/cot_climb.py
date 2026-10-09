@@ -165,6 +165,24 @@ async def _call_runner(
     return out if isinstance(out, dict) else {}
 
 
+def _cross_catalog_table(sql: str, outside: Any) -> bool:
+    """True when a parsed table names a catalog the caller does not hold."""
+    import sqlglot
+    from sqlglot import exp
+
+    try:
+        trees = sqlglot.parse(sql or "", read="duckdb")
+    except Exception:  # noqa: BLE001 - the validator names a parse failure
+        return False
+    for tree in trees or []:
+        if tree is None:
+            continue
+        for node in tree.find_all(exp.Table):
+            if outside(node):
+                return True
+    return False
+
+
 def _check_sql(
     fr: Any,
     sql: str,
@@ -176,8 +194,8 @@ def _check_sql(
 
     A caller catalog (``source=space``) is checked by the shared naming rule:
     qualified names exactly as declared, a bare name only when it resolves to
-    one declared table, columns only where the caller declared them. The engine
-    pack path is unchanged.
+    one declared table, columns only where the caller declared them. The pack
+    path refuses a catalog qualifier before the FreeRoute table check.
     """
     from CortexOS.insights.caller_ontology import SOURCE_CALLER
 
@@ -186,6 +204,19 @@ def _check_sql(
 
         declared = {t: list(columns.get(t) or []) for t in allowed}
         return validate_caller_sql(sql, declared)
+    # The pack session names no catalog. A three-part name is another database.
+    # Checked here so the frozen FreeRoute validator is not the allowlist for it.
+    from CortexOS.dms.sql_guardrail import catalog_outside_caller
+
+    outside = _cross_catalog_table(sql, catalog_outside_caller)
+    if outside:
+        return {
+            "ok": False,
+            "sql": None,
+            "tables": [],
+            "reason": "cross-catalog table reference refused",
+            "check": "refused",
+        }
     return fr.validate_sql(sql, allowed, columns=columns)
 
 
@@ -841,6 +872,31 @@ async def climb(
                 )
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
+            reason = str(checked.get("reason") or "")
+            if not checked.get("ok") and reason.startswith(
+                "cross-catalog table reference refused"
+            ):
+                # Same named refusal as the schema_context gate. sql stays
+                # unset, so a refused statement is not copied into a later
+                # prompt or into sql_used.
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="CROSS_CATALOG",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=schema_mod.public_sql_reason(reason),
+                )
         if checked.get("ok"):
             last_sql = str(checked.get("sql") or "")
         elif not supplied:
