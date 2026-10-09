@@ -267,6 +267,28 @@ async def contract_ask(body: AskRequest) -> Answer:
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
 
+    from CortexOS.loop import analysis_loop_enabled
+
+    if analysis_loop_enabled():
+        from CortexOS.dms.analysis_loop_ask import loop_ask
+
+        try:
+            looped = loop_ask(
+                body.question,
+                session_id=body.session_id,
+                space_id=body.space_id,
+                verified=verified,
+                scored_pack_id=body.scored_pack_id,
+            )
+        except ManifestError as exc:
+            code = getattr(exc, "code", "manifest_error")
+            raise HTTPException(
+                status_code=_http_for_submit_status(code),
+                detail={"code": code, "message": str(exc)},
+            ) from exc
+        looped = _enrich_answer(looped, session_id=body.session_id, verified=verified)
+        return Answer.model_validate(looped)
+
     from CortexOS.dms.space_memory_ask import try_solution_reuse
 
     reused, memory_fields = try_solution_reuse(

@@ -71,7 +71,7 @@ supported:
 
   - version: "1.4"
     spec: openapi-1.4.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive C-MEM (#290) per-Space memory: Answer gains memory_ids_read
@@ -80,6 +80,18 @@ supported:
       reused (a stored solution re-run on current data; never a validation).
       AskRequest gains optional scored_pack_id. 1.3 clients ignore the new
       fields. canonical_manifest_bytes unchanged.
+
+  - version: "1.5"
+    spec: openapi-1.5.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive C-LOOP (#291) analysis loop orchestrator: Answer gains optional
+      analysis_loop (outcome and served_* stamped steps in run order; an
+      abstain's last step names its reason as "<code>: <detail>"). It is
+      present only when CORTEX_ANALYSIS_LOOP is on and is omitted from the
+      wire otherwise, so a loop-off answer is a 1.4.0 answer. 1.4 clients
+      ignore the new field. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

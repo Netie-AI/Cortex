@@ -4,12 +4,14 @@ import sys
 
 from .answer import (
     AbstainReason,
+    AnalysisLoop,
     Answer,
     AskRequest,
     Badge,
     ContributingSource,
     DrillthroughRequest,
     DrillthroughResponse,
+    LoopStep,
     MemoryRead,
     Provenance,
 )
@@ -56,12 +58,14 @@ if __name__ != "cortex_contract":
 __all__ = [
     "CONTRACT_VERSION",
     "AbstainReason",
+    "AnalysisLoop",
     "Answer",
     "AskRequest",
     "Badge",
     "ContributingSource",
     "DrillthroughRequest",
     "DrillthroughResponse",
+    "LoopStep",
     "MemoryRead",
     "Provenance",
     "ContractError",

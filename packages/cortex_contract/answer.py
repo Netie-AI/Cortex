@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 
 class Badge(str, Enum):
@@ -50,6 +57,49 @@ class MemoryRead(BaseModel):
     served_at: str
 
 
+_NAMED_ABSTAIN = re.compile(r"^[a-z][a-z0-9_]*: \S")
+
+
+class LoopStep(BaseModel):
+    """1.5.0 C-LOOP: one stamped step of the analysis loop, in run order."""
+
+    seq: int
+    served_step: str
+    served_status: Literal["ok", "skipped", "failed", "refused", "abstain"]
+    served_by: str
+    served_at: str
+    served_reason: str = ""
+    served_tool: str | None = None
+    served_memory_ids: list[str] = Field(default_factory=list)
+    served_sql: list[str] = Field(default_factory=list)
+    served_row_count: int | None = None
+
+
+class AnalysisLoop(BaseModel):
+    """1.5.0 C-LOOP: the stamped steps of one analysis-loop ask, in run order.
+
+    The last step is ``answer`` (ok) or ``abstain``; an abstain step's
+    ``served_reason`` is ``"<named_code>: <detail>"``.
+    """
+
+    outcome: Literal["answer", "abstain"]
+    steps: list[LoopStep] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _abstain_is_named(self) -> AnalysisLoop:
+        last = self.steps[-1] if self.steps else None
+        if self.outcome == "abstain":
+            if last is None or (last.served_step, last.served_status) != ("abstain", "abstain"):
+                raise ValueError("an analysis-loop abstain must end with an abstain step")
+            if not _NAMED_ABSTAIN.match(last.served_reason):
+                raise ValueError("an analysis-loop abstain must name its reason as '<code>: <detail>'")
+        elif last is None or (last.served_step, last.served_status) != ("answer", "ok"):
+            raise ValueError("an analysis-loop answer must end with an ok answer step")
+        if any(s.served_status == "abstain" for s in self.steps[:-1]):
+            raise ValueError("only the last analysis-loop step may abstain")
+        return self
+
+
 class ContributingSource(BaseModel):
     """One source card for the Sources panel (architecture §4.7 / §4.8)."""
 
@@ -86,6 +136,17 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0 C-LOOP: present only when the analysis loop ran. Left off the wire
+    # when absent, so a loop-off answer is byte-for-byte a 1.4.0 answer.
+    analysis_loop: AnalysisLoop | None = None
+
+    # No return annotation: one would replace Answer's published response schema.
+    @model_serializer(mode="wrap")
+    def _omit_absent_loop(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        if self.analysis_loop is None and isinstance(data, dict):
+            data.pop("analysis_loop", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):
