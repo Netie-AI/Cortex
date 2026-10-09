@@ -285,9 +285,8 @@ class InsightsIn(BaseModel):
 # wake a model call (a crew run through crew/llm.py, or a FreeRoute
 # generate) takes this gate as a dependency, so a refused caller gets
 # 401/403 with reason ``spend_requires_auth`` before the handler runs. The
-# handlers themselves are unchanged. POST /crew/freeroute is not gated here:
-# tests/test_crew/test_freeroute.py (guarded, #215) still pins a keyless
-# loopback spend there; that needs a founder decision.
+# handlers themselves are unchanged. POST /crew/freeroute is gated too
+# (founder decision 2026-09-26): every spend needs a key.
 _spend_gate = require_spend_auth("viewer")
 _SPEND = [Depends(_spend_gate)]
 
@@ -1100,7 +1099,7 @@ def build_router(crew: CrewApp) -> APIRouter:
 
         return await freeroute_mod.run_core(freeroute_mod.public_status)
 
-    @router.post("/freeroute")
+    @router.post("/freeroute", dependencies=_SPEND)
     async def freeroute_complete(body: FreeRouteIn, request: Request) -> Any:
         """Prompt, think, or act via OpenVault FreeRoute. Fail-closed when unarmed."""
         from CortexOS.crew import freeroute as freeroute_mod
