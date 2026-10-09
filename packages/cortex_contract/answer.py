@@ -223,7 +223,7 @@ class DrillthroughResponse(BaseModel):
 
 
 class InsightsSchemaContext(BaseModel):
-    """1.5.0 request field on POST /v1/insights.
+    """1.6.0 request field on POST /v1/insights.
 
     The engine reads this on ``InsightsWireIn.schema_context``, not on
     ``InsightsAskIn``. One optional string. Present: it replaces the pack
@@ -251,7 +251,7 @@ class InsightsSchemaContext(BaseModel):
 
 
 class InsightsUsage(BaseModel):
-    """1.5.0 response field ``usage`` on POST /v1/insights.
+    """1.6.0 response field ``usage`` on POST /v1/insights.
 
     Sum of the counts each FreeRoute complete() call reported. A count is
     null when it was omitted. A missing count is never stored as 0. The

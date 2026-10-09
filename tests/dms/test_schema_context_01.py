@@ -831,16 +831,16 @@ def test_absent_schema_context_matches_parent_bytes(
     assert digest == _ABSENT_SHA256, digest
 
 
-def test_contract_15_pins_schema_context_string_and_usage() -> None:
-    """1.5.0 pins the insights wire. Pick reasons stay inside the string."""
+def test_contract_16_pins_schema_context_string_and_usage() -> None:
+    """1.6.0 pins the insights wire. Pick reasons stay inside the string."""
     from pathlib import Path
 
     spec = json.loads(
-        (Path(__file__).resolve().parents[2] / "contract" / "openapi-1.5.0.json").read_text(
+        (Path(__file__).resolve().parents[2] / "contract" / "openapi-1.6.0.json").read_text(
             encoding="utf-8"
         )
     )
-    assert spec["info"]["version"] == "1.5.0"
+    assert spec["info"]["version"] == "1.6.0"
     assert "insights.ask" in spec["info"]["x-cortex-contract-routes"]
     schemas = spec["components"]["schemas"]
     ask = schemas["InsightsAskIn"]["properties"]

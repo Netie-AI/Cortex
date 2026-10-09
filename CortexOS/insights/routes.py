@@ -1,7 +1,7 @@
 """Stable Cortex Insights API for DMS generative-ask and AirGPT skin.
 
 Sibling to ``/v1/contract/*``. ``schema_context`` and ``usage`` are pinned in
-contract 1.5.0 (``InsightsSchemaContext``, ``InsightsUsage``). ``InsightsAskIn``
+contract 1.6.0 (``InsightsSchemaContext``, ``InsightsUsage``). ``InsightsAskIn``
 stays the frozen component. Same ``run_insights`` as Crew chrome. Callers
 never send provider keys; OpenVault FreeRoute holds them. AirGPT uses this
 path (plus ``/dms/sidecar/insights``); there is no parallel invent stack.
