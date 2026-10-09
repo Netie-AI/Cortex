@@ -331,7 +331,7 @@ JOIN (
     FROM inventory
     GROUP BY sku
 ) m ON t.sku = m.sku
-WHERE t.txn_type = 'outbound'
+WHERE t.txn_type = 'OUT'
 GROUP BY m.category
 ORDER BY sales_value_myr DESC, m.category ASC
 """
@@ -340,14 +340,14 @@ SELECT i.category,
        ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
 FROM transactions t
 JOIN inventory i ON t.sku = i.sku
-WHERE t.txn_type = 'outbound'
+WHERE t.txn_type = 'OUT'
 GROUP BY i.category
 ORDER BY sales_value_myr DESC, i.category ASC
 LIMIT 1
 """
 _OUT_REVENUE = """
 SELECT ROUND(SUM(quantity_kg * unit_cost_myr), 2)
-FROM transactions WHERE txn_type = 'outbound'
+FROM transactions WHERE txn_type = 'OUT'
 """
 
 

@@ -100,7 +100,7 @@ metrics:
     result_columns: [sku, sales_value_myr]
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-      FROM transactions WHERE txn_type = 'outbound' {exclude_skus}
+      FROM transactions WHERE txn_type = 'OUT' {exclude_skus}
       GROUP BY sku ORDER BY sales_value_myr {direction}, sku ASC
       LIMIT {limit}{offset_clause}
     params:
@@ -115,7 +115,7 @@ metrics:
     result_columns: [sku, total_sold_kg]
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
-      FROM transactions WHERE txn_type = 'outbound' {exclude_skus}
+      FROM transactions WHERE txn_type = 'OUT' {exclude_skus}
       GROUP BY sku ORDER BY total_sold_kg {direction}, sku ASC
       LIMIT {limit}{offset_clause}
     params:
@@ -136,7 +136,7 @@ metrics:
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
       FROM transactions
-      WHERE txn_type = 'outbound'
+      WHERE txn_type = 'OUT'
 
   - id: revenue_windowed
     kind: scalar
@@ -145,7 +145,7 @@ metrics:
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
       FROM transactions
-      WHERE txn_type = 'outbound' AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL {days} DAY
+      WHERE txn_type = 'OUT' AND CAST("timestamp" AS TIMESTAMP) >= CURRENT_DATE - INTERVAL {days} DAY
     params:
       days: {kind: int, default: 30, min: 1, max: 3650}
 
@@ -156,7 +156,7 @@ metrics:
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
       FROM transactions
-      WHERE txn_type = 'outbound'
+      WHERE txn_type = 'OUT'
         AND date_trunc('month', CAST("timestamp" AS TIMESTAMP))
           = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
 

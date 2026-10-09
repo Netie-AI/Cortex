@@ -34,7 +34,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -119,7 +119,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, SUM(quantity_kg) AS total_sold_kg
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
         GROUP BY sku ORDER BY total_sold_kg DESC, sku ASC LIMIT 3
       key_columns: [sku, total_sold_kg]
       tags: [sales, dedup]
@@ -132,7 +132,7 @@ categories:
       match: scalar
       canonical_sql: >
         SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
       key_columns: [revenue_myr]
       round: 2
       tags: [sales, time]
@@ -144,7 +144,7 @@ categories:
       match: scalar
       canonical_sql: >
         SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
           AND date_trunc('month', CAST("timestamp" AS TIMESTAMP))
             = date_trunc('month', CURRENT_DATE) - INTERVAL 1 MONTH
       key_columns: [revenue_myr]
@@ -233,7 +233,7 @@ categories:
       match: scalar
       canonical_sql: >
         SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
       key_columns: [revenue_myr]
       round: 2
       tags: [currency]
@@ -258,7 +258,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -364,7 +364,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -377,7 +377,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound' AND sku NOT IN ('SKU-BETA')
+        FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -467,7 +467,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound' AND sku NOT IN ('SKU-BETA')
+        FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -480,7 +480,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound' AND sku NOT IN ('SKU-00173')
+        FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-00173')
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -493,7 +493,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound' AND sku NOT IN ('SKU-BETA')
+        FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -557,7 +557,7 @@ categories:
       canonical_sql: >
         SELECT ROUND(SUM(sales_value_myr), 2) AS sum_sales_value_myr FROM (
           SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-          FROM transactions WHERE txn_type = 'outbound'
+          FROM transactions WHERE txn_type = 'OUT'
           GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5)
       key_columns: [sum_sales_value_myr]
       round: 2
@@ -576,7 +576,7 @@ categories:
       match: scalar
       canonical_sql: >
         SELECT COUNT(*) AS followup_count FROM (
-          SELECT sku FROM transactions WHERE txn_type = 'outbound'
+          SELECT sku FROM transactions WHERE txn_type = 'OUT'
           GROUP BY sku
           ORDER BY SUM(quantity_kg * unit_cost_myr) DESC, sku ASC LIMIT 5)
       key_columns: [followup_count]
@@ -595,7 +595,7 @@ categories:
       match: resultset
       canonical_sql: >
         SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
-        FROM transactions WHERE txn_type = 'outbound'
+        FROM transactions WHERE txn_type = 'OUT'
         GROUP BY sku ORDER BY sales_value_myr DESC, sku ASC LIMIT 5 OFFSET 1
       key_columns: [sku, sales_value_myr]
       round: 2
@@ -614,7 +614,7 @@ categories:
       match: scalar
       canonical_sql: >
         SELECT COUNT(*) AS followup_count FROM (
-          SELECT sku FROM transactions WHERE txn_type = 'outbound'
+          SELECT sku FROM transactions WHERE txn_type = 'OUT'
           GROUP BY sku
           ORDER BY SUM(quantity_kg * unit_cost_myr) DESC, sku ASC LIMIT 5)
       key_columns: [followup_count]

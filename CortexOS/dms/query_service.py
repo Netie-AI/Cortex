@@ -291,7 +291,7 @@ def _sales_sql(question: str) -> tuple[str, int, str]:
         "ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr, "
         "COUNT(*) AS transaction_count "
         "FROM transactions "
-        "WHERE txn_type = 'outbound' "
+        "WHERE txn_type = 'OUT' "
         f"GROUP BY sku ORDER BY {metric} {direction}, sku ASC LIMIT {limit}"
     )
     return sql, limit, f"{metric} {direction}"
