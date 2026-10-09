@@ -68,7 +68,7 @@ PER_PROVIDER = 2
 # healthy call. Healthy calls use this constant and do not read the env.
 HEALTHY_MAX_TOKENS = 600
 # Candidate bounds used when a scoreboard miss must not widen the walk.
-# max_tokens is not in this map. The live cap is fallback_max_tokens().
+# max_tokens is not in this map. The cap is captured at import.
 DEFAULT_FALLBACK_CAPS = {
     "max_candidates": MAX_CANDIDATES,
     "per_provider": PER_PROVIDER,
@@ -1143,12 +1143,14 @@ class FreeRouteFallbackCapInvalid(ValueError):
     """``CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS`` is outside 1..600. Not clamped."""
 
 
-def fallback_max_tokens() -> int:
-    """Token cap after a failed pre-call read.
+def check_fallback_cap() -> int:
+    """Startup read of ``FALLBACK_MAX_TOKENS_ENV``. Import calls this once.
 
-    Unset or blank is ``HEALTHY_MAX_TOKENS`` (600). A set value must be an
-    integer in 1..600. Anything else raises ``FreeRouteFallbackCapInvalid``
-    (``FREEROUTE_FALLBACK_CAP_INVALID``). This function does not clamp.
+    Unset, ``''``, spaces, and a tab are ``HEALTHY_MAX_TOKENS`` (600). Any
+    other value must be an integer in 1..600. Otherwise this raises
+    ``FreeRouteFallbackCapInvalid`` (``FREEROUTE_FALLBACK_CAP_INVALID``)
+    and does not clamp. ``complete`` does not call this and does not
+    re-read the environment.
     """
     raw = os.environ.get(FALLBACK_MAX_TOKENS_ENV)
     if raw is None or not str(raw).strip():
@@ -1166,12 +1168,13 @@ def fallback_max_tokens() -> int:
     return value
 
 
-def check_fallback_cap() -> int:
-    """Startup refusal. Import calls this before any model request is sent."""
-    return fallback_max_tokens()
+# One read, at import. A later env change must not raise out of complete().
+_FALLBACK_CAP = check_fallback_cap()
 
 
-check_fallback_cap()
+def fallback_max_tokens() -> int:
+    """Cap captured at import. Does not re-read ``FALLBACK_MAX_TOKENS_ENV``."""
+    return _FALLBACK_CAP
 
 
 def _operator_model(pin: str) -> str:
@@ -1211,11 +1214,12 @@ def complete(
     and that snapshot is what ``pick`` scores. With no operator pin and no
     ``MODELS_ENV`` bundle the body asks for ``auto`` and ``pick`` is not
     called; a pin or bundle is sent instead. Either way ``max_tokens`` is
-    clamped to ``fallback_max_tokens()`` and ``route_source`` is set on the
-    stamp only (``default_fallback`` or ``operator_pin``). An empty readable
-    store is not that signal. A healthy call that omits ``max_tokens`` sends
-    ``HEALTHY_MAX_TOKENS`` and does not read the fallback env. The chat body
-    never carries ``route_source``.
+    clamped to the cap captured at import (``fallback_max_tokens``) and
+    ``route_source`` is set on the stamp only (``default_fallback`` or
+    ``operator_pin``). This function does not re-read the fallback env.
+    An empty readable store is not that signal. A healthy call that omits
+    ``max_tokens`` sends ``HEALTHY_MAX_TOKENS``. The chat body never
+    carries ``route_source``.
     """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
@@ -1279,11 +1283,11 @@ def complete(
     else:
         chosen = pick(task, arm, pin=pin, pin_source=pin_source, rows=snapshot)
         route_source = ""
-    # Omitted max_tokens on a healthy call is main's 600. The env is read
-    # only when this read failed.
+    # Omitted max_tokens on a healthy call is main's 600. The failed-read
+    # clamp uses the cap captured at import and does not re-read the env.
     asked = HEALTHY_MAX_TOKENS if max_tokens is None else int(max_tokens)
     if read_failed:
-        token_limit = min(asked, fallback_max_tokens())
+        token_limit = min(asked, _FALLBACK_CAP)
     else:
         token_limit = asked
     body: dict[str, Any] = {

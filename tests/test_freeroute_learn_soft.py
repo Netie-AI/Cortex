@@ -353,10 +353,16 @@ def test_fallback_max_tokens_comes_from_env(
     armed_openvault,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The clamp reads FALLBACK_MAX_TOKENS_ENV. A healthy read ignores it."""
-    assert fr.fallback_max_tokens() == 600
+    """A post-import env change does not move the cap complete() uses.
+
+    The startup reader still parses 250. The failed-read clamp stays on
+    the import-time cap. A healthy call that passes max_tokens is unchanged.
+    """
+    import_cap = fr.fallback_max_tokens()
+    assert import_cap == 600
     monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, "250")
-    assert fr.fallback_max_tokens() == 250
+    assert fr.fallback_max_tokens() == import_cap
+    assert fr.check_fallback_cap() == 250
     fr.reset()
     fr._init_file(fr.store_path())
     armed_openvault.reply(SERVED)
@@ -379,7 +385,7 @@ def test_fallback_max_tokens_comes_from_env(
     assert missed.stamp is not None
     assert missed.stamp.route_source == "default_fallback"
     assert missed.stamp.requested == "auto"
-    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=250)
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=import_cap)
 
 
 def _wire(body: dict) -> str:
@@ -588,6 +594,44 @@ def test_unmeasured_first_model_is_not_served_without_a_stamp(
     assert body["model"] != "unmeasured-first"
 
 
+@pytest.mark.parametrize("bad", ["abc", "0", "601"])
+def test_failed_read_keeps_import_time_cap_after_bad_env(
+    armed_openvault,
+    monkeypatch: pytest.MonkeyPatch,
+    bad: str,
+) -> None:
+    """A cap set after import does not raise out of complete().
+
+    The served body uses the cap captured at import. On 3d70ee76 this
+    raises FreeRouteFallbackCapInvalid instead.
+    """
+    import_cap = fr.fallback_max_tokens()
+    monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, bad)
+    fr.reset()
+    fr._init_file(fr.store_path())
+    _fail_scoreboard_reads(monkeypatch)
+    armed_openvault.reply(SERVED)
+    out = fr.complete(
+        "cap-after-import",
+        [{"role": "user", "content": PROMPT}],
+        max_tokens=4000,
+    )
+    assert out.ok is True
+    assert out.stamp is not None
+    body = armed_openvault.chat_calls[-1]["body"]
+    assert body["max_tokens"] == import_cap
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "\t"])
+def test_blank_fallback_cap_resolves_to_600(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+) -> None:
+    """Empty, three spaces, and a tab are the startup default of 600."""
+    monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, raw)
+    assert fr.check_fallback_cap() == 600
+
+
 @pytest.mark.parametrize("bad", ["0", "-1", "abc", "601"])
 def test_fallback_cap_refuses_at_startup(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
     """0, -1, abc, and 601 raise at the startup check. They are not clamped."""
@@ -606,7 +650,8 @@ def test_fallback_cap_accepts_bounds(
     monkeypatch: pytest.MonkeyPatch,
     cap: int,
 ) -> None:
-    """1 and 600 are valid. A failed read clamps to that cap."""
+    """1 and 600 pass the startup reader. complete() keeps the import-time cap."""
+    import_cap = fr.fallback_max_tokens()
     monkeypatch.setenv(fr.FALLBACK_MAX_TOKENS_ENV, str(cap))
     assert fr.check_fallback_cap() == cap
     fr.reset()
@@ -617,7 +662,7 @@ def test_fallback_cap_accepts_bounds(
     assert out.stamp is not None
     assert out.stamp.route_source == "default_fallback"
     assert out.stamp.requested == "auto"
-    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=cap)
+    _assert_chat_body(armed_openvault.chat_calls[-1]["body"], max_tokens=import_cap)
 
 
 def test_outbound_body_keys_stay_on_openai_chat_allowlist(
