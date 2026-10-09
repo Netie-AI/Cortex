@@ -19,7 +19,7 @@
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@babel/runtime": "^8.0.0",
-    "@playwright/test": "^1.49.0"
+    "@playwright/test": "^1.63.0"
   },
   "overrides": {
     "postcss": "^8.5.26",
