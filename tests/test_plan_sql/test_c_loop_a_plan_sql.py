@@ -566,6 +566,51 @@ def test_multi_statement_or_dml_never_reaches_execute(
     assert len(armed_openvault.chat_calls) == 2
 
 
+def test_must_fail_lateral_table_function_never_serves_file_metadata(
+    armed_openvault, dms_http, execute_spy: list[str], tmp_path: Path  # noqa: F811
+) -> None:
+    """A table function joined LATERAL is a relation the manifest must bound.
+
+    The file sits outside the grant's allowed_paths. Its metadata (column name,
+    min/max statistics) must not reach the rows or the rendered answer.
+    """
+    import duckdb
+
+    marker = "CANARY-LATERAL-7731"
+    outside = tmp_path / "outside_grant.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"COPY (SELECT '{marker}' AS lateral_canary_col) "
+            f"TO '{outside.as_posix()}' (FORMAT parquet)"
+        )
+    finally:
+        con.close()
+    hostile = (
+        "SELECT t.txn_type, m.path_in_schema AS path_in_schema, m.stats_max AS stats_max "
+        f"FROM transactions AS t, LATERAL parquet_metadata('{outside.as_posix()}') AS m"
+    )
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, hostile)
+    _reply(armed_openvault, hostile)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, hostile)
+    _reply(armed_openvault, f"WHY: the SQL was refused\nCLOSEST: {QUESTION}")
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert marker not in body["answer"], body["answer"]
+    assert "lateral_canary_col" not in body["answer"], body["answer"]
+    assert body["rows"] in ([], None), body["rows"]
+    assert body["sql_used"] is None
+    assert body["drillthrough_token"] is None
+    assert _badge(body).lower() in {"abstain", "reconfirm"}, body
+    rendered = json.dumps(body)
+    assert marker not in rendered and "lateral_canary_col" not in rendered
+    assert all("parquet_metadata" not in sql.lower() for sql in _ran(execute_spy))
+
+
 # -- must-fail 3: the payload cannot widen the signed grant -----------------------
 
 

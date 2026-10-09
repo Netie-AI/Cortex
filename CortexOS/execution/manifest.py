@@ -783,8 +783,27 @@ def _named_tables(root: exp.Expression) -> list[exp.Table]:
     return [t for t in root.find_all(exp.Table) if isinstance(t.this, exp.Identifier)]
 
 
+def _function_relations(root: exp.Expression) -> list[exp.Expression]:
+    """Every relation operand that is not a named table or a subquery.
+
+    sqlglot spells a function in relation position more than one way:
+    ``FROM f()`` and ``JOIN f()`` wrap the call in a ``Table``, while
+    ``LATERAL f()`` hangs it directly off a ``Lateral`` node, and ``FROM
+    unnest(...)`` or ``FROM (VALUES ...)`` sit straight in ``From``/``Join``.
+    Walking only ``Table`` nodes saw the first spelling and none of the others.
+    A ``Subquery`` is skipped because every check walks into its body; a nested
+    ``Lateral`` is skipped because it is visited as a node of its own.
+    """
+    out = [t.this for t in root.find_all(exp.Table) if not isinstance(t.this, exp.Identifier)]
+    for node in root.find_all(exp.From, exp.Join, exp.Lateral):
+        source = node.this
+        if not isinstance(source, (exp.Table, exp.Subquery, exp.Lateral)):
+            out.append(source)
+    return out
+
+
 def _refuse_unknown_table_functions(root: exp.Expression) -> None:
-    """Refuse any FROM-position function this module does not recognise.
+    """Refuse any relation-position function this module does not recognise.
 
     The file-reading functions are enumerated so their path arguments can be
     checked, but an enumeration of dangerous functions is a denylist, and
@@ -793,11 +812,13 @@ def _refuse_unknown_table_functions(root: exp.Expression) -> None:
     ``iceberg_metadata`` and friends all take a path and return its contents.
     An unrecognised function is therefore refused rather than ignored, which
     turns the enumeration back into an allowlist.
+
+    Relation position means ``FROM``, ``JOIN``, a comma join and ``LATERAL``
+    alike (see :func:`_function_relations`). A source of any other shape — a
+    schema-qualified call parses to ``Dot`` — is named by its node class, which
+    no list holds, so it is refused too.
     """
-    for table in root.find_all(exp.Table):
-        source = table.this
-        if isinstance(source, exp.Identifier):
-            continue
+    for source in _function_relations(root):
         if isinstance(source, exp.Anonymous):
             name = str(source.this).lower()
         elif isinstance(source, (exp.ReadParquet, exp.ReadCSV)):
