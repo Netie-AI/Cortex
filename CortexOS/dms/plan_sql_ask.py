@@ -172,6 +172,14 @@ def _mark_rung(steps: list[StepStamp], rung: str) -> None:
     steps.append(StepStamp.cortex("rung", "cortex:plan-sql-rung", rung))
 
 
+def _last_served_stamp(steps: list[StepStamp]) -> StepStamp | None:
+    """Last step that copied served model and provider from an OpenVault response."""
+    for step in reversed(steps):
+        if step.served_provider or step.served_model:
+            return step
+    return None
+
+
 def _served(stamp: StepStamp | None, reason: str) -> dict[str, Any]:
     if stamp is None:
         return {
@@ -348,7 +356,10 @@ def _security_stop(step: ModelStep, journal: list[freeroute.RouteStamp]) -> tupl
     A missing OpenVault stronger route is not a trust failure: the ladder
     reconfirms instead of inventing a provider.
     """
-    if freeroute.NO_STRONGER_ROUTE in (step.reason or ""):
+    reason = step.reason or ""
+    # A missing stronger route, or OpenVault saying the pin is outside its
+    # own catalog, is not a direct abstain. The ladder reconfirms.
+    if freeroute.NO_STRONGER_ROUTE in reason or freeroute.MODEL_NOT_ALLOWLISTED in reason:
         return None
     code, detail, refused = _model_refusal(step, journal)
     if code and (refused or step.route is None):
@@ -477,14 +488,17 @@ class _RouteRefusal:
 
 
 def _stronger_generator(failed: set[str]) -> FreeRoutePlanSqlGenerator | _RouteRefusal:
-    """OpenVault's configured stronger route. Cortex does not pick a provider."""
+    """OpenVault's configured stronger route. Cortex does not pick a provider.
+
+    The id is whatever OpenVault put on ``routes.stronger``. It is not
+    checked against a list of model names. If that id is outside OpenVault's
+    own catalog, OpenVault's response says so and the ladder reconfirms.
+    """
     del failed
     pin = ""
     try:
         arm = freeroute.arming()
         pin = freeroute.configured_stronger_route(arm)
-        if pin and pin not in freeroute.model_allowlist(arm):
-            return _RouteRefusal(f"{freeroute.MODEL_NOT_ALLOWLISTED}: {pin}")
     except Exception:  # noqa: BLE001 - no status still does not invent a model
         pin = ""
     if not pin:
@@ -790,6 +804,22 @@ def plan_sql_answer(
         answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG)
         if answered is not None:
             return answered
+        policy = next(
+            (item for item in reversed(failures) if freeroute.MODEL_NOT_ALLOWLISTED in item),
+            "",
+        )
+        if policy:
+            why, closest = _parse_reconfirm("", failures, request)
+            served = _last_served_stamp(steps)
+            _mark_rung(steps, RUNG_RECONFIRM)
+            return _reconfirm_envelope(
+                audit_id,
+                steps,
+                why=why,
+                closest=closest,
+                stamp=served,
+                rung=RUNG_RECONFIRM,
+            )
         rec = strong.reconfirm(request, tuple(failures)[:8])
         steps.append(rec.stamp)
         _remember(rec, failed_models)

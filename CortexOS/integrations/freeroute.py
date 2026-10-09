@@ -801,18 +801,36 @@ def _same_model(requested: str, served: str) -> bool:
     return requested == served or requested.rsplit("/", 1)[-1] == served.rsplit("/", 1)[-1]
 
 
-# Named route refusals. Cortex does not substitute another provider.
+# Named route refusals. Cortex does not substitute another provider and
+# does not keep a list of model ids. ``MODEL_NOT_ALLOWLISTED`` is raised
+# only when OpenVault's own response says the pin is outside its catalog.
 MODEL_NOT_ALLOWLISTED = "FREEROUTE_MODEL_NOT_ALLOWLISTED"
 MODEL_NOT_SERVED = "FREEROUTE_MODEL_NOT_SERVED"
 NO_STRONGER_ROUTE = "FREEROUTE_NO_STRONGER_ROUTE"
+# OpenVault vault/proxy.py: strict pin, model absent from OV's catalog.
+_OV_PIN_UNAVAILABLE = "pin_unavailable"
+_OV_NOT_IN_CATALOG = "not_in_catalog"
 
 
-def model_allowlist(arm: Arming) -> frozenset[str]:
-    """Chat model ids OpenVault listed on spendable hops. Not a Cortex choice."""
-    found: set[str] = set()
-    for _provider, models in arm.catalogue:
-        found.update(models)
-    return frozenset(found)
+def openvault_policy_refusal(data: Any) -> str:
+    """Copy OpenVault's catalog refusal. Empty when OV did not say that.
+
+    The model id is the one OV put on ``error.model``. Nothing here is
+    compared to a list of names Cortex holds.
+    """
+    if not isinstance(data, dict):
+        return ""
+    err_type, err_reason = freeroute_ov_local.chat_error_fields(data)
+    if err_type != _OV_PIN_UNAVAILABLE or err_reason != _OV_NOT_IN_CATALOG:
+        return ""
+    err = data.get("error")
+    named = ""
+    if isinstance(err, dict) and isinstance(err.get("model"), str):
+        named = err["model"].strip()
+    text = f"{MODEL_NOT_ALLOWLISTED}: OpenVault policy {err_reason}"
+    if named:
+        text += f": {named}"
+    return text
 
 
 def configured_stronger_route(arm: Arming) -> str:
@@ -1455,6 +1473,13 @@ def complete(
             text = ""
             message = {}
             stamp.usable = False
+    if not local_only_enabled():
+        policy = openvault_policy_refusal(data if isinstance(data, dict) else None)
+        if policy:
+            reason = policy
+            text = ""
+            message = {}
+            stamp.usable = False
     stamp.error = reason
     stamp.route_source = route_source
     if not _write_row(
@@ -1634,7 +1659,7 @@ __all__ = [
     "NO_STRONGER_ROUTE",
     "complete",
     "configured_stronger_route",
-    "model_allowlist",
+    "openvault_policy_refusal",
     "fallback_max_tokens",
     "fingerprint",
     "identity",

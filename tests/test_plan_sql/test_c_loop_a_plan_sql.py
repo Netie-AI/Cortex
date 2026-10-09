@@ -936,28 +936,90 @@ def test_unknown_request_field_is_422(
     assert armed_openvault.non_openvault_calls == []
 
 
-def test_model_outside_allowlist_is_a_named_refusal_not_another_provider(
+def test_off_policy_served_model_reconfirms_not_abstain(
     armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """OV route id that is not in the FreeRoute allowlist is refused. No substitute."""
+    """OV says the pin is outside its catalog. That is a reconfirm, not an abstain.
+
+    Cortex does not compare the id to a list of model names. The served
+    model and provider are the ones on OpenVault's response.
+    """
     missing = "not-a-catalogue-model"
     _stronger_route(armed_openvault, missing, monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
+    armed_openvault.replies.append(
+        (
+            503,
+            {
+                "error": {
+                    "message": "pinned model has no healthy hop",
+                    "type": "pin_unavailable",
+                    "model": missing,
+                    "reason": "not_in_catalog",
+                },
+                "served_provider": PROVIDER,
+                "served_model": missing,
+                "served_local": False,
+            },
+        )
+    )
     dms_http.bind_session(SESSION, GRANT)
 
     body = _json(_ask(dms_http))
 
-    assert body["provenance"]["badge"] == "abstain"
+    assert body["provenance"]["badge"] == "reconfirm"
+    assert body["provenance"]["badge"] != "abstain"
     assert freeroute.MODEL_NOT_ALLOWLISTED in body["answer"]
     assert missing in body["answer"]
+    assert body["reconfirm"]["why"]
+    assert body["reconfirm"]["closest_question"]
+    assert "transactions" in body["reconfirm"]["closest_question"]
+    assert body["plan_sql_rung"] == plan_sql_ask.RUNG_RECONFIRM
+    assert body["sql_used"] is None
     assert _ran(execute_spy) == []
     asked = [call["body"]["model"] for call in armed_openvault.chat_calls]
-    assert missing not in asked
+    assert missing in asked
     assert "qwen/qwen3.6-27b" not in asked
+    served = next(line for line in body["assumptions"] if line.startswith("step plan-strong:"))
+    assert f"served_model={missing}" in served
+    assert f"served_provider={PROVIDER}" in served
     assert armed_openvault.non_openvault_calls == []
+
+
+def test_stronger_rung_has_no_hard_coded_model_id_list() -> None:
+    """Grep: the stronger rung does not hold a list of model ids."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    patterns = (
+        "model_allowlist",
+        "gpt-oss",
+        "qwen/",
+        "llama-3",
+        "deepseek-",
+        "gemini-",
+    )
+    listed = subprocess.run(
+        ["grep", "-nE", "|".join(patterns), "CortexOS/dms/plan_sql_ask.py"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert listed.returncode == 1, listed.stdout
+    assert listed.stdout == ""
+    defined = subprocess.run(
+        ["grep", "-n", "def model_allowlist", "-r", "--include=*.py", "CortexOS", "packages"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert defined.returncode == 1, defined.stdout
+    assert defined.stdout == ""
 
 
 def test_unserved_pin_reconfirms_and_names_the_missing_model(
