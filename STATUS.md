@@ -1,5 +1,5 @@
 # STATUS.md
-**Last updated:** 2026-10-06 | **Gate:** G2.3 OSR SHIPPED | Rules and merge flow: `AGENTS.md`
+**Last updated:** 2026-10-08 | **Gate:** G2.3 OSR SHIPPED | Rules and merge flow: `AGENTS.md`
 **Rule:** Update after every gate. Read `CURSOR_HANDOFF.md` first. Leave next prompts in
 `docs/dms/packets/NEXT_LANES.md`. Live work is GitHub issues; this file only points at
 them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
@@ -8,6 +8,8 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 
 | Area | Issues | Last recorded state |
 |---|---|---|
+| Brain FreeRoute | #350 | Writer lane: `/dms/brain` model calls go through `CortexOS.crew.freeroute.complete`. Named refusal `model_route_unavailable` when unarmed. Draft. Nothing PASS. |
+| RUN-AUTH-01 spend on model run routes | #358 | Draft PR #362. Steward spends. Viewer `api_viewer` is a named 403 and sentinel 0 on the five run routes. `get_caller` does not read the cookie. Constructor cookie mutations require `CONSTRUCTOR_ORIGIN_ALLOWLIST` (empty by default). A bad Origin port is `constructor_origin_denied`. Workflow cancel, clear, recognize, and hardware take a header key, steward or above. A steward cookie with no header is 401 on those four and the model sentinel stays 0. A route walk lists every constructor and workflow route plus `/run` and engine `/run`, and fails if one is missing from that table or if a spend or write route sits on the viewer dependency. Workflow GETs are unchanged (WORKFLOW-READ-AUTH-01). `DMS_AUTH_DISABLED` still opens only `POST /api/engine/run`. Not a CI claim. |
 | C7 L2 serve / retire cascade | #17 #104 #105 #288 | #104 part 2 merged `b6bd559`; G-sh NOT MET (no real shadow traffic). Phase 1b gate cases are hand-written same-shape stand-ins, unit evidence only. #288 Workday WRONG=1 open. |
 | Contract-ask stamp | #289 | Merged; L2 copies only the actual FreeRoute RouteStamp, refuses `L2_ROUTE_STAMP_MISSING`. Draft evidence only. |
 | FreeRoute / router / keys | #211 #212 #267 #272 | #211: no live Studio re-prove, armed live path unproven. #212: INCOMPLETE (fixture 40.00% and pinned-26 exact 0.00% are this-run only). #272: merged `27f79ea8`, local not proven; header/SSE copies of `served_local` PENDING. |
@@ -16,6 +18,7 @@ them. Nothing here is PASS or COMPLETE, and no line here is a GitHub CI claim.
 | Liberty | #222-#225 | Proxy JEPA (cosine / `action_value`) only; no trained world model. |
 | RSF | #151 #154 #155 #156 | COMPLETE needs an R-0003 different-run verify. |
 | Crew export / desktop | #197-#200 | HOLD. |
+| Image auth-off | #363 | IMAGE-AUTH-01 in draft. Images must not set `DMS_AUTH_DISABLED` or `CORTEX_DEV_MODE`. Startup refuses auth-off without dev mode. Auth tests refuse dev mode. Image-auth scan lists `git ls-files` only. A repo whose `git ls-files` fails stops with `GIT_LS_FILES_FAILED` and does not walk. Shipped Dockerfiles set `DMS_REFUSE_DEMO_KEYS=1`. Not a CI claim. Not PASS. |
 
 ## Standing constraints
 

@@ -1,0 +1,17 @@
+# Local dev only. release.yml does not build this file.
+# Dockerfile.core and Dockerfile.full do not set DMS_AUTH_DISABLED.
+# Auth-off on a dev machine:
+#   cp dev.env.example dev.env
+#   docker compose -f docker-compose.dev.yml up --build
+# dev.env is gitignored. Startup refuses DMS_AUTH_DISABLED unless
+# CORTEX_DEV_MODE is also truthy (1, true, yes).
+services:
+  cortex:
+    build:
+      context: .
+      dockerfile: Dockerfile.core
+    env_file:
+      - path: dev.env
+        required: false
+    ports:
+      - "8010:8010"

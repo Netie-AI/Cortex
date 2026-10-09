@@ -8,11 +8,14 @@ import json
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional
 
 from packs.dms.audit.ledger import default_db_path
-
-BIG_API_PLACEHOLDER = os.getenv("ANTHROPIC_API_KEY", "")
+from packs.dms.generative.model_route import (
+    MODEL_ROUTE_UNAVAILABLE,
+    call_freeroute,
+    parse_model_json,
+    served_from,
+)
 
 
 def _sqlite_path() -> str:
@@ -109,15 +112,8 @@ def _score_by_history(candidates: list[dict], history: list[dict]) -> list[dict]
     return sorted(candidates, key=lambda x: (-x["confidence"], x["priority"] == "critical"))
 
 
-def _llm_rank_and_explain(candidates: list[dict], context: str) -> list[dict]:
-    if not BIG_API_PLACEHOLDER or len(candidates) <= 3:
-        return candidates
-
-    try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=BIG_API_PLACEHOLDER)
-        prompt = f"""
+def _rank_prompt(candidates: list[dict], context: str) -> str:
+    return f"""
 Warehouse context: {context}
 
 Task candidates (JSON):
@@ -126,21 +122,39 @@ Task candidates (JSON):
 Re-rank these tasks by operational urgency and add a 1-sentence 'rationale' to each.
 Return ONLY a JSON array with the same fields plus 'rationale'. No markdown.
 """
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-        ranked = json.loads(raw)
-        if isinstance(ranked, list):
-            return ranked
-    except Exception:
-        pass
 
-    return candidates
+
+def _llm_rank_and_explain(candidates: list[dict], context: str) -> tuple[list[dict], dict]:
+    """One FreeRoute rank step. On refusal, the deterministic list is returned as-is."""
+    refused = {
+        "llm_used": False,
+        "refusal": MODEL_ROUTE_UNAVAILABLE,
+        "served_provider": None,
+        "served_model": None,
+    }
+    result = call_freeroute(
+        [{"role": "user", "content": _rank_prompt(candidates, context)}],
+        purpose="think",
+    )
+    if not result.get("ok"):
+        return candidates, refused
+    provider, model = served_from(result)
+    try:
+        ranked = parse_model_json(str(result.get("text") or ""))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return candidates, refused
+    if (
+        not isinstance(ranked, list)
+        or not ranked
+        or not all(isinstance(item, dict) for item in ranked)
+    ):
+        return candidates, refused
+    return list(ranked), {
+        "llm_used": True,
+        "refusal": None,
+        "served_provider": provider,
+        "served_model": model,
+    }
 
 
 def _load_history(limit: int = 200) -> list[dict]:
@@ -170,13 +184,14 @@ def suggest(state: dict, use_llm: bool = False, trigger_text: str | None = None)
     history = _load_history()
     candidates = _score_by_history(candidates, history)
 
+    route_meta: dict | None = None
     if use_llm:
         context_summary = (
             f"Items: {len(state.get('items', []))}, "
             f"Locations: {len(state.get('locations', []))}, "
             f"Recent movements: {len(state.get('recent_movements', []))}"
         )
-        candidates = _llm_rank_and_explain(candidates, context_summary)
+        candidates, route_meta = _llm_rank_and_explain(candidates, context_summary)
 
     if trigger_text:
         from packs.dms.skills.capture import boost_candidates_from_skills
@@ -186,6 +201,13 @@ def suggest(state: dict, use_llm: bool = False, trigger_text: str | None = None)
     for c in candidates:
         c["requires_confirm"] = True
         c["suggested_at"] = datetime.now(timezone.utc).isoformat()
+        if route_meta is not None:
+            # Stamps come from the FreeRoute response, not from model text.
+            c["llm_used"] = bool(route_meta.get("llm_used"))
+            c["served_provider"] = route_meta.get("served_provider")
+            c["served_model"] = route_meta.get("served_model")
+            if not route_meta.get("llm_used"):
+                c["refusal"] = route_meta.get("refusal") or MODEL_ROUTE_UNAVAILABLE
 
     return candidates[:10]
 

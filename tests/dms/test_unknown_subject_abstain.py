@@ -83,7 +83,6 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.security.rate_limit import reset_limiter
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     import netie.config
 
     netie.config._cached_config = None
@@ -113,7 +112,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     get_session_registry().bind(verifier.verify(manifest))
     clear_session(WIDE_SESSION)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     yield client
 
     set_verifier_for_tests(None)
