@@ -1,17 +1,21 @@
 """VERIFIED-QUERY (#309): load steward-confirmed examples for the SQL generator.
 
 Off unless ``CORTEX_VERIFIED_QUERY`` is set. When off, :func:`generation_examples`
-returns ``None`` before touching the library.
+returns ``None`` before touching the library, and the historical phrase lanes
+are left alone.
 
-Which examples belong with the question is one OpenVault FreeRoute pick
-(``vq-pick-examples``). That pick is not a word-overlap rank. The SQL
-generator then writes new SQL. This module does not execute stored SQL.
+Which examples belong with the question is lexical similarity over the
+confirmed questions. That is not an exact-phrase table. The chosen examples
+are fed to the SQL generator, which writes new SQL. This module does not
+execute stored SQL. When the flag is on, the ask does not also consult
+``match_certified`` or ``route_to_metric``.
 """
 
 from __future__ import annotations
 
-import json
 import os
+import re
+import threading
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
@@ -20,9 +24,9 @@ from CortexOS.memory.verified_query import get_verified_queries
 
 ENABLED_ENV = "CORTEX_VERIFIED_QUERY"
 ASK_ACTOR = "cortex:contract-ask"
-PICK_TASK = "vq-pick-examples"
-# Token budget for the pick call. Id order, not similarity.
-CANDIDATE_BUDGET = 32
+# Lexical similarity over the token union. Not an exact-phrase branch.
+RETRIEVE_MIN = 0.35
+_TOKEN = re.compile(r"[a-z0-9]+")
 
 _TRUTHY = {"1", "true", "on", "yes"}
 
@@ -31,63 +35,40 @@ def verified_query_enabled() -> bool:
     return (os.environ.get(ENABLED_ENV) or "").strip().lower() in _TRUTHY
 
 
-def _parse_ids(text: str, allowed: set[str]) -> list[str]:
-    """Ids the model named that are in ``allowed``, in the model's order."""
-    start = text.find("[")
-    end = text.rfind("]")
-    if start < 0 or end <= start:
-        return []
-    try:
-        raw = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for item in raw:
-        qid = str(item).strip()
-        if qid in allowed and qid not in seen:
-            seen.add(qid)
-            out.append(qid)
-    return out
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(_TOKEN.findall((text or "").lower()))
 
 
-def pick_example_ids(question: str, candidates: list[tuple[str, str]]) -> list[str]:
-    """One FreeRoute pick. Empty on refusal. Never a shared-word ranking.
+def lexical_similarity(left: str, right: str) -> float:
+    """Share of the token union. Not an exact-phrase lookup."""
+    a = _tokens(left)
+    b = _tokens(right)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
 
-    ``candidates`` is ``(id, question)``. At most :data:`CANDIDATE_BUDGET` are
-    shown, in id order, which is a token budget. The model chooses which of
-    those ids go into the SQL prompt, at most :data:`EXAMPLE_CAP`.
+
+def retrieve_example_ids(question: str, candidates: list[tuple[str, str]]) -> list[str]:
+    """Ids whose question is lexically near ``question``, best score first.
+
+    ``candidates`` is ``(id, question)``. A score under :data:`RETRIEVE_MIN`
+    is not an example. There is no normalized-phrase dict and no equality
+    shortcut. At most :data:`EXAMPLE_CAP` ids are returned.
     """
-    from CortexOS.integrations import freeroute
     from CortexOS.memory.verified_query import EXAMPLE_CAP
 
-    by_id: dict[str, str] = {}
+    scored: list[tuple[float, str]] = []
+    seen: set[str] = set()
     for qid, text in candidates:
         key = str(qid).strip()
-        if key and key not in by_id:
-            by_id[key] = str(text or "")
-    if not by_id:
-        return []
-    shown = sorted(by_id)[:CANDIDATE_BUDGET]
-    lines = [f"{qid}\t{by_id[qid]}" for qid in shown]
-    prompt = (
-        "Choose verified-query ids for QUESTION. "
-        "Reply with a JSON array of ids and nothing else.\n"
-        "CANDIDATES:\n" + "\n".join(lines) + f"\nQUESTION:\n{question}"
-    )
-    out = freeroute.complete(
-        PICK_TASK,
-        [{"role": "user", "content": prompt}],
-        temperature=0.0,
-        max_tokens=200,
-        timeout=30.0,
-        egress="leave",
-    )
-    if not getattr(out, "ok", False) or not getattr(out, "text", None):
-        return []
-    return _parse_ids(str(out.text), set(shown))[:EXAMPLE_CAP]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        score = lexical_similarity(question, text)
+        if score >= RETRIEVE_MIN:
+            scored.append((score, key))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [qid for _score, qid in scored[:EXAMPLE_CAP]]
 
 
 def generation_examples(
@@ -96,11 +77,11 @@ def generation_examples(
     question: str,
     scored_pack_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Prompt examples for one Space, or ``None`` when off, empty, or unpicked.
+    """Prompt examples for one Space, or ``None`` when off, empty, or not retrieved.
 
-    The model names the ids. A refusal does not fall back to shared words.
-    ``verified_query_id`` names the picked examples. Memory fields name those
-    C-MEM solutions.
+    Lexical similarity names the ids. A question that is not near any
+    confirmed question gets no examples. ``verified_query_id`` names the
+    retrieved examples. Memory fields name those C-MEM solutions.
     """
     if not verified_query_enabled():
         return None
@@ -112,7 +93,7 @@ def generation_examples(
     )
     if not found:
         return None
-    chosen = pick_example_ids(
+    chosen = retrieve_example_ids(
         question, [(ex.query.id, ex.query.question) for ex in found]
     )
     by_id = {ex.query.id: ex for ex in found}
@@ -170,6 +151,51 @@ class _AskBind:
 
 _ASK: ContextVar[_AskBind | None] = ContextVar("verified_query_ask", default=None)
 _USED: ContextVar[dict[str, Any] | None] = ContextVar("verified_query_used", default=None)
+_PHRASE_LOCK = threading.Lock()
+_PHRASE_DEPTH = 0
+_PHRASE_SAVED: list[tuple[Any, str, Any]] | None = None
+
+
+def _no_phrase_match(*_args: Any, **_kwargs: Any) -> None:
+    """Stand-in so the exact-phrase and metric-phrase lanes do not also run."""
+    return None
+
+
+def _suspend_exact_phrase_match() -> bool:
+    """While the flag is on, do not also serve from the phrase tables.
+
+    ``match_certified`` is an exact normalized-phrase dict. ``route_to_metric``
+    is the keyword cascade. Retrieval into the generator replaces both for
+    this ask. Flag off leaves them as they are.
+    """
+    global _PHRASE_DEPTH, _PHRASE_SAVED
+    if not verified_query_enabled():
+        return False
+    import CortexOS.dms.answer_engine as answer_engine
+
+    with _PHRASE_LOCK:
+        if _PHRASE_DEPTH == 0:
+            saved: list[tuple[Any, str, Any]] = []
+            for name in ("match_certified", "route_to_metric"):
+                saved.append((answer_engine, name, getattr(answer_engine, name)))
+                setattr(answer_engine, name, _no_phrase_match)
+            _PHRASE_SAVED = saved
+        _PHRASE_DEPTH += 1
+    return True
+
+
+def _resume_exact_phrase_match(active: bool) -> None:
+    global _PHRASE_DEPTH, _PHRASE_SAVED
+    if not active:
+        return
+    with _PHRASE_LOCK:
+        if _PHRASE_DEPTH <= 0:
+            return
+        _PHRASE_DEPTH -= 1
+        if _PHRASE_DEPTH == 0 and _PHRASE_SAVED is not None:
+            for mod, name, fn in _PHRASE_SAVED:
+                setattr(mod, name, fn)
+            _PHRASE_SAVED = None
 
 
 class _ExamplePort:
@@ -211,7 +237,7 @@ class _ExamplePort:
 
 def bind_verified_examples(
     *, space_id: str, scored_pack_id: str | None
-) -> tuple[Token[Any], Token[Any], Any]:
+) -> tuple[Token[Any], Token[Any], Any, bool]:
     """Arm example loading for this ask. The L2 port is restored when the ask ends.
 
     A test that stubs ``resolve_l2_generation`` is left alone: its stub is not
@@ -219,38 +245,45 @@ def bind_verified_examples(
     """
     from CortexOS.dms import l2_generation
 
+    phrase = _suspend_exact_phrase_match()
     restore: Any = None
     try:
-        port = l2_generation.resolve_l2_generation()
-    except l2_generation.L2NotRegistered:
-        port = None
-    if (
-        port is not None
-        and port is l2_generation._port
-        and not getattr(port, "_vq_examples", False)
-    ):
-        l2_generation.register_l2_generation(_ExamplePort(port))
-        restore = port
-    return (
-        _ASK.set(_AskBind(space_id=space_id, scored_pack_id=scored_pack_id)),
-        _USED.set(None),
-        restore,
-    )
+        try:
+            port = l2_generation.resolve_l2_generation()
+        except l2_generation.L2NotRegistered:
+            port = None
+        if (
+            port is not None
+            and port is l2_generation._port
+            and not getattr(port, "_vq_examples", False)
+        ):
+            l2_generation.register_l2_generation(_ExamplePort(port))
+            restore = port
+        return (
+            _ASK.set(_AskBind(space_id=space_id, scored_pack_id=scored_pack_id)),
+            _USED.set(None),
+            restore,
+            phrase,
+        )
+    except Exception:
+        _resume_exact_phrase_match(phrase)
+        raise
 
 
 def take_verified_examples(
-    tokens: tuple[Token[Any], Token[Any], Any] | None,
+    tokens: tuple[Token[Any], Token[Any], Any, bool] | None,
 ) -> dict[str, Any] | None:
     """Return examples that were placed in a prompt, and put the L2 port back."""
     meta = _USED.get()
     if tokens is not None:
-        ask_token, used_token, restore = tokens
+        ask_token, used_token, restore, phrase = tokens
         _USED.reset(used_token)
         _ASK.reset(ask_token)
         if restore is not None:
             from CortexOS.dms.l2_generation import register_l2_generation
 
             register_l2_generation(restore)
+        _resume_exact_phrase_match(phrase)
     return meta
 
 

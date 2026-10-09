@@ -5,9 +5,10 @@ confirmed SQL is also a C-MEM solution (#290). This library keeps the pair
 and its status (``pending`` / ``confirmed`` / ``revoked`` / ``superseded``),
 keyed by Space.
 
-The ask path does not match phrasing and does not run the stored SQL. It
-hands the Space's confirmed pairs to the SQL generator as examples. The
-generator writes new SQL. Nothing here stores or serves rows.
+This library does not match phrasing and does not run the stored SQL. The
+ask path retrieves examples by lexical similarity and hands those pairs to
+the SQL generator. The generator writes new SQL. Nothing here stores or
+serves rows.
 
 Rules, each a named refusal stamped in the Space:
 

@@ -13,8 +13,8 @@ test_verified_query_guard_mutations.py):
    is called with the example in the prompt and returns its own SQL. The
    stored SQL is not the candidate.
 
-No phrasing lookup. The library returns every live pair. The model picks
-which ids go into the SQL prompt.
+No exact-phrase table. The library returns every live pair. Lexical
+similarity over those questions chooses which ids go into the SQL prompt.
 """
 
 from __future__ import annotations
@@ -319,50 +319,98 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
-def _word_overlap(left: str, right: str) -> int:
-    return len(_words(left) & _words(right))
+CERT_Q = "How many SKUs do we have in inventory?"
+CERT_SQL = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+CERT_PARAPHRASE = "How many distinct SKUs are currently in our inventory?"
 
 
-def test_pick_follows_the_model_not_shared_words(
+def _norm_phrase(text: str) -> str:
+    return " ".join(_words(text))
+
+
+def _is_norm_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id in {"_norm", "_normalize"}
+    if isinstance(func, ast.Attribute):
+        return func.attr in {"_norm", "_normalize"}
+    return False
+
+
+def exact_phrase_table(source: str) -> list[str]:
+    """Reasons ``source`` still looks up a normalized phrase by equality."""
+    hits: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Compare) and any(isinstance(op, ast.Eq) for op in node.ops):
+            sides = (node.left, *node.comparators)
+            if any(_is_norm_call(side) for side in sides):
+                hits.append("normalized phrase equality")
+        elif isinstance(node, ast.DictComp) and _is_norm_call(node.key):
+            hits.append("normalized phrase index")
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript) and _is_norm_call(target.slice):
+                    hits.append("normalized phrase index")
+    for name in ("_certified_index", "match_pack_phrase"):
+        if name in source:
+            hits.append(name)
+    return hits
+
+
+def test_must_fail_exact_phrase_table_detector_catches_a_planted_lookup() -> None:
+    planted = (
+        "def _norm(text):\n"
+        "    return text\n"
+        "def match_pack_phrase(question, rows):\n"
+        "    qn = _norm(question)\n"
+        "    return next((m for m in rows if _norm(m.question) == qn), None)\n"
+    )
+    assert exact_phrase_table(planted)
+
+
+def test_must_fail_verified_match_has_no_exact_phrase_table() -> None:
+    for rel in (
+        "CortexOS/dms/verified_query_ask.py",
+        "CortexOS/memory/verified_query.py",
+    ):
+        source = (ROOT / rel).read_text(encoding="utf-8")
+        assert exact_phrase_table(source) == [], rel
+        assert "_STOPWORDS" not in source
+
+
+def test_must_fail_paraphrase_of_certified_question_reaches_the_example(
     lib: VerifiedQueryLibrary, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The certified/verified-query match is the model's id list, not shared words."""
+    """A paraphrase retrieves the certified example. An exact table does not."""
     from CortexOS.dms import verified_query_ask as vqa
-    from CortexOS.integrations import freeroute
 
-    ask = "total quantity_kg moved for SKU-00109 in June 2026"
+    assert _norm_phrase(CERT_Q) != _norm_phrase(CERT_PARAPHRASE)
+    assert vqa.lexical_similarity(CERT_PARAPHRASE, CERT_Q) >= vqa.RETRIEVE_MIN
+    target = _confirmed(lib, question=CERT_Q, sql=CERT_SQL)
     decoy = _confirmed(
         lib,
-        question="total quantity_kg moved for SKU-00999 in June 2026",
-        sql="SELECT SUM(quantity_kg) AS n FROM transactions WHERE sku = 'SKU-00999'",
+        question="Rank suppliers by combined risk and lead time score",
+        sql="SELECT supplier_id, ranking_score FROM suppliers",
     )
-    target = _confirmed(
-        lib,
-        question="hazardous carrier punctuality",
-        sql="SELECT carrier, on_time_pct FROM shipments WHERE hazmat = true",
-    )
-    assert _word_overlap(ask, decoy.question) > _word_overlap(ask, target.question)
+    assert vqa.lexical_similarity(CERT_PARAPHRASE, decoy.question) < vqa.RETRIEVE_MIN
     monkeypatch.setenv(vqa.ENABLED_ENV, "1")
     monkeypatch.setattr(vqa, "get_verified_queries", lambda: lib)
-    sent: list[str] = []
-
-    def mocked_complete(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> freeroute.Completion:
-        assert task == vqa.PICK_TASK
-        sent.append(task)
-        assert len(sent) == 1, "the pick is one FreeRoute call"
-        blob = json.dumps(messages)
-        assert decoy.question in blob and target.question in blob
-        return freeroute.Completion(ok=True, text=json.dumps([target.id]))
-
-    monkeypatch.setattr(freeroute, "complete", mocked_complete)
-    meta = vqa.generation_examples(space_id="alpha", question=ask)
+    meta = vqa.generation_examples(space_id="alpha", question=CERT_PARAPHRASE)
     assert meta is not None
     assert meta["verified_query_id"] == target.id
-    assert target.sql in json.dumps(meta["prompt"])
-    assert "SKU-00999" not in json.dumps(meta["prompt"])
+    blob = json.dumps(meta["prompt"])
+    assert CERT_SQL in blob and CERT_Q in blob
+    assert decoy.sql not in blob
+    exact = vqa.generation_examples(space_id="alpha", question=CERT_Q)
+    assert exact is not None and exact["verified_query_id"] == target.id
+    assert vqa.generation_examples(
+        space_id="alpha", question="hazardous carrier punctuality"
+    ) is None
 
 
-def test_refused_pick_does_not_fall_back_to_shared_words(
+def test_below_threshold_retrieves_nothing(
     lib: VerifiedQueryLibrary, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from CortexOS.dms import verified_query_ask as vqa
@@ -375,21 +423,15 @@ def test_refused_pick_does_not_fall_back_to_shared_words(
     )
     monkeypatch.setenv(vqa.ENABLED_ENV, "1")
     monkeypatch.setattr(vqa, "get_verified_queries", lambda: lib)
-    monkeypatch.setattr(
-        freeroute,
-        "complete",
-        lambda *a, **k: freeroute.Completion(ok=False, text=""),
-    )
+
+    def boom(*_a: Any, **_k: Any) -> freeroute.Completion:
+        raise AssertionError("retrieval must not call a model")
+
+    monkeypatch.setattr(freeroute, "complete", boom)
     assert vqa.generation_examples(
         space_id="alpha",
-        question="total quantity_kg moved for SKU-00109 in June 2026",
+        question="hazardous carrier punctuality",
     ) is None
-
-
-def test_pick_source_has_no_word_rank() -> None:
-    source = (ROOT / "CortexOS" / "dms" / "verified_query_ask.py").read_text(encoding="utf-8")
-    for banned in ("jaccard", "word_overlap", "embed_goal", "text_embedding", "_STOPWORDS"):
-        assert banned not in source
 
 
 def test_prompt_carries_examples_for_an_unrelated_question() -> None:

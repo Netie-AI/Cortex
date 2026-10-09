@@ -190,7 +190,12 @@ def execute_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     return calls
 
 
-def _reach_generator(monkeypatch: pytest.MonkeyPatch, sql: str = MODEL_SQL) -> list[dict[str, Any]]:
+def _reach_generator(
+    monkeypatch: pytest.MonkeyPatch,
+    sql: str = MODEL_SQL,
+    *,
+    null_phrase_lanes: bool = True,
+) -> list[dict[str, Any]]:
     """L2 runs, FreeRoute is mocked, and the plan gate serves the model's SQL."""
     from CortexOS.dms.l2_plan_gates import L2ServePlan
     from CortexOS.dms.l2_plausibility import PlausibilityResult
@@ -199,8 +204,9 @@ def _reach_generator(monkeypatch: pytest.MonkeyPatch, sql: str = MODEL_SQL) -> l
 
     monkeypatch.setenv(vqa.ENABLED_ENV, "1")
     monkeypatch.setenv("DMS_L2_ENABLED", "1")
-    monkeypatch.setattr("CortexOS.dms.answer_engine.match_certified", lambda q: None)
-    monkeypatch.setattr("CortexOS.dms.answer_engine.route_to_metric", lambda q: None)
+    if null_phrase_lanes:
+        monkeypatch.setattr("CortexOS.dms.answer_engine.match_certified", lambda q: None)
+        monkeypatch.setattr("CortexOS.dms.answer_engine.route_to_metric", lambda q: None)
     monkeypatch.setattr("CortexOS.dms.answer_engine.undefined_subject", lambda q: None)
     monkeypatch.setattr("CortexOS.dms.answer_engine._shape_refusal", lambda q: None)
     monkeypatch.setattr("packs.dms.semantic.query_skills.find", lambda *a, **k: None)
@@ -233,14 +239,7 @@ def _reach_generator(monkeypatch: pytest.MonkeyPatch, sql: str = MODEL_SQL) -> l
 
     def mocked_complete(task: str, messages: list[dict[str, Any]], **kwargs: Any) -> freeroute.Completion:
         sent.append({"task": task, "messages": messages})
-        if task == vqa.PICK_TASK:
-            import re
-
-            ids: list[str] = []
-            for token in re.findall(r"vq_[0-9a-f]{16}", json.dumps(messages)):
-                if token not in ids:
-                    ids.append(token)
-            return freeroute.Completion(ok=True, text=json.dumps(ids))
+        assert task == "gen-ask-sql", task
         stamp = freeroute.RouteStamp(
             call_id="mock",
             task=task,
@@ -306,9 +305,7 @@ def test_verified_examples_feed_the_generator_and_current_data_is_executed(
     body = _ask(ask_http, "alpha")
     prompt = json.dumps(sent)
     assert query.id in prompt and VQ_SQL in prompt and VQ_Q in prompt
-    sql_calls = [item for item in sent if item["task"] == "gen-ask-sql"]
-    assert sql_calls and sql_calls[0]["task"] == "gen-ask-sql"
-    assert any(item["task"] == vqa.PICK_TASK for item in sent)
+    assert sent and all(item["task"] == "gen-ask-sql" for item in sent)
     assert body["verified_query_id"] == query.id
     assert body["reused"] is False
     assert body["memory_ids_read"] == [query.entry_id]
@@ -414,7 +411,7 @@ def test_must_fail_generated_sql_never_widens_beyond_the_grant(
 
     _reach_generator(monkeypatch, GRANT_SQL)
     ask_http.bind_session("alpha", LOC3_GRANT)
-    query = _confirm("alpha", "quantity moved at LOC-003", VQ_SQL)
+    query = _confirm("alpha")
     enforced: list[str] = []
     real = submit.enforce_manifest
 
@@ -445,12 +442,56 @@ def test_freeroute_is_the_only_model_call_and_it_sees_the_example_sql(
     sent = _reach_generator(monkeypatch)
     ask_http.bind_session("alpha")
     query = _confirm("alpha")
-    body = _ask(ask_http, "alpha", "how many kilos shifted, phrased differently")
-    assert len(sent) >= 1
-    assert {item["task"] for item in sent} <= {"gen-ask-sql", vqa.PICK_TASK}
-    assert any(item["task"] == vqa.PICK_TASK for item in sent)
-    assert any(item["task"] == "gen-ask-sql" for item in sent)
+    paraphrase = "total quantity_kg moved for SKU-00296 in June 2026"
+    assert paraphrase.lower() != VQ_Q.lower()
+    body = _ask(ask_http, "alpha", paraphrase)
+    assert sent and {item["task"] for item in sent} == {"gen-ask-sql"}
     prompt = json.dumps(sent)
     assert query.id in prompt and VQ_SQL in prompt
     assert body["verified_query_id"] == query.id
     assert body["served_provider"] == _recorded_served()["served_provider"]
+
+
+def test_must_fail_paraphrase_reaches_certified_example_not_the_phrase_table(
+    ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
+) -> None:
+    """Paraphrase retrieves the example. The exact phrase is not a table hit."""
+    from CortexOS.dms import answer_engine as ae
+
+    certified_q = "How many SKUs do we have in inventory?"
+    certified_sql = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+    paraphrase = "How many distinct SKUs are currently in our inventory?"
+    assert " ".join(paraphrase.lower().split()) != " ".join(certified_q.lower().split())
+    phrase_calls: list[str] = []
+    real_certified = ae.match_certified
+    real_route = ae.route_to_metric
+
+    def spy_certified(question: str):
+        phrase_calls.append("certified")
+        return real_certified(question)
+
+    def spy_route(question: str):
+        phrase_calls.append("route")
+        return real_route(question)
+
+    monkeypatch.setattr(ae, "match_certified", spy_certified)
+    monkeypatch.setattr(ae, "route_to_metric", spy_route)
+    sent = _reach_generator(monkeypatch, null_phrase_lanes=False)
+    ask_http.bind_session("alpha")
+    query = _confirm("alpha", certified_q, certified_sql)
+
+    for question in (paraphrase, certified_q):
+        sent.clear()
+        phrase_calls.clear()
+        execute_spy.clear()
+        body = _ask(ask_http, "alpha", question)
+        prompt = json.dumps(sent)
+        assert query.id in prompt and certified_sql in prompt and certified_q in prompt
+        assert body["verified_query_id"] == query.id
+        assert body["provenance"]["layer"] == "generated"
+        assert body["provenance"]["badge"] != "certified"
+        assert body["reused"] is False
+        executed = "\n".join(sql for sql, _params in execute_spy)
+        assert "sku_count" not in executed
+        assert "quantity_kg" in executed.lower()
+        assert phrase_calls == [], question
