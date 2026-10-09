@@ -6,7 +6,8 @@ It was seeded from ``bench/golden/dms_golden_v1.yaml``. Before this split
 L0 was memorised by construction.
 
 Must-fail tests (each fails on the parent and passes on the head):
-  (a) ``test_must_fail_serving_never_opens_the_oracle_or_bench`` and
+  (a) ``test_must_fail_serving_never_opens_the_oracle_or_bench`` (the answer
+      path, contract /ask, the #329 plan+SQL ladder and /v1/insights) and
       ``test_must_fail_import_contract_serve_never_reads_oracle_is_declared``
   (b) ``test_must_fail_gold_sql_for_never_reads_the_serve_set``
   (c) ``test_must_fail_scored_climb_refuses_serve_set_id``,
@@ -42,6 +43,10 @@ HELDOUT = ROOT / "bench" / "heldout" / "c7_heldout_v1.yaml"
 CONTRACT = "importlinter:contract:serve-never-reads-oracle"
 SKU_GOLD = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
 RANK_Q = "Rank suppliers by combined risk and lead time score"
+HELDOUT_Q = (
+    "Which supplier countries have a mean lead time strictly above 20 days "
+    "and at least three suppliers in that country?"
+)
 
 _TRACES: list[list[Path]] = []
 
@@ -173,20 +178,65 @@ def serving(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     netie.config._cached_config = None
 
 
+def _plan_sql_reply(fake: Any, content: str) -> None:
+    """Scripted OpenVault reply carrying the served_* stamps the ladder requires."""
+    fake.replies.append(
+        (
+            200,
+            {
+                "model": "openai/gpt-oss-120b",
+                "choices": [{"message": {"role": "assistant", "content": content}}],
+                "served_provider": "groq",
+                "served_model": "openai/gpt-oss-120b",
+                "served_local": False,
+            },
+        )
+    )
+
+
+def _payload(table: str, *columns: tuple[str, str]) -> dict[str, Any]:
+    return {
+        "tables": [
+            {"name": table, "columns": [{"name": n, "type": t} for n, t in columns]}
+        ]
+    }
+
+
+# (question, dms_payload, scripted SQL, column the rows must carry)
+PLAN_SQL_ASKS = [
+    (
+        "How many SKUs do we have in inventory?",  # an L0 certified question
+        _payload("inventory", ("sku", "VARCHAR"), ("category", "VARCHAR")),
+        SKU_GOLD,
+        "sku_count",
+    ),
+    (
+        HELDOUT_Q,  # a held-out question, answered by the ladder, not graded
+        _payload("suppliers", ("country", "VARCHAR"), ("lead_time_days", "INTEGER")),
+        "SELECT country, COUNT(*) AS n FROM suppliers GROUP BY country ORDER BY country",
+        "country",
+    ),
+]
+
+
 def test_must_fail_serving_never_opens_the_oracle_or_bench(
-    serving: Any, monkeypatch: pytest.MonkeyPatch
+    armed_openvault: Any, serving: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from CortexOS.crew import freeroute as fr
+    from CortexOS.dms import plan_sql_ask
     from CortexOS.dms.answer_engine import answer
     from packs.dms.semantic.loader import reload
 
     gold = _gold_files(monkeypatch)
     monkeypatch.setattr(fr, "complete", _script(SKU_GOLD))
+    monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    for _, _, sql, _ in PLAN_SQL_ASKS:
+        _plan_sql_reply(armed_openvault, "1. Read the selected table.\n2. Aggregate.")
+        _plan_sql_reply(armed_openvault, f"```sql\n{sql};\n```")
     asks = [
         "How many SKUs do we have in inventory?",  # an L0 certified question
         RANK_Q,
-        "Which supplier countries have a mean lead time strictly above 20 days "
-        "and at least three suppliers in that country?",  # a held-out / oracle question
+        HELDOUT_Q,  # a held-out / oracle question
     ]
     with _opened() as seen:
         reload()  # the serve set is loaded inside the trace, not before it
@@ -197,13 +247,74 @@ def test_must_fail_serving_never_opens_the_oracle_or_bench(
                 json={"question": q, "session_id": "cert-oracle-343", "space_id": "alpha"},
             )
             assert res.status_code == 200, res.text
+        laddered = []
+        for q, payload, _, _ in PLAN_SQL_ASKS:
+            res = serving.post(
+                "/v1/contract/ask",
+                json={
+                    "question": q,
+                    "session_id": "cert-oracle-343",
+                    "space_id": "alpha",
+                    "dms_payload": payload,
+                },
+            )
+            assert res.status_code == 200, res.text
+            laddered.append(res.json())
         res = serving.post("/v1/insights", json={"intent": RANK_Q, "ask": False, "generate": True})
         assert res.status_code == 200, res.text
 
     assert SERVE_SET in seen, "trace saw no serve-set load; the guard would prove nothing"
     assert envelopes[0]["rows"], envelopes[0]
-    bad = sorted({str(p) for p in seen if p in gold or p.is_relative_to(BENCH)})
+    # The ladder really served inside the trace: plan rung, rows, rendered answer.
+    for body, (_, _, sql, column) in zip(laddered, PLAN_SQL_ASKS, strict=True):
+        assert body["plan_sql_rung"] == plan_sql_ask.RUNG_PLAN, body
+        assert body["provenance"]["layer"] == "plan_sql", body
+        assert body["sql_used"].startswith(sql), body["sql_used"]
+        rows = body["rows"]
+        assert rows and body["row_count"] == len(rows), body
+        assert all(row.get(column) is not None for row in rows), rows
+        assert str(rows[0][column]) in body["answer"], body["answer"]
+    assert len(armed_openvault.chat_calls) == 2 * len(PLAN_SQL_ASKS)
+    bad = _oracle_reads(seen, gold)
     assert bad == [], f"serving opened the climb/score oracle or bench/: {bad}"
+
+
+def _oracle_reads(seen: list[Path], gold: set[Path]) -> list[str]:
+    return sorted({str(p) for p in seen if p in gold or p.is_relative_to(BENCH)})
+
+
+def test_audit_sees_an_oracle_read_on_the_plan_sql_path(
+    armed_openvault: Any, serving: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The trace covers the ladder: a gold read inside plan_sql_ask is reported."""
+    from CortexOS.dms import plan_sql_ask
+
+    gold = _gold_files(monkeypatch)
+    leak = sorted(gold)[0]
+    real = plan_sql_ask._sample_values
+
+    def leaky(*args: Any, **kwargs: Any) -> Any:
+        leak.read_bytes()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(plan_sql_ask, "_sample_values", leaky)
+    monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    question, payload, sql, _ = PLAN_SQL_ASKS[0]
+    _plan_sql_reply(armed_openvault, "1. Count distinct sku.")
+    _plan_sql_reply(armed_openvault, sql)
+    with _opened() as seen:
+        res = serving.post(
+            "/v1/contract/ask",
+            json={
+                "question": question,
+                "session_id": "cert-oracle-343",
+                "space_id": "alpha",
+                "dms_payload": payload,
+            },
+        )
+    assert res.status_code == 200, res.text
+    assert res.json()["plan_sql_rung"] == plan_sql_ask.RUNG_PLAN
+    assert _oracle_reads(seen, gold) == [str(leak)]
 
 
 def _contract() -> configparser.SectionProxy:
@@ -224,6 +335,7 @@ def test_must_fail_import_contract_serve_never_reads_oracle_is_declared() -> Non
     assert set(_lines(section["source_modules"])) == {
         "CortexOS.dms.answer_engine",
         "CortexOS.api.contract_routes",
+        "CortexOS.dms.plan_sql_ask",  # the #329 plan+SQL ladder
     }
     assert set(_lines(section["forbidden_modules"])) >= {
         "bench",
@@ -233,15 +345,18 @@ def test_must_fail_import_contract_serve_never_reads_oracle_is_declared() -> Non
     assert "ignore_imports" not in section
 
 
-def _scratch(tmp: Path, offending: str | None) -> Path:
+def _scratch(tmp: Path, offending: str | None, source: str = "dms/answer_engine") -> Path:
     section = _contract()
     for pkg in ("CortexOS", "CortexOS/dms", "CortexOS/api", "CortexOS/crew", "packs", "bench"):
         (tmp / pkg).mkdir(parents=True, exist_ok=True)
         (tmp / pkg / "__init__.py").write_text("", encoding="utf-8")
-    for mod in ("crew/score_oracle", "crew/cot_climb", "api/contract_routes"):
+    for mod in (
+        "crew/score_oracle", "crew/cot_climb", "api/contract_routes",
+        "dms/answer_engine", "dms/plan_sql_ask",
+    ):
         (tmp / f"CortexOS/{mod}.py").write_text("", encoding="utf-8")
     body = "import json\n" + (f"import {offending}\n" if offending else "")
-    (tmp / "CortexOS/dms/answer_engine.py").write_text(body, encoding="utf-8")
+    (tmp / f"CortexOS/{source}.py").write_text(body, encoding="utf-8")
     lines = [f"[{CONTRACT}]"] + [
         f"{key} =" + ("\n    " + "\n    ".join(_lines(value)) if "\n" in value else f" {value}")
         for key, value in section.items()
@@ -272,10 +387,11 @@ def _lint(tmp: Path, config: Path) -> subprocess.CompletedProcess[str]:
 @pytest.mark.parametrize(
     "offending", ["CortexOS.crew.score_oracle", "CortexOS.crew.cot_climb", "bench"]
 )
+@pytest.mark.parametrize("source", ["dms/answer_engine", "dms/plan_sql_ask"])
 def test_import_contract_breaks_when_serving_imports_the_oracle(
-    tmp_path: Path, offending: str
+    tmp_path: Path, offending: str, source: str
 ) -> None:
-    proc = _lint(tmp_path, _scratch(tmp_path, offending))
+    proc = _lint(tmp_path, _scratch(tmp_path, offending, source))
     out = proc.stdout + proc.stderr
     assert proc.returncode != 0, out
     assert "BROKEN" in out and "#343" in out.replace("\n", " "), out
