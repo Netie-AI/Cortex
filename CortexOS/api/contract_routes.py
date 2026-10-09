@@ -19,7 +19,7 @@ from cortex_contract.answer import (
 from cortex_contract.execution import QueryResult, SubmitRequest
 from cortex_contract.ledger import ChainVerification, LedgerEntry
 from cortex_contract.tools import ToolClass, ToolSpec
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 # Canonical contract route IDs — keep in lockstep with scripts/export_openapi.py.
@@ -236,9 +236,46 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
     return data
 
 
+async def _schema_context_field(request: Request) -> tuple[str | None, tuple[str, str] | None]:
+    """SCHEMA-CONTEXT-01 string from the raw body, without a contract bump.
+
+    The field is defined on PR #351 as an optional string. It is not on
+    ``AskRequest`` in this tree, so it is read here and ignored by the model.
+    Absent or blank is ``None``. A non-string or over-cap value is a 422.
+    Other unknown keys stay on the existing AskRequest rules.
+    """
+    from CortexOS.plan_sql.catalog import accepted_schema_context, schema_context_problem
+
+    try:
+        raw = await request.json()
+    except Exception:  # noqa: BLE001 - no JSON body
+        return None, None
+    if not isinstance(raw, dict) or "schema_context" not in raw:
+        return None, None
+    value = raw.get("schema_context")
+    problem = schema_context_problem(value)
+    if problem is not None:
+        return None, problem
+    return accepted_schema_context(value), None
+
+
+async def _load_schema_context(request: Request) -> str | None:
+    """FastAPI dependency. Direct callers of ``contract_ask`` omit it."""
+    text, problem = await _schema_context_field(request)
+    if problem is not None:
+        code, message = problem
+        raise HTTPException(status_code=422, detail={"code": code, "message": message})
+    return text
+
+
 @router.post("/ask", response_model=Answer, operation_id="ask")
-async def contract_ask(body: AskRequest) -> Answer:
+async def contract_ask(
+    body: AskRequest,
+    schema_context: str | None = Depends(_load_schema_context),
+) -> Answer:
     """Answer a governed question (DMS ask plane). Requires a prior submit bind."""
+    if not isinstance(schema_context, str):
+        schema_context = None
     from CortexOS.dms.answer_engine import answer as answer_engine
     from CortexOS.execution.manifest import ManifestError
     from CortexOS.execution.session_manifests import (
@@ -282,7 +319,7 @@ async def contract_ask(body: AskRequest) -> Answer:
         from CortexOS.dms.plan_sql_ask import try_plan_sql
 
         # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
-        served = try_plan_sql(body, verified=verified)
+        served = try_plan_sql(body, verified=verified, schema_context=schema_context)
     try:
         result = served if served is not None else answer_engine(
             body.question,
