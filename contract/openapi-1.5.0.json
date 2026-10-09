@@ -210,6 +210,17 @@
             "title": "Memory Reads",
             "type": "array"
           },
+          "plan_sql_rung": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Sql Rung"
+          },
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
           },
@@ -1224,6 +1235,18 @@
             },
             "title": "Memory Reads",
             "type": "array"
+          },
+          "plan_sql_rung": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Sql Rung"
           },
           "provenance": {
             "$ref": "#/components/schemas/Provenance"

@@ -92,8 +92,10 @@ supported:
       plan_sql_confirm (yes runs the closest question, no answers
       "not found in the database"). New schemas AskPayload, AskPayloadTable,
       AskPayloadColumn, AskPayloadJoin, PlanSqlReconfirm. Answer gains optional
-      reconfirm and Badge gains reconfirm. 1.4 clients omit the fields and get
-      the 1.4 behaviour. canonical_manifest_bytes unchanged.
+      reconfirm, optional plan_sql_rung (plan, error-fed-retry-N, stronger-model,
+      or reconfirm; null when this path did not answer) and Badge gains
+      reconfirm. 1.4 clients omit the fields and get the 1.4 behaviour.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

@@ -125,6 +125,25 @@ def _assert_not_answered(body: dict[str, Any], code: str) -> None:
     assert body["served_provider"] is None and body["served_model"] is None
     assert code in body["answer"], body["answer"]
     assert any(code in line for line in body["assumptions"]), body["assumptions"]
+    assert body["plan_sql_rung"] is None
+    assert not any(line.startswith("rung:") for line in body["assumptions"])
+
+
+def _assert_rung(body: dict[str, Any], rung: str) -> None:
+    """The producing rung is on the wire, not only on the dropped step list."""
+    assert body["plan_sql_rung"] == rung
+    assert f"rung: {rung}" in body["assumptions"]
+    step = next(line for line in body["assumptions"] if line.startswith("step rung:"))
+    assert f"({rung})" in step
+    if rung == plan_sql_ask.RUNG_RECONFIRM:
+        assert body["provenance"]["badge"] == "reconfirm"
+        assert body["rows"] in ([], None)
+        assert body["sql_used"] is None
+        return
+    assert body["provenance"]["badge"] == "session"
+    rows = body["rows"] or []
+    assert rows and body["row_count"] == len(rows)
+    assert not all(all(value is None for value in row.values()) for row in rows)
 
 
 def _route_rows() -> list[tuple[Any, ...]]:
@@ -229,7 +248,9 @@ def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
         "step sql",
         "step gate",
         "step execute",
+        "step rung",
     ]
+    _assert_rung(body, plan_sql_ask.RUNG_PLAN)
     for step in ("step plan", "step sql"):
         assert "served_by=openvault-freeroute" in by_step[step]
         assert f"served_provider={PROVIDER}" in by_step[step]
@@ -642,6 +663,7 @@ def test_must_fail_unknown_column_retries_and_does_not_execute_it(
     retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
     assert "UNKNOWN_COLUMN:no_such_col" in retry
     assert len(armed_openvault.chat_calls) == 3
+    _assert_rung(body, plan_sql_ask.rung_retry(1))
 
 
 def test_must_fail_empty_result_retries_where_the_old_head_abstained(
@@ -670,6 +692,7 @@ def test_must_fail_empty_result_retries_where_the_old_head_abstained(
     assert plan_sql_ask.EMPTY_RESULT in retry
     assert "NOT_A_TYPE" in retry
     assert _ran(execute_spy)[-1] == body["sql_used"]
+    _assert_rung(body, plan_sql_ask.rung_retry(1))
 
 
 def test_implausible_all_null_rows_are_fed_back(
@@ -697,6 +720,7 @@ def test_implausible_all_null_rows_are_fed_back(
     assert body["rows"] and body["provenance"]["badge"] == "session"
     retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
     assert plan_sql_ask.IMPLAUSIBLE_RESULT in retry
+    _assert_rung(body, plan_sql_ask.rung_retry(1))
 
 
 def test_exhausted_retries_then_a_stronger_openvault_model(
@@ -729,6 +753,7 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
         line for line in body["assumptions"] if line.startswith("step plan-strong:")
     )
     assert armed_openvault.non_openvault_calls == []
+    _assert_rung(body, plan_sql_ask.RUNG_STRONG)
 
 
 def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
@@ -757,6 +782,58 @@ def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
     assert _ran(execute_spy) == []
     assert any(line.startswith("step reconfirm-strong:") for line in body["assumptions"])
     assert body["served_provider"] == PROVIDER and body["served_model"] == MODEL
+    _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
+
+
+def test_ladder_rung_stamps_appear_on_the_answer(
+    armed_openvault, dms_http  # noqa: F811
+) -> None:
+    """Each producing rung is on the customer envelope Check reads.
+
+    Tokens: plan, error-fed-retry-N, stronger-model, reconfirm.
+    A session rung has rows. An empty or all-null result is not a session
+    answer, so this path does not add a WRONG.
+    """
+    bad = "SELECT no_such_col FROM transactions"
+    dms_http.bind_session(SESSION, GRANT)
+
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    planned = _json(_ask(dms_http, question="how many of each type"))
+    _assert_rung(planned, "plan")
+    planned_model = armed_openvault.chat_calls[0]["body"]["model"]
+
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, GOOD_SQL)
+    retried = _json(_ask(dms_http, question="count the types again"))
+    _assert_rung(retried, "error-fed-retry-1")
+
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    stronger = _json(_ask(dms_http, question="count types on the stronger model"))
+    _assert_rung(stronger, "stronger-model")
+    models = [call["body"]["model"] for call in armed_openvault.chat_calls]
+    assert models[0] == planned_model
+    assert models[-1] != planned_model and models[-1] != "auto"
+
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, "WHY: no grounded column\nCLOSEST: how many rows are in transactions")
+    asked = _json(_ask(dms_http, question="count types until reconfirm"))
+    _assert_rung(asked, "reconfirm")
+    assert {planned["plan_sql_rung"], retried["plan_sql_rung"], stronger["plan_sql_rung"], asked["plan_sql_rung"]} == {
+        "plan",
+        "error-fed-retry-1",
+        "stronger-model",
+        "reconfirm",
+    }
 
 
 def test_confirm_yes_runs_the_closest_question(
@@ -771,6 +848,7 @@ def test_confirm_yes_runs_the_closest_question(
 
     assert body["rows"] and body["provenance"]["badge"] == "session"
     assert body["reconfirm"] is None
+    _assert_rung(body, plan_sql_ask.RUNG_PLAN)
     assert any(line.startswith("step confirm:") for line in body["assumptions"])
     assert "confirm" in next(line for line in body["assumptions"] if line.startswith("step confirm:"))
 
@@ -788,6 +866,7 @@ def test_confirm_no_answers_not_found_in_the_database(
     assert body["provenance"]["badge"] == "session"
     assert body["rows"] in ([], None) and body["sql_used"] is None
     assert body["reconfirm"] is None
+    assert body["plan_sql_rung"] is None
     assert armed_openvault.chat_calls == []
     assert execute_spy == []
 

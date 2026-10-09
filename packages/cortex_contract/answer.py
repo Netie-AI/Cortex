@@ -148,6 +148,11 @@ class Answer(BaseModel):
     # 1.5.0: set when the plan+SQL loop asks the user to confirm the closest
     # question. Null on every other answer. 1.4 clients ignore it.
     reconfirm: PlanSqlReconfirm | None = None
+    # 1.5.0: which ladder rung produced this plan+SQL answer.
+    # ``plan`` | ``error-fed-retry-<N>`` | ``stronger-model`` | ``reconfirm``.
+    # Null when this path did not answer (flag off, direct abstain, confirm-no).
+    # 1.4 clients ignore it.
+    plan_sql_rung: str | None = None
 
 
 class DrillthroughRequest(BaseModel):

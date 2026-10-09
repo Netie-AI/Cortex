@@ -25,6 +25,11 @@ Order, each step stamped (``StepStamp``):
    ``plan_sql_confirm=yes`` runs that question. ``no`` answers
    ``not found in the database``.
 
+The answer that leaves this path stamps the rung that produced it
+(``plan``, ``error-fed-retry-<N>``, ``stronger-model``, ``reconfirm``) on
+``plan_sql_rung`` and on an assumptions line ``rung: <token>``. A direct
+abstain and a confirm-no do not carry a rung.
+
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
 route-stamp failure, which never reaches a model result). PII is not an abstain
 case and this path does not mask it.
@@ -76,6 +81,9 @@ NOT_FOUND_ANSWER = "not found in the database"
 # pass gets one write: the failures are already in its prompt.
 SQL_ATTEMPTS = 2
 STRONG_SQL_ATTEMPTS = 1
+RUNG_PLAN = "plan"
+RUNG_STRONG = "stronger-model"
+RUNG_RECONFIRM = "reconfirm"
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAMPLE_ROWS = 8
@@ -154,6 +162,15 @@ def _is_scored_round(scored_pack_id: str | None) -> bool:
 # -- envelopes ------------------------------------------------------------------
 
 
+def rung_retry(n: int) -> str:
+    """Token for the Nth error-fed SQL rewrite on the first model. N starts at 1."""
+    return f"error-fed-retry-{n}"
+
+
+def _mark_rung(steps: list[StepStamp], rung: str) -> None:
+    steps.append(StepStamp.cortex("rung", "cortex:plan-sql-rung", rung))
+
+
 def _served(stamp: StepStamp | None, reason: str) -> dict[str, Any]:
     if stamp is None:
         return {
@@ -193,6 +210,7 @@ def _not_answered(
         "assumptions": [reason, *(s.line() for s in steps)],
         "plan_sql_steps": [s.public() for s in steps],
         "reconfirm": None,
+        "plan_sql_rung": None,
         **_served(None, reason),
     }
 
@@ -210,6 +228,7 @@ def _not_found(audit_id: str, steps: list[StepStamp]) -> dict[str, Any]:
         "rows": [],
         "assumptions": [note, *(s.line() for s in steps)],
         "reconfirm": None,
+        "plan_sql_rung": None,
         "provenance": {"layer": LAYER, "badge": "session", "assumptions": note},
         **_served(None, note),
     }
@@ -222,6 +241,7 @@ def _reconfirm_envelope(
     why: str,
     closest: str,
     stamp: StepStamp | None,
+    rung: str,
 ) -> dict[str, Any]:
     answer = (
         f"Reconfirm: {why} Closest question: {closest} "
@@ -237,8 +257,9 @@ def _reconfirm_envelope(
         "badge": RECONFIRM,
         "row_count": 0,
         "rows": [],
-        "assumptions": [why, *(s.line() for s in steps)],
+        "assumptions": [why, *(s.line() for s in steps), f"rung: {rung}"],
         "reconfirm": {"why": why, "closest_question": closest},
+        "plan_sql_rung": rung,
         "provenance": {
             "layer": RECONFIRM,
             "badge": RECONFIRM,
@@ -258,6 +279,7 @@ def _success(
     sql_step: ModelStep,
     rows: list[dict[str, Any]],
     served_sql: str,
+    rung: str,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import synthesize_answer
 
@@ -275,10 +297,12 @@ def _success(
         "assumptions": [
             *(f"plan: {line}" for line in plan.plan),
             *(s.line() for s in steps),
+            f"rung: {rung}",
             CAVEAT,
         ],
         "plan_sql_steps": [s.public() for s in steps],
         "reconfirm": None,
+        "plan_sql_rung": rung,
         "provenance": {
             "layer": LAYER,
             "badge": "session",
@@ -519,7 +543,11 @@ def plan_sql_answer(
 
     gen = generator or default_generator()
 
-    def _round(active: PlanSqlGenerator, attempts: int) -> dict[str, Any] | None:
+    def _round(
+        active: PlanSqlGenerator,
+        attempts: int,
+        rung_of,
+    ) -> dict[str, Any] | None:
         plan = active.plan(request)
         steps.append(plan.stamp)
         _remember(plan, failed_models)
@@ -530,7 +558,7 @@ def plan_sql_answer(
             failures.append(f"{MODEL_UNAVAILABLE}: {plan.kind} step: {plan.reason}")
             return None
         priors = list(failures)
-        for _attempt in range(attempts):
+        for attempt in range(attempts):
             sql_step = active.sql(request, plan, prior_violations=priors)
             steps.append(sql_step.stamp)
             _remember(sql_step, failed_models)
@@ -542,13 +570,13 @@ def plan_sql_answer(
                 priors.append(detail)
                 failures.append(detail)
                 continue
-            outcome = _use_sql(sql_step, plan, priors)
+            outcome = _use_sql(sql_step, plan, priors, rung_of(attempt))
             if outcome is not None:
                 return outcome
         return None
 
     def _use_sql(
-        sql_step: ModelStep, plan: ModelStep, priors: list[str]
+        sql_step: ModelStep, plan: ModelStep, priors: list[str], rung: str
     ) -> dict[str, Any] | None:
         """A final envelope, or None when ``priors`` gained a retryable error."""
         from CortexOS.dms.sql_extract import extract_statement
@@ -601,13 +629,14 @@ def plan_sql_answer(
             return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
-        return _execute(sql_step, plan, served_sql, priors)
+        return _execute(sql_step, plan, served_sql, priors, rung)
 
     def _execute(
         sql_step: ModelStep,
         plan: ModelStep,
         served_sql: str,
         priors: list[str],
+        rung: str,
     ) -> dict[str, Any] | None:
         from CortexOS.dms.sql_validate_gate import SqlGateAbstain
         from CortexOS.execution.manifest import ManifestError
@@ -655,6 +684,7 @@ def plan_sql_answer(
             failures.append(detail)
             return None
         steps.append(StepStamp.cortex("execute", "cortex:execute_sql", f"rows={len(rows)}"))
+        _mark_rung(steps, rung)
         return _success(
             question,
             audit_id,
@@ -663,11 +693,14 @@ def plan_sql_answer(
             sql_step=sql_step,
             rows=rows,
             served_sql=served_sql,
+            rung=rung,
         )
 
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
     with freeroute.journal(split=split) as journal:
-        answered = _round(gen, SQL_ATTEMPTS)
+        answered = _round(
+            gen, SQL_ATTEMPTS, lambda n: RUNG_PLAN if n == 0 else rung_retry(n)
+        )
         if answered is not None:
             return answered
         strong = _stronger_generator(failed_models)
@@ -679,7 +712,7 @@ def plan_sql_answer(
             )
         )
         request = replace(request, prior_failures=tuple(failures)[:8])
-        answered = _round(strong, STRONG_SQL_ATTEMPTS)
+        answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG)
         if answered is not None:
             return answered
         rec = strong.reconfirm(request, tuple(failures)[:8])
@@ -689,8 +722,14 @@ def plan_sql_answer(
         if security and security[0] != MODEL_UNAVAILABLE:
             return stop(security[0], security[1], refused=True)
         why, closest = _parse_reconfirm(rec.text if rec.ok else "", failures, request)
+        _mark_rung(steps, RUNG_RECONFIRM)
         return _reconfirm_envelope(
-            audit_id, steps, why=why, closest=closest, stamp=rec.stamp if rec.ok else None
+            audit_id,
+            steps,
+            why=why,
+            closest=closest,
+            stamp=rec.stamp if rec.ok else None,
+            rung=RUNG_RECONFIRM,
         )
 
 
@@ -701,7 +740,11 @@ __all__ = [
     "LAYER",
     "NOT_FOUND_ANSWER",
     "RECONFIRM",
+    "RUNG_PLAN",
+    "RUNG_RECONFIRM",
+    "RUNG_STRONG",
     "SQL_ATTEMPTS",
+    "rung_retry",
     "default_generator",
     "plan_sql_answer",
     "plan_sql_enabled",
