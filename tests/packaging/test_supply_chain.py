@@ -3,8 +3,13 @@
 The images used to run a bare ``pip install`` against floors with no upper pin,
 and ``uv.lock`` recorded ``netie`` 0.1.0 against 2.5.0 and ``litellm>=1`` against
 ``>=1.84.0``. ``scripts/check_supply_chain.py`` is what now fails the build on
-that. These tests run it on the real tree (green) and on planted copies of the
-tree (each must go red), so a checker stuck at "OK" cannot pass here.
+that. It also compares every package an image lock and ``uv.lock`` both
+contain, at the image target. Mismatches frozen from main 0faede64 (litellm
+lines removed) live in ``requirements/lock_skew/`` and may only shrink. These
+tests run it on the real tree (green) and on planted copies of the tree (each
+must go red), so a checker stuck at "OK" cannot pass here. The skew plants
+also pass with that one check removed, so the failure is the agreement guard
+and not some other check.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import pytest
 
 from scripts import check_supply_chain as sc
 from scripts import lock_images
+from tests.invariants.test_lock_skew_baseline import skew_lines_outside_baseline
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -154,3 +160,182 @@ def test_dockerfile_pointing_at_wrong_lock_fails(tree: Path) -> None:
 def test_missing_image_lock_fails(tree: Path) -> None:
     (tree / "requirements" / "image-full.lock.txt").unlink()
     assert any("image-full.lock.txt: missing" in p for p in sc.run(tree))
+
+
+def _plant_image_pin(tree: Path, package: str, version: str, variant: str = "core") -> None:
+    lock = tree / "requirements" / f"image-{variant}.lock.txt"
+    text = lock.read_text(encoding="utf-8")
+    new = re.sub(rf"^{package}==\S+", f"{package}=={version}", text, count=1, flags=re.M)
+    assert new != text, f"{package}=={version} did not change {lock.name}"
+    lock.write_text(new, encoding="utf-8")
+
+
+def test_image_uv_version_skew_fails(tree: Path) -> None:
+    """A litellm pin that is not the uv.lock version is a new, unlisted mismatch."""
+    _plant_image_pin(tree, "litellm", "1.84.0")
+    problems = sc.run(tree)
+    assert any(
+        "image-core.lock.txt: litellm==1.84.0 disagrees with uv.lock" in p
+        and "may only shrink" in p
+        for p in problems
+    )
+
+
+def test_unlisted_boto3_pin_fails(tree: Path) -> None:
+    """An unlisted boto3 pin disagrees with uv.lock 1.43.108 and is not on the skew list."""
+    _plant_image_pin(tree, "boto3", "1.43.109")
+    problems = sc.run(tree)
+    assert any(
+        "image-core.lock.txt: boto3==1.43.109 disagrees with uv.lock boto3==1.43.108" in p
+        and "may only shrink" in p
+        for p in problems
+    )
+
+
+def _set_python_version(tree: Path, name: str, version: str) -> None:
+    _edit(tree / name, "ARG PYTHON_VERSION=3.11", f"ARG PYTHON_VERSION={version}")
+
+
+def test_dockerfile_python_versions_disagree(tree: Path) -> None:
+    """One image at 3.12 while the other three stay at 3.11 is a named error."""
+    _set_python_version(tree, "Dockerfile.full", "3.12")
+    problems = sc.run(tree)
+    assert problems == [
+        "image Python version disagrees: "
+        "Dockerfile=3.11, Dockerfile.constructor=3.11, Dockerfile.core=3.11, Dockerfile.full=3.12"
+    ]
+
+
+def test_dockerfile_python_version_has_no_uv_resolution_entry(tree: Path) -> None:
+    """3.99 has no resolution entry. ``>= '3.15'`` names 3.15, not 3.99."""
+    for name in sc.DOCKERFILES:
+        _set_python_version(tree, name, "3.99")
+    problems = sc.run(tree)
+    assert problems == ["uv.lock has no resolution entry for Python 3.99"]
+
+
+def test_new_mismatch_plus_skew_line_fails_frozen_baseline(tree: Path) -> None:
+    """A new mismatch plus its lock_skew line passes the checker and fails the ceiling.
+
+    ``check_version_agreement`` only requires the skew file to equal the
+    current mismatches, so appending the matching line hides the plant from
+    ``scripts/check_supply_chain.py``. The frozen baseline in
+    ``tests/invariants/test_lock_skew_baseline.py`` names the added line.
+    """
+    _plant_image_pin(tree, "boto3", "1.43.109", variant="core")
+    line = "image-core.lock.txt: boto3==1.43.109 disagrees with uv.lock boto3==1.43.108"
+    path = tree / "requirements" / "lock_skew" / "image-core.txt"
+    path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
+    assert line in sc.mismatch_lines(tree)
+    assert sc.run(tree) == []
+    assert skew_lines_outside_baseline(tree) == [
+        f"new skew line not in frozen baseline: image-core: {line}"
+    ]
+
+
+def test_stale_skew_line_fails(tree: Path) -> None:
+    path = tree / "requirements" / "lock_skew" / "image-core.txt"
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        + "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110\n",
+        encoding="utf-8",
+    )
+    problems = sc.run(tree)
+    assert any("no longer mismatches" in p and "boto3==1.43.108" in p for p in problems)
+
+
+def test_listed_skew_is_exactly_the_remaining_mismatches() -> None:
+    """The committed lines are the check's output, not a hand count."""
+    listed: list[str] = []
+    for variant in sc.VARIANTS:
+        lines, problems = sc.load_skew_lines(ROOT, variant)
+        assert problems == []
+        listed.extend(lines)
+    assert listed == sc.mismatch_lines(ROOT)
+
+
+def _write_min_tree(tmp_path: Path, uv_packages: str, image_pin: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "netie"\nversion = "2.5.0"\ndependencies = []\n',
+        encoding="utf-8",
+    )
+    for name in sc.DOCKERFILES:
+        (tmp_path / name).write_text("ARG PYTHON_VERSION=3.11\n", encoding="utf-8")
+    (tmp_path / "uv.lock").write_text(
+        "version = 1\n"
+        "resolution-markers = [\n"
+        '    "python_full_version == \'3.11.*\'",\n'
+        "]\n\n"
+        '[[package]]\nname = "netie"\nversion = "2.5.0"\n\n' + uv_packages,
+        encoding="utf-8",
+    )
+    req = tmp_path / "requirements"
+    req.mkdir(exist_ok=True)
+    digest = "ab" * 32
+    (req / "image-core.lock.txt").write_text(
+        f"{image_pin} \\\n    --hash=sha256:{digest}\n",
+        encoding="utf-8",
+    )
+
+
+def test_ambiguous_uv_resolution_is_a_mismatch_never_a_match(tmp_path: Path) -> None:
+    """Two versions that both select the image target do not match either pin."""
+    _write_min_tree(
+        tmp_path,
+        '[[package]]\nname = "boto3"\nversion = "1.43.108"\n'
+        'resolution-markers = ["python_full_version == \'3.11.*\'"]\n\n'
+        '[[package]]\nname = "boto3"\nversion = "1.43.110"\n'
+        'resolution-markers = ["python_full_version == \'3.11.*\'"]\n',
+        "boto3==1.43.110",
+    )
+    lines = sc.mismatch_lines(tmp_path)
+    assert len(lines) == 1
+    assert "has no single uv.lock version" in lines[0]
+    assert "1.43.108" in lines[0] and "1.43.110" in lines[0]
+    assert "disagrees with uv.lock boto3==1.43.110" not in lines[0]
+
+
+def test_image_target_selects_one_uv_version(tmp_path: Path) -> None:
+    """Markers narrow a multi-version package to the image's Python."""
+    _write_min_tree(
+        tmp_path,
+        '[[package]]\nname = "boto3"\nversion = "1.43.108"\n'
+        'resolution-markers = ["python_full_version < \'3.11\'"]\n\n'
+        '[[package]]\nname = "boto3"\nversion = "1.43.110"\n'
+        'resolution-markers = ["python_full_version == \'3.11.*\'"]\n',
+        "boto3==1.43.110",
+    )
+    assert sc.mismatch_lines(tmp_path) == []
+    _write_min_tree(
+        tmp_path,
+        '[[package]]\nname = "boto3"\nversion = "1.43.108"\n'
+        'resolution-markers = ["python_full_version < \'3.11\'"]\n\n'
+        '[[package]]\nname = "boto3"\nversion = "1.43.110"\n'
+        'resolution-markers = ["python_full_version == \'3.11.*\'"]\n',
+        "boto3==1.43.108",
+    )
+    assert sc.mismatch_lines(tmp_path) == [
+        "image-core.lock.txt: boto3==1.43.108 disagrees with uv.lock boto3==1.43.110"
+    ]
+
+
+def test_packages_in_only_one_lock_are_not_compared(tmp_path: Path) -> None:
+    _write_min_tree(
+        tmp_path,
+        '[[package]]\nname = "only-uv"\nversion = "1.0.0"\n',
+        "only-image==9.9.9",
+    )
+    assert sc.mismatch_lines(tmp_path) == []
+
+
+def test_image_uv_version_skew_passes_when_agreement_guard_removed(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same plant as the litellm skew. With that check gone, the tree is clean.
+
+    The other checks still see an exact, hashed, in-specifier, non-denylisted
+    pin, so a pass here means the failure belongs to ``check_version_agreement``.
+    """
+    _plant_image_pin(tree, "litellm", "1.84.0")
+    monkeypatch.setattr(sc, "check_version_agreement", lambda _root: [])
+    assert sc.run(tree) == []

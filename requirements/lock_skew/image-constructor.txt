@@ -1,0 +1,49 @@
+# Known image-vs-uv mismatches for this image.
+# Frozen from `python scripts/check_supply_chain.py --mismatches` against main
+# 0faede64 (uv.lock and the three image locks at that commit), with the litellm
+# line removed. May only shrink: delete a line in the commit that makes that pin
+# match. Never add one. Full alignment is LOCK-ALIGN-01.
+image-constructor.lock.txt: aiohttp==3.14.4 disagrees with uv.lock aiohttp==3.14.3
+image-constructor.lock.txt: annotated-doc==0.0.5 disagrees with uv.lock annotated-doc==0.0.4
+image-constructor.lock.txt: annotated-types==0.8.0 disagrees with uv.lock annotated-types==0.7.0
+image-constructor.lock.txt: anyio==4.15.1 disagrees with uv.lock anyio==4.14.2
+image-constructor.lock.txt: cffi==2.1.1 disagrees with uv.lock cffi==2.1.0
+image-constructor.lock.txt: charset-normalizer==3.5.2 disagrees with uv.lock charset-normalizer==3.4.9
+image-constructor.lock.txt: click==8.5.0 disagrees with uv.lock click==8.4.2
+image-constructor.lock.txt: duckdb==1.5.6 disagrees with uv.lock duckdb==1.5.5
+image-constructor.lock.txt: filelock==3.32.7 disagrees with uv.lock filelock==3.32.0
+image-constructor.lock.txt: fsspec==2026.9.0 disagrees with uv.lock fsspec==2026.6.0
+image-constructor.lock.txt: h2==4.4.1 disagrees with uv.lock h2==4.3.0
+image-constructor.lock.txt: hf-xet==1.6.0 disagrees with uv.lock hf-xet==1.5.2
+image-constructor.lock.txt: huggingface-hub==1.33.0 disagrees with uv.lock huggingface-hub==1.24.0
+image-constructor.lock.txt: idna==3.20 disagrees with uv.lock idna==3.18
+image-constructor.lock.txt: jiter==0.17.0 disagrees with uv.lock jiter==0.16.0
+image-constructor.lock.txt: markupsafe==3.0.4 disagrees with uv.lock markupsafe==3.0.3
+image-constructor.lock.txt: multidict==6.9.1 disagrees with uv.lock multidict==6.7.1
+image-constructor.lock.txt: openai==2.54.0 disagrees with uv.lock openai==2.47.0
+image-constructor.lock.txt: packaging==26.3 disagrees with uv.lock packaging==26.2
+image-constructor.lock.txt: pip==26.2.1 disagrees with uv.lock pip==26.1.2
+image-constructor.lock.txt: propcache==0.5.4 disagrees with uv.lock propcache==0.5.2
+image-constructor.lock.txt: pydantic==2.13.5 disagrees with uv.lock pydantic==2.13.4
+image-constructor.lock.txt: pydantic-core==2.46.5 disagrees with uv.lock pydantic-core==2.46.4
+image-constructor.lock.txt: pygments==2.21.0 disagrees with uv.lock pygments==2.20.0
+image-constructor.lock.txt: python-dotenv==1.2.4 disagrees with uv.lock python-dotenv==1.2.2
+image-constructor.lock.txt: pytz==2026.5 disagrees with uv.lock pytz==2026.2
+image-constructor.lock.txt: regex==2026.9.29 disagrees with uv.lock regex==2026.7.19
+image-constructor.lock.txt: rpds-py==2026.9.1 disagrees with uv.lock rpds-py==2026.6.3
+image-constructor.lock.txt: sqlglot==30.21.0 disagrees with uv.lock sqlglot==30.13.0
+image-constructor.lock.txt: sqlite-utils==4.2.1 disagrees with uv.lock sqlite-utils==4.1.1
+image-constructor.lock.txt: starlette==1.7.0 disagrees with uv.lock starlette==1.3.1
+image-constructor.lock.txt: tiktoken==0.14.0 disagrees with uv.lock tiktoken==0.13.0
+image-constructor.lock.txt: tokenizers==0.23.2 disagrees with uv.lock tokenizers==0.22.2
+image-constructor.lock.txt: tqdm==4.70.1 disagrees with uv.lock tqdm==4.69.0
+image-constructor.lock.txt: typer==0.27.2 disagrees with uv.lock typer==0.27.0
+image-constructor.lock.txt: typing-inspection==0.4.4 disagrees with uv.lock typing-inspection==0.4.2
+image-constructor.lock.txt: urllib3==2.8.0 disagrees with uv.lock urllib3==2.7.0
+image-constructor.lock.txt: uvicorn==0.54.0 disagrees with uv.lock uvicorn==0.51.0
+image-constructor.lock.txt: uvloop==0.23.0 disagrees with uv.lock uvloop==0.22.1
+image-constructor.lock.txt: wasmtime==49.0.0 disagrees with uv.lock wasmtime==47.0.1
+image-constructor.lock.txt: watchfiles==1.3.0 disagrees with uv.lock watchfiles==1.2.0
+image-constructor.lock.txt: websockets==17.2 disagrees with uv.lock websockets==16.1.1
+image-constructor.lock.txt: yarl==1.25.1 disagrees with uv.lock yarl==1.24.5
+image-constructor.lock.txt: zipp==4.1.1 disagrees with uv.lock zipp==4.1.0
