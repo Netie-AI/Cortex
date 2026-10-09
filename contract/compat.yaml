@@ -93,8 +93,10 @@ supported:
       "not found in the database"). New schemas AskPayload, AskPayloadTable,
       AskPayloadColumn, AskPayloadJoin, PlanSqlReconfirm. Answer gains optional
       reconfirm, optional plan_sql_rung (plan, error-fed-retry-N, stronger-model,
-      or reconfirm; null when this path did not answer) and Badge gains
-      reconfirm (a new Badge enum value). AskRequest ignores unknown keys, as
+      or reconfirm; null when this path did not answer), optional model_calls
+      (complete() counts for plan, each error-fed-retry-N, stronger-model and
+      reconfirm, plus total; null when this path made no model call) and Badge
+      gains reconfirm (a new Badge enum value). AskRequest ignores unknown keys, as
       on 1.4. The wire names model, strict and provider are rejected by name
       with 422. Full request strictness is a declared breaking change (#388).
       Routing stays in OpenVault route config, not a request field.

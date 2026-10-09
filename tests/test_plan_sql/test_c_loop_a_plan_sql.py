@@ -869,6 +869,61 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     }
 
 
+def test_model_calls_stamp_matches_complete_count(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Must-fail: per-step model_calls sum to total, and total equals complete().
+
+    Full ladder: plan, at least one numbered error-fed retry, stronger, then
+    reconfirm. DMS reads per-step counts only from Answer.model_calls.
+    Dropping one step's count from the stamp makes the sum disagree with
+    the fake's complete() counter.
+    """
+    seen = {"n": 0}
+    real = freeroute.complete
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(freeroute, "complete", _spy)
+    bad = "SELECT no_such_col FROM transactions"
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, bad, model=configured)
+    _reply(
+        armed_openvault,
+        "WHY: no grounded column\nCLOSEST: how many rows are in transactions",
+        model=configured,
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    calls = body["model_calls"]
+    assert calls == {
+        "plan": 2,
+        "error-fed-retry-1": 1,
+        "stronger-model": 2,
+        "reconfirm": 1,
+        "total": 6,
+    }
+    steps = {key: value for key, value in calls.items() if key != "total"}
+    assert "plan" in steps
+    assert "error-fed-retry-1" in steps
+    assert "stronger-model" in steps
+    assert "reconfirm" in steps
+    assert sum(steps.values()) == calls["total"] == seen["n"]
+    assert seen["n"] == len(armed_openvault.chat_calls)
+    dropped = "error-fed-retry-1"
+    reduced = sum(value for key, value in steps.items() if key != dropped)
+    assert reduced != seen["n"]
+
+
 def test_confirm_yes_runs_the_closest_question(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:

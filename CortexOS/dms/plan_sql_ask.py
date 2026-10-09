@@ -31,6 +31,9 @@ The answer that leaves this path stamps the rung that produced it
 ``plan_sql_rung`` and on an assumptions line ``rung: <token>``. A direct
 abstain and a confirm-no do not carry a rung.
 
+``Answer.model_calls`` counts FreeRoute ``complete()`` calls on those same
+steps, plus ``total``. DMS reads the per-step counts only from that object.
+
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
 route-stamp failure, which never reaches a model result). PII is not an abstain
 case and this path does not mask it.
@@ -170,6 +173,33 @@ def rung_retry(n: int) -> str:
 
 def _mark_rung(steps: list[StepStamp], rung: str) -> None:
     steps.append(StepStamp.cortex("rung", "cortex:plan-sql-rung", rung))
+
+
+def model_calls_stamp(counts: dict[str, int]) -> dict[str, int] | None:
+    """Per-step ``complete()`` counts plus ``total``. None when nothing was called.
+
+    Step keys match the rung tokens. ``total`` is the sum of those steps.
+    """
+    ordered: dict[str, int] = {}
+    plan = counts.get(RUNG_PLAN, 0)
+    if plan:
+        ordered[RUNG_PLAN] = plan
+    retries = sorted(
+        (key for key in counts if key.startswith("error-fed-retry-") and counts[key]),
+        key=lambda key: int(key.rsplit("-", 1)[-1]),
+    )
+    for key in retries:
+        ordered[key] = counts[key]
+    strong = counts.get(RUNG_STRONG, 0)
+    if strong:
+        ordered[RUNG_STRONG] = strong
+    rec = counts.get(RUNG_RECONFIRM, 0)
+    if rec:
+        ordered[RUNG_RECONFIRM] = rec
+    if not ordered:
+        return None
+    ordered["total"] = sum(ordered.values())
+    return ordered
 
 
 def _last_served_stamp(steps: list[StepStamp]) -> StepStamp | None:
@@ -583,10 +613,24 @@ def plan_sql_answer(
     steps: list[StepStamp] = []
     failed_models: set[str] = set()
     failures: list[str] = []
+    call_counts: dict[str, int] = {}
+
+    def _note_call(active: object, bucket: str) -> None:
+        # A route refusal does not call complete(). Every other generator
+        # method on this path calls it once.
+        if isinstance(active, _RouteRefusal):
+            return
+        call_counts[bucket] = call_counts.get(bucket, 0) + 1
+
+    def _with_calls(env: dict[str, Any]) -> dict[str, Any]:
+        env["model_calls"] = model_calls_stamp(call_counts)
+        return env
 
     def stop(code: str, detail: str, *, refused: bool = True) -> dict[str, Any]:
-        return _not_answered(
-            question, audit_id, steps, code=code, detail=detail, refused=refused
+        return _with_calls(
+            _not_answered(
+                question, audit_id, steps, code=code, detail=detail, refused=refused
+            )
         )
 
     try:
@@ -612,7 +656,7 @@ def plan_sql_answer(
 
     if confirm == "no":
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "no"))
-        return _not_found(audit_id, steps)
+        return _with_calls(_not_found(audit_id, steps))
 
     sampled, sample_reason = _sample_values(grant, request)
     steps.append(StepStamp.cortex("sample", "cortex:column-values", sample_reason))
@@ -626,8 +670,10 @@ def plan_sql_answer(
         active: PlanSqlGenerator,
         attempts: int,
         rung_of,
+        plan_bucket: str,
     ) -> dict[str, Any] | None:
         plan = active.plan(request)
+        _note_call(active, plan_bucket)
         steps.append(plan.stamp)
         _remember(plan, failed_models)
         security = _security_stop(plan, journal)
@@ -643,6 +689,7 @@ def plan_sql_answer(
         priors = list(failures)
         for attempt in range(attempts):
             sql_step = active.sql(request, plan, prior_violations=priors)
+            _note_call(active, rung_of(attempt))
             steps.append(sql_step.stamp)
             _remember(sql_step, failed_models)
             security = _security_stop(sql_step, journal)
@@ -774,21 +821,26 @@ def plan_sql_answer(
             return None
         steps.append(StepStamp.cortex("execute", "cortex:execute_sql", f"rows={len(rows)}"))
         _mark_rung(steps, rung)
-        return _success(
-            question,
-            audit_id,
-            steps,
-            plan=plan,
-            sql_step=sql_step,
-            rows=rows,
-            served_sql=served_sql,
-            rung=rung,
+        return _with_calls(
+            _success(
+                question,
+                audit_id,
+                steps,
+                plan=plan,
+                sql_step=sql_step,
+                rows=rows,
+                served_sql=served_sql,
+                rung=rung,
+            )
         )
 
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
     with freeroute.journal(split=split) as journal:
         answered = _round(
-            gen, SQL_ATTEMPTS, lambda n: RUNG_PLAN if n == 0 else rung_retry(n)
+            gen,
+            SQL_ATTEMPTS,
+            lambda n: RUNG_PLAN if n == 0 else rung_retry(n),
+            RUNG_PLAN,
         )
         if answered is not None:
             return answered
@@ -801,7 +853,7 @@ def plan_sql_answer(
             )
         )
         request = replace(request, prior_failures=tuple(failures)[:8])
-        answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG)
+        answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG, RUNG_STRONG)
         if answered is not None:
             return answered
         policy = next(
@@ -812,15 +864,18 @@ def plan_sql_answer(
             why, closest = _parse_reconfirm("", failures, request)
             served = _last_served_stamp(steps)
             _mark_rung(steps, RUNG_RECONFIRM)
-            return _reconfirm_envelope(
-                audit_id,
-                steps,
-                why=why,
-                closest=closest,
-                stamp=served,
-                rung=RUNG_RECONFIRM,
+            return _with_calls(
+                _reconfirm_envelope(
+                    audit_id,
+                    steps,
+                    why=why,
+                    closest=closest,
+                    stamp=served,
+                    rung=RUNG_RECONFIRM,
+                )
             )
         rec = strong.reconfirm(request, tuple(failures)[:8])
+        _note_call(strong, RUNG_RECONFIRM)
         steps.append(rec.stamp)
         _remember(rec, failed_models)
         security = _security_stop(rec, journal)
@@ -833,13 +888,15 @@ def plan_sql_answer(
             rec.text if rec.ok and not missed else "", failures, request
         )
         _mark_rung(steps, RUNG_RECONFIRM)
-        return _reconfirm_envelope(
-            audit_id,
-            steps,
-            why=why,
-            closest=closest,
-            stamp=rec.stamp if rec.ok else None,
-            rung=RUNG_RECONFIRM,
+        return _with_calls(
+            _reconfirm_envelope(
+                audit_id,
+                steps,
+                why=why,
+                closest=closest,
+                stamp=rec.stamp if rec.ok else None,
+                rung=RUNG_RECONFIRM,
+            )
         )
 
 
@@ -854,6 +911,7 @@ __all__ = [
     "RUNG_RECONFIRM",
     "RUNG_STRONG",
     "SQL_ATTEMPTS",
+    "model_calls_stamp",
     "rung_retry",
     "default_generator",
     "plan_sql_answer",

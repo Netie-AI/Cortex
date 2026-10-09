@@ -210,6 +210,20 @@
             "title": "Memory Reads",
             "type": "array"
           },
+          "model_calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Calls"
+          },
           "plan_sql_rung": {
             "anyOf": [
               {
@@ -1236,6 +1250,21 @@
             },
             "title": "Memory Reads",
             "type": "array"
+          },
+          "model_calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Calls"
           },
           "plan_sql_rung": {
             "anyOf": [
