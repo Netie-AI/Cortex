@@ -31,8 +31,11 @@ The answer that leaves this path stamps the rung that produced it
 ``plan_sql_rung`` and on an assumptions line ``rung: <token>``. A direct
 abstain and a confirm-no do not carry a rung.
 
-``Answer.model_calls`` counts FreeRoute ``complete()`` calls on those same
-steps, plus ``total``. DMS reads the per-step counts only from that object.
+``Answer.model_calls`` counts logical FreeRoute ``complete()`` calls on those
+same steps, plus ``total``: one per call the ladder issues. A transport or
+proxy retry under that call (an upstream 429 retried by the cap proxy or the
+FreeRoute client) is not a step. DMS reads the per-step counts only from that
+object.
 
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
 route-stamp failure, which never reaches a model result). PII is not an abstain
@@ -176,9 +179,10 @@ def _mark_rung(steps: list[StepStamp], rung: str) -> None:
 
 
 def model_calls_stamp(counts: dict[str, int]) -> dict[str, int] | None:
-    """Per-step ``complete()`` counts plus ``total``. None when nothing was called.
+    """Logical ``complete()`` counts per step, plus ``total``.
 
-    Step keys match the rung tokens. ``total`` is the sum of those steps.
+    One count per call the ladder issues. Transport retries under that call
+    are not included. None when nothing was called. ``total`` is the sum.
     """
     ordered: dict[str, int] = {}
     plan = counts.get(RUNG_PLAN, 0)

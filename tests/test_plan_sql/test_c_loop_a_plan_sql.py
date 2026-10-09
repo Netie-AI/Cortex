@@ -869,15 +869,53 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     }
 
 
+def _plan_call_transport_retries(fake, monkeypatch: pytest.MonkeyPatch, retries: int) -> dict[str, int]:
+    """Cap proxy under the first chat: ``retries`` HTTP 429s, then the real reply.
+
+    ``complete()`` is issued once. The 429s are swallowed here and never become
+    another ladder call. ``raw`` counts every chat attempt, including those 429s.
+    """
+    from CortexOS.integrations import openvault_client
+
+    current = openvault_client.request_json
+    state = {"left": retries, "raw": 0}
+
+    def _call(method, path, **kwargs):  # noqa: ANN001
+        route = str(path).split("?", 1)[0]
+        if not route.endswith("/v1/chat/completions"):
+            return current(method, path, **kwargs)
+        if state["left"]:
+            state["left"] -= 1
+            state["raw"] += 1
+            fake.calls.append(
+                {
+                    "method": str(method).upper(),
+                    "path": path,
+                    "body": {"error": {"message": "HTTP 429", "type": "rate_limit"}},
+                    "headers": {},
+                    "base": kwargs.get("base"),
+                    "transport_retry": 429,
+                }
+            )
+            return _call(method, path, **kwargs)
+        state["raw"] += 1
+        return current(method, path, **kwargs)
+
+    monkeypatch.setattr(openvault_client, "request_json", _call)
+    return state
+
+
 def test_model_calls_stamp_matches_complete_count(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """Must-fail: per-step model_calls sum to total, and total equals complete().
+    """Must-fail: model_calls counts logical complete() calls, not transport retries.
 
     Full ladder: plan, at least one numbered error-fed retry, stronger, then
-    reconfirm. DMS reads per-step counts only from Answer.model_calls.
-    Dropping one step's count from the stamp makes the sum disagree with
-    the fake's complete() counter.
+    reconfirm. The fake injects two HTTP 429 retries on the plan call. DMS
+    reads per-step counts only from Answer.model_calls. The stamp stays equal
+    to the logical complete() count. The fake's raw attempt counter is higher.
+    Dropping one step, or adding the 429s into the stamp, disagrees with that
+    logical count.
     """
     seen = {"n": 0}
     real = freeroute.complete
@@ -889,7 +927,9 @@ def test_model_calls_stamp_matches_complete_count(
     monkeypatch.setattr(freeroute, "complete", _spy)
     bad = "SELECT no_such_col FROM transactions"
     configured = "openai/gpt-oss-20b"
+    plan_retries = 2
     _stronger_route(armed_openvault, configured, monkeypatch)
+    transport = _plan_call_transport_retries(armed_openvault, monkeypatch, plan_retries)
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
@@ -913,15 +953,18 @@ def test_model_calls_stamp_matches_complete_count(
         "total": 6,
     }
     steps = {key: value for key, value in calls.items() if key != "total"}
-    assert "plan" in steps
-    assert "error-fed-retry-1" in steps
-    assert "stronger-model" in steps
-    assert "reconfirm" in steps
     assert sum(steps.values()) == calls["total"] == seen["n"]
-    assert seen["n"] == len(armed_openvault.chat_calls)
+    assert transport["raw"] == seen["n"] + plan_retries
+    assert len(armed_openvault.chat_calls) == transport["raw"]
+    assert calls["total"] != transport["raw"]
     dropped = "error-fed-retry-1"
     reduced = sum(value for key, value in steps.items() if key != dropped)
     assert reduced != seen["n"]
+    leaked_plan = calls["plan"] + plan_retries
+    leaked_total = calls["total"] + plan_retries
+    assert leaked_total == transport["raw"]
+    assert calls["plan"] != leaked_plan
+    assert calls["total"] != leaked_total
 
 
 def test_confirm_yes_runs_the_closest_question(

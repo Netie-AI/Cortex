@@ -190,12 +190,22 @@ class Answer(BaseModel):
     # Null when this path did not answer (flag off, direct abstain, confirm-no).
     # 1.4 clients ignore it.
     plan_sql_rung: str | None = None
-    # 1.5.0: FreeRoute complete() calls per ladder step, plus ``total``.
-    # Keys that ran: ``plan``, ``error-fed-retry-<N>`` (N starts at 1),
-    # ``stronger-model``, ``reconfirm``. ``total`` is their sum. DMS reads
-    # per-step counts only from this object. Null when this path made no
-    # model call. 1.4 clients ignore it.
-    model_calls: dict[str, int] | None = None
+    # 1.5.0: logical complete() calls per ladder step, plus ``total``.
+    # One per complete() the ladder issues. A 429 retried under that call
+    # is not a step. Null when this path made no model call.
+    model_calls: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "1.5.0 logical FreeRoute complete() calls per ladder step, plus "
+            "total. One count per complete() the ladder issues. Transport or "
+            "proxy retries (an upstream 429 retried by the cap proxy or the "
+            "FreeRoute client) are not counted. Keys that ran: plan, "
+            "error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. "
+            "total is their sum. DMS reads per-step counts only from this "
+            "object. Null when this path made no model call. 1.4 clients "
+            "ignore it."
+        ),
+    )
 
 
 class DrillthroughRequest(BaseModel):
