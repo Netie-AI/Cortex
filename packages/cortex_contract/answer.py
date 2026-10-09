@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 
 class Badge(str, Enum):
@@ -50,6 +50,47 @@ class MemoryRead(BaseModel):
     served_at: str
 
 
+class PackageStamp(BaseModel):
+    """1.5.0 C-LOOP-C: what a packaged artifact was built from, by whom and when."""
+
+    served_by: str
+    served_method: str
+    served_at: str
+    served_rows_sha256: str
+    served_sql_sha256: str
+    served_row_count: int
+    served_rows_truncated: bool = False
+    # Set when the artifact was not produced or was refused; its body is then empty.
+    served_reason: str | None = None
+
+
+class ChartSpec(PackageStamp):
+    """1.5.0: a declarative Vega-Lite-style spec over ``Answer.rows``.
+
+    ``spec.data`` is ``{"name": "rows"}``: the consumer binds the answer's rows.
+    The spec never embeds values, and every ``field`` it names is a row column.
+    """
+
+    spec: dict[str, Any] | None = None
+    fields: list[str] = Field(default_factory=list)
+
+
+class InsightFact(BaseModel):
+    """1.5.0: one number an insight states, and where in the rows it comes from."""
+
+    op: str
+    value: float
+    column: str | None = None
+    row_index: int | None = None
+
+
+class Insight(PackageStamp):
+    """1.5.0: short text stating only facts computed from ``Answer.rows``."""
+
+    text: str | None = None
+    facts: list[InsightFact] = Field(default_factory=list)
+
+
 class ContributingSource(BaseModel):
     """One source card for the Sources panel (architecture §4.7 / §4.8)."""
 
@@ -86,6 +127,24 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0 C-LOOP-C: result packaging. Absent from the wire unless packaging
+    # ran, so an answer without a package serialises exactly as 1.4.0 did.
+    chart_spec: ChartSpec | None = None
+    insight: Insight | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_package(self, handler):
+        # Unannotated on purpose: pydantic would publish a return annotation as
+        # the serialization schema and drop every Answer property from the spec.
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in _PACKAGE_FIELDS:
+                if data.get(key) is None:
+                    data.pop(key, None)
+        return data
+
+
+_PACKAGE_FIELDS = ("chart_spec", "insight")
 
 
 class DrillthroughRequest(BaseModel):

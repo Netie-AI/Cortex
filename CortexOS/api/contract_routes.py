@@ -298,7 +298,9 @@ async def contract_ask(body: AskRequest) -> Answer:
         data = dict(result)
     data.update(memory_fields)
     data = _enrich_answer(data, session_id=body.session_id, verified=verified)
-    return Answer.model_validate(data)
+    from CortexOS.dms.result_package import apply_result_package
+
+    return apply_result_package(data)
 
 
 @router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")
