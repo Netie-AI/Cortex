@@ -26,6 +26,32 @@ are gone from both files. Unarmed or no OpenVault route returns
 and that refusal. `served_provider` / `served_model` are copied from the
 FreeRoute stamp. Nothing PASS.
 
+## RUN-AUTH-01 spend gate on model run routes -- 2026-10-08
+
+Cortex #358. `POST /run`, `POST /api/workflows/run`, `POST /api/workflows/resume`,
+`POST /api/engine/run`, and (pack dms) `POST /cortex/constructor/run` now depend
+on the existing `require_spend` (`require_role("steward")`). Viewer `api_viewer`
+is HTTP 403 with the named detail and zero adapter calls. Unknown keys are 401.
+A secret mapped to two roles is dropped. A non-rank role string is 403.
+`POST /api/engine/run` still uses `get_caller`, so `DMS_AUTH_DISABLED` still
+opens that one route as admin, the same as parent. `POST /run` and workflow
+run/resume use `require_spend_key` and do not honor the flag. Constructor
+`/run` ignores the flag too. `get_caller` does not read the `cortex_api_key`
+cookie. Constructor mutations that authenticate only by that cookie require
+an exact Origin from `CONSTRUCTOR_ORIGIN_ALLOWLIST` (empty by default; `*`
+is a config error). A malformed Origin port is the same named refusal,
+`constructor_origin_denied`, not a 500. `POST /api/workflows/cancel`,
+`clear`, `recognize`, and `hardware` take a header key only, steward or
+above. The session cookie path stays `/cortex`. A steward cookie with no
+header is 401 on those four POSTs and the model sentinel stays 0.
+A registered-route walk lists every constructor and workflow route, plus
+``POST /run`` and engine ``POST /api/engine/run``. A route in that scope
+that is not in the table fails the walk. A spend or write route (model
+call, run creation, cost write, or store write) still fails on the viewer
+dependency.
+recognize stays steward and is not in that spend/write set. Workflow GETs
+are unchanged. Draft only. Not a merge claim.
+
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 
 Crew Insights now serves generated SQL on an L0/L1 miss only when
