@@ -97,7 +97,7 @@ _C7_06_105_BRANCH_EXCEPTIONS = {
 }
 _C7_06_105_EXACT_DIFF = {
     "CortexOS/dms/answer_engine.py": (
-        "eaa2fc05d34f2a1d4bf6cac5d3f900aee34c46eebaf62e39e99c9a6bbbf4daa8",
+        "7f28e476e99e7df1ad365ffc1a8f0e55161f659776ff16199f588c3d33fb3040",
         ("choose_governed_metric", "keyword cascade is not a caller"),
     ),
 }

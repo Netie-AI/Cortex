@@ -6,8 +6,9 @@ Agents append one section per shipped feature. Sequential build log.
 
 `choose_governed_metric` no longer calls `route_to_metric`. `answer()` reaches
 `attempt_l2` (OpenVault/FreeRoute) on that miss. The keyword function stays
-for direct tests. A stored skill whose SQL drops a named SKU exclusion is not
-served. The delayed/late ranked-SQL bridge in `answer_question` is retired; a
+for direct tests. A stored `sql_template` is not served: a fuzzy hit replayed sku_count for a
+delayed-shipment question. A governed `metric_id` skill still recompiles, and
+one whose SQL drops a named SKU exclusion is not served. The delayed/late ranked-SQL bridge in `answer_question` is retired; a
 successful abstain stays an abstain. `cutover` stays false. Held-out gate is
 not met. Draft only. Not a CI claim. Not PASS.
 

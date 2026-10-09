@@ -1898,12 +1898,10 @@ def answer(
                     metric_id = hit["metric_id"]
                     metric_slots = dict(params)
                     planned_tables = _tables_stated_by_metric(hit["metric_id"])
-            elif hit.get("sql_template"):
-                candidate = str(hit["sql_template"])
-                if not _sql_omits_named_exclusion(question, candidate):
-                    sql = candidate
-                    layer, badge = "query_skill", "query_skill"
-                    assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
+            # sql_template skills are not served. A 0.73 embedding hit
+            # replayed sku_count for a delayed-shipment question, then
+            # capture stored that pair. Exact certified questions are
+            # already served by L0. A template miss falls through to L2.
 
     if sql is None:
         # L2 lives on the engine port module, not here. This file must not

@@ -30,11 +30,10 @@
     "sa_total_over_a_ranking",
     "sa_unknown_entity",
     "sa_vague_how_doing",
-    "sd_distinct_sku_vs_rows",
     "sd_top3_volume",
     "tp_audit_overdue",
     "uc_spend_by_country",
     "vn_low_stock_wh_a"
   ],
-  "_c7_06": "Keyword serve retired. These ids left the answering set on purpose because route_to_metric is not a caller and L2 is off: cv_paged_total_followup, gf_unique_sku_count, ms_cold_storage, ms_delayed_count, ms_exclude_beta, ms_sku_count, ms_top5_revenue, ns_expired_count, rs_cold_storage_count, tp_cold_storage_count, tp_delayed_count, tp_revenue_last_month, tp_total_revenue, uc_top5_revenue_ringgit, uc_total_revenue_myr, vn_exclude_bare_beta, vn_exclude_full_sku, vn_exclude_numeric. A later abstain of an id still listed is a regression."
+  "_c7_06": "Keyword serve retired. These ids left the answering set on purpose because route_to_metric is not a caller and L2 is off: cv_paged_total_followup, gf_unique_sku_count, ms_cold_storage, ms_delayed_count, ms_exclude_beta, ms_sku_count, ms_top5_revenue, ns_expired_count, rs_cold_storage_count, tp_cold_storage_count, tp_delayed_count, tp_revenue_last_month, tp_total_revenue, uc_top5_revenue_ringgit, uc_total_revenue_myr, vn_exclude_bare_beta, vn_exclude_full_sku, vn_exclude_numeric. A later abstain of an id still listed is a regression. Also sd_distinct_sku_vs_rows: it was a fuzzy stored-SQL replay of sku_count, not L0."
 }
