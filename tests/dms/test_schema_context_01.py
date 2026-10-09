@@ -52,7 +52,10 @@ SQL_JOIN = (
     "JOIN beta_entry ON alpha_ledger.id = beta_entry.ref_code "
     "WHERE alpha_ledger.qty > 1"
 )
-HEADERS = {"Authorization": "Bearer ov_schema_ctx_test"}
+HEADERS = {
+    "Authorization": "Bearer ov_schema_ctx_test",
+    "X-API-Key": "dms-demo-admin-key",
+}
 _FROZEN_UUID = uuid.UUID("0123456789abcdef0123456789abcdef")
 # Measured on 279cbd85 with the frozen clock below, usage key absent.
 _ABSENT_SHA256 = "6c38d0a89050612baebae9c32e4f77c511d365211d8d7cd4636656b9627c2e95"
@@ -89,7 +92,7 @@ def _post(api: TestClient, payload: dict[str, Any]) -> dict[str, Any]:
 @pytest.fixture
 def api(monkeypatch: pytest.MonkeyPatch, tmp_path) -> TestClient:
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv("CORTEX_FREEROUTE_SCOREBOARD", str(tmp_path / "routes.db"))
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
@@ -97,7 +100,7 @@ def api(monkeypatch: pytest.MonkeyPatch, tmp_path) -> TestClient:
     reset_limiter(per_minute=600)
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def _complete(prompts: list[tuple[str, str]], sql_for):
@@ -203,6 +206,97 @@ def test_must_pass_non_pack_space_sql_names_only_caller_tables(
         "completion_tokens": 5,
         "total_tokens": 12,
     }
+
+
+def _user_message(messages: list) -> str:
+    parts: list[str] = []
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            parts.append(str(msg.get("content") or ""))
+    return "\n".join(parts)
+
+
+def _capture_openvault(monkeypatch: pytest.MonkeyPatch):
+    """Real crew ``complete`` builds the messages. Only the vault call is stubbed."""
+    from types import SimpleNamespace
+
+    from CortexOS.crew import freeroute as fr
+    from CortexOS.integrations.freeroute import Arming
+
+    captured: list[tuple[str, list]] = []
+
+    def fake_arm() -> Arming:
+        return Arming(armed=True, reason="test-armed", url="http://127.0.0.1:9")
+
+    async def fake_complete_core(task, messages, **kwargs):  # noqa: ANN001
+        del kwargs
+        captured.append((str(task), list(messages)))
+        text = SQL_OK if task == "crew-insights-sql" else "use the supplied schema"
+        return SimpleNamespace(
+            ok=True,
+            text=text,
+            message={},
+            stamp=None,
+            reason="",
+            usage={"prompt_tokens": 4, "completion_tokens": 2},
+        )
+
+    monkeypatch.setattr(fr, "arm", fake_arm)
+    monkeypatch.setattr(fr, "complete_core", fake_complete_core)
+    return captured
+
+
+def test_openvault_sql_leg_receives_schema_context_verbatim(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DMS schema_context is the user message on the FreeRoute SQL task.
+
+    ``complete()`` is the live adapter. The test stubs only ``complete_core``,
+    which is the OpenVault call, and checks that message.
+    """
+    captured = _capture_openvault(monkeypatch)
+    pack = _pack_tables(INTENT)
+    body = _post(
+        api,
+        {
+            "intent": INTENT,
+            "ask": False,
+            "generate": True,
+            "schema_context": SCHEMA,
+        },
+    )
+    sql_calls = [msgs for task, msgs in captured if task == "crew-insights-sql"]
+    assert sql_calls, [task for task, _msgs in captured]
+    user = _user_message(sql_calls[0])
+    assert SCHEMA in user
+    assert not (schema_mod.schema_idents(user) & pack)
+    assert body["status"] == "ABSTAIN"
+    assert "alpha_ledger" in schema_mod.schema_idents(str(body.get("sql_used") or ""))
+
+
+def test_unranked_intent_still_sends_schema_context_to_openvault(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A question with no pack hit still offers the caller schema to the model."""
+    from CortexOS.crew.insights import retrieve_ontology
+
+    intent = "xqkpl zznorf"
+    ranking = retrieve_ontology(intent)
+    assert ranking.get("ok") is False
+    captured = _capture_openvault(monkeypatch)
+    body = _post(
+        api,
+        {
+            "intent": intent,
+            "ask": False,
+            "generate": True,
+            "schema_context": SCHEMA,
+        },
+    )
+    sql_calls = [msgs for task, msgs in captured if task == "crew-insights-sql"]
+    assert sql_calls, body.get("refuse_reason")
+    assert SCHEMA in _user_message(sql_calls[0])
+    assert body["status"] == "ABSTAIN"
 
 
 def test_must_fail_pack_table_never_offered(
@@ -702,7 +796,7 @@ def test_absent_schema_context_matches_parent_bytes(
 
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv("CORTEX_FREEROUTE_SCOREBOARD", "/tmp/schema-context-01-byte-probe.db")
     monkeypatch.setattr(uuid, "uuid4", lambda: _FROZEN_UUID)
@@ -723,7 +817,7 @@ def test_absent_schema_context_matches_parent_bytes(
 
     from CortexOS.api.app import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"}) as client:
         response = client.post(
             "/v1/insights",
             json={"intent": "count qty on the supplied ledger", "ask": True, "generate": False},

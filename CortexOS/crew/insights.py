@@ -1496,7 +1496,10 @@ async def _run_insights(
     supplied = schema_mod.supplied_schema(schema_context)
     gen: dict[str, Any] | None = None
     if generate:
-        if not ranking.get("ok"):
+        # Pack ranking is the fallback only when no caller schema was sent.
+        # A supplied schema is the ontology the model writes against, including
+        # a Space whose question shares no tokens with the engine pack.
+        if not ranking.get("ok") and not supplied:
             return _refuse(
                 intent=text,
                 ranking=ranking,
