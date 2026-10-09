@@ -42,6 +42,9 @@ jobs:
       - name: Version lines
         run: python scripts/check_versions.py
 
+      - name: Supply chain (hash-locked images, uv.lock current, litellm denylist)
+        run: python scripts/check_supply_chain.py
+
       - name: OpenAPI drift (requires [full])
         run: |
           python -c "import dbos,qdrant_client,tantivy,sentence_transformers"
