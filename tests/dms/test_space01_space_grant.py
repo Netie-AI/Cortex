@@ -40,7 +40,7 @@ from CortexOS.execution.session_manifests import (
 SESSION = "space01-sess"
 SA = ["transactions"]
 REVENUE_Q = "Top 5 selling SKUs by revenue"
-OUTSIDE_SA_Q = "Which SKUs are below reorder level?"
+OUTSIDE_SA_Q = "Which SKUs are below reorder level in warehouse A?"
 
 
 def _b64u(raw: bytes) -> str:

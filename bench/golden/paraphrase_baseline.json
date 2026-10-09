@@ -1,6 +1,6 @@
 {
-  "robustness_floor": 0.1429,
+  "robustness_floor": 0.1224,
   "wrong_must_be_zero": true,
   "paraphrase_total": 100,
-  "note": "C7-06 retired keyword serve. Measured robustness on this head is 0.1429 (was 0.6471 while route_to_metric answered). Wrong stays 0. Raise this floor only after a measured gain. Do not lower it to hide a new miss."
+  "note": "C7-06 retired keyword serve and stored-SQL replay. Measured robustness on this head is 0.1224 (was 0.6471 while route_to_metric answered). Wrong stays 0. Raise this floor only after a measured gain. Do not lower it to hide a new miss."
 }

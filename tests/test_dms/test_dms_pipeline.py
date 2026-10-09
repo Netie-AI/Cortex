@@ -100,7 +100,9 @@ def test_query_low_stock(loaded_db, monkeypatch):
         "netie.dms.query_service.get_connection",
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
-    result = query_service.answer_question("Which SKUs are below reorder level?")
+    result = query_service.answer_question(
+        "Which SKUs are below reorder level in warehouse A?"
+    )
     assert result["violations_blocked"] == []
     assert result["sql_used"]
     rows = result.get("rows") or []

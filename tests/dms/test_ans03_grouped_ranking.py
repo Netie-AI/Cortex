@@ -65,14 +65,17 @@ def test_grouped_ranking_does_not_return_the_warehouse_as_one_row(
 
 
 def test_sku_rank_that_names_total_revenue_still_ranks() -> None:
-    """R-0005 — "top 5 SKUs by total revenue" ranks SKUs; it is not a scalar."""
+    """R-0005 — this phrasing is not the certified top-5 question.
+
+    It must not return the warehouse-wide total. The keyword cascade and
+    stored-SQL replay are not serve paths, so it abstains.
+    """
     body = answer("top 5 SKUs by total revenue")
-    assert body["badge"] != "abstain", body.get("answer")
-    assert len(body.get("rows") or []) == 5
-    assert "sku" in body["rows"][0]
+    assert body["badge"] == "abstain", body.get("answer")
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
     assert not _warehouse_total_leaked(body)
-    rendered = body.get("answer") or ""
-    assert "SKU-" in rendered
+    assert "80375993" not in (body.get("answer") or "").replace(",", "")
 
 
 def test_bare_total_revenue_still_answers() -> None:
