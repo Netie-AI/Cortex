@@ -3,15 +3,12 @@
 The lines below are the mismatch set printed by
 ``python scripts/check_supply_chain.py --mismatches`` against main 0faede64,
 with the three litellm rows removed: constructor 44, core 44, full 67.
-``requirements/lock_skew/`` may only shrink. This file is the ceiling,
-because that directory and ``scripts/check_supply_chain.py`` are not
-protected paths: a commit can add a mismatch and the matching skew line
-together and the checker still passes.
-
-Current non-comment lines in each ``requirements/lock_skew/image-<image>.txt``
-must be a subset of the literal set for that image. Removing a line passes.
-A line that is not in the frozen set fails, and the message names the image
-and the line.
+That set is the ceiling. It may only shrink or be reordered, never grow.
+LOCK-ALIGN-01 deleted the live ``requirements/lock_skew/`` files once every
+shared pin matched ``uv.lock`` and the checker stopped consulting an
+allow-list. A missing file is an empty subset. A file that comes back must
+still be a subset of the literal set for that image. A line that is not in
+the frozen set fails, and the message names the image and the line.
 
 This file is under ``tests/invariants/``. A commit that touches it needs
 ``INVARIANT-CHANGE:`` in the commit body. Lead approved this one-time
@@ -195,15 +192,20 @@ def _frozen(image: str) -> frozenset[str]:
 
 
 def skew_lines(root: Path) -> dict[str, list[str]]:
-    """Non-comment lines in each image's lock_skew file, in file order."""
+    """Non-comment lines in each image's lock_skew file, in file order.
+
+    A missing file is empty. The live ratchet files are absent once the list
+    is zero; a reintroduced file is still capped by the frozen set.
+    """
     found: dict[str, list[str]] = {}
     for image in IMAGES:
         path = root / "requirements" / "lock_skew" / f"image-{image}.txt"
         rows: list[str] = []
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            if not raw.strip() or raw.lstrip().startswith("#"):
-                continue
-            rows.append(raw.strip())
+        if path.is_file():
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                if not raw.strip() or raw.lstrip().startswith("#"):
+                    continue
+                rows.append(raw.strip())
         found[image] = rows
     return found
 
