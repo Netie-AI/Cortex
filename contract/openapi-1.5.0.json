@@ -1853,6 +1853,7 @@
           "schema_context": {
             "anyOf": [
               {
+                "maxLength": 8192,
                 "type": "string"
               },
               {
@@ -1860,7 +1861,7 @@
               }
             ],
             "default": null,
-            "description": "Caller shortlist. Replaces the pack table list when present. Pick reasons live in this string, not in a separate field: table lines use reason=score:<score>, column lines may include reason=<why>, join lines include reason=<why>.",
+            "description": "Caller shortlist. Replaces the pack table list when present. Pick reasons live in this string, not in a separate field: table lines use reason=score:<score>, column lines may include reason=<why>, join lines include reason=<why>. maxLength 8192. The engine cap is 8192 UTF-8 bytes.",
             "title": "Schema Context"
           }
         },

@@ -111,7 +111,8 @@ supported:
       The insights response gains usage (ContractInsightsUsage):
       prompt_tokens, completion_tokens, total_tokens, each null when omitted,
       never 0 as a stand-in. Clients that omit schema_context keep the
-      279cbd85 envelope apart from usage. canonical_manifest_bytes unchanged.
+      279cbd85 envelope apart from usage. schema_context maxLength is 8192;
+      the engine cap is 8192 UTF-8 bytes. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

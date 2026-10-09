@@ -332,7 +332,7 @@ def _prompt_ontology_lines(
     """
     text = schema_mod.supplied_schema(schema_context)
     if text:
-        return [text]
+        return [schema_mod.untrusted_schema_block(text)]
     return _ontology_lines(ranking)
 
 
@@ -649,7 +649,20 @@ async def climb(
         )
 
     supplied = schema_mod.supplied_schema(schema_context)
-    allowed = schema_mod.schema_idents(supplied) if supplied else _allowed_tables(ranking)
+    declared: dict[str, list[str]] | None = None
+    if supplied:
+        # The string never becomes the allowlist. Parse declared tables and
+        # columns, then narrow the caller grant when one exists.
+        from CortexOS.insights.caller_ontology import SOURCE_CALLER
+
+        parsed = schema_mod.parsed_catalog(supplied)
+        if ranking.get("source") == SOURCE_CALLER:
+            declared = schema_mod.narrow_catalog(schema_mod.grant_catalog(ranking), parsed)
+        else:
+            declared = parsed
+        allowed = set(declared)
+    else:
+        allowed = _allowed_tables(ranking)
     if not allowed:
         return _envelope(
             ok=False,
@@ -663,7 +676,7 @@ async def climb(
             ),
         )
     runner = complete or fr.complete
-    columns = {} if supplied else _ranked_columns(ranking)
+    columns = _ranked_columns(ranking)
     idea_list = _idea_lines(ideas)
     g1_consumed = bool(_g1_plan_lines(g1))
     prior_sql_consumed = False
@@ -800,10 +813,38 @@ async def climb(
             # instead of validating "" and reporting "empty sql".
             checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
         elif supplied:
-            checked = fr.validate_sql(sql, allowed, columns={})
+            from CortexOS.insights.caller_sql import validate_caller_sql
+
+            checked = validate_caller_sql(sql, declared or {})
+            if not checked.get("ok"):
+                # Same refusal as the caller-catalog gate. sql stays unset so
+                # a refused statement is never copied into sql_used.
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="SCHEMA_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=str(checked.get("reason") or "refused"),
+                )
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
-        last_sql = str(checked.get("sql") or sql or last_sql)
+        if checked.get("ok"):
+            last_sql = str(checked.get("sql") or "")
+        elif not supplied:
+            # Pack path: the improve step still sees the prior statement.
+            # The schema_context path returns above, with sql left unset.
+            last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
 
