@@ -2,6 +2,7 @@
 
 | Date | Topic | Keywords | Main idea | Path |
 |------|-------|----------|-----------|------|
+| 2026-10-06 | hx-02-port-main | hx-02, supply-chain, require-hashes, uv.lock, litellm, egress, chokepoint, freeroute, openvault, #283, #280 | Images install hash-locked wheels then the project --no-deps; check_supply_chain.py in CI. On main the egress gate is the OV FreeRoute client; 7 direct-provider files are frozen, shrink-only debt. | `2026-10-06_hx-02-port-main.md` |
 | 2026-09-25 | cortex-272-local-1 | freeroute, served_local, LOCAL_ONLY, local_qwen, openvault, #272, #71 | Cortex stamps served_* from OV response; local hop arming; LOCAL_ONLY fail-closed. OV#71 edead3c4; JSON boolean true only; local not proven. | `2026-09-25_cortex-272-local-1.md` |
 | 2026-09-25 | cortex-269-router1 | freeroute, router, held-out, shadow, split, token cost, insights, #269 | Additive token/split store; shadow/heldout/benchmark never train pick; Insights served_* unproven until #272; baseline refuses unless LEARN is explicit. | `2026-09-25_cortex-269-router1.md` |
 | 2026-09-25 | cortex-211-narrow-plan-source | insights, plan_source, ontology_plan, generative-ask, #211, #231 | Insights stamps plan_source=ontology_plan only for validated ontology generate SQL. Missing stamp was why Studio scored other. | `2026-09-25_cortex-211-narrow-plan-source.md` |

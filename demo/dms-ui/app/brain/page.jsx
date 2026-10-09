@@ -2,6 +2,11 @@
 import { useState, useRef } from "react";
 import AppShell from "../../components/AppShell";
 import {
+  EXPORT_FALLBACK,
+  presentBrain,
+  suggestionRefusalLine,
+} from "../../lib/brain-refusal";
+import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
@@ -210,10 +215,14 @@ function SuggestionsCard({ suggestions, onAccept, onDismiss, gateResults = {} })
     <div className="mt-3 space-y-2">
       {suggestions.map((s) => {
         const gate = gateResults[s.task_id];
+        const refusalLine = suggestionRefusalLine(s);
         return (
         <div key={s.task_id} className="bg-gray-800 border border-gray-700 rounded-lg p-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
+              {refusalLine ? (
+                <p data-testid="brain-refusal" className="text-amber-300 text-xs mb-1">{refusalLine}</p>
+              ) : null}
               <div className="flex items-center gap-2">
                 <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${s.priority === "critical" ? "bg-red-900/60 text-red-300" : s.priority === "high" ? "bg-orange-900/60 text-orange-300" : "bg-gray-700 text-gray-400"}`}>{s.priority}</span>
                 <span className="text-white text-sm font-medium">{s.title}</span>
@@ -249,8 +258,15 @@ export default function BrainPage() {
   const [gateResults, setGateResults] = useState({});
   const bottomRef = useRef(null);
 
-  const addMessage = (role, text, data = null, dataType = null) => {
-    setMessages(prev => [...prev, { role, text, data, dataType, id: Date.now() }]);
+  const addMessage = (role, text, data = null, dataType = null, flags = null) => {
+    setMessages(prev => [...prev, {
+      role,
+      text,
+      data,
+      dataType,
+      refused: Boolean(flags && flags.refused),
+      id: Date.now(),
+    }]);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   };
 
@@ -282,45 +298,48 @@ export default function BrainPage() {
     return res.json();
   };
 
+  const publish = (kind, result, successText) => {
+    const view = presentBrain({ kind, payload: result, successText });
+    addMessage("assistant", view.text, view.data, view.dataType, { refused: view.refused });
+  };
+
   const handleQuick = async (cmd) => {
     setLoading(true);
     addMessage("user", cmd.label);
     try {
-      let result, dataType;
+      let result;
       switch (cmd.intent) {
         case "generate_chart":
           result = await callBrain("chart", { query: cmd.query, data: {} });
-          dataType = "chart";
-          addMessage("assistant", `Chart generated: "${result.title || cmd.query}"`, result, "chart");
+          publish("chart", result, `Chart generated: "${result.title || cmd.query}"`);
           break;
         case "export_csv":
           result = await callBrain("export", { query: cmd.query, table: "inventory", limit: 5000 });
-          dataType = "csv";
           if (result.error) {
             addMessage("assistant", `Export failed: ${result.error}`, result, "error");
           } else {
-            addMessage("assistant", `CSV ready: ${result.filename} (${result.row_count} rows). ${result.summary}`, result, "csv");
+            publish("export", result, `CSV ready: ${result.filename} (${result.row_count} rows). ${result.summary}`);
           }
           break;
         case "draft_email":
           result = await callBrain("email", { request: cmd.request, context: {} });
-          addMessage("assistant", "Email drafted — review before sending.", result, "email");
+          publish("email", result, "Email drafted — review before sending.");
           break;
         case "draft_whatsapp":
           result = await callBrain("whatsapp", { request: cmd.request, context: {} });
-          addMessage("assistant", "WhatsApp message drafted — review before sending.", result, "whatsapp");
+          publish("whatsapp", result, "WhatsApp message drafted — review before sending.");
           break;
         case "analyze_sales":
           result = await callBrain("analyze", { period: cmd.period });
-          addMessage("assistant", `Analysis complete for ${cmd.period}.`, result, "analysis");
+          publish("analyze", result, `Analysis complete for ${cmd.period}.`);
           break;
         case "auto_analysis":
           result = await callBrain("auto-analysis", {});
-          addMessage("assistant", "Executive summary generated.", result, "analysis");
+          publish("auto-analysis", result, "Executive summary generated.");
           break;
         case "organize_report":
           result = await callBrain("report", { query: cmd.query });
-          addMessage("assistant", "Report organized.", result, "report");
+          publish("report", result, "Report organized.");
           break;
         default:
           addMessage("assistant", "Unknown command.");
@@ -338,36 +357,34 @@ export default function BrainPage() {
     setLoading(true);
     addMessage("user", text);
     try {
-      // Route custom input to best intent
+      // Route custom input to best intent. Refusal copy is not chosen here.
       const lower = text.toLowerCase();
-      let result, type;
+      let result;
       if (lower.includes("chart") || lower.includes("graph") || lower.includes("show me")) {
         result = await callBrain("chart", { query: text, data: {} });
-        type = "chart";
-        addMessage("assistant", result.title || "Chart ready", result, "chart");
+        publish("chart", result, result.title || "Chart ready");
       } else if (lower.includes("export") || lower.includes("csv") || lower.includes("download")) {
         result = await callBrain("export", { query: text, table: "inventory", limit: 5000 });
-        type = "csv";
         if (result.error) {
           addMessage("assistant", `Export failed: ${result.error}`, result, "error");
         } else {
-          addMessage("assistant", `CSV: ${result.filename} (${result.row_count} rows)`, result, "csv");
+          publish("export", result, `CSV: ${result.filename} (${result.row_count} rows)`);
         }
       } else if (lower.includes("email") || lower.includes("send to") || lower.includes("draft")) {
         result = await callBrain("email", { request: text, context: {} });
-        addMessage("assistant", "Email drafted — review before sending.", result, "email");
+        publish("email", result, "Email drafted — review before sending.");
       } else if (lower.includes("whatsapp") || lower.includes("message") || lower.includes("text")) {
         result = await callBrain("whatsapp", { request: text, context: {} });
-        addMessage("assistant", "Message drafted.", result, "whatsapp");
+        publish("whatsapp", result, "Message drafted.");
       } else if (lower.includes("summary") || lower.includes("ceo") || lower.includes("executive")) {
         result = await callBrain("auto-analysis", {});
-        addMessage("assistant", "Executive summary ready.", result, "analysis");
+        publish("auto-analysis", result, "Executive summary ready.");
       } else if (lower.includes("suggest") || lower.includes("task") || lower.includes("recommend")) {
         result = await callBrain("suggest", { use_llm: false });
-        addMessage("assistant", `${result.suggestions?.length || 0} task suggestions.`, result.suggestions, "suggestions");
+        publish("suggest", result, `${result.suggestions?.length || 0} task suggestions.`);
       } else {
         result = await callBrain("analyze", { period: "last_7_days" });
-        addMessage("assistant", "Analysis complete.", result, "analysis");
+        publish("analyze", result, "Analysis complete.");
       }
     } catch (e) {
       addMessage("assistant", `Error: ${e.message}`);
@@ -440,7 +457,12 @@ export default function BrainPage() {
               <p className="text-gray-600 text-xs text-center">{msg.text}</p>
             ) : (
               <div className="max-w-2xl w-full">
-                <p className="text-gray-300 text-sm mb-1">{msg.text}</p>
+                <p
+                  className={`text-sm mb-1 ${msg.refused ? "text-amber-300" : "text-gray-300"}`}
+                  data-testid={msg.refused ? "brain-refusal" : undefined}
+                >
+                  {msg.text}
+                </p>
 
                 {/* Chart */}
                 {msg.dataType === "chart" && msg.data && <ChartRenderer config={msg.data} />}
@@ -448,6 +470,9 @@ export default function BrainPage() {
                 {/* CSV */}
                 {msg.dataType === "csv" && msg.data?.csv_content && msg.data?.filename && (
                   <div className="bg-gray-800 rounded-lg p-3 mt-2">
+                    {msg.refused ? (
+                      <p data-testid="brain-export-fallback" className="text-amber-300 text-xs mb-2">{EXPORT_FALLBACK}</p>
+                    ) : null}
                     <p className="text-gray-400 text-xs mb-2">{msg.data.summary}</p>
                     <p className="text-gray-500 text-xs mb-3">Columns: {msg.data.columns?.join(", ")}</p>
                     <button

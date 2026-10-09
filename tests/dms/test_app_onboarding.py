@@ -165,12 +165,11 @@ def test_dockerize_unknown_app_is_handled():
 
 def test_routes_expose_folder_import_dockerize_and_about(tmp_path, monkeypatch):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     from fastapi.testclient import TestClient
 
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     project = _python_project(tmp_path)
 
     imported = client.post(
