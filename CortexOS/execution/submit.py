@@ -214,7 +214,11 @@ def execute_sql(
     """
     import os
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, explain_dry_run
+    from CortexOS.dms.sql_validate_gate import (
+        SqlGateAbstain,
+        explain_dry_run,
+        redact_db_error,
+    )
 
     safe_sql = enforce_manifest(sql, verified)
     use_explain = (
@@ -232,9 +236,12 @@ def execute_sql(
             if use_explain:
                 ok, detail = explain_dry_run(con, safe_sql, params=params)
                 if not ok:
+                    # The raw text quotes post-enforce SQL. It rides on raw_detail for the audit sink.
+                    reason = redact_db_error(detail)
                     raise SqlGateAbstain(
-                        f"EXPLAIN rejected SQL: {detail}",
-                        violations=[f"EXPLAIN_FAILED:{detail}"],
+                        f"EXPLAIN rejected SQL: {reason}",
+                        violations=[f"EXPLAIN_FAILED:{reason}"],
+                        raw_detail=detail,
                     )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s

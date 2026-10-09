@@ -431,7 +431,11 @@ def _ungranted(sql: str, granted: set[str]) -> bool:
 
 
 def _missing_literals(sql: str, request: plan_payload.PlanSqlRequest) -> list[str]:
-    """Comparison literals that are not in the sampled values for that column."""
+    """Comparison literals that are not in the sampled values for that column.
+
+    Names the model's own literal only. The sampled values are already in the
+    model's prompt block and a failure detail can reach the user's reconfirm.
+    """
     import sqlglot
     from sqlglot import exp
 
@@ -454,8 +458,26 @@ def _missing_literals(sql: str, request: plan_payload.PlanSqlRequest) -> list[st
         for cols in request.column_values.values():
             pool.extend(cols.get(col.name, ()))
         if pool and str(lit.this) not in pool:
-            missed.append(f"{col.name}={str(lit.this)!r} sampled={pool[:8]}")
+            missed.append(f"{col.name}={str(lit.this)!r}")
     return missed
+
+
+def _audit_raw(sql: str, exc: Any) -> None:
+    """Unredacted engine text goes to the SQL audit log only, never an envelope or prompt."""
+    from datetime import datetime, timezone
+
+    from CortexOS.dms.sql_guardrail import AuditEntry, log_audit
+
+    raw = getattr(exc, "raw_detail", None)
+    log_audit(
+        AuditEntry(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            original_sql=sql,
+            safe_sql=None,
+            violations=[f"EXPLAIN_FAILED:{raw}"] if raw else list(exc.violations),
+            passed=False,
+        )
+    )
 
 
 def _sample_values(
@@ -808,6 +830,8 @@ def plan_sql_answer(
             return None
         except SqlGateAbstain as exc:
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", "refused: EXPLAIN"))
+            _audit_raw(served_sql, exc)
+            # Redacted at the source: no caret context, no literal, no post-enforce SQL.
             detail = f"{GATE_REFUSED}: {exc}"
             priors.append(detail)
             failures.append(detail)
