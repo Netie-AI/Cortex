@@ -228,7 +228,76 @@ def execute_sql(
     truthy), run DuckDB EXPLAIN after manifest enforce and before fetch.
     ``params`` are forwarded to both EXPLAIN and the fetch execute so bind
     placeholders in caller SQL survive predicate wrapping.
+
+    The statement, and the text of any error it raises, are noted on the
+    request's attempt record (:mod:`CortexOS.sql_attempts`).
     """
+    from CortexOS.sql_attempts import note_error, note_sql
+
+    note_sql(sql)
+    try:
+        return _execute_sql(
+            verified,
+            sql,
+            pool_id=pool_id,
+            db_path=db_path,
+            explain_gate=explain_gate,
+            params=params,
+        )
+    except Exception as exc:
+        note_error(str(exc))
+        raise
+
+
+def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> frozenset[str]:
+    """Column names of the tables this grant names, folded as DuckDB compares them.
+
+    Read from the warehouse catalog that ``execute_sql`` runs on. A grant key
+    ``schema.table`` matches only that schema; a bare key matches the table in
+    any schema. Empty when the catalog cannot be read: callers treat a name
+    they cannot place as not granted.
+    """
+    from pathlib import Path
+
+    from CortexOS.identifier_fold import fold_identifier
+
+    wanted: set[tuple[str | None, str]] = set()
+    for key in verified.row_predicates:
+        parts = str(key).split(".")
+        schema = fold_identifier(parts[-2]) if len(parts) > 1 else None
+        wanted.add((schema, fold_identifier(parts[-1])))
+    if not wanted:
+        return frozenset()
+    path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
+    if not Path(path).exists():
+        return frozenset()
+    try:
+        con = get_connection(path, read_only=True)
+        try:
+            rows = con.execute(
+                "SELECT table_schema, table_name, column_name FROM information_schema.columns"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - an unreadable catalog grants nothing
+        return frozenset()
+    out: set[str] = set()
+    for schema, table, column in rows:
+        folded = fold_identifier(str(table))
+        if (None, folded) in wanted or (fold_identifier(str(schema)), folded) in wanted:
+            out.add(fold_identifier(str(column)))
+    return frozenset(out)
+
+
+def _execute_sql(
+    verified: VerifiedManifest,
+    sql: str,
+    *,
+    pool_id: str | None = None,
+    db_path: Any = None,
+    explain_gate: bool | None = None,
+    params: Sequence[Any] | None = None,
+) -> tuple[list[dict[str, Any]], float, float]:
     import os
 
     import duckdb
@@ -322,6 +391,7 @@ __all__ = [
     "execute_count",
     "execute_sql",
     "get_verifier",
+    "granted_column_names",
     "refresh_jwks",
     "set_verifier_for_tests",
     "submit_request",

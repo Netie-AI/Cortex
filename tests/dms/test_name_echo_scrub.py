@@ -1,0 +1,376 @@
+"""NAME-ECHO-CX-01: names outside the caller's grant never reach the response.
+
+A model can write SQL that names tables and columns it invented (or that exist
+but are not granted). Before this item those names came back to the caller in
+answer prose, assumptions, served_reason, the reconfirm fields and HTTP error
+details of ``/v1/contract/ask`` and ``/v1/contract/drillthrough``. The scrub
+at those exits replaces, in free-text fields only, every identifier this
+request's SQL attempts referenced (or an error quoted) that the grant does not
+cover. Rows, ``sql_used``, ``contributing_sources`` and text built from rows
+are never changed, and the caller's own question words are kept.
+
+Assertions are on the envelope DMS receives: the whole JSON body, the rendered
+answer text and rows, checked against an oracle run on the test lake
+(CLAUDE.md section 8). The model is the scripted OpenVault.
+"""
+
+# ruff: noqa: F811  (pytest fixtures are imported, then requested by name)
+from __future__ import annotations
+
+import json
+from decimal import Decimal
+from typing import Any
+
+import duckdb
+import pytest
+
+from CortexOS.dms import plan_sql_ask
+from tests.dms.test_c7_02_manifest_before_explain import _badge, dms_http  # noqa: F401
+from tests.dms.test_l2_freeroute_envelope import (  # noqa: F401
+    _l2_real_port,
+    _reply_with_served_stamp,
+)
+from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
+    GOOD_SQL,
+    GRANT,
+    PLAN_TEXT,
+    SESSION,
+    _ask,
+    _assert_rung,
+    _json,
+    _plan_sql_on,
+    _reply,
+    _stronger_route,
+)
+
+# Names no grant in these tests covers. Each is checked on the whole body.
+VAULT = "zz_payroll_vault"
+BAND = "zz_salary_band"
+GHOST = "zz_ghost_col"
+INVENTED = (VAULT, BAND, GHOST)
+PROVIDER = "groq"
+MODEL = "openai/gpt-oss-120b"
+
+
+def _norm(value: Any) -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float, Decimal)):
+        return round(float(value), 6)
+    return str(value)
+
+
+def _rowset(rows: list[dict[str, Any]]) -> list[tuple[tuple[str, Any], ...]]:
+    return sorted(
+        (tuple(sorted((str(k), _norm(v)) for k, v in row.items())) for row in rows),
+        key=repr,
+    )
+
+
+def _oracle(sql: str) -> list[dict[str, Any]]:
+    """Run ``sql`` on the test lake directly, outside Cortex's executor."""
+    from CortexOS.dms.warehouse_db import DEFAULT_DB
+
+    con = duckdb.connect(str(DEFAULT_DB), read_only=True)
+    try:
+        cur = con.execute(sql)
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
+    finally:
+        con.close()
+
+
+def _assert_no_invented(payload: Any) -> None:
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    for name in INVENTED:
+        assert name not in text, (name, text)
+        assert name.upper() not in text, (name, text)
+
+
+# -- plan-SQL ladder exits ------------------------------------------------------
+
+
+def test_direct_abstain_on_an_invented_table_names_neither_table_nor_column(
+    armed_openvault, dms_http
+) -> None:
+    _reply(armed_openvault, f"1. Read {VAULT}.\n2. Sum {BAND}.")
+    _reply(armed_openvault, f"SELECT {BAND} FROM {VAULT}")
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_no_invented(body)
+    assert _badge(body).lower() == "abstain", body
+    assert body["rows"] in ([], None)
+    assert body["sql_used"] is None
+    assert body["drillthrough_token"] is None
+    # The refusal is still named; only the identifiers are withheld.
+    assert body["answer"].startswith("Not answered: PLAN_SQL_GATE_REFUSED"), body["answer"]
+    assert "UNKNOWN_TABLE:" in body["answer"]
+    assert "UNKNOWN_TABLE:" in (body["served_reason"] or "")
+    assert any("UNKNOWN_TABLE:" in line for line in body["assumptions"])
+    assert "UNKNOWN_TABLE:" in (body["provenance"]["assumptions"] or "")
+
+
+def test_reconfirm_after_invented_columns_withholds_them(armed_openvault, dms_http) -> None:
+    """No stronger route: the step lines name each refused write's column."""
+    bad = f"SELECT {GHOST}, COUNT(*) AS n FROM transactions GROUP BY {GHOST}"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_no_invented(body)
+    assert body["answer"].startswith("Reconfirm:"), body["answer"]
+    assert body["reconfirm"] is not None
+    assert body["reconfirm"]["why"]
+    assert body["reconfirm"]["closest_question"]
+    gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
+    assert len(gate) == 2 and all("UNKNOWN_COLUMN:" in line for line in gate), gate
+    assert body["rows"] in ([], None)
+    assert body["sql_used"] is None
+    _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
+
+
+def test_reconfirm_text_from_the_stronger_model_withholds_invented_names(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
+    bad = f"SELECT {GHOST} FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, f"SELECT {BAND} FROM transactions", model=configured)
+    _reply(
+        armed_openvault,
+        f"WHY: transactions has no {GHOST} or {BAND} column\n"
+        "CLOSEST: how many transactions of each txn_type",
+        model=configured,
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_no_invented(body)
+    assert body["answer"].startswith("Reconfirm:"), body["answer"]
+    why = body["reconfirm"]["why"]
+    # Granted names in the model's prose are kept.
+    assert why.startswith("transactions has no "), why
+    assert why.endswith(" column"), why
+    assert body["reconfirm"]["closest_question"] == "how many transactions of each txn_type"
+    assert body["served_model"] == configured
+    _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
+
+
+def test_served_answer_after_an_invented_column_keeps_rows_sql_and_granted_names(
+    armed_openvault, dms_http
+) -> None:
+    plan = f"1. Read transactions.\n2. Group by txn_type, not {GHOST}, and count rows."
+    _reply(armed_openvault, plan)
+    _reply(armed_openvault, f"SELECT {GHOST}, COUNT(*) AS n FROM transactions GROUP BY 1")
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+    oracle = _oracle(GOOD_SQL)
+    assert oracle
+
+    body = _json(_ask(dms_http))
+
+    _assert_no_invented(body)
+    assert body["sql_used"].startswith(GOOD_SQL)
+    assert _rowset(body["rows"]) == _rowset(oracle)
+    assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
+    assert body["row_count"] == len(oracle)
+    for row in oracle:
+        assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
+    assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
+    assert body["drillthrough_token"]
+    # Granted names stay in the prose around the withheld one.
+    assert "plan: 1. Read transactions." in body["assumptions"]
+    plan_line = next(a for a in body["assumptions"] if a.startswith("plan: 2."))
+    assert plan_line.startswith("plan: 2. Group by txn_type, not "), plan_line
+    assert plan_line.endswith(", and count rows."), plan_line
+    gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
+    assert any("UNKNOWN_COLUMN:" in line for line in gate), gate
+    _assert_rung(body, plan_sql_ask.rung_retry(1))
+
+
+# -- L2 exit (no DMS payload) ---------------------------------------------------
+
+
+def test_l2_abstain_on_invented_names_withholds_them(armed_openvault, dms_http) -> None:
+    for _ in range(3):
+        _reply_with_served_stamp(
+            armed_openvault,
+            f"SELECT {BAND} FROM {VAULT} ORDER BY {GHOST} LIMIT 5",
+            provider=PROVIDER,
+            model=MODEL,
+        )
+    dms_http.bind_session("name-echo-l2", {"inventory": "TRUE"})
+
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "list some skus from inventory stock", "session_id": "name-echo-l2"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    _assert_no_invented(body)
+    assert _badge(body).lower() == "abstain", body
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
+    assert "UNKNOWN_TABLE:" in body["answer"], body["answer"]
+
+
+def test_l2_served_answer_is_unchanged_and_keeps_granted_names(armed_openvault, dms_http) -> None:
+    """Positive control: a granted L2 answer passes the boundary untouched."""
+    sql = "SELECT sku FROM inventory ORDER BY sku LIMIT 5"
+    _reply_with_served_stamp(armed_openvault, sql, provider=PROVIDER, model=MODEL)
+    dms_http.bind_session("name-echo-l2-ok", {"inventory": "TRUE"})
+    oracle = _oracle(sql)
+
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "list some skus from inventory stock", "session_id": "name-echo-l2-ok"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provenance"]["layer"] == "generated", body
+    assert _rowset(body["rows"]) == _rowset(oracle)
+    assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
+    for row in oracle:
+        assert str(row["sku"]) in body["answer"]
+    assert [s["ref_id"] for s in body["contributing_sources"]] == ["inventory"]
+    assert any("inventory" in line for line in body["assumptions"]), body["assumptions"]
+    assert "[name withheld]" not in json.dumps(body)
+
+
+# -- HTTP error exits -------------------------------------------------------------
+
+
+def test_ask_http_error_detail_withholds_names_from_the_refused_sql(
+    dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ManifestError escaping the engine becomes the 403 detail; its names are withheld."""
+    from CortexOS.dms import answer_engine
+    from CortexOS.execution.submit import execute_sql
+
+    def engine(question: str, *, verified: Any, **_: Any) -> dict[str, Any]:
+        # Stands in for an engine path that runs model SQL and lets the
+        # executor's refusal propagate to the route.
+        execute_sql(verified, f"SELECT {BAND} FROM {VAULT}")
+        raise AssertionError("the executor must refuse an ungranted table")
+
+    monkeypatch.setattr(answer_engine, "answer", engine)
+    dms_http.bind_session("name-echo-http", GRANT)
+
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "how many rows are there", "session_id": "name-echo-http"},
+    )
+
+    assert resp.status_code == 403, resp.text
+    _assert_no_invented(resp.text)
+    detail = resp.json()["detail"]
+    assert detail["code"]
+    assert "not named by this manifest" in detail["message"], detail
+
+
+def test_drillthrough_error_detail_withholds_names_from_the_refused_sql(
+    dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.execution import drillthrough
+    from CortexOS.execution.manifest import ManifestError
+    from CortexOS.execution.session_manifests import get_session_registry
+    from CortexOS.execution.submit import execute_sql
+
+    dms_http.bind_session("name-echo-drill", GRANT)
+
+    def drill(token: str, **_: Any) -> dict[str, Any]:
+        del token
+        verified = get_session_registry().resolve("name-echo-drill")
+        try:
+            execute_sql(verified, f"SELECT {BAND} FROM {VAULT}")
+        except ManifestError as exc:
+            raise drillthrough.DrillthroughError(f"drill refused: {exc}") from exc
+        raise AssertionError("the executor must refuse an ungranted table")
+
+    monkeypatch.setattr(drillthrough, "execute_drillthrough", drill)
+
+    resp = dms_http.post("/v1/contract/drillthrough", json={"token": "dt_x.y"})
+
+    assert resp.status_code == 400, resp.text
+    _assert_no_invented(resp.text)
+    assert resp.json()["detail"]["message"].startswith("drill refused: ")
+
+
+def test_drillthrough_success_is_unchanged(
+    dms_http, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive control: the drill rows and SQL are what the executor returned.
+
+    The demo lake has no provenance columns, so this drill runs on a small lake
+    that has them (the drill rewrite projects ``<table>._src*``).
+    """
+    from CortexOS.execution import submit
+    from CortexOS.execution.drillthrough import (
+        execute_drillthrough,
+        manifest_content_hash,
+        mint_token,
+    )
+    from CortexOS.execution.session_manifests import get_session_registry
+
+    lake = tmp_path / "drill.duckdb"
+    con = duckdb.connect(str(lake))
+    con.execute(
+        "CREATE TABLE stock AS SELECT * FROM (VALUES "
+        "('SKU-A', 3, 'r1', 1, 'i1', 'f.csv'), ('SKU-A', 4, 'r2', 2, 'i1', 'f.csv'), "
+        "('SKU-B', 5, 'r3', 3, 'i1', 'f.csv')) "
+        "AS v(sku, qty, _src_ref_id, _src_row, _ingest_id, _src)"
+    )
+    con.close()
+    monkeypatch.setattr(submit, "DEFAULT_DB", lake)
+    dms_http.bind_session("name-echo-drill-ok", {"stock": "TRUE"})
+    verified = get_session_registry().resolve("name-echo-drill-ok")
+    sql = "SELECT sku, SUM(qty) AS total FROM stock GROUP BY sku"
+    token = mint_token(
+        answer_id="a-1",
+        session_id="name-echo-drill-ok",
+        manifest_hash=manifest_content_hash(verified.manifest),
+        sql=sql,
+    )
+
+    resp = dms_http.post("/v1/contract/drillthrough", json={"token": token})
+
+    assert resp.status_code == 200, resp.text
+    drilled = resp.json()
+    direct = execute_drillthrough(token)
+    assert drilled["sql_used"] == direct["sql_used"]
+    assert drilled["rows"] == json.loads(json.dumps(direct["rows"]))
+    assert drilled["row_count"] == direct["row_count"] == 3
+    assert drilled["total_count"] == direct["total_count"]
+    assert {row["stock__src_ref_id"] for row in drilled["rows"]} == {"r1", "r2", "r3"}
+
+
+def test_granted_plan_sql_answer_passes_the_boundary_untouched(armed_openvault, dms_http) -> None:
+    """Positive control: no invented name, so nothing is withheld."""
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+    oracle = _oracle(GOOD_SQL)
+
+    body = _json(_ask(dms_http))
+
+    assert body["sql_used"].startswith(GOOD_SQL)
+    assert _rowset(body["rows"]) == _rowset(oracle)
+    for row in oracle:
+        assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
+    assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
+    for line in PLAN_TEXT.splitlines():
+        assert f"plan: {line}" in body["assumptions"]
+    assert "[name withheld]" not in json.dumps(body)
+    _assert_rung(body, plan_sql_ask.RUNG_PLAN)
