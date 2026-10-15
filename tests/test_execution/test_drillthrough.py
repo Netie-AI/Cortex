@@ -76,3 +76,46 @@ def test_token_tamper_fails(monkeypatch):
     bad = tok[:-4] + ("AAAA" if not tok.endswith("AAAA") else "BBBB")
     with pytest.raises(DrillthroughTokenInvalid):
         verify_token(bad)
+
+
+def test_rewrite_group_by_count_star_projects_no_star_and_drops_group_order():
+    sql = "SELECT txn_type, COUNT(*) AS n FROM transactions GROUP BY txn_type ORDER BY n DESC"
+    out = rewrite_for_drillthrough(sql, provenance_for=lambda schema, table: [])
+    assert out.sql == "SELECT txn_type FROM transactions LIMIT 5000"
+    assert out.approximate is False
+    assert out.measure_expr is None
+
+
+def test_rewrite_count_distinct_drills_to_the_counted_column():
+    out = rewrite_for_drillthrough(
+        "SELECT COUNT(DISTINCT sku) AS skus FROM transactions",
+        provenance_for=lambda schema, table: [],
+    )
+    assert out.sql == "SELECT sku AS skus FROM transactions ORDER BY sku DESC LIMIT 5000"
+
+
+def test_rewrite_projects_only_provenance_columns_the_table_has():
+    seen: list[tuple[str | None, str]] = []
+
+    def lookup(schema, table):  # noqa: ANN001
+        seen.append((schema, table))
+        return ["_src_ref_id", "_ingest_id"] if table == "sales" else []
+
+    out = rewrite_for_drillthrough(
+        "SELECT SUM(s.amount) AS total FROM silver.sales s "
+        "JOIN silver.customer c ON c.id = s.customer_id",
+        provenance_for=lookup,
+    )
+    assert seen == [("silver", "sales"), ("silver", "customer")]
+    low = out.sql.lower()
+    assert "s._src_ref_id as s__src_ref_id" in low
+    assert "s._ingest_id as s__ingest_id" in low
+    assert "_src_row" not in low
+    assert "c._src" not in low
+
+
+def test_rewrite_unparseable_sql_is_a_drillthrough_error():
+    from CortexOS.execution.drillthrough import DrillthroughError
+
+    with pytest.raises(DrillthroughError):
+        rewrite_for_drillthrough("SELECT FROM WHERE (")
