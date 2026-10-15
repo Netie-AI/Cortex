@@ -119,3 +119,74 @@ def test_rewrite_unparseable_sql_is_a_drillthrough_error():
 
     with pytest.raises(DrillthroughError):
         rewrite_for_drillthrough("SELECT FROM WHERE (")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT region, COUNT(*) AS n FROM sales GROUP BY region OFFSET 1",
+        "SELECT region, COUNT(*) AS n FROM sales GROUP BY region LIMIT 0",
+        "SELECT SUM(amount) AS t FROM sales LIMIT 1 OFFSET 1",
+        "SELECT ROUND(SUM(amount), 2) AS t FROM sales",
+        "SELECT SUM(amount) / COUNT(*) AS t FROM sales",
+        "SELECT COUNT(*) FILTER (WHERE region = 'N') AS n FROM sales",
+        "SELECT region, ROUND(AVG(amount), 1) AS a FROM sales GROUP BY region",
+    ],
+)
+def test_rewrite_refuses_shapes_whose_rows_it_cannot_derive(sql):
+    from CortexOS.execution.drillthrough import DrillthroughError
+
+    with pytest.raises(DrillthroughError):
+        rewrite_for_drillthrough(sql, provenance_for=lambda schema, table: [])
+
+
+def test_rewrite_keeps_limit_on_a_one_row_aggregate():
+    out = rewrite_for_drillthrough(
+        "SELECT SUM(amount) AS t FROM sales LIMIT 1", provenance_for=lambda schema, table: []
+    )
+    assert out.sql == "SELECT amount AS t FROM sales ORDER BY amount DESC LIMIT 5000"
+
+
+def test_rewrite_keeps_order_and_limit_of_a_row_answer():
+    out = rewrite_for_drillthrough(
+        "SELECT id, amount FROM sales ORDER BY amount DESC LIMIT 10 OFFSET 2",
+        provenance_for=lambda schema, table: [],
+    )
+    assert out.sql == "SELECT id, amount FROM sales ORDER BY amount DESC LIMIT 10 OFFSET 2"
+    assert out.approximate is False
+    assert out.count_sql == (
+        "SELECT COUNT(*) AS contributing_count FROM "
+        "(SELECT id, amount FROM sales ORDER BY amount DESC LIMIT 10 OFFSET 2) AS _answer"
+    )
+
+
+def test_rewrite_caps_a_row_answer_limit_at_the_drill_limit():
+    out = rewrite_for_drillthrough(
+        "SELECT id FROM sales ORDER BY id LIMIT 99999", provenance_for=lambda schema, table: []
+    )
+    assert out.sql == "SELECT id FROM sales ORDER BY id LIMIT 5000"
+
+
+def test_rewrite_leaves_window_aggregates_alone():
+    out = rewrite_for_drillthrough(
+        "SELECT region, SUM(amount) OVER (PARTITION BY region) AS t FROM sales",
+        provenance_for=lambda schema, table: [],
+    )
+    assert out.sql == (
+        "SELECT region, SUM(amount) OVER (PARTITION BY region) AS t FROM sales LIMIT 5000"
+    )
+
+
+def test_rewrite_counts_groups_when_a_limit_may_drop_some():
+    sql = "SELECT region, SUM(amount) AS t FROM sales GROUP BY region ORDER BY t DESC LIMIT 3"
+    out = rewrite_for_drillthrough(sql, provenance_for=lambda schema, table: [])
+    assert out.group_limit == 3
+    assert out.group_count_sql == (
+        "SELECT COUNT(*) AS group_count FROM "
+        "(SELECT region, SUM(amount) AS t FROM sales GROUP BY region) AS _groups"
+    )
+    plain = rewrite_for_drillthrough(
+        "SELECT region, SUM(amount) AS t FROM sales GROUP BY region",
+        provenance_for=lambda schema, table: [],
+    )
+    assert plain.group_count_sql is None and plain.group_limit is None

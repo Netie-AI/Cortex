@@ -181,3 +181,124 @@ def test_drill_refused_by_the_manifest_is_a_named_4xx(
     detail = resp.json()["detail"]
     assert detail["code"] == "path_not_allowed"
     assert detail["message"] == "table not granted to this session"
+
+
+def _assert_named_400(drill_client, answer: dict[str, Any], reason: str) -> None:
+    resp = drill_client.post(
+        "/v1/contract/drillthrough", json={"token": answer["drillthrough_token"]}
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "drillthrough_error"
+    assert reason in detail["message"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'OUT' "
+        "GROUP BY txn_type ORDER BY n DESC LIMIT 1",
+        "SELECT txn_type, AVG(quantity_kg) AS a FROM transactions WHERE txn_type <> 'OUT' "
+        "GROUP BY txn_type ORDER BY a DESC LIMIT 1",
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'OUT' "
+        "GROUP BY txn_type ORDER BY n DESC LIMIT 2 OFFSET 1",
+    ],
+    ids=["top1-count", "top1-avg", "offset"],
+)
+def test_top_n_group_answer_is_a_named_4xx_not_every_group(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+) -> None:
+    """The answer kept some groups only; a drill over every group would serve rows it never used."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    kept = _oracle(sql)
+    assert len(answer["rows"]) == len(kept) < 3
+    for row in answer["rows"]:
+        assert f"txn_type={row['txn_type']}" in answer["answer"]
+
+    _assert_named_400(drill_client, answer, "keeps only some groups")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT ROUND(SUM(quantity_kg), 2) AS total FROM transactions WHERE txn_type = 'IN'",
+        "SELECT SUM(quantity_kg) / COUNT(*) AS avgq FROM transactions WHERE txn_type = 'IN'",
+        "SELECT COUNT(*) FILTER (WHERE txn_type = 'IN') AS n FROM transactions",
+    ],
+    ids=["round-sum", "sum-over-count", "count-filter"],
+)
+def test_nested_or_filtered_aggregate_answer_is_a_named_4xx(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+) -> None:
+    """An aggregate left inside an expression would come back as the answer value, not rows."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    oracle = _oracle(sql)
+    assert len(answer["rows"]) == 1
+    col = next(iter(oracle[0]))
+    assert abs(float(answer["rows"][0][col]) - float(oracle[0][col])) < 1e-6
+
+    _assert_named_400(drill_client, answer, "aggregate inside an expression")
+
+
+def test_top_n_row_answer_drills_to_exactly_its_rows(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    """Positive control: a top-N answer without aggregates drills to the same N rows."""
+    sql = (
+        "SELECT txn_id, quantity_kg FROM transactions WHERE txn_type = 'IN' "
+        "ORDER BY quantity_kg DESC, txn_id LIMIT 5"
+    )
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    oracle = _oracle(sql)
+    assert [r["txn_id"] for r in answer["rows"]] == [r["txn_id"] for r in oracle]
+
+    resp = drill_client.post(
+        "/v1/contract/drillthrough", json={"token": answer["drillthrough_token"]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [(r["txn_id"], float(r["quantity_kg"])) for r in body["rows"]] == [
+        (r["txn_id"], float(r["quantity_kg"])) for r in oracle
+    ]
+    assert body["row_count"] == body["total_count"] == 5
+    assert body["approximate"] is False
+
+
+def test_group_answer_whose_limit_keeps_every_group_still_drills(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    """Positive control: LIMIT 3 over exactly three groups dropped nothing, so rows come back."""
+    sql = (
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'OUT' "
+        "GROUP BY txn_type ORDER BY n DESC LIMIT 3"
+    )
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    counts = {r["txn_type"]: int(r["n"]) for r in answer["rows"]}
+    assert counts == {r["txn_type"]: int(r["n"]) for r in _oracle(sql)}
+    assert len(counts) == 3
+    for txn_type, n in counts.items():
+        assert f"txn_type={txn_type}, n={n}" in answer["answer"]
+
+    resp = drill_client.post(
+        "/v1/contract/drillthrough", json={"token": answer["drillthrough_token"]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    drilled: dict[str, int] = {}
+    for row in body["rows"]:
+        drilled[row["txn_type"]] = drilled.get(row["txn_type"], 0) + 1
+    assert drilled == counts
+    assert body["total_count"] == body["row_count"] == sum(counts.values())
+    assert body["approximate"] is False

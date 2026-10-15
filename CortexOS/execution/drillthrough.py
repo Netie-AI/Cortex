@@ -23,6 +23,7 @@ from sqlglot import exp
 _PROVENANCE_COLS = ("_src_ref_id", "_src_row", "_ingest_id", "_src")
 _DRILL_LIMIT = 5000
 _TOKEN_TTL_S = 3600
+_SOME_GROUPS = "drill-through cannot derive rows for an answer that keeps only some groups"
 
 
 class DrillthroughError(Exception):
@@ -55,6 +56,10 @@ class DrillRewrite:
     count_sql: str
     approximate: bool
     measure_expr: str | None
+    #: Counts the answer's groups when its LIMIT may have dropped some.
+    group_count_sql: str | None = None
+    #: The answer's LIMIT; more groups than this means the drill cannot be exact.
+    group_limit: int | None = None
 
 
 def _hmac_key() -> bytes:
@@ -153,6 +158,27 @@ def _strip_aggregates(select: exp.Select) -> tuple[list[exp.Expression], str | N
     return new_exprs, measure, approximate
 
 
+def _own_aggregates(select: exp.Select, node: exp.Expression) -> list[exp.AggFunc]:
+    """Aggregates in ``node`` that aggregate ``select`` itself.
+
+    Window aggregates and aggregates inside a subquery are not the answer's own.
+    """
+    return [
+        agg
+        for agg in node.find_all(exp.AggFunc)
+        if agg.find_ancestor(exp.Window, exp.Select) is select
+    ]
+
+
+def _int_literal(node: exp.Expression | None) -> int | None:
+    if isinstance(node, exp.Literal) and not node.is_string:
+        try:
+            return int(node.this)
+        except ValueError:
+            return None
+    return None
+
+
 def _table_aliases(select: exp.Select) -> list[tuple[str | None, str, str | None]]:
     """Return (alias_or_None, table_name, schema_or_None) for FROM + JOINs."""
     out: list[tuple[str | None, str, str | None]] = []
@@ -209,6 +235,38 @@ def rewrite_for_drillthrough(
     if not isinstance(tree, exp.Select):
         raise DrillthroughError("drill-through requires a SELECT statement")
 
+    limit = tree.args.get("limit")
+    offset = tree.args.get("offset")
+    group_count_sql: str | None = None
+    group_limit: int | None = None
+    grouped = tree.args.get("group") is not None
+    aggregated = grouped or any(_own_aggregates(tree, p) for p in tree.expressions)
+    if aggregated:
+        for proj in tree.expressions:
+            node = proj.this if isinstance(proj, exp.Alias) else proj
+            if not isinstance(node, exp.AggFunc) and _own_aggregates(tree, node):
+                # Nested (ROUND(SUM(x))) or filtered (COUNT(*) FILTER ...): the drill
+                # would return the aggregate value, not the rows behind it.
+                raise DrillthroughError(
+                    "drill-through cannot derive rows for an aggregate inside an expression"
+                )
+        # A LIMIT or OFFSET that drops groups leaves rows the answer never used in
+        # every other group; a drill over all groups would serve them.
+        skipped = 0 if offset is None else _int_literal(offset.expression)
+        kept = None if limit is None else _int_literal(limit.expression)
+        if skipped != 0 or (limit is not None and (kept is None or kept < 1)):
+            raise DrillthroughError(_SOME_GROUPS)
+        if grouped and kept is not None:
+            # Whether this LIMIT dropped a group is known only from the data.
+            groups = sqlglot.parse_one(sql, read=dialect)
+            groups.set("order", None)
+            groups.set("limit", None)
+            group_count_sql = (
+                "SELECT COUNT(*) AS group_count FROM "
+                f"({groups.sql(dialect=dialect)}) AS _groups"
+            )
+            group_limit = kept
+
     approximate = False
     # HAVING → WHERE when possible
     having = tree.args.get("having")
@@ -236,12 +294,24 @@ def rewrite_for_drillthrough(
     prov = _provenance_projections(aliases, provenance_for)
     tree.set("expressions", new_exprs + prov)
 
-    if measure:
+    if not aggregated:
+        # A row answer's contributing rows are its own rows: keep its ORDER BY,
+        # OFFSET and LIMIT, capped at the drill limit.
+        if limit is not None:
+            kept = _int_literal(limit.expression)
+            if kept is None:
+                raise DrillthroughError("drill-through requires a literal LIMIT")
+            drill_limit = min(kept, _DRILL_LIMIT)
+        else:
+            drill_limit = _DRILL_LIMIT
+    elif measure:
         tree.set("order", exp.Order(expressions=[exp.Ordered(this=sqlglot.parse_one(measure, read=dialect), desc=True)]))
+        drill_limit = _DRILL_LIMIT
     else:
         # The answer's ORDER BY ranks groups (often by a stripped aggregate alias).
         tree.set("order", None)
-    tree.set("limit", exp.Limit(expression=exp.Literal.number(_DRILL_LIMIT)))
+        drill_limit = _DRILL_LIMIT
+    tree.set("limit", exp.Limit(expression=exp.Literal.number(drill_limit)))
 
     drill_sql = tree.sql(dialect=dialect)
     # COUNT(*) over the same joins/filters without limit/order/provenance-only noise
@@ -258,12 +328,20 @@ def rewrite_for_drillthrough(
     if tree.args.get("where") is not None:
         count_tree.set("where", tree.args["where"].copy())
     count_sql = count_tree.sql(dialect=dialect)
+    if not aggregated and (limit is not None or offset is not None):
+        # Rows past the answer's own LIMIT/OFFSET did not contribute.
+        count_sql = (
+            "SELECT COUNT(*) AS contributing_count FROM "
+            f"({sqlglot.parse_one(sql, read=dialect).sql(dialect=dialect)}) AS _answer"
+        )
 
     return DrillRewrite(
         sql=drill_sql,
         count_sql=count_sql,
         approximate=approximate,
         measure_expr=measure,
+        group_count_sql=group_count_sql,
+        group_limit=group_limit,
     )
 
 
@@ -306,15 +384,25 @@ def execute_drillthrough(
         raise DrillthroughTokenInvalid("sql digest mismatch")
 
     rewritten = rewrite_for_drillthrough(sql, provenance_for=_warehouse_provenance_columns)
-    try:
-        rows, _, _ = execute_sql(verified, rewritten.sql)
-    except (ManifestError, PoolSaturated) as exc:
-        raise DrillthroughRefused(str(exc), code=exc.code) from exc
-    except (SqlGateAbstain, duckdb.Error) as exc:
-        # Text is already redacted by execute_sql; raw detail stays on the cause.
-        raise DrillthroughError(
-            f"drill-through rows could not be derived for this answer: {exc}"
-        ) from exc
+
+    def run(drill_sql: str) -> list[dict[str, Any]]:
+        try:
+            out, _, _ = execute_sql(verified, drill_sql)
+        except (ManifestError, PoolSaturated) as exc:
+            raise DrillthroughRefused(str(exc), code=exc.code) from exc
+        except (SqlGateAbstain, duckdb.Error) as exc:
+            # Text is already redacted by execute_sql; raw detail stays on the cause.
+            raise DrillthroughError(
+                f"drill-through rows could not be derived for this answer: {exc}"
+            ) from exc
+        return out
+
+    if rewritten.group_count_sql is not None and rewritten.group_limit is not None:
+        counted = run(rewritten.group_count_sql)
+        groups = int(counted[0].get("group_count") or 0) if counted else 0
+        if groups > rewritten.group_limit:
+            raise DrillthroughError(_SOME_GROUPS)
+    rows = run(rewritten.sql)
     try:
         count_rows, _, _ = execute_sql(verified, rewritten.count_sql)
         total = (
