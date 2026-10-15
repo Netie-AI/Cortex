@@ -461,3 +461,129 @@ def test_reconfirm_answer_keeps_cortex_wording_when_a_template_word_is_withheld(
     for line in gate:
         assert "UNKNOWN_COLUMN:question" not in line and "UNKNOWN_COLUMN:found" not in line
     _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
+
+
+# -- every form a name can take in model SQL --------------------------------------
+#
+# The review of 13fa80f found invented names that the scrub did not collect
+# because they were not a plain table or column identifier: a 4-part table name
+# (sqlglot puts the last two parts in a Dot), a function in relation position
+# (FROM f(), JOIN f(), LATERAL f()) and its schema-qualified spelling. The cases
+# below cover those and the other spellings the model's SQL can carry a name in.
+# Each one is driven through both AI exits of /v1/contract/ask and checked on the
+# whole JSON body. ``{T}`` and ``{C}`` are a granted table and one of its columns.
+
+CATALOG = "zz_vault_catalog"
+SCHEMA = "zz_vault_schema"
+
+NAME_FORMS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "four_part_table": (f"SELECT * FROM {CATALOG}.{SCHEMA}.{VAULT}.{BAND}", (CATALOG, SCHEMA)),
+    "three_part_table": (f"SELECT {{C}} FROM {CATALOG}.{SCHEMA}.{VAULT}", (CATALOG, SCHEMA)),
+    "table_function": (f"SELECT * FROM {VAULT}()", ()),
+    "table_function_with_argument": (f"SELECT * FROM {VAULT}('{{C}}')", ()),
+    "schema_qualified_table_function": (f"SELECT * FROM {SCHEMA}.{VAULT}()", (SCHEMA,)),
+    "join_table_function": (f"SELECT {{C}} FROM {{T}} JOIN {VAULT}() ON TRUE", ()),
+    "lateral_table_function": (f"SELECT {{C}} FROM {{T}}, LATERAL {VAULT}({{T}}.{{C}})", ()),
+    "scalar_function": (f"SELECT {VAULT}({{C}}) FROM {{T}}", ()),
+    "schema_qualified_scalar_function": (f"SELECT {SCHEMA}.{VAULT}({{C}}) FROM {{T}}", (SCHEMA,)),
+    "five_part_column": (
+        f"SELECT {CATALOG}.{SCHEMA}.{VAULT}.{BAND}.{GHOST} FROM {{T}}",
+        (CATALOG, SCHEMA),
+    ),
+    "using_column": (f"SELECT {{C}} FROM {{T}} JOIN {{T}} AS other USING ({GHOST})", ()),
+    "user_defined_type": (f"SELECT CAST({{C}} AS {BAND}) FROM {{T}}", ()),
+    "quoted_table": (f'SELECT {{C}} FROM "{VAULT}"', ()),
+    "subquery_table": (f"SELECT {{C}} FROM {{T}} WHERE {{C}} IN (SELECT {GHOST} FROM {VAULT})", ()),
+}
+
+
+def _form_sql(form: str, table: str, column: str) -> str:
+    return NAME_FORMS[form][0].replace("{T}", table).replace("{C}", column)
+
+
+def _assert_none_of(payload: Any, names: tuple[str, ...]) -> None:
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    for name in (*INVENTED, *names):
+        assert name not in text, (name, text)
+        assert name.upper() not in text, (name, text)
+
+
+@pytest.mark.parametrize("form", sorted(NAME_FORMS))
+def test_plan_sql_exit_withholds_every_name_form(form: str, armed_openvault, dms_http) -> None:
+    bad = _form_sql(form, "transactions", "txn_type")
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_none_of(body, NAME_FORMS[form][1])
+    assert body["rows"] in ([], None), body
+    assert body["sql_used"] is None, body
+    assert body["drillthrough_token"] is None, body
+    assert body["answer"].startswith(("Not answered:", "Reconfirm:")), body["answer"]
+    if body["answer"].startswith("Reconfirm:"):
+        assert "[name withheld]" not in body["reconfirm"]["closest_question"], body["reconfirm"]
+
+
+@pytest.mark.parametrize("form", sorted(NAME_FORMS))
+def test_l2_exit_withholds_every_name_form(form: str, armed_openvault, dms_http) -> None:
+    bad = _form_sql(form, "inventory", "sku")
+    for _ in range(3):
+        _reply_with_served_stamp(armed_openvault, bad, provider=PROVIDER, model=MODEL)
+    session = f"name-echo-form-{form}"
+    dms_http.bind_session(session, {"inventory": "TRUE"})
+
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "list some skus from inventory stock", "session_id": session},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    _assert_none_of(body, NAME_FORMS[form][1])
+    assert _badge(body).lower() == "abstain", body
+    assert body.get("rows") in ([], None), body
+    assert body.get("sql_used") is None, body
+
+
+def test_served_answer_keeps_engine_function_and_default_schema_names(
+    armed_openvault, dms_http
+) -> None:
+    """Positive control for the wider extraction.
+
+    A refused attempt invents a column, so the scrub runs on the served answer.
+    The served SQL calls a built-in sqlglot does not know (``strip_accents``)
+    and reads the granted table through DuckDB's default schema
+    (``main.transactions``). Neither name is outside the grant: the plan text
+    keeps them, and the rows are the oracle rows.
+    """
+    good = (
+        "SELECT strip_accents(txn_type) AS kind, COUNT(*) AS n "
+        "FROM main.transactions GROUP BY 1 ORDER BY n DESC"
+    )
+    plan = "1. Read main.transactions.\n2. Group by strip_accents(txn_type) and count rows."
+    _reply(armed_openvault, plan)
+    _reply(armed_openvault, f"SELECT {GHOST}, COUNT(*) AS n FROM transactions GROUP BY 1")
+    _reply(armed_openvault, good)
+    dms_http.bind_session(SESSION, GRANT)
+    oracle = _oracle(good)
+    assert oracle
+
+    body = _json(_ask(dms_http))
+
+    _assert_no_invented(body)
+    # The gate renders the call upper-case (STRIP_ACCENTS); the statement is the same.
+    assert body["sql_used"].lower().startswith(good.lower()), body["sql_used"]
+    assert _rowset(body["rows"]) == _rowset(oracle)
+    assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
+    for row in oracle:
+        assert f"kind={row['kind']}, n={row['n']}" in body["answer"], body["answer"]
+    assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
+    assert "plan: 1. Read main.transactions." in body["assumptions"], body["assumptions"]
+    assert "plan: 2. Group by strip_accents(txn_type) and count rows." in body["assumptions"], body[
+        "assumptions"
+    ]
+    gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
+    assert any("UNKNOWN_COLUMN:[name withheld]" in line for line in gate), gate

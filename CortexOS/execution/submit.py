@@ -289,6 +289,38 @@ def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> 
     return frozenset(out)
 
 
+_ENGINE_BUILTINS: frozenset[str] | None = None
+
+
+def engine_builtin_names() -> frozenset[str]:
+    """Names of the engine's own functions and types, folded as DuckDB compares them.
+
+    Read from DuckDB's catalog of internal entries on a database with no
+    data, so a macro or type defined in a warehouse is never among them. Empty
+    when the catalog cannot be read: callers then treat every function name as
+    a name they cannot place. A successful read is kept for the process, since
+    the built-ins of one engine build do not change.
+    """
+    global _ENGINE_BUILTINS
+    if _ENGINE_BUILTINS is not None:
+        return _ENGINE_BUILTINS
+    from CortexOS.identifier_fold import fold_identifier
+
+    try:
+        con = get_connection(":memory:")
+        try:
+            rows = con.execute(
+                "SELECT function_name FROM duckdb_functions() WHERE internal "
+                "UNION SELECT type_name FROM duckdb_types() WHERE internal"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - an unreadable catalog names no built-in
+        return frozenset()
+    _ENGINE_BUILTINS = frozenset(fold_identifier(str(name)) for (name,) in rows if name)
+    return _ENGINE_BUILTINS
+
+
 def _execute_sql(
     verified: VerifiedManifest,
     sql: str,
@@ -388,6 +420,7 @@ __all__ = [
     "PoolMismatch",
     "PoolRequired",
     "SqlRequired",
+    "engine_builtin_names",
     "execute_count",
     "execute_sql",
     "get_verifier",

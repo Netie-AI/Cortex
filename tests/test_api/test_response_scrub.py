@@ -254,3 +254,175 @@ def test_a_fallback_that_would_be_scrubbed_is_not_used() -> None:
     assert out.reconfirm.closest_question == f"the {WITHHELD}"
     # Not the reconfirm rendering, so the answer is scrubbed as free text.
     assert out.answer == f"other text about {WITHHELD}"
+
+
+# -- every form a name can take in model SQL (review of 13fa80f) -------------------------
+#
+# Each case is SQL a model can write and the names in it that no grant covers.
+# Whatever wording a refusal uses, it quotes a name as the SQL spells it, so the
+# scrub built from the SQL alone must leave none of those names in the SQL text
+# itself, nor in the refusal strings the review reported.
+
+NAME_FORMS: dict[str, tuple[str, set[str]]] = {
+    "four_part_table": (
+        "SELECT * FROM zz_cat.zz_db.zz_vault.zz_band",
+        {"zz_cat", "zz_db", "zz_vault", "zz_band"},
+    ),
+    "table_function": ("SELECT * FROM zz_vault()", {"zz_vault"}),
+    "table_function_with_column_argument": ("SELECT * FROM zz_vault(sku)", {"zz_vault"}),
+    "schema_qualified_table_function": ("SELECT * FROM zz_s.zz_vault(1)", {"zz_s", "zz_vault"}),
+    "join_table_function": ("SELECT sku FROM inventory JOIN zz_vault() ON TRUE", {"zz_vault"}),
+    "lateral_table_function": (
+        "SELECT sku FROM inventory, LATERAL zz_vault(inventory.sku)",
+        {"zz_vault"},
+    ),
+    "table_function_star": ("SELECT zz_vault.* FROM zz_vault()", {"zz_vault"}),
+    "scalar_function": ("SELECT zz_vault(sku) FROM inventory", {"zz_vault"}),
+    "qualified_scalar_function": (
+        "SELECT zz_s.zz_t.zz_vault(sku) FROM inventory",
+        {"zz_s", "zz_t", "zz_vault"},
+    ),
+    "five_part_column": (
+        "SELECT zz_cat.zz_db.zz_tbl.zz_col.zz_field.zz_leaf FROM inventory",
+        {"zz_cat", "zz_db", "zz_tbl", "zz_col", "zz_field", "zz_leaf"},
+    ),
+    "using_column": (
+        "SELECT sku FROM inventory JOIN inventory AS o USING (zz_col)",
+        {"zz_col"},
+    ),
+    "user_defined_type": (
+        "SELECT CAST(sku AS zz_type), sku::zz_type2 FROM inventory",
+        {"zz_type", "zz_type2"},
+    ),
+    "quoted_names": ('SELECT "zz Col" FROM "zz_s"."Zz Vault"', {"zz Col", "zz_s", "Zz Vault"}),
+    "quoted_path": ("SELECT * FROM 'zz_vault.parquet'", {"zz_vault.parquet"}),
+    "exclude_and_columns": (
+        "SELECT * EXCLUDE (zz_ex), COLUMNS(zz_cols) FROM inventory",
+        {"zz_ex", "zz_cols"},
+    ),
+    "pivot": ("PIVOT zz_vault ON zz_col USING sum(zz_val)", {"zz_vault", "zz_col", "zz_val"}),
+    "insert_columns": ("INSERT INTO zz_vault (zz_col) VALUES (1)", {"zz_vault", "zz_col"}),
+    "describe": ("DESCRIBE zz_vault", {"zz_vault"}),
+    "command_call": ("CALL zz_vault()", {"zz_vault"}),
+    "command_show": ("SHOW zz_vault", {"zz_vault"}),
+    "subquery_and_window": (
+        "SELECT sku FROM inventory WHERE sku IN (SELECT zz_sq FROM zz_sub) "
+        "QUALIFY row_number() OVER (PARTITION BY zz_part) = 1",
+        {"zz_sq", "zz_sub", "zz_part"},
+    ),
+}
+
+
+def test_every_name_form_is_a_referenced_name() -> None:
+    for form, (sql, names) in NAME_FORMS.items():
+        assert names <= sql_identifiers(sql), (form, names - sql_identifiers(sql))
+
+
+def test_every_name_form_is_withheld_wherever_a_refusal_quotes_it() -> None:
+    for form, (sql, names) in NAME_FORMS.items():
+        scrub = build_scrub(_record(sql), verified=_grant("inventory"))
+        quoted = [
+            sql,
+            *(f"UNKNOWN_TABLE:{n}, TABLE_FUNCTION:LATERAL:{n}, {n}() '{n}'" for n in names),
+        ]
+        for text in quoted:
+            out = scrub.text(text)
+            for name in names:
+                assert name.lower() not in out.lower(), (form, name, out)
+
+
+def test_review_probes_are_withheld() -> None:
+    """The two blocking probes of the review, with the refusal text it reported."""
+    four = "SELECT * FROM zz_cat.zz_db.zz_payroll_vault.zz_salary_band"
+    scrub = build_scrub(_record(four), verified=_grant("transactions"))
+    assert scrub.text("UNKNOWN_TABLE:zz_cat.zz_db.zz_payroll_vault.zz_salary_band") == (
+        f"UNKNOWN_TABLE:{WITHHELD}.{WITHHELD}.{WITHHELD}.{WITHHELD}"
+    )
+    function = "SELECT * FROM zz_payroll_vault()"
+    scrub = build_scrub(_record(function), verified=_grant("transactions"))
+    assert scrub.text("(refused: TABLE_FUNCTION:zz_payroll_vault)") == (
+        f"(refused: TABLE_FUNCTION:{WITHHELD})"
+    )
+    assert scrub.text("TABLE_FUNCTION:LATERAL:zz_payroll_vault") == (
+        f"TABLE_FUNCTION:LATERAL:{WITHHELD}"
+    )
+
+
+def test_names_the_statement_defines_are_still_not_references() -> None:
+    sql = (
+        "WITH cte_t AS (SELECT 1 AS one) "
+        "SELECT list_filter([1], lambda lam_x: lam_x > 0) AS kept_alias, "
+        "{'struct_key': 1} AS s, sum(qty) OVER win_w AS running "
+        "FROM read_csv('f.csv', option_name := true) AS rel(col_label), cte_t "
+        "PIVOT (sum(qty) FOR sku IN ('pivot_value')) "
+        "WINDOW win_w AS (ORDER BY sku)"
+    )
+    names = sql_identifiers(sql)
+    assert {"qty", "sku"} <= names
+    assert not names & {
+        "cte_t",
+        "lam_x",
+        "kept_alias",
+        "struct_key",
+        "s",
+        "running",
+        "win_w",
+        "option_name",
+        "rel",
+        "col_label",
+        "pivot_value",
+        "one",
+    }, names
+
+
+def test_engine_function_and_type_names_are_not_withheld(tmp_path, monkeypatch) -> None:
+    """A built-in the model calls (sqlglot does not know ``hash`` or ``bar``) is not a data name."""
+    import duckdb
+
+    from CortexOS.execution import submit
+
+    lake = tmp_path / "lake.duckdb"
+    con = duckdb.connect(str(lake))
+    con.execute("CREATE TABLE inventory (sku VARCHAR, qty INTEGER)")
+    con.close()
+    monkeypatch.setattr(submit, "DEFAULT_DB", lake)
+    sql = (
+        "SELECT hash(sku), bar(qty, 0, 10), strip_accents(sku), CAST(qty AS HUGEINT) "
+        "FROM main.inventory, range(3)"
+    )
+    assert build_scrub(_record(sql), verified=_grant("inventory")).withheld == frozenset()
+    # An invented function next to them is still withheld, and so is a column
+    # that happens to share a built-in's name: only a name in call position is
+    # an engine name.
+    sql = "SELECT hash(sku), zz_fn(qty), bar FROM inventory"
+    assert build_scrub(_record(sql), verified=_grant("inventory")).withheld == frozenset(
+        {"zz_fn", "bar"}
+    )
+
+
+def test_default_schema_of_a_bare_grant_is_kept() -> None:
+    record = _record("SELECT * FROM main.zz_vault JOIN other.inventory ON TRUE")
+    assert build_scrub(record, verified=_grant("inventory")).withheld == frozenset(
+        {"zz_vault", "other"}
+    )
+    # A qualified grant keeps its own schema, not the default one.
+    assert build_scrub(record, verified=_grant("other.inventory")).withheld == frozenset(
+        {"zz_vault", "main"}
+    )
+
+
+def test_engine_catalog_errors_name_unquoted_objects() -> None:
+    text = (
+        "EXPLAIN_FAILED:CATALOG_ERROR: Scalar Function with name zz_fn does not exist! "
+        'Did you mean "atan2"? / Sequence with name zz_seq does not exist! / '
+        'Table with name "zz_s.zz_t" does not exist because schema "zz_s" does not exist.'
+    )
+    assert error_identifiers(text) == {"zz_fn", "atan2", "zz_seq", "zz_s", "zz_t"}
+
+
+def test_ansi_highlight_in_a_parse_error_does_not_hide_a_name() -> None:
+    scrub = NameScrub(frozenset({"zz_ghost_col"}))
+    text = "PARSE_ERROR:Invalid expression. SELECT \x1b[4mzz_ghost_col\x1b[0m FROM"
+    out = scrub.text(text)
+    assert "zz_ghost_col" not in out
+    assert out == f"PARSE_ERROR:Invalid expression. SELECT {WITHHELD} FROM"

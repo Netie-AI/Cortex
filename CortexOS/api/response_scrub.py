@@ -10,14 +10,23 @@ At each user-facing exit of ``/v1/contract/ask`` and
 ``/v1/contract/drillthrough`` the route builds a :class:`NameScrub` and applies
 it to free-text fields only. The names it withholds are:
 
-* every table, schema and column identifier the request's SQL attempts
-  referenced (each statement the SQL gate or the executor saw, recorded by
-  :mod:`CortexOS.sql_attempts` and parsed with sqlglot; alias and CTE labels
-  the statement defines are not references), and
+* every identifier the request's SQL attempts referenced (each statement the
+  SQL gate or the executor saw, recorded by :mod:`CortexOS.sql_attempts` and
+  parsed with sqlglot): table, schema and catalog parts at any depth,
+  columns and struct fields, ``USING`` columns, and the identifier tokens of
+  anything sqlglot could only keep as an opaque command. Labels the statement
+  defines (aliases, CTE and window names, lambda parameters, struct keys,
+  named arguments) are not references;
+* every function and type name sqlglot does not know, in call or relation
+  position (``FROM f()``, ``JOIN f()``, ``LATERAL f()``, ``s.f(x)``,
+  ``CAST(x AS t)``), unless the engine defines it as a built-in; and
 * every double-quoted identifier in the error text those attempts produced,
+  and the object DuckDB's catalog error names unquoted
+  (``... with name <name> does not exist``),
 
-minus the names the grant covers: the granted tables (and their schema
-parts) and the columns of those tables in the warehouse catalog. Names are
+minus the names the grant covers: the granted tables, their schema parts
+(``main`` for a bare key) and the columns of those tables in the warehouse
+catalog. Names are
 compared with :func:`CortexOS.identifier_fold.fold_identifier`, the rule
 DuckDB binds by. The caller's own words are never withheld: names in the
 question, the session and Space ids, and the tables and columns of the DMS
@@ -32,7 +41,7 @@ own closest question from the grant replaces it, and a reconfirm answer is
 rendered again from its scrubbed ``why`` and that question.
 Decisions come from parsed SQL, error text and the grant; no
 rule reads the question for words. No pack import and no database driver
-here: the catalog read goes through :mod:`CortexOS.execution.submit`.
+here: the catalog reads go through :mod:`CortexOS.execution.submit`.
 """
 
 from __future__ import annotations
@@ -53,10 +62,16 @@ from CortexOS.sql_attempts import AttemptRecord
 WITHHELD = "[name withheld]"
 
 _DIALECT = "duckdb"
+_DEFAULT_SCHEMA = "main"
 _MAX_NAME = 128
 # A double-quoted identifier in engine error text ("" is an escaped quote).
 _QUOTED_IDENT = re.compile(r'"((?:[^"]|"")+)"')
 _WORD = re.compile(r"\w+")
+# DuckDB's catalog error names the missing object unquoted:
+# "Scalar Function with name f does not exist!".
+_CATALOG_MISSING = re.compile(r"\bwith name ([^\s\"'!?,;()]+) does not exist")
+# Terminal highlighting (sqlglot underlines the failing token in a parse error).
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # Clauses of a query whose bare names may refer to that query's output columns.
 _OUTPUT_CLAUSES = frozenset({"order", "group", "having", "qualify"})
 
@@ -105,29 +120,101 @@ def _refers_to_output(column: exp.Column) -> bool:
     return fold_identifier(column.name) in outputs
 
 
-def _tree_identifiers(tree: exp.Expression) -> set[str]:
+def _defined_identifier_ids(tree: exp.Expression, cte_refs: set[int]) -> set[int]:
+    """Identifier nodes that define a name, or read one the statement defined.
+
+    Alias, CTE and window labels, lambda parameters, struct keys and named
+    arguments, the output columns sqlglot synthesises for a PIVOT, a table
+    reference scope binds to a CTE, and a bare ORDER BY / GROUP BY / HAVING /
+    QUALIFY name that reads an output column. Every other identifier in the
+    statement is a reference.
+    """
+    ids: set[int] = set()
+
+    def mark(node: object) -> None:
+        if isinstance(node, exp.Identifier):
+            ids.add(id(node))
+
+    for alias in tree.find_all(exp.TableAlias):
+        mark(alias.this)
+        for column in alias.columns:
+            mark(column)
+    for named in tree.find_all(exp.Alias):
+        mark(named.args.get("alias"))
+    for window in tree.find_all(exp.Window):
+        mark(window.this)
+        mark(window.args.get("alias"))
+    for keyed in tree.find_all(exp.PropertyEQ, exp.Kwarg):
+        mark(keyed.this)
+    for pivot in tree.find_all(exp.Pivot):
+        for column in pivot.args.get("columns") or []:
+            mark(column)
+    for lam in tree.find_all(exp.Lambda):
+        params = {fold_identifier(p.name) for p in lam.expressions if isinstance(p, exp.Identifier)}
+        for param in lam.expressions:
+            mark(param)
+        for ident in lam.this.find_all(exp.Identifier):
+            if fold_identifier(ident.name) in params:
+                mark(ident)
+    for table in tree.find_all(exp.Table):
+        if id(table) in cte_refs:
+            for key in ("this", "db", "catalog"):
+                mark(table.args.get(key))
+    labels = _labels(tree)
+    for column in tree.find_all(exp.Column):
+        if _refers_to_output(column):
+            mark(column.this)
+        for key in ("table", "db", "catalog"):
+            part = column.args.get(key)
+            if isinstance(part, exp.Identifier) and fold_identifier(part.name) in labels:
+                mark(part)
+    return ids
+
+
+def _command_text(command: exp.Command) -> str:
+    rest = command.args.get("expression")
+    if isinstance(rest, exp.Literal):
+        return str(rest.this)
+    return str(rest or "")
+
+
+def _tree_names(tree: exp.Expression) -> tuple[set[str], set[str]]:
+    """``(identifiers, engine_names)`` a statement references, as written.
+
+    ``identifiers`` holds every identifier in the tree that is not a label the
+    statement defines (:func:`_defined_identifier_ids`): table, schema and
+    catalog parts at any depth (``a.b.c.d`` puts its last parts in a ``Dot``),
+    columns, struct fields, ``USING`` columns, the schema of a qualified call,
+    and the identifier tokens of any part sqlglot kept as an opaque
+    ``Command``. ``engine_names`` holds names in the engine's own namespace:
+    functions sqlglot does not know, in call or relation position
+    (``FROM f()``, ``JOIN f()``, ``LATERAL f()``, ``s.f(x)``), and types it
+    does not know (``CAST(x AS t)``). Those are withheld unless they are
+    engine built-ins (see :func:`build_scrub`).
+    """
     try:
         cte_refs = cte_reference_ids(tree, allow_recursive=True)
     except ScopeError:
         cte_refs = set()
-    labels = _labels(tree)
-    names: set[str] = set()
-    for table in tree.find_all(exp.Table):
-        if id(table) in cte_refs:
-            continue
-        for key in ("this", "db", "catalog"):
-            name = _identifier(table.args.get(key))
-            if name:
-                names.add(name)
-    for column in tree.find_all(exp.Column):
-        name = _identifier(column.this)
-        if name and not _refers_to_output(column):
-            names.add(name)
-        for key in ("table", "db", "catalog"):
-            part = _identifier(column.args.get(key))
-            if part and fold_identifier(part) not in labels:
-                names.add(part)
-    return names
+    defined = _defined_identifier_ids(tree, cte_refs)
+    identifiers = {
+        ident.name
+        for ident in tree.find_all(exp.Identifier)
+        if id(ident) not in defined and ident.name.strip()
+    }
+    for command in tree.find_all(exp.Command):
+        identifiers |= _token_identifiers(_command_text(command))
+    engine_names: set[str] = set()
+    for call in tree.find_all(exp.Anonymous):
+        if isinstance(call.this, str) and call.this.strip():
+            engine_names.add(call.this)
+    for dtype in tree.find_all(exp.DataType):
+        if dtype.this == exp.DataType.Type.USERDEFINED:
+            kind = dtype.args.get("kind")
+            name = kind.name if isinstance(kind, exp.Expression) else str(kind or "")
+            if name.strip():
+                engine_names.add(name)
+    return identifiers, engine_names
 
 
 def _token_identifiers(sql: str) -> set[str]:
@@ -146,23 +233,38 @@ def _token_identifiers(sql: str) -> set[str]:
     }
 
 
-def sql_identifiers(sql: str) -> set[str]:
-    """Table, schema and column names ``sql`` references, as written."""
+def sql_names(sql: str) -> tuple[set[str], set[str]]:
+    """``(identifiers, engine_names)`` ``sql`` references, as written (see :func:`_tree_names`)."""
     try:
         trees = [tree for tree in sqlglot.parse(sql, read=_DIALECT) if tree is not None]
     except Exception:  # noqa: BLE001 - unparseable: fall back to its identifier tokens
-        return _token_identifiers(sql)
-    names: set[str] = set()
+        return _token_identifiers(sql), set()
+    identifiers: set[str] = set()
+    engine_names: set[str] = set()
     for tree in trees:
-        names |= _tree_identifiers(tree)
-    return names
+        found, called = _tree_names(tree)
+        identifiers |= found
+        engine_names |= called
+    return identifiers, engine_names
+
+
+def sql_identifiers(sql: str) -> set[str]:
+    """Every relation, column, function and type name ``sql`` references, as written."""
+    identifiers, engine_names = sql_names(sql)
+    return identifiers | engine_names
 
 
 def error_identifiers(text: str) -> set[str]:
-    """Double-quoted identifiers in engine error text, split at dots."""
+    """Identifiers engine error text names, split at dots.
+
+    Double-quoted identifiers, and the object of DuckDB's catalog error
+    (``<Kind> with name <name> does not exist``), which it writes unquoted.
+    """
     names: set[str] = set()
-    for match in _QUOTED_IDENT.finditer(text or ""):
-        for part in match.group(1).replace('""', '"').split("."):
+    raws = [m.group(1).replace('""', '"') for m in _QUOTED_IDENT.finditer(text or "")]
+    raws += [m.group(1) for m in _CATALOG_MISSING.finditer(text or "")]
+    for raw in raws:
+        for part in raw.split("."):
             part = part.strip()
             if part and len(part) <= _MAX_NAME and _WORD.fullmatch(part) and not part.isdigit():
                 names.add(part)
@@ -188,6 +290,9 @@ class NameScrub:
         pattern = self._pattern()
         if pattern is None or not value:
             return value
+        # A highlight code ends in a letter ("\x1b[4m"), which would hide the
+        # word edge in front of the name it highlights.
+        value = _ANSI.sub("", value)
         # fold_identifier maps one character to one character, so spans found in
         # the folded text are spans of the original.
         out: list[str] = []
@@ -211,11 +316,17 @@ def _in_text(folded_name: str, folded_texts: list[str]) -> bool:
 
 
 def _grant_names(verified: Any) -> set[str]:
+    """The granted tables and their schema parts.
+
+    A bare key grants the table in DuckDB's default schema (``main.t`` is ``t``,
+    as the manifest matches it), so ``main`` is kept with it.
+    """
     names: set[str] = set()
     for key in getattr(verified, "row_predicates", {}) or {}:
-        for part in str(key).split("."):
-            if part:
-                names.add(fold_identifier(part))
+        parts = [part for part in str(key).split(".") if part]
+        if len(parts) == 1:
+            names.add(_DEFAULT_SCHEMA)
+        names.update(fold_identifier(part) for part in parts)
     return names
 
 
@@ -237,10 +348,16 @@ def build_scrub(
     ``errors`` is error text produced at the exit itself.
     """
     candidates: set[str] = set()
+    called: set[str] = set()
     for sql in attempts.sql:
-        candidates |= {fold_identifier(name) for name in sql_identifiers(sql)}
+        identifiers, engine_names = sql_names(sql)
+        candidates |= {fold_identifier(name) for name in identifiers}
+        called |= {fold_identifier(name) for name in engine_names}
     for text in [*attempts.errors, *errors]:
         candidates |= {fold_identifier(name) for name in error_identifiers(text)}
+    # A name only ever written in call or type position may be the engine's own.
+    called -= candidates
+    candidates |= called
     candidates = {name for name in candidates if name.strip() and len(name) <= _MAX_NAME}
     if not candidates:
         return NameScrub(frozenset())
@@ -253,6 +370,10 @@ def build_scrub(
         from CortexOS.execution.submit import granted_column_names
 
         remaining -= granted_column_names(verified)
+    if remaining & called:
+        from CortexOS.execution.submit import engine_builtin_names
+
+        remaining -= called & engine_builtin_names()
     return NameScrub(frozenset(remaining))
 
 
@@ -400,4 +521,5 @@ __all__ = [
     "scrub_answer",
     "scrub_http_detail",
     "sql_identifiers",
+    "sql_names",
 ]
