@@ -37,6 +37,9 @@ SCHEMA_CONTEXT_INVALID = "schema_context_invalid"
 SCHEMA_CONTEXT_UNPARSED = "schema_context_unparsed"
 SCHEMA_CONTEXT_FORBIDDEN_CHAR = "schema_context_forbidden_char"
 BRUTE_FORCE_SCAN = "brute_force_scan"
+#: Fed back to the model when its SQL names a column the schema did not declare.
+#: The column itself is not named: it is not granted.
+UNDECLARED_COLUMN = "schema_context:undeclared_column"
 
 #: Prompt fence. The block is data. Directions inside it are not instructions.
 UNTRUSTED_BEGIN = "<<<UNTRUSTED_SCHEMA_CONTEXT>>>"

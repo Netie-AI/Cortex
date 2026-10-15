@@ -340,12 +340,96 @@ def test_must_fail_ungranted_join_refuses_without_retry(
 def test_must_fail_brute_force_scan_refuses_before_run(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A model that only lists the table is retried by name, then refused by name."""
+    from CortexOS.crew.cot_climb import HORIZON
+
     def sql_for(_prompt: str) -> str:
         return SQL_SCAN
 
     body, prompts = _generate(api, monkeypatch, SCHEMA, sql_for)
     _assert_named_refusal(body, "brute_force_scan", SQL_SCAN)
-    assert _generate_count(prompts) == 1
+    assert _generate_count(prompts) == HORIZON
+    assert all(SQL_SCAN not in prompt for _purpose, prompt in prompts)
+
+
+SQL_INVENTED_COLUMN = "SELECT zzsc01made_up FROM alpha_ledger WHERE qty > 1"
+LAKE_ROWS = [(1, 1), (2, 2), (3, 5), (4, 0), (5, 9)]
+
+
+def _test_lake():
+    """The caller Space's table, built here. Oracle rows come from LAKE_ROWS."""
+    import duckdb
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE alpha_ledger (id INTEGER, qty INTEGER)")
+    con.executemany("INSERT INTO alpha_ledger VALUES (?, ?)", LAKE_ROWS)
+    return con
+
+
+def _oracle_qty_over_one() -> list[tuple[int]]:
+    return sorted((qty,) for _id, qty in LAKE_ROWS if qty > 1)
+
+
+def _first_bad_then_good(bad: str):
+    seen = {"gen": 0}
+
+    def sql_for(_prompt: str) -> str:
+        seen["gen"] += 1
+        return bad if seen["gen"] == 1 else SQL_OK
+
+    return sql_for
+
+
+def _assert_retried_to_good_sql(
+    body: dict[str, Any], prompts: list[tuple[str, str]], bad: str, fed: str
+) -> None:
+    from CortexOS.crew.cot_climb import HORIZON
+
+    # User-visible answer: the validated SQL abstain, no numbers invented.
+    assert body["status"] == "ABSTAIN", body.get("answer")
+    assert body["phase"] == "generate"
+    assert body["badge"] == "abstain"
+    assert body["values"] == []
+    assert body["answer"] == (
+        "Validated SQL via FreeRoute (caller catalog: tables and declared columns). "
+        "Numbers not certified: static sqlglot guardrail: not EXPLAINed, "
+        "not manifest-enforced, not executed."
+    )
+    sql = str(body.get("sql_used") or "")
+    assert schema_mod.schema_idents(sql) & {"alpha_ledger"}
+    assert "zzsc01made_up" not in sql
+    assert (body.get("generative") or {}).get("sql") == sql
+    # The returned SQL, run on the test lake, gives the oracle rows.
+    assert sorted(_test_lake().execute(sql).fetchall()) == _oracle_qty_over_one()
+    # One retry inside the horizon. The named reason reached the model; the
+    # refused SQL and the invented name never did.
+    assert _generate_count(prompts) == 2 <= HORIZON
+    sql_prompts = [prompt for purpose, prompt in prompts if purpose == "generative_ask"]
+    assert fed not in sql_prompts[0]
+    assert fed in sql_prompts[1]
+    for _purpose, prompt in prompts:
+        assert bad not in prompt
+        assert "zzsc01made_up" not in prompt
+
+
+def test_must_fail_invented_column_is_fed_back_and_retried(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An undeclared column is the error class the ladder retries, not a terminal refuse."""
+    body, prompts = _generate(
+        api, monkeypatch, SCHEMA, _first_bad_then_good(SQL_INVENTED_COLUMN)
+    )
+    _assert_retried_to_good_sql(
+        body, prompts, SQL_INVENTED_COLUMN, "schema_context:undeclared_column"
+    )
+
+
+def test_must_fail_brute_force_scan_is_fed_back_and_retried(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unbounded listing is fed back by name and retried within the horizon."""
+    body, prompts = _generate(api, monkeypatch, SCHEMA, _first_bad_then_good(SQL_SCAN))
+    _assert_retried_to_good_sql(body, prompts, SQL_SCAN, "brute_force_scan")
 
 
 def test_must_fail_over_cap_is_named_422(

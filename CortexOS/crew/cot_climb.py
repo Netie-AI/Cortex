@@ -754,6 +754,7 @@ async def climb(
     prev_collapse = 0.0
     stall = 0
     last_reason = "no sql"
+    last_fed = ""
     goal_blob = text + " " + " ".join(sorted(allowed))
     goal_vec = embed_goal(goal_blob)
 
@@ -815,11 +816,10 @@ async def climb(
         sql = pulled.sql
         extracted = str(sql or "").strip()
         if supplied and extracted:
-            # Refuse before any retry. A retry would put this SQL back in the
-            # next prompt. The reason names the gate and does not include SQL.
+            # An ungranted table or join is refused before any retry. A retry
+            # would put this SQL back in the next prompt. The reason names the
+            # gate and does not include SQL.
             stop = schema_mod.ungranted_reason(extracted, supplied)
-            if stop is None:
-                stop = schema_mod.brute_force_reason(extracted)
             if stop:
                 return _envelope(
                     ok=False,
@@ -844,10 +844,11 @@ async def climb(
             # instead of validating "" and reporting "empty sql".
             checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
         elif supplied:
-            from CortexOS.insights.caller_sql import validate_caller_sql
+            from CortexOS.insights.caller_sql import UNDECLARED_COLUMN, validate_caller_sql
 
             checked = validate_caller_sql(sql, declared or {})
-            if not checked.get("ok"):
+            column_miss = checked.get("code") == UNDECLARED_COLUMN
+            if not checked.get("ok") and not column_miss:
                 # Same refusal as the caller-catalog gate. sql stays unset so
                 # a refused statement is never copied into sql_used.
                 return _envelope(
@@ -870,6 +871,19 @@ async def climb(
                         str(checked.get("reason") or "refused")
                     ),
                 )
+            # Retryable on this path: an unbounded listing, and a column the
+            # schema did not declare. Only the named reason goes back to the
+            # model ("fed"), never the SQL or the undeclared name.
+            fed = schema_mod.brute_force_reason(extracted) or (
+                schema_mod.UNDECLARED_COLUMN if column_miss else ""
+            )
+            if fed:
+                # The caller-facing reason stays what the gate said, for a
+                # refusal once the horizon is spent.
+                public = fed
+                if fed == schema_mod.UNDECLARED_COLUMN:
+                    public = schema_mod.public_sql_reason(str(checked.get("reason") or fed))
+                checked = {"ok": False, "sql": None, "tables": [], "reason": public, "fed": fed}
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
             reason = str(checked.get("reason") or "")
@@ -923,6 +937,7 @@ async def climb(
         stall = int(routed.get("stall_count") or 0)
         prev_collapse = collapse
         last_reason = str(checked.get("reason") or last_reason)
+        last_fed = str(checked.get("fed") or "")
         granted = DECISION_TERMINATE if predicates_pass else routed["decision"]
         steps.append(
             {
@@ -971,7 +986,7 @@ async def climb(
             DECISION_REGENERATE,
             DECISION_AUDIT_FAIL,
         ):
-            critique = last_reason
+            critique = last_fed or last_reason
             think = await _call_runner(
                 runner,
                 purpose="think",
@@ -1020,6 +1035,26 @@ async def climb(
             continue
         break
 
+    if supplied and last_fed:
+        # The schema_context gate still refuses by name once the horizon is
+        # spent on a retryable reason. sql stays unset.
+        return _envelope(
+            ok=False,
+            status="REFUSE",
+            arm=arm,
+            identity=identity,
+            sql=None,
+            climb=_climb_meta(
+                final="SCHEMA_REFUSE",
+                g1=g1,
+                steps=steps,
+                attempts=HORIZON,
+                think_consumed=bool(think_text),
+                g1_consumed=g1_consumed,
+                prior_sql_consumed=prior_sql_consumed,
+            ),
+            refuse_reason=last_reason,
+        )
     return _envelope(
         ok=False,
         status="REFUSE",
