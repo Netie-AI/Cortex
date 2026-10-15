@@ -7,6 +7,7 @@ the original answer (HMAC token binds session + sql digest).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 import json
@@ -128,45 +129,124 @@ def verify_token(token: str) -> dict[str, Any]:
     return payload
 
 
-def _strip_aggregates(select: exp.Select) -> tuple[list[exp.Expression], str | None, bool]:
-    """Replace aggregate projections with their args; return measure for ORDER BY."""
+@functools.lru_cache(maxsize=1)
+def _engine_aggregate_names() -> frozenset[str]:
+    """Aggregate function names DuckDB itself defines.
+
+    sqlglot parses some DuckDB aggregates (MEAN, PRODUCT, HISTOGRAM, FSUM, ...)
+    as anonymous functions. Read from an in-memory catalog; no data is touched.
+    """
+    import duckdb
+
+    con = duckdb.connect(":memory:")
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT function_name FROM duckdb_functions() "
+            "WHERE function_type = 'aggregate'"
+        ).fetchall()
+    finally:
+        con.close()
+    return frozenset(str(r[0]).lower() for r in rows)
+
+
+def _is_aggregate(node: exp.Expression) -> bool:
+    if isinstance(node, exp.AggFunc):
+        return True
+    return isinstance(node, exp.Anonymous) and node.name.lower() in _engine_aggregate_names()
+
+
+def _projected_aggregate(proj: exp.Expression) -> exp.Expression | None:
+    """The aggregate a projection is, under its alias and IGNORE/RESPECT NULLS."""
+    node = proj.this if isinstance(proj, exp.Alias) else proj
+    while isinstance(node, (exp.IgnoreNulls, exp.RespectNulls)) and _is_aggregate(node.this):
+        node = node.this
+    return node if _is_aggregate(node) else None
+
+
+def _aggregate_input(
+    agg: exp.Expression,
+) -> tuple[bool, exp.Expression | None, list[exp.Ordered]]:
+    """(has_args, per-row argument or None, the aggregate's own ORDER BY).
+
+    The argument is None when the aggregate counts rows (``*``, ``t.*``).
+    ``x ORDER BY y`` and ``DISTINCT x`` are unwrapped to ``x``.
+    """
+    args = list(agg.expressions)
+    if not args and isinstance(agg.this, exp.Expression):
+        args = [agg.this]
+    if not args:
+        return False, None, []
+    arg = args[0]
+    if isinstance(arg, exp.Limit):
+        # ARRAY_AGG(x ORDER BY y LIMIT n) aggregates only some of the rows.
+        raise DrillthroughError(
+            "drill-through cannot derive rows for an aggregate that limits its own input"
+        )
+    order: list[exp.Ordered] = []
+    if isinstance(arg, exp.Order):
+        order = [o.copy() for o in arg.expressions]
+        arg = arg.this
+    if isinstance(arg, exp.Distinct):
+        arg = arg.expressions[0] if arg.expressions else None
+    if (
+        arg is None
+        or isinstance(arg, exp.Star)
+        or (isinstance(arg, exp.Column) and isinstance(arg.this, exp.Star))
+    ):
+        return True, None, order
+    return True, arg.copy(), order
+
+
+def _is_constant(node: exp.Expression) -> bool:
+    return isinstance(node, (exp.Literal, exp.Null, exp.Boolean))
+
+
+def _strip_aggregates(
+    select: exp.Select,
+) -> tuple[list[exp.Expression], str | None, list[exp.Ordered], bool]:
+    """Replace aggregate projections with their per-row arguments.
+
+    Returns the projections, the measure, the drill ORDER BY and whether the
+    drill is approximate. The ORDER BY is the first aggregate's own ORDER BY,
+    else its argument descending; it is built from nodes, never re-parsed text.
+    """
     approximate = False
     measure: str | None = None
+    order: list[exp.Ordered] = []
     new_exprs: list[exp.Expression] = []
     for proj in select.expressions:
-        alias = proj.alias_or_name if isinstance(proj, exp.Alias) else None
-        node = proj.this if isinstance(proj, exp.Alias) else proj
-        if isinstance(node, exp.AggFunc):
-            args = list(node.expressions) or ([node.this] if node.this is not None else [])
-            if not args:
-                approximate = True
-                continue
-            if isinstance(args[0], exp.Star):
-                # COUNT(*) has no per-row value; the drilled rows are what it counted.
-                continue
-            inner = args[0].copy()
-            if isinstance(inner, exp.Distinct) and inner.expressions:
-                inner = inner.expressions[0].copy()
-            if measure is None:
-                measure = inner.sql(dialect="duckdb")
-            if alias:
-                new_exprs.append(exp.alias_(inner, alias, table=False))
-            else:
-                new_exprs.append(inner)
-        else:
+        agg = _projected_aggregate(proj)
+        if agg is None:
             new_exprs.append(proj.copy())
-    return new_exprs, measure, approximate
+            continue
+        has_args, inner, own_order = _aggregate_input(agg)
+        if not has_args:
+            approximate = True
+            continue
+        if not order and own_order:
+            order = own_order
+        if inner is None:
+            # COUNT(*) has no per-row value; the drilled rows are what it counted.
+            continue
+        if measure is None and not _is_constant(inner):
+            # A constant (COUNT(1)) would be a positional ORDER BY.
+            measure = inner.sql(dialect="duckdb")
+            if not order:
+                order = [exp.Ordered(this=inner.copy(), desc=True)]
+        alias = proj.alias_or_name if isinstance(proj, exp.Alias) else None
+        new_exprs.append(exp.alias_(inner, alias, table=False) if alias else inner)
+    return new_exprs, measure, order, approximate
 
 
-def _own_aggregates(select: exp.Select, node: exp.Expression) -> list[exp.AggFunc]:
+def _own_aggregates(select: exp.Select, node: exp.Expression) -> list[exp.Expression]:
     """Aggregates in ``node`` that aggregate ``select`` itself.
 
     Window aggregates and aggregates inside a subquery are not the answer's own.
     """
     return [
         agg
-        for agg in node.find_all(exp.AggFunc)
-        if agg.find_ancestor(exp.Window, exp.Select) is select
+        for agg in node.find_all(exp.AggFunc, exp.Anonymous)
+        if _is_aggregate(agg) and agg.find_ancestor(exp.Window, exp.Select) is select
     ]
 
 
@@ -226,12 +306,26 @@ def rewrite_for_drillthrough(
     """Architecture §4.5 rewrite rules.
 
     ``provenance_for`` names the provenance columns each table really has; when
-    omitted every provenance column is projected.
+    omitted every provenance column is projected. Any SQL the rewrite cannot
+    parse or build is a DrillthroughError (a named 400), never an engine error.
     """
     try:
         tree = sqlglot.parse_one(sql, read=dialect)
     except sqlglot.errors.SqlglotError as exc:
         raise DrillthroughError("answer SQL could not be parsed for drill-through") from exc
+    try:
+        return _rewrite(tree, sql, dialect=dialect, provenance_for=provenance_for)
+    except sqlglot.errors.SqlglotError as exc:
+        raise DrillthroughError("drill-through SQL could not be built for this answer") from exc
+
+
+def _rewrite(
+    tree: exp.Expression,
+    sql: str,
+    *,
+    dialect: str,
+    provenance_for: ProvenanceLookup | None,
+) -> DrillRewrite:
     if not isinstance(tree, exp.Select):
         raise DrillthroughError("drill-through requires a SELECT statement")
 
@@ -244,7 +338,7 @@ def rewrite_for_drillthrough(
     if aggregated:
         for proj in tree.expressions:
             node = proj.this if isinstance(proj, exp.Alias) else proj
-            if not isinstance(node, exp.AggFunc) and _own_aggregates(tree, node):
+            if _projected_aggregate(proj) is None and _own_aggregates(tree, node):
                 # Nested (ROUND(SUM(x))) or filtered (COUNT(*) FILTER ...): the drill
                 # would return the aggregate value, not the rows behind it.
                 raise DrillthroughError(
@@ -285,13 +379,14 @@ def rewrite_for_drillthrough(
         approximate = True
 
     tree.set("group", None)
-    new_exprs, measure, agg_approx = _strip_aggregates(tree)
+    new_exprs, measure, drill_order, agg_approx = _strip_aggregates(tree)
     approximate = approximate or agg_approx
-    if not new_exprs:
-        raise DrillthroughError("no projectable columns after stripping aggregates")
 
     aliases = _table_aliases(tree)
     prov = _provenance_projections(aliases, provenance_for)
+    if not new_exprs and not prov:
+        raise DrillthroughError("no projectable columns after stripping aggregates")
+    # COUNT(*) alone still drills when its tables carry provenance columns.
     tree.set("expressions", new_exprs + prov)
 
     if not aggregated:
@@ -304,8 +399,8 @@ def rewrite_for_drillthrough(
             drill_limit = min(kept, _DRILL_LIMIT)
         else:
             drill_limit = _DRILL_LIMIT
-    elif measure:
-        tree.set("order", exp.Order(expressions=[exp.Ordered(this=sqlglot.parse_one(measure, read=dialect), desc=True)]))
+    elif drill_order:
+        tree.set("order", exp.Order(expressions=drill_order))
         drill_limit = _DRILL_LIMIT
     else:
         # The answer's ORDER BY ranks groups (often by a stripped aggregate alias).
