@@ -166,20 +166,27 @@ def _no_digits(answer: str, reason: str) -> bool:
 
 
 def _assert_served(body: dict[str, Any], mid: str, prompts: list[str]) -> str:
-    # Validated, not executed in crew: DMS runs query_sql. No figure from Cortex here.
+    # Validated, not executed in crew: DMS runs the returned SQL (generative.sql,
+    # also sql_used). No figure from Cortex here.
     assert body["status"] == "ABSTAIN"
     assert body["badge"] == "abstain"
     assert body["values"] == []
-    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    # INSIGHTS-LANE-INVERSION-01: stored SQL with no model call is not the
+    # model lane, so it is other and carries no ontology_plan query_sql.
+    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert "query_sql" not in body
+    assert body["model_called"] is False
     assert f"Served certified query {mid}" in body["answer"]
     assert body["served_provider"] is None and body["served_model"] is None
     assert body["served_reason"].startswith(f"certified_query:{mid}")
     assert body["generative"]["check"] == f"certified_query:{mid}"
     assert body["generative"]["route"] is None
+    assert body["generative"]["sql"] == body["sql_used"]
     assert prompts == []  # the model was never called for this ask
     text = insights.render_tool_text(body)
     assert f"certified_query:{mid}" in text
-    return str(body["query_sql"])
+    assert "plan_source: other" in text
+    return str(body["sql_used"])
 
 
 @pytest.mark.parametrize("mid", sorted(MEASURES))

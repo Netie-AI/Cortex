@@ -509,13 +509,17 @@ def test_demo_certified_question_is_served_end_to_end_unchanged(
     assert body["status"] == "ABSTAIN"
     assert body["badge"] == "abstain"
     assert body["values"] == []
-    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    # INSIGHTS-LANE-INVERSION-01: stored certified SQL, no model call: other.
+    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert "query_sql" not in body
+    assert body["model_called"] is False
     assert "Served certified query cq_supplier_ranking" in body["answer"]
     assert body["generative"]["check"] == "certified_query:cq_supplier_ranking"
     assert not _gen_prompts(prompts)  # the model is never asked for a certified measure
     oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
-    assert body["query_sql"] == oracle
-    rows = _lake_demo().execute(body["query_sql"]).fetchall()
+    assert body["sql_used"] == oracle
+    assert body["generative"]["sql"] == oracle
+    rows = _lake_demo().execute(body["sql_used"]).fetchall()
     assert rows and rows == _lake_demo().execute(oracle).fetchall()
     assert {row["where"]["table"] for row in body["ontology"]["locations"]} <= DEMO_TABLES
 
