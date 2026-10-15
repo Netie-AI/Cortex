@@ -233,3 +233,54 @@ def test_table_derived_sql_is_still_served_first_time(
     assert len(armed_openvault.chat_calls) == 2
     assert _ran(execute_spy) == [body["sql_used"]]
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
+
+
+# A row count is an answer only when every relation it counts is a granted
+# table. A VALUES list joined to a granted table makes it a count of typed rows.
+VALUES_COUNT_SQL = [
+    pytest.param(
+        "SELECT COUNT(*) AS n FROM (VALUES (1),(2),(3),(4),(5),(6),(7)) AS v "
+        "LEFT JOIN transactions ON FALSE",
+        7,
+        id="values-left-join-on-false",
+    ),
+]
+# The variant that aliases the VALUES list with the table's own name is stopped
+# by the manifest on this path; its lineage is in tests/dms/test_sql_lineage.py.
+
+
+@pytest.mark.parametrize(("count_sql", "typed_count"), VALUES_COUNT_SQL)
+def test_row_count_over_a_values_list_is_fed_back_then_the_table_answer_is_served(
+    armed_openvault,
+    dms_http,
+    execute_spy: list[str],
+    count_sql: str,
+    typed_count: int,
+) -> None:
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, count_sql)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+    oracle = _oracle(GOOD_SQL)
+    assert oracle
+    # The typed count is not a count of the table.
+    assert _oracle(count_sql) == [{"n": typed_count}]
+    assert _oracle("SELECT COUNT(*) AS n FROM transactions")[0]["n"] != typed_count
+
+    body = _json(_ask(dms_http))
+
+    assert f"n = {typed_count}" not in body["answer"], body["answer"]
+    assert {"n": typed_count} not in (body["rows"] or [])
+    assert _rowset(body["rows"]) == _rowset(oracle)
+    assert body["row_count"] == len(oracle)
+    for row in oracle:
+        assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
+    assert body["sql_used"].startswith(GOOD_SQL)
+    assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
+    assert _ran(execute_spy) == [body["sql_used"]]
+    assert all("VALUES" not in sql.upper() for sql in execute_spy)
+    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    assert NOT_FROM_TABLE in retry
+    assert "OUTPUT_NOT_FROM_TABLE:n" in retry
+    assert len(armed_openvault.chat_calls) == 3
+    _assert_rung(body, plan_sql_ask.rung_retry(1))

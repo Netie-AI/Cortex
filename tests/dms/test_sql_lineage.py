@@ -40,6 +40,12 @@ DERIVED = [
     "SELECT quantity_kg AS q, q * 2 AS dbl FROM inventory",
     "SELECT DATE_TRUNC('month', CAST(ts AS DATE)) AS m, COUNT(*) AS n FROM transactions GROUP BY 1",
     'SELECT "SKU" FROM "Inventory"',
+    # Row counts over granted tables only, joins included.
+    "SELECT COUNT(*) AS n FROM transactions t JOIN inventory i ON i.sku = t.sku",
+    "SELECT COUNT(*) AS n FROM transactions JOIN transactions ON TRUE",
+    "SELECT COUNT(*) AS n FROM (SELECT t.sku FROM transactions t JOIN inventory i ON i.sku = t.sku) s",
+    "WITH t AS (SELECT sku FROM transactions) SELECT COUNT(*) AS n FROM t, inventory",
+    "SELECT COUNT(*) AS n FROM (SELECT sku FROM transactions UNION ALL SELECT sku FROM inventory) s",
 ]
 
 UNDERIVED = [
@@ -68,6 +74,34 @@ UNDERIVED = [
     ("SELECT 424242 AS a, a AS b FROM inventory", ["a", "b"]),
     ("SELECT x FROM ungranted", ["x"]),
     ("SELECT COUNT(*) AS n FROM ungranted", ["n"]),
+    # A row count is a count of every relation in FROM/JOIN: a VALUES list
+    # there makes it a count of typed rows.
+    (
+        "SELECT COUNT(*) AS n FROM (VALUES (1),(2),(3),(4),(5),(6),(7)) AS v "
+        "LEFT JOIN transactions ON FALSE",
+        ["n"],
+    ),
+    ("SELECT COUNT(1) AS n FROM transactions, (VALUES (1),(2)) AS v", ["n"]),
+    ("SELECT COUNT(*) AS n FROM transactions, (VALUES (1),(2))", ["n"]),
+    ("SELECT COUNT(*) AS n FROM transactions, ungranted", ["n"]),
+    ("SELECT COUNT(*) AS n FROM transactions t JOIN (SELECT 1 AS k) s ON TRUE", ["n"]),
+    ("SELECT COUNT(*) AS n FROM (SELECT t.sku FROM transactions t, (VALUES (1),(2)) v) s", ["n"]),
+    (
+        "SELECT COUNT(*) AS n FROM "
+        "(SELECT sku FROM transactions UNION ALL SELECT 'X' FROM (VALUES (1),(2)) v) s",
+        ["n"],
+    ),
+    ("SELECT COUNT(*) AS n FROM (SELECT sku FROM transactions UNION ALL SELECT 'X') s", ["n"]),
+    # DuckDB accepts a repeated alias; a VALUES list must not hide behind a
+    # granted table's name.
+    (
+        "SELECT COUNT(*) AS n FROM (VALUES (1),(2),(3)) AS transactions "
+        "LEFT JOIN transactions ON FALSE",
+        ["n"],
+    ),
+    ("SELECT v.x AS n FROM (VALUES (424242)) AS v(x), transactions AS v", ["n"]),
+    ("SELECT v.x AS n FROM transactions AS v, (VALUES (424242)) AS v(x)", ["n"]),
+    ("SELECT x AS n FROM (VALUES (424242)) AS v(x), transactions AS v", ["n"]),
 ]
 
 

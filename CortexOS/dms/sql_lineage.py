@@ -9,12 +9,14 @@ An output column derives when its expression
 
 * references a column that resolves, through CTEs, derived tables, set
   operations and stars, to a granted base table; or
-* is a row count (``COUNT(*)`` or ``COUNT(<literal>)``) over a FROM clause that
-  reads a granted base table; or
+* is a row count (``COUNT(*)`` or ``COUNT(<literal>)``) whose FROM and JOIN
+  relations all take their rows from granted base tables (a VALUES list joined
+  in makes it a count of typed rows); or
 * holds a scalar subquery whose output derives.
 
 ``VALUES`` lists, a recursive CTE's own name, and any relation that is not a
-base table never supply a deriving column. An unqualified column that a
+base table never supply a deriving column. An alias that names two relations
+(DuckDB accepts that) binds neither. An unqualified column that a
 non-table source in scope (or an enclosing scope) could also expose must
 derive there too (fail closed). For a UNION every branch must derive; for
 INTERSECT and EXCEPT only the left branch supplies rows. No question text is
@@ -61,10 +63,11 @@ class _Opaque:
 
 @dataclass(slots=True)
 class _Env:
-    sources: dict[str, Any]
+    sources: dict[str, Any]  # by alias; an alias used twice maps to _Opaque
     aliases: dict[str, exp.Expression]
     parent: _Env | None
     ctes: dict[str, Any]
+    relations: list[Any]  # every FROM/JOIN relation, in order
 
 
 @dataclass(slots=True)
@@ -138,15 +141,20 @@ def _select_env(select: exp.Select, ctes: dict[str, Any], parent: _Env | None) -
         nodes.append(from_.this)
     nodes.extend(join.this for join in select.args.get("joins") or [])
     sources: dict[str, Any] = {}
+    relations: list[Any] = []
     for idx, node in enumerate(nodes):
         key = _fold(node.alias or (node.name if isinstance(node, exp.Table) else ""))
-        sources[key or f"\x00{idx}"] = _relation(node, ctes, parent)
+        rel = _relation(node, ctes, parent)
+        relations.append(rel)
+        key = key or f"\x00{idx}"
+        # A repeated alias does not say which relation it binds: neither derives.
+        sources[key] = _Opaque() if key in sources else rel
     aliases = {
         _fold(item.alias): item.this
         for item in select.expressions
         if isinstance(item, exp.Alias) and item.alias
     }
-    return _Env(sources=sources, aliases=aliases, parent=parent, ctes=ctes)
+    return _Env(sources=sources, aliases=aliases, parent=parent, ctes=ctes, relations=relations)
 
 
 def _branches(node: exp.Expression) -> list[exp.Expression]:
@@ -175,7 +183,7 @@ def _branch_envs(rel: _Query) -> list[tuple[exp.Select, _Env] | None]:
 
 def _item_derives(item: exp.Expression, env: _Env, ctx: _Ctx) -> bool:
     if isinstance(item, exp.Star):
-        return bool(env.sources) and all(_fully_derives(r, ctx) for r in env.sources.values())
+        return bool(env.relations) and all(_fully_derives(r, ctx) for r in env.relations)
     if isinstance(item, exp.Column) and isinstance(item.this, exp.Star):
         rel = _lookup(env, _fold(item.table))
         return rel is not None and _fully_derives(rel, ctx)
@@ -280,8 +288,13 @@ def _exposes(rel: Any, name: str) -> bool:
     return any(_is_star(item) or _fold(item.alias_or_name) == name for item in first.expressions)
 
 
+def _rows_from_granted(env: _Env, ctx: _Ctx) -> bool:
+    """Every relation in this FROM/JOIN takes its rows from granted base tables."""
+    return bool(env.relations) and all(_reads_granted(r, ctx) for r in env.relations)
+
+
 def _reads_granted(rel: Any, ctx: _Ctx) -> bool:
-    """Rows of ``rel`` come from a granted base table."""
+    """Every row of ``rel`` comes from granted base tables (VALUES rows do not)."""
     if isinstance(rel, _Base):
         return rel.name in ctx.granted
     if not isinstance(rel, _Query):
@@ -289,9 +302,8 @@ def _reads_granted(rel: Any, ctx: _Ctx) -> bool:
     with ctx.guard("reads", rel.node) as fresh:
         if not fresh:
             return False
-        return any(
-            entry is not None and any(_reads_granted(s, ctx) for s in entry[1].sources.values())
-            for entry in _branch_envs(rel)
+        return all(
+            entry is not None and _rows_from_granted(entry[1], ctx) for entry in _branch_envs(rel)
         )
 
 
@@ -315,7 +327,7 @@ def _column_derives(col: exp.Column, env: _Env, ctx: _Ctx, own: str, seen: froze
     granted_base = False
     scope: _Env | None = env
     while scope is not None:
-        for rel in scope.sources.values():
+        for rel in scope.relations:
             if _exposes(rel, name):
                 shadows.append(rel)
             elif isinstance(rel, _Base) and rel.name in ctx.granted:
@@ -350,7 +362,7 @@ def _expr_derives(
             if _column_derives(node, env, ctx, own, seen):
                 return True
             continue
-        if _is_row_count(node) and any(_reads_granted(r, ctx) for r in env.sources.values()):
+        if _is_row_count(node) and _rows_from_granted(env, ctx):
             return True
         stack.extend(node.iter_expressions())
     return False
