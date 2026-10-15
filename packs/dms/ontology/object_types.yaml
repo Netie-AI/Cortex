@@ -97,6 +97,26 @@ object_types:
       - {name: operator_id, type: string, agent_visible: true}
       - {name: timestamp, type: datetime, agent_visible: true}
       - {name: reference_doc, type: string, agent_visible: true}
+    # METRIC-SEMANTICS-01: what a sales number means, declared once.
+    # `expression` is the aggregate; `filter` is the row condition every value of
+    # the measure carries (a declared txn_type value above); `grain` is the
+    # property naming one summed row; `metrics` lists the metrics.yaml entries
+    # that compute it. The /v1/insights SQL prompt carries these definitions,
+    # and SQL that aggregates these columns without pinning txn_type is sent
+    # back to the model (CortexOS/ontology/measures.py).
+    measures:
+      - name: sales_value_myr
+        description: "Sales value in MYR. A sale is an outbound movement; inbound, ADJUST and WRITE_OFF rows are not sales."
+        expression: "SUM(quantity_kg * unit_cost_myr)"
+        filter: {column: txn_type, equals: outbound}
+        grain: txn_id
+        metrics: [sales_by_value, revenue_total, revenue_windowed, revenue_last_month]
+      - name: sales_volume_kg
+        description: "Quantity sold in kg. A sale is an outbound movement."
+        expression: "SUM(quantity_kg)"
+        filter: {column: txn_type, equals: outbound}
+        grain: txn_id
+        metrics: [sales_by_volume]
 
   - id: alerts
     description: "An operational alert (low stock, expiry, delay) optionally linked to a SKU, location, or supplier."

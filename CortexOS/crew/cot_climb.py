@@ -42,7 +42,7 @@ from CortexOS.execution.gen_cfsm import (
 )
 from CortexOS.execution.scoreboard import embed_goal
 from CortexOS.identifier_fold import fold_identifier
-from CortexOS.ontology import value_domain
+from CortexOS.ontology import measures, value_domain
 from CortexOS.ontology.registry import pack_dir_for
 
 HORIZON = 3
@@ -295,6 +295,37 @@ def _declared_values(ranking: Mapping[str, Any]) -> dict[str, dict[str, list[str
     return value_domain.prompt_values(value_domain.load_value_domains(pack_dir_for("dms")))
 
 
+def _declared_measures(ranking: Mapping[str, Any]) -> tuple[measures.Measure, ...]:
+    """METRIC-SEMANTICS-01: measures the engine pack's ontology declares.
+
+    Same scope as ``_declared_values``: a caller catalog is the caller's own
+    schema, so the pack's measures neither reach its prompt nor check its SQL.
+    """
+    if ranking.get("source"):
+        return ()
+    return measures.load_measures(pack_dir_for("dms"))
+
+
+def _measure_lines(ranking: Mapping[str, Any]) -> list[str]:
+    """Declared measure definitions for the tables in play (never chosen by question words)."""
+    found = measures.prompt_lines(_declared_measures(ranking), _allowed_tables(ranking))
+    if not found:
+        return []
+    return [
+        "- declared measures (compute these exactly as defined, filter included):",
+        *("  " + line for line in found),
+    ]
+
+
+def _measure_violation(ranking: Mapping[str, Any], sql: str) -> str:
+    """Named reason when ``sql`` aggregates a declared measure without its filter; else ''."""
+    declared = _declared_measures(ranking)
+    if not declared or not sql:
+        return ""
+    found = measures.check_sql(sql, declared, measures.ontology_schema(pack_dir_for("dms")))
+    return "; ".join(dict.fromkeys(v.reason() for v in found))
+
+
 def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
     declared = _declared_values(ranking)
@@ -306,6 +337,7 @@ def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
         for col, vals in (declared.get(str(table)) or {}).items():
             if col in cols:
                 lines.append("  " + value_domain.prompt_line(str(table), col, vals))
+    lines.extend(_measure_lines(ranking))
     for row in list(ranking.get("metrics") or [])[:12]:
         mid = row.get("id") or ""
         tables = (row.get("where") or {}).get("tables") or []
@@ -779,6 +811,12 @@ async def climb(
             checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
+            if checked.get("ok"):
+                # METRIC-SEMANTICS-01: a declared measure without its filter is a
+                # named retry inside this horizon, never a served answer.
+                broken = _measure_violation(ranking, str(checked.get("sql") or ""))
+                if broken:
+                    checked = {**checked, "ok": False, "reason": broken}
         last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core

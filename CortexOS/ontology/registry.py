@@ -55,11 +55,32 @@ class Property:
 
 
 @dataclass(frozen=True, slots=True)
+class DeclaredMeasure:
+    """A measure an object declares: what the number means, as data.
+
+    ``expression`` is one aggregate over the object's columns; every value of
+    the measure counts only rows where ``filter_column = filter_value`` (a
+    declared canonical value of that column); ``grain`` is the property that
+    identifies one summed row; ``metrics`` names the metric entries that
+    compute it. See ``CortexOS.ontology.measures``.
+    """
+
+    name: str
+    description: str
+    expression: str
+    filter_column: str
+    filter_value: str
+    grain: str
+    metrics: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ObjectType:
     id: str
     description: str
     primary_key: str
     properties: tuple[Property, ...]
+    measures: tuple[DeclaredMeasure, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +159,61 @@ def _declared_values(where: str, raw: Any) -> tuple[DeclaredValue, ...]:
     return tuple(out)
 
 
+def _declared_measures(
+    obj_id: str, props: tuple[Property, ...], raw: Any
+) -> tuple[DeclaredMeasure, ...]:
+    """Parse an object's ``measures:`` list. Refuse a filter the lake could not match."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{obj_id}: measures must be a list")
+    by_name = {p.name: p for p in props}
+    out: list[DeclaredMeasure] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError(f"{obj_id}: each measure must be a mapping")
+        name = item.get("name")
+        if not isinstance(name, str) or not name.isidentifier():
+            raise ValueError(f"{obj_id}: measure name must be an identifier")
+        where = f"{obj_id}.{name}"
+        expression = item.get("expression")
+        if not isinstance(expression, str) or not expression.strip():
+            raise ValueError(f"{where}: expression must be a non-empty string")
+        flt = item.get("filter")
+        if not isinstance(flt, dict) or set(flt) != {"column", "equals"}:
+            raise ValueError(f"{where}: filter must be a mapping with column and equals")
+        column, value = flt["column"], flt["equals"]
+        prop = by_name.get(column) if isinstance(column, str) else None
+        if prop is None:
+            raise ValueError(f"{where}: filter column {column!r} is not a property")
+        canonical = [v.canonical for v in prop.values]
+        if not canonical:
+            raise ValueError(f"{where}: filter column {column!r} declares no values")
+        if value not in canonical:
+            raise ValueError(f"{where}: filter value {value!r} is not a declared value of {column}")
+        grain = item.get("grain")
+        if not isinstance(grain, str) or grain not in by_name:
+            raise ValueError(f"{where}: grain {grain!r} is not a property")
+        metrics = item.get("metrics", [])
+        if not isinstance(metrics, list) or not all(isinstance(m, str) and m for m in metrics):
+            raise ValueError(f"{where}: metrics must be a list of metric ids")
+        out.append(
+            DeclaredMeasure(
+                name=name,
+                description=str(item.get("description", "")),
+                expression=expression.strip(),
+                filter_column=column,
+                filter_value=value,
+                grain=str(grain),
+                metrics=tuple(metrics),
+            )
+        )
+    names = [m.name for m in out]
+    if len(set(names)) != len(names):
+        raise ValueError(f"{obj_id}: a measure is declared twice")
+    return tuple(out)
+
+
 def load_object_types(pack_dir: Path | str | None = None) -> list[ObjectType]:
     data = _read_yaml(_ontology_dir(pack_dir) / "object_types.yaml")
     out: list[ObjectType] = []
@@ -157,6 +233,7 @@ def load_object_types(pack_dir: Path | str | None = None) -> list[ObjectType]:
                 description=str(row.get("description", "")),
                 primary_key=str(row["primary_key"]),
                 properties=props,
+                measures=_declared_measures(str(row["id"]), props, row.get("measures")),
             )
         )
     return out
