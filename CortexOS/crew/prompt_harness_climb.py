@@ -414,7 +414,9 @@ async def run_harness(
     this_run = dict(report.get("this_run") or {})
     exclusions = {
         key: report.get(key)
-        for key in ("excluded", "excluded_ids", "excluded_n", "counts_toward_score", "score_note")
+        for key in (
+            "excluded", "excluded_ids", "excluded_n", "counts_toward_score", "score_note", "gold",
+        )
         if key in report
     }
     if report.get("status") == "REFUSE":

@@ -20,7 +20,8 @@ the pinned 26 ids from that covering SHA -- not a 5-item fixture, not a
 label-only n==26. this_run.exact scores against oracle gold SQL
 (``bench/oracle``, never the L0 serve set; #343) when the case id /
 expected_sql is present; missing gold is not invented 38.46%. A case whose id
-or question text is in the serve set is excluded from the score and named.
+or question text is in the serve set is excluded from the score and named. The
+oracle never copies frozen held-out; a run with no gold stamps ``NO_GOLD``.
 """
 
 from __future__ import annotations
@@ -123,7 +124,7 @@ def public_map() -> dict[str, Any]:
         ),
         "exact": (
             "this_run.exact vs oracle gold (bench/oracle) when id/expected_sql present; "
-            "serve-set cases excluded by name; never invent 38.46%"
+            "serve-set cases excluded by name; no gold stamps NO_GOLD; never invent 38.46%"
         ),
         "freeroute": "consume crew.freeroute public API only; unarmed fail-closed",
         "prompt_harness": (
@@ -433,6 +434,11 @@ def coverage_report(
         note = "serve-set cases excluded (#343); not like-with-like vs DMS #180"
     else:
         note = "different corpus; do not replace DMS #180 numbers"
+    from CortexOS.crew import score_oracle
+
+    gold = score_oracle.gold_stamp(n, gold_n)
+    if n and gold["status"] == score_oracle.NO_GOLD:
+        note = f"{score_oracle.NO_GOLD}: exact is not a score; {note}"
     report: dict[str, Any] = {
         "ok": True,
         "complete": False,
@@ -450,6 +456,7 @@ def coverage_report(
             "exact": exact_label,
             "exact_matched": exact_hit,
             "gold_n": gold_n,
+            "gold": gold["status"],
             "corpus": this_corpus,
             "like_with_like": like,
         },
@@ -468,9 +475,8 @@ def coverage_report(
         "issue_212_complete": False,
         "issue_227_complete": False,
         "outcomes": [dict(row) for row in outcomes],
+        "gold": gold,
     }
-    from CortexOS.crew import score_oracle
-
     reasons = sorted({str(row.get("reason") or "") for row in excluded})
     score_oracle.stamp(
         report,

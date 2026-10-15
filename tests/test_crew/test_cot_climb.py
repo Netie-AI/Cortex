@@ -779,6 +779,8 @@ async def test_pinned_26_excludes_the_serve_set_without_inventing_percent(
     assert report["vs_baseline"]["this_run_exact"] == "0.00%"
     assert report["this_run"]["exact_matched"] == 0
     assert report["this_run"]["gold_n"] == 0
+    assert report["this_run"]["gold"] == "NO_GOLD"  # 0.00% exact is not a score
+    assert report["gold"]["status"] == "NO_GOLD"
     assert report["complete"] is False
     assert report["status"] == "INCOMPLETE"
     assert report["replaces_baseline"] is False
@@ -960,7 +962,8 @@ def test_public_map_leftover_stays_incomplete_covering() -> None:
     assert body["issue_212_complete"] is False
     gold = cot_climb.oracle_gold_sql()
     assert "cq_sku_count" not in gold  # the L0 serve set is never gold (#343)
-    sql = gold["spider_country_mean_lead_having"]
+    assert "spider_country_mean_lead_having" not in gold  # nor is frozen held-out
+    sql = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
     assert cot_climb.sql_exact("", sql) is False
     assert cot_climb.sql_exact(sql, sql) is True
 

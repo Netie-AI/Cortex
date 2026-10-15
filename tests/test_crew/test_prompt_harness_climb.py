@@ -621,6 +621,8 @@ async def test_pinned_26_excludes_serve_set_and_stays_incomplete(
     assert out["this_run"]["n"] == 5
     assert out["excluded_n"] == 21
     assert "cq_supplier_ranking" in out["excluded_ids"]
+    assert out["gold"]["status"] == "NO_GOLD"  # no disjoint gold: exact is not a score
+    assert out["this_run"]["gold"] == "NO_GOLD"
     assert out["this_run"]["gen"] == "0.00%"
     assert out["this_run"]["gen"] != "57.69%"
     assert out["this_run"]["exact"] == "0.00%"

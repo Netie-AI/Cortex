@@ -12,6 +12,10 @@ to exclude from scoring: a case whose id, or whose normalised question text
 (the certified question or a synonym), is in the serve set earns no score and
 is listed by name with a named reason. ``dms_golden_v1`` counts toward no
 score until it is re-split.
+
+The oracle never copies the frozen held-out split (``bench/heldout/``); it
+holds no entries today. A climb whose cases found no gold stamps ``NO_GOLD``
+(``gold_stamp``) so an exact % over no gold is never read as a score.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 ORACLE_PATH = ROOT / "bench" / "oracle" / "climb_oracle_v1.yaml"
+ORACLE_REL = ORACLE_PATH.relative_to(ROOT).as_posix()
 SERVE_SET_REL = Path("semantic") / "certified_queries.yaml"
 
 GOLDEN_UNSPLIT = "dms_golden_v1"
@@ -32,6 +37,8 @@ SERVE_SET_ID = "serve_set_id"
 SERVE_SET_QUESTION = "serve_set_question"
 GOLDEN_NOT_RESPLIT = "dms_golden_v1_not_resplit"
 ALL_EXCLUDED = "all_cases_excluded"
+NO_GOLD = "NO_GOLD"
+HAS_GOLD = "GOLD"
 GOLDEN_NOTE = (
     "dms_golden_v1 seeded the L0 serve set (packs/dms/semantic/certified_queries.yaml); "
     "it counts toward no score until it is re-split"
@@ -63,6 +70,23 @@ def oracle_gold_sql(path: Path | str | None = None) -> dict[str, str]:
         if cid and sql:
             out[cid] = sql
     return out
+
+
+def gold_stamp(n: int, gold_n: int) -> dict[str, Any]:
+    """Whether a run's exact % was graded against any gold. Never a silent empty score."""
+    stamp: dict[str, Any] = {
+        "status": HAS_GOLD if gold_n > 0 else NO_GOLD,
+        "n": n,
+        "gold_n": gold_n,
+        "oracle": ORACLE_REL,
+        "oracle_entries": len(oracle_gold_sql()),
+    }
+    if gold_n == 0:
+        stamp["reason"] = (
+            f"{NO_GOLD}: no case had expected_sql or an entry in {ORACLE_REL}; "
+            "exact is not a score"
+        )
+    return stamp
 
 
 def serve_set(pack_dir: Path | str | None = None) -> tuple[frozenset[str], dict[str, str]]:
@@ -148,7 +172,11 @@ __all__ = [
     "GOLDEN_NOTE",
     "GOLDEN_NOT_RESPLIT",
     "GOLDEN_UNSPLIT",
+    "HAS_GOLD",
+    "NO_GOLD",
     "ORACLE_PATH",
+    "ORACLE_REL",
+    "gold_stamp",
     "SERVE_SET_ID",
     "SERVE_SET_QUESTION",
     "norm_question",

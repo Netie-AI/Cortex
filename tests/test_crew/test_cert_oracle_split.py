@@ -13,6 +13,10 @@ Must-fail tests (each fails on the parent and passes on the head):
   (c) ``test_must_fail_scored_climb_refuses_serve_set_id``,
       ``test_must_fail_scored_climb_refuses_serve_set_question`` and
       ``test_must_fail_heldout_score_refuses_serve_set_overlap``
+  (d) ``test_must_fail_climb_oracle_is_disjoint_from_heldout_and_serve_set`` and
+      ``test_must_fail_climb_without_gold_says_so``: the climb never tunes on
+      the frozen held-out split, and with no disjoint gold it says NO_GOLD
+      instead of printing an empty exact score.
 
 "The oracle" in (a) is whatever file ``gold_sql_for`` actually opens, observed
 through an ``open`` audit hook. File reads are invisible to import-linter, so
@@ -39,7 +43,8 @@ from CortexOS.crew import cot_climb
 ROOT = Path(__file__).resolve().parents[2]
 SERVE_SET = (ROOT / "packs" / "dms" / "semantic" / "certified_queries.yaml").resolve()
 BENCH = (ROOT / "bench").resolve()
-HELDOUT = ROOT / "bench" / "heldout" / "c7_heldout_v1.yaml"
+HELDOUT_DIR = ROOT / "bench" / "heldout"
+HELDOUT_ID = "spider_country_mean_lead_having"  # a frozen held-out sql item
 CONTRACT = "importlinter:contract:serve-never-reads-oracle"
 SKU_GOLD = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
 RANK_Q = "Rank suppliers by combined risk and lead time score"
@@ -79,7 +84,7 @@ def _opened() -> Iterator[list[Path]]:
 def _gold_files(monkeypatch: pytest.MonkeyPatch) -> set[Path]:
     monkeypatch.setattr(cot_climb, "_GOLD", None)
     with _opened() as seen:
-        cot_climb.gold_sql_for("spider_country_mean_lead_having")
+        cot_climb.gold_sql_for(HELDOUT_ID)
     files = {p for p in seen if p.suffix in {".yaml", ".yml", ".json"}}
     assert files, "gold_sql_for opened no gold file"
     return files
@@ -413,31 +418,122 @@ def test_must_fail_gold_sql_for_never_reads_the_serve_set(
     monkeypatch.setattr(cot_climb, "_GOLD", None)
     with _opened() as seen:
         served = cot_climb.gold_sql_for("cq_sku_count")
-        oracle = cot_climb.gold_sql_for("spider_country_mean_lead_having")
+        heldout = cot_climb.gold_sql_for(HELDOUT_ID)
     assert SERVE_SET not in seen, "gold_sql_for opened certified_queries.yaml"
     assert served == ""  # a serve-set id has no gold
-    assert oracle.startswith("SELECT country FROM suppliers")
+    assert heldout == ""  # a frozen held-out id has no climb gold either
     assert cot_climb.gold_sql_for("cq_sku_count", SKU_GOLD) == SKU_GOLD
 
 
-def test_oracle_is_pinned_to_heldout_and_disjoint_from_the_serve_set() -> None:
+# --- (d) the climb never tunes on held-out, and says so when it has no gold ----
+
+
+def _heldout_keys() -> tuple[set[str], set[str], set[str]]:
+    """(ids, normalised questions, normalised SQL) of every frozen held-out file."""
     from CortexOS.crew import score_oracle
 
-    oracle = yaml.safe_load(score_oracle.ORACLE_PATH.read_text(encoding="utf-8"))["gold"]
-    heldout = {
-        row["id"]: row
-        for row in yaml.safe_load(HELDOUT.read_text(encoding="utf-8"))["items"]
-        if row["split"] == "sql"
-    }
-    assert [row["id"] for row in oracle] == list(heldout)
-    for row in oracle:
-        src = heldout[row["id"]]
-        assert row["sql"].strip() == src["canonical_sql"].strip(), row["id"]
-        assert " ".join(row["question"].split()) == " ".join(src["question"].split())
+    files = sorted(p for p in HELDOUT_DIR.rglob("*") if p.suffix in {".yaml", ".yml"})
+    assert files, "no held-out file found; the disjointness check would prove nothing"
+    ids: set[str] = set()
+    questions: set[str] = set()
+    sqls: set[str] = set()
+    for path in files:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        rows = doc.get("items") or []
+        assert rows, f"{path} has no items"
+        for row in rows:
+            ids.add(str(row["id"]).strip())
+            questions.add(score_oracle.norm_question(row.get("question")))
+            if row.get("canonical_sql"):
+                sqls.add(cot_climb.normalize_sql(str(row["canonical_sql"])))
+    return ids, questions, sqls
+
+
+def test_must_fail_climb_oracle_is_disjoint_from_heldout_and_serve_set() -> None:
+    from CortexOS.crew import score_oracle
+
+    doc = yaml.safe_load(score_oracle.ORACLE_PATH.read_text(encoding="utf-8"))
+    assert doc["split"] == "oracle"
+    oracle = doc["gold"]
+    assert isinstance(oracle, list)
+    ids, questions, sqls = _heldout_keys()
     serve = score_oracle.serve_set()
-    hits = [row["id"] for row in oracle if score_oracle.serve_hit(row["id"], row["question"], serve)]
-    assert hits == []
+    leaks = []
+    for row in oracle:
+        cid = str(row["id"]).strip()
+        if cid in ids:
+            leaks.append(f"heldout_id:{cid}")
+        if score_oracle.norm_question(row["question"]) in questions:
+            leaks.append(f"heldout_question:{cid}")
+        if cot_climb.normalize_sql(str(row["sql"])) in sqls:
+            leaks.append(f"heldout_sql:{cid}")
+        if "heldout" in str(row.get("source") or ""):
+            leaks.append(f"heldout_source:{cid}")
+        hit = score_oracle.serve_hit(cid, str(row["question"]), serve)
+        if hit:
+            leaks.append(hit)
+    assert leaks == [], f"climb oracle overlaps held-out or the serve set: {leaks}"
+    assert set(score_oracle.oracle_gold_sql()).isdisjoint(ids)
     assert not score_oracle.ORACLE_PATH.resolve().is_relative_to((ROOT / "packs").resolve())
+    assert not score_oracle.ORACLE_PATH.resolve().is_relative_to(HELDOUT_DIR.resolve())
+
+
+@pytest.mark.asyncio
+async def test_must_fail_climb_without_gold_says_so(
+    crew_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.crew import insights, score_oracle
+
+    _armed(monkeypatch)
+    monkeypatch.setattr(cot_climb, "_GOLD", None)
+    intent = "Which supplier countries have a mean lead time above 20 days?"
+    report = await cot_climb.measure_climb(
+        [
+            {
+                "id": HELDOUT_ID,  # held-out gold must not be reachable from the climb
+                "intent": intent,
+                "ranking": insights.retrieve_ontology(intent),
+                "complete": _script(SKU_GOLD),
+            }
+        ]
+    )
+    assert report["this_run"]["n"] == 1
+    assert report["this_run"]["gold_n"] == 0
+    assert report["this_run"]["gold"] == score_oracle.NO_GOLD
+    gold = report["gold"]
+    assert gold["status"] == score_oracle.NO_GOLD
+    assert gold["gold_n"] == 0 and gold["n"] == 1
+    assert gold["oracle"] == "bench/oracle/climb_oracle_v1.yaml"
+    assert gold["oracle_entries"] == len(score_oracle.oracle_gold_sql())
+    assert "exact is not a score" in gold["reason"]
+    assert score_oracle.NO_GOLD in report["vs_baseline"]["note"]
+    assert report["vs_baseline"]["improved"] is False
+    assert report["status"] == "INCOMPLETE"
+
+
+@pytest.mark.asyncio
+async def test_climb_with_pinned_gold_is_not_stamped_no_gold(
+    crew_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from CortexOS.crew import insights, score_oracle
+
+    _armed(monkeypatch)
+    report = await cot_climb.measure_climb(
+        [
+            {
+                "id": "fresh_case_pinned",
+                "intent": "how many skus",
+                "ranking": insights.retrieve_ontology("how many skus"),
+                "expected_sql": SKU_GOLD,
+                "complete": _script(SKU_GOLD),
+            }
+        ]
+    )
+    assert report["this_run"]["gold_n"] == 1
+    assert report["this_run"]["gold"] == score_oracle.HAS_GOLD
+    assert report["gold"]["status"] == score_oracle.HAS_GOLD
+    assert report["this_run"]["exact"] == "100.00%"
+    assert score_oracle.NO_GOLD not in report["vs_baseline"]["note"]
 
 
 # --- (c) a scored run refuses serve-set cases by name -------------------------
