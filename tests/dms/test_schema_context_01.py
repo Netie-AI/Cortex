@@ -1239,3 +1239,59 @@ def test_schema_context_prompt_marks_untrusted_data(
     assert start < stop
     assert SCHEMA in prompt[start:stop]
     assert prompt.index(begin) < prompt.index(SCHEMA) < prompt.index(end)
+
+
+PACK_TRIAL_INTENT = "how many skus"
+
+
+def _record_pack_trials(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from CortexOS.crew.engine_bridge import LocalEngineBridge
+
+    asked: list[str] = []
+
+    async def fake_ask(self, question: str) -> dict[str, Any]:  # noqa: ARG001
+        asked.append(question)
+        return {"ok": True, "badge": "governed_metric", "rows": [{"n": 12}], "answer": "12"}
+
+    monkeypatch.setattr(LocalEngineBridge, "ask", fake_ask)
+    return asked
+
+
+def test_positive_control_ask_without_schema_context_runs_pack_trials(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The intent below does reach the engine-pack trials when no schema is sent."""
+    asked = _record_pack_trials(monkeypatch)
+    body = _post(api, {"intent": PACK_TRIAL_INTENT, "ask": True, "generate": False})
+    assert asked
+    assert body["trials"]
+
+
+def test_must_fail_schema_context_ask_runs_no_pack_trials(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ask without generate plus a supplied schema is refused by name: zero pack trials."""
+    asked = _record_pack_trials(monkeypatch)
+    prompts: list[tuple[str, str]] = []
+    _bind(monkeypatch, _complete(prompts, lambda _prompt: SQL_OK))
+    body = _post(
+        api,
+        {
+            "intent": PACK_TRIAL_INTENT,
+            "ask": True,
+            "generate": False,
+            "schema_context": SCHEMA,
+        },
+    )
+    assert asked == []
+    assert prompts == []
+    assert body["status"] == "REFUSE"
+    assert body["badge"] == "refused"
+    assert body["values"] == []
+    assert body["trials"] == []
+    assert not body.get("sql_used")
+    assert body["answer"] == (
+        "schema_context_ask_unsupported: engine /dms/query trials "
+        "serve only the engine pack; send generate=true"
+    )
+    assert "12" not in body["answer"]

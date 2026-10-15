@@ -1627,6 +1627,23 @@ async def _run_insights(
             gen,
         )
 
+    if supplied:
+        # The caller sent its own schema. Engine-pack trials answer the pack's
+        # data, not the caller's, so none is run.
+        return _attach_generative(
+            _refuse(
+                intent=text,
+                ranking=ranking,
+                reason=(
+                    schema_mod.SCHEMA_CONTEXT_ASK_UNSUPPORTED
+                    + ": engine /dms/query trials serve only the engine pack; "
+                    "send generate=true"
+                ),
+                shell_public=shell_public,
+            ),
+            gen,
+        )
+
     if not ranking.get("ok"):
         return _attach_generative(
             _refuse(

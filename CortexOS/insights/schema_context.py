@@ -37,6 +37,8 @@ SCHEMA_CONTEXT_INVALID = "schema_context_invalid"
 SCHEMA_CONTEXT_UNPARSED = "schema_context_unparsed"
 SCHEMA_CONTEXT_FORBIDDEN_CHAR = "schema_context_forbidden_char"
 BRUTE_FORCE_SCAN = "brute_force_scan"
+#: ask=true without generate: engine-pack trials do not answer a caller schema.
+SCHEMA_CONTEXT_ASK_UNSUPPORTED = "schema_context_ask_unsupported"
 #: Fed back to the model when its SQL names a column the schema did not declare.
 #: The column itself is not named: it is not granted.
 UNDECLARED_COLUMN = "schema_context:undeclared_column"
