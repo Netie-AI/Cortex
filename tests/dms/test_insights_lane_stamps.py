@@ -34,6 +34,8 @@ from CortexOS.execution.session_manifests import (
     get_session_registry,
     reset_session_registry_for_tests,
 )
+from CortexOS.ontology import value_domain
+from CortexOS.ontology.registry import pack_dir_for
 from packs.dms.security.rate_limit import reset_limiter
 
 SESSION = "insights-lane-stamps"
@@ -93,6 +95,10 @@ def lake_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     try:
         for statement in LAKE["setup_sql"]:
             con.execute(statement)
+        # VALUE-NORMALIZE-CX-01 (#387): the fixture rows keep the source
+        # txn_type spelling; the lake build maps them through the ontology
+        # declaration, as every Cortex lake build does.
+        value_domain.apply_to_lake(con, value_domain.load_value_domains(pack_dir_for("dms")))
     finally:
         con.close()
     return path
