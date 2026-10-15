@@ -172,6 +172,28 @@ def run_gate(
     )
 
 
+def _output_lineage(
+    gate: ValidateGateResult,
+    semantic: dict[str, Any],
+    verified: VerifiedManifest | None,
+) -> list[str]:
+    """Violations for output columns no granted table supplies. Empty when all derive.
+
+    Granted tables are the verified grant's, else the semantic allowlist the
+    gate already enforced. Read from the pre-enforce SQL: enforcement only
+    narrows rows, it does not add columns.
+    """
+    from CortexOS.dms.sql_guardrail import _allowed_tables
+    from CortexOS.dms.sql_lineage import lineage_violations
+
+    sql = gate.source_sql or gate.safe_sql or ""
+    if verified is not None:
+        granted: set[str] = {str(name) for name in verified.manifest.row_predicates}
+    else:
+        granted = set(_allowed_tables(semantic))
+    return lineage_violations(sql, granted)
+
+
 def gate_with_retry(
     generate_fn: Callable[[list[str]], str | None],
     question: str,  # noqa: ARG001 — reserved for future schema-retrieval context
@@ -185,7 +207,9 @@ def gate_with_retry(
 
     ``generate_fn(prior_violations) -> sql | None``. Exhaustion raises SqlGateAbstain.
     ManifestError aborts that candidate (no EXPLAIN, no second try of the same
-    SQL). A later generate_fn result may still pass.
+    SQL). A later generate_fn result may still pass. A candidate that passes
+    the gate but has an output column no granted table supplies (a literal, a
+    VALUES list) is refused as ``OUTPUT_NOT_FROM_TABLE:<col>`` and fed back.
     """
     prior: list[str] = []
     last = ValidateGateResult(passed=False, attempts=0)
@@ -213,7 +237,10 @@ def gate_with_retry(
                 )
             refused_sql.add(sql)
         if last.passed and last.safe_sql:
-            return last
+            lineage = _output_lineage(last, semantic, verified)
+            if not lineage:
+                return last
+            last = ValidateGateResult(passed=False, violations=lineage, attempts=attempt)
         prior = list(last.violations)
     raise SqlGateAbstain(
         "SQL validation gate exhausted retries",

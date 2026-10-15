@@ -18,7 +18,9 @@ Order, each step stamped (``StepStamp``):
    is refused.
 5. On a SQL, execution, empty, or implausible result that is not an ungranted
    table and not destructive SQL: feed the error back and regenerate, up to
-   ``SQL_ATTEMPTS`` writes on the same model.
+   ``SQL_ATTEMPTS`` writes on the same model. SQL with an output column that
+   does not derive from a granted table column (a literal, a VALUES list) is
+   such an error: it is fed back and never executed (``sql_lineage``).
 6. ``escalate``: one more plan+SQL pass on the stronger route OpenVault
    configured (``routes.stronger``). Cortex does not pick a provider. If OV
    did not configure one, the ladder reconfirms and does not invent a model.
@@ -82,6 +84,7 @@ MODEL_UNAVAILABLE = "PLAN_SQL_MODEL_UNAVAILABLE"
 EXECUTE_FAILED = "PLAN_SQL_EXECUTE_FAILED"
 EMPTY_RESULT = "PLAN_SQL_EMPTY_RESULT"
 IMPLAUSIBLE_RESULT = "PLAN_SQL_IMPLAUSIBLE_RESULT"
+NOT_FROM_TABLE = "PLAN_SQL_OUTPUT_NOT_FROM_TABLE"
 
 NOT_FOUND_ANSWER = "not found in the database"
 
@@ -159,6 +162,13 @@ def _sql_tables(sql: str) -> set[str]:
     tree = sqlglot.parse_one(sql, read="duckdb")
     ctes = {fold_identifier(cte.alias_or_name) for cte in tree.find_all(exp.CTE)}
     return {fold_identifier(t.name) for t in tree.find_all(exp.Table) if t.name} - ctes
+
+
+def _underived(sql: str, granted: set[str]) -> list[str]:
+    """``OUTPUT_NOT_FROM_TABLE:<col>`` per output column not read from a granted table."""
+    from CortexOS.dms.sql_lineage import lineage_violations
+
+    return lineage_violations(sql, granted)
 
 
 def _granted_names(grant: Any) -> set[str]:
@@ -800,6 +810,19 @@ def plan_sql_answer(
             priors.append(detail)
             failures.append(detail)
             return None
+        underived = _underived(served_sql, granted)
+        if underived:
+            # An answer column that no granted table supplies is a value the
+            # model typed. Fed back, never executed or served.
+            detail = (
+                f"{NOT_FROM_TABLE}: {', '.join(underived)}; every output column must "
+                "read a column of a granted table, or count or aggregate its rows"
+            )
+            steps.append(StepStamp.cortex("gate", "cortex:sql-gate", f"refused: {detail}"))
+            freeroute.note_verdict(sql_step.route, "gate_fail")
+            priors.append(detail)
+            failures.append(detail)
+            return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
         return _execute(sql_step, plan, served_sql, priors, rung)
@@ -944,6 +967,7 @@ __all__ = [
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
     "LAYER",
+    "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
     "RECONFIRM",
     "RUNG_PLAN",
