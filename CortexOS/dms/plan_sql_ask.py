@@ -57,6 +57,7 @@ from typing import Any
 
 from cortex_contract.answer import AskRequest
 
+from CortexOS.identifier_fold import fold_identifier
 from CortexOS.integrations import freeroute
 from CortexOS.plan_sql import payload as plan_payload
 from CortexOS.plan_sql.generator import (
@@ -156,8 +157,18 @@ def _sql_tables(sql: str) -> set[str]:
     from sqlglot import exp
 
     tree = sqlglot.parse_one(sql, read="duckdb")
-    ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
-    return {t.name.lower() for t in tree.find_all(exp.Table) if t.name} - ctes
+    ctes = {fold_identifier(cte.alias_or_name) for cte in tree.find_all(exp.CTE)}
+    return {fold_identifier(t.name) for t in tree.find_all(exp.Table) if t.name} - ctes
+
+
+def _granted_names(grant: Any) -> set[str]:
+    """The grant's table keys, folded only the way DuckDB folds names.
+
+    Read from the verified manifest itself: a name list lower-cased with
+    Unicode rules would turn a grant on ``"Äpfel"`` into ``äpfel``, which is a
+    different DuckDB table.
+    """
+    return {fold_identifier(str(name)) for name in grant.row_predicates}
 
 
 def _is_scored_round(scored_pack_id: str | None) -> bool:
@@ -638,13 +649,13 @@ def plan_sql_answer(
         )
 
     try:
-        grant, _, granted_list = resolve_product_grant(
+        grant, _, _ = resolve_product_grant(
             session_id, verified, space_id=space_id
         )
     except UngroundedSession as exc:
         steps.append(StepStamp.cortex("grant", "cortex:session-grant", f"refused: {exc}"))
         return stop(UNGROUNDED, str(exc))
-    granted = {name.lower() for name in granted_list}
+    granted = _granted_names(grant)
     steps.append(
         StepStamp.cortex("grant", "cortex:session-grant", f"tables={sorted(granted)}")
     )

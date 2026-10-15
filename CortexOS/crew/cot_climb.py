@@ -41,6 +41,7 @@ from CortexOS.execution.gen_cfsm import (
     route_step,
 )
 from CortexOS.execution.scoreboard import embed_goal
+from CortexOS.identifier_fold import fold_identifier
 
 HORIZON = 3
 JEPA_PATH = "proxy"
@@ -140,7 +141,7 @@ def _ranked_columns(ranking: Mapping[str, Any]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for row in ranking.get("locations") or []:
         where = row.get("where") or {}
-        table = str(where.get("table") or row.get("id") or "").lower()
+        table = fold_identifier(str(where.get("table") or row.get("id") or ""))
         if not table:
             continue
         cols = [str(c) for c in (where.get("columns") or []) if str(c).strip()]
@@ -189,14 +190,19 @@ def _check_sql(
 
 
 def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
+    """Ranked table names folded as DuckDB compares them (ASCII case only).
+
+    A Unicode ``lower()`` here would hand the caller-catalog check ``äpfel`` for
+    a declared ``"Äpfel"``, which DuckDB resolves to a different table.
+    """
     tables: set[str] = set()
     for row in ranking.get("locations") or []:
         table = ((row.get("where") or {}).get("table") or row.get("id") or "")
         if table:
-            tables.add(str(table).lower())
+            tables.add(fold_identifier(str(table)))
     for row in list(ranking.get("metrics") or []) + list(ranking.get("certified") or []):
         for table in (row.get("where") or {}).get("tables") or []:
-            tables.add(str(table).lower())
+            tables.add(fold_identifier(str(table)))
     return tables
 
 

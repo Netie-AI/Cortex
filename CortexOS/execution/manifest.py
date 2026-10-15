@@ -50,6 +50,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from CortexOS.execution.sql_scope import ScopeError, cte_reference_ids, dotted_part
+from CortexOS.identifier_fold import fold_identifier
 from CortexOS.paths import data_path
 
 __all__ = [
@@ -747,8 +748,8 @@ def _locally_bound_names(root: exp.Expression) -> set[str]:
         if isinstance(parent, exp.Table) and isinstance(parent.this, exp.Identifier):
             continue
         if alias.name:
-            bound.add(alias.name.lower())
-    return bound | {cte.alias.lower() for cte in root.find_all(exp.CTE) if cte.alias}
+            bound.add(fold_identifier(alias.name))
+    return bound | {fold_identifier(cte.alias) for cte in root.find_all(exp.CTE) if cte.alias}
 
 
 def _cte_reference_ids(root: exp.Expression) -> set[int]:
@@ -969,12 +970,16 @@ def _grant_key(table: exp.Table, granted: set[str]) -> str | None:
     ``bronze.schools`` and must not match the key ``bronze.schools``. A part
     that contains a dot never matches at all. Three-part names are refused
     before this is reached.
+
+    Names fold with :func:`fold_identifier` (ASCII case only), as DuckDB
+    resolves them: ``"ORDERS"`` is ``orders``, but ``"Äpfel"`` is not
+    ``äpfel``. ``granted`` keys are already folded.
     """
     if dotted_part(table) is not None:
         return None
     pairs = _grant_pairs(granted)
-    name = table.name.lower()
-    schema = (table.db or "").lower()
+    name = fold_identifier(table.name)
+    schema = fold_identifier(table.db or "")
     if schema:
         if (schema, name) in pairs:
             return pairs[(schema, name)]
@@ -982,6 +987,25 @@ def _grant_key(table: exp.Table, granted: set[str]) -> str | None:
             return pairs[("", name)]
         return None
     return pairs.get(("", name))
+
+
+def _folded_predicates(row_predicates: dict[str, str]) -> dict[str, str]:
+    """Grant keys folded the way DuckDB resolves names, predicates unchanged.
+
+    Two keys that fold together (``orders`` and ``ORDERS``) name one DuckDB
+    table. With different predicates there is no right one to apply, so the
+    manifest is refused rather than letting dict order pick the weaker filter.
+    """
+    out: dict[str, str] = {}
+    for name, body in row_predicates.items():
+        key = fold_identifier(name)
+        if key in out and out[key] != body:
+            raise ManifestMalformed(
+                f"row_predicates name {key!r} more than once with different predicates; "
+                "DuckDB resolves those keys to one table"
+            )
+        out[key] = body
+    return out
 
 
 def _refuse_ungranted_tables(
@@ -1027,7 +1051,7 @@ def _refuse_schema_qualified_columns(root: exp.Expression, granted: set[str]) ->
     """
     bare_granted = {_bare(key) for key in granted}
     for column in root.find_all(exp.Column):
-        table = (column.args.get("table").name if column.args.get("table") else "").lower()
+        table = fold_identifier(column.args.get("table").name if column.args.get("table") else "")
         schema = column.args.get("db")
         if schema is not None and table in bare_granted:
             raise SqlNotAnalyzable(
@@ -1089,7 +1113,7 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
 
     _refuse_cross_catalog(root)
 
-    predicates = {name.lower(): body for name, body in verified.row_predicates.items()}
+    predicates = _folded_predicates(verified.row_predicates)
     granted = set(predicates)
     # Order matters: disjointness first, so the grant check and the injector
     # below can both decide by name alone. Note the two different sets — only a
