@@ -910,12 +910,17 @@ def answer_question(
     require_grounding: bool = False,
 ) -> dict[str, Any]:
     """Q2 — route through the layered answer engine (certified → governed metric →
-    abstain). Falls back to the legacy heuristic path only if the engine is
-    unavailable, so behavior degrades safely rather than breaking.
+    L2 model step → abstain).
 
-    Bridge: when the engine abstains but a ranked legacy SQL template still matches
-    (delayed shipments / sales / supplier ranking), serve the legacy path so
-    pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+    An engine error is a named abstain with no rows, never the legacy keyword
+    generator (DECISION5-LEGACY-01). The answer says whether the model step or
+    the engine failed.
+
+    Bridge: with the model step (``DMS_L2_ENABLED``) off, when the engine abstains
+    but a ranked legacy SQL template still matches (delayed shipments), serve the
+    legacy path so pre-Q2 demo queries keep working until dedicated governed
+    metrics cover them. With the model step on, the engine's abstain is final: a
+    failed or refused model step must not be replaced by a rule answer.
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
@@ -938,6 +943,7 @@ def answer_question(
         q = question.lower()
         if (
             result.get("route") == "needs_clarification"
+            and not _model_step_enabled()
             and re.search(r"\b(delayed|late)\b", q)
             and _try_generate_ranked_sql(question)
         ):
@@ -946,8 +952,57 @@ def answer_question(
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.
         raise
-    except Exception:  # noqa: BLE001 — engine failure must not take the API down
-        return _answer_question_legacy(question, session_id=session_id)
+    except Exception as exc:  # noqa: BLE001 — engine failure must not take the API down
+        return _engine_failure_abstain(exc)
+
+
+def _model_step_enabled() -> bool:
+    """True when the L2 model step is the configured answer path for engine misses."""
+    from CortexOS.dms.l2_generation import _env_on
+
+    return _env_on("DMS_L2_ENABLED")
+
+
+def _raised_in_model_step(exc: BaseException) -> bool:
+    """Whether the exception propagated out of the L2 model step (``attempt_l2``)."""
+    try:
+        from CortexOS.dms.l2_generation import attempt_l2
+    except Exception:  # noqa: BLE001 — the abstain must not depend on this import
+        return False
+    code = getattr(attempt_l2, "__code__", None)
+    tb = exc.__traceback__
+    while tb is not None:
+        if code is not None and tb.tb_frame.f_code is code:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def _engine_failure_abstain(exc: BaseException) -> dict[str, Any]:
+    """Named abstain for an engine error. No rows and no SQL: nothing was verified.
+
+    Only the exception type is named; its message can carry engine internals.
+    """
+    step = "the model step" if _raised_in_model_step(exc) else "the answer engine"
+    reason = (
+        f"{step} failed ({type(exc).__name__}); no rule-based answer was substituted"
+    )
+    return {
+        "answer": f"I can't answer that: {reason}.",
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": str(uuid.uuid4()),
+        "violations_blocked": [],
+        "route": "needs_clarification",
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": [],
+    }
 
 
 def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
