@@ -5,6 +5,7 @@
 # docs/ontology/CORTEX_ONTOLOGY_PLAN.md §2.1: primary_key, description, and a
 # per-property agent_visible flag (folds semantic_layer.yaml `sensitive_columns:`).
 # Property `type` is informative (string|number|integer|boolean|date|datetime).
+# Optional property `values:` declares a value domain (CortexOS/ontology/value_domain.py).
 
 object_types:
   - id: inventory
@@ -79,7 +80,18 @@ object_types:
       - {name: txn_id, type: string, agent_visible: true}
       - {name: sku, type: string, agent_visible: true}
       - {name: location_id, type: string, agent_visible: true}
-      - {name: txn_type, type: string, agent_visible: true}
+      # VALUE-NORMALIZE-01 (#387): the one declaration of txn_type's value domain.
+      # `canonical` is what every lake build stores and what the model is shown;
+      # `from` lists the source spellings each build maps to it. Values without
+      # `from` are stored as the source writes them.
+      - name: txn_type
+        type: string
+        agent_visible: true
+        values:
+          - {canonical: outbound, from: [OUT]}
+          - {canonical: inbound, from: [IN]}
+          - {canonical: ADJUST}
+          - {canonical: WRITE_OFF}
       - {name: quantity_kg, type: number, agent_visible: true}
       - {name: unit_cost_myr, type: number, agent_visible: true}
       - {name: operator_id, type: string, agent_visible: true}

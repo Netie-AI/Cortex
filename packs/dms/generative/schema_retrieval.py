@@ -12,10 +12,12 @@ from typing import Any
 
 import yaml
 
+from CortexOS.ontology import value_domain
 from packs.dms.skills.capture import cosine_similarity, text_embedding
 
 ROOT = Path(__file__).resolve().parents[3]
-SEMANTIC_PATH = ROOT / "packs" / "dms" / "semantic_layer.yaml"
+PACK_DIR = ROOT / "packs" / "dms"
+SEMANTIC_PATH = PACK_DIR / "semantic_layer.yaml"
 DEFAULT_TOP_K = 4
 
 
@@ -125,9 +127,14 @@ def retrieve(
         if j.get("from_table") in chosen_names and j.get("to_table") in chosen_names:
             joins.append(j)
 
+    # #387: the ontology's declared canonical values, so filters use the stored spelling.
+    declared = value_domain.prompt_values(value_domain.load_value_domains(PACK_DIR))
     tables: dict[str, Any] = {}
     for e in chosen:
         tables[e.table] = {"columns": list(e.columns)}
+        values = {c: v for c, v in (declared.get(e.table) or {}).items() if c in e.columns}
+        if values:
+            tables[e.table]["values"] = values
 
     return {
         "tables": tables,
@@ -143,6 +150,8 @@ def schema_prompt_block(schema: dict[str, Any]) -> str:
     for name, spec in (schema.get("tables") or {}).items():
         cols = ", ".join(spec.get("columns") or [])
         lines.append(f"- {name}({cols})")
+        for col, vals in (spec.get("values") or {}).items():
+            lines.append("  " + value_domain.prompt_line(name, col, vals))
     if schema.get("joins"):
         lines.append("JOINS:")
         for j in schema["joins"]:

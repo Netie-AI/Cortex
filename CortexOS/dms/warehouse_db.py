@@ -18,11 +18,13 @@ from CortexOS.execution.warehouse import (
     get_connection,
     read_only_queries_enabled,
 )
+from CortexOS.ontology import value_domain
 
 # Re-export connection helpers so existing callers keep importing from here.
 __all__ = [
     "DEFAULT_DB",
     "DEFAULT_SEMANTIC",
+    "DMS_PACK",
     "KNOWN_TABLES",
     "SAMPLES",
     "TABLE_FILES",
@@ -36,7 +38,8 @@ __all__ = [
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SEMANTIC = ROOT / "packs" / "dms" / "semantic_layer.yaml"
+DMS_PACK = ROOT / "packs" / "dms"
+DEFAULT_SEMANTIC = DMS_PACK / "semantic_layer.yaml"
 SAMPLES = ROOT / "data" / "samples"
 
 TABLE_FILES = {
@@ -122,6 +125,8 @@ def load_inventory_csv(
                 path = Path(csv_path)
             _load_table(con, table, path)
         _cast_types(con)
+        # VALUE-NORMALIZE-01 (#387): store the ontology's canonical values.
+        value_domain.apply_to_lake(con, value_domain.load_value_domains(DMS_PACK))
         _create_indexes(con)
     finally:
         con.close()

@@ -22,6 +22,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from CortexOS.crew import cot_climb, insights
+from CortexOS.ontology import value_domain
+from CortexOS.ontology.registry import pack_dir_for
 from packs.dms.security.rate_limit import reset_limiter
 from tests.test_crew.conftest import FakeLLM
 
@@ -150,6 +152,9 @@ def _lake() -> duckdb.DuckDBPyConnection:
     con.execute(
         "INSERT INTO locations VALUES ('L1','A',333,1000),('L2','B',1,3),('L3','C',77.7,90)"
     )
+    # VALUE-NORMALIZE-CX-01 (#387): the rows above keep the source txn_type
+    # spelling; the lake build maps them through the ontology declaration.
+    value_domain.apply_to_lake(con, value_domain.load_value_domains(pack_dir_for("dms")))
     return con
 
 

@@ -35,10 +35,23 @@ def pack_dir_for(pack: str | None = None) -> Path:
 
 
 @dataclass(frozen=True, slots=True)
+class DeclaredValue:
+    """One canonical value of a property and the source spellings that mean it.
+
+    ``sources`` are the spellings a source system writes (``OUT``); a lake build
+    stores ``canonical`` (``outbound``) instead. See ``CortexOS.ontology.value_domain``.
+    """
+
+    canonical: str
+    sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Property:
     name: str
     type: str
     agent_visible: bool
+    values: tuple[DeclaredValue, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +105,39 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _declared_values(where: str, raw: Any) -> tuple[DeclaredValue, ...]:
+    """Parse a property's ``values:`` list. Refuse anything a lake build could read two ways."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{where}: values must be a list")
+    out: list[DeclaredValue] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError(f"{where}: each value must be a mapping with canonical")
+        canonical = item.get("canonical")
+        if not isinstance(canonical, str) or not canonical:
+            raise ValueError(f"{where}: canonical must be a non-empty string")
+        sources = item.get("from", [])
+        if not isinstance(sources, list) or not all(
+            isinstance(s, str) and s for s in sources
+        ):
+            raise ValueError(f"{where}: from must be a list of non-empty strings")
+        out.append(DeclaredValue(canonical=canonical, sources=tuple(sources)))
+    canon = [v.canonical for v in out]
+    if len(set(canon)) != len(canon):
+        raise ValueError(f"{where}: a canonical value is declared twice")
+    seen: set[str] = set()
+    for v in out:
+        for src in v.sources:
+            if src in seen:
+                raise ValueError(f"{where}: source spelling {src!r} maps to two values")
+            if src in canon:
+                raise ValueError(f"{where}: source spelling {src!r} is also a canonical value")
+            seen.add(src)
+    return tuple(out)
+
+
 def load_object_types(pack_dir: Path | str | None = None) -> list[ObjectType]:
     data = _read_yaml(_ontology_dir(pack_dir) / "object_types.yaml")
     out: list[ObjectType] = []
@@ -101,6 +147,7 @@ def load_object_types(pack_dir: Path | str | None = None) -> list[ObjectType]:
                 name=str(p["name"]),
                 type=str(p.get("type", "string")),
                 agent_visible=bool(p.get("agent_visible", True)),
+                values=_declared_values(f"{row.get('id')}.{p.get('name')}", p.get("values")),
             )
             for p in row.get("properties") or []
         )

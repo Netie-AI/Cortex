@@ -42,6 +42,8 @@ from CortexOS.execution.gen_cfsm import (
 )
 from CortexOS.execution.scoreboard import embed_goal
 from CortexOS.identifier_fold import fold_identifier
+from CortexOS.ontology import value_domain
+from CortexOS.ontology.registry import pack_dir_for
 
 HORIZON = 3
 JEPA_PATH = "proxy"
@@ -281,13 +283,29 @@ def _idea_lines(ideas: Sequence[str] | None) -> list[str]:
     return out
 
 
+def _declared_values(ranking: Mapping[str, Any]) -> dict[str, dict[str, list[str]]]:
+    """#387: canonical values the engine pack's ontology declares, for the prompt only.
+
+    Read here, not put on the ranking: the ranking is echoed on the wire. A caller
+    catalog (``source`` set) is the caller's own schema; the pack is not consulted.
+    """
+    if ranking.get("source"):
+        return {}
+    # Same pack as insights._pack_dir: the DMS ask spine.
+    return value_domain.prompt_values(value_domain.load_value_domains(pack_dir_for("dms")))
+
+
 def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
+    declared = _declared_values(ranking)
     for row in ranking.get("locations") or []:
         where = row.get("where") or {}
         table = where.get("table") or row.get("id")
         cols = where.get("columns") or []
         lines.append(f"- {table}: {', '.join(str(c) for c in cols[:24])}")
+        for col, vals in (declared.get(str(table)) or {}).items():
+            if col in cols:
+                lines.append("  " + value_domain.prompt_line(str(table), col, vals))
     for row in list(ranking.get("metrics") or [])[:12]:
         mid = row.get("id") or ""
         tables = (row.get("where") or {}).get("tables") or []
