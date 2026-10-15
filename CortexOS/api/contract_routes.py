@@ -330,8 +330,16 @@ async def contract_ask(body: AskRequest) -> Answer:
                 caller_names=names,
             )
             raise
+        from CortexOS.dms.plan_sql_ask import grant_closest_question, reconfirm_answer
+
         return scrub_answer(
-            result, attempts, verified=grant[0], caller_texts=texts, caller_names=names
+            result,
+            attempts,
+            verified=grant[0],
+            caller_texts=texts,
+            caller_names=names,
+            closest_fallback=lambda: grant_closest_question(body, verified=grant[0]),
+            reconfirm_text=reconfirm_answer,
         )
 
 

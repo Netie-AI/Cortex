@@ -190,3 +190,67 @@ def test_http_detail_keeps_code_and_scrubs_message() -> None:
         "message": f"table '{WITHHELD}' is not named by this manifest",
     }
     assert scrub_http_detail("zz_ghost failed", record, verified=None) == f"{WITHHELD} failed"
+
+
+def _render(why: str, closest: str) -> str:
+    return f"Reconfirm: {why} Closest question: {closest} Yes runs that question."
+
+
+def test_closest_question_with_a_withheld_word_is_replaced_whole() -> None:
+    """Yes resends closest_question; it never carries a withheld marker."""
+    record = _record("SELECT total FROM inventory")
+    rec = PlanSqlReconfirm(why="no total column", closest_question="what is the total sku")
+    answer = _answer(answer=_render(rec.why, rec.closest_question), reconfirm=rec)
+    asked: list[int] = []
+
+    def fallback() -> str:
+        asked.append(1)
+        return "What are the distinct sku values in inventory?"
+
+    out = scrub_answer(
+        answer,
+        record,
+        verified=_grant("inventory"),
+        closest_fallback=fallback,
+        reconfirm_text=_render,
+    )
+    assert out.reconfirm is not None
+    assert out.reconfirm.closest_question == "What are the distinct sku values in inventory?"
+    assert out.reconfirm.why == f"no {WITHHELD} column"
+    # Re-rendered from the scrubbed why and the replacement question.
+    assert out.answer == _render(f"no {WITHHELD} column", out.reconfirm.closest_question)
+    assert asked == [1]
+
+
+def test_untouched_closest_question_does_not_build_a_fallback() -> None:
+    record = _record("SELECT total FROM inventory")
+    rec = PlanSqlReconfirm(why="no total column", closest_question="how many sku in inventory")
+
+    def fallback() -> str:
+        raise AssertionError("not needed")
+
+    out = scrub_answer(
+        _answer(answer=_render(rec.why, rec.closest_question), reconfirm=rec),
+        record,
+        verified=_grant("inventory"),
+        closest_fallback=fallback,
+        reconfirm_text=_render,
+    )
+    assert out.reconfirm is not None
+    assert out.reconfirm.closest_question == "how many sku in inventory"
+
+
+def test_a_fallback_that_would_be_scrubbed_is_not_used() -> None:
+    record = _record("SELECT total FROM inventory")
+    rec = PlanSqlReconfirm(why="w", closest_question="the total")
+    out = scrub_answer(
+        _answer(answer="other text about total", reconfirm=rec),
+        record,
+        verified=_grant("inventory"),
+        closest_fallback=lambda: "sum the total",
+        reconfirm_text=_render,
+    )
+    assert out.reconfirm is not None
+    assert out.reconfirm.closest_question == f"the {WITHHELD}"
+    # Not the reconfirm rendering, so the answer is scrubbed as free text.
+    assert out.answer == f"other text about {WITHHELD}"

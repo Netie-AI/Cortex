@@ -374,3 +374,90 @@ def test_granted_plan_sql_answer_passes_the_boundary_untouched(armed_openvault, 
         assert f"plan: {line}" in body["assumptions"]
     assert "[name withheld]" not in json.dumps(body)
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
+
+
+# -- reconfirm: Yes must run a whole question -----------------------------------
+
+
+def test_withheld_word_in_closest_question_is_replaced_by_a_question_built_from_the_grant(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refused attempts invent the columns ``total`` and ``date``; the model's closest
+    question uses both words. Yes resends ``closest_question`` as the question, so it
+    must never carry a withheld marker: Cortex builds one from the grant instead, and
+    Yes on it runs and returns the oracle rows."""
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, "SELECT txn_type, total FROM transactions")
+    _reply(armed_openvault, "SELECT txn_type, total FROM transactions")
+    _reply(armed_openvault, PLAN_TEXT, model=configured)
+    _reply(armed_openvault, "SELECT txn_type, date FROM transactions", model=configured)
+    _reply(
+        armed_openvault,
+        "WHY: transactions has no stored per-type figure\n"
+        "CLOSEST: What is the total quantity_kg of transactions for each txn_type by date?",
+        model=configured,
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["answer"].startswith("Reconfirm:"), body["answer"]
+    closest = body["reconfirm"]["closest_question"]
+    assert closest == "What are the distinct txn_type values in transactions?", closest
+    assert body["reconfirm"]["why"] == "transactions has no stored per-type figure"
+    assert body["answer"] == (
+        "Reconfirm: transactions has no stored per-type figure "
+        f"Closest question: {closest} Yes runs that question. "
+        f"No answers '{plan_sql_ask.NOT_FOUND_ANSWER}'."
+    )
+    assert body["rows"] in ([], None)
+    assert body["sql_used"] is None
+    _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
+
+    # Yes: the closest question is resent as the question and answered from the lake.
+    yes_sql = "SELECT DISTINCT txn_type FROM transactions ORDER BY txn_type"
+    _reply(armed_openvault, "1. Read transactions.\n2. List the distinct txn_type values.")
+    _reply(armed_openvault, yes_sql)
+    oracle = _oracle(yes_sql)
+    assert oracle
+
+    yes = _json(_ask(dms_http, question=closest, plan_sql_confirm="yes"))
+
+    assert yes["reconfirm"] is None
+    assert yes["sql_used"].startswith(yes_sql)
+    assert _rowset(yes["rows"]) == _rowset(oracle)
+    assert _rowset(_oracle(yes["sql_used"])) == _rowset(oracle)
+    for row in oracle:
+        assert str(row["txn_type"]) in yes["answer"], yes["answer"]
+    assert any(line.startswith("step confirm:") for line in yes["assumptions"])
+    assert "[name withheld]" not in json.dumps(yes)
+
+
+def test_reconfirm_answer_keeps_cortex_wording_when_a_template_word_is_withheld(
+    armed_openvault, dms_http
+) -> None:
+    """Refused attempts invent the columns ``question`` and ``found``. Those words in
+    Cortex's own reconfirm sentence are not names from the SQL and stay as written."""
+    bad = "SELECT question, found FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    closest = body["reconfirm"]["closest_question"]
+    why = body["reconfirm"]["why"]
+    assert "[name withheld]" not in closest, closest
+    assert body["answer"] == (
+        f"Reconfirm: {why} Closest question: {closest} Yes runs that question. "
+        f"No answers '{plan_sql_ask.NOT_FOUND_ANSWER}'."
+    )
+    # The refused names themselves stay withheld in the free text around them.
+    gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
+    assert len(gate) == 2, gate
+    for line in gate:
+        assert "UNKNOWN_COLUMN:question" not in line and "UNKNOWN_COLUMN:found" not in line
+    _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)

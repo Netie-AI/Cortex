@@ -26,7 +26,11 @@ payload are kept, as are the column names of the rows being returned.
 Never changed: ``rows``, ``sql_used``, ``contributing_sources``, the drill
 response (it has no free text), ids, codes and every other structured field.
 On an answer that serves SQL, ``answer`` is text built from the rows and is
-left as it is. Decisions come from parsed SQL, error text and the grant; no
+left as it is. ``reconfirm.closest_question`` is never returned scrubbed:
+Yes resends it as the question, so when the scrub would change it, Cortex's
+own closest question from the grant replaces it, and a reconfirm answer is
+rendered again from its scrubbed ``why`` and that question.
+Decisions come from parsed SQL, error text and the grant; no
 rule reads the question for words. No pack import and no database driver
 here: the catalog read goes through :mod:`CortexOS.execution.submit`.
 """
@@ -34,7 +38,7 @@ here: the catalog read goes through :mod:`CortexOS.execution.submit`.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -285,6 +289,22 @@ def _row_keys(rows: Iterable[Mapping[str, Any]] | None) -> set[str]:
     return keys
 
 
+def _closest_question(scrub: NameScrub, closest: str, fallback: Callable[[], str] | None) -> str:
+    """A closest question with no withheld marker in it.
+
+    Yes resends ``closest_question`` as the question, so a scrubbed one would
+    run broken text. When the model's question names a withheld word, Cortex's
+    own question from the grant (``fallback``) replaces it whole.
+    """
+    scrubbed = scrub.text(closest)
+    if scrubbed == closest or fallback is None:
+        return scrubbed
+    replacement = fallback()
+    if replacement and scrub.text(replacement) == replacement:
+        return replacement
+    return scrubbed
+
+
 def scrub_answer(
     answer: Any,
     attempts: AttemptRecord,
@@ -292,8 +312,17 @@ def scrub_answer(
     verified: Any,
     caller_texts: Iterable[str] = (),
     caller_names: Iterable[str] = (),
+    closest_fallback: Callable[[], str] | None = None,
+    reconfirm_text: Callable[[str, str], str] | None = None,
 ) -> Any:
-    """``answer`` (a contract ``Answer``) with withheld names replaced in its free text."""
+    """``answer`` (a contract ``Answer``) with withheld names replaced in its free text.
+
+    ``closest_fallback`` builds Cortex's own closest question from the grant;
+    it replaces a model closest question the scrub would change.
+    ``reconfirm_text(why, closest)`` renders a reconfirm answer: when the answer
+    is that rendering, it is rendered again from the scrubbed ``why`` and the
+    final closest question, so Cortex's own wording is never scrubbed.
+    """
     scrub = build_scrub(
         attempts,
         verified=verified,
@@ -315,12 +344,16 @@ def scrub_answer(
             update={"assumptions": scrub.text(answer.provenance.assumptions)}
         )
     if answer.reconfirm is not None:
+        why = scrub.text(answer.reconfirm.why)
+        closest = _closest_question(scrub, answer.reconfirm.closest_question, closest_fallback)
         update["reconfirm"] = answer.reconfirm.model_copy(
-            update={
-                "why": scrub.text(answer.reconfirm.why),
-                "closest_question": scrub.text(answer.reconfirm.closest_question),
-            }
+            update={"why": why, "closest_question": closest}
         )
+        rendered = reconfirm_text is not None and answer.answer == reconfirm_text(
+            answer.reconfirm.why, answer.reconfirm.closest_question
+        )
+        if rendered and reconfirm_text is not None:
+            update["answer"] = reconfirm_text(why, closest)
     return answer.model_copy(update=update)
 
 
