@@ -71,7 +71,7 @@ supported:
 
   - version: "1.4"
     spec: openapi-1.4.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive C-MEM (#290) per-Space memory: Answer gains memory_ids_read
@@ -80,6 +80,30 @@ supported:
       reused (a stored solution re-run on current data; never a validation).
       AskRequest gains optional scored_pack_id. 1.3 clients ignore the new
       fields. canonical_manifest_bytes unchanged.
+
+  - version: "1.5"
+    spec: openapi-1.5.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive C-LOOP-A (#303) DMS payload: AskRequest gains optional
+      dms_payload (selected tables with columns, and ontology joins) for the
+      engine's plan+SQL path, which is off by default, and optional
+      plan_sql_confirm (yes runs the closest question, no answers
+      "not found in the database"). New schemas AskPayload, AskPayloadTable,
+      AskPayloadColumn, AskPayloadJoin, PlanSqlReconfirm. Answer gains optional
+      reconfirm, optional plan_sql_rung (plan, error-fed-retry-N, stronger-model,
+      or reconfirm; null when this path did not answer), optional model_calls
+      (logical complete() counts for plan, each error-fed-retry-N,
+      stronger-model and reconfirm, plus total; one per complete() the ladder
+      issues; transport or proxy retries such as an upstream 429 are not
+      counted; null when this path made no model call) and Badge
+      gains reconfirm (a new Badge enum value). AskRequest ignores unknown keys, as
+      on 1.4. The wire names model, strict and provider are rejected by name
+      with 422. Full request strictness is a declared breaking change (#388).
+      Routing stays in OpenVault route config, not a request field.
+      1.4 clients omit the fields and get the 1.4 behaviour.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

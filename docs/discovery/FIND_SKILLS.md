@@ -14,7 +14,7 @@
    - Requires: `pip install playwright uvicorn` and `playwright install chromium`
 3. Stress: `python -m bench.stress --scenario discovery --threads 8 --iterations 20`
 4. Demo UI E2E (API on :8000 + UI):
-   - `PACK=dms DMS_AUTH_DISABLED=1 uvicorn CortexOS.api.main:app --port 8000`
+   - `PACK=dms CORTEX_DEV_MODE=1 DMS_AUTH_DISABLED=1 uvicorn CortexOS.api.main:app --port 8000`
    - `cd demo/dms-ui && npm i && npx playwright install chromium && npm run test:e2e:reliability`
 
 ## Policy

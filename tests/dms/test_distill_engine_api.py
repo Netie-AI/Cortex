@@ -9,10 +9,9 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def test_deferred_tools_list_and_inject(client):
@@ -29,7 +28,11 @@ def test_deferred_tools_list_and_inject(client):
 
 
 def test_resume_route_rejects_unknown_run(client):
-    res = client.post("/api/workflows/resume", json={"task_id": "wf_does_not_exist"})
+    res = client.post(
+        "/api/workflows/resume",
+        json={"task_id": "wf_does_not_exist"},
+        headers={"X-API-Key": "dms-demo-steward-key"},
+    )
     assert res.status_code == 400
     assert "unknown run" in str(res.json()["detail"])
 
@@ -64,7 +67,11 @@ def test_resume_replays_journaled_phase(client, monkeypatch, tmp_path):
     monkeypatch.setattr(workflow_runner, "get_task", lambda rid: {"id": rid})
     monkeypatch.setattr(workflow_runner, "_execute_run", fake_execute)
 
-    res = client.post("/api/workflows/resume", json={"task_id": "wf_prior"})
+    res = client.post(
+        "/api/workflows/resume",
+        json={"task_id": "wf_prior"},
+        headers={"X-API-Key": "dms-demo-steward-key"},
+    )
     assert res.status_code == 200
     assert res.json()["resumed"] is True
     assert seen["run_id"] == "wf_prior"

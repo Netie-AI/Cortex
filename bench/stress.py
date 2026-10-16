@@ -228,7 +228,6 @@ def stress_discovery(threads: int, iterations: int) -> dict[str, Any]:
 def _make_stress_client(home: Path):
     """In-process FastAPI client with isolated engine DBs under *home*."""
     os.environ["PACK"] = "dms"
-    os.environ["DMS_AUTH_DISABLED"] = "1"
     from CortexOS.execution import app_store, routine_scheduler, scoreboard, workflow_store
     from CortexOS.api.app import create_app
     from fastapi.testclient import TestClient
@@ -242,7 +241,7 @@ def _make_stress_client(home: Path):
     routine_scheduler.init()
     app_store.init()
     workflow_store.init()
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def stress_activity(threads: int, iterations: int) -> dict[str, Any]:

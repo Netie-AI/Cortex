@@ -65,7 +65,6 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     from CortexOS.crew import freeroute as fr
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setattr(
         fr,
@@ -76,7 +75,7 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     from CortexOS.api.app import create_app
 
     # Loopback peer: the relay tier, so generate runs without a caller ov_ key.
-    return TestClient(create_app(), client=("127.0.0.1", 5555))
+    return TestClient(create_app(), client=("127.0.0.1", 5555), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 @pytest.fixture

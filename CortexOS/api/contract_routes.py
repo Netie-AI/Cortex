@@ -103,6 +103,7 @@ _FLAT_BADGE: dict[str, Badge] = {
     "abstain": Badge.ABSTAIN,
     "refused": Badge.ABSTAIN,  # F40 — contract has no REFUSED badge; never SESSION
     "blocked": Badge.BLOCKED,
+    "reconfirm": Badge.RECONFIRM,  # C-LOOP-A: asking, not an abstain and not SESSION
 }
 
 
@@ -278,11 +279,19 @@ async def contract_ask(body: AskRequest) -> Answer:
     )
     from CortexOS.dms.ask_scope import ask_scope
 
-    try:
-        with ask_scope(
-            space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
-        ):
-            result = reused if reused is not None else answer_engine(
+    # The signed Space and scored pack reach the legacy query_skill store
+    # through this scope, not through answer_engine (QUERY-SKILL #340).
+    with ask_scope(
+        space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
+    ):
+        served = reused
+        if served is None and body.dms_payload is not None:
+            from CortexOS.dms.plan_sql_ask import try_plan_sql
+
+            # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
+            served = try_plan_sql(body, verified=verified)
+        try:
+            result = served if served is not None else answer_engine(
                 body.question,
                 session_id=body.session_id,
                 space_id=body.space_id,
@@ -290,12 +299,12 @@ async def contract_ask(body: AskRequest) -> Answer:
                 require_grounding=True,
                 stamp_l2_route=True,
             )
-    except ManifestError as exc:
-        code = getattr(exc, "code", "manifest_error")
-        raise HTTPException(
-            status_code=_http_for_submit_status(code),
-            detail={"code": code, "message": str(exc)},
-        ) from exc
+        except ManifestError as exc:
+            code = getattr(exc, "code", "manifest_error")
+            raise HTTPException(
+                status_code=_http_for_submit_status(code),
+                detail={"code": code, "message": str(exc)},
+            ) from exc
 
     if isinstance(result, Answer):
         data = result.model_dump()
