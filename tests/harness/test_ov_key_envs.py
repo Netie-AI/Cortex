@@ -3,8 +3,11 @@
 OpenVault owns the catalogue; Cortex holds only a name list pinned to an
 OpenVault commit. The OpenVault comparison needs a checkout: set
 ``OPENVAULT_SRC`` to its repo root, or keep it as a sibling ``../OpenVault``.
-Without one it skips, so Cortex CI checks only the Cortex side. OpenVault has
-no endpoint that returns these names with their aliases.
+CI checks out OpenVault at ``OV_PIN`` and sets ``OPENVAULT_SRC`` (ci.yml), and
+under CI a missing checkout fails instead of skipping, so the comparison
+cannot pass by not running. Outside CI, with no checkout, it skips and only the
+Cortex-side checks run. OpenVault has no endpoint that returns these names with
+their aliases.
 """
 
 from __future__ import annotations
@@ -78,22 +81,37 @@ def derive_ov_key_envs(read: dict[str, str]) -> set[str]:
     return known - sets["NON_SECRET_ENV_KEYS"]
 
 
+def _has_sources(root: Path) -> bool:
+    return all((root / p).is_file() for p in ov_key_envs.OV_SOURCES.values())
+
+
 def _ov_checkout() -> Path | None:
-    for raw in (os.environ.get("OPENVAULT_SRC", ""), str(ROOT.parent / "OpenVault")):
-        if raw and (Path(raw) / ov_key_envs.OV_SOURCES["PROVIDER_TO_ENV"]).is_file():
-            return Path(raw)
-    return None
+    explicit = os.environ.get("OPENVAULT_SRC", "")
+    if explicit:
+        # Asked for by name: a wrong path is a failure, never a quiet skip.
+        if not _has_sources(Path(explicit)):
+            pytest.fail(f"OPENVAULT_SRC={explicit} lacks {sorted(set(ov_key_envs.OV_SOURCES.values()))}")
+        return Path(explicit)
+    sibling = ROOT.parent / "OpenVault"
+    return sibling if _has_sources(sibling) else None
 
 
 def test_mirror_matches_an_openvault_checkout() -> None:
     src = _ov_checkout()
     if src is None:
+        if os.environ.get("CI", "").strip().lower() not in ("", "0", "false"):
+            pytest.fail(
+                f"CI has no OpenVault checkout: check out {ov_key_envs.OV_REPO}@{ov_key_envs.OV_PIN} "
+                "and set OPENVAULT_SRC (ci.yml); skipping here would pass the drift check unrun"
+            )
         pytest.skip("no OpenVault checkout (set OPENVAULT_SRC); Cortex-side checks still run")
+        return
     read = {p: (src / p).read_text(encoding="utf-8") for p in set(ov_key_envs.OV_SOURCES.values())}
     ov = derive_ov_key_envs(read)
     mirror = set(ov_key_envs.OV_KEY_ENVS)
-    assert sorted(ov - mirror) == [], "OpenVault custodies names Cortex does not scrub"
-    assert sorted(mirror - ov) == [], "Cortex mirrors names OpenVault no longer lists"
+    where = f"{src} (mirror pinned to {ov_key_envs.OV_REPO}@{ov_key_envs.OV_PIN})"
+    assert sorted(ov - mirror) == [], f"OpenVault custodies names Cortex does not scrub: {where}"
+    assert sorted(mirror - ov) == [], f"Cortex mirrors names OpenVault no longer lists: {where}"
 
 
 def test_the_drift_check_can_fail() -> None:

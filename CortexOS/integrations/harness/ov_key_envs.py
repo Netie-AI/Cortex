@@ -7,7 +7,9 @@ OpenVault's ``env_ingest.known_env_keys()`` minus ``NON_SECRET_ENV_KEYS`` at
 :data:`OV_PIN`. OpenVault serves no endpoint with these names (its
 ``/api/keyvault/snapshot`` gives one ``env_key`` per catalogue row, no
 aliases), so ``tests/harness/test_ov_key_envs.py`` re-derives the set from an
-OpenVault checkout and fails on drift.
+OpenVault checkout and fails on drift. CI checks OpenVault out at
+:data:`OV_PIN` for that test (``.github/workflows/ci.yml``), so bumping the
+pin without re-deriving the names fails the build.
 
 Nothing here routes a model call or reads a key value.
 """
