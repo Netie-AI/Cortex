@@ -5,6 +5,16 @@ by reading `CortexOS/dms/query_service.route_question` +
 `CortexOS/dms/answer_engine.answer`. Every row below was **observed**, not
 inferred from the code.
 
+**Superseded 2026-10-09.** Keyword routing and abstain-when-nothing-matched in
+this map are history. The serve rule is `CLAUDE.md` section 9, the same rule as
+section 8. The AI ladder runs first: plan-then-solve, error-fed self-correct,
+then a stronger OpenVault tier. If the ladder is exhausted, reconfirm by saying
+why and suggesting the closest answerable question (Yes runs it, No answers
+"not found in the database" and logs a pipeline-failure ticket). Direct abstain
+only for ungranted tables or destructive SQL. A wrong answer is never served
+(WRONG=0). `route_to_metric` is not the serve chooser; #313 retires it. The
+probe rows stay as the 2026-07-27 record.
+
 There are two routers in series. Confusing them is the usual source of "why did
 it say that":
 
@@ -20,8 +30,14 @@ question
           session → certified(L0) → governed_metric(L1) → query_skill → abstain(L3)
 ```
 
-Router 2 is strictly ordered and **first-match-wins**. It never consults a later
-layer once an earlier one produces SQL.
+On 2026-07-27 Router 2 was strictly ordered and **first-match-wins**. It did not
+consult a later layer once an earlier one produced SQL. **Superseded 2026-10-09:**
+that order is not the serve rule. Current states: destructive SQL or an
+ungranted table abstains directly; every other ask runs the AI ladder
+(plan-then-solve, error-fed self-correct, stronger OpenVault tier); an exhausted
+ladder reconfirms (why, plus the closest answerable question; Yes runs it; No
+answers "not found in the database" and logs a pipeline-failure ticket). A wrong
+answer is never served (WRONG=0).
 
 ---
 
@@ -31,8 +47,8 @@ layer once an earlier one produces SQL.
 |---|---|---|---|
 | `blocked` | `destructive_intent()` returns a reason | `violations_blocked:["DDL_ATTEMPT"]`, no rows, `layer:"blocked"`, conf `0.85` | `"delete all inventory rows"`, `"wipe all supplier records"` |
 | `rag` | question **names a document** (contract / SOP / agreement / policy / terms) | `route:"rag"`, `sources:[…]`, `layer:"rag"`, conf `0.85` | `"what does the SOP document say about cold chain?"` |
-| `sql` | a warehouse keyword matches → hand to Router 2 | — | `"Show expired items"` |
-| `needs_clarification` | nothing matched | falls through to Router 2, which abstains | `"what is the airspeed velocity of an unladen swallow"` |
+| `sql` | 2026-07-27: a warehouse keyword matched, then handed off to Router 2. Superseded 2026-10-09: a keyword match is not the SQL route. The model writes SQL from ontology, schema, and verified examples. | — | `"Show expired items"` |
+| `needs_clarification` | 2026-07-27: nothing matched, and Router 2 abstained. Superseded 2026-10-09: run the ladder, then reconfirm. No answers "not found in the database" and logs a pipeline-failure ticket. | falls through to the ladder, not to a direct abstain | `"what is the airspeed velocity of an unladen swallow"` |
 
 Both Router-1 classifiers were rebuilt on 2026-07-27; see
 `tests/dms/test_destructive_intent.py` for the before/after contract.
@@ -47,6 +63,10 @@ Both Router-1 classifiers were rebuilt on 2026-07-27; see
   `"what does shipping cost us by destination"` was answered out of the supplier
   contract corpus — a confident zero-row answer. RAG now requires a document noun.
 
+**2026-10-09.** `RAG_KEYWORDS` and the warehouse-keyword SQL handoff are the
+2026-07-27 record. They are not the SQL serve rule. Destructive SQL still
+abstains directly.
+
 **Enforcement is not here.** `sql_guardrail` parses every statement with sqlglot
 and rejects `Insert/Update/Delete/Drop/Create/Alter/Truncate` regardless of
 wording. Router 1 exists to refuse *intent* early and record it.
@@ -55,21 +75,25 @@ wording. Router 1 exists to refuse *intent* early and record it.
 
 ## 2. Router 2 — trusted-asset routing (`answer_engine.answer`)
 
-Ordered. Each state's `layer` and `metric_id` are reported honestly in
-`query_plan`.
+The 2026-07-27 probe reported each state's `layer` and `metric_id` in
+`query_plan`. The order in this table is that probe. **Superseded 2026-10-09:**
+it is not the serve rule. Current states are in the note under the diagram.
 
 | # | State | Fires when | Confidence | Live probe |
 |---|---|---|---|---|
 | 1 | `session` | prior turn in this `session_id` **and** anaphora (`them`/`those`/`average of them`) | `0.88` | `"Top 5 selling SKUs by revenue"` → `"average of them"` = `avg_sales_value_myr 590996.79` |
 | 2 | `certified` (L0) | **exact** normalized match in `certified_queries.yaml` | `0.95` | `"Top 5 selling SKUs by revenue"` → `cq_sales_top5_value` |
-| 3 | `governed_metric` (L1) | `route_to_metric()` matches a rule → compile `metrics.yaml` template | `0.95` | `"last month sales"` → `revenue_last_month` |
+| 3 | `governed_metric` (L1) | 2026-07-27: `route_to_metric()` matched a keyword rule and compiled a `metrics.yaml` template. Superseded 2026-10-09: not the serve chooser. #313 retires the cascade. | `0.95` | `"last month sales"` → `revenue_last_month` |
 | 4 | `query_skill` | similarity ≥ 0.72 against a previously answered question | `max(0.72, score)` | **never observed in production traffic — see §4** |
-| 5 | L2 freeform | `DMS_L2_ENABLED` set **and** a model wired | — | **unreachable: no model is wired; the flag only changes the abstain reason** |
-| 6 | `abstain` (L3) | nothing above produced SQL | none | `"how profitable was the Berlin office in 1997"` |
+| 5 | L2 freeform | 2026-07-27: `DMS_L2_ENABLED` set and a model wired. The probe found no model wired, so the flag only changed the abstain reason. Superseded 2026-10-09: the model path is the ladder (plan-then-solve, error-fed self-correct, stronger OpenVault tier), not an unreachable flag. | — | **2026-07-27 probe: unreachable** |
+| 6 | `abstain` (L3) | 2026-07-27: nothing above produced SQL, so the route abstained. Superseded 2026-10-09: direct abstain only for an ungranted table or destructive SQL. Otherwise the ladder, then reconfirm. | none | `"how profitable was the Berlin office in 1997"` |
 
 ### Sub-states of `abstain`
-Same route (`needs_clarification`), different `reason` — worth separating because
-they mean different things operationally:
+Same route (`needs_clarification`), different `reason`. These are the 2026-07-27
+reasons. **Superseded 2026-10-09:** a miss is not a direct abstain. The ladder
+runs first. Reconfirm says why and suggests the closest answerable question.
+Yes runs it. No answers "not found in the database" and logs a pipeline-failure
+ticket. Direct abstain stays only for an ungranted table or destructive SQL.
 
 | Reason | Meaning | Action |
 |---|---|---|

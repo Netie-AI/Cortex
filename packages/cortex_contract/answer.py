@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
 class Badge(str, Enum):
@@ -13,6 +14,9 @@ class Badge(str, Enum):
     SESSION = "session"
     ABSTAIN = "abstain"
     BLOCKED = "blocked"
+    # 1.5.0: the plan+SQL loop could not ground an answer and is asking the user.
+    # Not an abstain. Older clients ignore the value.
+    RECONFIRM = "reconfirm"
 
 
 class AbstainReason(str, Enum):
@@ -29,13 +33,105 @@ class Provenance(BaseModel):
     assumptions: str | None = None
 
 
+class AskPayloadColumn(BaseModel):
+    """1.5.0: one column of a table the consumer selected for this ask."""
+
+    name: str = Field(min_length=1)
+    type: str | None = None
+    description: str | None = None
+
+
+class AskPayloadTable(BaseModel):
+    """1.5.0: one selected table and its schema."""
+
+    name: str = Field(min_length=1)
+    columns: list[AskPayloadColumn] = Field(default_factory=list)
+    description: str | None = None
+
+
+class AskPayloadJoin(BaseModel):
+    """1.5.0: one ontology join between two selected tables."""
+
+    left_table: str = Field(min_length=1)
+    left_column: str = Field(min_length=1)
+    right_table: str = Field(min_length=1)
+    right_column: str = Field(min_length=1)
+    relation: str | None = None
+
+
+class PlanSqlReconfirm(BaseModel):
+    """1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.
+
+    Present only when the loop could not ground an answer. Yes
+    (``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to
+    ``closest_question``) runs that question. No answers
+    ``not found in the database``. Older clients ignore the object.
+    """
+
+    why: str = Field(min_length=1)
+    closest_question: str = Field(min_length=1)
+
+
+class AskPayload(BaseModel):
+    """1.5.0: selected tables, their schema and ontology joins for one question.
+
+    The payload can only narrow what the signed grant allows: a table or join
+    outside the grant is refused before any model call.
+    """
+
+    tables: list[AskPayloadTable] = Field(min_length=1)
+    joins: list[AskPayloadJoin] = Field(default_factory=list)
+
+
+# Named wire fields only. Not a scan of question text, and not extra=forbid.
+# Unknown keys are ignored, as on main. Full strictness is #388.
+_REJECTED_WIRE_FIELDS = ("model", "strict", "provider")
+
+
 class AskRequest(BaseModel):
+    """Ask plane request.
+
+    Unknown keys are ignored, as on main. ``model``, ``strict`` and
+    ``provider`` are rejected by name before any model call. Routing stays
+    in OpenVault's route config. Full request strictness is a breaking
+    change tracked in #388.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_named_wire_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        errors: list[InitErrorDetails] = []
+        for name in _REJECTED_WIRE_FIELDS:
+            if name not in data:
+                continue
+            errors.append(
+                InitErrorDetails(
+                    type=PydanticCustomError(
+                        "rejected_wire_field",
+                        "wire field is not accepted",
+                    ),
+                    loc=(name,),
+                    input=data[name],
+                )
+            )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, errors)
+        return data
+
     question: str = Field(min_length=1)
     session_id: str = "demo"
     space_id: str | None = None
     # 1.4.0: set on every ask of a scored round. Solution memory stays empty and
     # nothing is written to memory while it is set.
     scored_pack_id: str | None = None
+    # 1.5.0: ignored unless the engine runs with its plan+SQL path switched on.
+    dms_payload: AskPayload | None = None
+    # 1.5.0: decision on a prior plan+SQL reconfirm. Absent on a normal ask.
+    # ``yes`` runs ``question`` (the closest question). ``no`` answers
+    # ``not found in the database`` and does not call a model.
+    plan_sql_confirm: Literal["yes", "no"] | None = None
 
 
 class MemoryRead(BaseModel):
@@ -86,6 +182,30 @@ class Answer(BaseModel):
     memory_ids_read: list[str] = Field(default_factory=list)
     memory_reads: list[MemoryRead] = Field(default_factory=list)
     reused: bool = False
+    # 1.5.0: set when the plan+SQL loop asks the user to confirm the closest
+    # question. Null on every other answer. 1.4 clients ignore it.
+    reconfirm: PlanSqlReconfirm | None = None
+    # 1.5.0: which ladder rung produced this plan+SQL answer.
+    # ``plan`` | ``error-fed-retry-<N>`` | ``stronger-model`` | ``reconfirm``.
+    # Null when this path did not answer (flag off, direct abstain, confirm-no).
+    # 1.4 clients ignore it.
+    plan_sql_rung: str | None = None
+    # 1.5.0: logical complete() calls per ladder step, plus ``total``.
+    # One per complete() the ladder issues. A 429 retried under that call
+    # is not a step. Null when this path made no model call.
+    model_calls: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "1.5.0 logical FreeRoute complete() calls per ladder step, plus "
+            "total. One count per complete() the ladder issues. Transport or "
+            "proxy retries (an upstream 429 retried by the cap proxy or the "
+            "FreeRoute client) are not counted. Keys that ran: plan, "
+            "error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. "
+            "total is their sum. DMS reads per-step counts only from this "
+            "object. Null when this path made no model call. 1.4 clients "
+            "ignore it."
+        ),
+    )
 
 
 class DrillthroughRequest(BaseModel):

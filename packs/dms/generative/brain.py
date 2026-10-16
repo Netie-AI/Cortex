@@ -23,11 +23,16 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
 from datetime import datetime, timezone
 from typing import Any
 
-BIG_API_PLACEHOLDER = os.getenv("ANTHROPIC_API_KEY", "")
+from packs.dms.generative.model_route import (
+    MODEL_ROUTE_UNAVAILABLE,
+    call_freeroute,
+    parse_model_json,
+    refusal_body,
+    served_from,
+)
 
 # ─── AI call ─────────────────────────────────────────────────────────────────
 
@@ -43,26 +48,39 @@ HARD RULES (never violate):
 
 
 def _ai(prompt: str, max_tokens: int = 2000) -> dict:
-    """Call claude-sonnet-4-6 (T2). Returns parsed JSON dict or error dict."""
-    if not BIG_API_PLACEHOLDER:
-        return {"error": "BIG_API_PLACEHOLDER not configured", "mock": True}
+    """One FreeRoute step. ``max_tokens`` is kept for callers; the crew cap applies.
+
+    Unarmed or no OpenVault route returns ``model_route_unavailable`` and does
+    not invent a chart, draft, or analysis.
+    """
+    _ = max_tokens
+    result = call_freeroute(
+        [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        purpose="think",
+    )
+    if not result.get("ok"):
+        return refusal_body()
+    provider, model = served_from(result)
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=BIG_API_PLACEHOLDER)
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=max_tokens,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        return {"error": f"JSON parse failed: {e}", "raw": raw[:300]}  # type: ignore[reportPossiblyUnbound]
-    except Exception as e:
-        return {"error": str(e)}
+        parsed = parse_model_json(str(result.get("text") or ""))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        body = refusal_body()
+        body["served_provider"] = provider
+        body["served_model"] = model
+        return body
+    if not isinstance(parsed, dict):
+        body = refusal_body()
+        body["served_provider"] = provider
+        body["served_model"] = model
+        return body
+    parsed["served_provider"] = provider
+    parsed["served_model"] = model
+    parsed["llm_used"] = True
+    parsed.pop("refusal", None)
+    return parsed
 
 
 # ─── Intent handlers ─────────────────────────────────────────────────────────
@@ -120,26 +138,31 @@ def export_csv(query: str, rows: list[dict]) -> dict:
     csv_content = buf.getvalue()
 
     summary = f"{len(rows)} rows × {len(columns)} columns"
-    try:
-        summary_result = _ai(
-            f'Data: {len(rows)} rows, columns: {columns}. '
-            f'First row sample: {json.dumps(rows[0], default=str)}. '
-            f'Request: "{query}". '
-            f'Return JSON: {{"summary": "one sentence describing this export"}}',
-            max_tokens=200,
-        )
-        summary = summary_result.get("summary") or summary
-    except Exception:  # noqa: BLE001 — export must work offline without an LLM
-        pass
+    summary_result = _ai(
+        f"Data: {len(rows)} rows, columns: {columns}. "
+        f"First row sample: {json.dumps(rows[0], default=str)}. "
+        f'Request: "{query}". '
+        'Return JSON: {"summary": "one sentence describing this export"}',
+        max_tokens=200,
+    )
+    refused = bool(summary_result.get("refusal")) or summary_result.get("ok") is False
+    if not refused and summary_result.get("summary"):
+        summary = summary_result["summary"]
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return {
+    body = {
         "filename": f"dms_export_{ts}.csv",
         "csv_content": csv_content,
         "row_count": len(rows),
         "columns": columns,
         "summary": summary,
         "requires_confirm": False,
+        "llm_used": False if refused else bool(summary_result.get("llm_used")),
+        "served_provider": None if refused else summary_result.get("served_provider"),
+        "served_model": None if refused else summary_result.get("served_model"),
     }
+    if refused:
+        body["refusal"] = summary_result.get("refusal") or MODEL_ROUTE_UNAVAILABLE
+    return body
 
 
 def draft_email(request: str, context: dict) -> dict:

@@ -118,7 +118,6 @@ def test_memory_api_survives_store_reopen(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("CORTEX_MEMORY_BACKEND", "rawknn")
     monkeypatch.setenv("CORTEX_MEMORY_ROOT", str(tmp_path / "api-knn"))
     monkeypatch.setenv("CORTEX_MEMORY_DIM", "64")
@@ -130,7 +129,7 @@ def test_memory_api_survives_store_reopen(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_routes, "_STORE", fresh_store())
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     vec = [1.0] + [0.0] * 63
     up = client.post(
         "/api/memory/upsert",
