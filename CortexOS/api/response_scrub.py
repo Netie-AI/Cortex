@@ -26,7 +26,9 @@ it to free-text fields only. The names it withholds are:
 
 minus the names the grant covers: the granted tables, their schema parts
 (``main`` for a bare key) and the columns of those tables in the warehouse
-catalog. Names are
+catalog. A bare key covers only ``main.<table>`` of the default catalog, as
+the manifest grants it; a same-named table in another schema is not granted
+and its columns are withheld. Names of any length are withheld. Names are
 compared with :func:`CortexOS.identifier_fold.fold_identifier`, the rule
 DuckDB binds by. The caller's own words are never withheld: names in the
 question, the session and Space ids, and the tables and columns of the DMS
@@ -63,7 +65,6 @@ WITHHELD = "[name withheld]"
 
 _DIALECT = "duckdb"
 _DEFAULT_SCHEMA = "main"
-_MAX_NAME = 128
 # A double-quoted identifier in engine error text ("" is an escaped quote).
 _QUOTED_IDENT = re.compile(r'"((?:[^"]|"")+)"')
 _WORD = re.compile(r"\w+")
@@ -266,7 +267,7 @@ def error_identifiers(text: str) -> set[str]:
     for raw in raws:
         for part in raw.split("."):
             part = part.strip()
-            if part and len(part) <= _MAX_NAME and _WORD.fullmatch(part) and not part.isdigit():
+            if part and _WORD.fullmatch(part) and not part.isdigit():
                 names.add(part)
     return names
 
@@ -358,7 +359,9 @@ def build_scrub(
     # A name only ever written in call or type position may be the engine's own.
     called -= candidates
     candidates |= called
-    candidates = {name for name in candidates if name.strip() and len(name) <= _MAX_NAME}
+    # No length cap: a long name is withheld like a short one. The record bounds
+    # how much SQL and error text there is (sql_attempts.MAX_ENTRIES/MAX_CHARS).
+    candidates = {name for name in candidates if name.strip()}
     if not candidates:
         return NameScrub(frozenset())
 

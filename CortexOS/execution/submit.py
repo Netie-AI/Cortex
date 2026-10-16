@@ -249,22 +249,29 @@ def execute_sql(
         raise
 
 
+#: DuckDB's default schema: what a bare table reference and a bare grant key name.
+_DEFAULT_SCHEMA = "main"
+
+
 def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> frozenset[str]:
     """Column names of the tables this grant names, folded as DuckDB compares them.
 
-    Read from the warehouse catalog that ``execute_sql`` runs on. A grant key
-    ``schema.table`` matches only that schema; a bare key matches the table in
-    any schema. Empty when the catalog cannot be read: callers treat a name
-    they cannot place as not granted.
+    Read from the warehouse catalog that ``execute_sql`` runs on, and resolved
+    as the manifest's ``_grant_key`` resolves a reference: a grant key
+    ``schema.table`` matches only that schema, and a bare key matches only the
+    table in DuckDB's default schema ``main``. A same-named table in any other
+    schema, or in another attached catalog, is a different relation and its
+    columns are not granted. Empty when the catalog cannot be read: callers
+    treat a name they cannot place as not granted.
     """
     from pathlib import Path
 
     from CortexOS.identifier_fold import fold_identifier
 
-    wanted: set[tuple[str | None, str]] = set()
+    wanted: set[tuple[str, str]] = set()
     for key in verified.row_predicates:
         parts = str(key).split(".")
-        schema = fold_identifier(parts[-2]) if len(parts) > 1 else None
+        schema = fold_identifier(parts[-2]) if len(parts) > 1 else _DEFAULT_SCHEMA
         wanted.add((schema, fold_identifier(parts[-1])))
     if not wanted:
         return frozenset()
@@ -275,7 +282,8 @@ def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> 
         con = get_connection(path, read_only=True)
         try:
             rows = con.execute(
-                "SELECT table_schema, table_name, column_name FROM information_schema.columns"
+                "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+                "WHERE table_catalog = current_database()"
             ).fetchall()
         finally:
             con.close()
@@ -283,8 +291,7 @@ def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> 
         return frozenset()
     out: set[str] = set()
     for schema, table, column in rows:
-        folded = fold_identifier(str(table))
-        if (None, folded) in wanted or (fold_identifier(str(schema)), folded) in wanted:
+        if (fold_identifier(str(schema)), fold_identifier(str(table))) in wanted:
             out.add(fold_identifier(str(column)))
     return frozenset(out)
 

@@ -587,3 +587,176 @@ def test_served_answer_keeps_engine_function_and_default_schema_names(
     ]
     gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
     assert any("UNKNOWN_COLUMN:[name withheld]" in line for line in gate), gate
+
+
+# -- review of 96f0bb8 ------------------------------------------------------------
+#
+# (1) A bare grant key grants the table in DuckDB's default schema only (the
+# manifest's ``_grant_key``). The columns of a same-named table in another
+# schema are real names outside the grant and must be withheld like invented
+# ones. (2) A name longer than 128 characters is withheld like any other.
+
+HR_SECRET = "zz_hr_secret_col"
+
+
+@pytest.fixture
+def hr_lake(dms_http, tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """The test lake plus ``hr.transactions`` and ``hr.inventory``, which share the
+    granted tables' names but are in schema ``hr``, so no grant here covers them."""
+    import shutil
+
+    from CortexOS.execution import submit
+    from CortexOS.execution.warehouse import warehouse_path
+
+    source = warehouse_path(submit.DEFAULT_DB)
+    lake = tmp_path / "hr_lake.duckdb"
+    shutil.copyfile(source, lake)
+    wal = source.with_name(source.name + ".wal")
+    if wal.exists():
+        shutil.copyfile(wal, lake.with_name(lake.name + ".wal"))
+    con = duckdb.connect(str(lake))
+    con.execute("CREATE SCHEMA hr")
+    con.execute(f"CREATE TABLE hr.transactions ({HR_SECRET} INTEGER, txn_type VARCHAR)")
+    con.execute(f"CREATE TABLE hr.inventory ({HR_SECRET} INTEGER, sku VARCHAR)")
+    con.close()
+    monkeypatch.setattr(submit, "DEFAULT_DB", lake)
+    return lake
+
+
+def _assert_absent(body: Any, *names: str) -> None:
+    text = json.dumps(body)
+    for name in names:
+        assert name not in text, (name, text)
+        assert name.upper() not in text, (name, text)
+        assert name.lower() not in text.lower(), (name, text)
+
+
+@pytest.mark.parametrize("schema", ["hr.", ""])
+def test_plan_sql_exit_withholds_a_column_of_a_same_named_ungranted_table(
+    schema: str, armed_openvault, dms_http, hr_lake
+) -> None:
+    bad = f"SELECT {HR_SECRET} FROM {schema}transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_absent(body, HR_SECRET)
+    assert body["rows"] in ([], None), body
+    assert body["sql_used"] is None, body
+    assert body["answer"].startswith(("Not answered:", "Reconfirm:")), body["answer"]
+
+
+@pytest.mark.parametrize("schema", ["hr.", ""])
+def test_l2_exit_withholds_a_column_of_a_same_named_ungranted_table(
+    schema: str, armed_openvault, dms_http, hr_lake
+) -> None:
+    bad = f"SELECT {HR_SECRET} FROM {schema}inventory LIMIT 5"
+    for _ in range(3):
+        _reply_with_served_stamp(armed_openvault, bad, provider=PROVIDER, model=MODEL)
+    session = f"name-echo-hr-{schema or 'bare'}"
+    dms_http.bind_session(session, {"inventory": "TRUE"})
+
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "list some skus from inventory stock", "session_id": session},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    _assert_absent(body, HR_SECRET)
+    assert _badge(body).lower() == "abstain", body
+    assert body.get("rows") in ([], None), body
+    assert body.get("sql_used") is None, body
+
+
+def test_served_answer_with_a_same_named_table_elsewhere_keeps_granted_names(
+    armed_openvault, dms_http, hr_lake
+) -> None:
+    """Positive control on the lake with ``hr.transactions``: the granted columns
+    of ``main.transactions`` stay in the prose, rows are the oracle rows."""
+    plan = f"1. Read transactions.\n2. Group by txn_type, not {HR_SECRET}, and count rows."
+    _reply(armed_openvault, plan)
+    _reply(armed_openvault, f"SELECT {HR_SECRET}, COUNT(*) AS n FROM transactions GROUP BY 1")
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+    oracle = _oracle(GOOD_SQL)
+    assert oracle
+
+    body = _json(_ask(dms_http))
+
+    _assert_absent(body, HR_SECRET)
+    assert body["sql_used"].startswith(GOOD_SQL)
+    assert _rowset(body["rows"]) == _rowset(oracle)
+    assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
+    for row in oracle:
+        assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
+    assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
+    assert "plan: 1. Read transactions." in body["assumptions"]
+    plan_line = next(a for a in body["assumptions"] if a.startswith("plan: 2."))
+    assert plan_line == "plan: 2. Group by txn_type, not [name withheld], and count rows.", (
+        plan_line
+    )
+
+
+LONG_VAULT = "zz_payroll_vault_" + "x" * 120
+LONG_COLUMN = "zz_ghost_col_" + "y" * 200
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "SELECT {C} FROM " + LONG_VAULT,
+        "SELECT " + LONG_COLUMN + " FROM {T}",
+        'SELECT {C} FROM "' + LONG_VAULT + '"',
+    ],
+    ids=["long_table", "long_column", "long_quoted_table"],
+)
+def test_plan_sql_exit_withholds_a_name_longer_than_128_characters(
+    template: str, armed_openvault, dms_http
+) -> None:
+    bad = template.replace("{T}", "transactions").replace("{C}", "txn_type")
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_absent(body, LONG_VAULT, LONG_COLUMN)
+    assert body["rows"] in ([], None), body
+    assert body["sql_used"] is None, body
+    assert body["answer"].startswith(("Not answered:", "Reconfirm:")), body["answer"]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "SELECT {C} FROM " + LONG_VAULT,
+        "SELECT " + LONG_COLUMN + " FROM {T}",
+        'SELECT {C} FROM "' + LONG_VAULT + '"',
+    ],
+    ids=["long_table", "long_column", "long_quoted_table"],
+)
+def test_l2_exit_withholds_a_name_longer_than_128_characters(
+    template: str, armed_openvault, dms_http
+) -> None:
+    bad = template.replace("{T}", "inventory").replace("{C}", "sku")
+    for _ in range(3):
+        _reply_with_served_stamp(armed_openvault, bad, provider=PROVIDER, model=MODEL)
+    session = "name-echo-long"
+    dms_http.bind_session(session, {"inventory": "TRUE"})
+
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "list some skus from inventory stock", "session_id": session},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    _assert_absent(body, LONG_VAULT, LONG_COLUMN)
+    assert _badge(body).lower() == "abstain", body
+    assert body.get("rows") in ([], None), body
+    assert body.get("sql_used") is None, body

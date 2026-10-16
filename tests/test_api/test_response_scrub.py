@@ -426,3 +426,102 @@ def test_ansi_highlight_in_a_parse_error_does_not_hide_a_name() -> None:
     out = scrub.text(text)
     assert "zz_ghost_col" not in out
     assert out == f"PARSE_ERROR:Invalid expression. SELECT {WITHHELD} FROM"
+
+
+# -- review of 96f0bb8 ----------------------------------------------------------------
+
+
+def _schema_lake(tmp_path) -> tuple[object, object]:
+    """A lake with ``main.inventory`` and a same-named ``hr.inventory``, plus an
+    attached second catalog that has its own ``main.inventory``."""
+    import duckdb
+
+    other = tmp_path / "other.duckdb"
+    con = duckdb.connect(str(other))
+    con.execute("CREATE TABLE inventory (zz_other_catalog_col INTEGER)")
+    con.close()
+    lake = tmp_path / "lake.duckdb"
+    con = duckdb.connect(str(lake))
+    con.execute("CREATE TABLE inventory (sku VARCHAR, qty INTEGER)")
+    con.execute("CREATE SCHEMA hr")
+    con.execute("CREATE TABLE hr.inventory (zz_hr_secret_col INTEGER, sku VARCHAR)")
+    con.close()
+    return lake, other
+
+
+def test_a_bare_grant_key_covers_only_the_default_schema_table(tmp_path, monkeypatch) -> None:
+    """A bare key grants ``main.<table>`` only (manifest ``_grant_key``), so the
+    columns of a same-named table in another schema are not granted names."""
+    from CortexOS.execution import submit
+    from CortexOS.execution.submit import granted_column_names
+
+    lake, _ = _schema_lake(tmp_path)
+    monkeypatch.setattr(submit, "DEFAULT_DB", lake)
+
+    assert granted_column_names(_grant("inventory")) == frozenset({"sku", "qty"})
+    assert granted_column_names(_grant("INVENTORY")) == frozenset({"sku", "qty"})
+    assert granted_column_names(_grant("main.inventory")) == frozenset({"sku", "qty"})
+    # A qualified key names its own schema only.
+    assert granted_column_names(_grant("hr.inventory")) == frozenset({"zz_hr_secret_col", "sku"})
+
+    for sql in (
+        "SELECT zz_hr_secret_col FROM hr.inventory",
+        "SELECT zz_hr_secret_col FROM inventory",
+    ):
+        scrub = build_scrub(_record(sql), verified=_grant("inventory"))
+        assert "zz_hr_secret_col" in scrub.withheld, (sql, scrub.withheld)
+        out = scrub.text("step gate: (refused: UNKNOWN_COLUMN:zz_hr_secret_col)")
+        assert "zz_hr_secret_col" not in out, out
+    # Positive control: the granted table's columns are still kept.
+    scrub = build_scrub(_record("SELECT sku, qty FROM inventory"), verified=_grant("inventory"))
+    assert scrub.withheld == frozenset()
+
+
+def test_tables_of_an_attached_catalog_are_not_the_granted_table(tmp_path, monkeypatch) -> None:
+    """information_schema spans every attached catalog; a grant names the default one."""
+    import duckdb
+
+    from CortexOS.execution import submit, warehouse
+    from CortexOS.execution.submit import granted_column_names
+
+    lake, other = _schema_lake(tmp_path)
+    monkeypatch.setattr(submit, "DEFAULT_DB", lake)
+
+    def attached(path, **kwargs):
+        # A fresh connection, so the ATTACH never reaches a cached one.
+        del kwargs
+        con = duckdb.connect(str(warehouse.warehouse_path(path)))
+        con.execute(f"ATTACH '{other}' AS zz_other (READ_ONLY)")
+        return con
+
+    monkeypatch.setattr(submit, "get_connection", attached)
+    assert granted_column_names(_grant("inventory")) == frozenset({"sku", "qty"})
+
+
+LONG_TABLE = "zz_payroll_vault_" + "x" * 120
+LONG_COLUMN = "zz_ghost_col_" + "y" * 200
+
+
+def test_a_name_longer_than_128_characters_is_withheld() -> None:
+    assert len(LONG_TABLE) > 128 and len(LONG_COLUMN) > 128
+    sql = f"SELECT txn_type, {LONG_COLUMN} FROM {LONG_TABLE}"
+    record = _record(sql, errors=(f"Table with name {LONG_TABLE} does not exist!",))
+    scrub = build_scrub(record, verified=_grant("transactions"))
+    assert {LONG_TABLE.lower(), LONG_COLUMN.lower()} <= scrub.withheld
+    for text in (
+        f"PLAN_SQL_GATE_REFUSED: UNKNOWN_TABLE:{LONG_TABLE}",
+        f"UNKNOWN_COLUMN:{LONG_COLUMN.upper()}",
+        f'Referenced column "{LONG_COLUMN}" not found',
+    ):
+        out = scrub.text(text)
+        assert LONG_TABLE.lower() not in out.lower() and LONG_COLUMN.lower() not in out.lower()
+        assert WITHHELD in out
+    # Read from error text alone, quoted or as a catalog-error object.
+    assert LONG_TABLE in error_identifiers(f"Table with name {LONG_TABLE} does not exist!")
+    assert LONG_COLUMN in error_identifiers(f'Referenced column "{LONG_COLUMN}" not found')
+    detail = scrub_http_detail(
+        {"code": "X", "message": f"refused: Table with name {LONG_TABLE} does not exist!"},
+        _record(),
+        verified=_grant("transactions"),
+    )
+    assert LONG_TABLE not in str(detail), detail
