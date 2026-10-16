@@ -89,7 +89,7 @@ def ask_http(skills_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
     monkeypatch.delenv("CORTEX_SPACE_MEMORY", raising=False)
     import netie.config
 
@@ -125,7 +125,7 @@ def ask_http(skills_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         get_session_registry().bind(verifier.verify(manifest))
         clear_session(SESSION, space_id=space_id)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 
