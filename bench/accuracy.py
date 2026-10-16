@@ -271,16 +271,51 @@ def run_benchmark(tier: str = "all", golden_path: Path | str | None = None) -> d
         else:
             summary.error += 1
 
-    return {
+    report = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "golden_set": str(golden_path or GOLDEN_PATH),
         "tiers": {t: s.to_dict() for t, s in sorted(tiers.items())},
         "results": [r.to_dict() for r in results],
     }
+    return stamp_golden(report, items, golden_path)
+
+
+def stamp_golden(
+    report: dict[str, Any],
+    items: list[GoldenItem],
+    golden_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """dms_golden_v1 seeded the L0 serve set: it counts toward no score (#343).
+
+    Its tiers stay as regression gates (core all-correct, safety wrong == 0);
+    they are not a score and every id is named as excluded from one.
+    """
+    from CortexOS.crew import score_oracle
+
+    unsplit = Path(golden_path or GOLDEN_PATH).stem == score_oracle.GOLDEN_UNSPLIT
+    _, excluded = score_oracle.split_scored(
+        items,
+        lambda i: (i.id, i.question),
+        corpus=score_oracle.GOLDEN_UNSPLIT if unsplit else "",
+    )
+    return score_oracle.stamp(report, excluded, counts_toward_score=not unsplit)
 
 
 def render_markdown(report: dict[str, Any]) -> str:
     lines = ["# DMS accuracy benchmark", "", f"Run: {report['generated_at']}", ""]
+    if report.get("counts_toward_score") is False:
+        lines += [
+            f"**NOT A SCORE.** {report.get('score_note')}. The tiers below are "
+            "regression gates only.",
+            "",
+        ]
+    if report.get("excluded"):
+        lines += [f"Excluded from any score ({report['excluded_n']}):", ""]
+        lines += [
+            f"- `{row['id']}`: {row['reason']}" + (f" ({row['serve']})" if row.get("serve") else "")
+            for row in report["excluded"]
+        ]
+        lines.append("")
     lines += ["| tier | total | correct | wrong | abstain | error | answered precision | coverage |",
               "|---|---|---|---|---|---|---|---|"]
     for t in report["tiers"].values():
