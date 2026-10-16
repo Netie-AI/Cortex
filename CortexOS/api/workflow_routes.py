@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,28 @@ class HardwareBody(BaseModel):
     hardware: dict[str, Any] = Field(default_factory=dict)
 
 
-def register_workflow_routes(app: Any) -> None:
+def _spend_not_configured() -> None:
+    """Fail closed when the app forgot to pass the spend dependency."""
+    raise HTTPException(
+        status_code=401,
+        detail="Valid API key required (X-API-Key or Bearer)",
+    )
+
+
+def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
+    """``spend_auth`` is the pack ``require_spend_key`` dependency. This module
+    must not import ``packs`` (C2).
+
+    Header key only (``X-API-Key`` or ``Bearer``), steward or above, on run,
+    resume, cancel, clear, recognize, and hardware. The dependency does not
+    read the cookie and does not honor ``DMS_AUTH_DISABLED``. These routes had
+    no auth on parent, so the flag must not start opening them. The session
+    cookie path is ``/cortex``, so a browser does not send it here.
+
+    GET list, tasks, task, and events are unchanged.
+    """
+    auth = spend_auth if spend_auth is not None else _spend_not_configured
+
     @app.get("/api/workflows")
     async def list_workflows() -> dict[str, Any]:
         return {"ok": True, "workflows": workflow_runner.list_workflows()}
@@ -61,7 +82,7 @@ def register_workflow_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail="unknown task")
         return {"ok": True, "task": task}
 
-    @app.post("/api/workflows/run")
+    @app.post("/api/workflows/run", dependencies=[Depends(auth)])
     async def run_workflow(request: Request, body: RunBody) -> dict[str, Any]:
         ledger = getattr(request.app.state, "ledger", None)
         router = getattr(request.app.state, "model_router", None)
@@ -85,7 +106,7 @@ def register_workflow_routes(app: Any) -> None:
             raise HTTPException(status_code=400, detail=result.get("error") or "start failed")
         return result
 
-    @app.post("/api/workflows/cancel")
+    @app.post("/api/workflows/cancel", dependencies=[Depends(auth)])
     async def cancel_workflow(body: CancelBody) -> dict[str, Any]:
         tid = body.task_id or body.run_id
         result = workflow_runner.cancel(tid)
@@ -93,7 +114,7 @@ def register_workflow_routes(app: Any) -> None:
             raise HTTPException(status_code=404, detail=result.get("error") or "cancel failed")
         return result
 
-    @app.post("/api/workflows/resume")
+    @app.post("/api/workflows/resume", dependencies=[Depends(auth)])
     async def resume_workflow(request: Request, body: CancelBody) -> dict[str, Any]:
         """Re-run a finished run under its id; journaled nodes replay for free."""
         ledger = getattr(request.app.state, "ledger", None)
@@ -108,17 +129,17 @@ def register_workflow_routes(app: Any) -> None:
             raise HTTPException(status_code=400, detail=result.get("error") or "resume failed")
         return result
 
-    @app.post("/api/workflows/clear")
+    @app.post("/api/workflows/clear", dependencies=[Depends(auth)])
     async def clear_finished() -> dict[str, Any]:
         return workflow_runner.clear_finished()
 
-    @app.post("/api/workflows/recognize")
+    @app.post("/api/workflows/recognize", dependencies=[Depends(auth)])
     async def recognize_prompt(body: RecognizeBody) -> dict[str, Any]:
         text = body.prompt or body.text or ""
         rec = recognize(text)
         return {"ok": True, **rec.as_dict()}
 
-    @app.post("/api/workflows/hardware")
+    @app.post("/api/workflows/hardware", dependencies=[Depends(auth)])
     async def push_hardware(body: HardwareBody) -> dict[str, Any]:
         workflow_runner.set_hardware(body.hardware)
         return {"ok": True, "hardware": workflow_runner.get_hardware()}

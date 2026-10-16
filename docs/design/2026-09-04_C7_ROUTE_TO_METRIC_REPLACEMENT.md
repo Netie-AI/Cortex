@@ -5,7 +5,9 @@
 **Branch / worktree:** `cursor/c7-design-epic-006` at `D:\Cortex-wt\c7-design`  
 **This ticket ships:** design + C7-01 shadow mode only. Do not rewrite the cascade here.
 
-C7 in CLAUDE.md: replace the keyword cascade in `answer_engine.route_to_metric` with schema retrieval → generation → sqlglot → EXPLAIN → bounded retry → plausibility. L2 already exists as an env-gated port. The serve path stays L0/L1 until numeric gates pass.
+C7 in CLAUDE.md (wording as of this 2026-09-04 design): replace the keyword cascade in `answer_engine.route_to_metric` with schema retrieval → generation → sqlglot → EXPLAIN → bounded retry → plausibility. L2 already exists as an env-gated port. This design said the serve path stays L0/L1 until numeric gates pass.
+
+**2026-10-09.** That serve rule is superseded by `CLAUDE.md` section 9 (same text as section 8). The AI ladder runs first: plan-then-solve, error-fed self-correct, then a stronger OpenVault tier. If the ladder is exhausted, reconfirm by saying why and suggesting the closest answerable question (Yes runs it, No answers "not found in the database" and logs a pipeline-failure ticket). Direct abstain only for ungranted tables or destructive SQL. Keyword routing is not the serve chooser. A wrong answer is never served (WRONG=0). The 2026-09-04 stages below stay as the design record.
 
 ---
 
@@ -14,6 +16,8 @@ C7 in CLAUDE.md: replace the keyword cascade in `answer_engine.route_to_metric` 
 ### Router 2 order
 
 `docs/dms/ROUTER_STATES.md` (established 2026-07-27): session → certified L0 → governed_metric L1 (`route_to_metric`) → query_skill → L2 freeform (`DMS_L2_ENABLED`, default OFF) → L3 abstain. First match wins.
+
+**2026-10-09.** That first-match order, including L1 keyword routing and L3 abstain-when-nothing-matched, is superseded by `CLAUDE.md` section 9. It stays here as the 2026-07-27 description.
 
 ### File:line anchors
 
@@ -80,13 +84,17 @@ Every generated SQL is a candidate, not an answer, until the enforcer and EXPLAI
 
 L0 certified and L1 governed templates remain the high-trust serve path until (f) passes. Pipeline is the L2 path, then the L1 replacement.
 
+**2026-10-09.** "L1 remains the serve path until (f)" is superseded. Keyword templates are not the chooser. The refusal states in the table above (`L3 abstain` on a schema miss, plausibility abstain) are the 2026-09-04 design. Current refusal: the ladder, then reconfirm, except an ungranted table or destructive SQL. A wrong answer is never served (WRONG=0).
+
 ---
 
 ## (c) Abstain-confidence / plausibility
 
 After execute, before synthesize. Does **not** generate SQL. Does **not** call the enforcer. Can only pass through or abstain.
 
-Signals (all fail-closed; any trip → abstain, badge `abstain`, no rows):
+**2026-10-09.** Abstain-on-any-trip, and "Prefer abstain" in signal 1, are superseded by `CLAUDE.md` section 9. A trip is not a direct abstain. The ladder runs first (plan-then-solve, error-fed self-correct, stronger OpenVault tier). If it is exhausted, reconfirm. Word lists in signal 2 (`how many` / `average`) are not a serve rule. Empty-success is still never served as a correct answer (WRONG=0). The signals below stay as the 2026-09-04 record.
+
+Signals (all fail-closed; any trip → abstain, badge `abstain`, no rows), as specified on 2026-09-04:
 
 1. **Empty-success:** 0 rows and the question asserted existence / ranking / threshold. Prefer abstain over a green empty table (G4 class).
 2. **Shape:** scalar question (`how many` / `average`) with a listing, or listing with a single unlabeled number and no group key.
@@ -123,6 +131,8 @@ Shadow is **sync** and adds latency to the request. Flag is opt-in. Do not enabl
 
 `bench/accuracy` (36 gold) and `bench/paraphrase` (85) are **development** sets. They were written next to the 23 metrics. They must not be the cutover corpus.
 
+**2026-10-09.** The must-abstain row below is the 2026-09-04 measurement record. On the serve path, direct abstain is only an ungranted table or destructive SQL. Other misses use the ladder, then reconfirm. An incorrect answer is never served (WRONG=0).
+
 | Split | Source | Use |
 |---|---|---|
 | Dev | existing golden + paraphrase | keep L1 from regressing while shadowing |
@@ -149,6 +159,8 @@ All gates are on the **customer envelope** (rendered `answer` + `rows` + badge),
 
 Cutover (C7-05): `DMS_L2_ENABLED=1` may serve when L0/L1 miss **after** G-abs, G-err, G-env, G-man, G-sh. Retire `route_to_metric` (C7-06) only when L2-as-L1-replacement beats L1 on G-err **and** G-abs still holds. Until then the 27-regex cascade stays.
 
+**2026-10-09.** "Until then the 27-regex cascade stays" is superseded. The cascade is not the serve chooser. #313 retires `route_to_metric`. The gate table above stays as the 2026-09-04 record.
+
 ---
 
 ## (g) Sub-tickets (paste-ready)
@@ -172,7 +184,9 @@ Cutover (C7-05): `DMS_L2_ENABLED=1` may serve when L0/L1 miss **after** G-abs, G
 ### C7-03 — Plausibility / abstain-confidence stage
 
 **WHEN** L2 execute returns rows  
-**SHALL** a plausibility stage run before synthesize; trips SHALL abstain (`badge=abstain`, empty `rows`, reason in `assumptions`) and SHALL NOT rewrite SQL or skip the enforcer. Empty-success and wrong-table-vs-retrieval SHALL abstain.  
+**SHALL** a plausibility stage run before synthesize; trips SHALL abstain (`badge=abstain`, empty `rows`, reason in `assumptions`) and SHALL NOT rewrite SQL or skip the enforcer. Empty-success and wrong-table-vs-retrieval SHALL abstain.
+
+**2026-10-09.** The SHALL-abstain outcome above is superseded. A trip does not direct-abstain. The ladder runs, then reconfirm, except an ungranted table or destructive SQL. WRONG=0 still holds: a wrong answer is never served.  
 **Appetite:** M  
 **Files:** new `CortexOS/dms/l2_plausibility.py` (engine), tests under `tests/dms/`  
 **Blocked-by:** C7-02 (stage order: enforce → EXPLAIN → execute → plausibility)
@@ -196,7 +210,9 @@ Cutover (C7-05): `DMS_L2_ENABLED=1` may serve when L0/L1 miss **after** G-abs, G
 ### C7-06 — Retire `route_to_metric` cascade
 
 **WHEN** the pipeline as L1 replacement beats L1 on G-err and still holds G-abs  
-**SHALL** `route_to_metric` stop being the serve chooser; keyword helpers may remain as slot extractors only if still needed for L0. A commit that deletes the 25 `_metric_plan` branches SHALL include the held-out numbers in the body.  
+**SHALL** `route_to_metric` stop being the serve chooser; keyword helpers may remain as slot extractors only if still needed for L0. A commit that deletes the 25 `_metric_plan` branches SHALL include the held-out numbers in the body.
+
+**2026-10-09.** Keyword routing is already not the serve rule. #313 retires `route_to_metric`. "Keyword helpers may remain" is history from this ticket, not a licence to add word rules.  
 **Appetite:** L  
 **Files:** `CortexOS/dms/answer_engine.py` 647–776, `tests/dms/test_q2_answer_engine.py`  
 **Blocked-by:** C7-05
