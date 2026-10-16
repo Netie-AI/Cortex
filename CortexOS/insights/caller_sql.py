@@ -36,6 +36,10 @@ from typing import Any
 
 from CortexOS.identifier_fold import fold_identifier
 
+#: ``code`` on a refusal whose only fault is a column the caller did not declare
+#: (or a column qualifier that binds to nothing). The table check passed.
+UNDECLARED_COLUMN = "undeclared_column"
+
 
 def _refuse(reason: str, tables: list[str] | None = None) -> dict[str, Any]:
     return {"ok": False, "sql": None, "tables": tables or [], "reason": reason, "check": "refused"}
@@ -338,7 +342,7 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
                 f"table identifier part {dotted!r} contains a dot; refused",
                 sorted(resolved),
             )
-        if node.catalog:
+        if sql_guardrail.catalog_outside_caller(node):
             return _refuse(
                 "cross-catalog table reference refused: " + node.sql(dialect="duckdb")[:80]
             )
@@ -372,7 +376,7 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
     except Exception as exc:  # noqa: BLE001 - an unresolvable binding is a refusal
         return _refuse(f"column scope analysis failed ({type(exc).__name__})", tables)
     if refusal is not None:
-        return _refuse(refusal, tables)
+        return {**_refuse(refusal, tables), "code": UNDECLARED_COLUMN}
 
     _cap_limit(stmt)
     out_sql = stmt.sql(dialect="duckdb")
@@ -383,4 +387,4 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
     return {"ok": True, "sql": out_sql, "tables": tables, "reason": "", "check": check}
 
 
-__all__ = ["resolve_table", "validate_caller_sql"]
+__all__ = ["UNDECLARED_COLUMN", "resolve_table", "validate_caller_sql"]

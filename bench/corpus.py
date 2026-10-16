@@ -628,14 +628,31 @@ def run_offline(
             detail=result.detail,
         )
 
-    return {
+    return _stamp_excluded({
         "mode": "offline",
         "totals": sum_counters(by_cat),
         "corpus": _corpus_sizes(items),
         "by_category": by_cat,
         "items": items,
         "categories": list(PHASE1_CATEGORIES),
-    }
+    })
+
+
+def _stamp_excluded(report: dict[str, Any]) -> dict[str, Any]:
+    """Seeds in the L0 serve set (#343) are named and kept out of ``scored_totals``.
+
+    ``check_thresholds`` still reads every seed: dropping one from
+    ``confidently_wrong`` or the claim-set rate floors would change a CI gate.
+    """
+    from CortexOS.crew import score_oracle
+
+    items = report["items"]
+    _, excluded = score_oracle.split_scored(
+        items, lambda i: (str(i.get("id") or ""), str(i.get("question") or ""))
+    )
+    out = {row["id"] for row in excluded}
+    report["scored_totals"] = _count_totals(items, lambda i: i.get("id") not in out)
+    return score_oracle.stamp(report, excluded)
 
 
 def run_live(
@@ -713,7 +730,7 @@ def run_live(
             detail=err,
         )
 
-    return {
+    return _stamp_excluded({
         "mode": "live",
         "dms_url": dms_url,
         "rps": rps,
@@ -725,7 +742,7 @@ def run_live(
         "by_category": by_cat,
         "items": items,
         "categories": list(PHASE1_CATEGORIES),
-    }
+    })
 
 
 def check_thresholds(report: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[str]:

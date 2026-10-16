@@ -1,0 +1,35 @@
+# Climb / score oracle v1 (CERT-ORACLE-SPLIT, Cortex #343) — NOT a serving input.
+#
+# CortexOS.crew.cot_climb.gold_sql_for and every exact-SQL climb score read gold
+# from this file only. No serving module (the CortexOS/dms answer path, the
+# contract /ask path, the #329 plan+SQL ladder, certified_serve, the semantic
+# loader) opens it:
+#   must-fail: tests/test_crew/test_cert_oracle_split.py
+#   import-linter: serve-never-reads-oracle
+#
+# packs/dms/semantic/certified_queries.yaml stays the L0 serve set. It is never
+# gold: it was seeded from bench/golden/dms_golden_v1.yaml, so grading against
+# it, or on a case it already answers, is memorised by construction. Any case
+# whose id, or normalised question text, is in the serve set is excluded from
+# every score and named in the report (CortexOS.crew.score_oracle).
+#
+# The frozen held-out split (bench/heldout/) is never gold here either. Its
+# header says "frozen held-out split, NOT a development golden"; a climb graded
+# on it tunes on held-out. The 16 entries this file first carried were copies of
+# that split and were removed. A test fails if any entry shares an id,
+# normalised question or normalised SQL with any bench/heldout/ file, or an id
+# or question with the serve set.
+#
+# dms_golden_v1 counts toward no score until it is re-split; none of its items
+# are here.
+#
+# No gold source in the repo is disjoint from all of the above and free to tune
+# on, so `gold` is empty. With no gold, a climb report stamps
+# gold.status = NO_GOLD and this_run.gold = NO_GOLD: its exact % is not a score.
+# A case can still carry its own expected_sql. Add entries only from a new,
+# independently authored development split.
+
+version: 1
+split: oracle
+
+gold: []
