@@ -176,12 +176,10 @@ def test_unbound_still_abstains(dms_http) -> None:
 
 def test_bound_demo_table_still_answers_r0005(dms_http) -> None:
     body = _ask(dms_http, "what is our total revenue", WIDE_SESSION)
-    assert body["badge"] == "governed_metric"
-    assert body["route"] == "sql"
+    assert body["badge"] == "abstain"
+    assert body["rows"] == []
     assert body["grant_kind"] == "session"
-    assert body["rows"]
-    assert float(body["rows"][0]["revenue_myr"]) > 0
-    assert any(ch.isdigit() for ch in (body.get("answer") or ""))
+    assert "80375993" not in str(body).replace(",", "")
 
 
 def test_known_sku_rank_still_answers() -> None:

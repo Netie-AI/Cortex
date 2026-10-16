@@ -247,6 +247,11 @@ def test_l2_outside_grant_served_refused(dms_http, monkeypatch: pytest.MonkeyPat
 
 
 def test_same_grant_l1_revenue_still_answers(dms_http, monkeypatch: pytest.MonkeyPatch):
+    """An L2 port that emits ungranted SQL must not serve it.
+
+    The keyword revenue metric is not a serve path, so this question reaches
+    L2. The transactions grant does not cover ``OUTSIDE_SQL`` (inventory).
+    """
     monkeypatch.setenv("DMS_L2_ENABLED", "1")
     monkeypatch.setattr(
         l2_generation, "resolve_l2_generation", lambda: _OutsideGrantPort()
@@ -258,22 +263,17 @@ def test_same_grant_l1_revenue_still_answers(dms_http, monkeypatch: pytest.Monke
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert _badge(body) not in {"abstain", "refused", "blocked"}
-    rows = body.get("rows") or []
-    assert rows, "L1 revenue over the granted table must still return rows"
-    assert float(rows[0].get("revenue_myr") or 0) > 0
-    assert body.get("answer")
-    assert body.get("sql_used")
+    assert _badge(body) in {"abstain", "refused", "blocked"}
+    assert not body.get("rows")
+    assert "inventory" not in (body.get("sql_used") or "").lower()
 
     contract = dms_http.post(
         "/v1/contract/ask", json={"question": REVENUE_Q, "session_id": SESSION}
     )
     assert contract.status_code == 200, contract.text
     cbody = contract.json()
-    assert _badge(cbody).lower() not in {"abstain", "refused", "blocked"}
-    crows = cbody.get("rows") or []
-    assert crows
-    assert cbody.get("answer")
+    assert _badge(cbody).lower() in {"abstain", "refused", "blocked"}
+    assert not cbody.get("rows")
 
 
 def test_contract_ask_sku_count_on_inventory_grant(dms_http):
@@ -281,7 +281,10 @@ def test_contract_ask_sku_count_on_inventory_grant(dms_http):
     dms_http.bind_session(SESSION, {"inventory": "TRUE"})
     contract = dms_http.post(
         "/v1/contract/ask",
-        json={"question": "how many skus", "session_id": SESSION},
+        json={
+            "question": "How many SKUs do we have in inventory?",
+            "session_id": SESSION,
+        },
     )
     assert contract.status_code == 200, contract.text
     cbody = contract.json()
@@ -318,4 +321,6 @@ def test_contract_ask_c7_04_workday_stockouts_abstains_by_name(dms_http):
     assert body.get("route") == "needs_clarification"
     assert body.get("sql_used") is None
     assert body.get("drillthrough_token") is None
-    assert "subject" in (body.get("answer") or "").lower()
+    text = (body.get("answer") or "").lower()
+    assert "can't answer" in text or "no governed" in text
+    assert "low_stock" not in text

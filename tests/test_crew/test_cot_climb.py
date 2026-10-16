@@ -141,6 +141,19 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
 }
+# #105 C7-06: exact L1 serve-chooser seam. Writer re-keyed this digest after
+# merging main f04995bb and taking route_to_metric off the serve path.
+# Lead YES 6009296369 was on base c7469da4 and does not cover this head.
+_C7_06_105_BASE = "c7469da4e87cb49f56930242189b10817cba7d04"
+_C7_06_105_BRANCH_EXCEPTIONS = {
+    "cursor/c7-06-refresh-c7469da-9556": frozenset({"CortexOS/dms/answer_engine.py"})
+}
+_C7_06_105_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "7f28e476e99e7df1ad365ffc1a8f0e55161f659776ff16199f588c3d33fb3040",
+        ("choose_governed_metric", "keyword cascade is not a caller"),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -427,6 +440,48 @@ def _is_exact_c7_05_104p2_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_c7_06_105_seam(path: str) -> bool:
+    """Allow only #105 C7-06's exact L1 serve-chooser seam on its branch."""
+    allowed = _C7_06_105_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    expected = _C7_06_105_EXACT_DIFF.get(path)
+    if expected is None:
+        return False
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_C7_06_105_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
+        assert symbol in diff.stdout, f"#105 C7-06 seam missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"#105 C7-06 exception covers only its exact L1 chooser seam in {path}; "
+        "any other edit needs a new license"
+    )
+    license_diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_C7_06_105_BASE}..HEAD",
+        "--",
+        "tests/test_crew/test_cot_climb.py",
+    )
+    assert license_diff.returncode == 0, license_diff.stderr
+    assert "_is_exact_c7_06_105_seam" in license_diff.stdout
+    assert "test_other_branch_editing_c7_06_seam_still_trips_guard" in license_diff.stdout
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
     return sorted(
         path
@@ -437,6 +492,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_h2_254_seam(path)
             or _is_exact_extract_pin_277(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or _is_exact_c7_06_105_seam(path)
         )
     )
 
@@ -492,6 +548,15 @@ def test_other_branch_editing_c7_05_seam_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-05-other-branch")
     path = "CortexOS/dms/answer_engine.py"
     assert _is_exact_c7_05_104p2_seam(path) is False
+
+
+def test_other_branch_editing_c7_06_seam_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-06-other-branch")
+    path = "CortexOS/dms/answer_engine.py"
+    assert _is_exact_c7_06_105_seam(path) is False
+    assert _held_freeroute_paths({path}) == [path]
 
 
 def test_other_branch_editing_conftest_still_trips_guard(

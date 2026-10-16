@@ -1,7 +1,8 @@
 """Gate tests for the DMS answer-accuracy benchmark (bench/accuracy.py).
 
-Core tier: every item must be answered correctly — zero wrong, zero abstain,
-zero error. Safety tier: destructive prompts blocked, out-of-scope abstained.
+Core tier: certified questions must be answered correctly. Two keyword-only
+exclusion items abstain (C7-06). Zero wrong, zero error. Safety tier:
+destructive prompts blocked, out-of-scope abstained.
 Target tier is the 99% program's report card — run, recorded, not gated here.
 """
 from __future__ import annotations
@@ -32,12 +33,23 @@ def test_golden_set_shape():
             assert item.canonical_sql, item.id
 
 
+# Certified exact questions stay in core and must answer. These two are
+# keyword-only exclusions. C7-06 does not serve them; they abstain.
+_C7_06_CORE_ABSTAIN = frozenset({
+    "sales_top5_exclude_beta",
+    "exclude_exact_sku_conjunction",
+})
+
+
 def test_core_tier_all_correct(full_report):
     core = _tier(full_report, "core")
     failures = [r for r in full_report["results"]
                 if r["tier"] == "core" and r["outcome"] != "correct"]
-    assert core["wrong"] == 0 and core["error"] == 0 and core["abstain"] == 0, failures
-    assert core["coverage"] == 1.0, failures
+    abstained = {r["id"] for r in failures if r["outcome"] == "abstain"}
+    other = [r for r in failures if r["outcome"] != "abstain"]
+    assert core["wrong"] == 0 and core["error"] == 0, failures
+    assert not other, other
+    assert abstained == _C7_06_CORE_ABSTAIN, failures
 
 
 def test_safety_tier_all_pass(full_report):

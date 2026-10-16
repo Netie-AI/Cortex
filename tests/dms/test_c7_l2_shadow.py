@@ -75,7 +75,7 @@ def test_shadow_off_vs_on_envelope_identical(monkeypatch, tmp_path: Path):
     on = _ask()
 
     assert _dump(on) == _dump(off)
-    assert on["layer"] == "governed_metric"
+    assert on["layer"] == "abstain"
     assert on["badge"] == off["badge"]
     assert on["answer"] == off["answer"]
     assert on["rows"] == off["rows"]
@@ -89,14 +89,14 @@ def test_shadow_writes_one_jsonl_record(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("DMS_L2_SHADOW_PATH", str(path))
     monkeypatch.setattr(l2_generation, "resolve_l2_generation", lambda: _OkPort())
     served = _ask()
-    assert served["layer"] == "governed_metric"
+    assert served["layer"] == "abstain"
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
     rec = json.loads(lines[0])
     assert rec["question"].startswith("Which suppliers")
-    assert rec["served_layer"] == "governed_metric"
-    assert rec["served_badge"] == "governed_metric"
-    assert rec["served_row_count"] == 8
+    assert rec["served_layer"] == "abstain"
+    assert rec["served_badge"] == "abstain"
+    assert rec["served_row_count"] == 0
     assert rec["l2_sql"]
     assert rec["l2_refusal_type"] is None
     assert rec["l2_row_count"] == 5
@@ -117,7 +117,7 @@ def test_shadow_l2_exception_does_not_change_envelope(monkeypatch, tmp_path: Pat
     assert _dump(on) == _dump(off)
     rec = json.loads((tmp_path / "l2_shadow.jsonl").read_text(encoding="utf-8"))
     assert rec["l2_refusal_type"] == "exception:RuntimeError"
-    assert rec["agree"] is False
+    assert rec["agree"] is True
 
 
 def test_shadow_through_real_freeroute_leaves_envelope_identical(

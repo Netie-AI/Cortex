@@ -909,13 +909,13 @@ def answer_question(
     space_id: str | None = None,
     require_grounding: bool = False,
 ) -> dict[str, Any]:
-    """Q2 — route through the layered answer engine (certified → governed metric →
-    abstain). Falls back to the legacy heuristic path only if the engine is
-    unavailable, so behavior degrades safely rather than breaking.
+    """Q2 — route through the layered answer engine (certified → AI SQL →
+    abstain). A successful abstain stays an abstain.
 
-    Bridge: when the engine abstains but a ranked legacy SQL template still matches
-    (delayed shipments / sales / supplier ranking), serve the legacy path so
-    pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+    The delayed/late ranked-SQL bridge was a hand-coded word rule. It served
+    a listing for a grouped count and badged it success. It is retired with
+    the keyword cascade. The legacy generator runs only when the engine
+    raises, so a crash does not take the API down.
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
@@ -930,18 +930,6 @@ def answer_question(
         # A served turn that nothing grants must not fall through to the
         # pre-Q2 ranked-SQL path. That bridge opens its own connection and
         # would answer from the demo warehouse under the abstain.
-        if result.get("grant_kind") == "none":
-            return result
-        # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
-        # until a dedicated governed metric exists. Word-boundary match only — bare
-        # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
-        q = question.lower()
-        if (
-            result.get("route") == "needs_clarification"
-            and re.search(r"\b(delayed|late)\b", q)
-            and _try_generate_ranked_sql(question)
-        ):
-            return _answer_question_legacy(question, session_id=session_id)
         return result
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.

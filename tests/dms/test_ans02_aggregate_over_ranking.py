@@ -26,6 +26,9 @@ AGGREGATE_OVER_RANKING = [
 
 STILL_ANSWERABLE = [
     "top 5 selling skus by revenue",
+]
+
+KEYWORD_ONLY = [
     "what is the total revenue",
     "total cold storage locations",
     "how many delayed shipments",
@@ -141,7 +144,17 @@ def test_compositional_delayed_hazardous_cold_abstains() -> None:
     assert body["rows"] == []
 
 
+@pytest.mark.parametrize("question", KEYWORD_ONLY)
+def test_keyword_only_questions_abstain(question: str) -> None:
+    body = answer(question)
+    assert body["badge"] == "abstain", body.get("answer")
+    assert body["rows"] == []
+    assert body.get("sql_used") is None
+    assert body["layer"] != "governed_metric"
+
+
 def test_simple_delayed_count_still_l1() -> None:
     body = answer("How many delayed shipments are there?")
-    assert body["layer"] == "governed_metric"
-    assert body.get("rows")
+    assert body["layer"] == "abstain"
+    assert body.get("rows") == []
+    assert route_to_metric("How many delayed shipments are there?") is not None
