@@ -440,3 +440,239 @@ def test_grouped_engine_aggregate_answer_drills_per_group(
     assert set(per_group) == set(means)
     for txn_type, values in per_group.items():
         assert abs(sum(values) / len(values) - means[txn_type]) < 1e-9
+
+
+WRITE_OFF_ROWS = (
+    "SELECT txn_id, quantity_kg, unit_cost_myr FROM transactions WHERE txn_type = 'WRITE_OFF'"
+)
+
+
+@pytest.mark.parametrize(
+    ("sql", "col"),
+    [
+        (
+            "SELECT geomean(quantity_kg) AS v FROM transactions WHERE txn_type = 'WRITE_OFF'",
+            "quantity_kg",
+        ),
+        (
+            "SELECT weighted_avg(quantity_kg, unit_cost_myr) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF'",
+            "quantity_kg",
+        ),
+        (
+            "SELECT wavg(quantity_kg, unit_cost_myr) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF'",
+            "quantity_kg",
+        ),
+        (
+            "SELECT json_group_array(txn_id) AS v FROM transactions WHERE txn_type = 'WRITE_OFF'",
+            "txn_id",
+        ),
+        (
+            "SELECT json_group_object(txn_id, quantity_kg) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF'",
+            "txn_id",
+        ),
+    ],
+    ids=["geomean", "weighted_avg", "wavg", "json_group_array", "json_group_object"],
+)
+def test_aggregate_macro_answer_drills_to_its_rows_not_its_value(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+    col: str,
+) -> None:
+    """DuckDB defines these aggregates as macros; the drill returns the rows they read."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    value = _oracle(sql)[0]["v"]
+    assert len(answer["rows"]) == 1
+    assert str(answer["rows"][0]["v"])[:12] == str(value)[:12]
+    assert "v = " in answer["answer"]
+    rows = _oracle(WRITE_OFF_ROWS)
+
+    body = _drill(drill_client, answer)
+
+    assert body["row_count"] == len(rows) == 273
+    # Every drilled value is a value of the column the aggregate read, row for row.
+    assert sorted(str(r["v"]) for r in body["rows"]) == sorted(str(r[col]) for r in rows)
+    assert "geomean" not in body["sql_used"].lower()
+    assert "json_group" not in body["sql_used"].lower()
+    assert "weighted_avg" not in body["sql_used"].lower()
+
+
+def test_geomean_drill_recomputes_the_answer(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    import math
+
+    sql = "SELECT geomean(quantity_kg) AS g FROM transactions WHERE txn_type = 'WRITE_OFF'"
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    g = float(answer["rows"][0]["g"])
+    assert abs(g - float(_oracle(sql)[0]["g"])) < 1e-9
+
+    body = _drill(drill_client, answer)
+
+    values = [float(r["g"]) for r in body["rows"]]
+    assert abs(math.exp(sum(math.log(v) for v in values) / len(values)) - g) < 1e-9
+
+
+@pytest.mark.parametrize(
+    ("sql", "top"),
+    [
+        (
+            "SELECT txn_id, max(quantity_kg, 3) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF' GROUP BY txn_id",
+            "max",
+        ),
+        (
+            "SELECT txn_id, min(quantity_kg, 2) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF' GROUP BY txn_id",
+            "min",
+        ),
+        (
+            "SELECT txn_id, arg_max(quantity_kg, unit_cost_myr, 2) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF' GROUP BY txn_id",
+            "arg_max",
+        ),
+    ],
+    ids=["max-n", "min-n", "arg_max-n"],
+)
+def test_top_n_aggregate_drills_to_each_rows_real_value_not_n(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+    top: str,
+) -> None:
+    """MAX(x, n) and siblings: each drilled row carries that row's own x, never the literal n."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    assert len(answer["rows"]) == len(_oracle(sql)) == 273
+    real = {r["txn_id"]: float(r["quantity_kg"]) for r in _oracle(WRITE_OFF_ROWS)}
+
+    body = _drill(drill_client, answer)
+
+    assert body["row_count"] == 273
+    assert {r["txn_id"]: float(r["v"]) for r in body["rows"]} == real
+    assert top not in body["sql_used"].lower()
+
+
+def test_ungrouped_max_n_drill_lists_the_answers_values_first(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    sql = "SELECT max(quantity_kg, 3) AS top3 FROM transactions WHERE txn_type = 'WRITE_OFF'"
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    top3 = [float(v) for v in answer["rows"][0]["top3"]]
+    assert top3 == [float(v) for v in _oracle(sql)[0]["top3"]]
+    rows = _oracle(WRITE_OFF_ROWS)
+
+    body = _drill(drill_client, answer)
+
+    drilled = [float(r["top3"]) for r in body["rows"]]
+    assert sorted(drilled) == sorted(float(r["quantity_kg"]) for r in rows)
+    assert drilled[:3] == top3
+
+
+@pytest.mark.parametrize(
+    ("sql", "col"),
+    [
+        (
+            "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY quantity_kg) AS v "
+            "FROM transactions WHERE txn_type = 'WRITE_OFF'",
+            "quantity_kg",
+        ),
+        (
+            "SELECT quantile_cont(quantity_kg, 0.5) AS v FROM transactions "
+            "WHERE txn_type = 'WRITE_OFF'",
+            "quantity_kg",
+        ),
+    ],
+    ids=["percentile-within-group", "quantile-param"],
+)
+def test_quantile_answer_drills_to_the_values_it_ranked(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+    col: str,
+) -> None:
+    import statistics
+
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    median = float(_oracle(sql)[0]["v"])
+    assert abs(float(answer["rows"][0]["v"]) - median) < 1e-9
+
+    body = _drill(drill_client, answer)
+
+    values = [float(r["v"]) for r in body["rows"]]
+    assert sorted(values) == sorted(float(r[col]) for r in _oracle(WRITE_OFF_ROWS))
+    assert abs(statistics.median(values) - median) < 1e-9
+
+
+@pytest.mark.parametrize(
+    ("sql", "reason"),
+    [
+        (
+            "SELECT arg_max(3, quantity_kg) AS v FROM transactions WHERE txn_type = 'WRITE_OFF'",
+            "which argument",
+        ),
+        (
+            "SELECT (SELECT MAX(quantity_kg) FROM transactions) AS m",
+            "reads rows from a table",
+        ),
+        (
+            "SELECT (SELECT MAX(quantity_kg) FROM transactions) AS m FROM transactions LIMIT 1",
+            "computed by a subquery",
+        ),
+        (
+            "SELECT txn_type, COUNT(*) AS n, (SELECT COUNT(*) FROM transactions) AS total "
+            "FROM transactions WHERE txn_type <> 'outbound' GROUP BY txn_type",
+            "window or subquery total",
+        ),
+        (
+            "SELECT txn_type, COUNT(*) AS n, ROW_NUMBER() OVER (ORDER BY txn_type) AS rn "
+            "FROM transactions WHERE txn_type <> 'outbound' GROUP BY txn_type",
+            "window or subquery total",
+        ),
+    ],
+    ids=["constant-arg", "no-from", "subquery-only", "subquery-total", "window-over-groups"],
+)
+def test_shapes_whose_rows_cannot_be_drilled_are_a_named_4xx(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+    reason: str,
+) -> None:
+    """Before: 200 with the aggregate value (or a made-up per-row number) stamped exact."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    assert answer["rows"]
+    oracle = _oracle(sql)
+    assert len(answer["rows"]) == len(oracle)
+
+    _assert_named_400(drill_client, answer, reason)
+
+
+def test_row_answer_with_a_subquery_beside_its_columns_still_drills(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    """Positive control: the subquery check does not refuse a row answer that reads its rows."""
+    sql = (
+        "SELECT txn_id, quantity_kg - (SELECT AVG(quantity_kg) FROM transactions) AS d "
+        "FROM transactions WHERE txn_type = 'WRITE_OFF' ORDER BY txn_id LIMIT 5"
+    )
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    oracle = _oracle(sql)
+    assert [r["txn_id"] for r in answer["rows"]] == [r["txn_id"] for r in oracle]
+
+    body = _drill(drill_client, answer)
+
+    assert [(r["txn_id"], round(float(r["d"]), 9)) for r in body["rows"]] == [
+        (r["txn_id"], round(float(r["d"]), 9)) for r in oracle
+    ]

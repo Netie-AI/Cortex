@@ -129,38 +129,95 @@ def verify_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def _top_level_aggregates(node: exp.Expression) -> list[exp.Expression]:
+    """Function calls in ``node`` outside any subquery or window."""
+    return [
+        f
+        for f in node.find_all(exp.AggFunc, exp.Anonymous)
+        if f.find_ancestor(exp.Select, exp.Window) is None
+    ]
+
+
 @functools.lru_cache(maxsize=1)
-def _engine_aggregate_names() -> frozenset[str]:
-    """Aggregate function names DuckDB itself defines.
+def _engine_function_kinds() -> dict[str, str]:
+    """DuckDB function name -> ``aggregate`` / ``scalar`` / ``unknown``.
 
     sqlglot parses some DuckDB aggregates (MEAN, PRODUCT, HISTOGRAM, FSUM, ...)
-    as anonymous functions. Read from an in-memory catalog; no data is touched.
+    as anonymous functions, and DuckDB defines others as macros over an
+    aggregate (GEOMEAN is ``exp(avg(ln(x)))``, JSON_GROUP_ARRAY wraps
+    STRING_AGG, WAVG calls WEIGHTED_AVG). A macro is an aggregate when its
+    body aggregates outside a subquery; a body sqlglot cannot read is
+    ``unknown``. Read from an in-memory catalog; no data is touched.
     """
     import duckdb
 
     con = duckdb.connect(":memory:")
     try:
         rows = con.execute(
-            "SELECT DISTINCT function_name FROM duckdb_functions() "
-            "WHERE function_type = 'aggregate'"
+            "SELECT function_name, function_type, macro_definition FROM duckdb_functions()"
         ).fetchall()
     finally:
         con.close()
-    return frozenset(str(r[0]).lower() for r in rows)
+    kinds: dict[str, str] = {}
+    macro_bodies: dict[str, list[exp.Expression | None]] = {}
+    for name, ftype, definition in rows:
+        key = str(name).lower()
+        if ftype == "aggregate":
+            kinds[key] = "aggregate"
+        elif ftype == "macro":
+            try:
+                body: exp.Expression | None = sqlglot.parse_one(str(definition), read="duckdb")
+            except sqlglot.errors.SqlglotError:
+                body = None
+            macro_bodies.setdefault(key, []).append(body)
+        else:
+            kinds.setdefault(key, "scalar")
+    # A macro may call another aggregate macro (WAVG -> WEIGHTED_AVG): iterate to a fixpoint.
+    changed = True
+    while changed:
+        changed = False
+        for key, bodies in macro_bodies.items():
+            if kinds.get(key) == "aggregate":
+                continue
+            aggregates = any(
+                body is not None
+                and any(
+                    isinstance(f, exp.AggFunc) or kinds.get(f.name.lower()) == "aggregate"
+                    for f in _top_level_aggregates(body)
+                )
+                for body in bodies
+            )
+            if aggregates:
+                kinds[key] = "aggregate"
+                changed = True
+    for key, bodies in macro_bodies.items():
+        if key not in kinds:
+            kinds[key] = "unknown" if any(body is None for body in bodies) else "scalar"
+    return kinds
+
+
+def _function_kind(node: exp.Anonymous) -> str:
+    return _engine_function_kinds().get(node.name.lower(), "unknown")
 
 
 def _is_aggregate(node: exp.Expression) -> bool:
     if isinstance(node, exp.AggFunc):
         return True
-    return isinstance(node, exp.Anonymous) and node.name.lower() in _engine_aggregate_names()
+    return isinstance(node, exp.Anonymous) and _function_kind(node) == "aggregate"
 
 
 def _projected_aggregate(proj: exp.Expression) -> exp.Expression | None:
-    """The aggregate a projection is, under its alias and IGNORE/RESPECT NULLS."""
+    """The aggregate a projection is, under its alias, IGNORE/RESPECT NULLS and WITHIN GROUP."""
     node = proj.this if isinstance(proj, exp.Alias) else proj
     while isinstance(node, (exp.IgnoreNulls, exp.RespectNulls)) and _is_aggregate(node.this):
         node = node.this
+    if isinstance(node, exp.WithinGroup) and _is_aggregate(node.this):
+        return node
     return node if _is_aggregate(node) else None
+
+
+def _has_column(node: exp.Expression | None) -> bool:
+    return node is not None and next(node.find_all(exp.Column), None) is not None
 
 
 def _aggregate_input(
@@ -169,21 +226,28 @@ def _aggregate_input(
     """(has_args, per-row argument or None, the aggregate's own ORDER BY).
 
     The argument is None when the aggregate counts rows (``*``, ``t.*``).
-    ``x ORDER BY y`` and ``DISTINCT x`` are unwrapped to ``x``.
+    ``x ORDER BY y`` and ``DISTINCT x`` are unwrapped to ``x``. The per-row
+    argument is the call's ``this``; the extra arguments are parameters
+    (``MAX(x, n)``, ``QUANTILE_CONT(x, q)``) and are never projected.
     """
-    args = list(agg.expressions)
-    if not args and isinstance(agg.this, exp.Expression):
-        args = [agg.this]
-    if not args:
+    if isinstance(agg, exp.WithinGroup):
+        return _within_group_input(agg)
+    if isinstance(agg.this, exp.Expression):
+        arg: exp.Expression | None = agg.this
+    else:
+        # Anonymous calls keep the name in ``this`` and the arguments in ``expressions``.
+        arg = agg.expressions[0] if agg.expressions else None
+    if arg is None:
         return False, None, []
-    arg = args[0]
     if isinstance(arg, exp.Limit):
         # ARRAY_AGG(x ORDER BY y LIMIT n) aggregates only some of the rows.
         raise DrillthroughError(
             "drill-through cannot derive rows for an aggregate that limits its own input"
         )
     order: list[exp.Ordered] = []
+    order_columns: set[int] = set()
     if isinstance(arg, exp.Order):
+        order_columns = {id(c) for o in arg.expressions for c in o.find_all(exp.Column)}
         order = [o.copy() for o in arg.expressions]
         arg = arg.this
     if isinstance(arg, exp.Distinct):
@@ -194,7 +258,31 @@ def _aggregate_input(
         or (isinstance(arg, exp.Column) and isinstance(arg.this, exp.Star))
     ):
         return True, None, order
+    if not _has_column(arg):
+        # ARG_MAX(3, x), CORR(0.5, x): the constant is not what varies per row. Which
+        # argument carries the rows is not known, so no per-row value is projected.
+        if any(id(c) not in order_columns for c in agg.find_all(exp.Column)):
+            raise DrillthroughError(
+                "drill-through cannot tell which argument of this aggregate holds the row values"
+            )
     return True, arg.copy(), order
+
+
+def _within_group_input(
+    agg: exp.WithinGroup,
+) -> tuple[bool, exp.Expression | None, list[exp.Ordered]]:
+    """``PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY x)`` aggregates ``x``, in that order."""
+    order_node = agg.expression
+    order = [o.copy() for o in order_node.expressions] if isinstance(order_node, exp.Order) else []
+    inner = agg.this
+    if isinstance(inner.this, exp.Expression) and _has_column(inner.this):
+        # LISTAGG(x, sep) WITHIN GROUP (ORDER BY y): the inner call names the values.
+        return True, inner.this.copy(), order
+    if len(order) != 1 or not _has_column(order[0].this):
+        raise DrillthroughError(
+            "drill-through cannot tell which argument of this aggregate holds the row values"
+        )
+    return True, order[0].this.copy(), order
 
 
 def _is_constant(node: exp.Expression) -> bool:
@@ -248,6 +336,23 @@ def _own_aggregates(select: exp.Select, node: exp.Expression) -> list[exp.Expres
         for agg in node.find_all(exp.AggFunc, exp.Anonymous)
         if _is_aggregate(agg) and agg.find_ancestor(exp.Window, exp.Select) is select
     ]
+
+
+def _aggregating_subquery(node: exp.Expression) -> bool:
+    """Whether ``node`` holds a subquery that aggregates (a total, a count)."""
+    for sub in node.find_all(exp.Select):
+        if sub is node:
+            continue
+        if sub.args.get("group") is not None or any(
+            _own_aggregates(sub, p) for p in sub.expressions
+        ):
+            return True
+    return False
+
+
+def _outer_columns(select: exp.Select, node: exp.Expression) -> list[exp.Column]:
+    """Columns in ``node`` that ``select`` itself reads (not a subquery's)."""
+    return [c for c in node.find_all(exp.Column) if c.find_ancestor(exp.Select) is select]
 
 
 def _int_literal(node: exp.Expression | None) -> int | None:
@@ -328,6 +433,17 @@ def _rewrite(
 ) -> DrillRewrite:
     if not isinstance(tree, exp.Select):
         raise DrillthroughError("drill-through requires a SELECT statement")
+    if tree.args.get("from_") is None:
+        # SELECT (SELECT MAX(x) FROM t): no table rows sit behind the answer's row.
+        raise DrillthroughError("drill-through requires an answer that reads rows from a table")
+    for proj in tree.expressions:
+        for fn in proj.find_all(exp.Anonymous):
+            if _function_kind(fn) == "unknown":
+                # Not in the engine catalog (an extension or user macro): it may
+                # aggregate, and a drill that misses that serves the answer value as a row.
+                raise DrillthroughError(
+                    f"drill-through cannot tell whether {fn.name} aggregates rows"
+                )
 
     limit = tree.args.get("limit")
     offset = tree.args.get("offset")
@@ -344,6 +460,15 @@ def _rewrite(
                 raise DrillthroughError(
                     "drill-through cannot derive rows for an aggregate inside an expression"
                 )
+            if _projected_aggregate(proj) is None and (
+                next(node.find_all(exp.Window), None) is not None or _aggregating_subquery(node)
+            ):
+                # A window over groups or a subquery total is not a per-row value:
+                # on drilled rows it would show numbers the answer never had there.
+                raise DrillthroughError(
+                    "drill-through cannot derive rows for a window or subquery total "
+                    "beside an aggregate"
+                )
         # A LIMIT or OFFSET that drops groups leaves rows the answer never used in
         # every other group; a drill over all groups would serve them.
         skipped = 0 if offset is None else _int_literal(offset.expression)
@@ -356,10 +481,17 @@ def _rewrite(
             groups.set("order", None)
             groups.set("limit", None)
             group_count_sql = (
-                "SELECT COUNT(*) AS group_count FROM "
-                f"({groups.sql(dialect=dialect)}) AS _groups"
+                f"SELECT COUNT(*) AS group_count FROM ({groups.sql(dialect=dialect)}) AS _groups"
             )
             group_limit = kept
+    elif all(not _outer_columns(tree, p) for p in tree.expressions) and any(
+        _aggregating_subquery(p) for p in tree.expressions
+    ):
+        # SELECT (SELECT MAX(x) FROM t) AS m FROM t LIMIT 1: the value came from rows
+        # the drill would not return.
+        raise DrillthroughError(
+            "drill-through cannot derive rows for an answer computed by a subquery"
+        )
 
     approximate = False
     # HAVING → WHERE when possible
@@ -417,7 +549,9 @@ def _rewrite(
     count_tree.set("having", None)
     count_tree.set("order", None)
     count_tree.set("limit", None)
-    count_tree.set("expressions", [exp.alias_(exp.Count(this=exp.Star()), "contributing_count", table=False)])
+    count_tree.set(
+        "expressions", [exp.alias_(exp.Count(this=exp.Star()), "contributing_count", table=False)]
+    )
     # Re-apply WHERE merge if original had HAVING — already handled above for drill;
     # for count, strip aggregates from WHERE if we moved HAVING (use drill where).
     if tree.args.get("where") is not None:
@@ -500,9 +634,7 @@ def execute_drillthrough(
     rows = run(rewritten.sql)
     try:
         count_rows, _, _ = execute_sql(verified, rewritten.count_sql)
-        total = (
-            int(count_rows[0].get("contributing_count") or 0) if count_rows else len(rows)
-        )
+        total = int(count_rows[0].get("contributing_count") or 0) if count_rows else len(rows)
     except Exception:  # noqa: BLE001 — count is best-effort
         total = len(rows)
 

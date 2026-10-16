@@ -312,3 +312,213 @@ def test_rewrite_of_any_aggregate_shape_is_a_rewrite_or_a_drillthrough_error(sql
     except DrillthroughError:
         return
     assert isinstance(out, DrillRewrite)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        (
+            "SELECT MAX(qty, 3) AS top3 FROM t",
+            "SELECT qty AS top3 FROM t ORDER BY qty DESC LIMIT 5000",
+        ),
+        (
+            "SELECT k, MIN(qty, 2) AS low2 FROM t GROUP BY k",
+            "SELECT k, qty AS low2 FROM t ORDER BY qty DESC LIMIT 5000",
+        ),
+        (
+            "SELECT ARG_MAX(txn_id, qty, 2) AS v FROM t",
+            "SELECT txn_id AS v FROM t ORDER BY txn_id DESC LIMIT 5000",
+        ),
+        (
+            "SELECT GEOMEAN(qty) AS g FROM t WHERE k = 'W'",
+            "SELECT qty AS g FROM t WHERE k = 'W' ORDER BY qty DESC LIMIT 5000",
+        ),
+        (
+            "SELECT k, GEOMETRIC_MEAN(qty) AS g FROM t GROUP BY k",
+            "SELECT k, qty AS g FROM t ORDER BY qty DESC LIMIT 5000",
+        ),
+        (
+            "SELECT WEIGHTED_AVG(qty, w) AS a FROM t",
+            "SELECT qty AS a FROM t ORDER BY qty DESC LIMIT 5000",
+        ),
+        (
+            "SELECT WAVG(qty, w) AS a FROM t",
+            "SELECT qty AS a FROM t ORDER BY qty DESC LIMIT 5000",
+        ),
+        (
+            "SELECT JSON_GROUP_ARRAY(txn_id) AS ids FROM t",
+            "SELECT txn_id AS ids FROM t ORDER BY txn_id DESC LIMIT 5000",
+        ),
+        (
+            "SELECT k, JSON_GROUP_OBJECT(txn_id, qty) AS o FROM t GROUP BY k",
+            "SELECT k, txn_id AS o FROM t ORDER BY txn_id DESC LIMIT 5000",
+        ),
+        (
+            "SELECT JSON_GROUP_STRUCTURE(doc) AS s FROM t",
+            "SELECT doc AS s FROM t ORDER BY doc DESC LIMIT 5000",
+        ),
+        (
+            "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty) AS m FROM t",
+            "SELECT qty AS m FROM t ORDER BY qty LIMIT 5000",
+        ),
+        (
+            "SELECT k, MODE() WITHIN GROUP (ORDER BY txn_id) AS m FROM t GROUP BY k",
+            "SELECT k, txn_id AS m FROM t ORDER BY txn_id LIMIT 5000",
+        ),
+    ],
+    ids=[
+        "max-n",
+        "min-n",
+        "arg_max-n",
+        "geomean",
+        "geometric_mean",
+        "weighted_avg",
+        "wavg",
+        "json_group_array",
+        "json_group_object",
+        "json_group_structure",
+        "percentile-within-group",
+        "mode-within-group",
+    ],
+)
+def test_rewrite_projects_the_aggregates_per_row_argument_not_a_parameter(sql, expected):
+    """Macro aggregates are aggregates; MAX(x, n) drills x, never the literal n."""
+    out = rewrite_for_drillthrough(sql, provenance_for=_no_prov)
+    assert out.sql == expected
+    assert out.approximate is False
+
+
+@pytest.mark.parametrize(
+    ("sql", "reason"),
+    [
+        ("SELECT ARG_MAX(3, qty) AS v FROM t", "which argument"),
+        ("SELECT CORR(0.5, qty) AS v FROM t", "which argument"),
+        ("SELECT JSON_GROUP_OBJECT(3, qty) AS v FROM t", "which argument"),
+        ("SELECT MY_EXTENSION_AGG(qty) AS v FROM t", "cannot tell whether MY_EXTENSION_AGG"),
+        ("SELECT k, MY_EXTENSION_AGG(qty) AS v FROM t GROUP BY k", "cannot tell whether"),
+        ("SELECT (SELECT MAX(qty) FROM t) AS m", "reads rows from a table"),
+        ("SELECT (SELECT MAX(qty) FROM t) AS m FROM t LIMIT 1", "computed by a subquery"),
+        (
+            "SELECT k, SUM(qty) AS s, (SELECT SUM(qty) FROM t) AS total FROM t GROUP BY k",
+            "window or subquery total",
+        ),
+        (
+            "SELECT k, COUNT(*) AS n, ROW_NUMBER() OVER (ORDER BY k) AS rn FROM t GROUP BY k",
+            "window or subquery total",
+        ),
+    ],
+)
+def test_rewrite_refuses_shapes_that_would_serve_values_not_in_the_rows(sql, reason):
+    from CortexOS.execution.drillthrough import DrillthroughError
+
+    with pytest.raises(DrillthroughError, match=reason):
+        rewrite_for_drillthrough(sql, provenance_for=_no_prov)
+
+
+def test_rewrite_keeps_a_row_answer_with_a_subquery_beside_its_columns():
+    """Positive control: a row answer that reads its own rows still drills."""
+    sql = "SELECT id, qty - (SELECT AVG(qty) FROM t) AS d FROM t ORDER BY id LIMIT 5"
+    out = rewrite_for_drillthrough(sql, provenance_for=_no_prov)
+    assert out.sql == sql
+
+
+def test_every_engine_aggregate_drills_to_real_row_values_or_is_refused():
+    """Sweep: every call DuckDB itself aggregates, over many argument shapes.
+
+    Which calls aggregate is decided by DuckDB (one row back from a four-row
+    table), not by the rewrite's own catalog, so a macro or new aggregate the
+    rewrite misses fails here. Each rewrite is a DrillthroughError, or its drill
+    runs, returns all four rows, and every drilled value is that row's own value
+    of a column the aggregate read.
+    """
+    import duckdb
+
+    from CortexOS.execution.drillthrough import DrillthroughError
+
+    con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE t AS SELECT * FROM (VALUES "
+        "('a', 1.5, 10.0, 's1', 1, true), ('a', 2.5, 20.0, 's2', 2, false), "
+        "('b', 4.0, 30.0, 's3', 3, true), ('b', 8.0, 40.0, 's4', 4, false)"
+        ") v(k, x, y, s, i, b)"
+    )
+    cols = ("x", "y", "s", "i", "b")
+    base = {
+        r[0]: dict(zip(cols, r[1:], strict=True))
+        for r in con.execute("SELECT i, x, y, s, i, b FROM t").fetchall()
+    }
+    names = sorted(
+        r[0]
+        for r in con.execute(
+            "SELECT DISTINCT function_name FROM duckdb_functions() "
+            "WHERE function_type IN ('aggregate', 'macro') AND function_name NOT LIKE '%sleep%'"
+        ).fetchall()
+    )
+    shapes = [
+        ("{n}(x)", "x"),
+        ("{n}(x, y)", "xy"),
+        ("{n}(x, 3)", "x"),
+        ("{n}(y, x)", "xy"),
+        ("{n}(s)", "s"),
+        ("{n}(s, ',')", "s"),
+        ("{n}(x, 0.5)", "x"),
+        ("{n}(i)", "i"),
+        ("{n}(b)", "b"),
+        ("{n}(DISTINCT x)", "x"),
+        ("{n}(x ORDER BY y DESC)", "xy"),
+        ("{n}(x, y, 2)", "xy"),
+        ("{n}(i, 1, 4)", "i"),
+        ("{n}(x, [0.25, 0.5])", "x"),
+        ("{n}(s, x)", "sx"),
+        ("{n}(3, x)", "x"),
+        ("{n}(1)", ""),
+        ("{n}(0.5) WITHIN GROUP (ORDER BY x)", "x"),
+        ("{n}() WITHIN GROUP (ORDER BY x)", "x"),
+        ("{n}(x IGNORE NULLS)", "x"),
+    ]
+    failures: list[str] = []
+    aggregating = drilled = 0
+    for name in names:
+        for shape, refs in shapes:
+            call = shape.format(n=name)
+            try:
+                if len(con.execute(f"SELECT {call} AS v FROM t").fetchall()) != 1:
+                    continue  # DuckDB does not aggregate this call
+            except duckdb.Error:
+                continue
+            aggregating += 1
+            for sql, keyed in (
+                (f"SELECT {call} AS v FROM t", False),
+                (f"SELECT i, {call} AS v FROM t GROUP BY i", True),
+            ):
+                try:
+                    con.execute(sql).fetchall()
+                except duckdb.Error:
+                    continue
+                try:
+                    out = rewrite_for_drillthrough(sql, provenance_for=_no_prov)
+                except DrillthroughError:
+                    continue
+                try:
+                    rel = con.execute(out.sql)
+                except duckdb.Error as exc:
+                    failures.append(f"{sql}: drill fails: {exc}")
+                    continue
+                names_out = [d[0] for d in rel.description]
+                rows = [dict(zip(names_out, r, strict=True)) for r in rel.fetchall()]
+                if len(rows) != 4:
+                    failures.append(f"{sql}: {len(rows)} rows from {out.sql}")
+                    continue
+                if "v" in names_out:
+                    if keyed:
+                        real = [all(r["v"] == base[r["i"]][c] for r in rows) for c in refs]
+                    else:
+                        got = sorted(repr(r["v"]) for r in rows)
+                        real = [got == sorted(repr(base[i][c]) for i in base) for c in refs]
+                    if refs and not any(real):
+                        failures.append(f"{sql}: values {[r['v'] for r in rows]} from {out.sql}")
+                        continue
+                drilled += 1
+    con.close()
+    assert aggregating > 300 and drilled > 400
+    assert failures == []
