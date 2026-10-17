@@ -137,8 +137,14 @@ def _multiset_equal(a: list[tuple], b: list[tuple]) -> bool:
 
 
 def _run_canonical(sql: str) -> list[dict]:
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
+    from CortexOS.dms.warehouse_db import DEFAULT_DB, DMS_PACK, get_connection
+    from CortexOS.ontology.value_domain import canonical_gold_sql
 
+    # VALUE-NORMALIZE-01 (#387): gold files keep the source spelling
+    # (txn_type = 'OUT'). The lake stores the ontology's canonical values, so gold
+    # runs through the same declared mapping the lake build applied. A literal the
+    # mapping cannot rewrite exactly raises, and the item scores "error".
+    sql = canonical_gold_sql(sql, DMS_PACK)
     # read_only: the benchmark must not take DuckDB's EXCLUSIVE read-write lock.
     # A live API process holding that lock made canonical SQL fail at random
     # ("IO Error: ... used by another process") — the documented "flaky golden
@@ -152,12 +158,27 @@ def _run_canonical(sql: str) -> list[dict]:
         con.close()
 
 
-def _ensure_db_loaded() -> None:
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, load_inventory_csv, table_row_counts
+def _unmapped_rows(db: Path) -> int:
+    """Rows a lake built before the value-domain declaration still holds in source spelling."""
+    from CortexOS.dms.warehouse_db import DMS_PACK, get_connection, read_only_queries_enabled
+    from CortexOS.ontology.value_domain import load_value_domains, source_rows
 
-    counts = table_row_counts(DEFAULT_DB) if DEFAULT_DB.exists() else {}
-    if not counts or sum(counts.values()) == 0:
-        load_inventory_csv()
+    # Same open as table_row_counts: no cached read-only instance left holding
+    # the file, so a second process can still open it read-write.
+    con = get_connection(db, read_only=read_only_queries_enabled())
+    try:
+        return source_rows(con, load_value_domains(DMS_PACK))
+    finally:
+        con.close()
+
+
+def _ensure_db_loaded() -> None:
+    from CortexOS.dms import warehouse_db
+
+    db = warehouse_db.DEFAULT_DB
+    counts = warehouse_db.table_row_counts(db) if db.exists() else {}
+    if not counts or sum(counts.values()) == 0 or _unmapped_rows(db):
+        warehouse_db.load_inventory_csv()
 
 
 def score_answer(item: GoldenItem, result: dict[str, Any]) -> ItemResult:
@@ -271,16 +292,51 @@ def run_benchmark(tier: str = "all", golden_path: Path | str | None = None) -> d
         else:
             summary.error += 1
 
-    return {
+    report = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "golden_set": str(golden_path or GOLDEN_PATH),
         "tiers": {t: s.to_dict() for t, s in sorted(tiers.items())},
         "results": [r.to_dict() for r in results],
     }
+    return stamp_golden(report, items, golden_path)
+
+
+def stamp_golden(
+    report: dict[str, Any],
+    items: list[GoldenItem],
+    golden_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """dms_golden_v1 seeded the L0 serve set: it counts toward no score (#343).
+
+    Its tiers stay as regression gates (core all-correct, safety wrong == 0);
+    they are not a score and every id is named as excluded from one.
+    """
+    from CortexOS.crew import score_oracle
+
+    unsplit = Path(golden_path or GOLDEN_PATH).stem == score_oracle.GOLDEN_UNSPLIT
+    _, excluded = score_oracle.split_scored(
+        items,
+        lambda i: (i.id, i.question),
+        corpus=score_oracle.GOLDEN_UNSPLIT if unsplit else "",
+    )
+    return score_oracle.stamp(report, excluded, counts_toward_score=not unsplit)
 
 
 def render_markdown(report: dict[str, Any]) -> str:
     lines = ["# DMS accuracy benchmark", "", f"Run: {report['generated_at']}", ""]
+    if report.get("counts_toward_score") is False:
+        lines += [
+            f"**NOT A SCORE.** {report.get('score_note')}. The tiers below are "
+            "regression gates only.",
+            "",
+        ]
+    if report.get("excluded"):
+        lines += [f"Excluded from any score ({report['excluded_n']}):", ""]
+        lines += [
+            f"- `{row['id']}`: {row['reason']}" + (f" ({row['serve']})" if row.get("serve") else "")
+            for row in report["excluded"]
+        ]
+        lines.append("")
     lines += ["| tier | total | correct | wrong | abstain | error | answered precision | coverage |",
               "|---|---|---|---|---|---|---|---|"]
     for t in report["tiers"].values():

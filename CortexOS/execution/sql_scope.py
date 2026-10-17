@@ -21,6 +21,13 @@ a CTE only when the scope that holds it resolves the name to a CTE. Every other
 ``exp.Table`` is a real table and the caller must check it. Anything the scope
 builder cannot analyse is a named refusal (:class:`ScopeError`), never a guess.
 
+A reference binds to a CTE here only when its name equals the CTE's name
+exactly. DuckDB binds CTE names case-insensitively for ASCII letters
+(:func:`CortexOS.identifier_fold.fold_identifier`), so exact matching exempts a
+subset of what DuckDB binds to a CTE and never a reference DuckDB sends to a
+base table: a ``WITH Totals ... FROM totals`` reference is checked as a real
+table. Grant comparisons themselves fold with ``fold_identifier`` in callers.
+
 It never executes anything and never imports a pack.
 """
 
