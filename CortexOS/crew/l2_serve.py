@@ -98,16 +98,19 @@ def serve_on_miss(
         )
 
     try:
-        from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+        from CortexOS.dms.sql_validate_gate import LakeValueDomainStale, SqlGateAbstain
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
-        # execute_sql is the ordered security seam: enforce_manifest -> EXPLAIN -> fetch.
+        # execute_sql is the ordered security seam: enforce_manifest -> EXPLAIN ->
+        # declared value domains on the lake (#402) -> fetch.
         rows, _, _ = execute_sql(verified, executable, explain_gate=True)
     except ManifestError as exc:
         return _step_abstain(
             "manifest_check", f"{type(exc).__name__}: {exc}", model_called=model_called
         )
+    except LakeValueDomainStale as exc:
+        return _step_abstain("value_domain", exc.reason, model_called=model_called)
     except SqlGateAbstain as exc:
         return _step_abstain(
             "explain", f"{type(exc).__name__}: {exc}", model_called=model_called

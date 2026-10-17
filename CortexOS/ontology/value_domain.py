@@ -6,12 +6,20 @@ them (``packs/dms/ontology/object_types.yaml``: ``transactions.txn_type``
 ``OUT`` -> ``outbound``). The declaration is data, read once through
 ``CortexOS.ontology.registry``; nothing here knows a value.
 
-Three uses, one declaration:
+Four uses, one declaration:
 
 * ``apply_to_lake`` - every Cortex lake build (warehouse load, lakehouse silver,
   test lakes) rewrites stored source spellings to canonical values.
   ``undeclared_values`` then counts and names any stored value the declaration
   does not list; such a value is reported, never guessed at or mapped.
+* ``stale_columns`` - at query time (``execute_sql`` and ``guard_and_execute``,
+  the seams every served answer runs through), before SQL that names a
+  declared column fetches a row, the lake it runs on is checked for stored
+  values a canonical filter or grouping would misread: a declared source
+  spelling the build did not map (a lake built before the declaration, or by
+  another loader), or a value the declaration does not list. Either one is a
+  named abstain (``lake_value_domain_stale:<table>.<column>``), never a served
+  zero.
 * ``prompt_values`` - the canonical values go into the model's generation context.
 * ``canonicalize_sql`` - SQL written against source spellings (gold and
   held-out files, which never change) is run through the same mapping before it
@@ -25,7 +33,9 @@ This module does not import ``duckdb``: callers pass an open connection.
 
 from __future__ import annotations
 
+import logging
 import re
+import threading
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,9 +44,14 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
-from CortexOS.ontology.registry import load_object_types
+from CortexOS.ontology.registry import load_object_types, object_types_path
+
+_log = logging.getLogger(__name__)
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+#: Named abstain reason: the lake does not store the declared values of a column.
+LAKE_STALE = "lake_value_domain_stale"
 
 
 class UnmappedLiteral(ValueError):
@@ -74,6 +89,33 @@ def load_value_domains(pack_dir: Path | str | None = None) -> tuple[ValueDomain,
                 )
             )
     return tuple(out)
+
+
+_DECLARED: dict[str, tuple[tuple[int, int], tuple[ValueDomain, ...]]] = {}
+_DECLARED_LOCK = threading.Lock()
+
+
+def declared_value_domains(pack_dir: Path | str) -> tuple[ValueDomain, ...]:
+    """``load_value_domains`` for a serving seam that asks on every query.
+
+    Parsed once and kept until the pack's ontology file changes (size or
+    modification time). A pack with no ontology file declares nothing: ``()``.
+    A malformed declaration still raises, as ``load_value_domains`` does.
+    """
+    path = object_types_path(pack_dir)
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return ()
+    key, stamp = str(path.resolve()), (st.st_mtime_ns, st.st_size)
+    with _DECLARED_LOCK:
+        hit = _DECLARED.get(key)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    domains = load_value_domains(pack_dir)
+    with _DECLARED_LOCK:
+        _DECLARED[key] = (stamp, domains)
+    return domains
 
 
 def prompt_values(domains: Iterable[ValueDomain]) -> dict[str, dict[str, list[str]]]:
@@ -210,6 +252,196 @@ def undeclared_values(
         if rows:
             out[d.key] = {str(v): int(n) for v, n in rows}
     return out
+
+
+# ── serve time: does the lake hold what the declaration says? ───────────────
+
+
+@dataclass(frozen=True, slots=True)
+class LakeDrift:
+    """Rows of one declared column that a filter or grouping on canonical values misreads.
+
+    Counts only. The stored values themselves are never carried here, so no
+    reason built from this can echo a cell value to a user or a model.
+    """
+
+    key: str
+    unmapped_rows: int  # a declared source spelling the lake build did not map
+    undeclared_rows: int  # a value the declaration does not list at all
+
+    @property
+    def code(self) -> str:
+        return f"{LAKE_STALE}:{self.key}"
+
+    def reason(self) -> str:
+        what: list[str] = []
+        if self.unmapped_rows:
+            what.append("declared source spellings its build did not map")
+        if self.undeclared_rows:
+            what.append("values the declaration does not list")
+        return (
+            f"{self.code}: the lake stores {' and '.join(what)}, so a filter or "
+            "grouping on that column would not match the declared values (rebuild "
+            "the lake through the declaration)"
+        )
+
+
+def domains_in_sql(sql: str, domains: Iterable[ValueDomain]) -> tuple[ValueDomain, ...]:
+    """Declared domains whose column ``sql`` names, on a table ``sql`` reads.
+
+    Matched by column name whenever the domain's table is read anywhere in the
+    statement, so a reference through a CTE, a derived table or an alias counts:
+    the check reads more columns rather than miss one. SQL that does not parse
+    is treated as naming every declared domain (fail closed). ``SELECT *`` names
+    no column: a listing shows what is stored and filters nothing.
+    """
+    domains = tuple(domains)
+    if not sql or not domains:
+        return ()
+    try:
+        tree = sqlglot.parse_one(sql, read="duckdb")
+    except sqlglot.errors.ParseError:
+        return domains
+    if tree is None:
+        return domains
+    tables = {t.name.lower() for t in tree.find_all(exp.Table)}
+    columns = {c.name.lower() for c in tree.find_all(exp.Column)}
+    return tuple(
+        d for d in domains if d.table.lower() in tables and d.column.lower() in columns
+    )
+
+
+_LAKE_CACHE: dict[tuple[Any, ...], tuple[int, int] | None] = {}
+_LAKE_CACHE_MAX = 256
+_LAKE_LOCK = threading.Lock()
+
+
+def _lake_stamp(lake: Path | str | None) -> tuple[Any, ...] | None:
+    """Identity of the lake file's current state, or None (in-memory: not cached).
+
+    DuckDB writes go to ``<file>.wal`` until a checkpoint, so its state is part
+    of the stamp: a write that has not reached the main file still moves it.
+    """
+    if lake is None or str(lake) in ("", ":memory:"):
+        return None
+    path = Path(lake)
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    try:
+        ws = Path(f"{path}.wal").stat()
+        wal: tuple[int, int] | None = (ws.st_mtime_ns, ws.st_size)
+    except OSError:
+        wal = None
+    return (str(path.resolve()), st.st_mtime_ns, st.st_size, wal)
+
+
+def _connection_lake(con: Any) -> str | None:
+    """The database file ``con`` reads, or None (in-memory, or not knowable: no cache)."""
+    try:
+        row = con.execute(
+            "SELECT path FROM duckdb_databases() WHERE database_name = current_database()"
+        ).fetchone()
+    except Exception:  # noqa: BLE001 - not DuckDB, or no catalog function: just not cached
+        return None
+    return str(row[0]) if row and row[0] else None
+
+
+def clear_lake_cache() -> None:
+    """Forget every cached lake check (tests, and after an in-place rebuild)."""
+    with _LAKE_LOCK:
+        _LAKE_CACHE.clear()
+
+
+def _drift_counts(con: Any, d: ValueDomain, schema: str) -> tuple[int, int] | None:
+    """(unmapped rows, undeclared rows) for one column; None when the lake lacks it."""
+    ref = _ref(schema, d.table)
+    if not _has_column(con, ref, d.column):
+        return None
+    srcs = [s for s, _ in d.sources]
+    known = [*d.canonical, *srcs]
+    unmapped = (
+        f"COUNT(*) FILTER (WHERE v IN ({', '.join('?' for _ in srcs)}))" if srcs else "0"
+    )
+    row = con.execute(
+        f"SELECT {unmapped}, "
+        f"COUNT(*) FILTER (WHERE v NOT IN ({', '.join('?' for _ in known)})) "
+        f"FROM (SELECT CAST({d.column} AS VARCHAR) AS v FROM {ref} "
+        f"WHERE {d.column} IS NOT NULL) AS _declared",
+        [*srcs, *known],
+    ).fetchone()
+    if not row:
+        return (0, 0)
+    return (int(row[0] or 0), int(row[1] or 0))
+
+
+def lake_drift(
+    con: Any,
+    domains: Iterable[ValueDomain],
+    *,
+    schema: str = "",
+    lake: Path | str | None = None,
+) -> tuple[LakeDrift, ...]:
+    """Declared columns in the lake ``con`` reads that hold values the declaration does not.
+
+    One aggregate scan per column, cached per state of the file ``con`` reads
+    (``lake``, else the file DuckDB reports for ``con``): path, size and
+    modification time of the file and its WAL. A rebuild is seen; an unchanged
+    lake is scanned once; an in-memory database is never cached. A table or
+    column the lake does not have is skipped.
+    """
+    stamp = _lake_stamp(lake if lake is not None else _connection_lake(con))
+    out: list[LakeDrift] = []
+    for d in domains:
+        key = None if stamp is None else (stamp, schema, d)
+        with _LAKE_LOCK:
+            hit = key is not None and key in _LAKE_CACHE
+            counts = _LAKE_CACHE[key] if hit and key is not None else None
+        if not hit:
+            counts = _drift_counts(con, d, schema)
+            if key is not None:
+                with _LAKE_LOCK:
+                    if len(_LAKE_CACHE) >= _LAKE_CACHE_MAX:
+                        _LAKE_CACHE.clear()
+                    _LAKE_CACHE[key] = counts
+        if counts is not None and any(counts):
+            out.append(LakeDrift(d.key, *counts))
+    return tuple(out)
+
+
+def stale_columns(
+    con: Any,
+    sql: str,
+    domains: Iterable[ValueDomain],
+    *,
+    schema: str = "",
+    lake: Path | str | None = None,
+) -> tuple[LakeDrift, ...]:
+    """Declared columns ``sql`` names that the lake does not hold as declared.
+
+    Empty when ``sql`` names no declared column, or when every one it names
+    stores only declared canonical values. A non-empty result is a named
+    abstain (``stale_reason``); it names columns and row counts, never a value.
+    """
+    named = domains_in_sql(sql, domains)
+    if not named:
+        return ()
+    drift = lake_drift(con, named, schema=schema, lake=lake)
+    for item in drift:
+        _log.warning(
+            "%s unmapped_rows=%d undeclared_rows=%d lake=%s",
+            item.code,
+            item.unmapped_rows,
+            item.undeclared_rows,
+            lake if lake is not None else "<connection>",
+        )
+    return drift
+
+
+def stale_reason(drift: Iterable[LakeDrift]) -> str:
+    """The user-visible abstain reason for ``stale_columns``: column names, no values."""
+    return "; ".join(item.reason() for item in drift)
 
 
 # ── SQL written against source spellings ────────────────────────────────────

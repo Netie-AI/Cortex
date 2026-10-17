@@ -295,9 +295,37 @@ SUM_V = "SUM(quantity_kg * unit_cost_myr)"
             f"SELECT {SUM_V} FROM transactions WHERE NOT txn_type = 'outbound'",
             ["measure_filter_inverted"],
         ),
-        # A positive pin is the SQL's explicit choice; spelling is the value domain's concern
-        # (tests/dms/test_c7_05_crew_l2_serve.py replays 'OUT' on an unmapped fixture lake).
-        (f"SELECT {SUM_V} FROM transactions WHERE txn_type = 'OUT'", []),
+        # #402 / #235 review: a positive pin outside the declared canonical values sums no
+        # rows on a mapped lake. It is a named violation (exact text, nothing folded).
+        (f"SELECT {SUM_V} FROM transactions WHERE txn_type = 'OUT'", ["measure_filter_undeclared"]),
+        (
+            f"SELECT {SUM_V} FROM transactions WHERE txn_type = 'Outbound'",
+            ["measure_filter_undeclared"],
+        ),
+        (
+            f"SELECT {SUM_V} FROM transactions WHERE txn_type IN ('outbound', 'OUT')",
+            ["measure_filter_undeclared"],
+        ),
+        (
+            "SELECT SUM(CASE WHEN txn_type = 'SALE' THEN quantity_kg * unit_cost_myr "
+            "ELSE 0 END) FROM transactions",
+            ["measure_filter_undeclared"],
+        ),
+        (
+            "SELECT txn_type, SUM(quantity_kg) FROM transactions "
+            "WHERE txn_type IN ('OUT', 'IN') GROUP BY txn_type",
+            ["measure_filter_undeclared"],
+        ),
+        (
+            f"SELECT {SUM_V} FROM transactions t WHERE t.txn_type = 'outbound' "
+            "AND t.txn_type = 'out'",
+            ["measure_filter_undeclared"],
+        ),
+        # an undeclared value that is only excluded: the declared pin stands
+        (
+            f"SELECT {SUM_V} FROM transactions WHERE txn_type = 'outbound' AND txn_type <> 'OUT'",
+            [],
+        ),
     ],
 )
 def test_check_reads_parsed_sql(sql: str, kinds: list[str], declared: Any, schema: Any) -> None:
@@ -315,6 +343,17 @@ def test_violation_reason_names_the_measure_and_its_definition(declared: Any, sc
     )
     assert i.reason().startswith("measure_filter_inverted:sales_value_myr:")
     assert "excludes transactions.txn_type = 'outbound'" in i.reason()
+
+
+def test_undeclared_pin_reason_names_the_declared_values_not_the_literal(
+    declared: Any, schema: Any
+) -> None:
+    (v,) = ms.check_sql(f"SELECT {SUM_V} FROM transactions WHERE txn_type = 'OUT'", declared, schema)
+    reason = v.reason()
+    assert reason.startswith("measure_filter_undeclared:sales_value_myr:")
+    assert "('outbound', 'inbound', 'ADJUST', 'WRITE_OFF')" in reason
+    assert "transactions.txn_type = 'outbound'" in reason
+    assert "'OUT'" not in reason
 
 
 def test_no_declared_measures_means_no_check(schema: Any) -> None:

@@ -221,6 +221,7 @@ def execute_sql(
     db_path: Any = None,
     explain_gate: bool | None = None,
     params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms).
 
@@ -228,6 +229,14 @@ def execute_sql(
     truthy), run DuckDB EXPLAIN after manifest enforce and before fetch.
     ``params`` are forwarded to both EXPLAIN and the fetch execute so bind
     placeholders in caller SQL survive predicate wrapping.
+
+    Declared value domains (#402): when the post-enforce SQL names a column
+    with a declared value domain and the lake it runs on stores values the
+    declaration does not (a build that predates it, or another loader),
+    ``LakeValueDomainStale`` (a ``SqlGateAbstain``) is raised before any row is
+    fetched: a filter on the declared values would match nothing there.
+    ``value_domains`` defaults to the serving warehouse's declaration
+    (``warehouse_db.serving_value_domains``); ``()`` checks nothing.
     """
     import os
 
@@ -261,6 +270,19 @@ def execute_sql(
                         f"EXPLAIN rejected SQL: {reason}",
                         violations=[f"EXPLAIN_FAILED:{reason}"],
                         raw_detail=detail,
+                    )
+            if value_domains is None:
+                from CortexOS.dms.warehouse_db import serving_value_domains
+
+                value_domains = serving_value_domains()
+            if value_domains:
+                from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
+                from CortexOS.ontology.value_domain import stale_columns, stale_reason
+
+                drift = stale_columns(con, safe_sql, value_domains, lake=path)
+                if drift:
+                    raise LakeValueDomainStale(
+                        stale_reason(drift), codes=[item.code for item in drift]
                     )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s

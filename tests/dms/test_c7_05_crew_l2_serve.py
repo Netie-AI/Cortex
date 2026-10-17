@@ -23,6 +23,8 @@ from CortexOS.execution.session_manifests import (
     get_session_registry,
     reset_session_registry_for_tests,
 )
+from CortexOS.ontology import value_domain
+from CortexOS.ontology.registry import pack_dir_for
 
 SESSION = "c7-05-l2-serve"
 SQL = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
@@ -145,9 +147,20 @@ def phase1b_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     try:
         for statement in PHASE1B["setup_sql"]:
             con.execute(statement)
+        # The fixture rows keep the source txn_type spelling; the lake build maps
+        # them through the ontology declaration, as every Cortex lake build does
+        # (an unmapped lake now abstains by name: tests/dms/test_stale_lake_value_domain.py).
+        value_domain.apply_to_lake(con, value_domain.load_value_domains(pack_dir_for("dms")))
     finally:
         con.close()
     return path
+
+
+def _replayed_sql(case: dict[str, Any]) -> str:
+    """The case SQL through the declared mapping, as gold is (the fixture keeps 'OUT')."""
+    return value_domain.canonicalize_sql(
+        case["sql"], value_domain.load_value_domains(pack_dir_for("dms"))
+    )
 
 
 def _row_multiset(rows: list[dict[str, Any]]) -> list[str]:
@@ -197,7 +210,7 @@ async def test_phase1b_wrong_shape_replays_reach_real_l2_and_never_serve_wrong(
         bridge=_MissBridge(),
         ask=True,
         generate=True,
-        complete=_complete(case["sql"]),
+        complete=_complete(_replayed_sql(case)),
     )
 
     assert calls == 1, "the real L2 miss call must run; a badge is not proof"
