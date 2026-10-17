@@ -8,6 +8,7 @@ refusals.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +18,14 @@ from CortexOS.execution.manifest import VerifiedManifest
 
 #: Violation token when enforce_manifest refuses a candidate (C7-02).
 MANIFEST_VIOLATION_PREFIX = "MANIFEST:"
+
+# DuckDB prefixes its messages with the error class ("Binder Error: ...").
+_DB_ERROR_CLASS = re.compile(r"^\s*([A-Za-z][A-Za-z ]{0,40}?) Error:\s*")
+# The caret context ("LINE 1: ...") quotes the post-enforce SQL, row predicates included.
+_LINE_CONTEXT = re.compile(r"\bLINE \d+:")
+# A quoted literal, or one the 400-char cut left open.
+_QUOTED = re.compile(r"'(?:[^']|'')*(?:'|$)")
+_REDACTED_CHARS = 240
 
 
 @dataclass(slots=True)
@@ -40,10 +49,13 @@ class SqlGateAbstain(Exception):
         *,
         violations: list[str] | None = None,
         manifest_refused: bool = False,
+        raw_detail: str | None = None,
     ) -> None:
         super().__init__(message)
         self.violations = list(violations or [])
         self.manifest_refused = manifest_refused
+        # Unredacted engine text, for the audit sink only. Never rendered.
+        self.raw_detail = raw_detail
 
     def __str__(self) -> str:
         # FF-03 / dms#59 — callers interpolate `{exc}` into the envelope reason.
@@ -53,6 +65,26 @@ class SqlGateAbstain(Exception):
         if not self.violations:
             return base
         return f"{base}: {', '.join(self.violations)}"
+
+
+def redact_db_error(detail: object) -> str:
+    """``CODE: message`` for a database error, safe to show a user or a model.
+
+    The code is the engine's own error class (``BINDER_ERROR``), else
+    ``DB_ERROR``. The ``LINE n:`` caret context is dropped and quoted literals
+    are masked, so no post-enforce SQL, row-predicate literal or cell value
+    travels. Double-quoted identifiers stay: they name what failed, so an
+    error-fed retry can fix it. The raw text belongs to the audit sink.
+    """
+    text = str(detail or "")
+    code = "DB_ERROR"
+    match = _DB_ERROR_CLASS.match(text)
+    if match:
+        code = "_".join(match.group(1).upper().split()) + "_ERROR"
+        text = text[match.end() :]
+    text = _LINE_CONTEXT.split(text, 1)[0]
+    text = " ".join(_QUOTED.sub("'?'", text).split())
+    return f"{code}: {text[:_REDACTED_CHARS]}" if text else code
 
 
 def explain_dry_run(
@@ -123,7 +155,7 @@ def run_gate(
     if not ok:
         return ValidateGateResult(
             passed=False,
-            violations=[f"EXPLAIN_FAILED:{detail}"],
+            violations=[f"EXPLAIN_FAILED:{redact_db_error(detail)}"],
             safe_sql=safe_sql,
             explain_ok=False,
             attempts=1,
@@ -140,6 +172,28 @@ def run_gate(
     )
 
 
+def _output_lineage(
+    gate: ValidateGateResult,
+    semantic: dict[str, Any],
+    verified: VerifiedManifest | None,
+) -> list[str]:
+    """Violations for output columns no granted table supplies. Empty when all derive.
+
+    Granted tables are the verified grant's, else the semantic allowlist the
+    gate already enforced. Read from the pre-enforce SQL: enforcement only
+    narrows rows, it does not add columns.
+    """
+    from CortexOS.dms.sql_guardrail import _allowed_tables
+    from CortexOS.dms.sql_lineage import lineage_violations
+
+    sql = gate.source_sql or gate.safe_sql or ""
+    if verified is not None:
+        granted: set[str] = {str(name) for name in verified.manifest.row_predicates}
+    else:
+        granted = set(_allowed_tables(semantic))
+    return lineage_violations(sql, granted)
+
+
 def gate_with_retry(
     generate_fn: Callable[[list[str]], str | None],
     question: str,  # noqa: ARG001 — reserved for future schema-retrieval context
@@ -153,7 +207,9 @@ def gate_with_retry(
 
     ``generate_fn(prior_violations) -> sql | None``. Exhaustion raises SqlGateAbstain.
     ManifestError aborts that candidate (no EXPLAIN, no second try of the same
-    SQL). A later generate_fn result may still pass.
+    SQL). A later generate_fn result may still pass. A candidate that passes
+    the gate but has an output column no granted table supplies (a literal, a
+    VALUES list) is refused as ``OUTPUT_NOT_FROM_TABLE:<col>`` and fed back.
     """
     prior: list[str] = []
     last = ValidateGateResult(passed=False, attempts=0)
@@ -181,7 +237,10 @@ def gate_with_retry(
                 )
             refused_sql.add(sql)
         if last.passed and last.safe_sql:
-            return last
+            lineage = _output_lineage(last, semantic, verified)
+            if not lineage:
+                return last
+            last = ValidateGateResult(passed=False, violations=lineage, attempts=attempt)
         prior = list(last.violations)
     raise SqlGateAbstain(
         "SQL validation gate exhausted retries",
@@ -205,5 +264,6 @@ __all__ = [
     "explain_dry_run",
     "gate_with_retry",
     "guard_result_from_gate",
+    "redact_db_error",
     "run_gate",
 ]

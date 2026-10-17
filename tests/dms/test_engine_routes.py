@@ -9,10 +9,9 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def engine_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def test_engine_specs_ok(engine_client):

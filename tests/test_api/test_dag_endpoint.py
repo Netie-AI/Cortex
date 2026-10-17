@@ -9,7 +9,9 @@ from netie.execution.model_router import BIG_API_PLACEHOLDER, ModelRouter
 from tests.test_execution.test_cost_ledger_and_executor import StubAdapter
 
 
-def test_judged_node_end_to_end_via_test_client():
+def test_judged_node_end_to_end_via_test_client(monkeypatch):
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "steward:sk-steward-dag")
     app = create_app()
 
     dag = {
@@ -46,6 +48,7 @@ def test_judged_node_end_to_end_via_test_client():
                 "run_id": "api_run",
                 "context": {},
             },
+            headers={"X-API-Key": "sk-steward-dag"},
         )
     assert r.status_code == 200
     payload = r.json()
@@ -59,7 +62,9 @@ def test_judged_node_end_to_end_via_test_client():
     assert j1_recs[0].cost_myr > 0
 
 
-def test_run_cost_endpoint_returns_total_and_records():
+def test_run_cost_endpoint_returns_total_and_records(monkeypatch):
+    monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("DMS_API_KEYS", "steward:sk-steward-dag")
     app = create_app()
 
     with TestClient(app) as client:
@@ -88,7 +93,11 @@ def test_run_cost_endpoint_returns_total_and_records():
                 {"id": "e1", "kind": "EMIT", "tier": 0, "inputs": ["j1"]},
             ],
         }
-        run = client.post("/run", json={"dag": dag, "run_id": "cost_probe"})
+        run = client.post(
+            "/run",
+            json={"dag": dag, "run_id": "cost_probe"},
+            headers={"X-API-Key": "sk-steward-dag"},
+        )
         assert run.status_code == 200
         cost = client.get("/api/engine/runs/cost_probe/cost")
     assert cost.status_code == 200

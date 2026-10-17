@@ -38,7 +38,11 @@ def api_keys_env(monkeypatch):
     monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.delenv("CONSTRUCTOR_SKIN_DIR", raising=False)
-    return {"viewer": "sk-viewer-test"}
+    return {
+        "viewer": "sk-viewer-test",
+        "steward": "sk-steward-test",
+        "admin": "sk-admin-test",
+    }
 
 
 @pytest.fixture
@@ -262,16 +266,16 @@ def test_recommend_foundry_picks_orchestrator(dms_client, api_keys_env):
     assert res.json()["recommendation"]["pattern"] == "orchestrator_subagent"
 
 
-def test_run_compiles_with_viewer_key(dms_client, api_keys_env):
+def test_run_refuses_viewer_key(dms_client, api_keys_env):
     res = dms_client.post(
         "/cortex/constructor/run",
         json=SAMPLE,
         headers={"X-API-Key": api_keys_env["viewer"]},
     )
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert set(body["nodes"]) == {"n1", "n2", "n3", "n4"}
-    assert body["actor"] == "api_viewer"
+    assert res.status_code == 403, res.text
+    assert res.json()["detail"] == (
+        "Requires role 'steward' or higher (caller='viewer' actor='api_viewer')"
+    )
 
 
 def test_ontology_catalog_is_live_yaml(dms_client, api_keys_env):
@@ -331,11 +335,12 @@ def test_run_seeds_fetch_onto_document_ref(dms_client, api_keys_env):
             ],
             "edges": [{"from": "c1", "to": "a1"}],
         },
-        headers={"X-API-Key": api_keys_env["viewer"]},
+        headers={"X-API-Key": api_keys_env["steward"]},
     )
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["ok"] is True
+    assert body["actor"] == "api_steward"
     assert body["fetches"]["c1"]["table"] == "inventory"
     assert body["fetches"]["c1"]["row_count"] >= 1
     out = body["nodes"]["c1"]["output"]

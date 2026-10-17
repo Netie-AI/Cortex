@@ -2,6 +2,70 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CERT-ORACLE-SPLIT (#345, Refs #343) -- 2026-10-15
+
+`cot_climb.gold_sql_for` no longer grades the climb against the L0 serve set
+(`packs/dms/semantic/certified_queries.yaml`). `CortexOS/crew/score_oracle.py`
+takes serve-set cases out of the climb, held-out, accuracy, paraphrase and
+corpus scores and lists each one by name. `bench/oracle/climb_oracle_v1.yaml`
+no longer copies the frozen held-out split, and a must-fail asserts climb
+oracle ids are disjoint from held-out and the serve set; a climb with no gold
+says `NO_GOLD`. `.importlinter` gains `serve-never-reads-oracle`, with
+`CortexOS.dms.plan_sql_ask` (the #329 ladder) as a source, and the open()
+audit covers the plan_sql path. The climb has no exact-SQL gold until a
+development split is written outside held-out, golden and paraphrase files.
+Draft only. Not a CI claim. Not PASS.
+
+## IMAGE-AUTH-01 (#363) -- 2026-10-08
+
+`Dockerfile.core` and `Dockerfile.full` no longer set `DMS_AUTH_DISABLED`.
+Startup raises `AUTH_DISABLED_WITHOUT_DEV_MODE` and logs that name when the
+flag is truthy without `CORTEX_DEV_MODE`. `scripts/check_supply_chain.py`
+exits 1 with `AUTH_DISABLED_IN_IMAGE` if a Dockerfile or compose file sets
+the flag, and with `DEV_MODE_IN_IMAGE` for `CORTEX_DEV_MODE` on ENV,
+environment, and env_file. On a git work tree that scan lists `git ls-files`
+only, so an untracked `dev.env` cannot change the verdict. If `.git` exists and `git ls-files` fails, the scan stops with `GIT_LS_FILES_FAILED` and does not walk. `Dockerfile.core` and `Dockerfile.full` set `DMS_REFUSE_DEMO_KEYS=1`. A shipped Dockerfile that omits it, or a tracked compose file or tracked env_file that sets it to anything other than `1`, exits 1 with `DEMO_KEYS_IN_IMAGE`. Auth assertions fail with
+`AUTH_TEST_IN_DEV_MODE` when `CORTEX_DEV_MODE` is set. Local auth-off is
+`docker-compose.dev.yml` plus gitignored `dev.env`. Draft only. Not a CI
+claim. Not PASS.
+
+## BRAIN-FREEROUTE-01 -- 2026-10-08
+
+Cortex #350. `/dms/brain` model steps (`packs/dms/generative/brain.py` `_ai`
+and `packs/dms/tasks/suggest.py` `_llm_rank_and_explain`) call
+`CortexOS.crew.freeroute.complete`. `import anthropic` and `ANTHROPIC_API_KEY`
+are gone from both files. Unarmed or no OpenVault route returns
+`model_route_unavailable` with no provider call and no invented model prose.
+`suggest(use_llm=True)` keeps the deterministic ranking, stamps `llm_used=false`
+and that refusal. `served_provider` / `served_model` are copied from the
+FreeRoute stamp. Nothing PASS.
+
+## RUN-AUTH-01 spend gate on model run routes -- 2026-10-08
+
+Cortex #358. `POST /run`, `POST /api/workflows/run`, `POST /api/workflows/resume`,
+`POST /api/engine/run`, and (pack dms) `POST /cortex/constructor/run` now depend
+on the existing `require_spend` (`require_role("steward")`). Viewer `api_viewer`
+is HTTP 403 with the named detail and zero adapter calls. Unknown keys are 401.
+A secret mapped to two roles is dropped. A non-rank role string is 403.
+`POST /api/engine/run` still uses `get_caller`, so `DMS_AUTH_DISABLED` still
+opens that one route as admin, the same as parent. `POST /run` and workflow
+run/resume use `require_spend_key` and do not honor the flag. Constructor
+`/run` ignores the flag too. `get_caller` does not read the `cortex_api_key`
+cookie. Constructor mutations that authenticate only by that cookie require
+an exact Origin from `CONSTRUCTOR_ORIGIN_ALLOWLIST` (empty by default; `*`
+is a config error). A malformed Origin port is the same named refusal,
+`constructor_origin_denied`, not a 500. `POST /api/workflows/cancel`,
+`clear`, `recognize`, and `hardware` take a header key only, steward or
+above. The session cookie path stays `/cortex`. A steward cookie with no
+header is 401 on those four POSTs and the model sentinel stays 0.
+A registered-route walk lists every constructor and workflow route, plus
+``POST /run`` and engine ``POST /api/engine/run``. A route in that scope
+that is not in the table fails the walk. A spend or write route (model
+call, run creation, cost write, or store write) still fails on the viewer
+dependency.
+recognize stays steward and is not in that spend/write set. Workflow GETs
+are unchanged. Draft only. Not a merge claim.
+
 ## CORTEX-104 C7-05 L2 serve-on-miss -- 2026-10-01
 
 Crew Insights now serves generated SQL on an L0/L1 miss only when

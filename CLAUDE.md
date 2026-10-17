@@ -5,7 +5,8 @@ layer, context assembly. DMS is a consumer app. OpenVault is key custody.
 
 **Start at `AGENTS.md`**: index, merge flow, binding rules, lane rules and verify
 commands live there once and are not repeated here. This file holds the engine
-invariants. Section numbers are stable because tests cite them.
+invariants. Section numbers are stable because tests cite them. The AI-first
+answer path is section 9. The live merge list is `TASK.md`.
 
 If a rule here conflicts with an instruction you were given, say so before acting.
 
@@ -94,11 +95,33 @@ gate that asserts an intermediate artifact certifies a broken feature (the SKU-B
 `NOT IN ('BETA')` false verification).
 
 **Value normalization** - filter tokens resolve to the column's actual encoding
-(`BETA` -> `SKU-BETA`, location dual-coding, case/whitespace). Prefer abstain over a
-filter that matches nothing while the envelope stamps success.
+(`BETA` -> `SKU-BETA`, location dual-coding, case/whitespace). A filter that
+matches nothing is not served as success. The AI ladder runs first:
+plan-then-solve, error-fed self-correct, then a stronger OpenVault tier. If the
+ladder is exhausted, reconfirm by saying why and suggesting the closest
+answerable question (Yes runs it, No answers "not found in the database" and
+logs a pipeline-failure ticket). Direct abstain only for ungranted tables or
+destructive SQL. A wrong answer is never served (WRONG=0).
 
 **Customer envelope** - every gate also asserts on the artifact the customer receives;
 Cortex-side assertions are necessary and insufficient. For DMS, assert badge /
 abstained / values / sources / drillthrough_token / audit_id on the envelope from
 `POST /v1/chat/ask` (DMS `assert_envelope_valid`). A green badge on abstention prose
 is a P0.
+
+## 9. AI-first answer path
+
+The model writes SQL from ontology, schema, and verified-example context
+(DB-GPT / Genie style).
+
+Escalation ladder, in order: plan-then-solve, error-fed self-correct, a stronger
+OpenVault tier. If the ladder is exhausted, reconfirm by saying why and
+suggesting the closest answerable question. Yes runs it. No answers "not found
+in the database" and logs a pipeline-failure ticket.
+
+Direct abstain only for ungranted tables or destructive SQL. A wrong answer is
+never served (WRONG=0).
+
+Keyword cascades and word rules stay out of the answer path. Leave
+`route_to_metric` unextended; #313 retires it as the serve chooser. Merge order
+for the open chain is `TASK.md`.
