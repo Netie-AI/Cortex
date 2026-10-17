@@ -206,6 +206,7 @@ async def mcp_call_tool(
         question = str(args.get("question") or "").strip()
         if not question:
             raise HTTPException(status_code=400, detail={"ok": False, "error": "question required"})
+        from CortexOS.api.response_scrub import scrub_envelope
         from CortexOS.dms.answer_engine import UngroundedSession
         from CortexOS.dms.answer_engine import answer as answer_fn
         from CortexOS.execution.session_manifests import (
@@ -213,26 +214,39 @@ async def mcp_call_tool(
             SessionUnbound,
             SpaceUnbound,
         )
+        from CortexOS.sql_attempts import recording
 
         space_raw = args.get("space_id")
         space_id = str(space_raw).strip() if space_raw else None
-        try:
-            result = answer_fn(
-                question,
-                session_id=args.get("session_id"),
-                space_id=space_id,
-                require_grounding=True,
+        session_id = args.get("session_id")
+        # NAME-ECHO-INSIGHTS-01: the statements this answer tried are recorded,
+        # and names outside the session grant are withheld from its free text.
+        with recording() as attempts:
+            try:
+                result = answer_fn(
+                    question,
+                    session_id=session_id,
+                    space_id=space_id,
+                    require_grounding=True,
+                )
+            except (UngroundedSession, SpaceUnbound, SessionUnbound, SessionExpired) as exc:
+                result = {
+                    "answer": str(exc),
+                    "sql_used": None,
+                    "badge": "abstain",
+                    "route": "needs_clarification",
+                    "rows": [],
+                    "grant_kind": "none",
+                    "granted_sources": [],
+                }
+        if isinstance(result, dict) and (attempts.sql or attempts.errors):
+            texts = [str(v) for v in (question, session_id, space_id) if v]
+            result = scrub_envelope(
+                result,
+                attempts,
+                verified=_session_grant(session_id, space_id),
+                caller_texts=texts,
             )
-        except (UngroundedSession, SpaceUnbound, SessionUnbound, SessionExpired) as exc:
-            result = {
-                "answer": str(exc),
-                "sql_used": None,
-                "badge": "abstain",
-                "route": "needs_clarification",
-                "rows": [],
-                "grant_kind": "none",
-                "granted_sources": [],
-            }
         return {"ok": True, "name": name, "result": result}
 
     if name == "lakehouse.tables":
@@ -352,6 +366,16 @@ async def mcp_call_tool(
         return {"ok": bool(out.get("ok")), "name": name, "result": out}
 
     raise HTTPException(status_code=404, detail={"ok": False, "error": "unknown_tool"})
+
+
+def _session_grant(session_id: Any, space_id: str | None) -> Any:
+    """The session grant the answer resolved, or None (then no name counts as granted)."""
+    from CortexOS.execution.session_manifests import get_session_registry
+
+    try:
+        return get_session_registry().resolve(session_id, space_id=space_id)
+    except Exception:  # noqa: BLE001 - unresolved grant: nothing is granted
+        return None
 
 
 def register_mcp_routes(app: Any) -> None:

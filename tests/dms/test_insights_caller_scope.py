@@ -25,6 +25,7 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
+from CortexOS.api.response_scrub import WITHHELD
 from CortexOS.insights.caller_sql import validate_caller_sql
 from tests.dms import test_insights_caller_ontology as _base
 from tests.dms.test_insights_caller_ontology import (
@@ -115,7 +116,9 @@ def test_cte_outside_its_scope_does_not_exempt_the_real_table(
     assert res.status_code == 200, res.text
     body = res.json()
     assert _gen_prompts(prompts)
-    _assert_refused(body, "table secrets is not in the caller catalog")
+    # NAME-ECHO-INSIGHTS-01: the undeclared table is withheld from the refusal text.
+    _assert_refused(body, f"table {WITHHELD} is not in the caller catalog")
+    assert "secrets" not in body["answer"]
     assert str(SECRET) not in json.dumps(body)
 
 
@@ -197,7 +200,9 @@ def test_alias_named_like_an_undeclared_column_is_still_checked(
     assert _lake().execute(sql).fetchall() == [("B",)]
     res, _ = _post(client, monkeypatch, dms_body(Q, space_ontology()), sql=sql)
     assert res.status_code == 200, res.text
-    _assert_refused(res.json(), "column phone is not declared")
+    body = res.json()
+    _assert_refused(body, f"column {WITHHELD} is not declared")
+    assert "phone" not in body["answer"]
 
 
 def test_star_relation_does_not_launder_an_undeclared_column(
@@ -208,7 +213,8 @@ def test_star_relation_does_not_launder_an_undeclared_column(
     res, _ = _post(client, monkeypatch, dms_body(Q, space_ontology()), sql=sql)
     assert res.status_code == 200, res.text
     body = res.json()
-    _assert_refused(body, "column d.phone is not declared")
+    _assert_refused(body, f"column d.{WITHHELD} is not declared")
+    assert "phone" not in body["answer"]
     assert "555-0103" not in json.dumps(body)
 
 
