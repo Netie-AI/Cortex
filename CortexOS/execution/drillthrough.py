@@ -771,10 +771,12 @@ def _warehouse_provenance_columns(schema: str | None, table: str) -> list[str]:
     drill SQL itself still runs through ``enforce_manifest``. On any lookup
     failure no provenance is projected: the rows stay the contributing rows.
     """
-    from CortexOS.execution.warehouse import DEFAULT_DB, get_connection
+    from CortexOS.execution import submit
+    from CortexOS.execution.warehouse import get_connection
 
     try:
-        con = get_connection(DEFAULT_DB, read_only=True)
+        # The database execute_sql runs the drill against, read at call time.
+        con = get_connection(submit.DEFAULT_DB, read_only=True)
         try:
             rows = con.execute(
                 "SELECT column_name FROM information_schema.columns "
