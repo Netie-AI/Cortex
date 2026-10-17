@@ -51,6 +51,13 @@ CASES: dict[str, list[str]] = {
         f"{HTTP}::test_must_fail_copied_example_for_another_field_never_served",
         f"{HTTP}::test_must_fail_copied_example_ignores_a_number_never_served",
         f"{HTTP}::test_must_fail_dropped_filter_example_never_served",
+        # Review @ 2161c14: a copy is never served for another question.
+        f"{HTTP}::test_must_fail_copy_with_added_qualifier_never_served",
+        f"{HTTP}::test_must_fail_reordered_words_are_not_the_confirmed_question",
+        f"{HTTP}::test_must_fail_copy_for_the_opposite_order_never_served",
+        f"{HTTP}::test_must_fail_copy_for_a_negated_question_never_served",
+        f"{HTTP}::test_must_fail_renamed_copy_is_still_a_copy",
+        f"{HTTP}::test_must_fail_paraphrase_reaches_certified_example_not_the_phrase_table",
     ],
     # Only examples inside the grant and the current schema reach the model.
     "example_scope": [f"{HTTP}::test_must_fail_example_outside_grant_or_schema_never_in_prompt"],

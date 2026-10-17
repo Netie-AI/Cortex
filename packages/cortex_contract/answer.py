@@ -213,18 +213,18 @@ class Answer(BaseModel):
             "ignore it."
         ),
     )
-    # 1.7.0 (VERIFIED-QUERY #309): ids of the steward-confirmed examples that
+    # 1.8.0 (VERIFIED-QUERY #309): ids of the steward-confirmed examples that
     # were in the SQL generator prompt for this served answer, best match
     # first. One id per element, never a joined string. Omitted when empty.
-    # Not a phrasing-match id and not a stored answer. 1.6 clients ignore it.
+    # Not a phrasing-match id and not a stored answer. Older clients ignore it.
     verified_query_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "1.7.0 ids of the steward-confirmed question/SQL examples that "
+            "1.8.0 ids of the steward-confirmed question/SQL examples that "
             "were in the SQL generator prompt for this served answer, best "
             "match first. The SQL was generated and executed on current data; "
             "this does not mark a stored answer and reused stays false. "
-            "Omitted when no example was used. 1.6 clients ignore it."
+            "Omitted when no example was used. Older clients ignore it."
         ),
     )
 

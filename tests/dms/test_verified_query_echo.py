@@ -1,8 +1,10 @@
 """VERIFIED-QUERY (#309) serve-time check and example scope, as pure functions.
 
 The HTTP must-fails in test_verified_query_contract_ask.py prove these on the
-served envelope. These pin each rule's edges: what is refused, and the
-paraphrases that must still be served.
+served envelope. These pin each rule's edges. An example's own SQL answers
+only the question the steward confirmed with it (normalised), inside the
+grant and the current schema. Any other question that runs it is refused,
+including a paraphrase: abstain beats a near miss served as the answer.
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ SCHEMA = {
     "shipments": frozenset(
         {"shipment_id", "sku", "supplier_id", "destination_location_id", "quantity_kg", "status", "carrier"}
     ),
-    "inventory": frozenset({"sku", "category", "location_id", "quantity_kg", "is_hazardous"}),
+    "inventory": frozenset(
+        {"sku", "category", "location_id", "quantity_kg", "reorder_level_kg", "is_hazardous"}
+    ),
     "transactions": frozenset({"txn_id", "sku", "location_id", "txn_type", "quantity_kg", "unit_cost_myr"}),
     "locations": frozenset({"location_id", "location_code"}),
 }
@@ -45,6 +49,20 @@ HAZARD = {
     "question": "List hazardous SKUs in inventory",
     "sql": "SELECT sku FROM inventory WHERE is_hazardous = true",
 }
+HIGHEST = {
+    "id": "vq_highest",
+    "question": "Which 5 SKUs have the highest quantity_kg in inventory?",
+    "sql": "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 5",
+}
+RANGE = {
+    "id": "vq_range",
+    "question": (
+        "List the sku and quantity_kg of inventory where quantity_kg is above 300 "
+        "and reorder_level_kg is below 10"
+    ),
+    "sql": "SELECT sku, quantity_kg FROM inventory WHERE quantity_kg > 300 AND reorder_level_kg < 10",
+}
+COPY = "only the question the steward confirmed for it may re-serve it"
 
 
 def _echo(question: str, sql: str, *examples: dict[str, str]) -> list[str]:
@@ -62,9 +80,21 @@ def test_value_from_an_example_must_be_in_the_question() -> None:
     assert any("'sku-00296'" in r for r in listing)
 
 
-def test_value_spelled_in_the_question_is_served() -> None:
-    assert _echo("How many shipments are delayed right now?", DELAYED["sql"], DELAYED) == []
-    assert _echo("Show me the sku and quantity_kg for SKU-00296", LISTING["sql"], LISTING) == []
+def test_value_spelled_in_the_question_is_served_in_new_sql() -> None:
+    """The model wrote new SQL that reuses a value the question spells: served."""
+    by_carrier = "SELECT carrier, COUNT(*) AS n FROM shipments WHERE status = 'DELAYED' GROUP BY carrier"
+    assert _echo("How many shipments are delayed, by carrier?", by_carrier, DELAYED) == []
+    outbound = (
+        "SELECT sku, quantity_kg FROM transactions "
+        "WHERE sku = 'SKU-00296' AND txn_type = 'outbound'"
+    )
+    assert _echo("Show me the sku and quantity_kg of outbound SKU-00296 transactions", outbound, LISTING) == []
+    # The same questions answered by the example's SQL unchanged are copies.
+    assert any(COPY in r for r in _echo("How many shipments are delayed, by carrier?", DELAYED["sql"], DELAYED))
+    assert any(
+        COPY in r
+        for r in _echo("Show me the sku and quantity_kg of outbound SKU-00296 transactions", LISTING["sql"], LISTING)
+    )
 
 
 def test_confirmed_question_is_a_re_serve_even_with_an_unspelled_value() -> None:
@@ -84,9 +114,11 @@ def test_only_the_value_side_of_a_comparison_counts() -> None:
         "sql": "SELECT location_code FROM locations WHERE 100.0 * capacity_kg / capacity_kg > 90",
     }
     # 100.0 is arithmetic on the column, not a value the question chose.
-    assert _echo("Show locations above 90 percent capacity", above["sql"], above) == []
+    wider = "SELECT location_code, capacity_kg FROM locations WHERE 100.0 * capacity_kg / capacity_kg > 90"
+    assert _echo("Show locations and their capacity above 90 percent capacity", wider, above) == []
     refused = _echo("Show locations above 80 percent capacity", above["sql"], above)
     assert any("'90'" in r for r in refused)
+    assert not any("'100" in r for r in refused)
     window = {
         "id": "vq_window",
         "question": "Count transactions in the last 30 days",
@@ -110,31 +142,124 @@ def test_value_the_model_wrote_itself_is_not_this_checks_business() -> None:
 def test_dropped_valueless_filter_is_refused() -> None:
     refused = _echo("List SKUs in inventory", HAZARD["sql"], HAZARD)
     assert any("'hazardous'" in r for r in refused)
-    assert _echo("Show hazardous SKUs in inventory", HAZARD["sql"], HAZARD) == []
+    with_category = "SELECT sku, category FROM inventory WHERE is_hazardous = true"
+    assert _echo("Show hazardous SKUs and their category in inventory", with_category, HAZARD) == []
+    refused = _echo("List SKUs and their category in inventory", with_category, HAZARD)
+    assert any("'hazardous'" in r for r in refused), "new SQL, but it keeps the dropped filter"
 
 
 # -- copy rule -----------------------------------------------------------------
 def test_copy_for_another_field_is_refused() -> None:
     refused = _echo("How many locations do we have in inventory?", SKUS["sql"], SKUS)
-    assert any("'locations'" in r and "vq_skus" in r for r in refused)
+    assert any(COPY in r and "vq_skus" in r for r in refused)
     by = _echo("How many SKUs do we have in inventory by location?", SKUS["sql"], SKUS)
-    assert any("'location'" in r for r in by)
+    assert any(COPY in r for r in by)
     carrier = _echo("How many delayed shipments do we have by carrier?", DELAYED["sql"], DELAYED)
-    assert any("'carrier'" in r for r in carrier)
+    assert any(COPY in r and "vq_delayed" in r for r in carrier)
 
 
 def test_copy_that_ignores_a_number_is_refused() -> None:
     refused = _echo("How many delayed shipments do we have at LOC-003?", DELAYED["sql"], DELAYED)
-    assert any("'003'" in r for r in refused)
+    assert any(COPY in r and "vq_delayed" in r for r in refused)
 
 
-def test_paraphrase_copy_is_served() -> None:
-    for asked in (
-        "How many distinct SKUs are currently in our inventory?",
-        "What is the SKU count in inventory?",
-        "how many skus do we have in inventory",
+def test_unchanged_copy_for_any_other_question_is_refused() -> None:
+    """Review #321 @ 2161c14: no word decides that a copy fits another question.
+
+    A qualifier ("inbound"), an order word ("lowest"), a negation, reordered
+    words, a flipped symbol and a plain paraphrase all abstain. A word list of
+    refusal triggers would fail open for every word not on it.
+    """
+    cases = [
+        ("List the sku and quantity_kg of inbound transactions for SKU-00296", LISTING),
+        ("Which 5 SKUs have the lowest quantity_kg in inventory?", HIGHEST),
+        ("How many shipments are not delayed?", DELAYED),
+        (
+            "List the sku and quantity_kg of inventory where quantity_kg is below 300 "
+            "and reorder_level_kg is above 10",
+            RANGE,
+        ),
+        ("How many distinct SKUs are currently in our inventory?", SKUS),
+        ("What is the SKU count in inventory?", SKUS),
+        ("Show hazardous SKUs in inventory", HAZARD),
+        ("Show me the sku and quantity_kg for SKU-00296", LISTING),
+    ]
+    for asked, example in cases:
+        capped = example["sql"] if " LIMIT " in example["sql"] else example["sql"] + " LIMIT 1000"
+        refused = _echo(asked, capped, example)
+        assert any(COPY in r and example["id"] in r for r in refused), (asked, refused)
+
+
+def test_copy_with_cosmetic_changes_is_still_a_copy() -> None:
+    """Renamed outputs, table aliases, qualifiers, quoting, case and row cap do not hide a copy."""
+    asked = "How many shipments are not delayed?"
+    for sql in (
+        "SELECT COUNT(*) AS n FROM shipments WHERE status = 'DELAYED'",
+        "select count(*) from shipments s where s.status = 'DELAYED' limit 5",
+        'SELECT COUNT(*) AS "total" FROM "shipments" AS sh WHERE sh."status" = \'DELAYED\';',
     ):
-        assert _echo(asked, SKUS["sql"], SKUS) == [], asked
+        refused = _echo(asked, sql, DELAYED)
+        assert any(COPY in r for r in refused), sql
+    lowest = "Which 5 SKUs have the lowest quantity_kg in inventory?"
+    renamed = "SELECT i.sku, i.quantity_kg AS kg FROM inventory i ORDER BY kg DESC LIMIT 5"
+    assert any(COPY in r for r in _echo(lowest, renamed, HIGHEST))
+    # A real change to the query is new SQL, not a copy.
+    assert _echo(lowest, "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg ASC LIMIT 5", HIGHEST) == []
+    negated = "SELECT COUNT(*) AS n FROM shipments WHERE status <> 'DELAYED'"
+    assert _echo(asked, negated, DELAYED) == []
+
+
+def test_confirmed_question_re_serves_its_own_sql() -> None:
+    """Case, spacing and end punctuation aside, the confirmed question re-serves."""
+    for asked in (
+        DELAYED["question"],
+        "how many delayed shipments do we have",
+        "  HOW MANY DELAYED   SHIPMENTS DO WE HAVE ?! ",
+    ):
+        assert _echo(asked, DELAYED["sql"] + " LIMIT 1000", DELAYED) == [], asked
+    assert _echo(RANGE["question"], RANGE["sql"], RANGE) == []
+    assert _echo(HIGHEST["question"], HIGHEST["sql"], HIGHEST) == []
+    # Two confirmed questions with one SQL: each re-serves for its own question only.
+    twin = {**SKUS, "id": "vq_twin", "question": "What is the SKU count in inventory?"}
+    assert _echo(twin["question"], SKUS["sql"], SKUS, twin) == []
+    assert _echo(SKUS["question"], SKUS["sql"], SKUS, twin) == []
+    refused = _echo("Count SKUs in inventory", SKUS["sql"], SKUS, twin)
+    assert any("vq_skus" in r for r in refused) and any("vq_twin" in r for r in refused)
+
+
+def test_same_question_keeps_word_order_and_symbols() -> None:
+    assert vqa.same_question("How many delayed shipments do we have?", "how many delayed shipments do we have")
+    assert not vqa.same_question(
+        "List inventory where quantity_kg is below 300 and reorder_level_kg is above 10",
+        "List inventory where quantity_kg is above 300 and reorder_level_kg is below 10",
+    )
+    assert not vqa.same_question("List inventory where quantity_kg < 300", "List inventory where quantity_kg > 300")
+    assert not vqa.same_question("Which SKUs have the lowest stock?", "Which SKUs have the highest stock?")
+    assert not vqa.same_question("", "")
+    refused = _echo("List inventory where quantity_kg < 300", "SELECT sku FROM inventory WHERE quantity_kg > 300", {
+        "id": "vq_gt", "question": "List inventory where quantity_kg > 300",
+        "sql": "SELECT sku FROM inventory WHERE quantity_kg > 300",
+    })
+    assert any(COPY in r and "vq_gt" in r for r in refused)
+
+
+def test_re_serve_needs_the_grant_and_the_current_schema() -> None:
+    """The confirmed question re-serves only while its example still fits."""
+    assert vqa.example_echo(
+        DELAYED["question"], DELAYED["sql"], [DELAYED], schema=SCHEMA, granted_tables={"shipments"}
+    ) == []
+    outside = vqa.example_echo(
+        DELAYED["question"], DELAYED["sql"], [DELAYED], schema=SCHEMA, granted_tables={"inventory"}
+    )
+    assert any("vq_delayed" in r and "grant" in r for r in outside), outside
+    no_status = {**SCHEMA, "shipments": SCHEMA["shipments"] - {"status"}}
+    stale = vqa.example_echo(DELAYED["question"], DELAYED["sql"], [DELAYED], schema=no_status)
+    assert any("vq_delayed" in r and "schema" in r for r in stale), stale
+    # The value rule loses its re-serve exemption the same way.
+    revenue_outside = vqa.example_echo(
+        REVENUE["question"], REVENUE["sql"], [REVENUE], schema=SCHEMA, granted_tables={"inventory"}
+    )
+    assert any("'outbound'" in r for r in revenue_outside)
 
 
 def test_unparseable_sql_is_refused_when_examples_were_read() -> None:

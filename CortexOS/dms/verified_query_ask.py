@@ -14,11 +14,19 @@ Three steps, all in this module:
 2. **Generate.** The chosen pairs go into the prompt the SQL generator already
    sends. The model writes the SELECT. This module never executes stored SQL.
 3. **Check before serving.** :func:`example_echo` compares the SQL that ran
-   with the examples that were in the prompt. SQL that carries an example's
-   value, filter or whole query into an answer for a question that does not
-   ask for it is refused with ``VQ_EXAMPLE_ECHO``, and the ask abstains. The
-   refusal runs in main's plausibility step, so the answer is not served,
-   promoted or remembered.
+   with the examples that were in the prompt. An example is context for new
+   SQL, never the answer to another question:
+
+   * an example's SQL that runs unchanged (row cap and names aside) is served
+     only for the question the steward confirmed with it, compared as C-MEM's
+     normalised question key, and only while that example is still inside
+     the session grant and the current schema. That is the one re-serve, and
+     it is a fresh execution. Any other question that runs it abstains;
+   * SQL that carries an example's value or value-less filter into an answer
+     for a question that does not ask for it abstains too.
+
+   Each refusal is ``VQ_EXAMPLE_ECHO``. It runs in main's plausibility step,
+   so a refused answer is not served, promoted or remembered.
 
 When the flag is on, the ask does not also consult ``match_certified`` or
 ``route_to_metric``.
@@ -37,6 +45,7 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
+from CortexOS.memory.space_memory import question_key
 from CortexOS.memory.verified_query import get_verified_queries
 
 ENABLED_ENV = "CORTEX_VERIFIED_QUERY"
@@ -176,13 +185,47 @@ def _valueless_filter_tokens(tree: exp.Expression) -> set[str]:
 
 
 def _query_key(tree: exp.Expression) -> str | None:
-    """Canonical text with the row cap removed, so a copy plus ``LIMIT`` is still a copy."""
-    copy = tree.copy()
-    if "limit" in copy.args:
-        copy.set("limit", None)
+    """Canonical text of a query for the copy rule, or ``None`` if it cannot be made.
+
+    Set aside: the top-level row cap (the serve path appends ``LIMIT``),
+    output names (a reference to one in ``ORDER BY``/``HAVING``/``QUALIFY``/
+    ``GROUP BY`` is replaced by the expression it names), table aliases,
+    column qualifiers, identifier quoting and case. So a copy that only
+    renames or re-caps is still a copy. Setting these aside can only make two
+    different queries look alike, which refuses more, never less.
+    """
     try:
+        copy = tree.copy()
+        if "limit" in copy.args:
+            copy.set("limit", None)
+        for table in copy.find_all(exp.Table):
+            if table.alias:
+                table.set("alias", None)
+        for col in copy.find_all(exp.Column):
+            if col.table:
+                col.set("table", None)
+        for select in list(copy.find_all(exp.Select)):
+            named = {
+                str(proj.alias).lower(): proj.this
+                for proj in select.expressions
+                if isinstance(proj, exp.Alias) and proj.alias
+            }
+            for arg in ("order", "having", "qualify", "group"):
+                node = select.args.get(arg)
+                if node is None:
+                    continue
+                for col in list(node.find_all(exp.Column)):
+                    target = named.get(str(col.name or "").lower())
+                    if target is not None:
+                        col.replace(target.copy())
+            select.set(
+                "expressions",
+                [p.this if isinstance(p, exp.Alias) else p for p in select.expressions],
+            )
+        for ident in copy.find_all(exp.Identifier):
+            ident.set("quoted", False)
         return copy.sql(dialect="duckdb", normalize=True, pretty=False)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - no key means no proof it is not a copy
         return None
 
 
@@ -289,6 +332,9 @@ def generation_examples(
     return {
         "question": question,
         "schema": {table: sorted(cols) for table, cols in layout.items()},
+        "granted_tables": (
+            None if granted_tables is None else sorted({str(t).lower() for t in granted_tables})
+        ),
         "prompt": prompt,
         "verified_query_ids": [item["id"] for item in prompt],
         "memory_ids_read": [ex.entry.id for ex in picked],
@@ -329,9 +375,25 @@ def question_with_examples(question: str, examples: list[dict[str, Any]]) -> str
 
 
 # -- step 3: the SQL that ran must answer this question, not an example's -----
+def same_question(asked: str, confirmed: str) -> bool:
+    """True when ``asked`` is the question the steward confirmed.
+
+    The comparison is C-MEM's solution key (:func:`question_key`): case,
+    spacing and end punctuation aside, every word in its place and every
+    symbol kept. "above 300 ... below 10" is not "below 300 ... above 10",
+    and "> 300" is not "< 300". It is applied only to an example retrieval
+    already put in the prompt, and only to decide whether that example's SQL
+    may be re-served. It never chooses an example or an answer.
+    """
+    key = question_key(asked or "")
+    return bool(key) and key == question_key(confirmed or "")
+
+
 @dataclass(frozen=True, slots=True)
 class _Seen:
     id: str
+    question: str
+    sql: str
     words: frozenset[str]
     literals: frozenset[str]
     valueless: frozenset[str]
@@ -341,13 +403,17 @@ class _Seen:
 def _seen(examples: Iterable[Mapping[str, Any]]) -> list[_Seen]:
     out: list[_Seen] = []
     for item in examples:
-        tree = _parse(str(item.get("sql") or ""))
+        sql = str(item.get("sql") or "")
+        tree = _parse(sql)
         if tree is None:
             continue
+        question = str(item.get("question") or "")
         out.append(
             _Seen(
                 id=str(item.get("id") or ""),
-                words=_tokens(str(item.get("question") or "")),
+                question=question,
+                sql=sql,
+                words=_tokens(question),
                 literals=frozenset(_comparison_literals(tree)),
                 valueless=frozenset(_valueless_filter_tokens(tree)),
                 key=_query_key(tree),
@@ -362,26 +428,32 @@ def example_echo(
     examples: Iterable[Mapping[str, Any]],
     *,
     schema: Mapping[str, Collection[str]] | None = None,
+    granted_tables: Collection[str] | None = None,
 ) -> list[str]:
     """Named refusals when ``sql`` answers a retrieved example instead of ``question``.
 
-    Empty means serve. Each entry starts with :data:`ECHO_CODE`. Three rules,
-    all fail-closed:
+    Empty means serve. Each entry starts with :data:`ECHO_CODE`. All rules are
+    fail-closed.
 
-    * **value**: a value the SQL compares against that is also in an example's
-      SQL must be spelled in the question. The one exception is the question
-      the steward confirmed, word for word: that is a re-serve with a fresh
-      execution. ``status = 'DELAYED'`` for "pending shipments" is refused.
+    A **re-serve** is the one case where an example's own SQL may answer: the
+    question is the example's confirmed question (:func:`same_question`), and
+    the example still reads only tables in ``granted_tables`` and tables and
+    columns in ``schema`` (:func:`example_fits`). The SQL is executed fresh.
+
+    * **copy**: SQL that is an example's SQL (row cap and names aside) is
+      refused unless this ask is a re-serve of that example. No word in the
+      question can make a copy acceptable for another question: a near miss
+      ("pending" for "delayed", "lowest" for "highest", "inbound", "not",
+      reordered words, a paraphrase) abstains.
+    * **value**: a value the SQL compares against that is also in an
+      example's SQL must be spelled in the question, unless this ask is a
+      re-serve of that example. ``status = 'DELAYED'`` for "pending
+      shipments" is refused even when the SQL is not a copy.
     * **dropped filter**: when the SQL keeps a filter that has no value
       (``is_hazardous = true``) from an example, the question must still say
       the word the example's question used for it.
-    * **copy**: when the SQL is an example's SQL (row cap aside) and the
-      question is not that example's question, a word the question adds must
-      not be a number the SQL lacks, or name a table or a column of a table
-      the SQL reads that the SQL does not use. "How many locations" answered
-      with ``COUNT(DISTINCT sku)`` is refused.
 
-    SQL that cannot be parsed is refused too.
+    SQL that cannot be parsed or canonicalised is refused too.
     """
     seen = _seen(examples)
     if not seen:
@@ -390,11 +462,20 @@ def example_echo(
     if tree is None:
         return [f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples"]
     asked = _tokens(question)
+    layout_box: list[Mapping[str, Collection[str]]] = []
+
+    def re_serve(ex: _Seen) -> bool:
+        if not same_question(question, ex.question):
+            return False
+        if not layout_box:
+            layout_box.append(current_schema() if schema is None else schema)
+        return example_fits(ex.sql, granted_tables=granted_tables, schema=layout_box[0])
+
     out: list[str] = []
 
     for value in sorted(_comparison_literals(tree)):
         sources = [ex for ex in seen if value in ex.literals]
-        if not sources or any(ex.words == asked for ex in sources):
+        if not sources or any(re_serve(ex) for ex in sources):
             continue
         parts = _TOKEN.findall(value)
         if parts and all(_touches_any(part, asked) for part in parts):
@@ -420,35 +501,20 @@ def example_echo(
                 )
 
     key = _query_key(tree)
-    copies = [ex for ex in seen if key is not None and ex.key == key and ex.words != asked]
-    if copies:
-        layout = current_schema() if schema is None else schema
-        reads = _tables(tree)
-        uses = reads | _columns(tree)
-        used_words = {tok for name in uses for tok in _name_tokens(name)}
-        used_words |= {tok for lit in tree.find_all(exp.Literal) for tok in _TOKEN.findall(_literal_text(lit))}
-        fields: set[str] = {t for t in layout if t not in reads}
-        for table in reads:
-            for col in layout.get(table, ()):
-                if col in uses:
-                    continue
-                head = next((tok for tok in _name_tokens(col) if len(tok) >= 3), "")
-                if head:
-                    fields.add(head)
-        for ex in copies:
-            for word in sorted(asked):
-                if _touches_any(word, ex.words) or _touches_any(word, used_words):
-                    continue
-                if any(ch.isdigit() for ch in word):
-                    why = f"the number '{word}'"
-                elif _touches_any(word, fields):
-                    why = f"'{word}'"
-                else:
-                    continue
-                out.append(
-                    f"{ECHO_CODE}: the SQL is verified example {ex.id} unchanged, and the "
-                    f"question asks about {why}, which that SQL does not use"
-                )
+    if key is None:
+        out.append(f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples")
+        return out
+    copied = [ex for ex in seen if ex.key is None or ex.key == key]
+    if copied and not any(re_serve(ex) for ex in copied):
+        for ex in copied:
+            why = (
+                "but that example no longer fits this session's grant and the current schema"
+                if same_question(question, ex.question)
+                else "and only the question the steward confirmed for it may re-serve it"
+            )
+            out.append(
+                f"{ECHO_CODE}: the SQL is verified example {ex.id} (row cap and names aside), {why}"
+            )
     return out
 
 
@@ -562,6 +628,7 @@ class _ExamplePort:
                     sql,
                     list(meta.get("prompt") or []),
                     schema=meta.get("schema"),
+                    granted_tables=meta.get("granted_tables"),
                 )
             )
         return found

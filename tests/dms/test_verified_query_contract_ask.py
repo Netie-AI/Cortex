@@ -14,7 +14,9 @@ Nothing on the answer path is stubbed.
 
 Near-miss must-fails use a model that copies the nearest example's SQL. The
 served answer must abstain with ``VQ_EXAMPLE_ECHO``, never carry the
-example's rows.
+example's rows. An example's own SQL answers only the question the steward
+confirmed with it (normalised), and is then executed fresh. Every other
+question, a paraphrase included, gets new SQL from the model or abstains.
 """
 
 from __future__ import annotations
@@ -55,6 +57,14 @@ DELAYED_Q = "How many delayed shipments do we have?"
 DELAYED_SQL = "SELECT COUNT(*) AS delayed_count FROM shipments WHERE status = 'DELAYED'"
 SKUS_Q = "How many SKUs do we have in inventory?"
 SKUS_SQL = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+HIGHEST_Q = "Which 5 SKUs have the highest quantity_kg in inventory?"
+HIGHEST_SQL = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 5"
+RANGE_Q = (
+    "List the sku and quantity_kg of inventory where quantity_kg is above 300 "
+    "and reorder_level_kg is below 10"
+)
+RANGE_SQL = "SELECT sku, quantity_kg FROM inventory WHERE quantity_kg > 300 AND reorder_level_kg < 10"
+COPY_REASON = "only the question the steward confirmed for it may re-serve it"
 C_STAMP = ROOT / "tests" / "dms" / "fixtures" / "c_stamp_289" / "resp_body.json"
 
 
@@ -313,7 +323,7 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     spec = json.loads((ROOT / "contract" / "openapi-1.4.0.json").read_text(encoding="utf-8"))
     base = set(spec["components"]["schemas"]["Answer"]["properties"])
     prior = json.loads((ROOT / "contract" / "openapi-1.6.0.json").read_text(encoding="utf-8"))
-    # 1.5.0 fields (#329) are present and null. verified_query_ids (1.7.0)
+    # 1.5.0 fields (#329) are present and null. verified_query_ids (1.8.0)
     # stays omitted, so the flag-off body is exactly the 1.6.0 Answer.
     assert set(body) - base == {"reconfirm", "plan_sql_rung", "model_calls"}
     assert set(body) == set(prior["components"]["schemas"]["Answer"]["properties"])
@@ -350,7 +360,7 @@ def test_answer_serialization_omits_empty_verified_query_ids() -> None:
     got = Answer.model_validate({**base, "verified_query_ids": ["vq_1", "vq_2"]})
     assert got.model_dump()["verified_query_ids"] == ["vq_1", "vq_2"]
     assert Answer.model_validate_json(got.model_dump_json()).verified_query_ids == ["vq_1", "vq_2"]
-    spec = json.loads((ROOT / "contract" / "openapi-1.7.0.json").read_text(encoding="utf-8"))
+    spec = json.loads((ROOT / "contract" / "openapi-1.8.0.json").read_text(encoding="utf-8"))
     field = spec["components"]["schemas"]["Answer"]["properties"]["verified_query_ids"]
     assert field["type"] == "array" and field["items"] == {"type": "string"}
     assert "verified_query_id" not in spec["components"]["schemas"]["Answer"]["properties"]
@@ -434,6 +444,41 @@ def test_confirmed_question_is_re_served_on_current_data(
     assert body["verified_query_ids"] == [query.id]
     assert body["reused"] is False
     assert "DELAYED" in body["sql_used"]
+
+
+def test_confirmed_question_re_serves_fresh_rows_every_time(
+    ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
+) -> None:
+    """Normalised equality on the confirmed question re-serves; each ask executes again."""
+    from CortexOS.execution import submit
+
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    expected = _warehouse_rows(HIGHEST_SQL)
+    assert len(expected) == 5
+    first = _ask(ask_http, "alpha", "which 5 SKUs have the highest quantity_kg in inventory")
+    _assert_served(first)
+    assert first["rows"] == expected
+    assert first["answer"].startswith("Found 5 row(s).")
+    assert first["verified_query_ids"] == [query.id]
+    assert first["reused"] is False
+    assert len(execute_spy) >= 1
+
+    real = submit.execute_sql
+
+    def moved_on(verified, sql, **kwargs):  # noqa: ANN001
+        rows, q_ms, e_ms = real(verified, sql, **kwargs)
+        return [{**r, "quantity_kg": float(r.get("quantity_kg") or 0) - 1} for r in rows], q_ms, e_ms
+
+    monkeypatch.setattr(submit, "execute_sql", moved_on)
+    second = _ask(ask_http, "alpha", HIGHEST_Q)
+    _assert_served(second)
+    assert [r["quantity_kg"] for r in second["rows"]] == [
+        float(r["quantity_kg"]) - 1 for r in expected
+    ], "the re-serve is a new execution, not a stored answer"
+    assert second["answer_id"] != first["answer_id"]
+    assert second["verified_query_ids"] == [query.id]
 
 
 def test_verified_query_ids_is_a_list_of_single_ids(
@@ -625,13 +670,13 @@ def test_must_fail_copied_example_for_another_field_never_served(
     """No literal to catch: the copy counts SKUs when the question asks for locations."""
     _arm_model(monkeypatch, copying)
     ask_http.bind_session("alpha", INV_GRANT)
-    _confirm("alpha", SKUS_Q, SKUS_SQL)
-    for asked, word in (
-        ("How many locations do we have in inventory?", "'locations'"),
-        ("How many SKUs do we have in inventory by location?", "'location'"),
+    query = _confirm("alpha", SKUS_Q, SKUS_SQL)
+    for asked in (
+        "How many locations do we have in inventory?",
+        "How many SKUs do we have in inventory by location?",
     ):
         body = _ask(ask_http, "alpha", asked)
-        _assert_echo_abstain(body, word)
+        _assert_echo_abstain(body, query.id, COPY_REASON)
 
 
 def test_must_fail_copied_example_ignores_a_number_never_served(
@@ -640,25 +685,95 @@ def test_must_fail_copied_example_ignores_a_number_never_served(
     """The copy drops a qualifier the question adds."""
     _arm_model(monkeypatch, copying)
     ask_http.bind_session("alpha", SHIP_GRANT)
-    _confirm("alpha", DELAYED_Q, DELAYED_SQL)
+    query = _confirm("alpha", DELAYED_Q, DELAYED_SQL)
     body = _ask(ask_http, "alpha", "How many delayed shipments do we have at LOC-003?")
-    _assert_echo_abstain(body, "'003'")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
     body = _ask(ask_http, "alpha", "How many delayed shipments do we have by carrier?")
-    _assert_echo_abstain(body, "'carrier'")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
 
 
 def test_must_fail_dropped_filter_example_never_served(
     ask_http, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A filter with no value (is_hazardous = true) is kept for a question without it."""
+    hazard_q = "List hazardous SKUs in inventory"
+    hazard_sql = "SELECT sku FROM inventory WHERE is_hazardous = true"
     _arm_model(monkeypatch, copying)
     ask_http.bind_session("alpha", INV_GRANT)
-    _confirm("alpha", "List hazardous SKUs in inventory", "SELECT sku FROM inventory WHERE is_hazardous = true")
+    query = _confirm("alpha", hazard_q, hazard_sql)
     body = _ask(ask_http, "alpha", "List SKUs in inventory")
     _assert_echo_abstain(body, "'hazardous'")
-    same = _ask(ask_http, "alpha", "Show hazardous SKUs in inventory")
+    # A paraphrase that keeps the word still gets the example's SQL unchanged: abstain.
+    body = _ask(ask_http, "alpha", "Show hazardous SKUs in inventory")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+    same = _ask(ask_http, "alpha", "list hazardous SKUs in inventory.")
     _assert_served(same)
-    assert same["rows"] == _warehouse_rows("SELECT sku FROM inventory WHERE is_hazardous = true")
+    assert same["rows"] == _warehouse_rows(hazard_sql)
+    assert same["verified_query_ids"] == [query.id]
+
+
+# -- must-fail: no word makes a copy fit another question (review @ 2161c14) --
+def test_must_fail_copy_with_added_qualifier_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'inbound' narrows the question. The unchanged copy would serve all 13 rows."""
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha")
+    query = _confirm("alpha")
+    body = _ask(ask_http, "alpha", "List the sku and quantity_kg of inbound transactions for SKU-00296")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+
+
+def test_must_fail_reordered_words_are_not_the_confirmed_question(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same words, opposite meaning: word order is part of the confirmed question."""
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", RANGE_Q, RANGE_SQL)
+    asked = (
+        "List the sku and quantity_kg of inventory where quantity_kg is below 300 "
+        "and reorder_level_kg is above 10"
+    )
+    assert vqa.lexical_similarity(asked, RANGE_Q) == 1.0
+    body = _ask(ask_http, "alpha", asked)
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+
+
+def test_must_fail_copy_for_the_opposite_order_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'lowest' against a confirmed 'highest': the copy would serve the maximum."""
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", "Which 5 SKUs have the lowest quantity_kg in inventory?")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+
+
+def test_must_fail_copy_for_a_negated_question_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'not delayed' spells the example's value, so only the copy rule stands here."""
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", SHIP_GRANT)
+    query = _confirm("alpha", DELAYED_Q, DELAYED_SQL)
+    delayed = _warehouse_rows(DELAYED_SQL)[0]["delayed_count"]
+    body = _ask(ask_http, "alpha", "How many shipments are not delayed?")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+    assert f"delayed_count = {delayed}" not in body["answer"]
+
+
+def test_must_fail_renamed_copy_is_still_a_copy(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A copy with new output names and a table alias is still the example's SQL."""
+    renamed = "SELECT t.sku AS item, t.quantity_kg AS kg FROM transactions t WHERE t.sku = 'SKU-00296'"
+    _arm_model(monkeypatch, renamed)
+    ask_http.bind_session("alpha")
+    query = _confirm("alpha")
+    body = _ask(ask_http, "alpha", "List the sku and quantity_kg of inbound transactions for SKU-00296")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
 
 
 def test_freeroute_is_the_only_model_call_and_it_sees_the_example_sql(
@@ -667,25 +782,39 @@ def test_freeroute_is_the_only_model_call_and_it_sees_the_example_sql(
     sent = _arm_model(monkeypatch)
     ask_http.bind_session("alpha")
     query = _confirm("alpha")
+    # A paraphrase of the confirmed question: the model sees the example, and
+    # the SQL it writes is that example unchanged. Only the confirmed question
+    # may re-serve it, so this abstains.
     paraphrase = "Show me the sku and quantity_kg for SKU-00296 transactions"
     assert paraphrase.lower() != VQ_Q.lower()
     body = _ask(ask_http, "alpha", paraphrase)
     assert sent and {item["task"] for item in sent} == {"gen-ask-sql"}
     prompt = json.dumps(sent)
     assert query.id in prompt and VQ_SQL in prompt
-    _assert_served(body)
-    assert body["verified_query_ids"] == [query.id]
-    assert body["served_provider"] == _recorded_served()["served_provider"]
-    expected = _warehouse_rows(VQ_SQL)
-    assert len(expected) == 13
-    assert body["rows"] == expected
-    assert body["answer"].startswith("Found 13 row(s).")
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+    # A related question gets new SQL from the model, with the example as context.
+    sent.clear()
+    other = _ask(ask_http, "alpha", "Show me the sku and quantity_kg for SKU-00109 transactions")
+    assert sent and {item["task"] for item in sent} == {"gen-ask-sql"}
+    assert query.id in json.dumps(sent) and VQ_SQL in json.dumps(sent)
+    _assert_served(other)
+    assert other["verified_query_ids"] == [query.id]
+    assert other["served_provider"] == _recorded_served()["served_provider"]
+    expected = _warehouse_rows(MODEL_SQL)
+    assert len(expected) == 6
+    assert other["rows"] == expected
+    assert other["answer"].startswith("Found 6 row(s).")
 
 
 def test_must_fail_paraphrase_reaches_certified_example_not_the_phrase_table(
     ask_http, monkeypatch: pytest.MonkeyPatch, execute_spy: list[tuple[str, Any]]
 ) -> None:
-    """Paraphrase retrieves the example. The exact phrase is not a table hit."""
+    """Paraphrase retrieves the example. The exact phrase is not a table hit.
+
+    Neither question is answered from a phrase table. The confirmed question
+    re-serves the example's SQL on current data. The paraphrase reaches the
+    example too, but the example's SQL unchanged is not its answer: abstain.
+    """
     from CortexOS.dms import answer_engine as ae
 
     paraphrase = "How many distinct SKUs are currently in our inventory?"
@@ -718,12 +847,16 @@ def test_must_fail_paraphrase_reaches_certified_example_not_the_phrase_table(
         body = _ask(ask_http, "alpha", question)
         prompt = json.dumps(sent)
         assert query.id in prompt and SKUS_SQL in prompt and SKUS_Q in prompt
-        _assert_served(body)
-        assert body["verified_query_ids"] == [query.id]
         assert body["provenance"]["badge"] != "certified"
         assert body["reused"] is False
-        assert body["rows"] == expected
-        assert body["answer"] == f"Result: sku_count = {expected[0]['sku_count']}"
         assert execute_spy, "the model's SQL ran"
         assert sent, "the model wrote it"
         assert phrase_calls == [], question
+        if question == paraphrase:
+            _assert_echo_abstain(body, query.id, COPY_REASON)
+            assert f"sku_count = {expected[0]['sku_count']}" not in body["answer"]
+            continue
+        _assert_served(body)
+        assert body["verified_query_ids"] == [query.id]
+        assert body["rows"] == expected
+        assert body["answer"] == f"Result: sku_count = {expected[0]['sku_count']}"
