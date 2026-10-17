@@ -107,3 +107,108 @@ def test_runtime_engine_error_over_http_is_not_a_5xx(
     res = client.post("/v1/contract/submit", json=_request(issuer, sql).model_dump(mode="json"))
     assert res.status_code == 403, res.text
     assert res.json()["detail"]["code"] == "sql_runtime_error"
+
+
+def _bad_cast_lake(lake: Path) -> None:
+    """A column whose cell fails a cast only when the query runs, not at EXPLAIN."""
+    import duckdb
+
+    con = duckdb.connect(str(lake))
+    con.execute("ALTER TABLE suppliers ADD COLUMN code VARCHAR")
+    con.execute("UPDATE suppliers SET code = 'abc'")
+    con.close()
+
+
+CANARY = "SECRET-LOC-9"
+BAD_CAST_SQL = "SELECT * FROM suppliers WHERE CAST(code AS INT) > 0"
+
+
+def _assert_redacted(text: str) -> None:
+    # No predicate literal (or a fragment of it), no caret context, no cell value.
+    assert CANARY not in text and "OC-9" not in text, text
+    assert "LINE 1:" not in text and "'abc'" not in text, text
+
+
+def test_must_fail_runtime_engine_error_carries_no_raw_engine_text(
+    verifier, issuer, lake, monkeypatch, tmp_path  # noqa: F811
+) -> None:
+    """DB-ERROR-TEXT-CX-01: a run-time engine error is redacted on the wire.
+
+    DuckDB's run-time error text can carry ``LINE 1:`` context cut from the
+    post-enforce SQL, which quotes the grant's row-predicate literal. The
+    caller gets a stable code and redacted message; the raw text stays in the
+    run record.
+    """
+    from CortexOS.execution.telemetry import recent_runs
+
+    _bad_cast_lake(lake)
+    req = SubmitRequest(
+        pool=PoolSpec(id="pool-a"),
+        plan={"kind": "sql"},
+        body={"sql": BAD_CAST_SQL},
+        manifest=_signed(issuer, predicates={"suppliers": f"supplier_id <> '{CANARY}'"}),
+    )
+
+    result = submit_mod.submit_request(req)
+    assert result.ok is False
+    assert result.status == submit_mod.SQL_RUNTIME_ERROR
+    assert (result.error or "").startswith("CONVERSION_ERROR: ")
+    _assert_redacted(result.error or "")
+    run = next(r for r in recent_runs() if r["run_id"] == result.run_id)
+    assert CANARY in (run["error"] or "")
+
+    monkeypatch.setenv("PACK", "dms")
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
+    from CortexOS.api.app import create_app
+
+    client = TestClient(create_app(), raise_server_exceptions=False, headers={"X-API-Key": "dms-demo-admin-key"})
+    res = client.post("/v1/contract/submit", json=req.model_dump(mode="json"))
+    assert res.status_code == 403, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == "sql_runtime_error"
+    assert detail["message"].startswith("CONVERSION_ERROR: ")
+    _assert_redacted(res.text)
+
+
+def test_gate_abstain_keeps_raw_engine_text_in_the_run_record(
+    verifier, issuer, lake  # noqa: F811
+) -> None:
+    """The EXPLAIN refusal shows redacted text; the run record keeps the raw text."""
+    from CortexOS.execution.telemetry import recent_runs
+
+    req = SubmitRequest(
+        pool=PoolSpec(id="pool-a"),
+        plan={"kind": "sql"},
+        body={"sql": "SELECT * FROM suppliers WHERE supplier_id > 5"},
+        manifest=_signed(issuer, predicates={"suppliers": f"supplier_id <> '{CANARY}'"}),
+    )
+    result = submit_mod.submit_request(req)
+    assert result.status == submit_mod.SQL_GATE_ABSTAIN
+    _assert_redacted(result.error or "")
+    run = next(r for r in recent_runs() if r["run_id"] == result.run_id)
+    assert CANARY in (run["error"] or "")
+
+
+def test_must_fail_execute_sql_runtime_error_is_redacted_at_the_seam(
+    verifier, issuer, lake  # noqa: F811
+) -> None:
+    """Every execute_sql caller (L2 serve, answer engine, submit) reads one seam.
+
+    The exception keeps its class so callers that branch on it are unchanged.
+    """
+    import duckdb
+
+    _bad_cast_lake(lake)
+    verified = submit_mod.verify_and_check_pool(
+        _signed(issuer, predicates={"suppliers": f"supplier_id <> '{CANARY}'"}), "pool-a"
+    )
+    with pytest.raises(duckdb.ConversionException) as caught:
+        submit_mod.execute_sql(verified, BAD_CAST_SQL, explain_gate=True)
+    shown = f"{type(caught.value).__name__}: {caught.value}"
+    assert shown.startswith("ConversionException: CONVERSION_ERROR: ")
+    _assert_redacted(shown)
+    assert CANARY in getattr(caught.value, "raw_detail", "")
+
+    # Positive control: an ordinary granted query still returns its rows.
+    rows, _, _ = submit_mod.execute_sql(verified, "SELECT supplier_id FROM suppliers")
+    assert rows == [{"supplier_id": "S1"}]

@@ -702,6 +702,62 @@
       "technique": "cte_scope_escape",
       "why_it_might_slip": "A recursive CTE binds its own name only in the recursive arm. DuckDB resolves the anchor arm's secrets to the base table, and sqlglot's scope builder also lists the CTE as visible there, so a self-reference is exempt only inside the recursive arm.",
       "expected": "reject_path"
+    },
+    {
+      "name": "lateral_table_function_reads_file_metadata",
+      "sql": "SELECT o.id, m.path_in_schema, m.stats_max FROM orders AS o, LATERAL parquet_metadata('/data/pool/tenant_b/secret.parquet') AS m",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "sqlglot models a LATERAL function as a Lateral node holding the call directly, not as a Table. A check that only inspects function sources wrapped in Table nodes never sees it, so a metadata reader outside the file allowlist runs with its path unchecked.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "lateral_table_function_reads_file_schema",
+      "sql": "SELECT o.id, s.name FROM orders AS o, LATERAL parquet_schema('/data/pool/tenant_b/secret.parquet') AS s",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "Same Lateral-node shape as parquet_metadata; the column names and types of a file outside allowed_paths come back as rows.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "lateral_catalog_function_lists_tables",
+      "sql": "SELECT o.id, t.table_name, t.sql FROM orders AS o, LATERAL duckdb_tables() AS t",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "An engine catalog function takes no path argument, so no path check fires, and as a Lateral source it is not a named table, so the grant check does not see it either. It returns every table name and its DDL, including tables the manifest never granted.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "join_lateral_catalog_function_secrets",
+      "sql": "SELECT o.id, s.name FROM orders AS o JOIN LATERAL duckdb_secrets() AS s ON TRUE",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "Explicit JOIN LATERAL puts the Lateral node in Join.this rather than in a comma join; the function is still not wrapped in a Table node.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "cross_join_lateral_catalog_function_settings",
+      "sql": "SELECT o.id, s.name, s.value FROM orders AS o CROSS JOIN LATERAL duckdb_settings() AS s",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "CROSS JOIN LATERAL is a third spelling of the same relation; engine settings include file system and extension configuration.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "left_join_lateral_catalog_function",
+      "sql": "SELECT o.id, t.table_name FROM orders AS o LEFT JOIN LATERAL duckdb_tables() AS t ON TRUE",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "An outer lateral join keeps every orders row and adds the catalog rows; it is the same unbounded function source under a different join kind.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "lateral_schema_qualified_catalog_function",
+      "sql": "SELECT o.id, t.table_name FROM orders AS o, LATERAL main.duckdb_tables() AS t",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "A schema-qualified call parses to a Dot node rather than a function node, so a check that recognises only function classes sees neither a function nor a table. An unrecognised relation shape must fail closed.",
+      "expected": "reject_path"
+    },
+    {
+      "name": "lateral_function_as_sole_source",
+      "sql": "SELECT * FROM LATERAL duckdb_tables()",
+      "technique": "lateral_table_function",
+      "why_it_might_slip": "With LATERAL in the FROM position the function is the only relation in the statement, and there is no named table for the grant check to refuse.",
+      "expected": "reject_path"
     }
   ],
   "_expected_values": {

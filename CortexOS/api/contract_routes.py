@@ -31,6 +31,7 @@ CONTRACT_ROUTE_IDS: frozenset[str] = frozenset(
         "ledger.verify",
         "tool.registry",
         "drillthrough",
+        "insights.ask",
     }
 )
 

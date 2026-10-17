@@ -18,7 +18,9 @@ Order, each step stamped (``StepStamp``):
    is refused.
 5. On a SQL, execution, empty, or implausible result that is not an ungranted
    table and not destructive SQL: feed the error back and regenerate, up to
-   ``SQL_ATTEMPTS`` writes on the same model.
+   ``SQL_ATTEMPTS`` writes on the same model. SQL with an output column that
+   does not derive from a granted table column (a literal, a VALUES list) is
+   such an error: it is fed back and never executed (``sql_lineage``).
 6. ``escalate``: one more plan+SQL pass on the stronger route OpenVault
    configured (``routes.stronger``). Cortex does not pick a provider. If OV
    did not configure one, the ladder reconfirms and does not invent a model.
@@ -57,6 +59,7 @@ from typing import Any
 
 from cortex_contract.answer import AskRequest
 
+from CortexOS.identifier_fold import fold_identifier
 from CortexOS.integrations import freeroute
 from CortexOS.plan_sql import payload as plan_payload
 from CortexOS.plan_sql.generator import (
@@ -81,6 +84,7 @@ MODEL_UNAVAILABLE = "PLAN_SQL_MODEL_UNAVAILABLE"
 EXECUTE_FAILED = "PLAN_SQL_EXECUTE_FAILED"
 EMPTY_RESULT = "PLAN_SQL_EMPTY_RESULT"
 IMPLAUSIBLE_RESULT = "PLAN_SQL_IMPLAUSIBLE_RESULT"
+NOT_FROM_TABLE = "PLAN_SQL_OUTPUT_NOT_FROM_TABLE"
 
 NOT_FOUND_ANSWER = "not found in the database"
 
@@ -156,8 +160,25 @@ def _sql_tables(sql: str) -> set[str]:
     from sqlglot import exp
 
     tree = sqlglot.parse_one(sql, read="duckdb")
-    ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
-    return {t.name.lower() for t in tree.find_all(exp.Table) if t.name} - ctes
+    ctes = {fold_identifier(cte.alias_or_name) for cte in tree.find_all(exp.CTE)}
+    return {fold_identifier(t.name) for t in tree.find_all(exp.Table) if t.name} - ctes
+
+
+def _underived(sql: str, granted: set[str]) -> list[str]:
+    """``OUTPUT_NOT_FROM_TABLE:<col>`` per output column not read from a granted table."""
+    from CortexOS.dms.sql_lineage import lineage_violations
+
+    return lineage_violations(sql, granted)
+
+
+def _granted_names(grant: Any) -> set[str]:
+    """The grant's table keys, folded only the way DuckDB folds names.
+
+    Read from the verified manifest itself: a name list lower-cased with
+    Unicode rules would turn a grant on ``"Äpfel"`` into ``äpfel``, which is a
+    different DuckDB table.
+    """
+    return {fold_identifier(str(name)) for name in grant.row_predicates}
 
 
 def _is_scored_round(scored_pack_id: str | None) -> bool:
@@ -420,7 +441,11 @@ def _ungranted(sql: str, granted: set[str]) -> bool:
 
 
 def _missing_literals(sql: str, request: plan_payload.PlanSqlRequest) -> list[str]:
-    """Comparison literals that are not in the sampled values for that column."""
+    """Comparison literals that are not in the sampled values for that column.
+
+    Names the model's own literal only. The sampled values are already in the
+    model's prompt block and a failure detail can reach the user's reconfirm.
+    """
     import sqlglot
     from sqlglot import exp
 
@@ -443,8 +468,26 @@ def _missing_literals(sql: str, request: plan_payload.PlanSqlRequest) -> list[st
         for cols in request.column_values.values():
             pool.extend(cols.get(col.name, ()))
         if pool and str(lit.this) not in pool:
-            missed.append(f"{col.name}={str(lit.this)!r} sampled={pool[:8]}")
+            missed.append(f"{col.name}={str(lit.this)!r}")
     return missed
+
+
+def _audit_raw(sql: str, exc: Any) -> None:
+    """Unredacted engine text goes to the SQL audit log only, never an envelope or prompt."""
+    from datetime import datetime, timezone
+
+    from CortexOS.dms.sql_guardrail import AuditEntry, log_audit
+
+    raw = getattr(exc, "raw_detail", None)
+    log_audit(
+        AuditEntry(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            original_sql=sql,
+            safe_sql=None,
+            violations=[f"EXPLAIN_FAILED:{raw}"] if raw else list(exc.violations),
+            passed=False,
+        )
+    )
 
 
 def _sample_values(
@@ -638,13 +681,13 @@ def plan_sql_answer(
         )
 
     try:
-        grant, _, granted_list = resolve_product_grant(
+        grant, _, _ = resolve_product_grant(
             session_id, verified, space_id=space_id
         )
     except UngroundedSession as exc:
         steps.append(StepStamp.cortex("grant", "cortex:session-grant", f"refused: {exc}"))
         return stop(UNGROUNDED, str(exc))
-    granted = {name.lower() for name in granted_list}
+    granted = _granted_names(grant)
     steps.append(
         StepStamp.cortex("grant", "cortex:session-grant", f"tables={sorted(granted)}")
     )
@@ -767,6 +810,19 @@ def plan_sql_answer(
             priors.append(detail)
             failures.append(detail)
             return None
+        underived = _underived(served_sql, granted)
+        if underived:
+            # An answer column that no granted table supplies is a value the
+            # model typed. Fed back, never executed or served.
+            detail = (
+                f"{NOT_FROM_TABLE}: {', '.join(underived)}; every output column must "
+                "read a column of a granted table, or count or aggregate its rows"
+            )
+            steps.append(StepStamp.cortex("gate", "cortex:sql-gate", f"refused: {detail}"))
+            freeroute.note_verdict(sql_step.route, "gate_fail")
+            priors.append(detail)
+            failures.append(detail)
+            return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
         return _execute(sql_step, plan, served_sql, priors, rung)
@@ -797,6 +853,8 @@ def plan_sql_answer(
             return None
         except SqlGateAbstain as exc:
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", "refused: EXPLAIN"))
+            _audit_raw(served_sql, exc)
+            # Redacted at the source: no caret context, no literal, no post-enforce SQL.
             detail = f"{GATE_REFUSED}: {exc}"
             priors.append(detail)
             failures.append(detail)
@@ -909,6 +967,7 @@ __all__ = [
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
     "LAYER",
+    "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
     "RECONFIRM",
     "RUNG_PLAN",
