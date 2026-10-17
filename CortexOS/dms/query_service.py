@@ -13,10 +13,13 @@ from typing import Any, Literal
 from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     load_semantic_layer,
     read_only_queries_enabled,
+    serving_value_domains,
 )
+from CortexOS.ontology import value_domain
 from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
 from packs.dms.security.reversible import secure_reversible
@@ -1063,9 +1066,34 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
     query_plan = plan_query(question, sql)
     con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
-        guard_result, rows, entry = guard_and_execute(sql, semantic, con)
+        # #402: the rule SQL filters declared values ('outbound'); on a lake that
+        # does not store them it would serve a silent zero. Name it instead.
+        stale = value_domain.stale_columns(
+            con, sql, serving_value_domains(), instance=connection_instance(con)
+        )
+        if not stale:
+            guard_result, rows, entry = guard_and_execute(sql, semantic, con)
     finally:
         con.close()
+
+    if stale:
+        reason = value_domain.stale_reason(stale)
+        return {
+            "answer": f"I can't answer that from the DMS semantic layer with confidence ({reason}).",
+            "sql_used": None,
+            "chart_spec": None,
+            "audit_id": audit_id,
+            "violations_blocked": [],
+            "route": "needs_clarification",
+            "rows": [],
+            "row_count": 0,
+            "source_table": None,
+            "layer": "abstain",
+            "badge": "abstain",
+            "assumptions": reason,
+            "total_count": 0,
+            "query_plan": query_plan.to_dict(),
+        }
 
     alerts_summary = get_alerts_summary()
     show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))
