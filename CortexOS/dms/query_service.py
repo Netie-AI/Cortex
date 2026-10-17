@@ -956,7 +956,7 @@ def answer_question(
         # Never swallow manifest/security refusals into the legacy path.
         raise
     except Exception as exc:  # noqa: BLE001 — engine failure must not take the API down
-        return _engine_failure_abstain(exc)
+        return engine_failure_abstain(exc)
 
 
 def _model_step_enabled() -> bool:
@@ -981,7 +981,7 @@ def _raised_in_model_step(exc: BaseException) -> bool:
     return False
 
 
-def _engine_failure_abstain(exc: BaseException) -> dict[str, Any]:
+def engine_failure_abstain(exc: BaseException) -> dict[str, Any]:
     """Named abstain for an engine error. No rows and no SQL: nothing was verified.
 
     Only the exception type is named; its message can carry engine internals.

@@ -209,6 +209,8 @@ async def mcp_call_tool(
         from CortexOS.api.response_scrub import scrub_envelope
         from CortexOS.dms.answer_engine import UngroundedSession
         from CortexOS.dms.answer_engine import answer as answer_fn
+        from CortexOS.dms.query_service import engine_failure_abstain
+        from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.session_manifests import (
             SessionExpired,
             SessionUnbound,
@@ -239,6 +241,11 @@ async def mcp_call_tool(
                     "grant_kind": "none",
                     "granted_sources": [],
                 }
+            except ManifestError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a failed model step is an answer, not a 500
+                # AI-ERROR-NO-500-01: the same named abstain as POST /dms/query.
+                result = engine_failure_abstain(exc)
         if isinstance(result, dict) and (attempts.sql or attempts.errors):
             texts = [str(v) for v in (question, session_id, space_id) if v]
             result = scrub_envelope(
