@@ -323,7 +323,9 @@ async def execute_insights(
     schema_problem = schema_mod.problem(raw_schema)
     if schema_problem is not None:
         code, detail = schema_problem
-        return _invalid_request(code, detail, intent=intent)
+        return _invalid_request(
+            code, detail, intent=intent, status_code=schema_mod.problem_status(code)
+        )
     schema_text = schema_mod.accepted_text(raw_schema)
     extras = sorted((wire.model_extra or {}).keys())
     if extras:

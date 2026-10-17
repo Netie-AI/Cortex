@@ -58,8 +58,13 @@ if hasattr(os, "register_at_fork"):
 def _write_line(path: Path, line: str) -> None:
     """Append one encoded line in one syscall, without a process-local write lock."""
     data = (line + "\n").encode("utf-8")
-    fd = os.open(path, _OPEN_FLAGS, 0o644)
+    fd = os.open(path, _OPEN_FLAGS, 0o600)
     try:
+        if hasattr(os, "fchmod"):  # a log created 0644 earlier is tightened on its next write
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass  # not the owner: the line is still written
         written = os.write(fd, data)
         if written != len(data):
             raise OSError(f"short write: {written} of {len(data)} bytes")

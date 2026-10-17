@@ -1,0 +1,54 @@
+{
+  "measures": [
+    {
+      "description": "Sales value in MYR. A sale is an outbound movement; inbound, ADJUST and WRITE_OFF rows are not sales.",
+      "expression": "SUM(quantity_kg * unit_cost_myr)",
+      "filter": {
+        "column": "txn_type",
+        "equals": "outbound"
+      },
+      "grain": "txn_id",
+      "metrics": [
+        "sales_by_value",
+        "revenue_total",
+        "revenue_windowed",
+        "revenue_last_month"
+      ],
+      "name": "sales_value_myr",
+      "table": "transactions"
+    },
+    {
+      "description": "Quantity sold in kg. A sale is an outbound movement.",
+      "expression": "SUM(quantity_kg)",
+      "filter": {
+        "column": "txn_type",
+        "equals": "outbound"
+      },
+      "grain": "txn_id",
+      "metrics": [
+        "sales_by_volume"
+      ],
+      "name": "sales_volume_kg",
+      "table": "transactions"
+    }
+  ],
+  "pack": "dms",
+  "source": "packs/dms/ontology/object_types.yaml",
+  "source_sha256": "19a2e7e0eec0271f43a866a3ab8f402b27bc1acfdf0d8470bb3b6bb251d95b62",
+  "value_domains": [
+    {
+      "canonical": [
+        "outbound",
+        "inbound",
+        "ADJUST",
+        "WRITE_OFF"
+      ],
+      "column": "txn_type",
+      "from": {
+        "IN": "inbound",
+        "OUT": "outbound"
+      },
+      "table": "transactions"
+    }
+  ]
+}

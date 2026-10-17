@@ -49,6 +49,7 @@ jobs:
         run: |
           python scripts/check_versions.py
           python scripts/export_openapi.py --check
+          python scripts/export_semantics.py --check
 
       - name: Build wheel
         run: python -m build --wheel
