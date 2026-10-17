@@ -390,3 +390,142 @@ def test_a_repeated_statement_is_noted_once() -> None:
         note_error("boom")
     assert attempts.sql == [sql]
     assert attempts.errors == ["boom"]
+
+
+# -- ask + generate: unexecuted SQL is not a served answer -------------------------
+
+L2_SESSION = "name-echo-insights-l2"
+TYPE = "zz_secret_type"
+FUNC = "zz_leak_fn"
+
+
+def _bind_inventory_only() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from cortex_contract.execution import Manifest
+
+    from CortexOS.execution.manifest import VerifiedManifest
+    from CortexOS.execution.pool import PoolConfig, reset_read_pool_for_tests
+    from CortexOS.execution.session_manifests import (
+        get_session_registry,
+        reset_session_registry_for_tests,
+    )
+
+    reset_session_registry_for_tests()
+    reset_read_pool_for_tests(PoolConfig("default", 4, 5.0, 30.0))
+    now = datetime.now(timezone.utc)
+    get_session_registry().bind(
+        VerifiedManifest(
+            manifest=Manifest(
+                session_id=L2_SESSION,
+                org_id="acme",
+                pool_id="default",
+                issuer_key_id="int-1",
+                allowed_paths=["/data/pool/acme/**"],
+                row_predicates={"inventory": "1=1"},
+                issued_at=now.isoformat(),
+                expires_at=(now + timedelta(minutes=5)).isoformat(),
+                signature="not-checked-here",
+            ),
+            issuer_kid="int-1",
+            verified_at=now,
+        )
+    )
+
+
+@pytest.fixture
+def l2_insights(insights_api, monkeypatch: pytest.MonkeyPatch):
+    """POST /v1/insights with ask+generate, the engine missing, so crew L2 serve-on-miss runs."""
+    from CortexOS.crew.engine_bridge import LocalEngineBridge
+    from CortexOS.execution.session_manifests import reset_session_registry_for_tests
+    from tests.dms.test_c7_05_crew_l2_serve import _complete as _stamped_complete
+    from tests.dms.test_c7_05_crew_l2_serve import _MissBridge
+
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    miss = _MissBridge()
+
+    async def ask(self, question: str) -> dict[str, Any]:  # noqa: ANN001
+        del self
+        return await miss.ask(question)
+
+    monkeypatch.setattr(LocalEngineBridge, "ask", ask)
+    _bind_inventory_only()
+
+    def post(sql: str) -> dict[str, Any]:
+        purposes: list[str] = []
+        stamped = _stamped_complete(sql)
+
+        async def complete(messages=None, *, purpose="", prompt="", **kwargs):  # noqa: ANN001
+            purposes.append(purpose)
+            return await stamped(messages, purpose=purpose, prompt=prompt, **kwargs)
+
+        _bind(monkeypatch, complete)
+        body = _post(
+            insights_api,
+            {"intent": PACK_INTENT, "ask": True, "generate": True, "session_id": L2_SESSION},
+        )
+        assert purposes, "the scripted model was never asked"
+        return body
+
+    yield post
+    reset_session_registry_for_tests()
+
+
+def _without_sql(node: Any) -> Any:
+    """The body minus the statements it returns as data (sql_used, query_sql, sql)."""
+    if isinstance(node, dict):
+        return {
+            key: _without_sql(value)
+            for key, value in node.items()
+            if key not in {"sql_used", "query_sql", "sql", "extracted_sql"}
+        }
+    if isinstance(node, list):
+        return [_without_sql(item) for item in node]
+    return node
+
+
+@pytest.mark.parametrize(
+    ("name", "sql"),
+    [
+        (
+            GHOST,
+            "SELECT COUNT(DISTINCT i.sku) AS sku_count FROM inventory i "
+            f"JOIN inventory j USING ({GHOST})",
+        ),
+        (TYPE, f"SELECT COUNT(DISTINCT CAST(sku AS {TYPE})) AS sku_count FROM inventory"),
+        (FUNC, f"SELECT COUNT(DISTINCT {FUNC}(sku)) AS sku_count FROM inventory"),
+    ],
+    ids=["using-column", "cast-type", "function"],
+)
+def test_insights_unexecuted_sql_used_does_not_keep_the_answer(
+    l2_insights, name: str, sql: str
+) -> None:
+    """An ABSTAIN that carries generative SQL but served no rows is scrubbed like a refusal."""
+    body = l2_insights(sql)
+
+    assert body["status"] == "ABSTAIN", body
+    assert body["values"] == []
+    # The statement is returned as data, unchanged apart from the row cap.
+    assert body["sql_used"], body
+    assert name in body["sql_used"].lower()
+    _assert_no_invented(_without_sql(body), (name,))
+    assert WITHHELD in body["answer"], body["answer"]
+    # Cortex's own wording and the refusal step stay; only the name is withheld.
+    assert body["answer"].startswith("explain abstained: "), body["answer"]
+    assert body["answer_step"] == "explain"
+    assert body["rows"] == []
+
+
+def test_insights_l2_served_rows_and_answer_are_unchanged(l2_insights) -> None:
+    """Positive control on the same path: an ordinary query serves DuckDB's rows."""
+    sql = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+    body = l2_insights(sql)
+
+    oracle = _oracle(sql)
+    assert oracle and oracle[0]["sku_count"] > 0
+    assert _rowset(body["rows"]) == _rowset(oracle), body
+    assert WITHHELD not in json.dumps(body)
+    assert str(oracle[0]["sku_count"]) in body["answer"], body["answer"]
+    assert body["status"] == "CERTIFIED"
+    assert body["sql_used"] == sql and body["query_sql"] == sql
+    assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)

@@ -601,9 +601,12 @@ def scrub_envelope(
     (``POST /v1/insights``, the MCP ``answer_engine.answer`` tool). Only string
     values under :data:`FREE_TEXT_KEYS` change, at any depth; nothing under
     :data:`KEPT_KEYS` is read or changed, so rows, values and SQL stay
-    byte-for-byte. A served envelope (SQL, rows or values present) keeps its
-    top-level ``answer``: that text is rendered from the rows. With nothing to
-    withhold the envelope itself is returned.
+    byte-for-byte. A served envelope (rows or values present, or status
+    ``CERTIFIED``) keeps its top-level ``answer``: that text is rendered from
+    the rows. SQL alone does not make an envelope served: insights copies a
+    generated statement into ``sql_used`` before it runs, so an abstain can
+    carry SQL, no rows, and error text quoting the names it invented. With
+    nothing to withhold the envelope itself is returned.
     """
     rows = envelope.get("rows")
     scrub = build_scrub(
@@ -614,7 +617,7 @@ def scrub_envelope(
     )
     if not scrub.withheld:
         return envelope
-    served = bool(envelope.get("sql_used") or rows or envelope.get("values"))
+    served = bool(rows or envelope.get("values")) or envelope.get("status") == "CERTIFIED"
     out: dict[str, Any] = {}
     for key, value in envelope.items():
         if key in KEPT_KEYS or (served and key == "answer"):
