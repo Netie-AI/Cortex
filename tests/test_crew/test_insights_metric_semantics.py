@@ -66,6 +66,11 @@ INVERTED_SQL = (
     "SELECT ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr "
     "FROM transactions WHERE txn_type <> 'outbound'"
 )
+# #402 / #235 review: the source spelling, which a mapped lake no longer stores.
+SOURCE_SPELLED_SQL = (
+    "SELECT ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr "
+    "FROM transactions WHERE txn_type = 'OUT'"
+)
 STOCK_SQL = (
     "SELECT location_id, SUM(quantity_kg * unit_cost_myr) AS stock_value_myr "
     "FROM inventory GROUP BY location_id ORDER BY location_id"
@@ -247,7 +252,11 @@ def test_caller_catalog_gets_no_pack_measures_and_no_pack_check(
 
 @pytest.mark.parametrize(
     ("bad_sql", "kind"),
-    [(OMITTED_SQL, "measure_filter_missing"), (INVERTED_SQL, "measure_filter_inverted")],
+    [
+        (OMITTED_SQL, "measure_filter_missing"),
+        (INVERTED_SQL, "measure_filter_inverted"),
+        (SOURCE_SPELLED_SQL, "measure_filter_undeclared"),
+    ],
 )
 def test_sql_breaking_a_declared_measure_is_retried_then_corrected(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, bad_sql: str, kind: str
@@ -298,6 +307,35 @@ def test_sql_that_never_applies_the_filter_is_refused_not_served(
     text = insights.render_tool_text(body)
     assert "measure_filter_missing:sales_value_myr" in text
     assert str(UNFILTERED) not in text
+
+
+def test_sql_that_keeps_pinning_an_undeclared_value_is_refused_not_served(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#235 review: ``txn_type = 'OUT'`` on a mapped lake sums no rows; it is never served."""
+    from CortexOS.crew import freeroute as fr
+
+    assert _rows(SOURCE_SPELLED_SQL) == [(None,)]  # the silent empty it would serve
+    prompts: list[tuple[str, str]] = []
+    monkeypatch.setattr(fr, "complete", _script([SOURCE_SPELLED_SQL], prompts))
+    body = _ask(client, SALES_ASK)
+
+    gen = _gen_prompts(prompts)
+    assert len(gen) == cot_climb.HORIZON
+    # Every retry prompt names the violation and the declared values to use.
+    for prompt in gen[1:]:
+        assert "measure_filter_undeclared:sales_value_myr" in prompt
+        assert "'outbound', 'inbound', 'ADJUST', 'WRITE_OFF'" in prompt
+    assert body["generative"]["ok"] is False
+    assert body["generative"]["sql"] is None
+    assert body.get("sql_used") is None
+    assert "query_sql" not in body
+    assert body["values"] == []
+    assert body["badge"] != "green"
+    assert "measure_filter_undeclared:sales_value_myr" in body["generative"]["refuse_reason"]
+    text = insights.render_tool_text(body)
+    assert "measure_filter_undeclared:sales_value_myr" in text
+    assert "txn_type = 'OUT'" not in text
 
 
 # ── positive controls ────────────────────────────────────────────────────────

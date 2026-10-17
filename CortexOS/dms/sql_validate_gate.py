@@ -67,6 +67,23 @@ class SqlGateAbstain(Exception):
         return f"{base}: {', '.join(self.violations)}"
 
 
+class LakeValueDomainStale(SqlGateAbstain):
+    """The lake stores values of a declared column that its pack's declaration does not.
+
+    Raised by ``execute_sql(..., value_domains=...)`` before any row is fetched.
+    A subclass of ``SqlGateAbstain`` so a caller that only knows the gate still
+    abstains; callers that serve an answer name it (``reason``). Retrying other
+    SQL cannot fix it: the lake has to be rebuilt through the declaration.
+    """
+
+    def __init__(self, reason: str, *, codes: Sequence[str] = ()) -> None:
+        super().__init__(reason, violations=list(codes))
+        self.reason = reason
+
+    def __str__(self) -> str:
+        return self.reason
+
+
 def redact_db_error(detail: object) -> str:
     """``CODE: message`` for a database error, safe to show a user or a model.
 

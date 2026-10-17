@@ -25,6 +25,7 @@ from CortexOS.execution.session_manifests import get_session_registry
 from CortexOS.execution.telemetry import new_run_id, record_run
 from CortexOS.execution.warehouse import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     read_only_queries_enabled,
     warehouse_path,
@@ -221,6 +222,7 @@ def execute_sql(
     db_path: Any = None,
     explain_gate: bool | None = None,
     params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms).
 
@@ -231,6 +233,14 @@ def execute_sql(
 
     The statement, and the text of any error it raises, are noted on the
     request's attempt record (:mod:`CortexOS.sql_attempts`).
+
+    Declared value domains (#402): when the post-enforce SQL names a column
+    with a declared value domain and the lake it runs on stores values the
+    declaration does not (a build that predates it, or another loader),
+    ``LakeValueDomainStale`` (a ``SqlGateAbstain``) is raised before any row is
+    fetched: a filter on the declared values would match nothing there.
+    ``value_domains`` defaults to the serving warehouse's declaration
+    (``warehouse_db.serving_value_domains``); ``()`` checks nothing.
     """
     from CortexOS.sql_attempts import note_error, note_sql
 
@@ -243,6 +253,7 @@ def execute_sql(
             db_path=db_path,
             explain_gate=explain_gate,
             params=params,
+            value_domains=value_domains,
         )
     except Exception as exc:
         note_error(str(exc))
@@ -336,6 +347,7 @@ def _execute_sql(
     db_path: Any = None,
     explain_gate: bool | None = None,
     params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     import os
 
@@ -369,6 +381,23 @@ def _execute_sql(
                         f"EXPLAIN rejected SQL: {reason}",
                         violations=[f"EXPLAIN_FAILED:{reason}"],
                         raw_detail=detail,
+                    )
+            if value_domains is None:
+                from CortexOS.dms.warehouse_db import serving_value_domains
+
+                value_domains = serving_value_domains()
+            if value_domains:
+                from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
+                from CortexOS.ontology.value_domain import stale_columns, stale_reason
+
+                # Kept per read-only instance this cursor reads, never per path:
+                # a file renamed over the path is a later instance's to check.
+                drift = stale_columns(
+                    con, safe_sql, value_domains, instance=connection_instance(con)
+                )
+                if drift:
+                    raise LakeValueDomainStale(
+                        stale_reason(drift), codes=[item.code for item in drift]
                     )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s

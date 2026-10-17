@@ -16,6 +16,7 @@ from CortexOS.execution.warehouse import (
     DEFAULT_DB,
     close_cached_connections,
     connect_write,
+    connection_instance,
     get_connection,
     read_only_queries_enabled,
 )
@@ -30,11 +31,13 @@ __all__ = [
     "SAMPLES",
     "TABLE_FILES",
     "close_cached_connections",
+    "connection_instance",
     "get_connection",
     "load_inventory_csv",
     "load_semantic_layer",
     "preview_table",
     "read_only_queries_enabled",
+    "serving_value_domains",
     "table_row_counts",
 ]
 
@@ -55,6 +58,17 @@ TABLE_FILES = {
 }
 
 KNOWN_TABLES = tuple(TABLE_FILES.keys())
+
+
+def serving_value_domains() -> tuple[value_domain.ValueDomain, ...]:
+    """The value domains the serving warehouse is built to hold (#402).
+
+    The same declaration ``load_inventory_csv`` maps at build time. The query
+    seams (``execute_sql``, ``guard_and_execute``) hold every read to it, so a
+    warehouse that does not store these values abstains by name instead of
+    answering a filter on them with nothing.
+    """
+    return value_domain.declared_value_domains(DMS_PACK)
 
 
 def load_semantic_layer(path: Path | str | None = None) -> dict[str, Any]:

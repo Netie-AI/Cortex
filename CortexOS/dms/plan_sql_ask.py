@@ -862,12 +862,26 @@ def plan_sql_answer(
         priors: list[str],
         rung: str,
     ) -> dict[str, Any] | None:
-        from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+        from CortexOS.dms.sql_validate_gate import LakeValueDomainStale, SqlGateAbstain
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
         try:
             rows, _, _ = execute_sql(grant, served_sql)
+        except LakeValueDomainStale as exc:
+            # #402: the lake does not store the declared values of a column this
+            # SQL names. Only a rebuild through the declaration fixes that, so
+            # it is the answer, not a gate error to feed back: the one rewrite
+            # that could run drops the column (for a sales question, every
+            # movement summed as sales). The reason names columns, never values.
+            steps.append(
+                StepStamp.cortex(
+                    "execute", "cortex:execute_sql", f"refused: {', '.join(exc.violations)}"
+                )
+            )
+            _audit_raw(served_sql, exc)
+            # No verdict on the model: its SQL passed the gate, the lake is what failed.
+            return stop(exc.reason, "", refused=False)
         except ManifestError as exc:
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", f"refused: {exc.code}"))
             if exc.code in {"statement_not_allowed", "path_not_allowed"} or _ungranted(
