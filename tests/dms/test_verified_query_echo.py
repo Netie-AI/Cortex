@@ -4,10 +4,13 @@ The HTTP must-fails in test_verified_query_contract_ask.py prove these on the
 served envelope. These pin each rule's edges. An example's own SQL answers
 only the question the steward confirmed with it (normalised), inside the
 grant and the current schema. Any other question that runs it is refused,
-including a paraphrase: abstain beats a near miss served as the answer.
+including a paraphrase: abstain beats a near miss served as the answer. The
+result rule refuses SQL written differently that returns an example's rows.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from CortexOS.dms import verified_query_ask as vqa
 
@@ -265,6 +268,126 @@ def test_re_serve_needs_the_grant_and_the_current_schema() -> None:
 def test_unparseable_sql_is_refused_when_examples_were_read() -> None:
     assert _echo("How many SKUs?", "SELEC nonsense FROM", SKUS)
     assert vqa.example_echo("How many SKUs?", "SELEC nonsense FROM", [], schema=SCHEMA) == []
+
+
+# -- result rule: an equivalent rewrite returns the example's rows -------------
+ROWS = "only the question the steward confirmed for it may re-serve them"
+INBOUND_Q = "List the sku and quantity_kg of inbound transactions for SKU-00296"
+LISTING_ROWS = [
+    {"sku": "SKU-00296", "quantity_kg": 12.5},
+    {"sku": "SKU-00296", "quantity_kg": 40.0},
+    {"sku": "SKU-00296", "quantity_kg": 7},
+]
+
+
+class _Runs:
+    """Stands in for the session runner: SQL text -> rows, every call recorded."""
+
+    def __init__(self, results: dict[str, Any]) -> None:
+        self.results = results
+        self.calls: list[str] = []
+
+    def __call__(self, sql: str) -> list[dict[str, Any]]:
+        self.calls.append(sql)
+        found = self.results[sql]
+        if isinstance(found, Exception):
+            raise found
+        return list(found)
+
+
+def _rows_echo(question: str, sql: str, runs: _Runs, *examples: dict[str, str], **kw: Any) -> list[str]:
+    return vqa.result_echo(question, sql, list(examples), run=runs, schema=SCHEMA, **kw)
+
+
+def test_equivalent_rewrite_returning_the_example_rows_is_refused() -> None:
+    """Review @ 4bb518b: the SQL rules cannot see these; the rows can."""
+    for rewrite, rows in (
+        ("SELECT sku, quantity_kg FROM transactions WHERE 'SKU-00296' = sku", LISTING_ROWS),
+        ("SELECT sku, quantity_kg FROM transactions WHERE sku IN ('SKU-00296')", LISTING_ROWS),
+        (
+            "SELECT quantity_kg, sku FROM transactions WHERE sku = 'SKU-00296'",
+            [{"quantity_kg": r["quantity_kg"], "sku": r["sku"]} for r in LISTING_ROWS],
+        ),
+        (
+            "SELECT sku, quantity_kg FROM transactions WHERE sku = 'SKU-00296' ORDER BY quantity_kg",
+            sorted(LISTING_ROWS, key=lambda r: float(r["quantity_kg"])),
+        ),
+    ):
+        assert vqa.example_echo(INBOUND_Q, rewrite, [LISTING], schema=SCHEMA) == [], rewrite
+        runs = _Runs({rewrite: rows, LISTING["sql"]: LISTING_ROWS})
+        refused = _rows_echo(INBOUND_Q, rewrite, runs, LISTING)
+        assert refused and all(r.startswith(vqa.ECHO_CODE) for r in refused)
+        assert any(ROWS in r and "vq_list" in r for r in refused), (rewrite, refused)
+        assert runs.calls == [rewrite, LISTING["sql"]]
+
+
+def test_rows_compare_without_names_order_or_number_spelling() -> None:
+    renamed = [{"n": 1031.0}]
+    runs = _Runs({"SELECT COUNT(1) AS n FROM shipments WHERE status = 'DELAYED'": renamed,
+                  DELAYED["sql"]: [{"delayed_count": 1031}]})
+    refused = _rows_echo(
+        "How many shipments are not delayed?",
+        "SELECT COUNT(1) AS n FROM shipments WHERE status = 'DELAYED'",
+        runs,
+        DELAYED,
+    )
+    assert any(ROWS in r and "vq_delayed" in r for r in refused)
+    assert vqa._rows_key([{"a": " Sku-1 ", "b": True}]) == vqa._rows_key([{"x": True, "y": "sku-1"}])
+    assert vqa._rows_key([{"a": 1}, {"a": 1}]) != vqa._rows_key([{"a": 1}])
+
+
+def test_other_rows_are_served() -> None:
+    inbound = "SELECT sku, quantity_kg FROM transactions WHERE sku = 'SKU-00296' AND txn_type = 'inbound'"
+    runs = _Runs({inbound: LISTING_ROWS[:1], LISTING["sql"]: LISTING_ROWS})
+    assert _rows_echo(INBOUND_Q, inbound, runs, LISTING) == []
+    assert runs.calls == [inbound, LISTING["sql"]]
+
+
+def test_re_serve_is_not_compared_and_twins_share_an_answer() -> None:
+    """The confirmed question may get its example's rows. Two confirmed questions may share them."""
+    nothing = _Runs({})
+    assert _rows_echo(DELAYED["question"], DELAYED["sql"] + " LIMIT 1000", nothing, DELAYED) == []
+    rewrite = "SELECT COUNT(1) FROM shipments WHERE 'DELAYED' = status"
+    assert _rows_echo(DELAYED["question"], rewrite, nothing, DELAYED) == []
+    assert nothing.calls == [], "only the re-served example shares the table: nothing runs"
+    twin = {**DELAYED, "id": "vq_twin", "question": "How many shipments are delayed?"}
+    runs = _Runs({rewrite: [{"c": 1031}], DELAYED["sql"]: [{"delayed_count": 1031}]})
+    assert _rows_echo(DELAYED["question"], rewrite, runs, DELAYED, twin) == []
+    refused = _rows_echo("How many shipments are not delayed?", rewrite, runs, DELAYED, twin)
+    assert any("vq_delayed" in r for r in refused) and any("vq_twin" in r for r in refused)
+    # A re-serve that returns other rows does not cover the copy of another example.
+    pending = "SELECT COUNT(*) AS n FROM shipments WHERE status = 'PENDING'"
+    other = {"id": "vq_other", "question": DELAYED["question"], "sql": pending}
+    runs = _Runs({rewrite: [{"c": 1031}], DELAYED["sql"]: [{"delayed_count": 1031}], pending: [{"n": 1767}]})
+    refused = _rows_echo(DELAYED["question"], rewrite, runs, other, twin)
+    assert any("vq_twin" in r for r in refused) and not any("vq_other" in r for r in refused)
+    assert pending in runs.calls, "the re-serve was compared and returned other rows"
+
+
+def test_result_rule_fails_closed() -> None:
+    rewrite = "SELECT sku, quantity_kg FROM transactions WHERE 'SKU-00296' = sku"
+    broken = _Runs({rewrite: RuntimeError("gate"), LISTING["sql"]: LISTING_ROWS})
+    assert any("cannot be compared" in r for r in _rows_echo(INBOUND_Q, rewrite, broken, LISTING))
+    unrun = _Runs({rewrite: LISTING_ROWS[:1], LISTING["sql"]: RuntimeError("stale")})
+    assert any("could not be run" in r for r in _rows_echo(INBOUND_Q, rewrite, unrun, LISTING))
+    full = [{"sku": f"SKU-{i:05d}", "quantity_kg": i} for i in range(vqa.MAX_LIMIT)]
+    other_full = [{"sku": f"SKU-{i:05d}", "quantity_kg": i + 1} for i in range(vqa.MAX_LIMIT)]
+    capped = _Runs({rewrite: full, LISTING["sql"]: other_full})
+    assert any("row cap" in r for r in _rows_echo(INBOUND_Q, rewrite, capped, LISTING))
+    # No manifest to run under: the session runner refuses, so the answer does.
+    no_manifest = vqa.result_echo(
+        INBOUND_Q, rewrite, [LISTING], run=vqa._session_runner(None), schema=SCHEMA
+    )
+    assert any("cannot be compared" in r for r in no_manifest)
+    assert vqa.result_echo(INBOUND_Q, "SELEC nonsense FROM", [LISTING], run=_Runs({}), schema=SCHEMA)
+
+
+def test_examples_on_other_tables_are_not_run() -> None:
+    runs = _Runs({})
+    sql = "SELECT sku FROM inventory WHERE quantity_kg > 300"
+    assert _rows_echo("List SKUs above 300 kg", sql, runs, DELAYED, LISTING) == []
+    assert runs.calls == []
+    assert vqa.result_echo("q", sql, [], run=runs, schema=SCHEMA) == []
 
 
 # -- scope: grant and schema ---------------------------------------------------

@@ -8,8 +8,8 @@ keyed by Space.
 This library does not match phrasing and does not run the stored SQL. The
 ask path (``CortexOS.dms.verified_query_ask``) retrieves examples by lexical
 similarity, hands those pairs to the SQL generator, and checks the SQL that
-ran against them before serving. The generator writes new SQL. Nothing here
-stores or serves rows.
+ran, and the rows it returns, against them before serving. The generator
+writes new SQL. Nothing here stores or serves rows.
 
 Rules, each a named refusal stamped in the Space:
 

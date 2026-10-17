@@ -310,7 +310,8 @@ async def contract_ask(body: AskRequest) -> Answer:
             # VERIFIED-QUERY (#309): examples are bound only for the generator the
             # answer engine runs, and only when the flag is on. A reused C-MEM
             # solution or a plan+SQL answer never carries them. Only examples
-            # over tables this session's grant names are offered.
+            # over tables this session's grant names are offered, and the
+            # serve-time result comparison runs under this session's manifest.
             tokens = None
             if served is None:
                 tokens = bind_verified_examples(
@@ -319,6 +320,7 @@ async def contract_ask(body: AskRequest) -> Answer:
                     granted_tables=tuple(
                         getattr(manifest, "row_predicates", None) or {}
                     ),
+                    verified=verified,
                 )
             try:
                 result = served if served is not None else answer_engine(

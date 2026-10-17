@@ -58,9 +58,16 @@ def pytest_configure(config: Any) -> None:
 
         submit.enforce_manifest = lambda sql, verified: sql
     elif guard == "example_echo":
+        # The whole serve-time check: the SQL rules and the result rule.
         from CortexOS.dms import verified_query_ask as vqa
 
         vqa.example_echo = lambda *args, **kwargs: []  # type: ignore[assignment]
+        vqa.result_echo = lambda *args, **kwargs: []  # type: ignore[assignment]
+    elif guard == "example_result":
+        # Only the result rule: the SQL rules stay on.
+        from CortexOS.dms import verified_query_ask as vqa
+
+        vqa.result_echo = lambda *args, **kwargs: []  # type: ignore[assignment]
     elif guard == "example_scope":
         from CortexOS.dms import verified_query_ask as vqa
 

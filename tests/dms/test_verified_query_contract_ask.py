@@ -12,11 +12,14 @@ plausibility and the plan-shape check. Only ``freeroute.complete`` is mocked
 (no live model), and its ``served_*`` copy the recorded C-STAMP response.
 Nothing on the answer path is stubbed.
 
-Near-miss must-fails use a model that copies the nearest example's SQL. The
-served answer must abstain with ``VQ_EXAMPLE_ECHO``, never carry the
-example's rows. An example's own SQL answers only the question the steward
+Near-miss must-fails use a model that copies the nearest example's SQL, or
+rewrites it into an equivalent form. The served answer must abstain with
+``VQ_EXAMPLE_ECHO``, never carry the example's rows. An example's own SQL,
+or SQL that returns its rows, answers only the question the steward
 confirmed with it (normalised), and is then executed fresh. Every other
 question, a paraphrase included, gets new SQL from the model or abstains.
+The example's SQL is executed only by the serve-time result comparison,
+under the same session manifest; its rows are never served.
 """
 
 from __future__ import annotations
@@ -64,7 +67,40 @@ RANGE_Q = (
     "and reorder_level_kg is below 10"
 )
 RANGE_SQL = "SELECT sku, quantity_kg FROM inventory WHERE quantity_kg > 300 AND reorder_level_kg < 10"
+REORDERED_Q = (
+    "List the sku and quantity_kg of inventory where quantity_kg is below 300 "
+    "and reorder_level_kg is above 10"
+)
+LOWEST_Q = "Which 5 SKUs have the lowest quantity_kg in inventory?"
+INBOUND_Q = "List the sku and quantity_kg of inbound transactions for SKU-00296"
+INBOUND_SQL = (
+    "SELECT sku, quantity_kg FROM transactions WHERE sku = 'SKU-00296' AND txn_type = 'inbound'"
+)
 COPY_REASON = "only the question the steward confirmed for it may re-serve it"
+ROWS_REASON = "only the question the steward confirmed for it may re-serve them"
+# Review @ 4bb518b: rewrites of VQ_SQL that the SQL text comparison cannot
+# see. Each returns the example's 13 rows; only 3 of them are inbound.
+EQUIVALENT_COPIES = {
+    "commuted_eq": "SELECT sku, quantity_kg FROM transactions WHERE 'SKU-00296' = sku",
+    "single_in": "SELECT sku, quantity_kg FROM transactions WHERE sku IN ('SKU-00296')",
+    "columns_swapped": "SELECT quantity_kg, sku FROM transactions WHERE sku = 'SKU-00296'",
+    "order_added": (
+        "SELECT sku, quantity_kg FROM transactions WHERE sku = 'SKU-00296' ORDER BY quantity_kg"
+    ),
+}
+LOWEST_REWRITE = "SELECT sku, quantity_kg FROM inventory ORDER BY 2 DESC LIMIT 5"
+RANGE_REWRITE = (
+    "SELECT sku, quantity_kg FROM inventory WHERE reorder_level_kg < 10 AND quantity_kg > 300"
+)
+# The item's must-fail: near misses of a confirmed question, each answered by
+# a model that copies the stored SQL unchanged.
+DELAYED_NEAR_MISSES = (
+    "How many delayed shipments do we have last month?",
+    "How many delayed shipments do we have per warehouse?",
+    "How many shipments do we have that are delayed?",
+    "How many delayed inbound shipments do we have?",
+    "How many delayed shipments do we not have?",
+)
 C_STAMP = ROOT / "tests" / "dms" / "fixtures" / "c_stamp_289" / "resp_body.json"
 
 
@@ -353,6 +389,110 @@ def test_flag_off_binds_no_example_port(ask_http, monkeypatch: pytest.MonkeyPatc
     assert vqa.bind_verified_examples(space_id="alpha", scored_pack_id=None) is None
 
 
+@pytest.mark.parametrize("value", [None, "", "0", "false", "off", "no", "enabled"])
+def test_flag_is_off_by_default_and_only_an_explicit_on_turns_it_on(
+    monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    """PR Bot 6240552800: the flag stays off by default."""
+    if value is None:
+        monkeypatch.delenv(vqa.ENABLED_ENV, raising=False)
+    else:
+        monkeypatch.setenv(vqa.ENABLED_ENV, value)
+
+    def untouched() -> None:
+        raise AssertionError("verified-query library read with the flag off")
+
+    monkeypatch.setattr(vqa, "get_verified_queries", untouched)
+    assert vqa.verified_query_enabled() is False
+    assert vqa.bind_verified_examples(space_id="alpha", scored_pack_id=None) is None
+    assert vqa.generation_examples(space_id="alpha", question=VQ_Q) is None
+    monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+    assert vqa.verified_query_enabled() is True
+
+
+def test_no_tracked_file_outside_the_lane_and_its_tests_names_the_flag() -> None:
+    """No deploy file, script or other module can switch the lane on.
+
+    Only the lane, the query-skill short-circuit that reads it, tests and
+    prose mention the variable.
+    """
+    import re
+    import subprocess
+
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+    ).stdout.decode("utf-8", "replace")
+    allowed = {"CortexOS/dms/verified_query_ask.py", "packs/dms/semantic/query_skills.py"}
+    name = re.compile(re.escape(vqa.ENABLED_ENV) + r"(?![A-Z0-9_])")
+    seen: list[str] = []
+    for rel in filter(None, listed.split("\0")):
+        path = ROOT / rel
+        if (
+            rel in allowed
+            or rel.startswith(("tests/", "docs/"))
+            or rel.endswith(".md")
+            or not path.is_file()
+        ):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if name.search(text):
+            seen.append(rel)
+    assert seen == []
+    for rel in allowed:
+        assert name.search((ROOT / rel).read_text(encoding="utf-8")), rel
+
+
+@pytest.mark.parametrize("value", [None, "0"])
+def test_flag_off_ask_is_byte_identical_to_the_ask_without_this_lane(
+    ask_http, monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    """PR Bot 6240552800: flag-off output is main's.
+
+    Main has none of this lane's hooks. With the flag off, the same asks give
+    the same bytes whether the hooks run or are replaced by no-ops, with a
+    confirmed example in the library for one of the questions.
+    """
+    import itertools
+    import uuid
+    from types import SimpleNamespace
+
+    from CortexOS.dms.answer_engine import clear_session
+
+    if value is None:
+        monkeypatch.delenv(vqa.ENABLED_ENV, raising=False)
+    else:
+        monkeypatch.setenv(vqa.ENABLED_ENV, value)
+    ask_http.bind_session("alpha")
+    _confirm("alpha")
+    questions = ("what is our total revenue", VQ_Q, ASK)
+
+    def ask_bytes(question: str) -> bytes:
+        clear_session(SESSION, space_id="alpha")
+        counter = itertools.count()
+        monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(counter)))
+        monkeypatch.setattr(
+            "CortexOS.execution.drillthrough.time",
+            SimpleNamespace(time=lambda: 1_900_000_000.0),
+        )
+        return _post(ask_http, "alpha", question).content
+
+    with_hooks = [ask_bytes(q) for q in questions]
+
+    def tripwire(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("examples stamped with the flag off")
+
+    monkeypatch.setattr(vqa, "bind_verified_examples", lambda **_kwargs: None)
+    monkeypatch.setattr(vqa, "take_verified_examples", lambda _tokens: None)
+    monkeypatch.setattr(vqa, "stamp_verified_examples", tripwire)
+    without = [ask_bytes(q) for q in questions]
+    assert with_hooks == without
+    assert any(json.loads(raw)["rows"] for raw in with_hooks), "a served answer is compared"
+    assert all(b"verified_query_ids" not in raw for raw in with_hooks)
+
+
 def test_answer_serialization_omits_empty_verified_query_ids() -> None:
     base = {"answer": "a", "audit_id": "x", "route": "r", "provenance": {"layer": "l", "badge": "session"}}
     assert "verified_query_ids" not in Answer.model_validate(base).model_dump_json()
@@ -389,9 +529,17 @@ def test_verified_examples_feed_the_generator_and_current_data_is_executed(
     assert body["served_provider"] == _recorded_served()["served_provider"]
     assert body["served_model"] == _recorded_served()["served_model"]
     assert execute_spy, "generated SQL is executed"
-    executed = "\n".join(sql for sql, _params in execute_spy)
-    assert "SKU-00296" not in executed
-    assert "SKU-00109" in executed
+    # The SQL that answered is the model's, never the example's.
+    assert "SKU-00109" in body["sql_used"] and "SKU-00296" not in body["sql_used"]
+    # The example's SQL runs only as the serve-time result comparison, under
+    # the same manifest. Every other statement is the model's SQL.
+    executed = [sql for sql, _params in execute_spy]
+    example_key = vqa._query_key(vqa._parse(VQ_SQL))
+    example_runs = [sql for sql in executed if "SKU-00296" in sql]
+    assert example_runs, "the result comparison ran the example"
+    assert all(vqa._query_key(vqa._parse(sql)) == example_key for sql in example_runs)
+    assert all("SKU-00109" in sql for sql in executed if sql not in example_runs)
+    assert "SKU-00296" not in json.dumps(body["rows"])
     # The rows are SKU-00109's current rows, not the example's SKU-00296 rows.
     expected = _warehouse_rows(MODEL_SQL)
     assert len(expected) == 6
@@ -597,9 +745,12 @@ def test_must_fail_generated_sql_never_widens_beyond_the_grant(
     assert body["row_count"] == 0
     assert body["rows"] == []
     assert enforced
-    assert any("location_id = 'LOC-003'" in sql for sql in enforced)
+    # Every statement runs under the grant, the result comparison's included.
+    assert all("location_id = 'LOC-003'" in sql for sql in enforced)
     assert any("LOC-004" in sql for sql in enforced)
-    assert all("SKU-00296" not in sql for sql in enforced)
+    # The example's SQL runs only as that comparison. The answer is the model's.
+    assert "SKU-00296" not in (body["sql_used"] or "")
+    assert all("LOC-004" in sql for sql in enforced if "SKU-00296" not in sql)
 
 
 def test_must_fail_example_outside_grant_or_schema_never_in_prompt(
@@ -774,6 +925,137 @@ def test_must_fail_renamed_copy_is_still_a_copy(
     query = _confirm("alpha")
     body = _ask(ask_http, "alpha", "List the sku and quantity_kg of inbound transactions for SKU-00296")
     _assert_echo_abstain(body, query.id, COPY_REASON)
+
+
+@pytest.mark.parametrize("asked", DELAYED_NEAR_MISSES)
+def test_must_fail_near_miss_never_gets_the_stored_sql(
+    ask_http, monkeypatch: pytest.MonkeyPatch, asked: str
+) -> None:
+    """A near miss of the confirmed question is never answered by its SQL unchanged."""
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", SHIP_GRANT)
+    query = _confirm("alpha", DELAYED_Q, DELAYED_SQL)
+    assert vqa.lexical_similarity(asked, DELAYED_Q) >= vqa.RETRIEVE_MIN, "the example is retrieved"
+    delayed = _warehouse_rows(DELAYED_SQL)[0]["delayed_count"]
+    body = _ask(ask_http, "alpha", asked)
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+    assert f"delayed_count = {delayed}" not in body["answer"]
+
+
+def test_confirmed_question_re_serves_the_stored_sql_on_fresh_rows(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confirmed question itself (normalised) re-serves, and each ask executes again."""
+    from CortexOS.execution import submit
+
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", SHIP_GRANT)
+    query = _confirm("alpha", DELAYED_Q, DELAYED_SQL)
+    delayed = _warehouse_rows(DELAYED_SQL)[0]["delayed_count"]
+    first = _ask(ask_http, "alpha", "  how many DELAYED shipments do we have  ")
+    _assert_served(first)
+    assert first["rows"] == [{"delayed_count": delayed}]
+    assert first["answer"] == f"Result: delayed_count = {delayed}"
+    assert first["verified_query_ids"] == [query.id] and first["reused"] is False
+
+    real = submit.execute_sql
+
+    def moved_on(verified, sql, **kwargs):  # noqa: ANN001
+        rows, q_ms, e_ms = real(verified, sql, **kwargs)
+        return [
+            {**r, "delayed_count": r["delayed_count"] + 1} if "delayed_count" in r else r
+            for r in rows
+        ], q_ms, e_ms
+
+    monkeypatch.setattr(submit, "execute_sql", moved_on)
+    second = _ask(ask_http, "alpha", DELAYED_Q)
+    _assert_served(second)
+    assert second["rows"] == [{"delayed_count": delayed + 1}], "a new execution, not a stored answer"
+    assert second["answer"] == f"Result: delayed_count = {delayed + 1}"
+    assert second["answer_id"] != first["answer_id"]
+    assert second["verified_query_ids"] == [query.id] and second["reused"] is False
+
+
+# -- must-fail: an equivalent rewrite is still the example (review @ 4bb518b) --
+def _not_a_text_copy(question: str, sql: str, example_q: str, example_sql: str) -> None:
+    """The SQL rules pass it: only the result comparison can refuse it."""
+    seen = [{"id": "vq_probe", "question": example_q, "sql": example_sql}]
+    assert vqa.example_echo(question, sql, seen, schema={}) == []
+
+
+@pytest.mark.parametrize("rewrite", sorted(EQUIVALENT_COPIES))
+def test_must_fail_equivalent_copy_for_an_added_qualifier_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch, rewrite: str
+) -> None:
+    """'inbound' narrows the question. A rewrite of the example returns all 13 rows."""
+    sql = EQUIVALENT_COPIES[rewrite]
+    _not_a_text_copy(INBOUND_Q, sql, VQ_Q, VQ_SQL)
+    assert len(_warehouse_rows(VQ_SQL)) == 13 and len(_warehouse_rows(INBOUND_SQL)) == 3
+    _arm_model(monkeypatch, sql)
+    ask_http.bind_session("alpha")
+    query = _confirm("alpha")
+    body = _ask(ask_http, "alpha", INBOUND_Q)
+    _assert_echo_abstain(body, query.id, ROWS_REASON)
+
+
+def test_must_fail_equivalent_copy_for_the_opposite_order_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'lowest' against a confirmed 'highest': ORDER BY 2 DESC would serve the maximum."""
+    _not_a_text_copy(LOWEST_Q, LOWEST_REWRITE, HIGHEST_Q, HIGHEST_SQL)
+    _arm_model(monkeypatch, LOWEST_REWRITE)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", LOWEST_Q)
+    _assert_echo_abstain(body, query.id, ROWS_REASON)
+
+
+def test_must_fail_equivalent_copy_for_reordered_words_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Swapped conjuncts: 641 rows above 300 for a question that asks below 300."""
+    _not_a_text_copy(REORDERED_Q, RANGE_REWRITE, RANGE_Q, RANGE_SQL)
+    _arm_model(monkeypatch, RANGE_REWRITE)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", RANGE_Q, RANGE_SQL)
+    body = _ask(ask_http, "alpha", REORDERED_Q)
+    _assert_echo_abstain(body, query.id, ROWS_REASON)
+
+
+def test_new_sql_for_the_added_qualifier_is_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: SQL that returns other rows than the example is served on current data."""
+    _arm_model(monkeypatch, INBOUND_SQL)
+    ask_http.bind_session("alpha")
+    query = _confirm("alpha")
+    body = _ask(ask_http, "alpha", INBOUND_Q)
+    _assert_served(body)
+    expected = _warehouse_rows(INBOUND_SQL)
+    assert len(expected) == 3
+    assert body["rows"] == expected
+    assert body["answer"].startswith("Found 3 row(s).")
+    assert body["verified_query_ids"] == [query.id]
+
+
+def test_confirmed_question_re_serves_an_equivalent_rewrite(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confirmed question may get the example's rows, however the SQL is written."""
+    _arm_model(monkeypatch, RANGE_REWRITE)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", RANGE_Q, RANGE_SQL)
+    body = _ask(ask_http, "alpha", RANGE_Q)
+    _assert_served(body)
+    expected = _warehouse_rows(RANGE_SQL)
+    assert len(expected) == 641
+
+    def rows(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+        return sorted((r["sku"], r["quantity_kg"]) for r in items)
+
+    assert rows(body["rows"]) == rows(expected)
+    assert body["answer"].startswith("Found 641 row(s).")
+    assert body["verified_query_ids"] == [query.id]
 
 
 def test_freeroute_is_the_only_model_call_and_it_sees_the_example_sql(

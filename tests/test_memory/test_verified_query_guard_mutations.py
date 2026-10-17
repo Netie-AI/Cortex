@@ -19,6 +19,12 @@ ROOT = Path(__file__).resolve().parents[2]
 UNIT = "tests/test_memory/test_verified_query.py"
 HTTP = "tests/dms/test_verified_query_contract_ask.py"
 
+EQUIVALENT = (
+    f"{HTTP}::test_must_fail_equivalent_copy_for_an_added_qualifier_never_served",
+    f"{HTTP}::test_must_fail_equivalent_copy_for_the_opposite_order_never_served",
+    f"{HTTP}::test_must_fail_equivalent_copy_for_reordered_words_never_served",
+)
+
 CASES: dict[str, list[str]] = {
     "confirm_gate": [
         f"{UNIT}::test_must_fail_unconfirmed_query_never_reused",
@@ -58,7 +64,13 @@ CASES: dict[str, list[str]] = {
         f"{HTTP}::test_must_fail_copy_for_a_negated_question_never_served",
         f"{HTTP}::test_must_fail_renamed_copy_is_still_a_copy",
         f"{HTTP}::test_must_fail_paraphrase_reaches_certified_example_not_the_phrase_table",
+        # The item's must-fail: near misses of a confirmed question.
+        f"{HTTP}::test_must_fail_near_miss_never_gets_the_stored_sql",
+        # Review @ 4bb518b: an equivalent rewrite returns the example's rows.
+        *EQUIVALENT,
     ],
+    # The result rule alone: the SQL rules stay on and cannot see these.
+    "example_result": list(EQUIVALENT),
     # Only examples inside the grant and the current schema reach the model.
     "example_scope": [f"{HTTP}::test_must_fail_example_outside_grant_or_schema_never_in_prompt"],
 }

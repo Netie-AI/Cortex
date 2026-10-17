@@ -12,16 +12,23 @@ Three steps, all in this module:
    exact-phrase table, and it never picks an answer: it decides which pairs
    the model reads.
 2. **Generate.** The chosen pairs go into the prompt the SQL generator already
-   sends. The model writes the SELECT. This module never executes stored SQL.
+   sends. The model writes the SELECT. An example's SQL never produces the
+   answer; it is executed only by the serve-time result comparison below.
 3. **Check before serving.** :func:`example_echo` compares the SQL that ran
-   with the examples that were in the prompt. An example is context for new
-   SQL, never the answer to another question:
+   with the examples that were in the prompt, and :func:`result_echo`
+   compares the rows. An example is context for new SQL, never the answer to
+   another question:
 
    * an example's SQL that runs unchanged (row cap and names aside) is served
      only for the question the steward confirmed with it, compared as C-MEM's
      normalised question key, and only while that example is still inside
      the session grant and the current schema. That is the one re-serve, and
      it is a fresh execution. Any other question that runs it abstains;
+   * SQL written differently that returns an example's rows (column names,
+     column order and row order aside) is that example's answer too, and is
+     held to the same re-serve rule. This closes the equivalent rewrites the
+     text comparison cannot see (``ORDER BY 2``, ``'X' = col``,
+     ``col IN ('X')``, reordered conjuncts or columns, an added ``ORDER BY``);
    * SQL that carries an example's value or value-less filter into an answer
      for a question that does not ask for it abstains too.
 
@@ -34,17 +41,21 @@ When the flag is on, the ask does not also consult ``match_certified`` or
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import threading
-from collections.abc import Collection, Iterable, Mapping
+from collections import Counter
+from collections.abc import Callable, Collection, Iterable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 import sqlglot
 from sqlglot import exp
 
+from CortexOS.dms.sql_guardrail import MAX_LIMIT
 from CortexOS.memory.space_memory import question_key
 from CortexOS.memory.verified_query import get_verified_queries
 
@@ -355,7 +366,8 @@ def question_with_examples(question: str, examples: list[dict[str, Any]]) -> str
     """Put examples in front of the question the SQL generator already sends.
 
     The generator is unchanged. It copies this string into the FreeRoute prompt
-    and writes a new SELECT. The example SQL is not executed.
+    and writes a new SELECT. The example SQL never produces the answer; only
+    the serve-time result comparison (:func:`result_echo`) runs it.
     """
     lines = [_PREAMBLE]
     for item in examples:
@@ -398,6 +410,7 @@ class _Seen:
     literals: frozenset[str]
     valueless: frozenset[str]
     key: str | None
+    tables: frozenset[str]
 
 
 def _seen(examples: Iterable[Mapping[str, Any]]) -> list[_Seen]:
@@ -417,9 +430,33 @@ def _seen(examples: Iterable[Mapping[str, Any]]) -> list[_Seen]:
                 literals=frozenset(_comparison_literals(tree)),
                 valueless=frozenset(_valueless_filter_tokens(tree)),
                 key=_query_key(tree),
+                tables=frozenset(_tables(tree)),
             )
         )
     return out
+
+
+def _re_serve_test(
+    question: str,
+    schema: Mapping[str, Collection[str]] | None,
+    granted_tables: Collection[str] | None,
+) -> Callable[[_Seen], bool]:
+    """``ex -> True`` when this ask is a re-serve of example ``ex``.
+
+    The question is the example's confirmed question (:func:`same_question`),
+    and the example still reads only granted tables and current columns
+    (:func:`example_fits`). The schema is read once, and only if needed.
+    """
+    layout_box: list[Mapping[str, Collection[str]]] = []
+
+    def re_serve(ex: _Seen) -> bool:
+        if not same_question(question, ex.question):
+            return False
+        if not layout_box:
+            layout_box.append(current_schema() if schema is None else schema)
+        return example_fits(ex.sql, granted_tables=granted_tables, schema=layout_box[0])
+
+    return re_serve
 
 
 def example_echo(
@@ -453,7 +490,9 @@ def example_echo(
       (``is_hazardous = true``) from an example, the question must still say
       the word the example's question used for it.
 
-    SQL that cannot be parsed or canonicalised is refused too.
+    SQL that cannot be parsed or canonicalised is refused too. SQL that is
+    written differently but returns an example's rows is :func:`result_echo`'s
+    to refuse.
     """
     seen = _seen(examples)
     if not seen:
@@ -462,14 +501,7 @@ def example_echo(
     if tree is None:
         return [f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples"]
     asked = _tokens(question)
-    layout_box: list[Mapping[str, Collection[str]]] = []
-
-    def re_serve(ex: _Seen) -> bool:
-        if not same_question(question, ex.question):
-            return False
-        if not layout_box:
-            layout_box.append(current_schema() if schema is None else schema)
-        return example_fits(ex.sql, granted_tables=granted_tables, schema=layout_box[0])
+    re_serve = _re_serve_test(question, schema, granted_tables)
 
     out: list[str] = []
 
@@ -518,11 +550,156 @@ def example_echo(
     return out
 
 
+# -- step 3, by result: the rows served must not be an example's rows ----------
+RunSql = Callable[[str], list[dict[str, Any]]]
+
+
+def _cell(value: Any) -> str:
+    """One value as the result comparison sees it.
+
+    Numbers compare by value to ten significant digits (``1031`` is
+    ``1031.0``), text by its trimmed, case-folded spelling. Setting these
+    aside can only make two results look alike, which refuses more, never
+    less.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            number = float(value)
+        except (OverflowError, ValueError):
+            return str(value)
+        if math.isnan(number):
+            return "nan"
+        return format(number, ".10g")
+    return str(value).strip().casefold()
+
+
+def _rows_key(rows: Iterable[Mapping[str, Any]]) -> Counter[tuple[str, ...]]:
+    """Rows as a multiset, with column names, column order and row order set aside."""
+    return Counter(tuple(sorted(_cell(v) for v in row.values())) for row in rows)
+
+
+def result_echo(
+    question: str,
+    sql: str,
+    examples: Iterable[Mapping[str, Any]],
+    *,
+    run: RunSql,
+    schema: Mapping[str, Collection[str]] | None = None,
+    granted_tables: Collection[str] | None = None,
+) -> list[str]:
+    """Named refusals when the rows ``sql`` returns are a retrieved example's rows.
+
+    :func:`example_echo` compares SQL text, so an equivalent rewrite of an
+    example (``ORDER BY 2``, ``'X' = col``, ``col IN ('X')``, conjuncts or
+    output columns in another order, an added ``ORDER BY``) is new SQL to it.
+    This rule compares what the customer would get. ``run`` executes one
+    statement the way the serve path does, under this session's manifest.
+
+    Each example in the prompt that reads a table ``sql`` reads, and that this
+    ask is not a re-serve of, runs next to ``sql``. When the two results are
+    the same multiset of rows (:func:`_rows_key`: column names, column order
+    and row order aside), the answer is that example's answer and is refused.
+    It is served only when a re-serve of an example returns the same rows,
+    since two confirmed questions may share one answer. Fail-closed:
+
+    * ``sql`` or an example that cannot be run cannot be shown to differ, so
+      the answer is refused;
+    * two results that both fill the serve path's row cap (``MAX_LIMIT``)
+      cannot be shown to differ past it, so the answer is refused;
+    * a different question whose right answer happens to equal an example's
+      rows abstains too. That is the price of never serving a near miss.
+
+    Nothing runs when ``sql`` is a re-serve's own SQL (row cap and names
+    aside), or when no other example shares a table with it. An example's
+    rows are compared here and never served.
+    """
+    seen = _seen(examples)
+    if not seen:
+        return []
+    tree = _parse(sql)
+    if tree is None:
+        return [f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples"]
+    read = _tables(tree)
+    re_serve = _re_serve_test(question, schema, granted_tables)
+    served_by = [ex for ex in seen if re_serve(ex)]
+    key = _query_key(tree)
+    if key is not None and any(ex.key == key for ex in served_by):
+        return []
+    others = [ex for ex in seen if ex.tables & read and ex not in served_by]
+    if not others:
+        return []
+    try:
+        rows = run(sql)
+    except Exception:  # noqa: BLE001 - rows that cannot be read cannot be shown to differ
+        return [
+            f"{ECHO_CODE}: the rows of the SQL that ran cannot be compared with "
+            f"verified example {others[0].id}"
+        ]
+    answer = _rows_key(rows)
+    cap = int(MAX_LIMIT)
+
+    def verdict(ex: _Seen) -> str:
+        try:
+            theirs = run(ex.sql)
+        except Exception:  # noqa: BLE001 - an example that cannot run is not shown to differ
+            return "unrun"
+        if len(rows) >= cap and len(theirs) >= cap:
+            return "capped"
+        return "same" if _rows_key(theirs) == answer else "differ"
+
+    out: list[str] = []
+    for ex in others:
+        found = verdict(ex)
+        if found == "same":
+            out.append(
+                f"{ECHO_CODE}: the SQL returns the rows of verified example {ex.id} "
+                "(columns and order aside), and only the question the steward "
+                "confirmed for it may re-serve them"
+            )
+        elif found == "capped":
+            out.append(
+                f"{ECHO_CODE}: the SQL and verified example {ex.id} both fill the "
+                f"{cap}-row cap, so their rows cannot be shown to differ"
+            )
+        elif found == "unrun":
+            out.append(
+                f"{ECHO_CODE}: verified example {ex.id} could not be run to show its "
+                "rows differ from this answer"
+            )
+    if out and any(verdict(ex) == "same" for ex in served_by if ex.tables & read):
+        return []
+    return out
+
+
+def _session_runner(verified: Any) -> RunSql:
+    """Run one statement as the contract ask serves one: SQL gate, then the manifest."""
+
+    def run(statement: str) -> list[dict[str, Any]]:
+        if verified is None:
+            raise RuntimeError("no session manifest to run the comparison under")
+        from CortexOS.dms.sql_validate_gate import run_gate
+        from CortexOS.dms.warehouse_db import load_semantic_layer
+        from CortexOS.execution import submit
+
+        gate = run_gate(statement, load_semantic_layer())
+        if not gate.passed or not gate.safe_sql:
+            raise RuntimeError(f"SQL gate refused the statement: {gate.violations}")
+        rows, _queue_ms, _exec_ms = submit.execute_sql(verified, gate.safe_sql)
+        return list(rows)
+
+    return run
+
+
 @dataclass(frozen=True, slots=True)
 class _AskBind:
     space_id: str
     scored_pack_id: str | None
     granted_tables: frozenset[str] | None
+    verified: Any = None
 
 
 _ASK: ContextVar[_AskBind | None] = ContextVar("verified_query_ask", default=None)
@@ -580,7 +757,10 @@ class _ExamplePort:
     ``generate_candidates`` puts examples into the question string the
     generator prompts with. ``leftover_literals`` is the serve-time check:
     main's plausibility step calls it on the SQL that ran, before the answer
-    is served, and abstains on anything it returns.
+    is served, promoted or remembered, and abstains on anything it returns.
+    The SQL rules (:func:`example_echo`) run first; when they pass, the rows
+    are compared (:func:`result_echo`) under the session manifest the ask
+    was bound with.
     """
 
     _vq_examples = True
@@ -622,15 +802,26 @@ class _ExamplePort:
         found = [str(item) for item in (inner(sql) or [])] if callable(inner) else []
         meta = _USED.get()
         if meta is not None:
-            found.extend(
-                example_echo(
-                    str(meta.get("question") or ""),
+            question = str(meta.get("question") or "")
+            prompt = list(meta.get("prompt") or [])
+            echo = example_echo(
+                question,
+                sql,
+                prompt,
+                schema=meta.get("schema"),
+                granted_tables=meta.get("granted_tables"),
+            )
+            if not echo:
+                bound = _ASK.get()
+                echo = result_echo(
+                    question,
                     sql,
-                    list(meta.get("prompt") or []),
+                    prompt,
+                    run=_session_runner(None if bound is None else bound.verified),
                     schema=meta.get("schema"),
                     granted_tables=meta.get("granted_tables"),
                 )
-            )
+            found.extend(echo)
         return found
 
 
@@ -642,8 +833,13 @@ def bind_verified_examples(
     space_id: str,
     scored_pack_id: str | None,
     granted_tables: Collection[str] | None = None,
+    verified: Any = None,
 ) -> _Tokens | None:
     """Arm example loading for this ask. ``None`` when the flag is off.
+
+    ``verified`` is the session's verified manifest. The serve-time result
+    comparison runs under it; without it, an answer from a prompt that held
+    examples cannot be compared and abstains.
 
     The L2 port is restored when the ask ends. A test that stubs
     ``resolve_l2_generation`` is left alone: its stub is not installed as the
@@ -674,7 +870,12 @@ def bind_verified_examples(
         )
         return (
             _ASK.set(
-                _AskBind(space_id=space_id, scored_pack_id=scored_pack_id, granted_tables=grant)
+                _AskBind(
+                    space_id=space_id,
+                    scored_pack_id=scored_pack_id,
+                    granted_tables=grant,
+                    verified=verified,
+                )
             ),
             _USED.set(None),
             restore,
