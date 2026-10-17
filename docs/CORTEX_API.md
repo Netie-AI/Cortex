@@ -33,6 +33,15 @@ this answer's SQL came from that generate path. Otherwise `other`. A request
 `mode=ontology_plan` is not copied onto the stamp. `query_sql` is set only
 alongside honest `ontology_plan`. This does not re-prove live DMS #231.
 
+Lane stamps (INSIGHTS-LANE-INVERSION-01, no new fields). A model wrote the
+SQL: `plan_source=ontology_plan`, `model_called=true`, `served_*` copy the
+vault RouteStamp of that call; this includes SQL that `l2_serve` executed
+after its gates (`query_sql` is then the SQL that ran). A certified query
+served as stored with no model call: `plan_source=other`,
+`model_called=false`, `served_model` null, `served_reason` and
+`generative.check` = `certified_query:<id>`; the SQL is in `sql_used` and
+`generative.sql`, not `query_sql`.
+
 ## Key posture (local vs cloud)
 
 OpenVault is the only vault. Cortex does not store provider secrets. Callers

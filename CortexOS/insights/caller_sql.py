@@ -4,7 +4,8 @@ Shared naming rule (DMS <-> Cortex): a table crosses the boundary as its exact
 qualified name ``schema.table`` (or bare, for tables that live unqualified).
 Generated SQL may reference a table only by a name the caller declared:
 
-* ``schema.table`` must be declared exactly (case-insensitive, as DuckDB is);
+* ``schema.table`` must be declared exactly (case-insensitive for ASCII letters
+  only, as DuckDB is: :func:`CortexOS.identifier_fold.fold_identifier`);
 * a bare ``table`` is accepted when it is itself declared, or when exactly one
   declared table has that bare name; it is then rewritten to that declared
   qualified name, so the SQL that leaves Cortex reads the declared relation and
@@ -33,6 +34,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from CortexOS.identifier_fold import fold_identifier
+
 #: ``code`` on a refusal whose only fault is a column the caller did not declare
 #: (or a column qualifier that binds to nothing). The table check passed.
 UNDECLARED_COLUMN = "undeclared_column"
@@ -50,8 +53,8 @@ def resolve_table(
     schema: str, name: str, declared: Mapping[str, Sequence[str]]
 ) -> tuple[str | None, str]:
     """(declared name, why-not). ``schema`` empty for a bare reference."""
-    name = name.lower()
-    schema = schema.lower()
+    name = fold_identifier(name)
+    schema = fold_identifier(schema)
     if schema:
         qualified = f"{schema}.{name}"
         if qualified in declared:
@@ -87,8 +90,10 @@ def _cap_limit(stmt: Any) -> None:
 
 
 def _selected(scope: Any) -> dict[str, Any]:
-    """This scope's FROM / JOIN sources by lower-cased name (not merely visible CTEs)."""
-    return {str(k).lower(): source for k, (_node, source) in scope.selected_sources.items()}
+    """This scope's FROM / JOIN sources by folded name (not merely visible CTEs)."""
+    return {
+        fold_identifier(str(k)): source for k, (_node, source) in scope.selected_sources.items()
+    }
 
 
 def _source_of(scope: Any, qualifier: str) -> Any:
@@ -134,7 +139,7 @@ def _binds_in(
     sources = list(_selected(scope).values())
     for rel in sources:
         if isinstance(rel, Scope) and isinstance(rel.expression, exp.Query):
-            if cname in {n.lower() for n in rel.expression.named_selects}:
+            if cname in {fold_identifier(n) for n in rel.expression.named_selects}:
                 return True
             if _has_star(rel.expression):
                 inner = _binds_in(rel, cname, real_tables, catalog)
@@ -169,7 +174,7 @@ def _relation_output(
     query = rel.expression
     if not isinstance(query, exp.Query):
         return False
-    if cname in {n.lower() for n in query.named_selects}:
+    if cname in {fold_identifier(n) for n in query.named_selects}:
         return True
     if _has_star(query):
         inner = _binds_in(rel, cname, real_tables, catalog)
@@ -215,10 +220,10 @@ def _column_refusal(
         for col in walk_in_scope(scope.expression):
             if not isinstance(col, exp.Column) or isinstance(col.this, exp.Star):
                 continue
-            cname = (col.name or "").lower()
+            cname = fold_identifier(col.name or "")
             if not cname:
                 continue
-            qname = col.text("table").lower()
+            qname = fold_identifier(col.text("table"))
             if qname:
                 source = _source_of(scope, qname)
                 if source is None:
@@ -270,8 +275,8 @@ def _is_order_key_alias(col: Any, scope: Any) -> bool:
     select = scope.expression
     if not isinstance(order, exp.Order) or order.parent is not select:
         return False
-    return isinstance(select, exp.Select) and col.name.lower() in {
-        n.lower() for n in select.named_selects
+    return isinstance(select, exp.Select) and fold_identifier(col.name) in {
+        fold_identifier(n) for n in select.named_selects
     }
 
 
@@ -284,7 +289,10 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
     from CortexOS.dms import sql_guardrail
     from CortexOS.execution.sql_scope import ScopeError, cte_reference_ids, dotted_part
 
-    catalog = {str(t).lower(): [str(c).lower() for c in cols or []] for t, cols in declared.items()}
+    catalog = {
+        fold_identifier(str(t)): [fold_identifier(str(c)) for c in cols or []]
+        for t, cols in declared.items()
+    }
     if not catalog:
         return _refuse("caller catalog names no tables; cannot prove the SQL stays in scope")
     text = (sql or "").strip()
@@ -338,8 +346,8 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
             return _refuse(
                 "cross-catalog table reference refused: " + node.sql(dialect="duckdb")[:80]
             )
-        name = node.name.lower()
-        schema = (node.db or "").lower()
+        name = fold_identifier(node.name)
+        schema = fold_identifier(node.db or "")
         table, why = resolve_table(schema, name, catalog)
         if table is None:
             return _refuse("sql reads a table outside the caller catalog: " + why, sorted(resolved))

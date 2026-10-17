@@ -509,13 +509,19 @@ def test_demo_certified_question_is_served_end_to_end_unchanged(
     assert body["status"] == "ABSTAIN"
     assert body["badge"] == "abstain"
     assert body["values"] == []
-    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    # INSIGHTS-LANE-INVERSION-01: stored certified SQL, no model call: other.
+    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert "query_sql" not in body
+    assert body["model_called"] is False
     assert "Served certified query cq_supplier_ranking" in body["answer"]
     assert body["generative"]["check"] == "certified_query:cq_supplier_ranking"
     assert not _gen_prompts(prompts)  # the model is never asked for a certified measure
+    # CERT-ORACLE-SPLIT (#345): the climb oracle no longer reads the serve set,
+    # so the oracle here is the stored certified SQL itself.
     stored = str(certified_serve._certified_rows(None)["cq_supplier_ranking"]["sql"]).strip()
-    assert body["query_sql"] == stored
-    rows = _lake_demo().execute(body["query_sql"]).fetchall()
+    assert body["sql_used"] == stored
+    assert body["generative"]["sql"] == stored
+    rows = _lake_demo().execute(body["sql_used"]).fetchall()
     assert rows and rows == _lake_demo().execute(stored).fetchall()
     assert {row["where"]["table"] for row in body["ontology"]["locations"]} <= DEMO_TABLES
 
