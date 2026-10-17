@@ -558,5 +558,6 @@ def test_drillthrough_reads_from_on_either_sqlglot_key() -> None:
     new = sqlglot.parse_one(sql, read="duckdb")
     old = _old_sqlglot_tree(sql)
     assert isinstance(new, exp.Select) and isinstance(old, exp.Select)
-    assert _table_aliases(new)[0] == ("a", "alpha_ledger")
+    # (alias, table, schema): DRILLTHROUGH-NO-500-01 added the schema slot.
+    assert _table_aliases(new)[0] == ("a", "alpha_ledger", None)
     assert _table_aliases(old) == _table_aliases(new)
