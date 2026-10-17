@@ -351,6 +351,51 @@ def test_review_shapes_description_and_foreign_key_lines() -> None:
     assert validate_caller_sql("SELECT sum(amount) FROM orders WHERE order_id > 0", parsed)["ok"]
 
 
+_ADJACENT = "\n".join(
+    [
+        "SCHEMA",
+        "- customers",
+        "- id integer",
+        "- region text",
+        "- orders reason=score:0.40 description=customer orders",
+        "- amount decimal description=net of orders.discount",
+        "- order_id integer",
+        "- customer_id integer foreign_key=customers.id",
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    ("sql", "needle"),
+    [
+        (
+            "SELECT sum(amount) AS n FROM customers WHERE id > 0",
+            "column amount is not declared for customers",
+        ),
+        (
+            "SELECT region FROM orders WHERE order_id > 0",
+            "column region is not declared for orders",
+        ),
+    ],
+    ids=["described_tables_column_on_plain_table", "plain_tables_column_on_described_table"],
+)
+def test_must_fail_undeclared_column_on_adjacent_described_table(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch, sql: str, needle: str
+) -> None:
+    """#400 (b) on the answer path: a described table after a plain one is its own table."""
+    from CortexOS.crew.cot_climb import HORIZON
+
+    prompts = _bind(monkeypatch, lambda _prompt: sql)
+    status, body = _ask(api, _ADJACENT)
+    assert status == 200, body
+    assert body["status"] == "REFUSE", body.get("answer")
+    assert needle in str(body.get("answer") or "")
+    assert body["values"] == []
+    assert not body.get("sql_used")
+    assert sql not in json.dumps(body)
+    assert _generate_count(prompts) == HORIZON
+
+
 def test_hand_written_schema_still_parses() -> None:
     """The bare-head shape the earlier tests use keeps its catalog."""
     schema = "\n".join(
@@ -503,3 +548,14 @@ def test_from_clause_read_on_either_sqlglot_key(
     assert schema_mod.ungranted_reason(join, no_join) == (
         "schema_context:ungranted_join:alpha_ledger+beta_entry"
     )
+
+
+def test_drillthrough_reads_from_on_either_sqlglot_key() -> None:
+    from CortexOS.execution.drillthrough import _table_aliases
+
+    sql = "SELECT a.qty FROM alpha_ledger a JOIN beta_entry b ON a.id = b.ref_code"
+    new = sqlglot.parse_one(sql, read="duckdb")
+    old = _old_sqlglot_tree(sql)
+    assert isinstance(new, exp.Select) and isinstance(old, exp.Select)
+    assert _table_aliases(new)[0] == ("a", "alpha_ledger")
+    assert _table_aliases(old) == _table_aliases(new)
