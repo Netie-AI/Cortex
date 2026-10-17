@@ -162,3 +162,29 @@ forbidden_modules =
 # score_oracle / cot_climb.gold_sql_for. This catches the import route; file
 # reads are invisible to grimp, so the IO guard is the stricter check.
 # Must-fail: tests/test_crew/test_cert_oracle_split.py.
+
+[importlinter:contract:query-skill-scope]
+name = the query_skill ask scope packs may import stays a stdlib leaf (QUERY-SKILL #340)
+type = forbidden
+source_modules =
+    CortexOS.dms.ask_scope
+forbidden_modules =
+    packs
+    CortexOS.api
+    CortexOS.dms.answer_engine
+    CortexOS.dms.query_service
+    CortexOS.execution
+    CortexOS.memory
+    CortexOS.integrations
+    CortexOS.crew
+    CortexOS.nlp
+    duckdb
+    litellm
+    httpx
+# packs -> CortexOS is not forbidden by any contract above (contract 1 is the
+# reverse direction), so packs.dms.semantic.query_skills -> CortexOS.dms.ask_scope
+# is allowed. This pins that the edge cannot carry a pack back into the engine or
+# the engine into the pack: ask_scope is a stdlib-only ContextVar that
+# contract_routes opens and query_skills reads. grimp cannot see the packs side
+# (packs/dms/semantic has no __init__.py), so the test pins that side by AST.
+# Must-fail: tests/dms/test_query_skill_scope_contract_340.py.
