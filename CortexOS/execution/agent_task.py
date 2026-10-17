@@ -94,7 +94,11 @@ def default_broker(name: str, params: dict) -> dict:
 
     fn = web_tools.WEB_TOOLS.get(name)
     if fn is not None:
-        return fn(**params)
+        kwargs = dict(params or {})
+        if name == "web_fetch":
+            # The model never chooses its own SSRF guard (PRD R4.6).
+            kwargs["public_only"] = True
+        return fn(**kwargs)
 
     from CortexOS.discovery.find import DISCOVERY_TOOLS
 

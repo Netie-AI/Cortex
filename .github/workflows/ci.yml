@@ -74,6 +74,20 @@ jobs:
             tests/test_freeroute_router1.py::test_baseline_refuses_when_learn_unset \
             tests/test_freeroute_router1.py::test_refusal_tests_have_no_skip_or_xfail_markers
 
+      - name: OpenVault at the HX-01 mirror pin (for tests/harness/test_ov_key_envs.py)
+        # Public repo, no token. Only the files the drift test reads are checked
+        # out. Under CI the test fails, not skips, if OPENVAULT_SRC is missing.
+        run: |
+          set -euo pipefail
+          read -r OV_REPO OV_PIN < <(python -c "from CortexOS.integrations.harness import ov_key_envs as m; print(m.OV_REPO, m.OV_PIN)")
+          OV_DIR="${RUNNER_TEMP}/OpenVault"
+          git init -q "${OV_DIR}"
+          git -C "${OV_DIR}" sparse-checkout set --no-cone $(python -c "from CortexOS.integrations.harness import ov_key_envs as m; print(' '.join(sorted(set(m.OV_SOURCES.values()))))")
+          git -C "${OV_DIR}" fetch -q --depth 1 --filter=blob:none "https://github.com/${OV_REPO}.git" "${OV_PIN}"
+          git -C "${OV_DIR}" checkout -q FETCH_HEAD
+          test "$(git -C "${OV_DIR}" rev-parse HEAD)" = "${OV_PIN}"
+          echo "OPENVAULT_SRC=${OV_DIR}" >> "${GITHUB_ENV}"
+
       - name: Pytest
         run: python -m pytest tests/ -q --tb=short
 
