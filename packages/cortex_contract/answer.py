@@ -3,7 +3,14 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
@@ -206,6 +213,19 @@ class Answer(BaseModel):
             "ignore it."
         ),
     )
+    # 1.7.0 (VERIFIED-QUERY #309): ids of the steward-confirmed examples that
+    # were in the SQL generator prompt for this answer. Omitted when unset.
+    # Not a phrasing-match id and not a stored answer. 1.6 clients ignore it.
+    verified_query_id: str | None = None
+
+    # No return annotation: pydantic derives the serialization schema from it,
+    # and the published Answer schema must stay the field list above.
+    @model_serializer(mode="wrap")
+    def _omit_unset_verified_query_id(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("verified_query_id") is None:
+            data.pop("verified_query_id", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):

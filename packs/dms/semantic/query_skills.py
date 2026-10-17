@@ -175,6 +175,15 @@ def find(
     threshold: float = DEFAULT_THRESHOLD,
 ) -> dict[str, Any] | None:
     """Return this Space's best active skill above threshold, or None."""
+    # The verified-query lane retrieves examples for the generator. A stored
+    # skill, including its exact trigger match, must not run ahead of that.
+    if (os.environ.get("CORTEX_VERIFIED_QUERY") or "").strip().lower() in {
+        "1",
+        "true",
+        "on",
+        "yes",
+    }:
+        return None
     space = _skill_space(space_id, scored_pack_id)
     if space is None:
         return None

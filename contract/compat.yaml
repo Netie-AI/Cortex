@@ -107,7 +107,7 @@ supported:
 
   - version: "1.6"
     spec: openapi-1.6.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive SCHEMA-CONTEXT-01 (#347): POST /v1/insights
@@ -122,6 +122,19 @@ supported:
       keep the 279cbd85 envelope. schema_context maxLength is 8192;
       the engine cap is 8192 UTF-8 bytes. 1.5 clients omit the field and
       get the 1.5 behaviour. canonical_manifest_bytes unchanged.
+
+  - version: "1.7"
+    spec: openapi-1.7.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive VERIFIED-QUERY (#309): Answer gains optional verified_query_id,
+      the ids of steward-confirmed examples that were in the SQL generator
+      prompt for this answer. It is omitted when unset, is not a
+      phrasing-match id, and does not mark a stored answer: the SQL was
+      generated and executed on current data, and reused stays false.
+      Nothing else on the wire changes. 1.6 clients ignore the field and get
+      the 1.6 behaviour. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.
