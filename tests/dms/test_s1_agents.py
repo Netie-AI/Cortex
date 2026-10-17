@@ -11,7 +11,6 @@ def lake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("DMS_LAKEHOUSE_HOME", str(tmp_path / "lakehouse"))
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DBOS_RUN_ADMIN_SERVER", "0")
     dbos_path = (tmp_path / "dbos_agents.sqlite").resolve()
     monkeypatch.setenv("DBOS_SYSTEM_DATABASE_URL", f"sqlite:///{dbos_path.as_posix()}")
     from packs.dms.agents import dbos_runtime
@@ -196,7 +195,7 @@ def test_workflow_resume_after_kill(lake_home, monkeypatch, use_dbos_destroy):
     """Chaos-lite: interrupt after draft / before approve → relaunch → one artifact.
 
     Ops-DB step checkpoints always provide resume semantics. When ``dbos`` is
-    installed, also tear down + relaunch the DBOS runtime (admin server off).
+    installed, also tear down + relaunch the DBOS runtime.
     """
     from packs.dms.agents import dbos_runtime, employee, registry
     from packs.dms.audit import ledger
@@ -249,6 +248,38 @@ def test_workflow_resume_after_kill(lake_home, monkeypatch, use_dbos_destroy):
 
     verify = ledger.verify()
     assert verify.ok is True
+
+    dbos_runtime.destroy()
+
+
+def test_dbos_records_agent_workflow(lake_home, monkeypatch):
+    """With ``dbos`` installed the run goes through DBOS itself, not only ops-DB checkpoints."""
+    from packs.dms.agents import dbos_runtime, employee, registry
+
+    if not dbos_runtime.HAS_DBOS:
+        pytest.skip("dbos not installed (pip install -e '.[agents]')")
+
+    monkeypatch.setattr(employee, "OUTPUTS", lake_home / "outputs")
+    _seed_sensor_rows(10)
+    registry.create_agent(
+        "dbos-w",
+        created_by="steward",
+        detector_cfg={
+            "type": "rowcount", "table": "bronze.stream_sensors", "op": ">", "bound": 1,
+        },
+    )
+    wf_id = f"wf-dbos-{uuid.uuid4().hex[:10]}"
+    out = employee.run_agent("dbos-w", actor="steward", workflow_id=wf_id)
+    assert out["status"] == "pending_approval"
+
+    DBOS = dbos_runtime.DBOS
+    status = DBOS.get_workflow_status(wf_id)
+    assert status is not None
+    assert status.status == "SUCCESS"
+    assert status.name == "dms_agent_run"
+    assert status.app_version == dbos_runtime.APP_VERSION
+    steps = [s["function_name"] for s in DBOS.list_workflow_steps(wf_id)]
+    assert steps == ["dms_step_detect", "dms_step_draft"]
 
     dbos_runtime.destroy()
 
