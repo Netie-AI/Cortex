@@ -18,7 +18,6 @@ from CortexOS.dms import plan_sql_ask
 from tests.dms.test_c7_02_manifest_before_explain import dms_http  # noqa: F401
 from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
     GOOD_SQL,
-    PLAN_TEXT,
     SESSION,
     _ask,
     _assert_rung,
@@ -72,10 +71,8 @@ def test_must_fail_explain_error_text_never_reaches_envelope_or_prompts(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     _stronger_route(armed_openvault, STRONGER, monkeypatch)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, EXPLAIN_FAILS)
     _reply(armed_openvault, EXPLAIN_FAILS)
-    _reply(armed_openvault, PLAN_TEXT, model=STRONGER)
     _reply(armed_openvault, EXPLAIN_FAILS, model=STRONGER)
     # No WHY line: the envelope falls back to the last failure detail.
     _reply(armed_openvault, "CLOSEST: how many rows are in transactions", model=STRONGER)
@@ -89,7 +86,7 @@ def test_must_fail_explain_error_text_never_reaches_envelope_or_prompts(
     assert CANARY not in served
     assert "LINE 1:" not in served
     prompts = _prompts(armed_openvault)
-    assert len(armed_openvault.chat_calls) == 6
+    assert len(armed_openvault.chat_calls) == 4
     for prompt in prompts:
         assert CANARY not in prompt
         assert "LINE 1:" not in prompt
@@ -100,7 +97,6 @@ def test_explain_error_retry_still_names_the_class_and_answers(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:
     """Positive control: the redacted error still drives a working retry."""
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, EXPLAIN_FAILS)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -114,7 +110,7 @@ def test_explain_error_retry_still_names_the_class_and_answers(
     ]
     for row in oracle:
         assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert "EXPLAIN_FAILED:BINDER_ERROR" in retry
     assert CANARY not in retry and "LINE 1:" not in retry
     assert CANARY not in json.dumps(body)
@@ -137,10 +133,8 @@ def test_must_fail_sampled_values_never_reach_the_user(
 
     monkeypatch.setattr(submit, "execute_sql", spy)
     _stronger_route(armed_openvault, STRONGER, monkeypatch)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, EMPTY_SQL)
     _reply(armed_openvault, EMPTY_SQL)
-    _reply(armed_openvault, PLAN_TEXT, model=STRONGER)
     _reply(armed_openvault, EMPTY_SQL, model=STRONGER)
     _reply(armed_openvault, "CLOSEST: how many rows are in transactions", model=STRONGER)
     dms_http.bind_session(SESSION, GRANT)
@@ -155,7 +149,7 @@ def test_must_fail_sampled_values_never_reach_the_user(
     for value in sampled:
         assert value not in served
     # The model still sees the grounded values in its own prompt block.
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert plan_sql_ask.EMPTY_RESULT in retry and "SKU-NOT-THERE" in retry
     assert sampled[0] in retry
 

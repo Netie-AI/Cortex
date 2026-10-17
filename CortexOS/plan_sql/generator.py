@@ -1,9 +1,10 @@
-"""C-LOOP-A (#303): plan, then SQL, through OpenVault FreeRoute only.
+"""C-LOOP-A (#303): SQL through OpenVault FreeRoute only.
 
-``PlanSqlGenerator`` is the seam other loop slices inject or wrap: ``plan()``
-asks for a numbered plan, ``sql()`` asks for one SELECT that carries it out
-(``prior_violations`` lets a caller feed gate errors back). Each call returns a
-``ModelStep`` stamped from the actual FreeRoute response.
+``PlanSqlGenerator`` is the seam other loop slices inject or wrap. ``sql()``
+asks for one SELECT (``prior_violations`` lets a caller feed gate errors back).
+``plan()`` does not call a model: the ask seam folds that rung into the single
+``sql()`` call so one attempt is one FreeRoute ``complete``. Each model step
+returns a ``ModelStep`` stamped from the actual FreeRoute response.
 
 The generator only produces text. It holds no executor and no DB handle, and
 it reaches a model only through ``CortexOS.integrations.freeroute`` (import
@@ -23,7 +24,6 @@ from CortexOS.integrations import freeroute
 from CortexOS.plan_sql.payload import (
     PlanSqlRequest,
     plan_lines,
-    plan_messages,
     reconfirm_messages,
     sql_messages,
 )
@@ -121,7 +121,7 @@ def _step(kind: str, out: freeroute.Completion) -> ModelStep:
 
 
 class FreeRoutePlanSqlGenerator:
-    """Default generator: two FreeRoute calls, plan then SQL. Never raises."""
+    """Default generator. One FreeRoute call per ``sql()`` or ``reconfirm()``. Never raises."""
 
     def __init__(
         self,
@@ -160,10 +160,11 @@ class FreeRoutePlanSqlGenerator:
         )
 
     def plan(self, request: PlanSqlRequest) -> ModelStep:
-        out = self._complete(
-            self._name(TASK_PLAN), plan_messages(request), lambda t: bool(plan_lines(t))
-        )
-        return _step(self._name("plan"), out)
+        """No model call. The ask seam folds planning into ``sql()``."""
+        del request
+        kind = self._name("plan")
+        reason = "folded into the sql call"
+        return ModelStep(kind, True, "", reason, StepStamp.cortex(kind, "cortex:plan-folded", reason))
 
     def sql(
         self,

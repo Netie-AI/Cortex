@@ -236,7 +236,7 @@ def test_must_fail_serving_never_opens_the_oracle_or_bench(
     monkeypatch.setattr(fr, "complete", _script(SKU_GOLD))
     monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
     for _, _, sql, _ in PLAN_SQL_ASKS:
-        _plan_sql_reply(armed_openvault, "1. Read the selected table.\n2. Aggregate.")
+        # One complete() per attempt: the planner is folded into the SQL call.
         _plan_sql_reply(armed_openvault, f"```sql\n{sql};\n```")
     asks = [
         "How many SKUs do we have in inventory?",  # an L0 certified question
@@ -279,7 +279,7 @@ def test_must_fail_serving_never_opens_the_oracle_or_bench(
         assert rows and body["row_count"] == len(rows), body
         assert all(row.get(column) is not None for row in rows), rows
         assert str(rows[0][column]) in body["answer"], body["answer"]
-    assert len(armed_openvault.chat_calls) == 2 * len(PLAN_SQL_ASKS)
+    assert len(armed_openvault.chat_calls) == len(PLAN_SQL_ASKS)
     bad = _oracle_reads(seen, gold)
     assert bad == [], f"serving opened the climb/score oracle or bench/: {bad}"
 
@@ -305,7 +305,6 @@ def test_audit_sees_an_oracle_read_on_the_plan_sql_path(
     monkeypatch.setattr(plan_sql_ask, "_sample_values", leaky)
     monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
     question, payload, sql, _ = PLAN_SQL_ASKS[0]
-    _plan_sql_reply(armed_openvault, "1. Count distinct sku.")
     _plan_sql_reply(armed_openvault, sql)
     with _opened() as seen:
         res = serving.post(

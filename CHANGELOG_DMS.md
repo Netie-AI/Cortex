@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## GEN-GRANTED-CATALOG-01 (#386) -- 2026-10-17
+
+SQL generation on the plan+SQL path prompts with the signed grant intersected
+with the SCHEMA-CONTEXT-01 ``schema_context`` string (#351, on main as
+657adf78). #351 publishes that field on ``POST /v1/insights``; ``AskRequest``
+does not carry it, so the ask route reads it from the raw body without a
+contract bump, and refuses a value by #351's own ``schema_context.problem``
+rule (422 with that code). An unknown-column retry adds did-you-mean names
+from that catalog; an executor error is scanned only after
+``redact_db_error``. Each attempt is one FreeRoute ``complete``; the planner
+call is folded into it, so ``model_calls`` counts one call per rung attempt.
+Not a CI claim. 52 effect not measured.
+
 ## DBOS-3X (#331) -- 2026-10-16
 
 The `agentic`, `agents` and `full` extras take `dbos>=3.0.0,<4`. `uv.lock`
