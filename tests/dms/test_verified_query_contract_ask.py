@@ -274,9 +274,13 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     body = resp.json()
     spec = json.loads((ROOT / "contract" / "openapi-1.4.0.json").read_text(encoding="utf-8"))
     base = set(spec["components"]["schemas"]["Answer"]["properties"])
-    # #329's 1.5.0 fields are present and null. verified_query_id stays omitted.
-    assert set(body) - base == {"reconfirm", "plan_sql_rung"}
+    prior = json.loads((ROOT / "contract" / "openapi-1.6.0.json").read_text(encoding="utf-8"))
+    # 1.5.0 fields (#329) are present and null. verified_query_id (1.7.0)
+    # stays omitted, so the flag-off body is exactly the 1.6.0 Answer.
+    assert set(body) - base == {"reconfirm", "plan_sql_rung", "model_calls"}
+    assert set(body) == set(prior["components"]["schemas"]["Answer"]["properties"])
     assert body["reconfirm"] is None and body["plan_sql_rung"] is None
+    assert body["model_calls"] is None
     assert list(body) == [f for f in Answer.model_fields if f != "verified_query_id"]
     _assert_not_verified(body)
     assert body["memory_ids_read"] == []

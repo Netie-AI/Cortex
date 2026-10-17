@@ -210,6 +210,21 @@
             "title": "Memory Reads",
             "type": "array"
           },
+          "model_calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.5.0 logical FreeRoute complete() calls per ladder step, plus total. One count per complete() the ladder issues. Transport or proxy retries (an upstream 429 retried by the cap proxy or the FreeRoute client) are not counted. Keys that ran: plan, error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. total is their sum. DMS reads per-step counts only from this object. Null when this path made no model call. 1.4 clients ignore it.",
+            "title": "Model Calls"
+          },
           "plan_sql_rung": {
             "anyOf": [
               {
@@ -324,17 +339,6 @@
             },
             "title": "Suggestions",
             "type": "array"
-          },
-          "verified_query_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verified Query Id"
           }
         },
         "required": [
@@ -387,7 +391,7 @@
         "type": "object"
       },
       "AskPayload": {
-        "description": "1.5.0 (#329): selected tables, their schema and ontology joins for one question.\n\nThe payload can only narrow what the signed grant allows: a table or join\noutside the grant is refused before any model call.",
+        "description": "1.5.0: selected tables, their schema and ontology joins for one question.\n\nThe payload can only narrow what the signed grant allows: a table or join\noutside the grant is refused before any model call.",
         "properties": {
           "joins": {
             "items": {
@@ -412,7 +416,7 @@
         "type": "object"
       },
       "AskPayloadColumn": {
-        "description": "1.5.0 (#329): one column of a table the consumer selected for this ask.",
+        "description": "1.5.0: one column of a table the consumer selected for this ask.",
         "properties": {
           "description": {
             "anyOf": [
@@ -449,7 +453,7 @@
         "type": "object"
       },
       "AskPayloadJoin": {
-        "description": "1.5.0 (#329): one ontology join between two selected tables.",
+        "description": "1.5.0: one ontology join between two selected tables.",
         "properties": {
           "left_column": {
             "minLength": 1,
@@ -493,7 +497,7 @@
         "type": "object"
       },
       "AskPayloadTable": {
-        "description": "1.5.0 (#329): one selected table and its schema.",
+        "description": "1.5.0: one selected table and its schema.",
         "properties": {
           "columns": {
             "items": {
@@ -526,6 +530,7 @@
         "type": "object"
       },
       "AskRequest": {
+        "description": "Ask plane request.\n\nUnknown keys are ignored, as on main. ``model``, ``strict`` and\n``provider`` are rejected by name before any model call. Routing stays\nin OpenVault's route config. Full request strictness is a breaking\nchange tracked in #388.",
         "properties": {
           "dms_payload": {
             "anyOf": [
@@ -1247,6 +1252,22 @@
             "title": "Memory Reads",
             "type": "array"
           },
+          "model_calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1.5.0 logical FreeRoute complete() calls per ladder step, plus total. One count per complete() the ladder issues. Transport or proxy retries (an upstream 429 retried by the cap proxy or the FreeRoute client) are not counted. Keys that ran: plan, error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. total is their sum. DMS reads per-step counts only from this object. Null when this path made no model call. 1.4 clients ignore it.",
+            "title": "Model Calls"
+          },
           "plan_sql_rung": {
             "anyOf": [
               {
@@ -1369,18 +1390,6 @@
             },
             "title": "Suggestions",
             "type": "array"
-          },
-          "verified_query_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Verified Query Id"
           }
         },
         "required": [
@@ -1393,7 +1402,7 @@
         "type": "object"
       },
       "ContractAskPayload": {
-        "description": "1.5.0 (#329): selected tables, their schema and ontology joins for one question.\n\nThe payload can only narrow what the signed grant allows: a table or join\noutside the grant is refused before any model call.",
+        "description": "1.5.0: selected tables, their schema and ontology joins for one question.\n\nThe payload can only narrow what the signed grant allows: a table or join\noutside the grant is refused before any model call.",
         "properties": {
           "joins": {
             "items": {
@@ -1418,7 +1427,7 @@
         "type": "object"
       },
       "ContractAskPayloadColumn": {
-        "description": "1.5.0 (#329): one column of a table the consumer selected for this ask.",
+        "description": "1.5.0: one column of a table the consumer selected for this ask.",
         "properties": {
           "description": {
             "anyOf": [
@@ -1457,7 +1466,7 @@
         "type": "object"
       },
       "ContractAskPayloadJoin": {
-        "description": "1.5.0 (#329): one ontology join between two selected tables.",
+        "description": "1.5.0: one ontology join between two selected tables.",
         "properties": {
           "left_column": {
             "minLength": 1,
@@ -1502,7 +1511,7 @@
         "type": "object"
       },
       "ContractAskPayloadTable": {
-        "description": "1.5.0 (#329): one selected table and its schema.",
+        "description": "1.5.0: one selected table and its schema.",
         "properties": {
           "columns": {
             "items": {
@@ -1536,6 +1545,7 @@
         "type": "object"
       },
       "ContractAskRequest": {
+        "description": "Ask plane request.\n\nUnknown keys are ignored, as on main. ``model``, ``strict`` and\n``provider`` are rejected by name before any model call. Routing stays\nin OpenVault's route config. Full request strictness is a breaking\nchange tracked in #388.",
         "properties": {
           "dms_payload": {
             "anyOf": [
@@ -2035,7 +2045,7 @@
         "type": "object"
       },
       "ContractPlanSqlReconfirm": {
-        "description": "1.5.0 (#329): why the plan+SQL loop would abstain, and the closest question.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
         "properties": {
           "closest_question": {
             "minLength": 1,
@@ -4178,7 +4188,7 @@
         "type": "object"
       },
       "PlanSqlReconfirm": {
-        "description": "1.5.0 (#329): why the plan+SQL loop would abstain, and the closest question.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
         "properties": {
           "closest_question": {
             "minLength": 1,

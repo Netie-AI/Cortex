@@ -5,6 +5,7 @@
 # docs/ontology/CORTEX_ONTOLOGY_PLAN.md §2.1: primary_key, description, and a
 # per-property agent_visible flag (folds semantic_layer.yaml `sensitive_columns:`).
 # Property `type` is informative (string|number|integer|boolean|date|datetime).
+# Optional property `values:` declares a value domain (CortexOS/ontology/value_domain.py).
 
 object_types:
   - id: inventory
@@ -79,12 +80,43 @@ object_types:
       - {name: txn_id, type: string, agent_visible: true}
       - {name: sku, type: string, agent_visible: true}
       - {name: location_id, type: string, agent_visible: true}
-      - {name: txn_type, type: string, agent_visible: true}
+      # VALUE-NORMALIZE-01 (#387): the one declaration of txn_type's value domain.
+      # `canonical` is what every lake build stores and what the model is shown;
+      # `from` lists the source spellings each build maps to it. Values without
+      # `from` are stored as the source writes them.
+      - name: txn_type
+        type: string
+        agent_visible: true
+        values:
+          - {canonical: outbound, from: [OUT]}
+          - {canonical: inbound, from: [IN]}
+          - {canonical: ADJUST}
+          - {canonical: WRITE_OFF}
       - {name: quantity_kg, type: number, agent_visible: true}
       - {name: unit_cost_myr, type: number, agent_visible: true}
       - {name: operator_id, type: string, agent_visible: true}
       - {name: timestamp, type: datetime, agent_visible: true}
       - {name: reference_doc, type: string, agent_visible: true}
+    # METRIC-SEMANTICS-01: what a sales number means, declared once.
+    # `expression` is the aggregate; `filter` is the row condition every value of
+    # the measure carries (a declared txn_type value above); `grain` is the
+    # property naming one summed row; `metrics` lists the metrics.yaml entries
+    # that compute it. The /v1/insights SQL prompt carries these definitions,
+    # and SQL that aggregates these columns without pinning txn_type is sent
+    # back to the model (CortexOS/ontology/measures.py).
+    measures:
+      - name: sales_value_myr
+        description: "Sales value in MYR. A sale is an outbound movement; inbound, ADJUST and WRITE_OFF rows are not sales."
+        expression: "SUM(quantity_kg * unit_cost_myr)"
+        filter: {column: txn_type, equals: outbound}
+        grain: txn_id
+        metrics: [sales_by_value, revenue_total, revenue_windowed, revenue_last_month]
+      - name: sales_volume_kg
+        description: "Quantity sold in kg. A sale is an outbound movement."
+        expression: "SUM(quantity_kg)"
+        filter: {column: txn_type, equals: outbound}
+        grain: txn_id
+        metrics: [sales_by_volume]
 
   - id: alerts
     description: "An operational alert (low stock, expiry, delay) optionally linked to a SKU, location, or supplier."

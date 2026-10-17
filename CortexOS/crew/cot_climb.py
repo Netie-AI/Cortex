@@ -17,8 +17,11 @@ values. Validated SQL is ABSTAIN (not executed). Never CERTIFIED. Never
 COMPLETE. DMS #180 gen 57.69% / exact 38.46% WRONG=0 @ d2f116a6 is the frozen
 baseline; this module does not replace it with a better %. Like-with-like is
 the pinned 26 ids from that covering SHA -- not a 5-item fixture, not a
-label-only n==26. this_run.exact scores against certified gold SQL when the
-case id / expected_sql is present; missing gold is not invented 38.46%.
+label-only n==26. this_run.exact scores against oracle gold SQL
+(``bench/oracle``, never the L0 serve set; #343) when the case id /
+expected_sql is present; missing gold is not invented 38.46%. A case whose id
+or question text is in the serve set is excluded from the score and named. The
+oracle never copies frozen held-out; a run with no gold stamps ``NO_GOLD``.
 """
 
 from __future__ import annotations
@@ -41,6 +44,10 @@ from CortexOS.execution.gen_cfsm import (
     route_step,
 )
 from CortexOS.execution.scoreboard import embed_goal
+from CortexOS.identifier_fold import fold_identifier
+from CortexOS.insights import schema_context as schema_mod
+from CortexOS.ontology import measures, value_domain
+from CortexOS.ontology.registry import pack_dir_for
 
 HORIZON = 3
 JEPA_PATH = "proxy"
@@ -111,7 +118,7 @@ def public_map() -> dict[str, Any]:
         "like_with_like_corpus": LIKE_WITH_LIKE_CORPUS,
         "like_with_like_n": DMS_180_N,
         "leftover": (
-            "covering: exact vs certified gold + G1 plan consumed in think; "
+            "covering: exact vs oracle gold + G1 plan consumed in think; "
             "like-with-like only when pinned 26 ids @ d2f116a6; still INCOMPLETE"
         ),
         "jepa": "proxy cosine via gen_cfsm.collapse_score; no trained path named",
@@ -120,8 +127,8 @@ def public_map() -> dict[str, Any]:
             "G1 plan consumed in think/SQL"
         ),
         "exact": (
-            "this_run.exact vs certified gold when id/expected_sql present; "
-            "never invent 38.46%"
+            "this_run.exact vs oracle gold (bench/oracle) when id/expected_sql present; "
+            "serve-set cases excluded by name; no gold stamps NO_GOLD; never invent 38.46%"
         ),
         "freeroute": "consume crew.freeroute public API only; unarmed fail-closed",
         "prompt_harness": (
@@ -140,7 +147,7 @@ def _ranked_columns(ranking: Mapping[str, Any]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for row in ranking.get("locations") or []:
         where = row.get("where") or {}
-        table = str(where.get("table") or row.get("id") or "").lower()
+        table = fold_identifier(str(where.get("table") or row.get("id") or ""))
         if not table:
             continue
         cols = [str(c) for c in (where.get("columns") or []) if str(c).strip()]
@@ -159,9 +166,29 @@ async def _call_runner(
 ) -> dict[str, Any]:
     try:
         out = await runner(None, purpose=purpose, prompt=prompt, bearer=bearer)
-    except TypeError:
-        out = await runner(None, purpose=purpose, prompt=prompt)
+    except TypeError as exc:
+        # Never re-send without the caller's bearer: that would spend Cortex's
+        # own credential on a relayed call (PRD R3.4, C4). One attempt, refused.
+        return {"ok": False, "reason": f"runner refused the call ({type(exc).__name__}); not retried without the caller's credential"}
     return out if isinstance(out, dict) else {}
+
+
+def _cross_catalog_table(sql: str, outside: Any) -> bool:
+    """True when a parsed table names a catalog the caller does not hold."""
+    import sqlglot
+    from sqlglot import exp
+
+    try:
+        trees = sqlglot.parse(sql or "", read="duckdb")
+    except Exception:  # noqa: BLE001 - the validator names a parse failure
+        return False
+    for tree in trees or []:
+        if tree is None:
+            continue
+        for node in tree.find_all(exp.Table):
+            if outside(node):
+                return True
+    return False
 
 
 def _check_sql(
@@ -175,8 +202,8 @@ def _check_sql(
 
     A caller catalog (``source=space``) is checked by the shared naming rule:
     qualified names exactly as declared, a bare name only when it resolves to
-    one declared table, columns only where the caller declared them. The engine
-    pack path is unchanged.
+    one declared table, columns only where the caller declared them. The pack
+    path refuses a catalog qualifier before the FreeRoute table check.
     """
     from CortexOS.insights.caller_ontology import SOURCE_CALLER
 
@@ -185,18 +212,36 @@ def _check_sql(
 
         declared = {t: list(columns.get(t) or []) for t in allowed}
         return validate_caller_sql(sql, declared)
+    # The pack session names no catalog. A three-part name is another database.
+    # Checked here so the frozen FreeRoute validator is not the allowlist for it.
+    from CortexOS.dms.sql_guardrail import catalog_outside_caller
+
+    outside = _cross_catalog_table(sql, catalog_outside_caller)
+    if outside:
+        return {
+            "ok": False,
+            "sql": None,
+            "tables": [],
+            "reason": "cross-catalog table reference refused",
+            "check": "refused",
+        }
     return fr.validate_sql(sql, allowed, columns=columns)
 
 
 def _allowed_tables(ranking: Mapping[str, Any]) -> set[str]:
+    """Ranked table names folded as DuckDB compares them (ASCII case only).
+
+    A Unicode ``lower()`` here would hand the caller-catalog check ``äpfel`` for
+    a declared ``"Äpfel"``, which DuckDB resolves to a different table.
+    """
     tables: set[str] = set()
     for row in ranking.get("locations") or []:
         table = ((row.get("where") or {}).get("table") or row.get("id") or "")
         if table:
-            tables.add(str(table).lower())
+            tables.add(fold_identifier(str(table)))
     for row in list(ranking.get("metrics") or []) + list(ranking.get("certified") or []):
         for table in (row.get("where") or {}).get("tables") or []:
-            tables.add(str(table).lower())
+            tables.add(fold_identifier(str(table)))
     return tables
 
 
@@ -225,34 +270,22 @@ def sql_exact(got: str, gold: str) -> bool:
 _GOLD: dict[str, str] | None = None
 
 
-def certified_gold_sql() -> dict[str, str]:
-    """Certified query gold from the DMS pack YAML. Pack modules stay unimported."""
+def oracle_gold_sql() -> dict[str, str]:
+    """Gold from bench/oracle only. Never the L0 serve set (certified_queries.yaml, #343)."""
     global _GOLD
-    if _GOLD is not None:
-        return _GOLD
-    from CortexOS.crew import insights as insights_mod
+    if _GOLD is None:
+        from CortexOS.crew import score_oracle
 
-    doc = insights_mod._read_yaml(
-        insights_mod._pack_dir() / "semantic" / "certified_queries.yaml"
-    )
-    out: dict[str, str] = {}
-    for row in doc.get("certified") or []:
-        if not isinstance(row, Mapping):
-            continue
-        cid = str(row.get("id") or "").strip()
-        sql = str(row.get("sql") or "").strip()
-        if cid and sql:
-            out[cid] = sql
-    _GOLD = out
-    return out
+        _GOLD = score_oracle.oracle_gold_sql()
+    return _GOLD
 
 
 def gold_sql_for(case_id: str, expected_sql: str = "") -> str:
-    """Case expected_sql wins. Else certified YAML by id. Never invent gold."""
+    """Case expected_sql wins. Else the oracle by id. Never invent gold."""
     pinned = (expected_sql or "").strip()
     if pinned:
         return pinned
-    return certified_gold_sql().get(str(case_id or "").strip(), "")
+    return oracle_gold_sql().get(str(case_id or "").strip(), "")
 
 
 def curated_intents() -> list[dict[str, str]]:
@@ -275,13 +308,61 @@ def _idea_lines(ideas: Sequence[str] | None) -> list[str]:
     return out
 
 
+def _declared_values(ranking: Mapping[str, Any]) -> dict[str, dict[str, list[str]]]:
+    """#387: canonical values the engine pack's ontology declares, for the prompt only.
+
+    Read here, not put on the ranking: the ranking is echoed on the wire. A caller
+    catalog (``source`` set) is the caller's own schema; the pack is not consulted.
+    """
+    if ranking.get("source"):
+        return {}
+    # Same pack as insights._pack_dir: the DMS ask spine.
+    return value_domain.prompt_values(value_domain.load_value_domains(pack_dir_for("dms")))
+
+
+def _declared_measures(ranking: Mapping[str, Any]) -> tuple[measures.Measure, ...]:
+    """METRIC-SEMANTICS-01: measures the engine pack's ontology declares.
+
+    Same scope as ``_declared_values``: a caller catalog is the caller's own
+    schema, so the pack's measures neither reach its prompt nor check its SQL.
+    """
+    if ranking.get("source"):
+        return ()
+    return measures.load_measures(pack_dir_for("dms"))
+
+
+def _measure_lines(ranking: Mapping[str, Any]) -> list[str]:
+    """Declared measure definitions for the tables in play (never chosen by question words)."""
+    found = measures.prompt_lines(_declared_measures(ranking), _allowed_tables(ranking))
+    if not found:
+        return []
+    return [
+        "- declared measures (compute these exactly as defined, filter included):",
+        *("  " + line for line in found),
+    ]
+
+
+def _measure_violation(ranking: Mapping[str, Any], sql: str) -> str:
+    """Named reason when ``sql`` aggregates a declared measure without its filter; else ''."""
+    declared = _declared_measures(ranking)
+    if not declared or not sql:
+        return ""
+    found = measures.check_sql(sql, declared, measures.ontology_schema(pack_dir_for("dms")))
+    return "; ".join(dict.fromkeys(v.reason() for v in found))
+
+
 def _ontology_lines(ranking: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
+    declared = _declared_values(ranking)
     for row in ranking.get("locations") or []:
         where = row.get("where") or {}
         table = where.get("table") or row.get("id")
         cols = where.get("columns") or []
         lines.append(f"- {table}: {', '.join(str(c) for c in cols[:24])}")
+        for col, vals in (declared.get(str(table)) or {}).items():
+            if col in cols:
+                lines.append("  " + value_domain.prompt_line(str(table), col, vals))
+    lines.extend(_measure_lines(ranking))
     for row in list(ranking.get("metrics") or [])[:12]:
         mid = row.get("id") or ""
         tables = (row.get("where") or {}).get("tables") or []
@@ -322,6 +403,19 @@ def _g1_plan_lines(g1: Mapping[str, Any] | None) -> list[str]:
     return lines
 
 
+def _prompt_ontology_lines(
+    ranking: Mapping[str, Any], schema_context: str | None
+) -> list[str]:
+    """Pack table lines, or the caller schema when one was sent.
+
+    The caller schema replaces the pack list. It is not appended to it.
+    """
+    text = schema_mod.supplied_schema(schema_context)
+    if text:
+        return [schema_mod.untrusted_schema_block(text)]
+    return _ontology_lines(ranking)
+
+
 def _think_prompt(
     intent: str,
     ranking: Mapping[str, Any],
@@ -331,12 +425,13 @@ def _think_prompt(
     g1: Mapping[str, Any] | None = None,
     prior_sql: str = "",
     decision: str = "",
+    schema_context: str | None = None,
 ) -> str:
     lines = [
         "Think which ontology tables and metrics answer the intent.",
         "Do not emit SQL. Do not invent warehouse numbers, keys, or live CI.",
         "ONTOLOGY:",
-        *_ontology_lines(ranking),
+        *_prompt_ontology_lines(ranking, schema_context),
         *_g1_plan_lines(g1),
         f"INTENT: {intent}",
     ]
@@ -365,10 +460,11 @@ def _sql_prompt(
     ideas: Sequence[str] | None = None,
     g1: Mapping[str, Any] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    schema_context: str | None = None,
 ) -> str:
     lines = [
         "ONTOLOGY (use only these tables and columns):",
-        *_ontology_lines(ranking),
+        *_prompt_ontology_lines(ranking, schema_context),
         *_g1_plan_lines(g1),
         "",
         f"INTENT: {intent}",
@@ -404,8 +500,13 @@ def coverage_report(
     outcomes: Sequence[Mapping[str, Any]],
     *,
     corpus: str = "",
+    excluded: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Report this-run coverage vs frozen #180 baseline. Never replaces it."""
+    """Report this-run coverage vs frozen #180 baseline. Never replaces it.
+
+    ``excluded`` cases (serve-set id or question, #343) are not in any number
+    here; they are listed by id with their named reason.
+    """
     n = len(outcomes)
     validated = sum(1 for row in outcomes if row.get("valid"))
     wrong = sum(1 for row in outcomes if row.get("wrong"))
@@ -432,7 +533,18 @@ def coverage_report(
         if like
         else (corpus.strip() or "cortex-cot-climb fixture, not DMS #180 curated 26")
     )
-    return {
+    if like:
+        note = "like-with-like vs DMS #180 curated 26 @ d2f116a6; baseline not replaced"
+    elif excluded:
+        note = "serve-set cases excluded (#343); not like-with-like vs DMS #180"
+    else:
+        note = "different corpus; do not replace DMS #180 numbers"
+    from CortexOS.crew import score_oracle
+
+    gold = score_oracle.gold_stamp(n, gold_n)
+    if n and gold["status"] == score_oracle.NO_GOLD:
+        note = f"{score_oracle.NO_GOLD}: exact is not a score; {note}"
+    report: dict[str, Any] = {
         "ok": True,
         "complete": False,
         "status": "INCOMPLETE",
@@ -449,6 +561,7 @@ def coverage_report(
             "exact": exact_label,
             "exact_matched": exact_hit,
             "gold_n": gold_n,
+            "gold": gold["status"],
             "corpus": this_corpus,
             "like_with_like": like,
         },
@@ -460,18 +573,26 @@ def coverage_report(
             "this_run_exact": exact_label,
             "like_with_like": like,
             "improved": improved,
-            "note": (
-                "like-with-like vs DMS #180 curated 26 @ d2f116a6; baseline not replaced"
-                if like
-                else "different corpus; do not replace DMS #180 numbers"
-            ),
+            "note": note,
         },
         "jepa": JEPA_PATH,
         "issue_211_complete": False,
         "issue_212_complete": False,
         "issue_227_complete": False,
         "outcomes": [dict(row) for row in outcomes],
+        "gold": gold,
     }
+    reasons = sorted({str(row.get("reason") or "") for row in excluded})
+    score_oracle.stamp(
+        report,
+        excluded,
+        counts_toward_score=score_oracle.GOLDEN_NOT_RESPLIT not in reasons,
+    )
+    if excluded and n == 0:
+        report["ok"] = False
+        report["status"] = "REFUSE"
+        report["refuse_reason"] = f"{score_oracle.ALL_EXCLUDED}:" + ",".join(reasons)
+    return report
 
 
 def _envelope(
@@ -598,6 +719,7 @@ async def climb(
     bearer: str | None = None,
     ideas: Sequence[str] | None = None,
     query_plan: Mapping[str, Any] | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """CoT/route/improve through FreeRoute. Fail-closed when unarmed."""
     from CortexOS.crew import freeroute as fr
@@ -631,7 +753,21 @@ async def climb(
             refuse_reason="gen_cfsm compile refused the think-path IR",
         )
 
-    allowed = _allowed_tables(ranking)
+    supplied = schema_mod.supplied_schema(schema_context)
+    declared: dict[str, list[str]] | None = None
+    if supplied:
+        # The string never becomes the allowlist. Parse declared tables and
+        # columns, then narrow the caller grant when one exists.
+        from CortexOS.insights.caller_ontology import SOURCE_CALLER
+
+        parsed = schema_mod.parsed_catalog(supplied)
+        if ranking.get("source") == SOURCE_CALLER:
+            declared = schema_mod.narrow_catalog(schema_mod.grant_catalog(ranking), parsed)
+        else:
+            declared = parsed
+        allowed = set(declared)
+    else:
+        allowed = _allowed_tables(ranking)
     if not allowed:
         return _envelope(
             ok=False,
@@ -655,7 +791,9 @@ async def climb(
     think = await _call_runner(
         runner,
         purpose="think",
-        prompt=_think_prompt(text, ranking, ideas=idea_list, g1=g1),
+        prompt=_think_prompt(
+            text, ranking, ideas=idea_list, g1=g1, schema_context=supplied
+        ),
         bearer=bearer,
     )
     if not think.get("ok"):
@@ -690,6 +828,7 @@ async def climb(
     prev_collapse = 0.0
     stall = 0
     last_reason = "no sql"
+    last_fed = ""
     goal_blob = text + " " + " ".join(sorted(allowed))
     goal_vec = embed_goal(goal_blob)
 
@@ -709,6 +848,7 @@ async def climb(
             ideas=idea_list,
             g1=g1,
             query_plan=query_plan,
+            schema_context=supplied,
         )
         if journal is not None:
             with journal as stamps:
@@ -749,13 +889,114 @@ async def climb(
         pulled = extract_statement(str(gen.get("text") or ""))
         sql = pulled.sql
         extracted = str(sql or "").strip()
+        if supplied and extracted:
+            # An ungranted table or join is refused before any retry. A retry
+            # would put this SQL back in the next prompt. The reason names the
+            # gate and does not include SQL.
+            stop = schema_mod.ungranted_reason(extracted, supplied)
+            if stop:
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="SCHEMA_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=stop,
+                )
         if sql is None:
             # Name why nothing was extracted (a second statement, no FROM)
             # instead of validating "" and reporting "empty sql".
             checked = {"ok": False, "sql": None, "tables": [], "reason": pulled.reason}
+        elif supplied:
+            from CortexOS.insights.caller_sql import UNDECLARED_COLUMN, validate_caller_sql
+
+            checked = validate_caller_sql(sql, declared or {})
+            column_miss = checked.get("code") == UNDECLARED_COLUMN
+            if not checked.get("ok") and not column_miss:
+                # Same refusal as the caller-catalog gate. sql stays unset so
+                # a refused statement is never copied into sql_used.
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="SCHEMA_REFUSE",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=schema_mod.public_sql_reason(
+                        str(checked.get("reason") or "refused")
+                    ),
+                )
+            # Retryable on this path: an unbounded listing, and a column the
+            # schema did not declare. Only the named reason goes back to the
+            # model ("fed"), never the SQL or the undeclared name.
+            fed = schema_mod.brute_force_reason(extracted) or (
+                schema_mod.UNDECLARED_COLUMN if column_miss else ""
+            )
+            if fed:
+                # The caller-facing reason stays what the gate said, for a
+                # refusal once the horizon is spent.
+                public = fed
+                if fed == schema_mod.UNDECLARED_COLUMN:
+                    public = schema_mod.public_sql_reason(str(checked.get("reason") or fed))
+                checked = {"ok": False, "sql": None, "tables": [], "reason": public, "fed": fed}
         else:
             checked = _check_sql(fr, sql, ranking, allowed, columns)
-        last_sql = str(checked.get("sql") or sql or last_sql)
+            reason = str(checked.get("reason") or "")
+            if not checked.get("ok") and reason.startswith(
+                "cross-catalog table reference refused"
+            ):
+                # Same named refusal as the schema_context gate. sql stays
+                # unset, so a refused statement is not copied into a later
+                # prompt or into sql_used.
+                return _envelope(
+                    ok=False,
+                    status="REFUSE",
+                    arm=arm,
+                    identity=gen.get("identity") or identity,
+                    route=gen.get("route"),
+                    stamp=gen.get("stamp"),
+                    sql=None,
+                    climb=_climb_meta(
+                        final="CROSS_CATALOG",
+                        g1=g1,
+                        steps=steps,
+                        think_consumed=bool(think_text),
+                        g1_consumed=g1_consumed,
+                        prior_sql_consumed=prior_sql_consumed,
+                    ),
+                    refuse_reason=schema_mod.public_sql_reason(reason),
+                )
+            if checked.get("ok"):
+                # METRIC-SEMANTICS-01: a declared measure without its filter is a
+                # named retry inside this horizon, never a served answer.
+                broken = _measure_violation(ranking, str(checked.get("sql") or ""))
+                if broken:
+                    checked = {**checked, "ok": False, "reason": broken}
+        if checked.get("ok"):
+            last_sql = str(checked.get("sql") or "")
+        elif not supplied:
+            # Pack path: the improve step still sees the prior statement.
+            # The schema_context path returns above, with sql left unset.
+            last_sql = str(checked.get("sql") or sql or last_sql)
         try:
             from CortexOS.integrations import freeroute as core
 
@@ -776,6 +1017,7 @@ async def climb(
         stall = int(routed.get("stall_count") or 0)
         prev_collapse = collapse
         last_reason = str(checked.get("reason") or last_reason)
+        last_fed = str(checked.get("fed") or "")
         granted = DECISION_TERMINATE if predicates_pass else routed["decision"]
         steps.append(
             {
@@ -824,7 +1066,7 @@ async def climb(
             DECISION_REGENERATE,
             DECISION_AUDIT_FAIL,
         ):
-            critique = last_reason
+            critique = last_fed or last_reason
             think = await _call_runner(
                 runner,
                 purpose="think",
@@ -836,6 +1078,7 @@ async def climb(
                     g1=g1,
                     prior_sql=last_sql,
                     decision=str(granted),
+                    schema_context=supplied,
                 ),
                 bearer=bearer,
             )
@@ -872,6 +1115,26 @@ async def climb(
             continue
         break
 
+    if supplied and last_fed:
+        # The schema_context gate still refuses by name once the horizon is
+        # spent on a retryable reason. sql stays unset.
+        return _envelope(
+            ok=False,
+            status="REFUSE",
+            arm=arm,
+            identity=identity,
+            sql=None,
+            climb=_climb_meta(
+                final="SCHEMA_REFUSE",
+                g1=g1,
+                steps=steps,
+                attempts=HORIZON,
+                think_consumed=bool(think_text),
+                g1_consumed=g1_consumed,
+                prior_sql_consumed=prior_sql_consumed,
+            ),
+            refuse_reason=last_reason,
+        )
     return _envelope(
         ok=False,
         status="REFUSE",
@@ -902,9 +1165,16 @@ async def measure_climb(
     complete: Any | None = None,
 ) -> dict[str, Any]:
     """Coverage vs frozen #180 baseline. Not a live :5000 CI claim."""
+    from CortexOS.crew import score_oracle
+
     rows: list[Mapping[str, Any]] = [c for c in (cases or []) if isinstance(c, Mapping)]
     if not rows and (corpus or "").strip() == LIKE_WITH_LIKE_CORPUS:
         rows = curated_intents()
+    rows, excluded = score_oracle.split_scored(
+        rows,
+        lambda c: (str(c.get("id") or ""), str(c.get("intent") or "")),
+        corpus=corpus,
+    )
     idea_list = _idea_lines(ideas)
     outcomes: list[dict[str, Any]] = []
     ranking_fn: Any = None
@@ -941,7 +1211,7 @@ async def measure_climb(
                 "final": (out.get("climb") or {}).get("final"),
             }
         )
-    return coverage_report(outcomes, corpus=corpus)
+    return coverage_report(outcomes, corpus=corpus, excluded=excluded)
 
 
 assert HORIZON in ALLOWED_HORIZONS

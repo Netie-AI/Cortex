@@ -99,7 +99,7 @@ def submit_request(body: SubmitRequest) -> QueryResult:
     """HTTP/contract entry: bind and/or execute under a signed manifest."""
     import duckdb
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, redact_db_error
 
     run_id = new_run_id()
     kind = _plan_kind(dict(body.plan or {}))
@@ -181,7 +181,12 @@ def submit_request(body: SubmitRequest) -> QueryResult:
         # EXPLAIN refused the SQL (a column the lake does not have), or the
         # engine failed running it (a bad cast, an overflow). Either way it is a
         # named refusal for the caller to abstain on, never an HTTP 500.
+        # The raw engine text quotes post-enforce SQL: the run record keeps it,
+        # the caller gets only the redacted text.
         status = SQL_GATE_ABSTAIN if isinstance(exc, SqlGateAbstain) else SQL_RUNTIME_ERROR
+        raw = getattr(exc, "raw_detail", None)
+        redacted_at_source = raw is not None or isinstance(exc, SqlGateAbstain)
+        shown = str(exc) if redacted_at_source else redact_db_error(exc)
         record_run(
             run_id=run_id,
             kind=kind,
@@ -191,9 +196,21 @@ def submit_request(body: SubmitRequest) -> QueryResult:
             queue_ms=queue_ms,
             exec_ms=exec_ms,
             issuer_kid=issuer_kid,
-            error=str(exc),
+            error=raw or str(exc),
         )
-        return QueryResult(ok=False, status=status, run_id=run_id, error=str(exc))
+        return QueryResult(ok=False, status=status, run_id=run_id, error=shown)
+
+
+def _redacted_db_error(exc: Exception, shown: str) -> Exception:
+    """A copy of ``exc`` that carries only ``shown``; the raw text is on ``raw_detail``."""
+    import duckdb
+
+    try:
+        redacted: Exception = type(exc)(shown)
+    except Exception:  # noqa: BLE001 - a class with an unusual constructor
+        redacted = duckdb.Error(shown)
+    redacted.raw_detail = str(exc)  # type: ignore[attr-defined]
+    return redacted
 
 
 def execute_sql(
@@ -214,7 +231,13 @@ def execute_sql(
     """
     import os
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, explain_dry_run
+    import duckdb
+
+    from CortexOS.dms.sql_validate_gate import (
+        SqlGateAbstain,
+        explain_dry_run,
+        redact_db_error,
+    )
 
     safe_sql = enforce_manifest(sql, verified)
     use_explain = (
@@ -232,9 +255,12 @@ def execute_sql(
             if use_explain:
                 ok, detail = explain_dry_run(con, safe_sql, params=params)
                 if not ok:
+                    # The raw text quotes post-enforce SQL. It rides on raw_detail for the audit sink.
+                    reason = redact_db_error(detail)
                     raise SqlGateAbstain(
-                        f"EXPLAIN rejected SQL: {detail}",
-                        violations=[f"EXPLAIN_FAILED:{detail}"],
+                        f"EXPLAIN rejected SQL: {reason}",
+                        violations=[f"EXPLAIN_FAILED:{reason}"],
+                        raw_detail=detail,
                     )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s
@@ -243,8 +269,14 @@ def execute_sql(
                     con.execute(f"SET statement_timeout='{int(timeout_s * 1000)}ms'")
                 except Exception:  # noqa: BLE001
                     pass
-            rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
-            rows_raw = rel.fetchall()
+            try:
+                rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
+                rows_raw = rel.fetchall()
+            except duckdb.Error as exc:
+                # Same class, redacted text: a run-time error quotes post-enforce SQL
+                # too. The raw text rides on raw_detail (and __cause__) for the
+                # audit/journal sink only.
+                raise _redacted_db_error(exc, redact_db_error(exc)) from exc
             columns = [d[0] for d in rel.description] if rel.description else []
             rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
         finally:

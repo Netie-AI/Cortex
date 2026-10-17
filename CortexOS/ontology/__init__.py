@@ -8,6 +8,8 @@ the engine owns capability, packs are consumer apps on top.
 
 from CortexOS.ontology.registry import (
     ActionType,
+    DeclaredMeasure,
+    DeclaredValue,
     FunctionDef,
     LinkType,
     ObjectType,
@@ -23,6 +25,8 @@ from CortexOS.ontology.registry import (
 
 __all__ = [
     "ActionType",
+    "DeclaredMeasure",
+    "DeclaredValue",
     "FunctionDef",
     "LinkType",
     "ObjectType",

@@ -1,0 +1,33 @@
+# DMS SCHEMA-RETRIEVE render of its FINANCE fixture, recorded byte for byte.
+# Everything after the line "---" is the schema_context string DMS sends.
+# The file ends with one newline after it; the loader strips that one.
+#
+# source repo:    Netie-AI/dms
+# rendered at:    5b2456fbbe0a9289f2843a14742137514bcf291b (origin/main)
+#                 packages/executor/dms_executor/schema_context.py
+#                 renderer blob 04e6d15be79bc54426e70b981260d9b9f5822f38
+# same bytes at:  3f96695b6bb7b777274f778bb7ee7d2d16f1da17
+#                 renderer blob 82908524dc7ccf3c4296cf31b570f3118687032d
+# fixture:        tests/test_schema_retrieve_01.py::_finance_schema + _finance_model
+#                 test blob 85cd547de2903270028889965fae35c4f2eb2523
+#                 question "open receivable amount owed", model ontology (adds MEASURES)
+# body sha256:    89f0f4a42bee76cc24ae2e56eb6b5512547795ec045d6becc2174b71b63a9f61
+# regenerate:     from a dms checkout, with its venv:
+#   python -c "import importlib.util as u; s=u.spec_from_file_location('t','tests/test_schema_retrieve_01.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print(m.build_schema_context('open receivable amount owed', m._finance_schema(), ontology=m._finance_model()).prompt, end='')"
+# Cortex never imports DMS. Do not hand-edit the body; re-render it and update this header.
+---
+DIALECT: sqlserver
+SCHEMA
+- invoice reason=score:0.04 description=customer invoice
+- balance_amt decimal description=DMSVAL_01 balance samples=40.00 reason=score:0.04
+- invoice_id bigint primary_key samples=100 reason=score:0.03
+- status varchar description=invoice status distinct=1 reason=score:0.00,span:s0
+- payment reason=score:0.08 description=cash applied to an invoice
+- invoice_id bigint foreign_key=invoice.invoice_id samples=100 reason=score:0.07
+- payment_id bigint primary_key samples=7 reason=score:0.08
+JOINS
+- payment.invoice_id = invoice.invoice_id (payment_invoice) reason=path:payment.invoice_id>invoice.invoice_id
+FILTER HINTS
+- invoice.status = open
+MEASURES
+- open_receivable grain=invoice expression=SUM(f.balance_amt) aliases=amount owed -- unpaid invoice balance

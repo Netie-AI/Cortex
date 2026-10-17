@@ -6,6 +6,7 @@ keeps loaders, previews, and semantic helpers without importing ``duckdb``.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,13 @@ from CortexOS.execution.warehouse import (
     get_connection,
     read_only_queries_enabled,
 )
+from CortexOS.ontology import value_domain
 
 # Re-export connection helpers so existing callers keep importing from here.
 __all__ = [
     "DEFAULT_DB",
     "DEFAULT_SEMANTIC",
+    "DMS_PACK",
     "KNOWN_TABLES",
     "SAMPLES",
     "TABLE_FILES",
@@ -35,8 +38,11 @@ __all__ = [
     "table_row_counts",
 ]
 
+_log = logging.getLogger(__name__)
+
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SEMANTIC = ROOT / "packs" / "dms" / "semantic_layer.yaml"
+DMS_PACK = ROOT / "packs" / "dms"
+DEFAULT_SEMANTIC = DMS_PACK / "semantic_layer.yaml"
 SAMPLES = ROOT / "data" / "samples"
 
 TABLE_FILES = {
@@ -122,6 +128,17 @@ def load_inventory_csv(
                 path = Path(csv_path)
             _load_table(con, table, path)
         _cast_types(con)
+        # VALUE-NORMALIZE-01 (#387): store the ontology's canonical values.
+        domains = value_domain.load_value_domains(DMS_PACK)
+        value_domain.apply_to_lake(con, domains)
+        # A value the declaration does not list is stored as written; name it
+        # instead of letting a canonical filter miss it without a word.
+        for key, found in value_domain.undeclared_values(con, domains).items():
+            _log.warning(
+                "value_not_declared:%s %s (declare it in the pack ontology)",
+                key,
+                ", ".join(f"{v!r}={n}" for v, n in found.items()),
+            )
         _create_indexes(con)
     finally:
         con.close()
