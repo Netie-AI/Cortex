@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from CortexOS.api.response_scrub import WITHHELD
 from CortexOS.insights import schema_context as schema_mod
 from packs.dms.security.rate_limit import reset_limiter
 
@@ -318,7 +319,7 @@ def test_must_fail_ungranted_table_refuses_without_retry(
         return SQL_OTHER
 
     body, prompts = _generate(api, monkeypatch, SCHEMA, sql_for)
-    _assert_named_refusal(body, "schema_context:ungranted_table:other_ledger", SQL_OTHER)
+    _assert_named_refusal(body, "schema_context:ungranted_table:" + WITHHELD, SQL_OTHER)
     assert _generate_count(prompts) == 1
     assert all(SQL_OTHER not in prompt for _purpose, prompt in prompts)
 
@@ -688,7 +689,7 @@ def test_guard_removed_ungranted_check_retries_and_echoes_sql(
 
     body, prompts = _generate(api, monkeypatch, SCHEMA, sql_for)
     with pytest.raises(AssertionError):
-        _assert_named_refusal(body, "schema_context:ungranted_table:other_ledger", SQL_OTHER)
+        _assert_named_refusal(body, "schema_context:ungranted_table:" + WITHHELD, SQL_OTHER)
         assert _generate_count(prompts) == 1
 
 
@@ -971,11 +972,11 @@ def test_contract_16_pins_schema_context_string_and_usage() -> None:
         ),
         (
             "SELECT secret_col FROM alpha_ledger LIMIT 5",
-            "column secret_col is not declared",
+            f"column {WITHHELD} is not declared",
         ),
         (
             "SELECT * FROM integer LIMIT 5",
-            "table integer is not in the caller catalog",
+            f"table {WITHHELD} is not in the caller catalog",
         ),
     ],
     ids=[
@@ -1027,7 +1028,7 @@ def test_must_fail_schema_context_does_not_widen_sql_gate(
         ),
         (
             "SELECT secret_col FROM alpha_ledger LIMIT 5",
-            "column secret_col is not declared",
+            f"column {WITHHELD} is not declared",
         ),
     ],
     ids=[

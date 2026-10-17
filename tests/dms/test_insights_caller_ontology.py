@@ -31,6 +31,7 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
+from CortexOS.api.response_scrub import WITHHELD
 from CortexOS.crew import certified_serve, insights
 from CortexOS.insights.routes import InsightsAskIn
 from packs.dms.security.rate_limit import reset_limiter
@@ -263,13 +264,15 @@ def test_bare_reference_resolves_to_the_one_declared_qualified_table(
 @pytest.mark.parametrize(
     ("sql", "needle"),
     [
-        ("SELECT COUNT(*) AS n FROM inventory", "table inventory is not in the caller catalog"),
-        ("SELECT COUNT(*) AS n FROM bronze.frpm", "table bronze.frpm is not in the caller catalog"),
-        ("SELECT COUNT(*) AS n FROM silver.schools", "table silver.schools is not in the caller"),
-        ("SELECT COUNT(*) AS n FROM main.schools", "table main.schools is not in the caller"),
+        # NAME-ECHO-INSIGHTS-01: a name outside the caller catalog is withheld; the
+        # refusal still names its gate.
+        ("SELECT COUNT(*) AS n FROM inventory", f"table {WITHHELD} is not in the caller catalog"),
+        ("SELECT COUNT(*) AS n FROM bronze.frpm", f"table bronze.{WITHHELD} is not in the caller catalog"),
+        ("SELECT COUNT(*) AS n FROM silver.schools", f"table {WITHHELD}.schools is not in the caller"),
+        ("SELECT COUNT(*) AS n FROM main.schools", f"table {WITHHELD}.schools is not in the caller"),
         ("SELECT COUNT(*) FROM memory.bronze.schools", "cross-catalog table reference refused"),
         ("SELECT * FROM read_csv('/etc/passwd')", "refused"),
-        ("SELECT s.phone FROM bronze.schools AS s", "column bronze.schools.phone is not declared"),
+        ("SELECT s.phone FROM bronze.schools AS s", f"column bronze.schools.{WITHHELD} is not declared"),
     ],
 )
 def test_sql_outside_the_declared_catalog_is_a_named_refuse(

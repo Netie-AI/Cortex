@@ -313,6 +313,14 @@ def _not_found(audit_id: str, steps: list[StepStamp]) -> dict[str, Any]:
     }
 
 
+def reconfirm_answer(why: str, closest: str) -> str:
+    """The answer text of a reconfirm envelope."""
+    return (
+        f"Reconfirm: {why} Closest question: {closest} "
+        f"Yes runs that question. No answers '{NOT_FOUND_ANSWER}'."
+    )
+
+
 def _reconfirm_envelope(
     audit_id: str,
     steps: list[StepStamp],
@@ -322,10 +330,7 @@ def _reconfirm_envelope(
     stamp: StepStamp | None,
     rung: str,
 ) -> dict[str, Any]:
-    answer = (
-        f"Reconfirm: {why} Closest question: {closest} "
-        f"Yes runs that question. No answers '{NOT_FOUND_ANSWER}'."
-    )
+    answer = reconfirm_answer(why, closest)
     call = stamp.served_call_id if stamp is not None else ""
     return {
         "answer": answer,
@@ -631,6 +636,29 @@ def _fallback_closest(request: plan_payload.PlanSqlRequest) -> str:
     return f"How many rows are in {request.payload.tables[0].name}?"
 
 
+def grant_closest_question(body: AskRequest, *, verified: Any) -> str:
+    """Cortex's own closest question for ``body``, built from the grant.
+
+    The same shape the ladder falls back to when the model names no closest
+    question: a sampled column of a payload table, else a row count of the first
+    payload table (the first granted table when the ask carries no payload). It
+    names only payload or granted tables and columns. Never raises; empty when
+    there is nothing to name.
+    """
+    from CortexOS.dms.answer_engine import UngroundedSession, resolve_product_grant
+
+    if body.dms_payload is None or not body.dms_payload.tables:
+        tables = sorted(str(key) for key in getattr(verified, "row_predicates", {}) or {})
+        return f"How many rows are in {tables[0]}?" if tables else ""
+    request = plan_payload.PlanSqlRequest(body.question, body.dms_payload)
+    try:
+        grant, _, _ = resolve_product_grant(body.session_id, verified, space_id=body.space_id)
+    except UngroundedSession:
+        return _fallback_closest(request)
+    sampled, _ = _sample_values(grant, request)
+    return _fallback_closest(replace(request, column_values=sampled))
+
+
 def _parse_reconfirm(
     text: str, failures: Sequence[str], request: plan_payload.PlanSqlRequest
 ) -> tuple[str, str]:
@@ -850,12 +878,30 @@ def plan_sql_answer(
         priors: list[str],
         rung: str,
     ) -> dict[str, Any] | None:
-        from CortexOS.dms.sql_validate_gate import SqlGateAbstain, redact_db_error
+        from CortexOS.dms.sql_validate_gate import (
+            LakeValueDomainStale,
+            SqlGateAbstain,
+            redact_db_error,
+        )
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
         try:
             rows, _, _ = execute_sql(grant, served_sql)
+        except LakeValueDomainStale as exc:
+            # #402: the lake does not store the declared values of a column this
+            # SQL names. Only a rebuild through the declaration fixes that, so
+            # it is the answer, not a gate error to feed back: the one rewrite
+            # that could run drops the column (for a sales question, every
+            # movement summed as sales). The reason names columns, never values.
+            steps.append(
+                StepStamp.cortex(
+                    "execute", "cortex:execute_sql", f"refused: {', '.join(exc.violations)}"
+                )
+            )
+            _audit_raw(served_sql, exc)
+            # No verdict on the model: its SQL passed the gate, the lake is what failed.
+            return stop(exc.reason, "", refused=False)
         except ManifestError as exc:
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", f"refused: {exc.code}"))
             if exc.code in {"statement_not_allowed", "path_not_allowed"} or _ungranted(
@@ -995,8 +1041,10 @@ __all__ = [
     "RUNG_STRONG",
     "SQL_ATTEMPTS",
     "model_calls_stamp",
+    "reconfirm_answer",
     "rung_retry",
     "default_generator",
+    "grant_closest_question",
     "plan_sql_answer",
     "plan_sql_enabled",
     "try_plan_sql",

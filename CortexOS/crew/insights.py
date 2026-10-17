@@ -30,6 +30,7 @@ from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
 from CortexOS.insights.caller_ontology import SOURCE_CALLER, CallerCatalog
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
+from CortexOS.ontology.value_domain import LAKE_STALE
 
 # Calls to freeroute.complete() during run_insights. None outside that call.
 _model_calls: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
@@ -1792,6 +1793,11 @@ async def _run_insights(
                 shell_public=shell_public,
                 attempted=attempted,
             )
+            if f"{LAKE_STALE}:" in str(envelope.get("assumptions") or ""):
+                # #402: the lake does not hold the declared values the ranked
+                # trial filters on. That is the answer; a lower-ranked trial
+                # would answer a different question on the same lake.
+                return _attach_generative(last_abstain, gen)
             continue
         # REFUSE this trial; try the next constrained question unless the engine is gone.
         badge = str(envelope.get("badge") or "")

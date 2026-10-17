@@ -19,7 +19,7 @@ from cortex_contract.answer import (
 from cortex_contract.execution import QueryResult, SubmitRequest
 from cortex_contract.ledger import ChainVerification, LedgerEntry
 from cortex_contract.tools import ToolClass, ToolSpec
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 # Canonical contract route IDs — keep in lockstep with scripts/export_openapi.py.
@@ -237,142 +237,156 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
     return data
 
 
-async def _schema_context_field(request: Request) -> tuple[str | None, tuple[str, str] | None]:
-    """SCHEMA-CONTEXT-01 string from the raw body, without a contract bump.
-
-    #351 publishes the field on ``POST /v1/insights`` (contract 1.6.0). It is
-    not on ``AskRequest``, so it is read here and ignored by the model.
-    Absent or blank is ``None``. A value #351's ``schema_context.problem``
-    refuses (non-string, over the UTF-8 byte cap, a control or format
-    character, no table and column catalog) is a 422 with that code.
-    Other unknown keys stay on the existing AskRequest rules.
-    """
-    from CortexOS.plan_sql.catalog import accepted_schema_context, schema_context_problem
-
-    try:
-        raw = await request.json()
-    except Exception:  # noqa: BLE001 - no JSON body
-        return None, None
-    if not isinstance(raw, dict) or "schema_context" not in raw:
-        return None, None
-    value = raw.get("schema_context")
-    problem = schema_context_problem(value)
-    if problem is not None:
-        return None, problem
-    return accepted_schema_context(value), None
-
-
-async def _load_schema_context(request: Request) -> str | None:
-    """FastAPI dependency. Direct callers of ``contract_ask`` omit it."""
-    text, problem = await _schema_context_field(request)
-    if problem is not None:
-        code, message = problem
-        raise HTTPException(status_code=422, detail={"code": code, "message": message})
-    return text
-
-
 @router.post("/ask", response_model=Answer, operation_id="ask")
-async def contract_ask(
-    body: AskRequest,
-    schema_context: str | None = Depends(_load_schema_context),
-) -> Answer:
+async def contract_ask(body: AskRequest) -> Answer:
     """Answer a governed question (DMS ask plane). Requires a prior submit bind."""
-    if not isinstance(schema_context, str):
-        schema_context = None
-    from CortexOS.dms.answer_engine import answer as answer_engine
-    from CortexOS.execution.manifest import ManifestError
-    from CortexOS.execution.session_manifests import (
-        SessionExpired,
-        SessionUnbound,
-        SpaceUnbound,
-        get_session_registry,
-    )
+    # NAME-ECHO-CX-01: every exit (the answer and each HTTP error) passes the
+    # response scrub, which withholds names outside the session's grant.
+    from CortexOS.api.response_scrub import ask_caller_context, scrub_answer, scrub_http_detail
+    from CortexOS.sql_attempts import recording
 
-    try:
-        verified = get_session_registry().resolve(
-            body.session_id, space_id=body.space_id
+    grant: list[Any] = []
+
+    def _ask() -> Answer:
+        from CortexOS.dms.answer_engine import answer as answer_engine
+        from CortexOS.execution.manifest import ManifestError
+        from CortexOS.execution.session_manifests import (
+            SessionExpired,
+            SessionUnbound,
+            SpaceUnbound,
+            get_session_registry,
         )
-    except SpaceUnbound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except SessionUnbound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except SessionExpired as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
 
-    from CortexOS.dms.space_memory_ask import try_solution_reuse
-
-    reused, memory_fields = try_solution_reuse(
-        body.question,
-        session_id=body.session_id,
-        space_id=body.space_id,
-        verified=verified,
-        scored_pack_id=body.scored_pack_id,
-    )
-    from CortexOS.dms.ask_scope import ask_scope
-
-    # The signed Space and scored pack reach the legacy query_skill store
-    # through this scope, not through answer_engine (QUERY-SKILL #340).
-    with ask_scope(
-        space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
-    ):
-        served = reused
-        if served is None and body.dms_payload is not None:
-            from CortexOS.dms.plan_sql_ask import try_plan_sql
-
-            # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
-            served = try_plan_sql(
-                body, verified=verified, schema_context=schema_context
-            )
         try:
-            result = served if served is not None else answer_engine(
-                body.question,
-                session_id=body.session_id,
-                space_id=body.space_id,
-                verified=verified,
-                require_grounding=True,
-                stamp_l2_route=True,
+            verified = get_session_registry().resolve(
+                body.session_id, space_id=body.space_id
             )
-        except ManifestError as exc:
-            code = getattr(exc, "code", "manifest_error")
+        except SpaceUnbound as exc:
             raise HTTPException(
-                status_code=_http_for_submit_status(code),
-                detail={"code": code, "message": str(exc)},
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
             ) from exc
+        except SessionUnbound as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except SessionExpired as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        grant.append(verified)
 
-    if isinstance(result, Answer):
-        data = result.model_dump()
-    else:
-        data = dict(result)
-    data.update(memory_fields)
-    data = _enrich_answer(data, session_id=body.session_id, verified=verified)
-    return Answer.model_validate(data)
+        from CortexOS.dms.space_memory_ask import try_solution_reuse
+
+        reused, memory_fields = try_solution_reuse(
+            body.question,
+            session_id=body.session_id,
+            space_id=body.space_id,
+            verified=verified,
+            scored_pack_id=body.scored_pack_id,
+        )
+        from CortexOS.dms.ask_scope import ask_scope
+
+        # The signed Space and scored pack reach the legacy query_skill store
+        # through this scope, not through answer_engine (QUERY-SKILL #340).
+        with ask_scope(
+            space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
+        ):
+            served = reused
+            if served is None and body.dms_payload is not None:
+                from CortexOS.dms.plan_sql_ask import try_plan_sql
+
+                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
+                served = try_plan_sql(body, verified=verified)
+            try:
+                result = served if served is not None else answer_engine(
+                    body.question,
+                    session_id=body.session_id,
+                    space_id=body.space_id,
+                    verified=verified,
+                    require_grounding=True,
+                    stamp_l2_route=True,
+                )
+            except ManifestError as exc:
+                code = getattr(exc, "code", "manifest_error")
+                raise HTTPException(
+                    status_code=_http_for_submit_status(code),
+                    detail={"code": code, "message": str(exc)},
+                ) from exc
+
+        if isinstance(result, Answer):
+            data = result.model_dump()
+        else:
+            data = dict(result)
+        data.update(memory_fields)
+        data = _enrich_answer(data, session_id=body.session_id, verified=verified)
+        return Answer.model_validate(data)
+
+    texts, names = ask_caller_context(body)
+    with recording() as attempts:
+        try:
+            result = _ask()
+        except HTTPException as exc:
+            exc.detail = scrub_http_detail(
+                exc.detail,
+                attempts,
+                verified=grant[0] if grant else None,
+                caller_texts=texts,
+                caller_names=names,
+            )
+            raise
+        from CortexOS.dms.plan_sql_ask import grant_closest_question, reconfirm_answer
+
+        return scrub_answer(
+            result,
+            attempts,
+            verified=grant[0],
+            caller_texts=texts,
+            caller_names=names,
+            closest_fallback=lambda: grant_closest_question(body, verified=grant[0]),
+            reconfirm_text=reconfirm_answer,
+        )
 
 
 @router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")
 async def contract_drillthrough(body: DrillthroughRequest) -> DrillthroughResponse:
     """Re-derive contributing rows under the same session manifest (T7)."""
+    from CortexOS.api.response_scrub import scrub_http_detail
     from CortexOS.execution.drillthrough import (
         DrillthroughError,
         execute_drillthrough,
     )
+    from CortexOS.sql_attempts import recording
+
+    with recording() as attempts:
+        try:
+            result = execute_drillthrough(body.token)
+        except DrillthroughError as exc:
+            # NAME-ECHO-CX-01: the error detail passes the response scrub.
+            code = getattr(exc, "code", "drillthrough_error")
+            raise HTTPException(
+                status_code=_http_for_submit_status(code),
+                detail=scrub_http_detail(
+                    {"code": code, "message": str(exc)},
+                    attempts,
+                    verified=_drill_grant(body.token),
+                ),
+            ) from exc
+    # The drill response carries rows, SQL, ids and counts only: no free text to scrub.
+    return DrillthroughResponse.model_validate(result)
+
+
+def _drill_grant(token: str) -> Any:
+    """The session grant a drill token names, or None when it cannot be resolved."""
+    from CortexOS.execution.drillthrough import verify_token
+    from CortexOS.execution.session_manifests import get_session_registry
 
     try:
-        result = execute_drillthrough(body.token)
-    except DrillthroughError as exc:
-        raise HTTPException(
-            status_code=_http_for_submit_status(getattr(exc, "code", "drillthrough_error")),
-            detail={"code": getattr(exc, "code", "drillthrough_error"), "message": str(exc)},
-        ) from exc
-    return DrillthroughResponse.model_validate(result)
+        return get_session_registry().resolve(str(verify_token(token)["session_id"]))
+    except Exception:  # noqa: BLE001 - no grant resolved: no name counts as granted
+        return None
 
 
 @router.post("/submit", response_model=QueryResult, operation_id="submit")

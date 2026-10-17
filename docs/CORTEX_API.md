@@ -42,6 +42,24 @@ served as stored with no model call: `plan_source=other`,
 `generative.check` = `certified_query:<id>`; the SQL is in `sql_used` and
 `generative.sql`, not `query_sql`.
 
+Stale lake (#402, no new fields). SQL that names a column with a declared value
+domain (`packs/dms/ontology/object_types.yaml`, e.g. `transactions.txn_type`)
+is executed only when the lake stores the declared canonical values. A lake
+built before the declaration, or by another loader, that still holds a source
+spelling (`OUT`) or a value the declaration does not list is an abstain named
+`lake_value_domain_stale:<table>.<column>` in `answer` and `assumptions`
+(`answer_step=value_domain` on the L2 serve path): no rows, no figure, and no
+stored value in the text. The check sits in the query seam, so
+`POST /v1/contract/submit` SQL that names such a column on such a lake is
+`status=sql_gate_abstain` with the same reason. The plan+SQL ladder
+(`CORTEX_PLAN_SQL=1`) stops on it with the same reason (`badge=abstain`); it is
+not fed back to the model as a retryable gate error. The check is kept per
+read-only warehouse instance, so a lake renamed over the path is checked by the
+first instance that reads it. Rebuild the lake (`load_inventory_csv` or the
+lakehouse silver sync) to clear it. On `generate=true`, SQL whose sales measure
+pins a value outside the declared values is a named retry,
+`measure_filter_undeclared`, and is never returned as validated.
+
 ## Key posture (local vs cloud)
 
 OpenVault is the only vault. Cortex does not store provider secrets. Callers

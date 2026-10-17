@@ -25,6 +25,7 @@ from CortexOS.execution.session_manifests import get_session_registry
 from CortexOS.execution.telemetry import new_run_id, record_run
 from CortexOS.execution.warehouse import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     read_only_queries_enabled,
     warehouse_path,
@@ -221,6 +222,7 @@ def execute_sql(
     db_path: Any = None,
     explain_gate: bool | None = None,
     params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms).
 
@@ -228,7 +230,125 @@ def execute_sql(
     truthy), run DuckDB EXPLAIN after manifest enforce and before fetch.
     ``params`` are forwarded to both EXPLAIN and the fetch execute so bind
     placeholders in caller SQL survive predicate wrapping.
+
+    The statement, and the text of any error it raises, are noted on the
+    request's attempt record (:mod:`CortexOS.sql_attempts`).
+
+    Declared value domains (#402): when the post-enforce SQL names a column
+    with a declared value domain and the lake it runs on stores values the
+    declaration does not (a build that predates it, or another loader),
+    ``LakeValueDomainStale`` (a ``SqlGateAbstain``) is raised before any row is
+    fetched: a filter on the declared values would match nothing there.
+    ``value_domains`` defaults to the serving warehouse's declaration
+    (``warehouse_db.serving_value_domains``); ``()`` checks nothing.
     """
+    from CortexOS.sql_attempts import note_error, note_sql
+
+    note_sql(sql)
+    try:
+        return _execute_sql(
+            verified,
+            sql,
+            pool_id=pool_id,
+            db_path=db_path,
+            explain_gate=explain_gate,
+            params=params,
+            value_domains=value_domains,
+        )
+    except Exception as exc:
+        note_error(str(exc))
+        raise
+
+
+#: DuckDB's default schema: what a bare table reference and a bare grant key name.
+_DEFAULT_SCHEMA = "main"
+
+
+def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> frozenset[str]:
+    """Column names of the tables this grant names, folded as DuckDB compares them.
+
+    Read from the warehouse catalog that ``execute_sql`` runs on, and resolved
+    as the manifest's ``_grant_key`` resolves a reference: a grant key
+    ``schema.table`` matches only that schema, and a bare key matches only the
+    table in DuckDB's default schema ``main``. A same-named table in any other
+    schema, or in another attached catalog, is a different relation and its
+    columns are not granted. Empty when the catalog cannot be read: callers
+    treat a name they cannot place as not granted.
+    """
+    from pathlib import Path
+
+    from CortexOS.identifier_fold import fold_identifier
+
+    wanted: set[tuple[str, str]] = set()
+    for key in verified.row_predicates:
+        parts = str(key).split(".")
+        schema = fold_identifier(parts[-2]) if len(parts) > 1 else _DEFAULT_SCHEMA
+        wanted.add((schema, fold_identifier(parts[-1])))
+    if not wanted:
+        return frozenset()
+    path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
+    if not Path(path).exists():
+        return frozenset()
+    try:
+        con = get_connection(path, read_only=True)
+        try:
+            rows = con.execute(
+                "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+                "WHERE table_catalog = current_database()"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - an unreadable catalog grants nothing
+        return frozenset()
+    out: set[str] = set()
+    for schema, table, column in rows:
+        if (fold_identifier(str(schema)), fold_identifier(str(table))) in wanted:
+            out.add(fold_identifier(str(column)))
+    return frozenset(out)
+
+
+_ENGINE_BUILTINS: frozenset[str] | None = None
+
+
+def engine_builtin_names() -> frozenset[str]:
+    """Names of the engine's own functions and types, folded as DuckDB compares them.
+
+    Read from DuckDB's catalog of internal entries on a database with no
+    data, so a macro or type defined in a warehouse is never among them. Empty
+    when the catalog cannot be read: callers then treat every function name as
+    a name they cannot place. A successful read is kept for the process, since
+    the built-ins of one engine build do not change.
+    """
+    global _ENGINE_BUILTINS
+    if _ENGINE_BUILTINS is not None:
+        return _ENGINE_BUILTINS
+    from CortexOS.identifier_fold import fold_identifier
+
+    try:
+        con = get_connection(":memory:")
+        try:
+            rows = con.execute(
+                "SELECT function_name FROM duckdb_functions() WHERE internal "
+                "UNION SELECT type_name FROM duckdb_types() WHERE internal"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - an unreadable catalog names no built-in
+        return frozenset()
+    _ENGINE_BUILTINS = frozenset(fold_identifier(str(name)) for (name,) in rows if name)
+    return _ENGINE_BUILTINS
+
+
+def _execute_sql(
+    verified: VerifiedManifest,
+    sql: str,
+    *,
+    pool_id: str | None = None,
+    db_path: Any = None,
+    explain_gate: bool | None = None,
+    params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
+) -> tuple[list[dict[str, Any]], float, float]:
     import os
 
     import duckdb
@@ -261,6 +381,23 @@ def execute_sql(
                         f"EXPLAIN rejected SQL: {reason}",
                         violations=[f"EXPLAIN_FAILED:{reason}"],
                         raw_detail=detail,
+                    )
+            if value_domains is None:
+                from CortexOS.dms.warehouse_db import serving_value_domains
+
+                value_domains = serving_value_domains()
+            if value_domains:
+                from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
+                from CortexOS.ontology.value_domain import stale_columns, stale_reason
+
+                # Kept per read-only instance this cursor reads, never per path:
+                # a file renamed over the path is a later instance's to check.
+                drift = stale_columns(
+                    con, safe_sql, value_domains, instance=connection_instance(con)
+                )
+                if drift:
+                    raise LakeValueDomainStale(
+                        stale_reason(drift), codes=[item.code for item in drift]
                     )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s
@@ -319,9 +456,11 @@ __all__ = [
     "PoolMismatch",
     "PoolRequired",
     "SqlRequired",
+    "engine_builtin_names",
     "execute_count",
     "execute_sql",
     "get_verifier",
+    "granted_column_names",
     "refresh_jwks",
     "set_verifier_for_tests",
     "submit_request",
