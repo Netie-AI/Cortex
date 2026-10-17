@@ -50,6 +50,12 @@ jobs:
           python -c "import dbos,qdrant_client,tantivy,sentence_transformers"
           python scripts/export_openapi.py --check
 
+      - name: Semantics export drift
+        # VALUE-NORMALIZE-CX-01 (#387): contract/semantics/<pack>.json is the
+        # declared value domains + measures DMS vendors. A YAML edit without
+        # regeneration fails here.
+        run: python scripts/export_semantics.py --check
+
       - name: Contract compatibility
         # Every published minor must differ from its predecessor only additively,
         # and each frozen spec must match its .sha256 sidecar — that sidecar is
@@ -67,6 +73,20 @@ jobs:
             tests/test_freeroute_router1.py::test_baseline_records_setup_without_inventing_numbers_when_armed \
             tests/test_freeroute_router1.py::test_baseline_refuses_when_learn_unset \
             tests/test_freeroute_router1.py::test_refusal_tests_have_no_skip_or_xfail_markers
+
+      - name: OpenVault at the HX-01 mirror pin (for tests/harness/test_ov_key_envs.py)
+        # Public repo, no token. Only the files the drift test reads are checked
+        # out. Under CI the test fails, not skips, if OPENVAULT_SRC is missing.
+        run: |
+          set -euo pipefail
+          read -r OV_REPO OV_PIN < <(python -c "from CortexOS.integrations.harness import ov_key_envs as m; print(m.OV_REPO, m.OV_PIN)")
+          OV_DIR="${RUNNER_TEMP}/OpenVault"
+          git init -q "${OV_DIR}"
+          git -C "${OV_DIR}" sparse-checkout set --no-cone $(python -c "from CortexOS.integrations.harness import ov_key_envs as m; print(' '.join(sorted(set(m.OV_SOURCES.values()))))")
+          git -C "${OV_DIR}" fetch -q --depth 1 --filter=blob:none "https://github.com/${OV_REPO}.git" "${OV_PIN}"
+          git -C "${OV_DIR}" checkout -q FETCH_HEAD
+          test "$(git -C "${OV_DIR}" rev-parse HEAD)" = "${OV_PIN}"
+          echo "OPENVAULT_SRC=${OV_DIR}" >> "${GITHUB_ENV}"
 
       - name: Pytest
         run: python -m pytest tests/ -q --tb=short
@@ -149,8 +169,11 @@ jobs:
       statuses: read
     continue-on-error: true
     steps:
+      # The decision script comes from the base, never from the PR under decision.
       - uses: actions/checkout@v4
-      - name: Squash-merge if perfect
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Squash-merge if tier:fast + exact-head CLEAR + different-family AGREE
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
