@@ -14,6 +14,9 @@ unmapped lake, for the items the mapping touches and for the ones it does not.
 
 from __future__ import annotations
 
+import csv
+import logging
+import shutil
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -397,3 +400,141 @@ def test_l2_schema_block_carries_the_declared_values() -> None:
     block = schema_retrieval.schema_prompt_block(schema)
     assert "transactions.txn_type values: 'outbound', 'inbound'" in block
     assert "'OUT'" not in block
+
+
+# ── the built lake holds the declared domain, and nothing is guessed ────────
+
+
+SALES_CERTIFIED = ("cq_sales_top5_value", "cq_top3_category_sales")
+
+
+def _csv_rows(samples: Path, fname: str) -> list[dict[str, str]]:
+    with (samples / fname).open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _sales_oracle(samples: Path, cid: str) -> list[tuple[str, float]]:
+    """Rows the certified sales query must return, computed from the CSVs in Python.
+
+    Independent of the ontology YAML and of the SQL: a sale is a row the source
+    wrote as ``OUT``.
+    """
+    txns = [r for r in _csv_rows(samples, "transactions_clean.csv") if r["txn_type"] == "OUT"]
+    if cid == "cq_sales_top5_value":
+        key = {r["sku"]: r["sku"] for r in txns}
+        limit = 5
+    else:
+        inv = _csv_rows(samples, "inventory_clean.csv")
+        cats: dict[str, set[str]] = {}
+        for r in inv:
+            cats.setdefault(r["sku"], set()).add(r["category"])
+        assert all(len(c) == 1 for c in cats.values())  # the join cannot fan out
+        key = {sku: next(iter(c)) for sku, c in cats.items()}
+        limit = 3
+    total: dict[str, float] = {}
+    for r in txns:
+        if r["sku"] in key:
+            k = key[r["sku"]]
+            total[k] = total.get(k, 0.0) + float(r["quantity_kg"]) * float(r["unit_cost_myr"])
+    ranked = sorted(total.items(), key=lambda kv: (-round(kv[1], 2), kv[0]))
+    return [(k, round(v, 2)) for k, v in ranked[:limit]]
+
+
+def _assert_rows(got: list[tuple[Any, ...]] | str, want: list[tuple[str, float]]) -> None:
+    assert isinstance(got, list), got
+    assert [r[0] for r in got] == [k for k, _ in want]
+    assert [float(r[1]) for r in got] == pytest.approx([v for _, v in want], abs=0.011)
+
+
+def test_built_lake_holds_exactly_the_declared_canonical_values(lakes: dict[str, Path]) -> None:
+    domains = vd.load_value_domains(DMS_PACK)
+    con = duckdb.connect(str(lakes["mapped"]), read_only=True)
+    try:
+        stored = {r[0] for r in con.execute("SELECT DISTINCT txn_type FROM transactions").fetchall()}
+        assert stored == set(_txn_domain().canonical)
+        assert vd.source_rows(con, domains) == 0
+        assert vd.undeclared_values(con, domains) == {}
+    finally:
+        con.close()
+    # The source lake holds spellings the declaration maps, and nothing else.
+    con = duckdb.connect(str(lakes["source"]), read_only=True)
+    try:
+        assert vd.undeclared_values(con, domains) == {}
+    finally:
+        con.close()
+
+
+@pytest.mark.parametrize("cid", SALES_CERTIFIED)
+def test_certified_sales_rows_on_the_built_lake_equal_the_csv_oracle(
+    lakes: dict[str, Path], cid: str
+) -> None:
+    want = _sales_oracle(warehouse_db.SAMPLES, cid)
+    assert len(want) == (5 if cid == "cq_sales_top5_value" else 3)
+    sql = _certified_sql(cid)
+    _assert_rows(_rows_on(lakes["mapped"], sql), want)
+    # Without the declared mapping the same certified SQL is a silent empty.
+    assert _rows_on(lakes["source"], sql) == []
+
+
+def _samples_with(tmp_path: Path, txn_id: str, spelling: str) -> Path:
+    """A copy of data/samples where one transaction row carries ``spelling``."""
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    for fname in warehouse_db.TABLE_FILES.values():
+        shutil.copy(warehouse_db.SAMPLES / fname, samples / fname)
+    rows = _csv_rows(samples, "transactions_clean.csv")
+    hit = [r for r in rows if r["txn_id"] == txn_id]
+    assert len(hit) == 1 and hit[0]["txn_type"] == "OUT"
+    hit[0]["txn_type"] = spelling
+    with (samples / "transactions_clean.csv").open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    return samples
+
+
+@pytest.mark.parametrize("spelling", ["Outbound", "out", "OUTBOUND", "SALE"])
+def test_undeclared_source_spelling_is_named_not_silently_mapped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    spelling: str,
+) -> None:
+    """Must-fail: only the declared ``from`` spellings map. Nothing folds case or guesses."""
+    txn_id = "TXN-200000"
+    samples = _samples_with(tmp_path, txn_id, spelling)
+    monkeypatch.setattr(warehouse_db, "SAMPLES", samples)
+    lake = tmp_path / "lake.duckdb"
+    with caplog.at_level(logging.WARNING, logger=warehouse_db.__name__):
+        warehouse_db.load_inventory_csv(db_path=lake)
+
+    domains = vd.load_value_domains(DMS_PACK)
+    con = duckdb.connect(str(lake), read_only=True)
+    try:
+        stored = con.execute(
+            "SELECT txn_type FROM transactions WHERE txn_id = ?", [txn_id]
+        ).fetchone()
+        assert stored == (spelling,)  # stored as written, not turned into 'outbound'
+        assert vd.undeclared_values(con, domains) == {"transactions.txn_type": {spelling: 1}}
+        assert vd.source_rows(con, domains) == 0
+    finally:
+        con.close()
+    named = [r.getMessage() for r in caplog.records if "value_not_declared" in r.getMessage()]
+    assert named == [f"value_not_declared:transactions.txn_type {spelling!r}=1 "
+                     "(declare it in the pack ontology)"]
+    # Rows: the row is not counted as a sale, exactly as the oracle without it.
+    _assert_rows(
+        _rows_on(lake, _certified_sql("cq_sales_top5_value")),
+        _sales_oracle(samples, "cq_sales_top5_value"),
+    )
+    shipped = _csv_rows(ROOT / "data" / "samples", "transactions_clean.csv")
+    assert _counts(lake)["outbound"] == sum(r["txn_type"] == "OUT" for r in shipped) - 1
+
+
+def test_clean_build_names_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Control for the must-fail above: the shipped samples raise no warning."""
+    with caplog.at_level(logging.WARNING, logger=warehouse_db.__name__):
+        warehouse_db.load_inventory_csv(db_path=tmp_path / "clean.duckdb")
+    assert not [r for r in caplog.records if "value_not_declared" in r.getMessage()]
