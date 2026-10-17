@@ -79,6 +79,79 @@ def catalog_outside_caller(table: exp.Table, own_catalog: str = "") -> bool:
     return catalog != own_catalog
 
 
+#: Nodes a literal-only generator argument may contain: constants, the array,
+#: struct and tuple constructors that hold them, a sign, and a typed literal
+#: such as ``DATE '2024-01-01'``. No column, call, subquery or relation.
+_LITERAL_ARGUMENT_NODES = (
+    exp.Literal,
+    exp.Null,
+    exp.Boolean,
+    exp.Neg,
+    exp.Array,
+    exp.Tuple,
+    exp.Struct,
+    exp.PropertyEQ,
+    exp.Cast,
+    exp.DataType,
+)
+
+
+def _literal_argument(node: exp.Expression) -> bool:
+    for sub in node.walk():
+        if isinstance(sub, _LITERAL_ARGUMENT_NODES):
+            continue
+        if isinstance(sub, exp.Identifier) and isinstance(sub.parent, exp.PropertyEQ):
+            continue  # the key of a struct literal, {'a': 1}
+        return False
+    return True
+
+
+def _relation_function_name(node: exp.Expression) -> str:
+    if isinstance(node, exp.Anonymous):
+        return str(node.name).lower() or "anonymous"
+    if isinstance(node, exp.Func):
+        return node.sql_name().lower()
+    return type(node).__name__.lower()
+
+
+def _unnest_is_literal_generator(node: exp.Unnest) -> bool:
+    args = list(node.expressions)
+    return bool(args) and all(_literal_argument(arg) for arg in args)
+
+
+def relation_function_violations(stmt: exp.Expression) -> list[str]:
+    """Name every function the statement reads as a relation.
+
+    A function in FROM, a JOIN, a comma join or LATERAL is a relation the table
+    and column checks below never see by name: ``read_csv``, ``glob``,
+    ``duckdb_tables()`` or ``query_table`` all parse to a table with an empty
+    name, and ``LATERAL read_csv(...)`` parses to no table at all. The walk
+    covers subqueries and CTE bodies. The one function allowed is the plain
+    generator this gate already served, ``UNNEST`` over literal arguments,
+    which touches no storage. Anything else is refused by name.
+    """
+    found: list[str] = []
+    for node in stmt.walk():
+        if isinstance(node, exp.Table):
+            if not isinstance(node.this, exp.Identifier):
+                found.append(f"TABLE_FUNCTION:{_relation_function_name(node.this)}")
+        elif isinstance(node, exp.Lateral):
+            inner = node.this
+            if isinstance(inner, exp.Subquery | exp.Select | exp.Unnest | exp.Table):
+                continue  # a subquery is checked by its own nodes; the rest below
+            found.append(f"TABLE_FUNCTION:{_relation_function_name(inner)}")
+        elif isinstance(node, exp.Unnest):
+            if isinstance(node.parent, exp.From | exp.Join | exp.Lateral) and not (
+                _unnest_is_literal_generator(node)
+            ):
+                found.append("TABLE_FUNCTION:unnest")
+        elif isinstance(node, exp.From | exp.Join):
+            inner = node.this
+            if isinstance(inner, exp.Func) and not isinstance(inner, exp.Unnest | exp.Lateral):
+                found.append(f"TABLE_FUNCTION:{_relation_function_name(inner)}")
+    return found
+
+
 def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
     violations: list[str] = []
     try:
@@ -110,6 +183,13 @@ def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
         if isinstance(node, FORBIDDEN):
             violations.append("DDL_ATTEMPT")
             return GuardrailResult(False, violations, None)
+
+    table_functions = relation_function_violations(stmt)
+    if table_functions:
+        # Fail closed before any name check: a function relation has no name
+        # the grant can be matched against.
+        violations.extend(dict.fromkeys(table_functions))
+        return GuardrailResult(False, violations, None)
 
     tables = _allowed_tables(semantic)
     sensitive = _sensitive_columns(semantic)
