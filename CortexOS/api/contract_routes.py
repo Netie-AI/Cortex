@@ -329,6 +329,11 @@ async def contract_ask(body: AskRequest) -> Answer:
                     status_code=_http_for_submit_status(code),
                     detail={"code": code, "message": str(exc)},
                 ) from exc
+            except Exception as exc:  # noqa: BLE001 - a failed model step is an answer, not a 500
+                from CortexOS.dms.query_service import engine_failure_abstain
+
+                # AI-ERROR-NO-500-01: the same named abstain as POST /dms/query.
+                result = engine_failure_abstain(exc)
 
         if isinstance(result, Answer):
             data = result.model_dump()
