@@ -676,3 +676,81 @@ def test_row_answer_with_a_subquery_beside_its_columns_still_drills(
     assert [(r["txn_id"], round(float(r["d"]), 9)) for r in body["rows"]] == [
         (r["txn_id"], round(float(r["d"]), 9)) for r in oracle
     ]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'outbound' "
+        "GROUP BY txn_type QUALIFY ROW_NUMBER() OVER (ORDER BY txn_type) <= 2",
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'outbound' "
+        "GROUP BY txn_type QUALIFY ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) <= 1",
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'outbound' "
+        "GROUP BY txn_type QUALIFY ROW_NUMBER() OVER (ORDER BY n DESC) <= 2",
+    ],
+    ids=["qualify-on-key", "qualify-on-aggregate", "qualify-on-alias"],
+)
+def test_group_answer_whose_qualify_drops_groups_is_a_named_4xx(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+) -> None:
+    """Before: QUALIFY ranked detail rows in the drill, 200 with 2 rows stamped exact."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    kept = _oracle(sql)
+    assert len(answer["rows"]) == len(kept) < 3
+    for row in answer["rows"]:
+        assert f"txn_type={row['txn_type']}" in answer["answer"]
+
+    _assert_named_400(drill_client, answer, "keeps only some groups")
+
+
+def test_group_answer_whose_qualify_keeps_every_group_still_drills(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    """Positive control: a QUALIFY that dropped no group drills to every counted row."""
+    sql = (
+        "SELECT txn_type, COUNT(*) AS n FROM transactions WHERE txn_type <> 'outbound' "
+        "GROUP BY txn_type QUALIFY ROW_NUMBER() OVER (ORDER BY txn_type) <= 3"
+    )
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    counts = {r["txn_type"]: int(r["n"]) for r in answer["rows"]}
+    assert counts == {r["txn_type"]: int(r["n"]) for r in _oracle(sql)}
+    assert len(counts) == 3
+    for txn_type, n in counts.items():
+        assert f"txn_type={txn_type}, n={n}" in answer["answer"]
+
+    body = _drill(drill_client, answer)
+
+    drilled: dict[str, int] = {}
+    for row in body["rows"]:
+        drilled[row["txn_type"]] = drilled.get(row["txn_type"], 0) + 1
+    assert drilled == counts
+    assert body["total_count"] == sum(counts.values())
+    assert "QUALIFY" not in body["sql_used"].upper()
+
+
+def test_row_answer_with_qualify_drills_to_exactly_its_rows(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+) -> None:
+    """A row answer filtered by QUALIFY drills to its own rows, and counts only those."""
+    sql = (
+        "SELECT txn_id, txn_type FROM transactions WHERE txn_type <> 'outbound' "
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY txn_type ORDER BY txn_id) <= 2"
+    )
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    oracle = _oracle(sql)
+    assert sorted(r["txn_id"] for r in answer["rows"]) == sorted(r["txn_id"] for r in oracle)
+    assert len(oracle) == 6
+
+    body = _drill(drill_client, answer)
+
+    assert sorted((r["txn_id"], r["txn_type"]) for r in body["rows"]) == sorted(
+        (r["txn_id"], r["txn_type"]) for r in oracle
+    )
+    assert body["total_count"] == len(oracle)

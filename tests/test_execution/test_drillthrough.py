@@ -192,6 +192,25 @@ def test_rewrite_counts_groups_when_a_limit_may_drop_some():
     assert plain.group_count_sql is None and plain.group_limit is None
 
 
+def test_rewrite_drops_qualify_and_counts_the_groups_it_kept():
+    sql = (
+        "SELECT region, SUM(amount) AS t FROM sales GROUP BY region "
+        "QUALIFY ROW_NUMBER() OVER (ORDER BY region) <= 2"
+    )
+    out = rewrite_for_drillthrough(sql, provenance_for=lambda schema, table: [])
+    assert "QUALIFY" not in out.sql.upper()
+    assert "QUALIFY" not in out.count_sql.upper()
+    assert out.group_count_sql == (
+        "SELECT COUNT(*) AS group_count FROM "
+        "(SELECT region, SUM(amount) AS t FROM sales GROUP BY region) AS _groups"
+    )
+    assert out.kept_count_sql == (
+        "SELECT COUNT(*) AS kept_count FROM "
+        "(SELECT region, SUM(amount) AS t FROM sales GROUP BY region "
+        "QUALIFY ROW_NUMBER() OVER (ORDER BY region) <= 2) AS _kept"
+    )
+
+
 def _no_prov(schema, table):  # noqa: ANN001, ANN202
     return []
 

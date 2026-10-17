@@ -61,6 +61,9 @@ class DrillRewrite:
     group_count_sql: str | None = None
     #: The answer's LIMIT; more groups than this means the drill cannot be exact.
     group_limit: int | None = None
+    #: Counts the answer's own rows when its QUALIFY may have dropped groups;
+    #: fewer rows than ``group_count_sql`` groups means the drill cannot be exact.
+    kept_count_sql: str | None = None
 
 
 def _hmac_key() -> bytes:
@@ -449,6 +452,8 @@ def _rewrite(
     offset = tree.args.get("offset")
     group_count_sql: str | None = None
     group_limit: int | None = None
+    kept_count_sql: str | None = None
+    qualify = tree.args.get("qualify")
     grouped = tree.args.get("group") is not None
     aggregated = grouped or any(_own_aggregates(tree, p) for p in tree.expressions)
     if aggregated:
@@ -484,6 +489,23 @@ def _rewrite(
                 f"SELECT COUNT(*) AS group_count FROM ({groups.sql(dialect=dialect)}) AS _groups"
             )
             group_limit = kept
+        if qualify is not None:
+            # QUALIFY filters the answer's groups, and a window in it would rank
+            # detail rows in the drill. Whether it dropped a group is known only from
+            # the data: compare the groups before QUALIFY with the rows the answer kept.
+            groups = sqlglot.parse_one(sql, read=dialect)
+            groups.set("qualify", None)
+            groups.set("order", None)
+            groups.set("limit", None)
+            group_count_sql = (
+                f"SELECT COUNT(*) AS group_count FROM ({groups.sql(dialect=dialect)}) AS _groups"
+            )
+            group_limit = None
+            kept_count_sql = (
+                "SELECT COUNT(*) AS kept_count FROM "
+                f"({sqlglot.parse_one(sql, read=dialect).sql(dialect=dialect)}) AS _kept"
+            )
+            tree.set("qualify", None)
     elif all(not _outer_columns(tree, p) for p in tree.expressions) and any(
         _aggregating_subquery(p) for p in tree.expressions
     ):
@@ -549,6 +571,8 @@ def _rewrite(
     count_tree.set("having", None)
     count_tree.set("order", None)
     count_tree.set("limit", None)
+    if aggregated:
+        count_tree.set("qualify", None)
     count_tree.set(
         "expressions", [exp.alias_(exp.Count(this=exp.Star()), "contributing_count", table=False)]
     )
@@ -557,8 +581,9 @@ def _rewrite(
     if tree.args.get("where") is not None:
         count_tree.set("where", tree.args["where"].copy())
     count_sql = count_tree.sql(dialect=dialect)
-    if not aggregated and (limit is not None or offset is not None):
-        # Rows past the answer's own LIMIT/OFFSET did not contribute.
+    if not aggregated and (limit is not None or offset is not None or qualify is not None):
+        # Rows past the answer's own LIMIT/OFFSET, or filtered by its QUALIFY, did
+        # not contribute.
         count_sql = (
             "SELECT COUNT(*) AS contributing_count FROM "
             f"({sqlglot.parse_one(sql, read=dialect).sql(dialect=dialect)}) AS _answer"
@@ -571,6 +596,7 @@ def _rewrite(
         measure_expr=measure,
         group_count_sql=group_count_sql,
         group_limit=group_limit,
+        kept_count_sql=kept_count_sql,
     )
 
 
@@ -626,10 +652,17 @@ def execute_drillthrough(
             ) from exc
         return out
 
-    if rewritten.group_count_sql is not None and rewritten.group_limit is not None:
+    if rewritten.group_count_sql is not None:
         counted = run(rewritten.group_count_sql)
         groups = int(counted[0].get("group_count") or 0) if counted else 0
-        if groups > rewritten.group_limit:
+        if rewritten.kept_count_sql is not None:
+            kept_rows = run(rewritten.kept_count_sql)
+            limit = int(kept_rows[0].get("kept_count") or 0) if kept_rows else 0
+        elif rewritten.group_limit is not None:
+            limit = rewritten.group_limit
+        else:
+            raise DrillthroughError(_SOME_GROUPS)
+        if groups > limit:
             raise DrillthroughError(_SOME_GROUPS)
     rows = run(rewritten.sql)
     try:
