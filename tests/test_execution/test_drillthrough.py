@@ -541,3 +541,51 @@ def test_every_engine_aggregate_drills_to_real_row_values_or_is_refused():
     con.close()
     assert aggregating > 300 and drilled > 400
     assert failures == []
+
+
+def test_having_drill_serves_only_the_rows_of_the_groups_the_answer_kept():
+    """HAVING binds names to aggregate aliases first; WHERE binds them to columns.
+
+    Each rewrite is a DrillthroughError, or its drill returns exactly the rows of
+    the groups the answer kept.
+    """
+    import duckdb
+
+    from CortexOS.execution.drillthrough import DrillthroughError
+
+    con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE t AS SELECT * FROM (VALUES "
+        "(1, 'a', 5.0), (2, 'a', 50.0), (3, 'b', 40.0), (4, 'b', 45.0), (5, 'c', 1.0)"
+        ") AS v(id, k, qty)"
+    )
+    cases = [
+        ("SELECT k, SUM(qty) AS qty FROM t GROUP BY k HAVING qty > 50", False),
+        ("SELECT k, MIN(qty) AS qty FROM t GROUP BY k HAVING qty > 30", False),
+        ("SELECT k, MAX(qty) AS qty FROM t GROUP BY k HAVING qty < 2 OR k = 'b'", False),
+        ("SELECT k, SUM(qty) AS s FROM t GROUP BY k HAVING SUM(qty) > 50", False),
+        ("SELECT k, SUM(qty) AS s FROM t GROUP BY k HAVING s > 50", False),
+        ("SELECT k, COUNT(*) AS n FROM t GROUP BY ROLLUP (k) HAVING k IS NULL", False),
+        ("SELECT k, SUM(qty) AS s FROM t GROUP BY k HAVING k IN (SELECT 'a')", False),
+        ("SELECT k, SUM(qty) AS qty FROM t GROUP BY k HAVING k <> 'c'", True),
+        ("SELECT k AS g, COUNT(*) AS n FROM t GROUP BY k HAVING g = 'a'", True),
+        ("SELECT k, COUNT(*) AS n FROM t GROUP BY k HAVING upper(k) = 'B'", True),
+        ("SELECT k, COUNT(*) AS n FROM t GROUP BY 1 HAVING k = 'a'", True),
+    ]
+    for sql, drills in cases:
+        kept = {r[0] for r in con.execute(sql).fetchall()}
+        assert kept, sql
+        if not drills:
+            with pytest.raises(DrillthroughError, match="HAVING"):
+                rewrite_for_drillthrough(sql, provenance_for=_no_prov)
+            continue
+        out = rewrite_for_drillthrough(sql, provenance_for=_no_prov)
+        drill_sql = out.sql.replace("SELECT ", "SELECT id, ", 1)
+        drilled = sorted(r[0] for r in con.execute(drill_sql).fetchall())
+        expected = sorted(
+            r[0] for r in con.execute("SELECT id, k FROM t").fetchall() if r[1] in kept
+        )
+        assert drilled == expected, (sql, out.sql)
+        (count,) = con.execute(out.count_sql).fetchone()
+        assert count == len(expected), (sql, out.count_sql)
+    con.close()

@@ -754,3 +754,91 @@ def test_row_answer_with_qualify_drills_to_exactly_its_rows(
         (r["txn_id"], r["txn_type"]) for r in oracle
     )
     assert body["total_count"] == len(oracle)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT txn_type, SUM(quantity_kg) AS quantity_kg FROM transactions "
+        "WHERE txn_type <> 'outbound' GROUP BY txn_type HAVING quantity_kg > 30000",
+        "SELECT sku, MIN(quantity_kg) AS quantity_kg FROM transactions "
+        "GROUP BY sku HAVING quantity_kg > 30",
+        "SELECT txn_type, COUNT(*) AS n FROM transactions "
+        "GROUP BY ROLLUP (txn_type) HAVING txn_type IS NULL",
+    ],
+    ids=["sum-alias-shadows-column", "min-alias-shadows-column", "rollup-total"],
+)
+def test_group_answer_whose_having_reads_an_aggregate_is_a_named_4xx(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+) -> None:
+    """Before: HAVING moved to WHERE filtered raw rows, 200 with rows the answer never used.
+
+    ``quantity_kg`` in HAVING is the aggregate's alias; in WHERE it is the column.
+    Under ROLLUP the NULL key is the grand-total row, which no raw row matches.
+    """
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    kept = _oracle(sql)
+    assert kept and len(answer["rows"]) == len(kept)
+
+    _assert_named_400(drill_client, answer, "HAVING")
+
+
+@pytest.mark.parametrize(
+    ("sql", "oracle_sql"),
+    [
+        (
+            "SELECT txn_type, COUNT(*) AS n FROM transactions "
+            "GROUP BY txn_type HAVING txn_type = 'inbound'",
+            "SELECT txn_type FROM transactions WHERE txn_type = 'inbound'",
+        ),
+        (
+            "SELECT txn_type AS t, COUNT(*) AS n FROM transactions "
+            "GROUP BY txn_type HAVING t = 'inbound'",
+            "SELECT txn_type AS t FROM transactions WHERE txn_type = 'inbound'",
+        ),
+        (
+            "SELECT txn_type, SUM(quantity_kg) AS quantity_kg FROM transactions "
+            "WHERE txn_type <> 'outbound' GROUP BY txn_type "
+            "HAVING txn_type IN ('ADJUST', 'WRITE_OFF')",
+            "SELECT txn_type FROM transactions WHERE txn_type IN ('ADJUST', 'WRITE_OFF')",
+        ),
+    ],
+    ids=["having-on-key", "having-on-key-alias", "having-on-key-beside-shadowing-alias"],
+)
+def test_group_answer_whose_having_reads_only_group_keys_still_drills(
+    armed_openvault,
+    dms_http,  # noqa: F811
+    drill_client,
+    sql: str,
+    oracle_sql: str,
+) -> None:
+    """Positive control: HAVING on a group key keeps whole groups, so WHERE gives the same rows."""
+    answer = _ladder_answer(armed_openvault, dms_http, sql)
+    assert len(answer["rows"]) == len(_oracle(sql)) >= 1
+    key = next(iter(answer["rows"][0]))
+    oracle = _oracle(oracle_sql)
+
+    resp = drill_client.post(
+        "/v1/contract/drillthrough", json={"token": answer["drillthrough_token"]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["row_count"] == len(body["rows"]) == body["total_count"] == len(oracle)
+    drilled: dict[str, int] = {}
+    for row in body["rows"]:
+        drilled[row[key]] = drilled.get(row[key], 0) + 1
+    expected: dict[str, int] = {}
+    for row in oracle:
+        expected[row[key]] = expected.get(row[key], 0) + 1
+    assert drilled == expected
+    assert set(drilled) == {r[key] for r in answer["rows"]}
+    if "SUM(" in sql:
+        sums = {r[key]: float(r["quantity_kg"]) for r in answer["rows"]}
+        got: dict[str, float] = {}
+        for row in body["rows"]:
+            got[row[key]] = got.get(row[key], 0.0) + float(row["quantity_kg"])
+        assert got == pytest.approx(sums)

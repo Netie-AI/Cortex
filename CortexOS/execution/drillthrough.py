@@ -387,6 +387,87 @@ def _table_aliases(select: exp.Select) -> list[tuple[str | None, str, str | None
     return out
 
 
+def _same_column(a: exp.Column, b: exp.Column) -> bool:
+    if a.name.lower() != b.name.lower():
+        return False
+    return not a.table or not b.table or a.table.lower() == b.table.lower()
+
+
+def _same_key(node: exp.Expression, key: exp.Expression) -> bool:
+    if isinstance(node, exp.Column) and isinstance(key, exp.Column):
+        return _same_column(node, key)
+    return node == key
+
+
+def _having_as_row_filter(select: exp.Select, pred: exp.Expression) -> exp.Expression:
+    """The aggregated answer's HAVING as a per-row WHERE predicate, bound as DuckDB binds it.
+
+    A HAVING that reads only group keys keeps whole groups, so the same test on
+    raw rows keeps exactly their rows. Anything else (an aggregate, an alias of
+    one, a subquery, ROLLUP's NULL total row) filters groups by a value raw rows
+    do not have, and moving it would serve rows the answer never used.
+    """
+    refused = DrillthroughError(
+        "drill-through cannot derive rows for an answer whose HAVING filters on more "
+        "than its group keys"
+    )
+    aliases: dict[str, exp.Expression] = {
+        p.alias.lower(): p.this for p in select.expressions if isinstance(p, exp.Alias)
+    }
+    group = select.args.get("group")
+    keys: list[exp.Expression] = []
+    if group is not None:
+        if any(v for k, v in group.args.items() if k != "expressions"):
+            raise refused  # GROUP BY ALL, GROUPING SETS, ROLLUP, CUBE, WITH TOTALS
+        for item in group.expressions:
+            position = _int_literal(item)
+            if position is not None:
+                if not 1 <= position <= len(select.expressions):
+                    raise refused
+                proj = select.expressions[position - 1]
+                item = proj.this if isinstance(proj, exp.Alias) else proj
+            elif isinstance(item, exp.Column) and not item.table:
+                target = aliases.get(item.name.lower())
+                if target is not None and not (
+                    isinstance(target, exp.Column) and _same_column(target, item)
+                ):
+                    # DuckDB groups by a column of this name when one exists, else
+                    # by the alias; which one it was is not known here.
+                    raise refused
+            if isinstance(item, (exp.Rollup, exp.Cube, exp.GroupingSets)) or (
+                next(item.find_all(exp.Select, exp.Window), None) is not None
+                or _own_aggregates(select, item)
+            ):
+                raise refused
+            keys.append(item)
+    key_names = {k.name.lower() for k in keys if isinstance(k, exp.Column)}
+
+    resolved = pred.copy()
+    for col in list(resolved.find_all(exp.Column)):
+        name = col.name.lower()
+        if col.table or name in key_names or name not in aliases:
+            continue
+        # HAVING binds a name to a grouped column first, then to a projection alias.
+        target = aliases[name].copy()
+        if col is resolved:
+            resolved = target
+        else:
+            col.replace(target)
+
+    if next(resolved.find_all(exp.Select, exp.Window), None) is not None:
+        raise refused
+    for fn in resolved.find_all(exp.AggFunc, exp.Anonymous):
+        if _is_aggregate(fn) or (isinstance(fn, exp.Anonymous) and _function_kind(fn) == "unknown"):
+            raise refused
+    for col in resolved.find_all(exp.Column):
+        node: exp.Expression | None = col
+        while node is not None and not any(_same_key(node, k) for k in keys):
+            node = None if node is resolved else node.parent
+        if node is None:
+            raise refused
+    return resolved
+
+
 def _provenance_projections(
     aliases: list[tuple[str | None, str, str | None]],
     provenance_for: ProvenanceLookup | None = None,
@@ -520,7 +601,7 @@ def _rewrite(
     having = tree.args.get("having")
     if having is not None:
         where = tree.args.get("where")
-        having_pred = having.this
+        having_pred = _having_as_row_filter(tree, having.this) if aggregated else having.this
         if where is None:
             tree.set("where", exp.Where(this=having_pred.copy()))
         else:
