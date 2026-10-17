@@ -517,7 +517,8 @@ def _rewrite(
 ) -> DrillRewrite:
     if not isinstance(tree, exp.Select):
         raise DrillthroughError("drill-through requires a SELECT statement")
-    if tree.args.get("from_") is None:
+    # sqlglot 25 keys the FROM clause ``from``; later releases key it ``from_``.
+    if tree.args.get("from_") is None and tree.args.get("from") is None:
         # SELECT (SELECT MAX(x) FROM t): no table rows sit behind the answer's row.
         raise DrillthroughError("drill-through requires an answer that reads rows from a table")
     for proj in tree.expressions:
