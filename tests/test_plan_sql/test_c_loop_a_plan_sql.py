@@ -30,14 +30,16 @@ from tests.dms.test_c7_02_manifest_before_explain import _badge, dms_http  # noq
 SESSION = "c-loop-a-303"
 QUESTION = "how many transactions of each type"
 GRANT = {"transactions": "TRUE"}
+# ``masked: false`` (contract 1.7.0): DMS marks these columns unmasked, so the
+# sampler may put their values in the prompt. Without it nothing is sampled.
 PAYLOAD: dict[str, Any] = {
     "tables": [
         {
             "name": "transactions",
             "columns": [
-                {"name": "txn_type", "type": "VARCHAR", "description": "IN or OUT"},
-                {"name": "sku", "type": "VARCHAR"},
-                {"name": "quantity_kg", "type": "DOUBLE"},
+                {"name": "txn_type", "type": "VARCHAR", "description": "IN or OUT", "masked": False},
+                {"name": "sku", "type": "VARCHAR", "masked": False},
+                {"name": "quantity_kg", "type": "DOUBLE", "masked": False},
             ],
         }
     ]
@@ -270,7 +272,7 @@ def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
         assert "served_provider=none" in by_step[step]
 
     calls = armed_openvault.chat_calls
-    assert len(calls) == plan_sql_ask.MODEL_CALLS_PER_ATTEMPT
+    assert len(calls) == 1
     assert armed_openvault.non_openvault_calls == []
     prompt = calls[0]["body"]["messages"][1]["content"]
     assert "transactions(txn_type VARCHAR -- IN or OUT, sku VARCHAR, quantity_kg DOUBLE)" in prompt

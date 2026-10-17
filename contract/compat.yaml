@@ -139,7 +139,12 @@ supported:
       schema_context_unparsed) before any model call. A string that
       declares no table (schema_context_empty) or no granted table
       (schema_context_ungranted) is a named 200 abstain.
-      1.6 clients omit the field and get the 1.6 behaviour.
+      AskPayloadColumn gains optional masked (Security ruling on #386): the
+      plan+SQL path samples a column's distinct values into its prompt only
+      when masked is false. True or absent, the name and type may reach the
+      prompt and the values never do. This applies to 1.6 clients too: they
+      send no mask state, so their plan+SQL asks get no sampled values.
+      1.6 clients omit schema_context and get the 1.6 prompt schema.
       canonical_manifest_bytes unchanged.
 
 deprecated:

@@ -28,7 +28,6 @@ from CortexOS.plan_sql.payload import (
     sql_messages,
 )
 
-TASK_PLAN = "plan-sql-plan"
 TASK_SQL = "plan-sql-sql"
 TASK_RECONFIRM = "plan-sql-reconfirm"
 SERVED_BY_FREEROUTE = freeroute.IMPL
@@ -198,7 +197,6 @@ __all__ = [
     "PlanSqlGenerator",
     "SERVED_BY_FREEROUTE",
     "StepStamp",
-    "TASK_PLAN",
     "TASK_RECONFIRM",
     "TASK_SQL",
 ]

@@ -30,22 +30,64 @@ SCHEMA_CONTEXT_EMPTY = schema_ctx.SCHEMA_CONTEXT_EMPTY
 #: The string declares tables and none of them is granted to this session.
 SCHEMA_CONTEXT_UNGRANTED = "schema_context_ungranted"
 
+#: Where an error names a column that does not exist: the SQL gate's
+#: ``UNKNOWN_COLUMN:<name>``, DuckDB's ``Referenced column "<name>" not found``
+#: and its qualified form ``Table "t" does not have a column named "<name>"``.
 _UNKNOWN_COL = re.compile(
     r"UNKNOWN_COLUMN:([A-Za-z_][A-Za-z0-9_]*)"
-    r"|column\s+\"([A-Za-z_][A-Za-z0-9_]*)\""
-    r"|column\s+'([A-Za-z_][A-Za-z0-9_]*)'",
+    r"|column\s+(?:named\s+)?\"([A-Za-z_][A-Za-z0-9_]*)\""
+    r"|column\s+(?:named\s+)?'([A-Za-z_][A-Za-z0-9_]*)'",
+    re.IGNORECASE,
+)
+
+#: A did-you-mean name is a typo of the unknown one: at most this many edits
+#: (insert, delete, replace, or swap two adjacent characters), case ignored.
+_TYPO_EDITS = 1
+#: And at least this similar (``difflib`` ratio), so one changed letter in a
+#: short name is not a typo of a different word (``date`` is not ``data``).
+_TYPO_RATIO = 0.8
+_MAX_HINTS = 3
+_SQL_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: The database's own suggestions in an error it raised: DuckDB's binder
+#: ``Candidate bindings: "a", "t.b"`` and its catalog ``Did you mean "x"?``.
+#: They name lake columns whether or not they are close to the unknown name
+#: and whether or not the prompt's granted catalog holds them.
+_DB_SUGGESTION = re.compile(
+    r"\s*(?:Candidate bindings:(?:\s*\"[^\"]*\"\s*,?)*|Did you mean\s*\"[^\"]*\"\s*\??)",
     re.IGNORECASE,
 )
 
 
-def column_names(request: PlanSqlRequest) -> tuple[str, ...]:
-    """Column names on the request the prompt will see, in listed order."""
+def column_names(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[str, ...]:
+    """Column names of granted tables on the request the prompt sees, in listed order.
+
+    The pool :func:`did_you_mean` draws from. A table outside ``granted``
+    (folded the DuckDB way) contributes nothing, so a hint can only name a
+    column of a granted table that the prompt already showed.
+    """
+    allowed = {fold_identifier(str(name).strip()) for name in granted}
     seen: list[str] = []
     for table in request.payload.tables:
+        if fold_identifier(table.name.strip()) not in allowed:
+            continue
         for column in table.columns:
             if column.name not in seen:
                 seen.append(column.name)
     return tuple(seen)
+
+
+def unmasked_columns(payload: AskPayload) -> frozenset[tuple[str, str]]:
+    """``(table, column)`` pairs, folded, that every listing marks ``masked: false``.
+
+    Fail closed: a column listed twice is unmasked only if both listings say
+    so, and a column with ``masked`` true or absent is not in the set.
+    """
+    states: dict[tuple[str, str], set[bool | None]] = {}
+    for table in payload.tables:
+        for column in table.columns:
+            key = (fold_identifier(table.name.strip()), fold_identifier(column.name))
+            states.setdefault(key, set()).add(column.masked)
+    return frozenset(key for key, seen in states.items() if seen == {False})
 
 
 def narrow(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[PlanSqlRequest, str]:
@@ -56,7 +98,10 @@ def narrow(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[PlanSqlRequ
     reads it, and the prompt's tables are ``grant ∩ declared tables``, folded
     the DuckDB way. Columns, types and joins come only from that string. A
     join is kept only when both of its tables are. The payload's own tables,
-    columns and joins are not offered.
+    columns and joins are not offered. The one thing read from the payload is
+    a kept column's ``masked`` state (contract 1.7.0), matched by folded table
+    and column name; a column the payload does not list has none, so the
+    sampler leaves it alone.
 
     Fail closed for a direct caller: a value ``schema_context.problem``
     refuses returns its code (the route has already turned those into a
@@ -71,6 +116,7 @@ def narrow(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[PlanSqlRequ
         return request, found[0]
     catalog = schema_ctx.parse_schema_context(text)
     allowed = {fold_identifier(str(name)) for name in granted}
+    unmasked = unmasked_columns(request.payload)
     tables: list[AskPayloadTable] = []
     for name, columns in catalog.tables.items():
         if name not in allowed:
@@ -79,7 +125,14 @@ def narrow(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[PlanSqlRequ
         tables.append(
             AskPayloadTable(
                 name=name,
-                columns=[AskPayloadColumn(name=col, type=types.get(col)) for col in columns],
+                columns=[
+                    AskPayloadColumn(
+                        name=col,
+                        type=types.get(col),
+                        masked=False if (name, col) in unmasked else None,
+                    )
+                    for col in columns
+                ],
             )
         )
     if not tables:
@@ -112,36 +165,94 @@ def unknown_column_names(detail: str) -> tuple[str, ...]:
     return tuple(found)
 
 
-def did_you_mean(unknown: Sequence[str], columns: Sequence[str]) -> str:
-    """Hint line from the granted catalog, or ``""`` when there is nothing to suggest.
+def _edits(left: str, right: str) -> int:
+    """Optimal-string-alignment distance (an adjacent swap is one edit)."""
+    rows = [list(range(len(right) + 1))]
+    for i, a in enumerate(left, 1):
+        row = [i] + [0] * len(right)
+        for j, b in enumerate(right, 1):
+            row[j] = min(
+                rows[-1][j] + 1,
+                row[j - 1] + 1,
+                rows[-1][j - 1] + (a != b),
+            )
+            if i > 1 and j > 1 and a == right[j - 2] and left[i - 2] == b:
+                row[j] = min(row[j], rows[-2][j - 2] + 1)
+        rows.append(row)
+    return rows[-1][-1]
 
-    Close names come first. When nothing is close, the hint still names columns
-    from the catalog so the next attempt is not shown the rest of the ontology.
+
+def _is_typo(unknown: str, column: str) -> bool:
+    left, right = unknown.lower(), column.lower()
+    if left == right or abs(len(left) - len(right)) > _TYPO_EDITS:
+        return False
+    if _edits(left, right) > _TYPO_EDITS:
+        return False
+    return difflib.SequenceMatcher(None, left, right).ratio() >= _TYPO_RATIO
+
+
+def did_you_mean(unknown: Sequence[str], columns: Sequence[str]) -> str:
+    """``did you mean: <names>`` naming typos of an unknown column, else ``""``.
+
+    ``columns`` is the granted catalog the prompt showed (:func:`column_names`).
+    A column is offered only when it is a typo of the unknown name: one edit,
+    case ignored, and a ``difflib`` ratio of at least 0.8 (``txn_typo`` gives
+    ``txn_type``). Nothing else is offered and there is no fallback. A column
+    the question needs that is not in the catalog (``revenue`` on a table of
+    ``quantity_kg``) gets no hint: offering a column that is not close is an
+    invitation to answer a different question under the asked-for name.
     """
     pool = list(dict.fromkeys(col for col in columns if col))
     if not unknown or not pool:
         return ""
-    suggestions: list[str] = []
     blocked = {name.lower() for name in unknown}
+    suggestions: list[str] = []
     for name in unknown:
-        close = difflib.get_close_matches(name, pool, n=3, cutoff=0.4)
-        for item in close:
-            if item.lower() not in blocked and item not in suggestions:
-                suggestions.append(item)
-    if not suggestions:
         for item in pool:
-            if item.lower() not in blocked and item not in suggestions:
+            if item.lower() in blocked or item in suggestions:
+                continue
+            if _is_typo(name, item):
                 suggestions.append(item)
-            if len(suggestions) >= 3:
-                break
     if not suggestions:
         return ""
-    return "did you mean: " + ", ".join(suggestions[:3])
+    return "did you mean: " + ", ".join(suggestions[:_MAX_HINTS])
+
+
+def drop_db_suggestions(detail: str) -> str:
+    """``detail`` without the database's own did-you-mean lists."""
+    return _DB_SUGGESTION.sub("", detail or "")
+
+
+def retry_detail(detail: str, columns: Sequence[str]) -> str:
+    """A failure line for the error-fed retry prompt.
+
+    The database's own suggestions are removed, and a hint is added only when
+    a column of the granted catalog (``columns``) is a typo of an unknown one.
+    So the only names the retry is offered are :func:`did_you_mean`'s.
+    """
+    return with_did_you_mean(drop_db_suggestions(detail), columns)
 
 
 def with_did_you_mean(detail: str, columns: Sequence[str]) -> str:
-    """Append a catalog hint when ``detail`` names an unknown column."""
+    """``detail`` plus a catalog hint when it names a typo of a catalog column."""
     hint = did_you_mean(unknown_column_names(detail), columns)
     if not hint or hint in detail:
         return detail
     return f"{detail}; {hint}"
+
+
+def unknown_column_hint(error_text: str, sql: str, columns: Sequence[str]) -> str:
+    """``UNKNOWN_COLUMN:<names>; did you mean: ...`` for a database error, or ``""``.
+
+    For an executor error, whose text is not fed back on its own. Only the
+    unknown names the model's ``sql`` itself wrote are named (never a column a
+    manifest predicate added), and only when :func:`did_you_mean` has a typo
+    match for one of them. The database's own wording, including any candidate
+    columns it lists, is not part of the result.
+    """
+    words = {word.lower() for word in _SQL_WORD.findall(sql or "")}
+    names = [name for name in unknown_column_names(error_text) if name.lower() in words]
+    hint = did_you_mean(names, columns)
+    if not hint:
+        return ""
+    return f"UNKNOWN_COLUMN:{','.join(names)}; {hint}"

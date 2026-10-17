@@ -10,8 +10,10 @@ Order, each step stamped (``StepStamp``):
    grants are refused.
 2. ``payload``: every selected table and both ends of every join must be in the
    grant. A payload that widens the grant is refused before any model call.
-3. ``sample``: distinct values from the granted payload columns, so filters can
-   be grounded in what the tables actually hold. No model call.
+3. ``sample``: distinct values from the granted payload columns DMS marked
+   ``masked: false`` (contract 1.7.0), so filters can be grounded in what the
+   tables actually hold. A column marked masked, or with no mask state, keeps
+   its name and type in the prompt and is never probed. No model call.
 4. ``sql``: one model call per attempt through the injected ``PlanSqlGenerator``
    (default: OpenVault FreeRoute). The #329 planner call is folded into this
    call: there is no serial planner or classifier before generation. A step
@@ -23,8 +25,9 @@ Order, each step stamped (``StepStamp``):
    ``SQL_ATTEMPTS`` writes on the same model. SQL with an output column that
    does not derive from a granted table column (a literal, a VALUES list) is
    such an error: it is fed back and never executed (``sql_lineage``). An
-   unknown-column error also carries did-you-mean hints from the granted
-   catalog.
+   unknown-column error also carries a did-you-mean hint when a granted
+   catalog column is a typo of the unknown name (one edit). A column that is
+   not close is never offered, so an absent column gets no hint.
 6. ``escalate``: one more SQL pass (still one call) on the stronger route
    OpenVault configured (``routes.stronger``). Cortex does not pick a provider.
    If OV did not configure one, the ladder reconfirms and does not invent a
@@ -45,8 +48,10 @@ FreeRoute client) is not a step. DMS reads the per-step counts only from that
 object.
 
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
-route-stamp failure, which never reaches a model result). PII is not an abstain
-case and this path does not mask it.
+route-stamp failure, which never reaches a model result). PII wording in a
+question is not an abstain case and this path does not mask answer rows. What
+it masks is the prompt: no sampled value of a column DMS did not mark unmasked
+reaches a model (step 3).
 
 Scored rounds (``scored_pack_id`` / ``CORTEX_SCORED_ROUND``, the #290 guard) run
 FreeRoute on the benchmark split so the route store never learns from them.
@@ -512,17 +517,28 @@ def _audit_raw(sql: str, exc: Any) -> None:
 def _sample_values(
     grant: Any, request: plan_payload.PlanSqlRequest
 ) -> tuple[dict[str, dict[str, tuple[str, ...]]], str]:
-    """Distinct values for payload columns the grant already allows. Never raises."""
+    """Distinct values for payload columns the grant already allows. Never raises.
+
+    Only a column DMS marked ``masked: false`` (contract 1.7.0) is probed. A
+    column marked masked, or one with no mask state (an older consumer, or a
+    ``schema_context`` column the payload does not list), is never read here:
+    its values do not reach a prompt, only its name and type do.
+    """
     from CortexOS.execution.submit import execute_sql
 
     found: dict[str, dict[str, tuple[str, ...]]] = {}
     taken = 0
     errors = 0
+    masked = 0
+    unmasked = plan_catalog.unmasked_columns(request.payload)
     for table in request.payload.tables:
         if not _IDENT.fullmatch(table.name):
             continue
         cols: dict[str, tuple[str, ...]] = {}
         for column in table.columns:
+            if (fold_identifier(table.name.strip()), fold_identifier(column.name)) not in unmasked:
+                masked += 1
+                continue
             if taken >= _MAX_SAMPLE_COLUMNS or not _IDENT.fullmatch(column.name):
                 continue
             taken += 1
@@ -548,7 +564,7 @@ def _sample_values(
         if cols:
             found[table.name] = cols
     nvals = sum(len(v) for cols in found.values() for v in cols.values())
-    return found, f"columns={taken} values={nvals} errors={errors}"
+    return found, f"columns={taken} values={nvals} errors={errors} masked={masked}"
 
 
 class _RouteRefusal:
@@ -768,7 +784,9 @@ def plan_sql_answer(
     gen = generator or default_generator()
 
     def _hint(detail: str) -> str:
-        return plan_catalog.with_did_you_mean(detail, plan_catalog.column_names(request))
+        # The database's own candidate lists are dropped; only a typo of an
+        # unknown column from the granted catalog is offered.
+        return plan_catalog.retry_detail(detail, plan_catalog.column_names(request, granted))
 
     def _round(
         active: PlanSqlGenerator,
@@ -924,18 +942,22 @@ def plan_sql_answer(
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", "refused: EXPLAIN"))
             _audit_raw(served_sql, exc)
             # Redacted at the source: no caret context, no literal, no post-enforce SQL.
-            detail = f"{GATE_REFUSED}: {exc}"
+            detail = _hint(f"{GATE_REFUSED}: {exc}")
             priors.append(detail)
             failures.append(detail)
             return None
         except Exception as exc:  # noqa: BLE001 - an executor fault is retried, never a 500
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", type(exc).__name__))
             # Scanned for an unknown column only after DB-ERROR-TEXT redaction:
-            # no LINE context, no quoted literal. Without a catalog hint the
-            # detail stays the class name alone.
-            scanned = f"{EXECUTE_FAILED}: {type(exc).__name__}: {redact_db_error(exc)}"
-            hinted = _hint(scanned)
-            detail = hinted if hinted != scanned else f"{EXECUTE_FAILED}: {type(exc).__name__}"
+            # no LINE context, no quoted literal. The database text itself is
+            # not fed back: only an unknown name the SQL wrote, with a typo
+            # match from the granted catalog. Otherwise the class name alone.
+            detail = f"{EXECUTE_FAILED}: {type(exc).__name__}"
+            hint = plan_catalog.unknown_column_hint(
+                redact_db_error(exc), served_sql, plan_catalog.column_names(request, granted)
+            )
+            if hint:
+                detail = f"{detail}: {hint}"
             priors.append(detail)
             failures.append(detail)
             return None

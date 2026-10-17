@@ -14,11 +14,18 @@ not a column of the table above it. The ask route refuses a value by that
 module's ``problem`` and ``problem_status``: 422 with the code before any
 model call, and ``schema_context_empty`` (no table) is a named 200 abstain,
 as on insights; ``schema_context_ungranted`` (no granted table) is a named
-refusal. An unknown-column retry adds did-you-mean names from the granted
-catalog; an executor error is scanned only after ``redact_db_error``. Each
-attempt is one FreeRoute ``complete``; the planner call is folded into it,
-so ``model_calls`` counts one call per rung attempt. Not a CI claim. 52
-effect not measured.
+refusal. An unknown-column retry adds a did-you-mean name only when a
+granted catalog column is a typo of the unknown one (one edit, ratio 0.8);
+a column that is not close is never offered and there is no fallback, so an
+absent measure gets no hint. An executor error is scanned only after
+``redact_db_error`` and its text is not fed back. ``AskPayloadColumn`` gains
+optional ``masked`` (Security ruling): only a column marked ``masked: false``
+is sampled into the prompt; masked or absent keeps the name and type and
+never the values, for 1.6 clients too. A schema type token reaches the
+prompt only from a fixed list of SQL type words. Each attempt is one
+FreeRoute ``complete``; the planner call is folded into it, so
+``model_calls`` counts one call per rung attempt. Not a CI claim. 52 effect
+not measured.
 
 ## DBOS-3X (#331) -- 2026-10-16
 

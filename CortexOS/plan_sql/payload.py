@@ -21,13 +21,6 @@ JOIN_OUTSIDE_PAYLOAD = "PLAN_SQL_JOIN_OUTSIDE_PAYLOAD"
 MAX_PLAN_LINES = 8
 MAX_LINE_CHARS = 240
 
-_PLAN_SYSTEM = (
-    "You plan one read-only analytics query over the tables given. "
-    "Reply with a numbered plan of 2 to 6 short steps, one per line. "
-    "Name the tables, joins, filters, grouping and aggregation each step uses. "
-    "Ground every filter in the sampled column values when they are listed. "
-    "Use only the tables, columns and joins listed. Do not write SQL."
-)
 _SQL_SYSTEM = (
     "You write a single DuckDB SELECT for the question. "
     "Use ONLY the tables, columns and joins listed. "
@@ -142,19 +135,6 @@ def plan_lines(text: str) -> tuple[str, ...]:
     return tuple(out)
 
 
-def plan_messages(request: PlanSqlRequest) -> list[dict[str, Any]]:
-    parts = [schema_block(request)]
-    block = values_block(request)
-    if block:
-        parts.extend(["", block])
-    parts.extend(_failure_lines(request.prior_failures))
-    parts.extend(["", f"QUESTION: {request.question}"])
-    return [
-        {"role": "system", "content": _PLAN_SYSTEM},
-        {"role": "user", "content": "\n".join(parts)},
-    ]
-
-
 def sql_messages(
     request: PlanSqlRequest,
     plan: Sequence[str],
@@ -204,7 +184,6 @@ __all__ = [
     "PAYLOAD_WIDENS_GRANT",
     "PlanSqlRequest",
     "plan_lines",
-    "plan_messages",
     "reconfirm_messages",
     "schema_block",
     "sql_messages",

@@ -429,6 +429,18 @@
             ],
             "title": "Description"
           },
+          "masked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.7.0 the consumer's mask state for this column. The plan+SQL path samples distinct values of a column into its model prompt only when this is false. True or absent: the column's name and type may reach the prompt, its values never do. A schema_context column this payload does not list has no mask state and is not sampled.",
+            "title": "Masked"
+          },
           "name": {
             "minLength": 1,
             "title": "Name",
@@ -1453,6 +1465,19 @@
             ],
             "default": null,
             "title": "Description"
+          },
+          "masked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1.7.0 the consumer's mask state for this column. The plan+SQL path samples distinct values of a column into its model prompt only when this is false. True or absent: the column's name and type may reach the prompt, its values never do. A schema_context column this payload does not list has no mask state and is not sampled.",
+            "title": "Masked"
           },
           "name": {
             "minLength": 1,

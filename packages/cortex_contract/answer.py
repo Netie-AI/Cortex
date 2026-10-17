@@ -39,6 +39,18 @@ class AskPayloadColumn(BaseModel):
     name: str = Field(min_length=1)
     type: str | None = None
     description: str | None = None
+    # 1.7.0: the consumer's mask state for this column. Fail closed: only an
+    # explicit ``false`` lets the engine put this column's values in a prompt.
+    masked: bool | None = Field(
+        default=None,
+        description=(
+            "1.7.0 the consumer's mask state for this column. The plan+SQL path "
+            "samples distinct values of a column into its model prompt only when "
+            "this is false. True or absent: the column's name and type may reach "
+            "the prompt, its values never do. A schema_context column this "
+            "payload does not list has no mask state and is not sampled."
+        ),
+    )
 
 
 class AskPayloadTable(BaseModel):

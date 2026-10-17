@@ -245,8 +245,36 @@ _HINT = re.compile(r"(\S+)\s+[=~]\s+\S.*")
 #: ``- name grain=<grain> expression=<expression>[ aliases=..][ -- text]``.
 _MEASURE = re.compile(r"\S.*?\s+grain=.*?\s+expression=.*")
 #: The type token DMS writes after a column name (``bigint``, ``varchar(20)``,
-#: ``decimal(12,2)``). Any other second token records no type.
-_COLUMN_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\(\d+(?:,\d+)?\))?")
+#: ``decimal(12,2)``): a word from ``_SQL_TYPES``, optionally with a length or
+#: a precision and scale. Any other second token records no type, so a table
+#: or column name written where a type goes (``- qty passport_no``) never
+#: reaches a prompt as one.
+_COLUMN_TYPE = re.compile(r"([A-Za-z][A-Za-z0-9]*)(?:\(\d+(?:,\d+)?\))?")
+#: SQL type words across the dialects DMS renders (DuckDB, MySQL, SQL Server,
+#: Postgres, generic). A fixed list, not a pattern: the token that reaches the
+#: prompt is always one of these words.
+_SQL_TYPES = frozenset(
+    {
+        # integers
+        "bigint", "int", "integer", "smallint", "tinyint", "mediumint", "hugeint",
+        "int1", "int2", "int4", "int8", "ubigint", "uinteger", "usmallint", "utinyint",
+        "uhugeint", "serial", "bigserial", "smallserial",
+        # exact and approximate numerics
+        "decimal", "numeric", "number", "money", "smallmoney", "real", "float",
+        "float4", "float8", "double",
+        # text
+        "varchar", "char", "character", "nchar", "nvarchar", "text", "ntext",
+        "tinytext", "mediumtext", "longtext", "string", "bpchar", "clob", "uuid",
+        "uniqueidentifier",
+        # binary and boolean
+        "blob", "bytea", "binary", "varbinary", "bit", "boolean", "bool",
+        # date and time
+        "date", "time", "timetz", "timestamp", "timestamptz", "datetime", "datetime2",
+        "smalldatetime", "datetimeoffset", "interval",
+        # semi-structured
+        "json", "jsonb", "xml",
+    }
+)
 
 
 class SchemaContextParseError(ValueError):
@@ -280,8 +308,9 @@ class SchemaCatalog:
     #: right_table, right_column)``, folded, in line order, once each. Only
     #: lines between two different tables, as in ``joins``.
     join_keys: tuple[tuple[str, str, str, str], ...] = ()
-    #: Per table, the type token written after a column name, when it has the
-    #: shape of a SQL type. Declares nothing: ``tables`` is the catalog.
+    #: Per table, the type token written after a column name, when it is a
+    #: word from ``_SQL_TYPES`` (with an optional length or precision).
+    #: Declares nothing: ``tables`` is the catalog.
     column_types: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
@@ -422,7 +451,8 @@ def parse_schema_context(text: str) -> SchemaCatalog:
                 )
             add_col(current, fold_identifier(first))
             kind = rest.split(None, 1)[0]
-            if kind != "primary_key" and _COLUMN_TYPE.fullmatch(kind):
+            typed = _COLUMN_TYPE.fullmatch(kind)
+            if typed and typed.group(1).lower() in _SQL_TYPES:
                 column_types.setdefault(current, {}).setdefault(fold_identifier(first), kind)
             continue
 
