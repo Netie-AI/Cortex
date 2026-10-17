@@ -240,128 +240,183 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
 @router.post("/ask", response_model=Answer, operation_id="ask")
 async def contract_ask(body: AskRequest) -> Answer:
     """Answer a governed question (DMS ask plane). Requires a prior submit bind."""
-    from CortexOS.dms.answer_engine import answer as answer_engine
-    from CortexOS.execution.manifest import ManifestError
-    from CortexOS.execution.session_manifests import (
-        SessionExpired,
-        SessionUnbound,
-        SpaceUnbound,
-        get_session_registry,
-    )
+    # NAME-ECHO-CX-01: every exit (the answer and each HTTP error) passes the
+    # response scrub, which withholds names outside the session's grant.
+    from CortexOS.api.response_scrub import ask_caller_context, scrub_answer, scrub_http_detail
+    from CortexOS.sql_attempts import recording
 
-    try:
-        verified = get_session_registry().resolve(
-            body.session_id, space_id=body.space_id
+    grant: list[Any] = []
+
+    def _ask() -> Answer:
+        from CortexOS.dms.answer_engine import answer as answer_engine
+        from CortexOS.execution.manifest import ManifestError
+        from CortexOS.execution.session_manifests import (
+            SessionExpired,
+            SessionUnbound,
+            SpaceUnbound,
+            get_session_registry,
         )
-    except SpaceUnbound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except SessionUnbound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except SessionExpired as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
 
-    from CortexOS.dms.space_memory_ask import try_solution_reuse
-    from CortexOS.dms.verified_query_ask import (
-        bind_verified_examples,
-        stamp_verified_examples,
-        take_verified_examples,
-    )
-
-    reused, memory_fields = try_solution_reuse(
-        body.question,
-        session_id=body.session_id,
-        space_id=body.space_id,
-        verified=verified,
-        scored_pack_id=body.scored_pack_id,
-    )
-    from CortexOS.dms.ask_scope import ask_scope
-
-    manifest = getattr(verified, "manifest", None)
-    space = str(getattr(manifest, "space_id", "") or body.space_id or "")
-    # The signed Space and scored pack reach the legacy query_skill store
-    # through this scope, not through answer_engine (QUERY-SKILL #340).
-    with ask_scope(
-        space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
-    ):
-        served = reused
-        if served is None and body.dms_payload is not None:
-            from CortexOS.dms.plan_sql_ask import try_plan_sql
-
-            # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
-            served = try_plan_sql(body, verified=verified)
-        # VERIFIED-QUERY (#309): examples are bound only for the generator the
-        # answer engine runs. A reused C-MEM solution or a plan+SQL answer
-        # never carries them.
-        tokens = None
-        if served is None:
-            tokens = bind_verified_examples(
-                space_id=space, scored_pack_id=body.scored_pack_id
-            )
         try:
-            result = served if served is not None else answer_engine(
-                body.question,
-                session_id=body.session_id,
-                space_id=body.space_id,
-                verified=verified,
-                require_grounding=True,
-                stamp_l2_route=True,
+            verified = get_session_registry().resolve(
+                body.session_id, space_id=body.space_id
             )
-        except ManifestError as exc:
-            code = getattr(exc, "code", "manifest_error")
+        except SpaceUnbound as exc:
             raise HTTPException(
-                status_code=_http_for_submit_status(code),
-                detail={"code": code, "message": str(exc)},
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
             ) from exc
-        finally:
-            example_meta = take_verified_examples(tokens)
+        except SessionUnbound as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except SessionExpired as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        grant.append(verified)
 
-    if isinstance(result, Answer):
-        data = result.model_dump()
-    else:
-        data = dict(result)
-    # Examples land on a served L2 answer only. Empty C-MEM fields must not
-    # wipe those reads. C-MEM still wins when it reused a solution.
-    served_generated = (
-        example_meta is not None
-        and not _is_abstain_signal(data)
-        and data.get("layer") == "generated"
-        and data.get("badge") == "L2_VALIDATED"
-        and isinstance(data.get("sql_used"), str)
-        and bool(data["sql_used"].strip())
-    )
-    if served_generated and example_meta is not None:
-        stamp_verified_examples(data, example_meta)
-    if not data.get("verified_query_id"):
-        data.update(memory_fields)
-    data = _enrich_answer(data, session_id=body.session_id, verified=verified)
-    return Answer.model_validate(data)
+        from CortexOS.dms.space_memory_ask import try_solution_reuse
+        from CortexOS.dms.verified_query_ask import (
+            bind_verified_examples,
+            stamp_verified_examples,
+            take_verified_examples,
+        )
+
+        reused, memory_fields = try_solution_reuse(
+            body.question,
+            session_id=body.session_id,
+            space_id=body.space_id,
+            verified=verified,
+            scored_pack_id=body.scored_pack_id,
+        )
+        from CortexOS.dms.ask_scope import ask_scope
+
+        manifest = getattr(verified, "manifest", None)
+        space = str(getattr(manifest, "space_id", "") or body.space_id or "")
+        # The signed Space and scored pack reach the legacy query_skill store
+        # through this scope, not through answer_engine (QUERY-SKILL #340).
+        with ask_scope(
+            space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
+        ):
+            served = reused
+            if served is None and body.dms_payload is not None:
+                from CortexOS.dms.plan_sql_ask import try_plan_sql
+
+                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
+                served = try_plan_sql(body, verified=verified)
+            # VERIFIED-QUERY (#309): examples are bound only for the generator the
+            # answer engine runs. A reused C-MEM solution or a plan+SQL answer
+            # never carries them.
+            tokens = None
+            if served is None:
+                tokens = bind_verified_examples(
+                    space_id=space, scored_pack_id=body.scored_pack_id
+                )
+            try:
+                result = served if served is not None else answer_engine(
+                    body.question,
+                    session_id=body.session_id,
+                    space_id=body.space_id,
+                    verified=verified,
+                    require_grounding=True,
+                    stamp_l2_route=True,
+                )
+            except ManifestError as exc:
+                code = getattr(exc, "code", "manifest_error")
+                raise HTTPException(
+                    status_code=_http_for_submit_status(code),
+                    detail={"code": code, "message": str(exc)},
+                ) from exc
+            finally:
+                example_meta = take_verified_examples(tokens)
+
+        if isinstance(result, Answer):
+            data = result.model_dump()
+        else:
+            data = dict(result)
+        # Examples land on a served L2 answer only. Empty C-MEM fields must not
+        # wipe those reads. C-MEM still wins when it reused a solution.
+        served_generated = (
+            example_meta is not None
+            and not _is_abstain_signal(data)
+            and data.get("layer") == "generated"
+            and data.get("badge") == "L2_VALIDATED"
+            and isinstance(data.get("sql_used"), str)
+            and bool(data["sql_used"].strip())
+        )
+        if served_generated and example_meta is not None:
+            stamp_verified_examples(data, example_meta)
+        if not data.get("verified_query_id"):
+            data.update(memory_fields)
+        data = _enrich_answer(data, session_id=body.session_id, verified=verified)
+        return Answer.model_validate(data)
+
+    texts, names = ask_caller_context(body)
+    with recording() as attempts:
+        try:
+            result = _ask()
+        except HTTPException as exc:
+            exc.detail = scrub_http_detail(
+                exc.detail,
+                attempts,
+                verified=grant[0] if grant else None,
+                caller_texts=texts,
+                caller_names=names,
+            )
+            raise
+        from CortexOS.dms.plan_sql_ask import grant_closest_question, reconfirm_answer
+
+        return scrub_answer(
+            result,
+            attempts,
+            verified=grant[0],
+            caller_texts=texts,
+            caller_names=names,
+            closest_fallback=lambda: grant_closest_question(body, verified=grant[0]),
+            reconfirm_text=reconfirm_answer,
+        )
 
 
 @router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")
 async def contract_drillthrough(body: DrillthroughRequest) -> DrillthroughResponse:
     """Re-derive contributing rows under the same session manifest (T7)."""
+    from CortexOS.api.response_scrub import scrub_http_detail
     from CortexOS.execution.drillthrough import (
         DrillthroughError,
         execute_drillthrough,
     )
+    from CortexOS.sql_attempts import recording
+
+    with recording() as attempts:
+        try:
+            result = execute_drillthrough(body.token)
+        except DrillthroughError as exc:
+            # NAME-ECHO-CX-01: the error detail passes the response scrub.
+            code = getattr(exc, "code", "drillthrough_error")
+            raise HTTPException(
+                status_code=_http_for_submit_status(code),
+                detail=scrub_http_detail(
+                    {"code": code, "message": str(exc)},
+                    attempts,
+                    verified=_drill_grant(body.token),
+                ),
+            ) from exc
+    # The drill response carries rows, SQL, ids and counts only: no free text to scrub.
+    return DrillthroughResponse.model_validate(result)
+
+
+def _drill_grant(token: str) -> Any:
+    """The session grant a drill token names, or None when it cannot be resolved."""
+    from CortexOS.execution.drillthrough import verify_token
+    from CortexOS.execution.session_manifests import get_session_registry
 
     try:
-        result = execute_drillthrough(body.token)
-    except DrillthroughError as exc:
-        raise HTTPException(
-            status_code=_http_for_submit_status(getattr(exc, "code", "drillthrough_error")),
-            detail={"code": getattr(exc, "code", "drillthrough_error"), "message": str(exc)},
-        ) from exc
-    return DrillthroughResponse.model_validate(result)
+        return get_session_registry().resolve(str(verify_token(token)["session_id"]))
+    except Exception:  # noqa: BLE001 - no grant resolved: no name counts as granted
+        return None
 
 
 @router.post("/submit", response_model=QueryResult, operation_id="submit")
