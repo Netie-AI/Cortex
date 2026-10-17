@@ -138,7 +138,8 @@ def _strip_aggregates(select: exp.Select) -> tuple[list[exp.Expression], str | N
 def _table_aliases(select: exp.Select) -> list[tuple[str | None, str]]:
     """Return (alias_or_None, table_name) for FROM + JOINs."""
     out: list[tuple[str | None, str]] = []
-    from_ = select.args.get("from_")
+    # sqlglot 25 keys the FROM clause ``from``; later releases key it ``from_``.
+    from_ = select.args.get("from_") or select.args.get("from")
     if from_ is not None:
         tbl = from_.this
         if isinstance(tbl, exp.Table):

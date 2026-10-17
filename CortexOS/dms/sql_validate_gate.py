@@ -113,7 +113,29 @@ def run_gate(
     EXPLAIN sees only post-enforce SQL. ``source_sql`` is the pre-enforce
     candidate so ``execute_sql`` can enforce once. A ManifestError fails the
     candidate without EXPLAIN.
+
+    The candidate and a failure's violations are noted on the request's
+    attempt record (:mod:`CortexOS.sql_attempts`) for the response boundary.
     """
+    from CortexOS.sql_attempts import note_error, note_sql
+
+    note_sql(sql)
+    result = _run_gate(sql, semantic, con=con, verified=verified)
+    if not result.passed:
+        for violation in result.violations:
+            note_error(violation)
+        if result.explain_error:
+            note_error(result.explain_error)
+    return result
+
+
+def _run_gate(
+    sql: str,
+    semantic: dict[str, Any],
+    *,
+    con: Any | None = None,
+    verified: VerifiedManifest | None = None,
+) -> ValidateGateResult:
     guard = validate_sql(sql, semantic)
     if not guard.passed or not guard.safe_sql:
         return ValidateGateResult(

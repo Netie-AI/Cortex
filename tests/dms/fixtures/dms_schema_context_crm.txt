@@ -1,0 +1,36 @@
+# DMS SCHEMA-RETRIEVE render of its CRM fixture, recorded byte for byte.
+# Everything after the line "---" is the schema_context string DMS sends.
+# The file ends with one newline after it; the loader strips that one.
+#
+# source repo:    Netie-AI/dms
+# rendered at:    5b2456fbbe0a9289f2843a14742137514bcf291b (origin/main)
+#                 packages/executor/dms_executor/schema_context.py
+#                 renderer blob 04e6d15be79bc54426e70b981260d9b9f5822f38
+# same bytes at:  3f96695b6bb7b777274f778bb7ee7d2d16f1da17
+#                 renderer blob 82908524dc7ccf3c4296cf31b570f3118687032d
+# fixture:        tests/test_schema_retrieve_01.py::_crm_prompt
+#                 test blob 85cd547de2903270028889965fae35c4f2eb2523
+#                 ontology None and {} render the same bytes
+# body sha256:    f0bd984ae6ed9b787cf9581548fca41d910838fdfa481dad7a8a1908f7cdb2a4
+# regenerate:     from a dms checkout, with its venv:
+#   python -c "import importlib.util as u; s=u.spec_from_file_location('t','tests/test_schema_retrieve_01.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print(m._crm_prompt(None), end='')"
+# Cortex never imports DMS. Do not hand-edit the body; re-render it and update this header.
+---
+DIALECT: mysql
+SCHEMA
+- account reason=score:0.35 description=customer organisation
+- account_id bigint primary_key description=account key samples=1 reason=score:0.35
+- status varchar description=market segment distinct=1 reason=score:0.32,span:s3
+- contact reason=score:0.20 description=person at an account
+- account_id bigint foreign_key=account.account_id samples=1 reason=score:0.20
+- contact_id bigint primary_key samples=9 reason=score:0.00
+- customer_name varchar description=DMSMASK_name_01 distinct=40 reason=score:0.00
+- date_of_birth date description=DMSMASK_dob_01 distinct=1 reason=score:0.00
+- email varchar distinct=40 reason=score:0.00
+- memo varchar description=reach DMSVAL_01 distinct=1 reason=score:0.03
+- passport_no varchar description=DMSMASK_nric_01 distinct=40 reason=score:0.00
+- phone varchar distinct=40 reason=score:0.00
+JOINS
+- contact.account_id = account.account_id (contact_account) reason=path:contact.account_id>account.account_id
+FILTER HINTS
+- account.status = midmarket
