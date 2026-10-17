@@ -8,7 +8,10 @@ assumptions, ``served_reason``, the reconfirm fields and HTTP error details.
 
 At each user-facing exit of ``/v1/contract/ask`` and
 ``/v1/contract/drillthrough`` the route builds a :class:`NameScrub` and applies
-it to free-text fields only. The names it withholds are:
+it to free-text fields only. ``POST /v1/insights`` and the MCP tool
+``answer_engine.answer`` return plain dict envelopes and use
+:func:`scrub_envelope`, the same scrub over named free-text keys
+(NAME-ECHO-INSIGHTS-01). The names it withholds are:
 
 * every identifier the request's SQL attempts referenced (each statement the
   SQL gate or the executor saw, recorded by :mod:`CortexOS.sql_attempts` and
@@ -515,14 +518,124 @@ def scrub_http_detail(
     }
 
 
+#: Keys of a JSON envelope whose string values (or lists of strings) are free
+#: text: prose, refusal and retry reasons, notes. Only these are scrubbed.
+FREE_TEXT_KEYS = frozenset(
+    {
+        "answer",
+        "assumptions",
+        "detail",
+        "error",
+        "message",
+        "note",
+        "notes",
+        "reason",
+        "refuse_reason",
+        "served_reason",
+        "suggestions",
+        "warning",
+        "why",
+    }
+)
+#: Keys whose whole value is left as it is: rows, values and SQL the caller
+#: reads as data, the caller's own words, the ranking Cortex served the model
+#: from, and Cortex's own constant blocks.
+KEPT_KEYS = frozenset(
+    {
+        "api",
+        "export_runtime",
+        "extracted_sql",
+        "intent",
+        "law",
+        "ontology",
+        "query_sql",
+        "question",
+        "rows",
+        "schema_context",
+        "sql",
+        "sql_used",
+        "usage",
+        "values",
+    }
+)
+
+
+def _scrub_tree(node: Any, scrub: NameScrub, *, free: bool) -> Any:
+    if isinstance(node, Mapping):
+        return {
+            key: value
+            if key in KEPT_KEYS
+            else _scrub_tree(value, scrub, free=key in FREE_TEXT_KEYS)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_scrub_tree(item, scrub, free=free) for item in node]
+    if free and isinstance(node, str):
+        return scrub.text(node)
+    return node
+
+
+def split_names(names: Iterable[str]) -> set[str]:
+    """Each name and its dot-separated parts (``schema.table`` keeps both parts)."""
+    out: set[str] = set()
+    for name in names:
+        text = str(name or "").strip()
+        if not text:
+            continue
+        out.add(text)
+        out.update(part for part in text.split(".") if part.strip())
+    return out
+
+
+def scrub_envelope(
+    envelope: Mapping[str, Any],
+    attempts: AttemptRecord,
+    *,
+    verified: Any,
+    caller_texts: Iterable[str] = (),
+    caller_names: Iterable[str] = (),
+) -> Any:
+    """A JSON answer envelope with withheld names replaced in its free text.
+
+    For exits that return a plain dict instead of a contract ``Answer``
+    (``POST /v1/insights``, the MCP ``answer_engine.answer`` tool). Only string
+    values under :data:`FREE_TEXT_KEYS` change, at any depth; nothing under
+    :data:`KEPT_KEYS` is read or changed, so rows, values and SQL stay
+    byte-for-byte. A served envelope (SQL, rows or values present) keeps its
+    top-level ``answer``: that text is rendered from the rows. With nothing to
+    withhold the envelope itself is returned.
+    """
+    rows = envelope.get("rows")
+    scrub = build_scrub(
+        attempts,
+        verified=verified,
+        caller_texts=caller_texts,
+        caller_names={*caller_names, *_row_keys(rows if isinstance(rows, list) else None)},
+    )
+    if not scrub.withheld:
+        return envelope
+    served = bool(envelope.get("sql_used") or rows or envelope.get("values"))
+    out: dict[str, Any] = {}
+    for key, value in envelope.items():
+        if key in KEPT_KEYS or (served and key == "answer"):
+            out[key] = value
+        else:
+            out[key] = _scrub_tree(value, scrub, free=key in FREE_TEXT_KEYS)
+    return out
+
+
 __all__ = [
+    "FREE_TEXT_KEYS",
+    "KEPT_KEYS",
     "WITHHELD",
     "NameScrub",
     "ask_caller_context",
     "build_scrub",
     "error_identifiers",
     "scrub_answer",
+    "scrub_envelope",
     "scrub_http_detail",
+    "split_names",
     "sql_identifiers",
     "sql_names",
 ]

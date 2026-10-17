@@ -22,6 +22,7 @@ import sqlglot
 from fastapi.testclient import TestClient
 from sqlglot import exp
 
+from CortexOS.api.response_scrub import WITHHELD
 from CortexOS.insights import schema_context as schema_mod
 from CortexOS.insights.caller_sql import validate_caller_sql
 from packs.dms.security.rate_limit import reset_limiter
@@ -224,20 +225,20 @@ def test_insights_answers_with_the_dms_crm_render(
         (
             # DMS dropped this ungranted table from the render.
             "SELECT note_body FROM restricted_note WHERE note_body IS NOT NULL",
-            "schema_context:ungranted_table:restricted_note",
+            "schema_context:ungranted_table:" + WITHHELD,
         ),
         (
             # A word in contact's description is not a table: the parsed
             # catalog gate refuses it.
             "SELECT 1 AS n FROM person WHERE 1 = 1",
             "sql reads a table outside the caller catalog: "
-            "table person is not in the caller catalog",
+            f"table {WITHHELD} is not in the caller catalog",
         ),
         (
             # A type word is not a table either.
             "SELECT 1 AS n FROM varchar WHERE 1 = 1",
             "sql reads a table outside the caller catalog: "
-            "table varchar is not in the caller catalog",
+            f"table {WITHHELD} is not in the caller catalog",
         ),
     ],
     ids=["table_not_rendered", "description_word", "type_word"],
@@ -262,7 +263,7 @@ def test_must_fail_table_outside_the_dms_render_is_refused(
     [
         (
             "SELECT account_id, credit_limit FROM account WHERE status = 'MIDMARKET'",
-            "column credit_limit is not declared for account",
+            f"column {WITHHELD} is not declared for account",
         ),
         (
             # customer_name is contact's. The old parser could file a column

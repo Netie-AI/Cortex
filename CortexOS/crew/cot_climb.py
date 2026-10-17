@@ -885,10 +885,14 @@ async def climb(
             )
 
         from CortexOS.dms.sql_extract import extract_statement
+        from CortexOS.sql_attempts import note_sql
 
         pulled = extract_statement(str(gen.get("text") or ""))
         sql = pulled.sql
         extracted = str(sql or "").strip()
+        # NAME-ECHO-INSIGHTS-01: this path checks SQL without the SQL gate, so
+        # the statement is noted here for the response scrub at the route.
+        note_sql(extracted)
         if supplied and extracted:
             # An ungranted table or join is refused before any retry. A retry
             # would put this SQL back in the next prompt. The reason names the

@@ -3,8 +3,10 @@
 The response boundary (:mod:`CortexOS.api.response_scrub`) needs to know which
 names a request's SQL attempts referenced, including attempts the gate or the
 executor refused and that never reach the envelope as SQL. The SQL gate and
-the executor note each statement here; a route opens a :func:`recording` for
-the request and reads it back at its exits.
+the executor note each statement here, and so does the Crew Insights climb
+(:mod:`CortexOS.crew.cot_climb`), which checks model SQL statically without
+the gate; a route opens a :func:`recording` for the request and reads
+it back at its exits.
 
 With no recording open, :func:`note_sql` and :func:`note_error` do nothing.
 The record is a context variable, so concurrent requests never see each
@@ -36,9 +38,10 @@ _CURRENT: ContextVar[AttemptRecord | None] = ContextVar("cortex_sql_attempts", d
 
 
 def _add(bucket: list[str], text: object) -> None:
-    value = str(text or "")
-    if value.strip() and len(bucket) < MAX_ENTRIES:
-        bucket.append(value[:MAX_CHARS])
+    value = str(text or "")[:MAX_CHARS]
+    # A repeat names nothing new; skipping it keeps room for later attempts.
+    if value.strip() and len(bucket) < MAX_ENTRIES and value not in bucket:
+        bucket.append(value)
 
 
 def note_sql(sql: object) -> None:
