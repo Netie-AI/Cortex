@@ -6,6 +6,7 @@ keeps loaders, previews, and semantic helpers without importing ``duckdb``.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,8 @@ __all__ = [
     "read_only_queries_enabled",
     "table_row_counts",
 ]
+
+_log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 DMS_PACK = ROOT / "packs" / "dms"
@@ -126,7 +129,16 @@ def load_inventory_csv(
             _load_table(con, table, path)
         _cast_types(con)
         # VALUE-NORMALIZE-01 (#387): store the ontology's canonical values.
-        value_domain.apply_to_lake(con, value_domain.load_value_domains(DMS_PACK))
+        domains = value_domain.load_value_domains(DMS_PACK)
+        value_domain.apply_to_lake(con, domains)
+        # A value the declaration does not list is stored as written; name it
+        # instead of letting a canonical filter miss it without a word.
+        for key, found in value_domain.undeclared_values(con, domains).items():
+            _log.warning(
+                "value_not_declared:%s %s (declare it in the pack ontology)",
+                key,
+                ", ".join(f"{v!r}={n}" for v, n in found.items()),
+            )
         _create_indexes(con)
     finally:
         con.close()

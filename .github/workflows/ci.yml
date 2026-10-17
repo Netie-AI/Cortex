@@ -50,6 +50,12 @@ jobs:
           python -c "import dbos,qdrant_client,tantivy,sentence_transformers"
           python scripts/export_openapi.py --check
 
+      - name: Semantics export drift
+        # VALUE-NORMALIZE-CX-01 (#387): contract/semantics/<pack>.json is the
+        # declared value domains + measures DMS vendors. A YAML edit without
+        # regeneration fails here.
+        run: python scripts/export_semantics.py --check
+
       - name: Contract compatibility
         # Every published minor must differ from its predecessor only additively,
         # and each frozen spec must match its .sha256 sidecar — that sidecar is

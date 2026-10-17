@@ -139,6 +139,7 @@ files = [
     "packages/cortex_contract",
     "scripts/check_versions.py",
     "scripts/export_openapi.py",
+    "scripts/export_semantics.py",
 ]
 
 [tool.pytest.ini_options]

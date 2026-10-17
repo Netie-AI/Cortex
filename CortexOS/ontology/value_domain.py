@@ -10,6 +10,8 @@ Three uses, one declaration:
 
 * ``apply_to_lake`` - every Cortex lake build (warehouse load, lakehouse silver,
   test lakes) rewrites stored source spellings to canonical values.
+  ``undeclared_values`` then counts and names any stored value the declaration
+  does not list; such a value is reported, never guessed at or mapped.
 * ``prompt_values`` - the canonical values go into the model's generation context.
 * ``canonicalize_sql`` - SQL written against source spellings (gold and
   held-out files, which never change) is run through the same mapping before it
@@ -114,10 +116,12 @@ def _targets(
     domains: Iterable[ValueDomain],
     schema: str,
     tables: Iterable[str] | None,
+    *,
+    mapped_only: bool = True,
 ) -> Iterator[tuple[ValueDomain, str]]:
     only = None if tables is None else {t.lower() for t in tables}
     for d in domains:
-        if not d.sources:
+        if mapped_only and not d.sources:
             continue
         if only is not None and d.table.lower() not in only:
             continue
@@ -173,6 +177,38 @@ def apply_to_lake(
                 params,
             )
         out[d.key] = pending
+    return out
+
+
+def undeclared_values(
+    con: Any,
+    domains: Iterable[ValueDomain],
+    *,
+    schema: str = "",
+    tables: Iterable[str] | None = None,
+) -> dict[str, dict[str, int]]:
+    """Stored values the declaration does not name: ``{table.column: {value: rows}}``.
+
+    The declared list is the complete domain: a value that is neither a
+    canonical value nor a declared source spelling is one ``apply_to_lake``
+    leaves as it is, so a filter on the canonical value silently misses it.
+    Nothing here guesses what such a value means (no case folding, no
+    synonyms); it is counted and named so the build can report it. Empty when
+    every non-null value is declared. Comparison is on the stored text.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for d, ref in _targets(con, domains, schema, tables, mapped_only=False):
+        known = [*d.canonical, *(s for s, _ in d.sources)]
+        marks = ", ".join("?" for _ in known)
+        rows = con.execute(
+            f"SELECT CAST({d.column} AS VARCHAR), COUNT(*) FROM {ref} "
+            f"WHERE {d.column} IS NOT NULL "
+            f"AND CAST({d.column} AS VARCHAR) NOT IN ({marks}) "
+            "GROUP BY 1 ORDER BY 1",
+            known,
+        ).fetchall()
+        if rows:
+            out[d.key] = {str(v): int(n) for v, n in rows}
     return out
 
 
