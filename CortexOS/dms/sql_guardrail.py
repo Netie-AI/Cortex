@@ -210,10 +210,12 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
 
     # #402: the same declared-value check execute_sql applies. On a lake that
     # does not store the declared values, a filter on them matches nothing.
-    from CortexOS.dms.warehouse_db import serving_value_domains
+    from CortexOS.dms.warehouse_db import connection_instance, serving_value_domains
     from CortexOS.ontology.value_domain import stale_columns, stale_reason
 
-    drift = stale_columns(con, result.safe_sql, serving_value_domains())
+    drift = stale_columns(
+        con, result.safe_sql, serving_value_domains(), instance=connection_instance(con)
+    )
     if drift:
         stale = GuardrailResult(passed=False, violations=[stale_reason(drift)], safe_sql=None)
         entry.safe_sql = None

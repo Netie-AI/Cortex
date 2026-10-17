@@ -16,6 +16,7 @@ from CortexOS.execution.warehouse import (
     DEFAULT_DB,
     close_cached_connections,
     connect_write,
+    connection_instance,
     get_connection,
     read_only_queries_enabled,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "SAMPLES",
     "TABLE_FILES",
     "close_cached_connections",
+    "connection_instance",
     "get_connection",
     "load_inventory_csv",
     "load_semantic_layer",

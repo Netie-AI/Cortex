@@ -25,6 +25,7 @@ from CortexOS.execution.session_manifests import get_session_registry
 from CortexOS.execution.telemetry import new_run_id, record_run
 from CortexOS.execution.warehouse import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     read_only_queries_enabled,
     warehouse_path,
@@ -389,7 +390,11 @@ def _execute_sql(
                 from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
                 from CortexOS.ontology.value_domain import stale_columns, stale_reason
 
-                drift = stale_columns(con, safe_sql, value_domains, lake=path)
+                # Kept per read-only instance this cursor reads, never per path:
+                # a file renamed over the path is a later instance's to check.
+                drift = stale_columns(
+                    con, safe_sql, value_domains, instance=connection_instance(con)
+                )
                 if drift:
                     raise LakeValueDomainStale(
                         stale_reason(drift), codes=[item.code for item in drift]

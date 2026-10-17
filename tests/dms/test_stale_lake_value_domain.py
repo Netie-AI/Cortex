@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import os
 import re
 import shutil
 from collections.abc import Iterator
@@ -443,10 +444,10 @@ def test_space_memory_reuse_does_not_replay_onto_a_stale_lake(
         sm.reset_space_memory_for_tests()
 
 
-# ── the check is cached per lake file state, and sees a rebuild ──────────────
+# ── the check is kept per read-only instance, and sees a rebuild ─────────────
 
 
-def test_check_scans_once_per_lake_state_and_sees_a_rebuild(
+def test_check_scans_once_per_instance_and_sees_a_rebuild(
     serve: Any, lake: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     scans: list[str] = []
@@ -469,6 +470,222 @@ def test_check_scans_once_per_lake_state_and_sees_a_rebuild(
     assert body["badge"] == "governed_metric", body["answer"]
     assert body["rows"][0]["revenue_myr"] == pytest.approx(_revenue_oracle(), abs=0.011)
     assert scans == ["transactions.txn_type", "transactions.txn_type"]
+
+
+# ── the verdict belongs to the database instance it scanned (review of #407) ──
+
+
+def _evict(how: str, lake: Path) -> None:
+    if how == "close_cached":
+        warehouse.close_cached_connections()
+    else:
+        # A read-write open of the path evicts the cached read-only instance.
+        warehouse.get_connection(lake).close()
+
+
+@pytest.mark.parametrize("how", ["close_cached", "read_write_open"])
+def test_a_lake_renamed_over_the_path_is_checked_on_the_instance_that_reads_it(
+    serve: Any, lake: Path, tmp_path: Path, how: str
+) -> None:
+    """Swap a stale lake in by rename, then evict: the stale lake is never served.
+
+    The cached read-only instance keeps reading the file it opened after another
+    file is renamed over its path, so a check it runs is about that file. Filed
+    under the path's new stamp, that verdict ("clean") outlived the instance and
+    the next one served the stale file unchecked: ``revenue_myr = 0.0``, badge
+    ``governed_metric``.
+    """
+    stale = tmp_path / "stale.duckdb"
+    shutil.copy(lake, stale)
+    _unmap(stale)
+    client = serve(lake)
+    first = _dms_query(client, REVENUE_Q)
+    assert first["badge"] == "governed_metric", first["answer"]
+    assert first["rows"][0]["revenue_myr"] == pytest.approx(_revenue_oracle(), abs=0.011)
+
+    os.replace(stale, lake)
+    # Same instance, same file it opened: it still answers from the mapped lake.
+    again = _dms_query(client, REVENUE_Q)
+    assert again["badge"] == "governed_metric", again["answer"]
+    assert again["rows"] == first["rows"]
+    assert again["answer"] == first["answer"]
+
+    _evict(how, lake)
+    for question in (REVENUE_Q, TOP3_Q):
+        _assert_stale_abstain(_dms_query(client, question))
+    assert set(_stored(lake)) == {"OUT", "IN", "ADJUST", "WRITE_OFF"}
+
+
+def test_connection_instance_names_the_read_only_instance_a_cursor_reads(lake: Path) -> None:
+    warehouse.close_cached_connections()
+    a = warehouse.get_connection(lake, read_only=True)
+    b = warehouse.get_connection(lake, read_only=True)
+    try:
+        first = warehouse.connection_instance(a)
+        assert first is not None
+        assert warehouse.connection_instance(b) == first  # two cursors, one instance
+    finally:
+        a.close()
+        b.close()
+    warehouse.close_cached_connections()
+    c = warehouse.get_connection(lake, read_only=True)
+    try:
+        second = warehouse.connection_instance(c)
+        assert second is not None and second != first  # a new instance is never the old one
+    finally:
+        c.close()
+    # A connection the warehouse cannot pin to one unchanging instance has no name.
+    rw = warehouse.get_connection(lake)
+    mem = duckdb.connect(":memory:")
+    try:
+        assert warehouse.connection_instance(rw) is None
+        assert warehouse.connection_instance(mem) is None
+    finally:
+        rw.close()
+        mem.close()
+        warehouse.close_cached_connections()
+
+
+def test_lake_drift_caches_per_named_instance_and_rescans_an_unnamed_one(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scans: list[str] = []
+    real = vd._drift_counts
+
+    def counted(con: Any, d: vd.ValueDomain, schema: str) -> Any:
+        scans.append(d.key)
+        return real(con, d, schema)
+
+    monkeypatch.setattr(vd, "_drift_counts", counted)
+    vd.clear_lake_cache()
+    (dom,) = [d for d in _domains() if d.key == "transactions.txn_type"]
+    con = duckdb.connect(str(lake), read_only=True)
+    try:
+        for _ in range(2):
+            assert vd.lake_drift(con, (dom,)) == ()  # no instance named: scanned each time
+        assert len(scans) == 2
+        for _ in range(2):
+            assert vd.lake_drift(con, (dom,), instance=("lake", 1)) == ()
+        assert len(scans) == 3
+        assert vd.lake_drift(con, (dom,), instance=("lake", 2)) == ()
+        assert len(scans) == 4  # another instance is scanned on its own
+    finally:
+        con.close()
+        vd.clear_lake_cache()
+
+
+# ── the plan+SQL ladder (CORTEX_PLAN_SQL=1) stops on a stale lake ────────────
+
+PLAN_SQL_PAYLOAD: dict[str, Any] = {
+    "tables": [
+        {
+            "name": "transactions",
+            "columns": [
+                {"name": "txn_type", "type": "VARCHAR"},
+                {"name": "sku", "type": "VARCHAR"},
+                {"name": "quantity_kg", "type": "DOUBLE"},
+            ],
+        }
+    ]
+}
+SALES_KG_Q = "how many kg did we sell"
+SALES_KG_SQL = "SELECT SUM(quantity_kg) AS kg FROM transactions WHERE txn_type = 'outbound'"
+# What a model writes once told the filtered SQL failed: every movement, not sales.
+ALL_KG_SQL = "SELECT SUM(quantity_kg) AS kg FROM transactions"
+
+
+def _kg_oracle(*, sales_only: bool) -> float:
+    path = warehouse_db.SAMPLES / "transactions_clean.csv"
+    with path.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    return round(
+        sum(float(r["quantity_kg"]) for r in rows if not sales_only or r["txn_type"] == "OUT"),
+        2,
+    )
+
+
+def _model_reply(fake: Any, content: str) -> None:
+    fake.replies.append(
+        (
+            200,
+            {
+                "model": "openai/gpt-oss-120b",
+                "choices": [{"message": {"role": "assistant", "content": content}}],
+                "served_provider": "groq",
+                "served_model": "openai/gpt-oss-120b",
+                "served_local": False,
+            },
+        )
+    )
+
+
+@pytest.mark.parametrize("mapped", [True, False])
+def test_plan_sql_ladder_stops_by_name_on_a_stale_lake_and_never_retries(
+    serve: Any,
+    lake: Path,
+    armed_openvault: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    mapped: bool,
+) -> None:
+    """Must-fail for the plan+SQL ladder: the stale reason is not fed back as retryable.
+
+    Before, ``LakeValueDomainStale`` was caught as a generic ``SqlGateAbstain``
+    and handed to the model as a gate error. The only SQL it could then serve
+    for a sales question drops ``txn_type``: served badge ``session``, rung
+    ``error-fed-retry-1``, ``kg`` = every movement instead of the outbound total.
+    """
+    from CortexOS.dms import plan_sql_ask
+    from CortexOS.execution import submit
+
+    monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    real = submit.execute_sql
+    ran: list[str] = []
+
+    def spy(verified: Any, sql: str, **kwargs: Any) -> Any:
+        if not sql.lstrip().upper().startswith("SELECT DISTINCT"):  # not a sample probe
+            ran.append(sql)
+        return real(verified, sql, **kwargs)
+
+    monkeypatch.setattr(submit, "execute_sql", spy)
+    if not mapped:
+        _unmap(lake)
+    _model_reply(armed_openvault, "1. Read transactions.\n2. Sum quantity_kg of sales.")
+    _model_reply(armed_openvault, f"```sql\n{SALES_KG_SQL};\n```")
+    _model_reply(armed_openvault, f"```sql\n{ALL_KG_SQL};\n```")
+    client = serve(lake)
+    res = client.post(
+        "/v1/contract/ask",
+        json={"question": SALES_KG_Q, "session_id": SESSION, "dms_payload": PLAN_SQL_PAYLOAD},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    if mapped:
+        assert body["provenance"]["badge"] == "session", body["answer"]
+        assert body["plan_sql_rung"] == plan_sql_ask.RUNG_PLAN
+        (row,) = body["rows"]
+        assert row["kg"] == pytest.approx(_kg_oracle(sales_only=True), abs=0.011)
+        assert f"kg = {row['kg']}" in body["answer"]
+        assert ran == [body["sql_used"]] and "txn_type = 'outbound'" in body["sql_used"]
+        return
+
+    assert body["provenance"]["badge"] == "abstain", body["answer"]
+    assert body["provenance"]["layer"] == "abstain"
+    assert body["rows"] in ([], None)
+    assert body["sql_used"] is None
+    assert body["drillthrough_token"] is None
+    assert body["plan_sql_rung"] is None
+    assert STALE in body["answer"] and NOT_MAPPED in body["answer"]
+    assert any(STALE in line for line in body["assumptions"])
+    assert not _FIGURE.search(body["answer"]), body["answer"]
+    assert not re.search(r"\b(OUT|IN)\b", body["answer"]), body["answer"]
+    for kg in (_kg_oracle(sales_only=True), _kg_oracle(sales_only=False)):
+        assert str(kg) not in json.dumps(body)
+    # One model SQL (as gated: a row bound added), refused on the lake; the
+    # filter-dropping rewrite was never asked for, so it never ran.
+    assert len(ran) == 1 and ran[0].startswith(SALES_KG_SQL), ran
+    assert len(armed_openvault.chat_calls) == 2  # the plan and that one SQL
+    assert len(armed_openvault.replies) == 1
 
 
 # ── the two query seams every served answer runs through ─────────────────────

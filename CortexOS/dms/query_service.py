@@ -13,6 +13,7 @@ from typing import Any, Literal
 from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     load_semantic_layer,
     read_only_queries_enabled,
@@ -1067,7 +1068,9 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
     try:
         # #402: the rule SQL filters declared values ('outbound'); on a lake that
         # does not store them it would serve a silent zero. Name it instead.
-        stale = value_domain.stale_columns(con, sql, serving_value_domains(), lake=DEFAULT_DB)
+        stale = value_domain.stale_columns(
+            con, sql, serving_value_domains(), instance=connection_instance(con)
+        )
         if not stale:
             guard_result, rows, entry = guard_and_execute(sql, semantic, con)
     finally:

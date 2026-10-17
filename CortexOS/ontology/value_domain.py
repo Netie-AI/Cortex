@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Hashable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -311,45 +311,13 @@ def domains_in_sql(sql: str, domains: Iterable[ValueDomain]) -> tuple[ValueDomai
     )
 
 
-_LAKE_CACHE: dict[tuple[Any, ...], tuple[int, int] | None] = {}
+_LAKE_CACHE: dict[tuple[Hashable, str, ValueDomain], tuple[int, int] | None] = {}
 _LAKE_CACHE_MAX = 256
 _LAKE_LOCK = threading.Lock()
 
 
-def _lake_stamp(lake: Path | str | None) -> tuple[Any, ...] | None:
-    """Identity of the lake file's current state, or None (in-memory: not cached).
-
-    DuckDB writes go to ``<file>.wal`` until a checkpoint, so its state is part
-    of the stamp: a write that has not reached the main file still moves it.
-    """
-    if lake is None or str(lake) in ("", ":memory:"):
-        return None
-    path = Path(lake)
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    try:
-        ws = Path(f"{path}.wal").stat()
-        wal: tuple[int, int] | None = (ws.st_mtime_ns, ws.st_size)
-    except OSError:
-        wal = None
-    return (str(path.resolve()), st.st_mtime_ns, st.st_size, wal)
-
-
-def _connection_lake(con: Any) -> str | None:
-    """The database file ``con`` reads, or None (in-memory, or not knowable: no cache)."""
-    try:
-        row = con.execute(
-            "SELECT path FROM duckdb_databases() WHERE database_name = current_database()"
-        ).fetchone()
-    except Exception:  # noqa: BLE001 - not DuckDB, or no catalog function: just not cached
-        return None
-    return str(row[0]) if row and row[0] else None
-
-
 def clear_lake_cache() -> None:
-    """Forget every cached lake check (tests, and after an in-place rebuild)."""
+    """Forget every cached lake check (tests). A rebuild needs no call: it is a new instance."""
     with _LAKE_LOCK:
         _LAKE_CACHE.clear()
 
@@ -381,20 +349,23 @@ def lake_drift(
     domains: Iterable[ValueDomain],
     *,
     schema: str = "",
-    lake: Path | str | None = None,
+    instance: Hashable | None = None,
 ) -> tuple[LakeDrift, ...]:
     """Declared columns in the lake ``con`` reads that hold values the declaration does not.
 
-    One aggregate scan per column, cached per state of the file ``con`` reads
-    (``lake``, else the file DuckDB reports for ``con``): path, size and
-    modification time of the file and its WAL. A rebuild is seen; an unchanged
-    lake is scanned once; an in-memory database is never cached. A table or
-    column the lake does not have is skipped.
+    One aggregate scan per column. ``instance`` names the database instance
+    ``con`` reads, one whose data cannot change while it lives (the serving
+    warehouse's cached read-only instance: ``warehouse.connection_instance``);
+    the result is kept per instance, so it is scanned once, and a later instance
+    on the same path (a rebuild, a file renamed over it) is scanned afresh. With
+    no ``instance`` nothing is kept and every call scans: a path or a file stamp
+    does not say which file an open connection reads, and a verdict filed under
+    one outlives the connection it was about. A table or column the lake does
+    not have is skipped.
     """
-    stamp = _lake_stamp(lake if lake is not None else _connection_lake(con))
     out: list[LakeDrift] = []
     for d in domains:
-        key = None if stamp is None else (stamp, schema, d)
+        key = None if instance is None else (instance, schema, d)
         with _LAKE_LOCK:
             hit = key is not None and key in _LAKE_CACHE
             counts = _LAKE_CACHE[key] if hit and key is not None else None
@@ -416,25 +387,26 @@ def stale_columns(
     domains: Iterable[ValueDomain],
     *,
     schema: str = "",
-    lake: Path | str | None = None,
+    instance: Hashable | None = None,
 ) -> tuple[LakeDrift, ...]:
     """Declared columns ``sql`` names that the lake does not hold as declared.
 
     Empty when ``sql`` names no declared column, or when every one it names
     stores only declared canonical values. A non-empty result is a named
     abstain (``stale_reason``); it names columns and row counts, never a value.
+    ``instance`` is as for ``lake_drift``.
     """
     named = domains_in_sql(sql, domains)
     if not named:
         return ()
-    drift = lake_drift(con, named, schema=schema, lake=lake)
+    drift = lake_drift(con, named, schema=schema, instance=instance)
     for item in drift:
         _log.warning(
-            "%s unmapped_rows=%d undeclared_rows=%d lake=%s",
+            "%s unmapped_rows=%d undeclared_rows=%d instance=%s",
             item.code,
             item.unmapped_rows,
             item.undeclared_rows,
-            lake if lake is not None else "<connection>",
+            instance if instance is not None else "<unnamed>",
         )
     return drift
 
