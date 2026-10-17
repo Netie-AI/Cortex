@@ -27,7 +27,7 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import sqlglot
@@ -244,6 +244,9 @@ _JOIN = re.compile(r"(\S+)\s+=\s+(\S+)((?:\s+\(.*\))?(?:\s+reason=\S+)?)")
 _HINT = re.compile(r"(\S+)\s+[=~]\s+\S.*")
 #: ``- name grain=<grain> expression=<expression>[ aliases=..][ -- text]``.
 _MEASURE = re.compile(r"\S.*?\s+grain=.*?\s+expression=.*")
+#: The type token DMS writes after a column name (``bigint``, ``varchar(20)``,
+#: ``decimal(12,2)``). Any other second token records no type.
+_COLUMN_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\(\d+(?:,\d+)?\))?")
 
 
 class SchemaContextParseError(ValueError):
@@ -273,6 +276,13 @@ class SchemaCatalog:
 
     tables: dict[str, list[str]]
     joins: frozenset[tuple[str, str]]
+    #: The same JOINS lines column by column, ``(left_table, left_column,
+    #: right_table, right_column)``, folded, in line order, once each. Only
+    #: lines between two different tables, as in ``joins``.
+    join_keys: tuple[tuple[str, str, str, str], ...] = ()
+    #: Per table, the type token written after a column name, when it has the
+    #: shape of a SQL type. Declares nothing: ``tables`` is the catalog.
+    column_types: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def _is_ident(name: str) -> bool:
@@ -328,6 +338,8 @@ def parse_schema_context(text: str) -> SchemaCatalog:
     tables: dict[str, list[str]] = {}
     head_line: dict[str, int] = {}
     joins: set[tuple[str, str]] = set()
+    join_keys: list[tuple[str, str, str, str]] = []
+    column_types: dict[str, dict[str, str]] = {}
     section = _PREAMBLE
     seen: list[str] = []
     dialect_seen = False
@@ -409,6 +421,9 @@ def parse_schema_context(text: str) -> SchemaCatalog:
                     number, section, "column name is not an identifier"
                 )
             add_col(current, fold_identifier(first))
+            kind = rest.split(None, 1)[0]
+            if kind != "primary_key" and _COLUMN_TYPE.fullmatch(kind):
+                column_types.setdefault(current, {}).setdefault(fold_identifier(first), kind)
             continue
 
         if section == "JOINS":
@@ -425,6 +440,9 @@ def parse_schema_context(text: str) -> SchemaCatalog:
             add_col(*right)
             if left[0] != right[0]:
                 joins.add((min(left[0], right[0]), max(left[0], right[0])))
+                key = (left[0], left[1], right[0], right[1])
+                if key not in join_keys:
+                    join_keys.append(key)
             continue
 
         if section == "FILTER HINTS":
@@ -447,7 +465,12 @@ def parse_schema_context(text: str) -> SchemaCatalog:
     for table, cols in tables.items():
         if not cols:
             raise SchemaContextParseError(head_line[table], "SCHEMA", "table declares no column")
-    return SchemaCatalog(tables=tables, joins=frozenset(joins))
+    return SchemaCatalog(
+        tables=tables,
+        joins=frozenset(joins),
+        join_keys=tuple(join_keys),
+        column_types=column_types,
+    )
 
 
 def parsed_catalog(text: str) -> dict[str, list[str]]:

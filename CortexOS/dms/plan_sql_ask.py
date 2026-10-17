@@ -134,18 +134,17 @@ def default_generator() -> PlanSqlGenerator:
     return FreeRoutePlanSqlGenerator()
 
 
-def try_plan_sql(
-    body: AskRequest,
-    *,
-    verified: Any,
-    schema_context: str | None = None,
-) -> dict[str, Any] | None:
-    """Flat answer for the contract ask, or ``None`` when this path is off."""
+def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
+    """Flat answer for the contract ask, or ``None`` when this path is off.
+
+    ``body.schema_context`` (contract 1.7.0) narrows the prompt to the grant
+    intersected with that string. Absent or blank, the payload is the prompt.
+    """
     if body.dms_payload is None or not plan_sql_enabled():
         return None
     return plan_sql_answer(
         plan_payload.PlanSqlRequest(
-            body.question, body.dms_payload, schema_context=schema_context
+            body.question, body.dms_payload, schema_context=body.schema_context
         ),
         session_id=body.session_id,
         space_id=body.space_id,
@@ -739,10 +738,18 @@ def plan_sql_answer(
     if widened:
         steps.append(StepStamp.cortex("payload", "cortex:payload-check", "refused"))
         return stop(widened[0].split(":", 1)[0], ", ".join(widened))
-    request, empty = plan_catalog.narrow(request, granted)
-    if empty:
-        steps.append(StepStamp.cortex("payload", "cortex:payload-check", "refused"))
-        return stop(empty, "schema_context names no granted table")
+    request, unusable = plan_catalog.narrow(request, granted)
+    if unusable:
+        steps.append(
+            StepStamp.cortex("payload", "cortex:payload-check", f"refused: {unusable}")
+        )
+        # A string that declares no table is DMS's over-budget fallback: an
+        # abstain, as on POST /v1/insights. Every other code is a refusal.
+        return stop(
+            unusable,
+            plan_catalog.refusal_detail(unusable),
+            refused=unusable != plan_catalog.SCHEMA_CONTEXT_EMPTY,
+        )
     selected = set(request.table_names())
     steps.append(
         StepStamp.cortex("payload", "cortex:payload-check", f"tables={sorted(selected)}")

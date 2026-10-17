@@ -1,11 +1,11 @@
 """Granted catalog for one SQL generation attempt.
 
 The prompt sees the tables and columns the signed grant allows, intersected
-with the ``schema_context`` string DMS sends. That string is the SCHEMA-CONTEXT-01
-shape (#351, ``CortexOS.insights.schema_context``): optional text, ``SCHEMA``
-table/column lines, ``JOINS`` lines. Whether a value may be used at all is that
-module's rule, so the ask route and ``POST /v1/insights`` refuse the same
-strings. This module does not add a contract field.
+with the ``schema_context`` string DMS sends (``AskRequest.schema_context``,
+contract 1.7.0). That string is the SCHEMA-CONTEXT-01 shape, and
+``CortexOS.insights.schema_context`` is its only parser and its only rule:
+the ask route and ``POST /v1/insights`` refuse the same strings with the same
+codes, and read the same tables, columns and joins out of the ones they take.
 
 Nothing parsed from outside the grant is returned to the prompt builder.
 Names are whatever the grant and the schema string contain. No pack list.
@@ -16,143 +16,26 @@ from __future__ import annotations
 import difflib
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from cortex_contract.answer import AskPayload, AskPayloadColumn, AskPayloadJoin, AskPayloadTable
 
+from CortexOS.identifier_fold import fold_identifier
 from CortexOS.insights import schema_context as schema_ctx
 from CortexOS.plan_sql.payload import PlanSqlRequest
 
-# SCHEMA-CONTEXT-01's cap and refusal codes. Over-cap is a named refusal,
-# never a truncation. The cap is UTF-8 bytes.
-SCHEMA_CONTEXT_MAX_BYTES = schema_ctx.SCHEMA_CONTEXT_MAX_BYTES
-SCHEMA_CONTEXT_INVALID = schema_ctx.SCHEMA_CONTEXT_INVALID
-SCHEMA_CONTEXT_TOO_LARGE = schema_ctx.SCHEMA_CONTEXT_TOO_LARGE
-SCHEMA_CONTEXT_EMPTY = "PLAN_SQL_SCHEMA_CONTEXT_EMPTY"
+#: The string parses and declares no table (DMS's over-budget fallback).
+#: SCHEMA-CONTEXT-01's own code, a 200 abstain on both routes.
+SCHEMA_CONTEXT_EMPTY = schema_ctx.SCHEMA_CONTEXT_EMPTY
+#: The string declares tables and none of them is granted to this session.
+SCHEMA_CONTEXT_UNGRANTED = "schema_context_ungranted"
 
-_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_KV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S+$")
-_JOIN = re.compile(
-    r"(?P<lt>[A-Za-z_][A-Za-z0-9_]*)\.(?P<lc>[A-Za-z_][A-Za-z0-9_]*)"
-    r"\s*=\s*"
-    r"(?P<rt>[A-Za-z_][A-Za-z0-9_]*)\.(?P<rc>[A-Za-z_][A-Za-z0-9_]*)"
-    r"(?:\s*\((?P<rel>[^)]*)\))?"
-)
 _UNKNOWN_COL = re.compile(
     r"UNKNOWN_COLUMN:([A-Za-z_][A-Za-z0-9_]*)"
     r"|column\s+\"([A-Za-z_][A-Za-z0-9_]*)\""
     r"|column\s+'([A-Za-z_][A-Za-z0-9_]*)'",
     re.IGNORECASE,
 )
-
-
-def _norm(name: str) -> str:
-    return name.strip().lower()
-
-
-def schema_context_problem(value: object) -> tuple[str, str] | None:
-    """Named refusal for a present-but-unusable ``schema_context``, else None.
-
-    SCHEMA-CONTEXT-01's own check (``schema_context.problem``): ``None`` and a
-    blank string are absent, not an error. A non-string, an over-cap value, a
-    control or format character, and a string that does not parse into a
-    table and column catalog are refused by name.
-    """
-    return schema_ctx.problem(value)
-
-
-def accepted_schema_context(value: object) -> str | None:
-    """Stripped schema string, or None when the field is absent or unusable."""
-    return schema_ctx.accepted_text(value)
-
-
-@dataclass(frozen=True)
-class _Column:
-    name: str
-    type: str
-
-
-@dataclass(frozen=True)
-class _Table:
-    name: str
-    columns: tuple[_Column, ...]
-
-
-@dataclass(frozen=True)
-class _Parsed:
-    tables: tuple[_Table, ...]
-    joins: tuple[AskPayloadJoin, ...]
-
-
-def _words(line: str) -> list[str]:
-    body = line.strip()
-    if body.startswith("-"):
-        body = body[1:].strip()
-    words: list[str] = []
-    for tok in body.split():
-        if _KV.match(tok) or tok.startswith("reason="):
-            continue
-        words.append(tok)
-    return words
-
-
-def parse_schema_context(text: str) -> _Parsed:
-    """Tables, columns and joins named by a schema_context string.
-
-    A ``SCHEMA`` line with one identifier is a table. A line with an identifier
-    plus a type token is a column of the current table. ``JOINS`` lines are
-    ``table.column = table.column``. Anything else is dropped, so unparsed
-    prose never reaches the prompt.
-    """
-    section = ""
-    current: str | None = None
-    buckets: dict[str, list[_Column]] = {}
-    order: list[str] = []
-    joins: list[AskPayloadJoin] = []
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        upper = line.upper()
-        if upper == "SCHEMA" or upper.startswith("SCHEMA "):
-            section = "schema"
-            continue
-        if upper == "JOINS" or upper.startswith("JOINS "):
-            section = "joins"
-            continue
-        if upper.startswith("DIALECT:"):
-            continue
-        if section == "joins":
-            match = _JOIN.search(line)
-            if match is None:
-                continue
-            rel = (match.group("rel") or "").strip() or None
-            joins.append(
-                AskPayloadJoin(
-                    left_table=match.group("lt"),
-                    left_column=match.group("lc"),
-                    right_table=match.group("rt"),
-                    right_column=match.group("rc"),
-                    relation=rel,
-                )
-            )
-            continue
-        if section != "schema":
-            continue
-        words = _words(line)
-        if not words or not _IDENT.match(words[0]):
-            continue
-        if len(words) == 1:
-            current = words[0]
-            if current not in buckets:
-                buckets[current] = []
-                order.append(current)
-            continue
-        if current is None or not _IDENT.match(words[1]):
-            continue
-        buckets[current].append(_Column(words[0], words[1]))
-    tables = tuple(_Table(name, tuple(buckets[name])) for name in order)
-    return _Parsed(tables, tuple(joins))
 
 
 def column_names(request: PlanSqlRequest) -> tuple[str, ...]:
@@ -166,38 +49,57 @@ def column_names(request: PlanSqlRequest) -> tuple[str, ...]:
 
 
 def narrow(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[PlanSqlRequest, str]:
-    """Payload the prompt may see.
+    """Payload the prompt may see, and ``""``; or the request and a refusal code.
 
-    No schema string: the payload is unchanged (the grant check already ran).
-    With a schema string: tables are ``grant ∩ schema_context``. Columns and
-    joins come only from that string. ``SCHEMA_CONTEXT_EMPTY`` when the
-    intersection names no table.
+    No schema string (absent or blank): the payload is unchanged (the grant
+    check already ran). With one, ``schema_context.parse_schema_context``
+    reads it, and the prompt's tables are ``grant ∩ declared tables``, folded
+    the DuckDB way. Columns, types and joins come only from that string. A
+    join is kept only when both of its tables are. The payload's own tables,
+    columns and joins are not offered.
+
+    Fail closed for a direct caller: a value ``schema_context.problem``
+    refuses returns its code (the route has already turned those into a
+    422). A string that declares no table is ``SCHEMA_CONTEXT_EMPTY``, and
+    one whose tables are all outside the grant is ``SCHEMA_CONTEXT_UNGRANTED``.
     """
-    text = accepted_schema_context(request.schema_context)
+    text = schema_ctx.supplied_schema(request.schema_context)
     if text is None:
         return request, ""
-    allowed = {_norm(name) for name in granted}
-    parsed = parse_schema_context(text)
+    found = schema_ctx.problem(request.schema_context)
+    if found is not None:
+        return request, found[0]
+    catalog = schema_ctx.parse_schema_context(text)
+    allowed = {fold_identifier(str(name)) for name in granted}
     tables: list[AskPayloadTable] = []
-    kept: set[str] = set()
-    for table in parsed.tables:
-        if _norm(table.name) not in allowed:
+    for name, columns in catalog.tables.items():
+        if name not in allowed:
             continue
-        kept.add(_norm(table.name))
+        types = catalog.column_types.get(name, {})
         tables.append(
             AskPayloadTable(
-                name=table.name,
-                columns=[AskPayloadColumn(name=col.name, type=col.type or None) for col in table.columns],
+                name=name,
+                columns=[AskPayloadColumn(name=col, type=types.get(col)) for col in columns],
             )
         )
     if not tables:
-        return request, SCHEMA_CONTEXT_EMPTY
+        return request, SCHEMA_CONTEXT_UNGRANTED
+    kept = {table.name for table in tables}
     joins = [
-        join
-        for join in parsed.joins
-        if _norm(join.left_table) in kept and _norm(join.right_table) in kept
+        AskPayloadJoin(left_table=lt, left_column=lc, right_table=rt, right_column=rc)
+        for lt, lc, rt, rc in catalog.join_keys
+        if lt in kept and rt in kept
     ]
     return replace(request, payload=AskPayload(tables=tables, joins=joins)), ""
+
+
+def refusal_detail(code: str) -> str:
+    """Why :func:`narrow` refused, for the abstain text. Names no table."""
+    if code == SCHEMA_CONTEXT_EMPTY:
+        return "schema_context declares no table; nothing to generate against"
+    if code == SCHEMA_CONTEXT_UNGRANTED:
+        return "schema_context declares no table this session is granted"
+    return "schema_context is not usable"
 
 
 def unknown_column_names(detail: str) -> tuple[str, ...]:

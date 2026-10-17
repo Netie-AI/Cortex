@@ -107,7 +107,7 @@ supported:
 
   - version: "1.6"
     spec: openapi-1.6.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive SCHEMA-CONTEXT-01 (#347): POST /v1/insights
@@ -122,6 +122,25 @@ supported:
       keep the 279cbd85 envelope. schema_context maxLength is 8192;
       the engine cap is 8192 UTF-8 bytes. 1.5 clients omit the field and
       get the 1.5 behaviour. canonical_manifest_bytes unchanged.
+
+  - version: "1.7"
+    spec: openapi-1.7.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive GEN-GRANTED-CATALOG-01 (#386): AskRequest gains optional
+      schema_context, the same string and rule as the 1.6 insights field
+      (maxLength 8192; the engine cap is 8192 UTF-8 bytes). It is used only
+      by the plan+SQL path (dms_payload set and that path switched on): the
+      SQL prompt is then the signed grant intersected with the tables,
+      columns and joins the string declares, and a table outside the grant
+      is dropped. A value the insights rule refuses is HTTP 422 with that
+      code (schema_context_too_large, schema_context_forbidden_char,
+      schema_context_unparsed) before any model call. A string that
+      declares no table (schema_context_empty) or no granted table
+      (schema_context_ungranted) is a named 200 abstain.
+      1.6 clients omit the field and get the 1.6 behaviour.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

@@ -256,6 +256,19 @@ async def contract_ask(body: AskRequest) -> Answer:
             SpaceUnbound,
             get_session_registry,
         )
+        from CortexOS.insights import schema_context as schema_ctx
+
+        # Contract 1.7.0 (GEN-GRANTED-CATALOG-01): the same rule and status as
+        # POST /v1/insights, before any model call. A string that parses and
+        # declares no table is not malformed (problem_status 200): it reaches
+        # the plan+SQL path, which abstains by that name.
+        schema_problem = schema_ctx.problem(body.schema_context)
+        if schema_problem is not None and schema_ctx.problem_status(schema_problem[0]) != 200:
+            code, message = schema_problem
+            raise HTTPException(
+                status_code=schema_ctx.problem_status(code),
+                detail={"code": code, "message": message},
+            )
 
         try:
             verified = get_session_registry().resolve(
@@ -298,7 +311,8 @@ async def contract_ask(body: AskRequest) -> Answer:
             if served is None and body.dms_payload is not None:
                 from CortexOS.dms.plan_sql_ask import try_plan_sql
 
-                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
+                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303). The prompt is
+                # the grant intersected with body.schema_context when sent.
                 served = try_plan_sql(body, verified=verified)
             try:
                 result = served if served is not None else answer_engine(

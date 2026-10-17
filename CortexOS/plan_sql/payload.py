@@ -61,9 +61,9 @@ class PlanSqlRequest:
     payload: AskPayload
     column_values: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
     prior_failures: tuple[str, ...] = ()
-    # SCHEMA-CONTEXT-01 string (PR #351). Absent: the payload schema is used.
-    # Present: the ask seam replaces the payload with grant ∩ this string
-    # before any prompt is built. Not a new contract field.
+    # AskRequest.schema_context (contract 1.7.0), the SCHEMA-CONTEXT-01 string.
+    # Absent: the payload schema is used. Present: the ask seam replaces the
+    # payload with grant ∩ this string before any prompt is built.
     schema_context: str | None = None
 
     def table_names(self) -> frozenset[str]:

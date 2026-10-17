@@ -132,6 +132,26 @@ class AskRequest(BaseModel):
     # ``yes`` runs ``question`` (the closest question). ``no`` answers
     # ``not found in the database`` and does not call a model.
     plan_sql_confirm: Literal["yes", "no"] | None = None
+    # 1.7.0: the caller's schema shortlist, the same string and rule as
+    # ``InsightsSchemaContext.schema_context`` on POST /v1/insights. Checked
+    # on every ask; read only when the plan+SQL path answers it.
+    schema_context: str | None = Field(
+        default=None,
+        max_length=8192,
+        description=(
+            "1.7.0 caller shortlist, the SCHEMA-CONTEXT-01 string POST /v1/insights "
+            "takes. Used only by the plan+SQL path (dms_payload set and that path "
+            "switched on): its SQL prompt is then the signed grant intersected "
+            "with the tables, columns and joins this string declares, and a table "
+            "outside the grant is dropped. Absent or blank: the dms_payload "
+            "schema is the prompt, as on 1.6. A value the insights rule refuses "
+            "(over 8192 UTF-8 bytes, a control or format character, a line "
+            "outside the shapes it parses) is HTTP 422 with that code before "
+            "any model call. A string that declares no table, or no granted "
+            "table, is a named abstain. maxLength 8192; the engine cap is 8192 "
+            "UTF-8 bytes."
+        ),
+    )
 
 
 class MemoryRead(BaseModel):
