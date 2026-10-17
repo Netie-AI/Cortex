@@ -48,6 +48,13 @@ CASES: dict[str, list[str]] = {
 
 
 def _pytest(node_ids: list[str], guard_off: str | None) -> subprocess.CompletedProcess[str]:
+    from CortexOS.execution.warehouse import close_cached_connections
+
+    # An earlier HTTP test in this process can leave a cached read-only DuckDB
+    # instance open on the warehouse. The child's fixture opens it read-write,
+    # so that shared lock would make every child test ERROR (not FAIL) and the
+    # proof below would read a lock error as a surviving must-fail.
+    close_cached_connections()
     env = dict(os.environ)
     args = [sys.executable, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", *node_ids]
     if guard_off:
