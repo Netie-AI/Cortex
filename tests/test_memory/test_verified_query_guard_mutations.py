@@ -44,6 +44,16 @@ CASES: dict[str, list[str]] = {
         f"{UNIT}::test_must_fail_stored_example_is_not_the_generated_sql",
     ],
     "grant_gate": [f"{HTTP}::test_must_fail_generated_sql_never_widens_beyond_the_grant"],
+    # Serve-time check: a near-miss example is never the answer.
+    "example_echo": [
+        f"{HTTP}::test_must_fail_near_miss_example_never_served",
+        f"{HTTP}::test_must_fail_near_miss_listing_example_never_served",
+        f"{HTTP}::test_must_fail_copied_example_for_another_field_never_served",
+        f"{HTTP}::test_must_fail_copied_example_ignores_a_number_never_served",
+        f"{HTTP}::test_must_fail_dropped_filter_example_never_served",
+    ],
+    # Only examples inside the grant and the current schema reach the model.
+    "example_scope": [f"{HTTP}::test_must_fail_example_outside_grant_or_schema_never_in_prompt"],
 }
 
 

@@ -57,5 +57,13 @@ def pytest_configure(config: Any) -> None:
         from CortexOS.execution import submit
 
         submit.enforce_manifest = lambda sql, verified: sql
+    elif guard == "example_echo":
+        from CortexOS.dms import verified_query_ask as vqa
+
+        vqa.example_echo = lambda *args, **kwargs: []  # type: ignore[assignment]
+    elif guard == "example_scope":
+        from CortexOS.dms import verified_query_ask as vqa
+
+        vqa.example_fits = lambda *args, **kwargs: True  # type: ignore[assignment]
     else:
         raise RuntimeError(f"unknown VQ_GUARD_OFF={guard!r}")

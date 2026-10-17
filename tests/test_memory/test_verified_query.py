@@ -201,6 +201,19 @@ def test_steward_flows_are_steward_only_and_stamped(lib: VerifiedQueryLibrary) -
     ]
 
 
+def test_non_steward_cannot_learn_which_ids_exist(lib: VerifiedQueryLibrary) -> None:
+    """The role is checked before the id: a real id and a made-up one refuse alike."""
+    proposed = lib.propose(space_id="alpha", question=Q, sql=SQL, actor="analyst", source="ask:a1")
+    for query_id in (proposed.id, "vq_does_not_exist"):
+        for step in (lib.confirm, lib.revoke):
+            with pytest.raises(MemoryRefused) as ei:
+                step(space_id="alpha", query_id=query_id, steward=VIEWER)
+            assert ei.value.code == NOT_STEWARD, query_id
+    with pytest.raises(MemoryRefused) as ei:
+        lib.confirm(space_id="alpha", query_id="vq_does_not_exist", steward=STEWARD)
+    assert ei.value.code == NOT_IN_SPACE
+
+
 def test_library_has_no_hand_coded_phrasing_rules() -> None:
     source = (ROOT / "CortexOS" / "memory" / "verified_query.py").read_text(encoding="utf-8")
     for token in ("_STOPWORDS", "PARAM_PATTERNS", "intent_signature", "SKU-", "LOC-", "warehouse_code"):
@@ -399,12 +412,12 @@ def test_must_fail_paraphrase_of_certified_question_reaches_the_example(
     monkeypatch.setattr(vqa, "get_verified_queries", lambda: lib)
     meta = vqa.generation_examples(space_id="alpha", question=CERT_PARAPHRASE)
     assert meta is not None
-    assert meta["verified_query_id"] == target.id
+    assert meta["verified_query_ids"] == [target.id]
     blob = json.dumps(meta["prompt"])
     assert CERT_SQL in blob and CERT_Q in blob
     assert decoy.sql not in blob
     exact = vqa.generation_examples(space_id="alpha", question=CERT_Q)
-    assert exact is not None and exact["verified_query_id"] == target.id
+    assert exact is not None and exact["verified_query_ids"] == [target.id]
     assert vqa.generation_examples(
         space_id="alpha", question="hazardous carrier punctuality"
     ) is None

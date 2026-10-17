@@ -128,13 +128,14 @@ supported:
     status: current
     contract_surface: true
     notes: >
-      Additive VERIFIED-QUERY (#309): Answer gains optional verified_query_id,
-      the ids of steward-confirmed examples that were in the SQL generator
-      prompt for this answer. It is omitted when unset, is not a
-      phrasing-match id, and does not mark a stored answer: the SQL was
-      generated and executed on current data, and reused stays false.
-      Nothing else on the wire changes. 1.6 clients ignore the field and get
-      the 1.6 behaviour. canonical_manifest_bytes unchanged.
+      Additive VERIFIED-QUERY (#309): Answer gains optional
+      verified_query_ids (list of str), the ids of steward-confirmed examples
+      that were in the SQL generator prompt for this served answer, best
+      match first. It is omitted when empty, is not a phrasing-match id, and
+      does not mark a stored answer: the SQL was generated and executed on
+      current data, and reused stays false. Nothing else on the wire
+      changes. 1.6 clients ignore the field and get the 1.6 behaviour.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

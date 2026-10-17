@@ -340,16 +340,13 @@
             "title": "Suggestions",
             "type": "array"
           },
-          "verified_query_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verified Query Id"
+          "verified_query_ids": {
+            "description": "1.7.0 ids of the steward-confirmed question/SQL examples that were in the SQL generator prompt for this served answer, best match first. The SQL was generated and executed on current data; this does not mark a stored answer and reused stays false. Omitted when no example was used. 1.6 clients ignore it.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Verified Query Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -1402,17 +1399,13 @@
             "title": "Suggestions",
             "type": "array"
           },
-          "verified_query_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Verified Query Id"
+          "verified_query_ids": {
+            "description": "1.7.0 ids of the steward-confirmed question/SQL examples that were in the SQL generator prompt for this served answer, best match first. The SQL was generated and executed on current data; this does not mark a stored answer and reused stays false. Omitted when no example was used. 1.6 clients ignore it.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Verified Query Ids",
+            "type": "array"
           }
         },
         "required": [

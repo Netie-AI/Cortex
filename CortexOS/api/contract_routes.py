@@ -308,12 +308,17 @@ async def contract_ask(body: AskRequest) -> Answer:
                 # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
                 served = try_plan_sql(body, verified=verified)
             # VERIFIED-QUERY (#309): examples are bound only for the generator the
-            # answer engine runs. A reused C-MEM solution or a plan+SQL answer
-            # never carries them.
+            # answer engine runs, and only when the flag is on. A reused C-MEM
+            # solution or a plan+SQL answer never carries them. Only examples
+            # over tables this session's grant names are offered.
             tokens = None
             if served is None:
                 tokens = bind_verified_examples(
-                    space_id=space, scored_pack_id=body.scored_pack_id
+                    space_id=space,
+                    scored_pack_id=body.scored_pack_id,
+                    granted_tables=tuple(
+                        getattr(manifest, "row_predicates", None) or {}
+                    ),
                 )
             try:
                 result = served if served is not None else answer_engine(
@@ -349,7 +354,7 @@ async def contract_ask(body: AskRequest) -> Answer:
         )
         if served_generated and example_meta is not None:
             stamp_verified_examples(data, example_meta)
-        if not data.get("verified_query_id"):
+        if not data.get("verified_query_ids"):
             data.update(memory_fields)
         data = _enrich_answer(data, session_id=body.session_id, verified=verified)
         return Answer.model_validate(data)

@@ -214,17 +214,27 @@ class Answer(BaseModel):
         ),
     )
     # 1.7.0 (VERIFIED-QUERY #309): ids of the steward-confirmed examples that
-    # were in the SQL generator prompt for this answer. Omitted when unset.
+    # were in the SQL generator prompt for this served answer, best match
+    # first. One id per element, never a joined string. Omitted when empty.
     # Not a phrasing-match id and not a stored answer. 1.6 clients ignore it.
-    verified_query_id: str | None = None
+    verified_query_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "1.7.0 ids of the steward-confirmed question/SQL examples that "
+            "were in the SQL generator prompt for this served answer, best "
+            "match first. The SQL was generated and executed on current data; "
+            "this does not mark a stored answer and reused stays false. "
+            "Omitted when no example was used. 1.6 clients ignore it."
+        ),
+    )
 
     # No return annotation: pydantic derives the serialization schema from it,
     # and the published Answer schema must stay the field list above.
     @model_serializer(mode="wrap")
-    def _omit_unset_verified_query_id(self, handler: SerializerFunctionWrapHandler):
+    def _omit_empty_verified_query_ids(self, handler: SerializerFunctionWrapHandler):
         data = handler(self)
-        if isinstance(data, dict) and data.get("verified_query_id") is None:
-            data.pop("verified_query_id", None)
+        if isinstance(data, dict) and not data.get("verified_query_ids"):
+            data.pop("verified_query_ids", None)
         return data
 
 

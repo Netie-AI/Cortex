@@ -6,13 +6,16 @@ and its status (``pending`` / ``confirmed`` / ``revoked`` / ``superseded``),
 keyed by Space.
 
 This library does not match phrasing and does not run the stored SQL. The
-ask path retrieves examples by lexical similarity and hands those pairs to
-the SQL generator. The generator writes new SQL. Nothing here stores or
-serves rows.
+ask path (``CortexOS.dms.verified_query_ask``) retrieves examples by lexical
+similarity, hands those pairs to the SQL generator, and checks the SQL that
+ran against them before serving. The generator writes new SQL. Nothing here
+stores or serves rows.
 
 Rules, each a named refusal stamped in the Space:
 
-* only a steward confirms, revokes or lists (``MEMORY_NOT_STEWARD``);
+* only a steward confirms, revokes or lists (``MEMORY_NOT_STEWARD``), and
+  the role is checked before the id is looked up, so a non-steward cannot
+  learn which ids exist;
 * a pair that is not confirmed, or was revoked, is never an example;
 * a write tagged with a scored pack id is refused and a scored round reads
   nothing — the C-MEM guards themselves, not copies of them;
@@ -21,7 +24,9 @@ Rules, each a named refusal stamped in the Space:
 No parameter types, stopword lists, or source-specific tokens. Any source's
 question and single SELECT can be an example.
 
-This module holds no model, no database driver and no source-DB handle.
+This module holds no model and no source-DB driver or handle. Its own pair
+store is a stdlib ``sqlite3`` table (``:memory:`` unless
+``CORTEX_VERIFIED_QUERY_PATH`` names a file).
 """
 
 from __future__ import annotations
@@ -289,8 +294,8 @@ class VerifiedQueryLibrary:
     ) -> VerifiedQuery:
         """Steward confirm: the pair enters C-MEM and can be offered as an example."""
         sid = self.memory._space(space_id)
-        query = self._get(sid, query_id, steward.actor_id)
         self._require_steward(sid, steward, "confirms")
+        query = self._get(sid, query_id, steward.actor_id)
         if query.status != PENDING:
             raise self._refuse(
                 NOT_PENDING, f"verified query is {query.status}, not pending", space_id=sid,
@@ -335,8 +340,8 @@ class VerifiedQueryLibrary:
     def revoke(self, *, space_id: str, query_id: str, steward: Actor) -> VerifiedQuery:
         """Steward revoke: the solution and everything derived from it leave memory."""
         sid = self.memory._space(space_id)
-        query = self._get(sid, query_id, steward.actor_id)
         self._require_steward(sid, steward, "revokes")
+        query = self._get(sid, query_id, steward.actor_id)
         deleted = self._retire(query, steward)
         self._stamp("vq_revoke", sid, steward.actor_id, deleted, reason=query.id)
         return self._get(sid, query.id, steward.actor_id)
@@ -374,8 +379,9 @@ class VerifiedQueryLibrary:
     ) -> list[VerifiedExample]:
         """Every confirmed example in this Space.
 
-        No word rank and no recency rank. The ask path asks the model which
-        ids belong with the question. A scored round returns nothing.
+        No word rank and no recency rank here. The ask path filters these by
+        the session grant and the current schema, then orders them by lexical
+        similarity to the question. A scored round returns nothing.
         Unconfirmed, revoked and other Spaces are absent.
         """
         sid = self.memory._space(space_id)
