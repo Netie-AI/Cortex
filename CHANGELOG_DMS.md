@@ -21,6 +21,20 @@ workflows, but a 2.x process cannot read the migrated database. Do not run
 to 2.x against a database a 3.x process has opened. Draft only. Not a CI
 claim. Not PASS.
 
+## CERT-ORACLE-SPLIT (#345, Refs #343) -- 2026-10-15
+
+`cot_climb.gold_sql_for` no longer grades the climb against the L0 serve set
+(`packs/dms/semantic/certified_queries.yaml`). `CortexOS/crew/score_oracle.py`
+takes serve-set cases out of the climb, held-out, accuracy, paraphrase and
+corpus scores and lists each one by name. `bench/oracle/climb_oracle_v1.yaml`
+no longer copies the frozen held-out split, and a must-fail asserts climb
+oracle ids are disjoint from held-out and the serve set; a climb with no gold
+says `NO_GOLD`. `.importlinter` gains `serve-never-reads-oracle`, with
+`CortexOS.dms.plan_sql_ask` (the #329 ladder) as a source, and the open()
+audit covers the plan_sql path. The climb has no exact-SQL gold until a
+development split is written outside held-out, golden and paraphrase files.
+Draft only. Not a CI claim. Not PASS.
+
 ## IMAGE-AUTH-01 (#363) -- 2026-10-08
 
 `Dockerfile.core` and `Dockerfile.full` no longer set `DMS_AUTH_DISABLED`.

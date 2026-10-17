@@ -378,6 +378,50 @@ def test_metadata_functions_stay_refused(verified: VerifiedManifest) -> None:
         enforce_manifest("SELECT * FROM duckdb_settings()", verified)
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT o.id, t.tag FROM orders AS o, LATERAL unnest(o.tags) AS t(tag)",
+        "SELECT o.id, g.n FROM orders AS o, LATERAL generate_series(1, o.qty) AS g(n)",
+        "SELECT o.id, g.n FROM orders AS o CROSS JOIN LATERAL range(o.qty) AS g(n)",
+        "SELECT o.id, r.v FROM orders AS o, LATERAL read_parquet('/data/pool/tenant_a/r.parquet') AS r",
+        "SELECT o.id, x.n FROM orders AS o LEFT JOIN LATERAL "
+        "(SELECT count(*) AS n FROM users AS u WHERE u.id = o.uid) AS x ON TRUE",
+        "SELECT o.id, v.x FROM orders AS o, LATERAL (VALUES (o.id)) AS v(x)",
+        "SELECT o.id, t.tag FROM orders AS o CROSS JOIN unnest(o.tags) AS t(tag)",
+        "SELECT o.id, u.id FROM orders AS o JOIN users AS u ON u.id = o.uid",
+    ],
+    ids=[
+        "lateral_unnest",
+        "lateral_generate_series",
+        "cross_join_lateral_range",
+        "lateral_reader_inside_grant",
+        "left_join_lateral_subquery",
+        "lateral_values",
+        "cross_join_unnest",
+        "plain_join",
+    ],
+)
+def test_ordinary_lateral_and_join_sources_still_pass(
+    sql: str, verified: VerifiedManifest
+) -> None:
+    """Bounding function relations must not refuse generators, granted readers or subqueries."""
+    out = enforce_manifest(sql, verified)
+    assert "tenant_id" in out
+    for table, where in _unguarded_references(out):
+        pytest.fail(f"{table} is not filtered; nearest WHERE was {where!r}\n{out}")
+
+
+def test_lateral_reader_outside_the_grant_is_still_a_path_refusal(
+    verified: VerifiedManifest,
+) -> None:
+    with pytest.raises(PathNotAllowed):
+        enforce_manifest(
+            "SELECT o.id FROM orders AS o, LATERAL read_parquet('/data/pool/tenant_b/x.parquet') AS r",
+            verified,
+        )
+
+
 def test_schema_qualified_column_is_refused_clearly(verified: VerifiedManifest) -> None:
     """Wrapping makes main.orders.uid unresolvable; say so here, not via a binder error."""
     with pytest.raises(SqlNotAnalyzable) as caught:
