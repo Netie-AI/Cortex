@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from CortexOS.ontology import value_domain
 from packs.dms.lakehouse import tables as lt
 from packs.dms.lakehouse.catalog import connect, lakehouse_mode
 
@@ -68,6 +69,7 @@ def migrate_bronze(con) -> dict[str, int]:
 
 def migrate_silver(con) -> dict[str, int]:
     counts: dict[str, int] = {}
+    domains = value_domain.load_value_domains(ROOT / "packs" / "dms")
     for t in TABLES:
         path = _csv(t, messy=False)
         if not path.is_file():
@@ -81,6 +83,9 @@ def migrate_silver(con) -> dict[str, int]:
         con.execute(
             f"CREATE TABLE {target} AS SELECT {projected} "
             f"FROM read_csv_auto('{path.as_posix()}', header=true)")
+        # VALUE-NORMALIZE-01 (#387): silver stores the ontology's canonical values;
+        # bronze keeps the source spelling.
+        value_domain.apply_to_lake(con, domains, schema="lake.silver", tables=(t,))
         counts[t] = con.execute(f"SELECT COUNT(*) FROM {target}").fetchone()[0]
     return counts
 
@@ -91,7 +96,7 @@ def migrate_gold(con) -> dict[str, int]:
             "SELECT sku, SUM(quantity_kg) AS total_sold_kg, "
             "ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr, "
             "COUNT(*) AS transaction_count "
-            "FROM lake.silver.transactions WHERE txn_type = 'OUT' GROUP BY sku"),
+            "FROM lake.silver.transactions WHERE txn_type = 'outbound' GROUP BY sku"),
         "capacity_by_location": (
             "SELECT location_code, location_name, current_load_kg, capacity_kg, "
             "ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used, "

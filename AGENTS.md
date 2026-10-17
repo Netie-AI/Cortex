@@ -1,7 +1,8 @@
 # Cortex - agent index
 
-Read this first. Engine invariants live in `CLAUDE.md`; current state in `STATUS.md`;
-parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issues.
+Read this first. Engine invariants live in `CLAUDE.md` (AI-first answer path:
+section 9). Current state is `STATUS.md`. The live PR list is `TASK.md`.
+Parked work is `PARKING_LOT.md` (do not build from it). Live work is GitHub issues.
 
 ## Where things are
 
@@ -13,6 +14,7 @@ parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
 | Import boundaries | `.importlinter` (module-level net) + `tests/contract/test_import_boundaries.py` (AST, the stricter check) |
 | CI | `.github/workflows/` - required: `lint-type-test`, `base-install`, `protected-paths`, `rls-proof`, `secrets-scan` |
 | Subagents / DMS sequence | `.cursor/AGENTS.md`; sequence F1 -> F7 -> V0 -> V3, gate between milestones `docs/dms/SUPERVISOR_GATE.md`; distill trace `skill_distill/DISTILL.md` |
+| Live tasks | `TASK.md`. `docs/archive/task.md` is an old phase list and does not bind. |
 | Runtime state (gitignored, never commit) | `data/engine/`, `data/bench/`, `data/lakehouse/`, `CortexOS/data/` (per-device key), `packs/data/dms_ops.db` (rebuild: `python -m scripts.seed_ops_db`) |
 
 ## Binding rules
@@ -21,11 +23,15 @@ parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
    push CI 5/5 SUCCESS (the five required checks above) -> PR Bot exact-head CLEAR ->
    AGREE from a reviewer of a different model family than the writer -> squash-merge
    with `--match-head-commit <head>` -> Check (R-0003: a different run verifies; the
-   writer never verifies itself) -> Lead Formal.
+   writer never verifies itself) -> Lead Formal. CLEAR and AGREE use the comment
+   templates below, or the CI `auto-merge` job will not count them.
 2. **Any head move voids CLEAR and AGREE.** A new commit, rebase or force-push means
    CI, CLEAR and AGREE are redone on the new head. The CI `auto-merge` job
-   squash-merges any non-draft PR once checks are green and does not look for CLEAR
-   or AGREE, so a PR stays draft until both are on its exact head.
+   (`scripts/auto_merge_if_perfect.py`, `decide()`) squash-merges only a non-draft
+   `tier:fast` PR with 5/5 on its exact head SHA, a CLEAR and a different-family
+   AGREE that both name that SHA, and it passes `--match-head-commit`. `tier:full`
+   or no tier never auto-merges, so a `tier:full` PR stays draft until the moment of
+   squash.
 3. **Prove is pinned to `279cbd85`** (`279cbd85087464b3eac7c7faec4b0858de3cb5e8`).
    Never tip-deploy prove.
 4. **Nothing is PASS without evidence:** the command and its output on the exact SHA.
@@ -36,6 +42,55 @@ parked work in `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
    Remaining env/file key paths are debt tracked in #267.
 6. **Keep handoff files out of PR diffs** (`CLAUDE_HANDOFF.md`, `CURSOR_HANDOFF.md`,
    output of `scripts/handoff.py --write`).
+7. **AI-first answer path** is `CLAUDE.md` section 9. The text lives there once.
+   Keyword cascades and word rules stay out. Merge order is `TASK.md`.
+
+### Merge-flow comment templates
+
+`decide()` reads these exact shapes. `tests/packaging/test_auto_merge_templates.py`
+parses the blocks below and runs them through `decide()`, so editing a block here
+without the code (or the code without the block) fails CI. Replace each `<...>`;
+the head SHA is always the full 40-char SHA.
+
+PR body. `tier:fast` sits in the first five non-empty lines (or is a label);
+`tier:full` anywhere means never auto-merge. `Writer-Model:` starts its own line (or
+is a commit trailer) and names the writer's model:
+
+```text pr-body
+tier:fast
+
+Refs #<issue>.
+
+Writer-Model: <writer model id>
+```
+
+CLEAR, posted by `jian-hong` (PR Bot). The first line is exactly:
+
+```text clear
+PR Bot CLEAR @ <full 40-char head sha>
+
+CI 5/5 on this exact head.
+```
+
+AGREE, posted by the reviewer (`cursor[bot]` or `jian-hong`). The first line names
+the head; the body declares the reviewer model with `Reviewer-Model:` and says it is
+a different family from the writer:
+
+```text agree
+AGREE @ <full 40-char head sha>
+
+Reviewer-Model: <reviewer model id>
+Different model family from the writer (<writer model id>).
+```
+
+Short SHAs never count, in CLEAR, AGREE or a `Head:` line. A later comment from
+either login whose first line carries VOID or HOLD (also REVOKED, WITHDRAWN,
+DISAGREE, BLOCKED) and that names the head (full SHA or a 7+ char prefix) voids
+every CLEAR and AGREE posted before it; post a fresh CLEAR and AGREE after it:
+
+```text void
+PR Bot VOID @ <full 40-char head sha>
+```
 
 ## Working alongside other lanes
 

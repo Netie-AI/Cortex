@@ -13,6 +13,8 @@ from typing import Any
 
 from cortex_contract.answer import AskPayload
 
+from CortexOS.identifier_fold import fold_identifier
+
 PAYLOAD_WIDENS_GRANT = "PLAN_SQL_PAYLOAD_WIDENS_GRANT"
 JOIN_OUTSIDE_PAYLOAD = "PLAN_SQL_JOIN_OUTSIDE_PAYLOAD"
 
@@ -42,7 +44,8 @@ _RECONFIRM_SYSTEM = (
 
 
 def _norm(name: str) -> str:
-    return name.strip().lower()
+    """A table name as DuckDB compares it: ASCII case folded, nothing else."""
+    return fold_identifier(name.strip())
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from cortex_contract.answer import AskRequest
 
 from CortexOS.dms import plan_sql_ask
 from CortexOS.integrations import freeroute
@@ -71,6 +72,27 @@ def execute_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(submit, "execute_sql", spy)
     return calls
+
+
+def _stronger_route(fake, route: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Publish ``routes.stronger`` on the scripted status body. Not a request field.
+
+    ``__call__`` is looked up on the class, so the transport function is replaced.
+    """
+    fake.stronger_route = route
+    from CortexOS.integrations import openvault_client
+
+    current = openvault_client.request_json
+
+    def _call(method, path, **kwargs):  # noqa: ANN001
+        status, body = current(method, path, **kwargs)
+        if str(path).split("?", 1)[0].endswith("/api/freeroute/status") and isinstance(body, dict):
+            body = dict(body)
+            body["routes"] = {"stronger": fake.stronger_route}
+            return status, body
+        return status, body
+
+    monkeypatch.setattr(openvault_client, "request_json", _call)
 
 
 def _reply(fake, content: str, *, provider: str = PROVIDER, model: str = MODEL) -> None:
@@ -510,7 +532,9 @@ def test_must_fail_sql_outside_payload_is_refused_even_inside_grant(
         call["body"]["messages"][1]["content"] for call in armed_openvault.chat_calls
     ]
     assert any(plan_sql_ask.OUTSIDE_PAYLOAD in prompt for prompt in prompts)
-    assert len(armed_openvault.chat_calls) > 2
+    # Both same-model writes ran, one complete() each (the planner is folded
+    # into the SQL call). No stronger route is configured here, so no third call.
+    assert len(armed_openvault.chat_calls) == plan_sql_ask.SQL_ATTEMPTS
 
 
 def test_multi_statement_or_dml_never_reaches_execute(
@@ -522,6 +546,49 @@ def test_multi_statement_or_dml_never_reaches_execute(
     _assert_not_answered(body, plan_sql_ask.NO_SELECT)
     assert _ran(execute_spy) == []
     assert len(armed_openvault.chat_calls) == 1
+
+
+def test_must_fail_lateral_table_function_never_serves_file_metadata(
+    armed_openvault, dms_http, execute_spy: list[str], tmp_path: Path  # noqa: F811
+) -> None:
+    """A table function joined LATERAL is a relation the manifest must bound.
+
+    The file sits outside the grant's allowed_paths. Its metadata (column name,
+    min/max statistics) must not reach the rows or the rendered answer.
+    """
+    import duckdb
+
+    marker = "CANARY-LATERAL-7731"
+    outside = tmp_path / "outside_grant.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"COPY (SELECT '{marker}' AS lateral_canary_col) "
+            f"TO '{outside.as_posix()}' (FORMAT parquet)"
+        )
+    finally:
+        con.close()
+    hostile = (
+        "SELECT t.txn_type, m.path_in_schema AS path_in_schema, m.stats_max AS stats_max "
+        f"FROM transactions AS t, LATERAL parquet_metadata('{outside.as_posix()}') AS m"
+    )
+    _reply(armed_openvault, hostile)
+    _reply(armed_openvault, hostile)
+    _reply(armed_openvault, hostile)
+    _reply(armed_openvault, f"WHY: the SQL was refused\nCLOSEST: {QUESTION}")
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert marker not in body["answer"], body["answer"]
+    assert "lateral_canary_col" not in body["answer"], body["answer"]
+    assert body["rows"] in ([], None), body["rows"]
+    assert body["sql_used"] is None
+    assert body["drillthrough_token"] is None
+    assert _badge(body).lower() in {"abstain", "reconfirm"}, body
+    rendered = json.dumps(body)
+    assert marker not in rendered and "lateral_canary_col" not in rendered
+    assert all("parquet_metadata" not in sql.lower() for sql in _ran(execute_spy))
 
 
 # -- must-fail 3: the payload cannot widen the signed grant -----------------------
@@ -698,12 +765,15 @@ def test_implausible_all_null_rows_are_fed_back(
 
 
 def test_exhausted_retries_then_a_stronger_openvault_model(
-    armed_openvault, dms_http  # noqa: F811
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
+    # Not the next groq catalogue id. Cortex must ask for the route OV configured.
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, GOOD_SQL, model=configured)
     dms_http.bind_session(SESSION, GRANT)
 
     body = _json(_ask(dms_http))
@@ -712,8 +782,9 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
     models = [call["body"]["model"] for call in armed_openvault.chat_calls]
     assert len(models) == 3
     assert models[0] == models[1]
+    assert models[2] == configured
     assert models[2] != models[0]
-    assert models[2] != "auto"
+    assert "qwen/qwen3.6-27b" not in models
     retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     strong = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
     assert "UNKNOWN_COLUMN:no_such_col" in retry
@@ -728,15 +799,17 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
 
 
 def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
-    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     bad = "SELECT no_such_col FROM transactions"
     why = "the selected column is not in the table"
     closest = "how many transactions of each type"
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, bad)
-    _reply(armed_openvault, f"WHY: {why}\nCLOSEST: {closest}")
+    _reply(armed_openvault, bad, model=configured)
+    _reply(armed_openvault, f"WHY: {why}\nCLOSEST: {closest}", model=configured)
     dms_http.bind_session(SESSION, GRANT)
 
     body = _json(_ask(dms_http))
@@ -750,12 +823,12 @@ def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
     assert "not found in the database" in body["answer"]
     assert _ran(execute_spy) == []
     assert any(line.startswith("step reconfirm-strong:") for line in body["assumptions"])
-    assert body["served_provider"] == PROVIDER and body["served_model"] == MODEL
+    assert body["served_provider"] == PROVIDER and body["served_model"] == configured
     _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
 
 
 def test_ladder_rung_stamps_appear_on_the_answer(
-    armed_openvault, dms_http  # noqa: F811
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     """Each producing rung is on the customer envelope Check reads.
 
@@ -764,6 +837,8 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     answer, so this path does not add a WRONG.
     """
     bad = "SELECT no_such_col FROM transactions"
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
     dms_http.bind_session(SESSION, GRANT)
 
     _reply(armed_openvault, GOOD_SQL)
@@ -778,17 +853,21 @@ def test_ladder_rung_stamps_appear_on_the_answer(
 
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, GOOD_SQL, model=configured)
     stronger = _json(_ask(dms_http, question="count types on the stronger model"))
     _assert_rung(stronger, "stronger-model")
     models = [call["body"]["model"] for call in armed_openvault.chat_calls]
     assert models[0] == planned_model
-    assert models[-1] != planned_model and models[-1] != "auto"
+    assert configured in models
 
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, bad)
-    _reply(armed_openvault, "WHY: no grounded column\nCLOSEST: how many rows are in transactions")
+    _reply(armed_openvault, bad, model=configured)
+    _reply(
+        armed_openvault,
+        "WHY: no grounded column\nCLOSEST: how many rows are in transactions",
+        model=configured,
+    )
     asked = _json(_ask(dms_http, question="count types until reconfirm"))
     _assert_rung(asked, "reconfirm")
     assert {planned["plan_sql_rung"], retried["plan_sql_rung"], stronger["plan_sql_rung"], asked["plan_sql_rung"]} == {
@@ -797,6 +876,105 @@ def test_ladder_rung_stamps_appear_on_the_answer(
         "stronger-model",
         "reconfirm",
     }
+
+
+def _plan_call_transport_retries(fake, monkeypatch: pytest.MonkeyPatch, retries: int) -> dict[str, int]:
+    """Cap proxy under the first chat: ``retries`` HTTP 429s, then the real reply.
+
+    ``complete()`` is issued once. The 429s are swallowed here and never become
+    another ladder call. ``raw`` counts every chat attempt, including those 429s.
+    """
+    from CortexOS.integrations import openvault_client
+
+    current = openvault_client.request_json
+    state = {"left": retries, "raw": 0}
+
+    def _call(method, path, **kwargs):  # noqa: ANN001
+        route = str(path).split("?", 1)[0]
+        if not route.endswith("/v1/chat/completions"):
+            return current(method, path, **kwargs)
+        if state["left"]:
+            state["left"] -= 1
+            state["raw"] += 1
+            fake.calls.append(
+                {
+                    "method": str(method).upper(),
+                    "path": path,
+                    "body": {"error": {"message": "HTTP 429", "type": "rate_limit"}},
+                    "headers": {},
+                    "base": kwargs.get("base"),
+                    "transport_retry": 429,
+                }
+            )
+            return _call(method, path, **kwargs)
+        state["raw"] += 1
+        return current(method, path, **kwargs)
+
+    monkeypatch.setattr(openvault_client, "request_json", _call)
+    return state
+
+
+def test_model_calls_stamp_matches_complete_count(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Must-fail: model_calls counts logical complete() calls, not transport retries.
+
+    Full ladder: plan, at least one numbered error-fed retry, stronger, then
+    reconfirm. The fake injects two HTTP 429 retries on the first (``plan``
+    rung) call. DMS
+    reads per-step counts only from Answer.model_calls. The stamp stays equal
+    to the logical complete() count. The fake's raw attempt counter is higher.
+    Dropping one step, or adding the 429s into the stamp, disagrees with that
+    logical count.
+    """
+    seen = {"n": 0}
+    real = freeroute.complete
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(freeroute, "complete", _spy)
+    bad = "SELECT no_such_col FROM transactions"
+    configured = "openai/gpt-oss-20b"
+    plan_retries = 2
+    _stronger_route(armed_openvault, configured, monkeypatch)
+    transport = _plan_call_transport_retries(armed_openvault, monkeypatch, plan_retries)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad, model=configured)
+    _reply(
+        armed_openvault,
+        "WHY: no grounded column\nCLOSEST: how many rows are in transactions",
+        model=configured,
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    calls = body["model_calls"]
+    # One complete() per attempt: the planner is folded into the SQL call
+    # (GEN-GRANTED-CATALOG-01), so no rung carries a second, planning call.
+    assert calls == {
+        "plan": 1,
+        "error-fed-retry-1": 1,
+        "stronger-model": 1,
+        "reconfirm": 1,
+        "total": 4,
+    }
+    steps = {key: value for key, value in calls.items() if key != "total"}
+    assert sum(steps.values()) == calls["total"] == seen["n"]
+    assert transport["raw"] == seen["n"] + plan_retries
+    assert len(armed_openvault.chat_calls) == transport["raw"]
+    assert calls["total"] != transport["raw"]
+    dropped = "error-fed-retry-1"
+    reduced = sum(value for key, value in steps.items() if key != dropped)
+    assert reduced != seen["n"]
+    leaked_plan = calls["plan"] + plan_retries
+    leaked_total = calls["total"] + plan_retries
+    assert leaked_total == transport["raw"]
+    assert calls["plan"] != leaked_plan
+    assert calls["total"] != leaked_total
 
 
 def test_confirm_yes_runs_the_closest_question(
@@ -843,5 +1021,181 @@ def test_pii_wording_is_not_an_abstain_and_is_not_masked(
 
     assert body["rows"] and body["provenance"]["badge"] == "session"
     assert "abstain" not in body["answer"].lower()
-    plan_prompt = armed_openvault.chat_calls[0]["body"]["messages"][1]["content"]
-    assert "emails" in plan_prompt and "phone numbers" in plan_prompt
+    prompt = armed_openvault.chat_calls[0]["body"]["messages"][1]["content"]
+    assert "emails" in prompt and "phone numbers" in prompt
+
+
+# DMS executor body and the named model/strict/provider rejection live in
+# test_c_loop_a_dms_body.py. That module is fixture-based so it still collects
+# on 0c9cd70c and fails on the response, not on a missing symbol.
+
+
+@pytest.mark.parametrize("field", ["tenant_id", "note"])
+def test_unknown_request_field_is_422(
+    armed_openvault, dms_http, field: str  # noqa: F811
+) -> None:
+    """Unknown keys other than model, strict and provider are ignored, as on main.
+
+    The three banned names are a wire-field list, not extra=forbid and not a
+    word rule. A question that merely contains those words is not a 422.
+    """
+    assert field not in AskRequest.model_fields
+    session = "unknown-key-unbound"
+    value: object = None if field == "tenant_id" else "kept-on-main"
+    plain = dms_http.post(
+        "/v1/contract/ask",
+        json={"question": "which model and provider, and how strict", "session_id": session},
+    )
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={
+            "question": "which model and provider, and how strict",
+            "session_id": session,
+            field: value,
+        },
+    )
+    assert resp.status_code != 422, resp.text
+    assert resp.status_code == plain.status_code, (resp.status_code, resp.text)
+    assert armed_openvault.chat_calls == []
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_off_policy_served_model_reconfirms_not_abstain(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """OV says the pin is outside its catalog. That is a reconfirm, not an abstain.
+
+    Cortex does not compare the id to a list of model names. The served
+    model and provider are the ones on OpenVault's response.
+    """
+    missing = "not-a-catalogue-model"
+    _stronger_route(armed_openvault, missing, monkeypatch)
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    armed_openvault.replies.append(
+        (
+            503,
+            {
+                "error": {
+                    "message": "pinned model has no healthy hop",
+                    "type": "pin_unavailable",
+                    "model": missing,
+                    "reason": "not_in_catalog",
+                },
+                "served_provider": PROVIDER,
+                "served_model": missing,
+                "served_local": False,
+            },
+        )
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["provenance"]["badge"] == "reconfirm"
+    assert body["provenance"]["badge"] != "abstain"
+    assert freeroute.MODEL_NOT_ALLOWLISTED in body["answer"]
+    assert missing in body["answer"]
+    assert body["reconfirm"]["why"]
+    assert body["reconfirm"]["closest_question"]
+    assert "transactions" in body["reconfirm"]["closest_question"]
+    assert body["plan_sql_rung"] == plan_sql_ask.RUNG_RECONFIRM
+    assert body["sql_used"] is None
+    assert _ran(execute_spy) == []
+    asked = [call["body"]["model"] for call in armed_openvault.chat_calls]
+    assert missing in asked
+    assert "qwen/qwen3.6-27b" not in asked
+    served = next(line for line in body["assumptions"] if line.startswith("step sql-strong:"))
+    assert f"served_model={missing}" in served
+    assert f"served_provider={PROVIDER}" in served
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_stronger_rung_has_no_hard_coded_model_id_list() -> None:
+    """Grep: the stronger rung does not hold a list of model ids."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    patterns = (
+        "model_allowlist",
+        "gpt-oss",
+        "qwen/",
+        "llama-3",
+        "deepseek-",
+        "gemini-",
+    )
+    listed = subprocess.run(
+        ["grep", "-nE", "|".join(patterns), "CortexOS/dms/plan_sql_ask.py"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert listed.returncode == 1, listed.stdout
+    assert listed.stdout == ""
+    defined = subprocess.run(
+        ["grep", "-n", "def model_allowlist", "-r", "--include=*.py", "CortexOS", "packages"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert defined.returncode == 1, defined.stdout
+    assert defined.stdout == ""
+
+
+def test_unserved_pin_reconfirms_and_names_the_missing_model(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """OV served a different model than the pinned route. That answer is not used."""
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(armed_openvault, configured, monkeypatch)
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    # Stronger SQL: OV stamps a different model than the one it was asked for.
+    _reply(armed_openvault, GOOD_SQL, model=MODEL)
+    _reply(armed_openvault, "WHY: ignored substitute\nCLOSEST: ignored substitute", model=MODEL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["provenance"]["badge"] == "reconfirm"
+    assert freeroute.MODEL_NOT_SERVED in body["answer"] or any(
+        freeroute.MODEL_NOT_SERVED in line for line in body["assumptions"]
+    )
+    assert configured in body["answer"] or any(configured in line for line in body["assumptions"])
+    assert "ignored substitute" not in body["answer"]
+    assert _ran(execute_spy) == []
+    assert body["sql_used"] is None
+    strong = [
+        call["body"]["model"]
+        for call in armed_openvault.chat_calls
+        if call["body"]["model"] == configured
+    ]
+    assert strong
+    served = next(line for line in body["assumptions"] if line.startswith("step sql-strong:"))
+    assert f"served_model={MODEL}" in served
+    assert f"served_provider={PROVIDER}" in served
+    assert armed_openvault.non_openvault_calls == []
+
+
+def test_unset_stronger_route_does_not_pick_a_provider(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    _stronger_route(armed_openvault, "", monkeypatch)
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, bad)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    assert body["plan_sql_rung"] == plan_sql_ask.RUNG_RECONFIRM
+    assert freeroute.NO_STRONGER_ROUTE in " ".join(body["assumptions"])
+    asked = [call["body"]["model"] for call in armed_openvault.chat_calls]
+    assert asked
+    assert set(asked) == {MODEL}
+    assert _ran(execute_spy) == []
+    assert armed_openvault.non_openvault_calls == []

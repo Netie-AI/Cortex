@@ -29,6 +29,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from CortexOS.identifier_fold import fold_identifier
+
 #: One SQL identifier part (shared naming rule). Always used with ``fullmatch``:
 #: ``re.match`` with ``$`` accepts a trailing newline (``"schools\n"``).
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -106,7 +108,7 @@ def _ident(value: Any, where: str) -> str:
     """One identifier part: no dot, no quote, no whitespace, no trailing newline."""
     if not isinstance(value, str) or IDENT.fullmatch(value) is None:
         raise CallerOntologyError("bad_identifier", f"{where} is not an identifier")
-    return value.lower()
+    return fold_identifier(value)
 
 
 def _table_name(value: Any, where: str) -> str:
@@ -118,7 +120,7 @@ def _table_name(value: Any, where: str) -> str:
         raise CallerOntologyError(
             "bad_identifier", f"{where} is not a table name (table or schema.table)"
         )
-    return value.lower()
+    return fold_identifier(value)
 
 
 def _resolve(name: str, tables: dict[str, list[str]]) -> str | None:

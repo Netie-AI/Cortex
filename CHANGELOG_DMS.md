@@ -2,14 +2,48 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
-## GEN-GRANTED-CATALOG-01 -- 2026-10-09
+## GEN-GRANTED-CATALOG-01 (#386) -- 2026-10-17
 
 SQL generation on the plan+SQL path prompts with the signed grant intersected
-with the SCHEMA-CONTEXT-01 ``schema_context`` string (PR #351 shape). The
+with the SCHEMA-CONTEXT-01 ``schema_context`` string (#351 shape). The
 string is read from the ask body without a contract bump. An unknown-column
-retry adds did-you-mean names from that catalog. Each attempt is one FreeRoute
-``complete``; the planner call is folded into it. Draft only. Not a CI claim.
-Not PASS. 52 effect not measured.
+retry adds did-you-mean names from that catalog; an executor error is scanned
+only after ``redact_db_error``. Each attempt is one FreeRoute ``complete``;
+the planner call is folded into it, so ``model_calls`` counts one call per
+rung attempt. Not a CI claim. 52 effect not measured.
+
+## DBOS-3X (#331) -- 2026-10-16
+
+The `agentic`, `agents` and `full` extras take `dbos>=3.0.0,<4`. `uv.lock`
+and `requirements/image-full.lock.txt` resolve `dbos==3.3.0`, which adds
+`croniter` and drops `typer-slim`. dbos 3.0 removed the admin server, so
+`dbos_runtime.py` no longer sets `run_admin_server` and
+`DBOS_RUN_ADMIN_SERVER` has no effect. `APP_VERSION` stays
+`s1-dbos-resume-v1` so `launch()` still recovers PENDING workflows written
+under 2.x.
+
+**Upgrade step for any host with a DBOS system database**
+(`DBOS_SYSTEM_DATABASE_URL`, or the default `data/dbos_agents.sqlite`): stop
+every dbos 2.x process that uses that database before starting a 3.x one. A
+3.x process migrates the system database in place on launch; 3.x reads 2.x
+workflows, but a 2.x process cannot read the migrated database. Do not run
+2.x and 3.x workers against the same system database, and do not roll back
+to 2.x against a database a 3.x process has opened. Draft only. Not a CI
+claim. Not PASS.
+
+## CERT-ORACLE-SPLIT (#345, Refs #343) -- 2026-10-15
+
+`cot_climb.gold_sql_for` no longer grades the climb against the L0 serve set
+(`packs/dms/semantic/certified_queries.yaml`). `CortexOS/crew/score_oracle.py`
+takes serve-set cases out of the climb, held-out, accuracy, paraphrase and
+corpus scores and lists each one by name. `bench/oracle/climb_oracle_v1.yaml`
+no longer copies the frozen held-out split, and a must-fail asserts climb
+oracle ids are disjoint from held-out and the serve set; a climb with no gold
+says `NO_GOLD`. `.importlinter` gains `serve-never-reads-oracle`, with
+`CortexOS.dms.plan_sql_ask` (the #329 ladder) as a source, and the open()
+audit covers the plan_sql path. The climb has no exact-SQL gold until a
+development split is written outside held-out, golden and paraphrase files.
+Draft only. Not a CI claim. Not PASS.
 
 ## IMAGE-AUTH-01 (#363) -- 2026-10-08
 

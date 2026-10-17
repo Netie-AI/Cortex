@@ -20,10 +20,15 @@ Order, each step stamped (``StepStamp``):
    granted catalog intersected with ``schema_context`` when DMS sent one.
 5. On a SQL, execution, empty, or implausible result that is not an ungranted
    table and not destructive SQL: feed the error back and regenerate, up to
-   ``SQL_ATTEMPTS`` writes on the same model. An unknown-column error also
-   carries did-you-mean hints from the granted catalog.
-6. ``escalate``: one more SQL pass pinned to the next OpenVault catalogue
-   model (a stronger retry, still one call) before any user reconfirm.
+   ``SQL_ATTEMPTS`` writes on the same model. SQL with an output column that
+   does not derive from a granted table column (a literal, a VALUES list) is
+   such an error: it is fed back and never executed (``sql_lineage``). An
+   unknown-column error also carries did-you-mean hints from the granted
+   catalog.
+6. ``escalate``: one more SQL pass (still one call) on the stronger route
+   OpenVault configured (``routes.stronger``). Cortex does not pick a provider.
+   If OV did not configure one, the ladder reconfirms and does not invent a
+   model.
 7. ``reconfirm``: why this would abstain, plus the closest answerable question.
    ``plan_sql_confirm=yes`` runs that question. ``no`` answers
    ``not found in the database``.
@@ -32,6 +37,12 @@ The answer that leaves this path stamps the rung that produced it
 (``plan``, ``error-fed-retry-<N>``, ``stronger-model``, ``reconfirm``) on
 ``plan_sql_rung`` and on an assumptions line ``rung: <token>``. A direct
 abstain and a confirm-no do not carry a rung.
+
+``Answer.model_calls`` counts logical FreeRoute ``complete()`` calls on those
+same steps, plus ``total``: one per call the ladder issues. A transport or
+proxy retry under that call (an upstream 429 retried by the cap proxy or the
+FreeRoute client) is not a step. DMS reads the per-step counts only from that
+object.
 
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
 route-stamp failure, which never reaches a model result). PII is not an abstain
@@ -53,6 +64,7 @@ from typing import Any
 
 from cortex_contract.answer import AskRequest
 
+from CortexOS.identifier_fold import fold_identifier
 from CortexOS.integrations import freeroute
 from CortexOS.plan_sql import catalog as plan_catalog
 from CortexOS.plan_sql import payload as plan_payload
@@ -78,6 +90,7 @@ MODEL_UNAVAILABLE = "PLAN_SQL_MODEL_UNAVAILABLE"
 EXECUTE_FAILED = "PLAN_SQL_EXECUTE_FAILED"
 EMPTY_RESULT = "PLAN_SQL_EMPTY_RESULT"
 IMPLAUSIBLE_RESULT = "PLAN_SQL_IMPLAUSIBLE_RESULT"
+NOT_FROM_TABLE = "PLAN_SQL_OUTPUT_NOT_FROM_TABLE"
 
 NOT_FOUND_ANSWER = "not found in the database"
 
@@ -162,8 +175,25 @@ def _sql_tables(sql: str) -> set[str]:
     from sqlglot import exp
 
     tree = sqlglot.parse_one(sql, read="duckdb")
-    ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
-    return {t.name.lower() for t in tree.find_all(exp.Table) if t.name} - ctes
+    ctes = {fold_identifier(cte.alias_or_name) for cte in tree.find_all(exp.CTE)}
+    return {fold_identifier(t.name) for t in tree.find_all(exp.Table) if t.name} - ctes
+
+
+def _underived(sql: str, granted: set[str]) -> list[str]:
+    """``OUTPUT_NOT_FROM_TABLE:<col>`` per output column not read from a granted table."""
+    from CortexOS.dms.sql_lineage import lineage_violations
+
+    return lineage_violations(sql, granted)
+
+
+def _granted_names(grant: Any) -> set[str]:
+    """The grant's table keys, folded only the way DuckDB folds names.
+
+    Read from the verified manifest itself: a name list lower-cased with
+    Unicode rules would turn a grant on ``"Äpfel"`` into ``äpfel``, which is a
+    different DuckDB table.
+    """
+    return {fold_identifier(str(name)) for name in grant.row_predicates}
 
 
 def _is_scored_round(scored_pack_id: str | None) -> bool:
@@ -182,6 +212,42 @@ def rung_retry(n: int) -> str:
 
 def _mark_rung(steps: list[StepStamp], rung: str) -> None:
     steps.append(StepStamp.cortex("rung", "cortex:plan-sql-rung", rung))
+
+
+def model_calls_stamp(counts: dict[str, int]) -> dict[str, int] | None:
+    """Logical ``complete()`` counts per step, plus ``total``.
+
+    One count per call the ladder issues. Transport retries under that call
+    are not included. None when nothing was called. ``total`` is the sum.
+    """
+    ordered: dict[str, int] = {}
+    plan = counts.get(RUNG_PLAN, 0)
+    if plan:
+        ordered[RUNG_PLAN] = plan
+    retries = sorted(
+        (key for key in counts if key.startswith("error-fed-retry-") and counts[key]),
+        key=lambda key: int(key.rsplit("-", 1)[-1]),
+    )
+    for key in retries:
+        ordered[key] = counts[key]
+    strong = counts.get(RUNG_STRONG, 0)
+    if strong:
+        ordered[RUNG_STRONG] = strong
+    rec = counts.get(RUNG_RECONFIRM, 0)
+    if rec:
+        ordered[RUNG_RECONFIRM] = rec
+    if not ordered:
+        return None
+    ordered["total"] = sum(ordered.values())
+    return ordered
+
+
+def _last_served_stamp(steps: list[StepStamp]) -> StepStamp | None:
+    """Last step that copied served model and provider from an OpenVault response."""
+    for step in reversed(steps):
+        if step.served_provider or step.served_model:
+            return step
+    return None
 
 
 def _served(stamp: StepStamp | None, reason: str) -> dict[str, Any]:
@@ -355,7 +421,16 @@ def _remember(step: ModelStep, failed: set[str]) -> None:
 
 
 def _security_stop(step: ModelStep, journal: list[freeroute.RouteStamp]) -> tuple[str, str] | None:
-    """A trust failure, or a model call that was never sent. Else None."""
+    """A trust failure, or a model call that was never sent. Else None.
+
+    A missing OpenVault stronger route is not a trust failure: the ladder
+    reconfirms instead of inventing a provider.
+    """
+    reason = step.reason or ""
+    # A missing stronger route, or OpenVault saying the pin is outside its
+    # own catalog, is not a direct abstain. The ladder reconfirms.
+    if freeroute.NO_STRONGER_ROUTE in reason or freeroute.MODEL_NOT_ALLOWLISTED in reason:
+        return None
     code, detail, refused = _model_refusal(step, journal)
     if code and (refused or step.route is None):
         return code, detail
@@ -381,7 +456,11 @@ def _ungranted(sql: str, granted: set[str]) -> bool:
 
 
 def _missing_literals(sql: str, request: plan_payload.PlanSqlRequest) -> list[str]:
-    """Comparison literals that are not in the sampled values for that column."""
+    """Comparison literals that are not in the sampled values for that column.
+
+    Names the model's own literal only. The sampled values are already in the
+    model's prompt block and a failure detail can reach the user's reconfirm.
+    """
     import sqlglot
     from sqlglot import exp
 
@@ -404,8 +483,26 @@ def _missing_literals(sql: str, request: plan_payload.PlanSqlRequest) -> list[st
         for cols in request.column_values.values():
             pool.extend(cols.get(col.name, ()))
         if pool and str(lit.this) not in pool:
-            missed.append(f"{col.name}={str(lit.this)!r} sampled={pool[:8]}")
+            missed.append(f"{col.name}={str(lit.this)!r}")
     return missed
+
+
+def _audit_raw(sql: str, exc: Any) -> None:
+    """Unredacted engine text goes to the SQL audit log only, never an envelope or prompt."""
+    from datetime import datetime, timezone
+
+    from CortexOS.dms.sql_guardrail import AuditEntry, log_audit
+
+    raw = getattr(exc, "raw_detail", None)
+    log_audit(
+        AuditEntry(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            original_sql=sql,
+            safe_sql=None,
+            violations=[f"EXPLAIN_FAILED:{raw}"] if raw else list(exc.violations),
+            passed=False,
+        )
+    )
 
 
 def _sample_values(
@@ -450,19 +547,80 @@ def _sample_values(
     return found, f"columns={taken} values={nvals} errors={errors}"
 
 
-def _stronger_generator(failed: set[str]) -> FreeRoutePlanSqlGenerator:
-    """Next OpenVault catalogue model, still only through FreeRoute."""
+class _RouteRefusal:
+    """A stronger rung that must not call a model. No provider is chosen."""
+
+    def __init__(self, reason: str) -> None:
+        self.pin = ""
+        self._reason = reason
+
+    def _no(self, kind: str) -> ModelStep:
+        stamp = StepStamp.cortex(kind, "openvault-freeroute", self._reason)
+        return ModelStep(kind, False, "", self._reason, stamp, None)
+
+    def plan(self, request: plan_payload.PlanSqlRequest) -> ModelStep:
+        del request
+        return self._no("plan-strong")
+
+    def sql(
+        self,
+        request: plan_payload.PlanSqlRequest,
+        plan: ModelStep,
+        *,
+        prior_violations: Sequence[str] = (),
+    ) -> ModelStep:
+        del request, plan, prior_violations
+        return self._no("sql-strong")
+
+    def reconfirm(
+        self, request: plan_payload.PlanSqlRequest, failures: Sequence[str]
+    ) -> ModelStep:
+        del request, failures
+        return self._no("reconfirm-strong")
+
+
+def _stronger_generator(failed: set[str]) -> FreeRoutePlanSqlGenerator | _RouteRefusal:
+    """OpenVault's configured stronger route. Cortex does not pick a provider.
+
+    The id is whatever OpenVault put on ``routes.stronger``. It is not
+    checked against a list of model names. If that id is outside OpenVault's
+    own catalog, OpenVault's response says so and the ladder reconfirms.
+    """
+    del failed
     pin = ""
     try:
         arm = freeroute.arming()
-        models, _source = freeroute.candidates(arm)
-    except Exception:  # noqa: BLE001 - no catalogue still goes through FreeRoute
-        models = ()
-    for model in models:
-        if model and model not in failed and model != "auto":
-            pin = model
-            break
-    return FreeRoutePlanSqlGenerator(pin=pin, pin_source="plan-sql-stronger", tier="strong")
+        pin = freeroute.configured_stronger_route(arm)
+    except Exception:  # noqa: BLE001 - no status still does not invent a model
+        pin = ""
+    if not pin:
+        return _RouteRefusal(
+            f"{freeroute.NO_STRONGER_ROUTE}: OpenVault status has no routes.stronger"
+        )
+    return FreeRoutePlanSqlGenerator(
+        pin=pin,
+        pin_source="openvault-stronger-route",
+        tier="strong",
+    )
+
+
+def _not_served(step: ModelStep) -> str:
+    """Requested id OpenVault did not serve. Empty for ``auto`` and for a match."""
+    route = step.route
+    if route is None or not step.ok:
+        return ""
+    # A catalogue pick is not a pin. Only an id Cortex asked OV to serve
+    # (the stronger route, or an operator pin) is a promise OV can miss.
+    source = f"{route.source} {route.route_source}"
+    if "pin" not in source:
+        return ""
+    requested = (route.requested or "").strip()
+    if not requested or requested == "auto":
+        return ""
+    served = (route.served or step.stamp.served_model or "").strip()
+    if freeroute.request_was_served(requested, served):
+        return ""
+    return requested
 
 
 def _fallback_closest(request: plan_payload.PlanSqlRequest) -> str:
@@ -517,20 +675,34 @@ def plan_sql_answer(
     steps: list[StepStamp] = []
     failed_models: set[str] = set()
     failures: list[str] = []
+    call_counts: dict[str, int] = {}
+
+    def _note_call(active: object, bucket: str) -> None:
+        # A route refusal does not call complete(). Every other generator
+        # method on this path calls it once.
+        if isinstance(active, _RouteRefusal):
+            return
+        call_counts[bucket] = call_counts.get(bucket, 0) + 1
+
+    def _with_calls(env: dict[str, Any]) -> dict[str, Any]:
+        env["model_calls"] = model_calls_stamp(call_counts)
+        return env
 
     def stop(code: str, detail: str, *, refused: bool = True) -> dict[str, Any]:
-        return _not_answered(
-            question, audit_id, steps, code=code, detail=detail, refused=refused
+        return _with_calls(
+            _not_answered(
+                question, audit_id, steps, code=code, detail=detail, refused=refused
+            )
         )
 
     try:
-        grant, _, granted_list = resolve_product_grant(
+        grant, _, _ = resolve_product_grant(
             session_id, verified, space_id=space_id
         )
     except UngroundedSession as exc:
         steps.append(StepStamp.cortex("grant", "cortex:session-grant", f"refused: {exc}"))
         return stop(UNGROUNDED, str(exc))
-    granted = {name.lower() for name in granted_list}
+    granted = _granted_names(grant)
     steps.append(
         StepStamp.cortex("grant", "cortex:session-grant", f"tables={sorted(granted)}")
     )
@@ -550,7 +722,7 @@ def plan_sql_answer(
 
     if confirm == "no":
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "no"))
-        return _not_found(audit_id, steps)
+        return _with_calls(_not_found(audit_id, steps))
 
     sampled, sample_reason = _sample_values(grant, request)
     steps.append(StepStamp.cortex("sample", "cortex:column-values", sample_reason))
@@ -568,7 +740,8 @@ def plan_sql_answer(
         attempts: int,
         rung_of,
     ) -> dict[str, Any] | None:
-        # One freeroute.complete per attempt, inside sql(). plan() is not called.
+        # One freeroute.complete per attempt, inside sql(). plan() is not called,
+        # so the first attempt's single call is the ``plan`` rung's only count.
         folded = ModelStep(
             "plan",
             True,
@@ -579,6 +752,7 @@ def plan_sql_answer(
         priors = list(failures)
         for attempt in range(attempts):
             sql_step = active.sql(request, folded, prior_violations=priors)
+            _note_call(active, rung_of(attempt))
             steps.append(sql_step.stamp)
             _remember(sql_step, failed_models)
             security = _security_stop(sql_step, journal)
@@ -586,6 +760,12 @@ def plan_sql_answer(
                 return stop(security[0], security[1], refused=security[0] != MODEL_UNAVAILABLE)
             if not sql_step.ok:
                 detail = f"{MODEL_UNAVAILABLE}: {sql_step.kind} step: {sql_step.reason}"
+                priors.append(detail)
+                failures.append(detail)
+                continue
+            missed = _not_served(sql_step)
+            if missed:
+                detail = f"{freeroute.MODEL_NOT_SERVED}: {missed}"
                 priors.append(detail)
                 failures.append(detail)
                 continue
@@ -646,6 +826,19 @@ def plan_sql_answer(
             priors.append(detail)
             failures.append(detail)
             return None
+        underived = _underived(served_sql, granted)
+        if underived:
+            # An answer column that no granted table supplies is a value the
+            # model typed. Fed back, never executed or served.
+            detail = (
+                f"{NOT_FROM_TABLE}: {', '.join(underived)}; every output column must "
+                "read a column of a granted table, or count or aggregate its rows"
+            )
+            steps.append(StepStamp.cortex("gate", "cortex:sql-gate", f"refused: {detail}"))
+            freeroute.note_verdict(sql_step.route, "gate_fail")
+            priors.append(detail)
+            failures.append(detail)
+            return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
         return _execute(sql_step, plan, served_sql, priors, rung)
@@ -657,7 +850,7 @@ def plan_sql_answer(
         priors: list[str],
         rung: str,
     ) -> dict[str, Any] | None:
-        from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+        from CortexOS.dms.sql_validate_gate import SqlGateAbstain, redact_db_error
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
@@ -676,16 +869,18 @@ def plan_sql_answer(
             return None
         except SqlGateAbstain as exc:
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", "refused: EXPLAIN"))
+            _audit_raw(served_sql, exc)
+            # Redacted at the source: no caret context, no literal, no post-enforce SQL.
             detail = f"{GATE_REFUSED}: {exc}"
             priors.append(detail)
             failures.append(detail)
             return None
         except Exception as exc:  # noqa: BLE001 - an executor fault is retried, never a 500
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", type(exc).__name__))
-            scanned = (
-                f"{EXECUTE_FAILED}: {type(exc).__name__}: "
-                f"{freeroute.redact(str(exc), limit=200)}"
-            )
+            # Scanned for an unknown column only after DB-ERROR-TEXT redaction:
+            # no LINE context, no quoted literal. Without a catalog hint the
+            # detail stays the class name alone.
+            scanned = f"{EXECUTE_FAILED}: {type(exc).__name__}: {redact_db_error(exc)}"
             hinted = _hint(scanned)
             detail = hinted if hinted != scanned else f"{EXECUTE_FAILED}: {type(exc).__name__}"
             priors.append(detail)
@@ -709,21 +904,25 @@ def plan_sql_answer(
             return None
         steps.append(StepStamp.cortex("execute", "cortex:execute_sql", f"rows={len(rows)}"))
         _mark_rung(steps, rung)
-        return _success(
-            question,
-            audit_id,
-            steps,
-            plan=plan,
-            sql_step=sql_step,
-            rows=rows,
-            served_sql=served_sql,
-            rung=rung,
+        return _with_calls(
+            _success(
+                question,
+                audit_id,
+                steps,
+                plan=plan,
+                sql_step=sql_step,
+                rows=rows,
+                served_sql=served_sql,
+                rung=rung,
+            )
         )
 
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
     with freeroute.journal(split=split) as journal:
         answered = _round(
-            gen, SQL_ATTEMPTS, lambda n: RUNG_PLAN if n == 0 else rung_retry(n)
+            gen,
+            SQL_ATTEMPTS,
+            lambda n: RUNG_PLAN if n == 0 else rung_retry(n),
         )
         if answered is not None:
             return answered
@@ -732,28 +931,54 @@ def plan_sql_answer(
             StepStamp.cortex(
                 "escalate",
                 "openvault-freeroute",
-                f"stronger pin={strong.pin or 'openvault-pick'}",
+                f"stronger route={strong.pin or 'unset'}",
             )
         )
         request = replace(request, prior_failures=tuple(failures)[:8])
         answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG)
         if answered is not None:
             return answered
+        policy = next(
+            (item for item in reversed(failures) if freeroute.MODEL_NOT_ALLOWLISTED in item),
+            "",
+        )
+        if policy:
+            why, closest = _parse_reconfirm("", failures, request)
+            served = _last_served_stamp(steps)
+            _mark_rung(steps, RUNG_RECONFIRM)
+            return _with_calls(
+                _reconfirm_envelope(
+                    audit_id,
+                    steps,
+                    why=why,
+                    closest=closest,
+                    stamp=served,
+                    rung=RUNG_RECONFIRM,
+                )
+            )
         rec = strong.reconfirm(request, tuple(failures)[:8])
+        _note_call(strong, RUNG_RECONFIRM)
         steps.append(rec.stamp)
         _remember(rec, failed_models)
         security = _security_stop(rec, journal)
         if security and security[0] != MODEL_UNAVAILABLE:
             return stop(security[0], security[1], refused=True)
-        why, closest = _parse_reconfirm(rec.text if rec.ok else "", failures, request)
+        missed = _not_served(rec)
+        if missed:
+            failures.append(f"{freeroute.MODEL_NOT_SERVED}: {missed}")
+        why, closest = _parse_reconfirm(
+            rec.text if rec.ok and not missed else "", failures, request
+        )
         _mark_rung(steps, RUNG_RECONFIRM)
-        return _reconfirm_envelope(
-            audit_id,
-            steps,
-            why=why,
-            closest=closest,
-            stamp=rec.stamp if rec.ok else None,
-            rung=RUNG_RECONFIRM,
+        return _with_calls(
+            _reconfirm_envelope(
+                audit_id,
+                steps,
+                why=why,
+                closest=closest,
+                stamp=rec.stamp if rec.ok else None,
+                rung=RUNG_RECONFIRM,
+            )
         )
 
 
@@ -762,12 +987,14 @@ __all__ = [
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
     "LAYER",
+    "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
     "RECONFIRM",
     "RUNG_PLAN",
     "RUNG_RECONFIRM",
     "RUNG_STRONG",
     "SQL_ATTEMPTS",
+    "model_calls_stamp",
     "rung_retry",
     "default_generator",
     "plan_sql_answer",

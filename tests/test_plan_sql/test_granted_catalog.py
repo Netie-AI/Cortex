@@ -94,9 +94,9 @@ def test_must_fail_column_outside_granted_catalog_never_in_prompt_or_sql(
 def test_must_fail_unknown_column_retry_carries_did_you_mean(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:
-    # The non-SELECT reply is the base ladder's plan call. On this head it is
-    # one unusable attempt, then the unknown-column attempt, then the rewrite.
-    _reply(armed_openvault, "1. Ground the question in the listed columns.")
+    # The unknown-column attempt, then the error-fed rewrite on the same model.
+    # (Main's ladder only escalates to a stronger route OpenVault configured,
+    # so both writes stay inside SQL_ATTEMPTS.)
     _reply(armed_openvault, "SELECT txn_typo FROM transactions")
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -138,3 +138,4 @@ def test_must_fail_one_model_call_per_attempt(
     tasks = [row[0] for row in _route_rows()]
     assert tasks[routes_before:] == ["plan-sql-sql", "plan-sql-sql"]
     assert "plan-sql-plan" not in tasks
+
