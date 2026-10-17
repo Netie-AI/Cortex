@@ -139,3 +139,36 @@ def test_must_fail_one_model_call_per_attempt(
     assert tasks[routes_before:] == ["plan-sql-sql", "plan-sql-sql"]
     assert "plan-sql-plan" not in tasks
 
+
+@pytest.mark.parametrize(
+    ("value", "code"),
+    [
+        pytest.param(123, "schema_context_invalid", id="not-a-string"),
+        # 4097 two-byte characters: under 8192 characters, over 8192 UTF-8 bytes.
+        pytest.param("é" * 4097, "schema_context_too_large", id="over-byte-cap"),
+        pytest.param(
+            "SCHEMA\n- transactions\n- txn_type VARCHAR ‮",
+            "schema_context_forbidden_char",
+            id="bidi-override",
+        ),
+        pytest.param("count the types, please", "schema_context_unparsed", id="no-catalog"),
+    ],
+)
+def test_ask_refuses_schema_context_by_the_schema_context_01_rule(
+    armed_openvault, dms_http, value: object, code: str  # noqa: F811
+) -> None:
+    """The ask route and POST /v1/insights share one rule (#351's ``problem``).
+
+    A value that rule refuses is a 422 with its code, before any model call.
+    """
+    from CortexOS.insights import schema_context as schema_ctx
+
+    assert schema_ctx.problem(value) is not None
+    assert schema_ctx.problem(value)[0] == code
+    dms_http.bind_session(SESSION, GRANT)
+
+    resp = _ask(dms_http, payload=PAYLOAD, schema_context=value)
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == code
+    assert armed_openvault.chat_calls == []

@@ -240,9 +240,11 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
 async def _schema_context_field(request: Request) -> tuple[str | None, tuple[str, str] | None]:
     """SCHEMA-CONTEXT-01 string from the raw body, without a contract bump.
 
-    The field is defined on PR #351 as an optional string. It is not on
-    ``AskRequest`` in this tree, so it is read here and ignored by the model.
-    Absent or blank is ``None``. A non-string or over-cap value is a 422.
+    #351 publishes the field on ``POST /v1/insights`` (contract 1.6.0). It is
+    not on ``AskRequest``, so it is read here and ignored by the model.
+    Absent or blank is ``None``. A value #351's ``schema_context.problem``
+    refuses (non-string, over the UTF-8 byte cap, a control or format
+    character, no table and column catalog) is a 422 with that code.
     Other unknown keys stay on the existing AskRequest rules.
     """
     from CortexOS.plan_sql.catalog import accepted_schema_context, schema_context_problem

@@ -2,8 +2,10 @@
 
 The prompt sees the tables and columns the signed grant allows, intersected
 with the ``schema_context`` string DMS sends. That string is the SCHEMA-CONTEXT-01
-shape (PR #351, contract 1.5.0): optional text, ``SCHEMA`` table/column lines,
-``JOINS`` lines. This module does not add a contract field.
+shape (#351, ``CortexOS.insights.schema_context``): optional text, ``SCHEMA``
+table/column lines, ``JOINS`` lines. Whether a value may be used at all is that
+module's rule, so the ask route and ``POST /v1/insights`` refuse the same
+strings. This module does not add a contract field.
 
 Nothing parsed from outside the grant is returned to the prompt builder.
 Names are whatever the grant and the schema string contain. No pack list.
@@ -18,12 +20,14 @@ from dataclasses import dataclass, replace
 
 from cortex_contract.answer import AskPayload, AskPayloadColumn, AskPayloadJoin, AskPayloadTable
 
+from CortexOS.insights import schema_context as schema_ctx
 from CortexOS.plan_sql.payload import PlanSqlRequest
 
-# Same cap as SCHEMA-CONTEXT-01. Over-cap is a named refusal, never a truncation.
-SCHEMA_CONTEXT_MAX_CHARS = 8192
-SCHEMA_CONTEXT_INVALID = "schema_context_invalid"
-SCHEMA_CONTEXT_TOO_LARGE = "schema_context_too_large"
+# SCHEMA-CONTEXT-01's cap and refusal codes. Over-cap is a named refusal,
+# never a truncation. The cap is UTF-8 bytes.
+SCHEMA_CONTEXT_MAX_BYTES = schema_ctx.SCHEMA_CONTEXT_MAX_BYTES
+SCHEMA_CONTEXT_INVALID = schema_ctx.SCHEMA_CONTEXT_INVALID
+SCHEMA_CONTEXT_TOO_LARGE = schema_ctx.SCHEMA_CONTEXT_TOO_LARGE
 SCHEMA_CONTEXT_EMPTY = "PLAN_SQL_SCHEMA_CONTEXT_EMPTY"
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -49,27 +53,17 @@ def _norm(name: str) -> str:
 def schema_context_problem(value: object) -> tuple[str, str] | None:
     """Named refusal for a present-but-unusable ``schema_context``, else None.
 
-    ``None`` and a blank string are absent, not an error. A non-string is
-    invalid. Over-cap is never truncated.
+    SCHEMA-CONTEXT-01's own check (``schema_context.problem``): ``None`` and a
+    blank string are absent, not an error. A non-string, an over-cap value, a
+    control or format character, and a string that does not parse into a
+    table and column catalog are refused by name.
     """
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        return (SCHEMA_CONTEXT_INVALID, "schema_context must be a string")
-    if len(value) > SCHEMA_CONTEXT_MAX_CHARS:
-        return (
-            SCHEMA_CONTEXT_TOO_LARGE,
-            f"schema_context length {len(value)} exceeds {SCHEMA_CONTEXT_MAX_CHARS}",
-        )
-    return None
+    return schema_ctx.problem(value)
 
 
 def accepted_schema_context(value: object) -> str | None:
     """Stripped schema string, or None when the field is absent or unusable."""
-    if schema_context_problem(value) is not None or not isinstance(value, str):
-        return None
-    text = value.strip()
-    return text or None
+    return schema_ctx.accepted_text(value)
 
 
 @dataclass(frozen=True)
