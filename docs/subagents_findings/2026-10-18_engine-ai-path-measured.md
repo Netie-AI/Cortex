@@ -24,6 +24,18 @@ Two scorer defects inflate "incorrect":
 - `missing columns [...]` counts a right value under another column alias as wrong;
 - two items (`bird_over_capacity_with_critical_alert`, `bird_delayed_kg_exceeds_on_hand`) have canonical SQL that returns no rows on today's lake, because their gold says `txn_type = 'OUT'` and the lake now stores `outbound`.
 
+## 1b. The plan+SQL ladder on the same 28 (POST /v1/contract/ask, CORTEX_PLAN_SQL=1)
+Every demo table was granted and sent as `dms_payload`. Served rows were compared to the canonical SQL by value, ignoring column names. Model: codestral-2508.
+
+| Run | answerable OK | answerable wrong | reconfirm or abstain | must-abstain served |
+|---|---|---|---|---|
+| main 52ac71f | 3 | 7 | 5 | 5 |
+| plus LITERAL-GROUNDING-01 | 4 | 7 | 3 | 2 |
+
+- **Without the check:** asked about `SKU-ZZZZZ` in `LOC-999`, the model filtered on `SKU-00026` and `LOC-001`, which came from the sampled values, and served their total. Every gate passed. With the check, the ladder feeds the identifier back and ends in reconfirm.
+- **What the check catches:** only identifiers (letters with digits, or 3+ digits; not dates, times or period codes). On known-correct SQL it flags 2 of 500 BIRD gold queries (`K-8` and `K-9`, written as "Kindergarten to 8th grade") and 0 of 48 Cortex canonical queries.
+- **Unchanged:** the remaining wrong answers are semantic, for example the wrong grain or a missed filter. A single run of 28 items cannot separate the other shifts from sampling noise.
+
 ## 2. BIRD Mini-Dev, prompt variants (split A = 150 fixed by hash; B = 350 kept for one final report)
 EX means the predicted rows equal the gold rows as a set, as BIRD's evaluator scores it. Each change adds one technique:
 - **v0:** DDL, evidence and question.

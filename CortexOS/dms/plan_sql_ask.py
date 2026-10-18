@@ -85,6 +85,7 @@ EXECUTE_FAILED = "PLAN_SQL_EXECUTE_FAILED"
 EMPTY_RESULT = "PLAN_SQL_EMPTY_RESULT"
 IMPLAUSIBLE_RESULT = "PLAN_SQL_IMPLAUSIBLE_RESULT"
 NOT_FROM_TABLE = "PLAN_SQL_OUTPUT_NOT_FROM_TABLE"
+LITERAL_UNGROUNDED = "PLAN_SQL_LITERAL_UNGROUNDED"
 
 NOT_FOUND_ANSWER = "not found in the database"
 
@@ -851,6 +852,21 @@ def plan_sql_answer(
             priors.append(detail)
             failures.append(detail)
             return None
+        from CortexOS.dms.sql_literal_grounding import ungrounded_literals
+
+        ungrounded = ungrounded_literals(request.question, served_sql)
+        if ungrounded:
+            # With sample values in hand the model can filter on an entity the
+            # question never named and serve that entity's numbers. Fed back.
+            detail = (
+                f"{LITERAL_UNGROUNDED}: {', '.join(ungrounded)}; filter only on the "
+                "identifiers the question names, and if the data does not hold them, say so"
+            )
+            steps.append(StepStamp.cortex("gate", "cortex:sql-gate", f"refused: {detail}"))
+            freeroute.note_verdict(sql_step.route, "gate_fail")
+            priors.append(detail)
+            failures.append(detail)
+            return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
         return _execute(sql_step, plan, served_sql, priors, rung)
@@ -1009,6 +1025,7 @@ __all__ = [
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
     "LAYER",
+    "LITERAL_UNGROUNDED",
     "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
     "RECONFIRM",
