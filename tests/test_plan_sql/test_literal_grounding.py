@@ -20,6 +20,7 @@ from tests.dms.test_c7_02_manifest_before_explain import dms_http  # noqa: F401
 from tests.test_plan_sql.test_ai_sql_reads_table import _oracle, _rowset
 from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
     GRANT,
+    PAYLOAD,
     PLAN_TEXT,
     SESSION,
     _ask,
@@ -169,3 +170,26 @@ def test_an_identifier_the_question_never_named_is_flagged(
     question: str, sql: str, flagged: list[str]
 ) -> None:
     assert ungrounded_literals(question, sql) == flagged
+
+
+def test_prompts_take_filter_values_from_the_question_not_the_samples() -> None:
+    """The instruction "filter literals must come from the sampled values" made the
+    model swap a value the question named for one the samples held. Measured on
+    BIRD Mini-Dev split B through this path, removing it and adding an output
+    contract raised EX from 41.7% to 47.7% (paired +38/-17, n=348)."""
+    from CortexOS.plan_sql import payload as plan_payload
+
+    request = plan_payload.PlanSqlRequest(
+        "kg of SKU-ZZZZZ",
+        plan_payload.AskPayload.model_validate(PAYLOAD),
+        column_values={"transactions": {"sku": ("SKU-00001",)}},
+    )
+    prompts = [m["content"] for m in plan_payload.plan_messages(request)] + [
+        m["content"] for m in plan_payload.sql_messages(request, ["1. Read transactions."])
+    ]
+    text = " ".join(prompts)
+    assert "must come from them" not in text
+    assert "Ground every filter in the sampled column values" not in text
+    assert "Never replace a value the question names" in text
+    assert "Take every filter value from the question" in text
+    assert "Return the columns the question asks for" in text

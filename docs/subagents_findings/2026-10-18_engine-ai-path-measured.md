@@ -51,6 +51,44 @@ EX means the predicted rows equal the gold rows as a set, as BIRD's evaluator sc
 - **v3 on glm-5.3:** cut short by a provider 429. On its first 55 questions the retry ran once.
 - **Remaining glm-5.3 errors under v2 (56):** 25 return a different column count from gold, and 15 return no rows.
 
+## 3. BIRD Mini-Dev through Cortex's own AI path (split A, 150)
+Each BIRD database was copied into DuckDB, and every question went through POST /v1/contract/ask with CORTEX_PLAN_SQL=1. The setup per database:
+- a semantic layer listing its tables;
+- a signed grant over them;
+- `dms_payload` with BIRD's column descriptions and its foreign keys as joins;
+- the question with BIRD's evidence appended as a note.
+
+Served rows were scored against SQLite gold. Model: codestral-2508. No stronger route was configured, so the ladder ran plan, error-fed retries, then reconfirm.
+
+| Tree | OK | wrong | reconfirm or abstain | EX | answered precision |
+|---|---|---|---|---|---|
+| main 8fc4505 | 57 | 71 | 22 | 38.0% | 44.5% |
+| prompt fix (below) | 61 | 67 | 22 | 40.7% | 47.7% |
+
+Paired, the prompt fix gained 12 and lost 8, which is not significant at n=150. Split B (350, held out) confirms it:
+
+| Tree, split B | OK | wrong | reconfirm or abstain | EX | answered precision |
+|---|---|---|---|---|---|
+| main 8fc4505 | 145 | 137 | 66 | 41.7% | 51.4% |
+| prompt fix | 166 | 120 | 62 | 47.7% | 58.0% |
+
+Paired n=348: gained 38, lost 17, two-sided sign test p = 0.006.
+- **Prompt fix:**
+  - the plan and SQL system prompts no longer say "filter literals must come from the sampled values", which is what pushed the model to swap `SKU-ZZZZZ` for a sampled SKU;
+  - filter values now come from the question, and the samples are used only to match spelling;
+  - an output contract asks for exactly the columns requested.
+- **Wrong answers under the fix (67):**
+  - 10 have the right values with extra columns, so a scorer that checks only key columns would pass them;
+  - 30 have the same shape but different values (semantic);
+  - 13 have the right columns but a different row count;
+  - 11 have extra columns and wrong values;
+  - 3 are missing columns.
+- **The same model with one SQL call** and v2 context (section 2) scores 51.0%. Cortex's plan-then-SQL path scores 38 to 41%.
+- **#386's head (edda9cf)** folds the planner into one call per attempt. On split A it scores 46.7% EX (66 wrong, 14 reconfirm or abstain) and makes 1.16 model calls per question, against 2.22 on main:
+  - paired against main: +23 / −10 (p = 0.035);
+  - paired against the prompt fix: +24 / −15 (p = 0.20).
+  It does not carry LITERAL-GROUNDING-01 or the prompt fix, and the effects look additive. So the one-call design is more accurate and half the model calls.
+
 ## Root-cause class
 The answer path decides with word rules before the model and with stored-plan matching after it, so the model can only serve what the rules already cover. A word rule then becomes the only guard against another word rule's wrong answer. Retiring one rule lane without the others turns abstains into wrong answers.
 
