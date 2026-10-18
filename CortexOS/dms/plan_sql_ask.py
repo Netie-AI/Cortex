@@ -969,7 +969,7 @@ def plan_sql_answer(
             collect.append((sql_step, served_sql, rows))
             return None
         if vote_on:
-            picked = _vote((sql_step, served_sql, rows), rung)
+            picked = _vote((sql_step, served_sql, rows), rung, bool(plan.plan))
             if picked is None or isinstance(picked, dict):
                 return picked
             if picked[0] is not sql_step:
@@ -989,41 +989,54 @@ def plan_sql_answer(
             )
         )
 
-    def _check(active: Any, bucket: str, rung: str) -> _Reading | dict[str, Any] | None:
+    def _check(
+        active: Any, bucket: str, rung: str, attempts: int = 1
+    ) -> _Reading | dict[str, Any] | None:
         """One more SQL from the question alone, gated and run like the first.
 
         The reading, a stop envelope on a trust failure, or None when it gave no
-        rows. Any other refusal of this SQL (an ungranted table included) only
-        loses its vote: the candidate it checks already passed every gate.
+        rows. A SQL that fails a gate, errors or returns no rows is fed back for
+        up to ``attempts`` writes, as the ladder does for the first. Any other
+        refusal of this SQL (an ungranted table included) only loses its vote:
+        the candidate it checks already passed every gate.
         """
-        step = active.sql(request, _NO_PLAN, prior_violations=())
-        _note_call(active, bucket)
-        step = replace(step, stamp=replace(step.stamp, served_step=f"vote-{step.kind}"))
-        steps.append(step.stamp)
-        _remember(step, failed_models)
-        security = _security_stop(step, journal)
-        if security and security[0] != MODEL_UNAVAILABLE:
-            return stop(security[0], security[1])
-        if security or not step.ok or _not_served(step):
-            return None
-        got: list[_Reading] = []
-        _use_sql(step, _NO_PLAN, [], rung, collect=got)
-        return got[0] if got else None
+        priors: list[str] = []
+        for n in range(attempts):
+            step = active.sql(request, _NO_PLAN, prior_violations=priors)
+            _note_call(active, bucket if n == 0 else rung_retry(n))
+            step = replace(step, stamp=replace(step.stamp, served_step=f"vote-{step.kind}"))
+            steps.append(step.stamp)
+            _remember(step, failed_models)
+            security = _security_stop(step, journal)
+            if security and security[0] != MODEL_UNAVAILABLE:
+                return stop(security[0], security[1])
+            if security or not step.ok or _not_served(step):
+                return None
+            got: list[_Reading] = []
+            _use_sql(step, _NO_PLAN, priors, rung, collect=got)
+            if got:
+                return got[0]
+        return None
 
-    def _vote(first: _Reading, rung: str) -> _Reading | dict[str, Any] | None:
-        """The reading to serve, a stop envelope, or None when no two readings agree."""
+    def _vote(first: _Reading, rung: str, planned: bool) -> _Reading | dict[str, Any] | None:
+        """The reading to serve, a stop envelope, or None when no two readings agree.
+
+        The second reading differs from the first only in having no plan. A first SQL
+        written without one would meet an identical prompt and always agree, so it has
+        no second reading from the same model.
+        """
 
         def _note(reason: str) -> None:
             steps.append(StepStamp.cortex("vote", "cortex:plan-sql-vote", reason))
 
-        second = _check(gen, rung, rung)
+        second = _check(gen, rung, rung, SQL_ATTEMPTS) if planned else None
+        if not planned:
+            _note("no second reading: the first SQL was written without a plan")
         if isinstance(second, dict):
             return second
-        if second is not None and plan_sql_vote.same_sql(first[1], second[1]):
-            _note("the second SQL repeated the first; not counted")
-            second = None
         if second is not None and plan_sql_vote.agree(first[2], second[2]):
-            _note("agreed: a second SQL written without the plan returned the same rows")
+            how = "the same SQL" if plan_sql_vote.same_sql(first[1], second[1]) else "a second SQL"
+            _note(f"agreed: {how} written without the plan returned the same rows")
             return first
         third = _check(_stronger_generator(failed_models), RUNG_STRONG, rung)
         if isinstance(third, dict):

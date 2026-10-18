@@ -13,15 +13,15 @@ The SQL from earlier split-A runs (section 3 of `2026-10-18_engine-ai-path-measu
 | prompt fix x direct v2 codestral | 53 | 79.2% | 25.8% |
 | #386 x glm-5.3 (other model) | 63 | 84.1% | 22.2% |
 
-In the first vote run, B's SQL text equalled A's on 11 of 126 questions. A was right on 7 of those 11 (64%), below the 79 to 84% of two different queries that return the same rows. So identical text is weaker evidence and is not counted.
+**Correction, same day.** From 126 questions I saw B's SQL text equal A's on 11 and A right on 7 of them (64%), and I excluded identical text from the vote. At 500 questions that was wrong: the 49 identical-text agreements were right 41 times (84%), better than the 179 agreements between different SQL (75%). The exclusion cost 41 correct answers. See the follow-up below.
 
 ## What was built (`CORTEX_PLAN_SQL_VOTE=1`, default off)
 The ladder's first SQL that runs with rows is a candidate:
-1. **B:** the same model writes SQL for the question without the plan, through the same gates. B's rows matching A's serve A.
+1. **B:** the same model writes SQL for the question without the plan, through the same gates, with the ladder's error-fed retry (two writes). B's rows matching A's serve A, whether or not the SQL text is the same.
 2. **C:** otherwise the stronger route OpenVault configured writes it. The candidate C matches is served.
 3. **Split:** with no two agreeing, nothing is served and the ladder reconfirms (`PLAN_SQL_VOTE_SPLIT` on the envelope).
 
-Rows compare as a set, numbers to four decimals, column names ignored. A model step in the vote with no OpenVault route stamp stops the answer, as anywhere on the ladder. `model_calls` keeps its keys. No contract change.
+Rows compare as a set, numbers to four decimals, column names ignored. A first SQL written without a plan has no B: it would meet the same prompt and always agree. A model step in the vote with no OpenVault route stamp stops the answer, as anywhere on the ladder. `model_calls` keeps its keys. No contract change.
 
 ## Measured with the pair vote (no stronger route)
 **Split B (held out), paired n=348:**
@@ -45,6 +45,39 @@ Wrong answers removed 55, added 0 (p = 6e-17). Correct answers lost 27, gained 4
 
 **Tie-break (stronger route) on live data:** Gemini (gemini-3.8-flash) served as the stronger route for 23 calls before its quota returned 429 on every call. The vote resolved 6 questions through it: 5 right and 1 wrong. That is too few to claim anything. Replaying the earlier runs (A = Cortex, B = direct codestral, C = glm-5.3), the full vote scored 80 OK, 22 wrong and 48 reconfirm on split A (EX 53.3%, precision 78.4%). That is a proxy, not the engine.
 
+## Follow-up: why correct answers fell, and what recovered them
+I recorded every executed candidate per question (the first SQL A, the second B, and failed attempts) for all 500 questions on main 56f1f7c, with the same setup as above, and scored each against gold.
+
+**Where the correct answers went.** 221 first readings were right and the vote served 141 of them. Pairing the first two executed candidates per question (within 9 of the engine's own verdicts), the losses fall in four groups:
+
+| Why a right first reading was not served | Questions |
+|---|---|
+| A and B wrote the same SQL text, and the vote refused to count that (8 wrong ones were also held back) | 41 |
+| B failed: refused before running (10), failed EXPLAIN (7), or returned no rows (4); it had one write and no retry | 21 |
+| B ran and returned other rows | 23 |
+| A and B were each right but returned different rows | 4 |
+
+**Fix 1: identical SQL counts.** **Fix 2: B gets the ladder's error-fed retry.** Both are in `plan_sql_ask.py`. Paired against main, dev split A first, then held-out split B:
+
+| Split | Tree | OK | wrong | abstain | EX | answered precision |
+|---|---|---|---|---|---|---|
+| A (150) | pair vote, rerun on 56f1f7c | 41 | 15 | 94 | 27.3% | 73.2% |
+| A (150) | fixes 1+2 | 55 | 15 | 80 | 36.7% | 78.6% |
+| B (348) | pair vote, rerun on 56f1f7c | 98 | 30 | 220 | 28.2% | 76.6% |
+| B (348) | fixes 1+2 | 145 | 43 | 160 | 41.7% | 77.1% |
+
+On B the fixes gained 56 correct answers and lost 9 (p = 2e-9), and added 21 wrong answers while removing 8. Precision holds; the vote now keeps 145 of the 166 correct answers the single-shot path gives.
+
+**Tried and not shipped** (each against the fixes 1+2 tree):
+- **Stored-value hint** (feed back what a column holds when a filter matches nothing or counts zero). A: gained 7, lost 7. B: gained 12, lost 26 (p = 0.034); wrong fell 43 to 35. It turned wrong answers into abstains and did not turn them into right ones. #89 and #93 (`'East Bohemia'` stored as `'east Bohemia'`) went from wrong to abstain, not to right.
+- **Header of the sampled-values block** ("ground filters in these" to "take the value from the question"). B: gained 11, lost 16 (p = 0.44). Noise.
+- **Three SQL attempts instead of two.** First 71 questions of A: 22 correct against 24. Stopped.
+- **AI judge on disagreements, same model** (shown both SQL and result previews; offline on A). It picks the right SQL in 25 of the 31 cases where exactly one is right, but it never rejects both: when neither is right it still picks one. Served wrong answers rose from 17 to 43 and precision fell to 61%. A variant that reasons first rejected more, at 66%.
+- **Plurality over seven readings** (A, B and five temperature-0.7 samples). EX reached 50% on A at 58% precision. Where A and B disagreed, even six of seven readings agreeing was right only 59 to 63% of the time: the wrong answers are consistent misreadings, so more samples from the same model do not separate them.
+- **Gemini as a verifier of the disputed groups** was not measured: its daily quota ran out.
+
+**What this says.** The recoverable losses came from the vote's own design. The rest (a right reading exists for 64% of questions on A, and the vote serves 37%) is a selection problem the same model cannot solve. A stronger model verifying the disputed groups is the next measurement; the scheduled check-in runs it when a stronger model has quota.
+
 ## Repro
 1. Copy each BIRD Mini-Dev SQLite database into DuckDB (DuckDB's sqlite extension).
 2. For each database, set up three things:
@@ -66,7 +99,8 @@ Safety gates stood in for correctness gates. The gates answer whether a query ma
 - "Don't claim 0 wrong below n=300."
 - "Silent fallback is a lie." Every vote outcome is stamped on the envelope:
   - a split carries `PLAN_SQL_VOTE_SPLIT`;
-  - a repeated SQL is stamped "not counted";
+  - an agreement says whether the two SQL texts were the same;
+  - a first SQL written without a plan says it has no second reading;
   - a missing stronger route is stamped on its step.
 - "Assert the artifact the customer receives." Every count above comes from the envelope's rows.
 
@@ -75,7 +109,7 @@ Safety gates stood in for correctness gates. The gates answer whether a query ma
    - Gemini's quota ran out after 23 calls;
    - NVIDIA glm-5.3 and mistral-medium returned 429;
    - mistral-large returned 403.
-2. **After #386 lands,** the first SQL has no plan, so B's prompt equals A's. The repeated-SQL rule then leaves the decision to C, and B needs a framing of its own to stay a second reading.
+2. **After #386 lands,** the first SQL is written without a plan, so the vote skips B and relies on the stronger route alone. B needs a framing of its own (a different instruction, or temperature above 0) to be a second reading again. Measure that before enabling the vote on top of #386.
 3. **Keep `CORTEX_PLAN_SQL` off in production** on either setting until a held-out pack of 300+ shows WRONG near 0.
 
 ## Verified vs assumed
