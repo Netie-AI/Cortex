@@ -125,11 +125,18 @@ def test_abstain_refused_emits_refused_fields():
 
 
 def test_provenance_unknown_badge_is_abstain_not_session():
-    """F40 class: catalog / document / empty / sql_not_analyzable must not SESSION."""
-    for raw in ("catalog", "document", "sql_not_analyzable", "refused_by_manifest", ""):
+    """F40 class: catalog / document / empty / sql_not_analyzable must not SESSION.
+
+    1.7.0 gave document its own badge (RAG-01's cited answer); it is still
+    never SESSION. Every other unmapped token stays a fail-closed ABSTAIN.
+    """
+    for raw in ("catalog", "sql_not_analyzable", "refused_by_manifest", ""):
         prov = _provenance_from_flat({"badge": raw, "route": "sql", "layer": "engine"})
         assert prov.badge == Badge.ABSTAIN, raw
         assert prov.badge != Badge.SESSION, raw
+    prov = _provenance_from_flat({"badge": "document", "route": "rag", "layer": "rag"})
+    assert prov.badge == Badge.DOCUMENT
+    assert prov.badge != Badge.SESSION
 
 
 def test_provenance_mapped_certified_stays_certified():
@@ -185,18 +192,18 @@ def test_contract_ask_requires_grounding():
     assert "require_grounding=True" in src
 
 
-@pytest.mark.parametrize("layer", ["rag", "catalog", "sql_not_analyzable", "new_unmapped_layer"])
+@pytest.mark.parametrize("layer", ["catalog", "sql_not_analyzable", "new_unmapped_layer"])
 def test_enrich_answer_claims_no_table_under_a_fail_closed_badge(layer):
     """A layer the contract has no badge for falls closed to ABSTAIN, and then
-    no table card may claim the answer read it (RAG-01 follow-up)."""
+    no table card may claim the answer read it (SOURCES-WITHHELD-01)."""
     verified = SimpleNamespace(manifest={"tables": {}})
     data = _enrich_answer(
         {
-            "answer": '"Payment terms: Net 30 from invoice date." [1]',
+            "answer": "something",
             "route": layer,
-            "badge": "document" if layer == "rag" else layer,
+            "badge": layer,
             "layer": layer,
-            "audit_id": "aud_doc",
+            "audit_id": "aud_x",
             "granted_sources": ["transactions", "inventory"],
         },
         session_id="ses_1",
@@ -204,3 +211,32 @@ def test_enrich_answer_claims_no_table_under_a_fail_closed_badge(layer):
     )
     assert data["provenance"].badge == Badge.ABSTAIN
     assert data["contributing_sources"] == []
+
+
+def test_enrich_answer_document_answer_is_badged_document_with_document_cards():
+    """1.7.0: a document answer is Badge.DOCUMENT and cites documents, not the grant."""
+    verified = SimpleNamespace(manifest={"tables": {}})
+    data = _enrich_answer(
+        {
+            "answer": '"Payment terms: Net 30 from invoice date." [1]',
+            "route": "rag",
+            "badge": "document",
+            "layer": "rag",
+            "audit_id": "aud_doc",
+            "sources": ["acme_agreement.txt"],
+            "granted_sources": ["transactions", "inventory"],
+        },
+        session_id="ses_1",
+        verified=verified,
+    )
+    assert data["provenance"].badge == Badge.DOCUMENT
+    assert data["provenance"].layer == "rag"
+    assert data["contributing_sources"] == [
+        {
+            "ref_id": "acme_agreement.txt",
+            "container": "documents",
+            "member": "acme_agreement.txt",
+            "kind": "document",
+        }
+    ]
+    assert data.get("drillthrough_token") is None
