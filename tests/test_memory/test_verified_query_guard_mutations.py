@@ -23,6 +23,10 @@ EQUIVALENT = (
     f"{HTTP}::test_must_fail_equivalent_copy_for_an_added_qualifier_never_served",
     f"{HTTP}::test_must_fail_equivalent_copy_for_the_opposite_order_never_served",
     f"{HTTP}::test_must_fail_equivalent_copy_for_reordered_words_never_served",
+    # Review @ 92e6beb: a new row window or a changed ORDER BY hides no copy.
+    f"{HTTP}::test_must_fail_equivalent_copy_with_a_new_row_window_never_served",
+    f"{HTTP}::test_must_fail_added_order_with_a_new_row_cap_never_served",
+    f"{HTTP}::test_must_fail_confirmed_question_cut_at_another_row_window_never_served",
 )
 
 CASES: dict[str, list[str]] = {
@@ -66,6 +70,8 @@ CASES: dict[str, list[str]] = {
         f"{HTTP}::test_must_fail_paraphrase_reaches_certified_example_not_the_phrase_table",
         # The item's must-fail: near misses of a confirmed question.
         f"{HTTP}::test_must_fail_near_miss_never_gets_the_stored_sql",
+        # Review @ 92e6beb: the same SQL with only LIMIT changed is a copy.
+        f"{HTTP}::test_must_fail_copy_with_a_new_row_cap_for_another_question_never_served",
         # Review @ 4bb518b: an equivalent rewrite returns the example's rows.
         *EQUIVALENT,
     ],

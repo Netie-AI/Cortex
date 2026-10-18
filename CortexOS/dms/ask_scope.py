@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 
@@ -39,3 +39,22 @@ def ask_scope(*, space_id: str | None, scored_pack_id: str | None) -> Iterator[A
         yield scope
     finally:
         _SCOPE.reset(token)
+
+
+# VERIFIED-QUERY (#309): true while the ask in flight has steward-confirmed
+# examples bound for the SQL generator (``verified_query_ask``). The query-skill
+# store reads it to stand aside for that ask only; every other ask keeps its
+# skills. Outside such an ask it is false.
+_EXAMPLES_BOUND: ContextVar[bool] = ContextVar("cortex_ask_examples_bound", default=False)
+
+
+def examples_bound() -> bool:
+    return _EXAMPLES_BOUND.get()
+
+
+def mark_examples_bound() -> Token[bool]:
+    return _EXAMPLES_BOUND.set(True)
+
+
+def clear_examples_bound(token: Token[bool]) -> None:
+    _EXAMPLES_BOUND.reset(token)

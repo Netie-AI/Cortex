@@ -92,6 +92,27 @@ LOWEST_REWRITE = "SELECT sku, quantity_kg FROM inventory ORDER BY 2 DESC LIMIT 5
 RANGE_REWRITE = (
     "SELECT sku, quantity_kg FROM inventory WHERE reorder_level_kg < 10 AND quantity_kg > 300"
 )
+# Review @ 92e6beb: a new row cap must not hide a copy of HIGHEST_SQL. 12 SKUs
+# tie at the maximum 500.0, so a cap of 5 or 10 cuts through tied rows.
+LOWEST_10_Q = "Which 10 SKUs have the lowest quantity_kg in inventory?"
+HIGHEST_10_COPY = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 10"
+HIGHEST_10_REWRITE = "SELECT sku, quantity_kg FROM inventory ORDER BY 2 DESC LIMIT 10"
+WINDOW_REWRITES = {
+    "positional_order_new_cap": (LOWEST_10_Q, HIGHEST_10_REWRITE),
+    "changed_order_by": (
+        LOWEST_Q,
+        "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC, sku DESC LIMIT 5",
+    ),
+    "changed_order_by_new_cap": (
+        LOWEST_10_Q,
+        "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC, sku LIMIT 10",
+    ),
+    "columns_swapped_new_cap": (
+        LOWEST_10_Q,
+        "SELECT quantity_kg, sku FROM inventory ORDER BY quantity_kg DESC LIMIT 10",
+    ),
+}
+WINDOW_REASON = "a re-serve runs the example's statement unchanged"
 # The item's must-fail: near misses of a confirmed question, each answered by
 # a model that copies the stored SQL unchanged.
 DELAYED_NEAR_MISSES = (
@@ -413,8 +434,9 @@ def test_flag_is_off_by_default_and_only_an_explicit_on_turns_it_on(
 def test_no_tracked_file_outside_the_lane_and_its_tests_names_the_flag() -> None:
     """No deploy file, script or other module can switch the lane on.
 
-    Only the lane, the query-skill short-circuit that reads it, tests and
-    prose mention the variable.
+    Only the lane, tests and prose mention the variable. The query-skill
+    store asks the lane whether this ask is bound (PR Bot 6241769492), so it
+    does not read the variable itself.
     """
     import re
     import subprocess
@@ -422,7 +444,7 @@ def test_no_tracked_file_outside_the_lane_and_its_tests_names_the_flag() -> None
     listed = subprocess.run(
         ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
     ).stdout.decode("utf-8", "replace")
-    allowed = {"CortexOS/dms/verified_query_ask.py", "packs/dms/semantic/query_skills.py"}
+    allowed = {"CortexOS/dms/verified_query_ask.py"}
     name = re.compile(re.escape(vqa.ENABLED_ENV) + r"(?![A-Z0-9_])")
     seen: list[str] = []
     for rel in filter(None, listed.split("\0")):
@@ -443,6 +465,46 @@ def test_no_tracked_file_outside_the_lane_and_its_tests_names_the_flag() -> None
     assert seen == []
     for rel in allowed:
         assert name.search((ROOT / rel).read_text(encoding="utf-8")), rel
+
+
+def test_query_skills_stand_aside_only_for_the_bound_ask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR Bot 6241769492 (2): with the flag on, only the ask with examples bound skips skills.
+
+    MCP, ``/dms/query`` and any other ask in the same process keep the
+    query-skill store, exact trigger match included. The mark is carried by
+    ``ask_scope``, the one engine module the store may import (#340).
+    """
+    from CortexOS.dms import ask_scope
+    from packs.dms.semantic import query_skills
+
+    question = "what is our total revenue"
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops_vq.db"))
+    monkeypatch.setenv("CORTEX_QUERY_SKILL", "1")
+    for env in ("DMS_QUERY_SKILL_CAPTURE", "CORTEX_SCORED_ROUND"):
+        monkeypatch.delenv(env, raising=False)
+    query_skills.reset_schema_cache()
+    try:
+        assert query_skills.capture(question, metric_id="revenue_total", space_id="alpha")
+        monkeypatch.setenv(vqa.ENABLED_ENV, "1")
+        assert vqa.examples_bound() is False
+        hit = query_skills.find(question, space_id="alpha")
+        assert hit is not None and hit["score"] == 1.0, "no bound ask: the store answers"
+        tokens = vqa.bind_verified_examples(space_id="alpha", scored_pack_id=None)
+        assert tokens is not None
+        try:
+            assert vqa.examples_bound() is True and ask_scope.examples_bound() is True
+            assert query_skills.find(question, space_id="alpha") is None
+        finally:
+            vqa.take_verified_examples(tokens)
+        assert vqa.examples_bound() is False and ask_scope.examples_bound() is False
+        assert query_skills.find(question, space_id="alpha") is not None
+        monkeypatch.setenv(vqa.ENABLED_ENV, "0")
+        assert vqa.bind_verified_examples(space_id="alpha", scored_pack_id=None) is None
+        assert query_skills.find(question, space_id="alpha") is not None
+    finally:
+        query_skills.reset_schema_cache()
 
 
 @pytest.mark.parametrize("value", [None, "0"])
@@ -1055,6 +1117,140 @@ def test_confirmed_question_re_serves_an_equivalent_rewrite(
 
     assert rows(body["rows"]) == rows(expected)
     assert body["answer"].startswith("Found 641 row(s).")
+    assert body["verified_query_ids"] == [query.id]
+
+
+# -- must-fail: a new row window does not hide a copy (review @ 92e6beb) -------
+def _is_top_by_quantity(rows: list[dict[str, Any]], count: int, *, highest: bool) -> bool:
+    """``rows`` are ``count`` SKUs at the top (or bottom) of quantity_kg, ties allowed."""
+    ranked = _warehouse_rows(
+        "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg "
+        + ("DESC" if highest else "ASC")
+    )
+    edge = float(ranked[count - 1]["quantity_kg"])
+    allowed = {
+        (r["sku"], float(r["quantity_kg"]))
+        for r in ranked
+        if (float(r["quantity_kg"]) >= edge if highest else float(r["quantity_kg"]) <= edge)
+    }
+    return len(rows) == count and all(
+        (r["sku"], float(r["quantity_kg"])) in allowed for r in rows
+    )
+
+
+def test_must_fail_copy_with_a_new_row_cap_for_another_question_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The example's SQL with only LIMIT changed is still the example's SQL."""
+    assert vqa.lexical_similarity(LOWEST_10_Q, HIGHEST_Q) >= vqa.RETRIEVE_MIN
+    _arm_model(monkeypatch, HIGHEST_10_COPY)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", LOWEST_10_Q)
+    _assert_echo_abstain(body, query.id, COPY_REASON)
+    assert "500" not in body["answer"]
+
+
+@pytest.mark.parametrize("rewrite", sorted(WINDOW_REWRITES))
+def test_must_fail_equivalent_copy_with_a_new_row_window_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch, rewrite: str
+) -> None:
+    """Review @ 92e6beb repro and its kin: the SQL rules pass these, the rows do not.
+
+    The example runs at the row window of the SQL that ran. The tied rows at
+    the cap are compared as ties, so another pick among them is still a copy.
+    """
+    asked, sql = WINDOW_REWRITES[rewrite]
+    _not_a_text_copy(asked, sql, HIGHEST_Q, HIGHEST_SQL)
+    count = 10 if "LIMIT 10" in sql else 5
+    assert _is_top_by_quantity(_warehouse_rows(sql), count, highest=True), "the maximum, not the minimum"
+    _arm_model(monkeypatch, sql)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", asked)
+    _assert_echo_abstain(body, query.id, ROWS_REASON)
+    assert "500" not in body["answer"]
+
+
+def test_must_fail_added_order_with_a_new_row_cap_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An added ORDER BY and a cap: 10 of the example's 13 rows, for an 'inbound' question."""
+    sql = (
+        "SELECT sku, quantity_kg FROM transactions WHERE sku = 'SKU-00296' "
+        "ORDER BY quantity_kg LIMIT 10"
+    )
+    _not_a_text_copy(INBOUND_Q, sql, VQ_Q, VQ_SQL)
+    _arm_model(monkeypatch, sql)
+    ask_http.bind_session("alpha")
+    query = _confirm("alpha")
+    body = _ask(ask_http, "alpha", INBOUND_Q)
+    _assert_echo_abstain(body, query.id, ROWS_REASON)
+
+
+def test_must_fail_confirmed_question_cut_at_another_row_window_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-served unchanged only: the confirmed 'Which 5' question never gets 10 rows."""
+    _arm_model(monkeypatch, HIGHEST_10_COPY)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", HIGHEST_Q)
+    _assert_echo_abstain(body, query.id, WINDOW_REASON)
+    _arm_model(monkeypatch, HIGHEST_10_REWRITE)
+    body = _ask(ask_http, "alpha", HIGHEST_Q)
+    _assert_echo_abstain(body, query.id, WINDOW_REASON)
+
+
+def test_confirmed_question_still_re_serves_unchanged_on_fresh_rows(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exact confirmed question gets the stored statement, executed again each ask."""
+    from CortexOS.execution import submit
+
+    _arm_model(monkeypatch, copying)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    first = _ask(ask_http, "alpha", HIGHEST_Q)
+    _assert_served(first)
+    assert first["rows"] == _warehouse_rows(HIGHEST_SQL)
+    assert _is_top_by_quantity(first["rows"], 5, highest=True)
+    assert first["answer"].startswith("Found 5 row(s).")
+    for row in first["rows"]:
+        assert row["sku"] in first["answer"]
+    assert first["verified_query_ids"] == [query.id] and first["reused"] is False
+    assert "LIMIT 5" in first["sql_used"]
+
+    real = submit.execute_sql
+
+    def moved_on(verified, sql, **kwargs):  # noqa: ANN001
+        rows, q_ms, e_ms = real(verified, sql, **kwargs)
+        return [{**r, "quantity_kg": float(r.get("quantity_kg") or 0) - 1} for r in rows], q_ms, e_ms
+
+    monkeypatch.setattr(submit, "execute_sql", moved_on)
+    second = _ask(ask_http, "alpha", HIGHEST_Q)
+    _assert_served(second)
+    assert [r["quantity_kg"] for r in second["rows"]] == [
+        float(r["quantity_kg"]) - 1 for r in first["rows"]
+    ], "a new execution, not a stored answer"
+    assert second["answer"].startswith("Found 5 row(s).")
+    assert second["answer_id"] != first["answer_id"]
+    assert second["verified_query_ids"] == [query.id] and second["reused"] is False
+
+
+def test_new_sql_for_another_row_count_is_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: the right SQL for '10 lowest' returns other rows than the example at 10."""
+    sql = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg ASC LIMIT 10"
+    _arm_model(monkeypatch, sql)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", LOWEST_10_Q)
+    _assert_served(body)
+    assert _is_top_by_quantity(body["rows"], 10, highest=False)
+    assert body["row_count"] == 10
+    assert body["answer"].startswith("Found 10 row(s).")
     assert body["verified_query_ids"] == [query.id]
 
 

@@ -390,6 +390,137 @@ def test_examples_on_other_tables_are_not_run() -> None:
     assert vqa.result_echo("q", sql, [], run=runs, schema=SCHEMA) == []
 
 
+# -- row window: a new LIMIT or OFFSET hides no copy (review @ 92e6beb) ---------
+WINDOW = "a re-serve runs the example's statement unchanged"
+LOWEST_10 = "Which 10 SKUs have the lowest quantity_kg in inventory?"
+TOP_REWRITE_10 = "SELECT sku, quantity_kg FROM inventory ORDER BY 2 DESC LIMIT 10"
+HIGHEST_AT_10 = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 10"
+HIGHEST_RANKED = (
+    "SELECT sku, quantity_kg, quantity_kg AS vq_order_key_0 FROM inventory ORDER BY quantity_kg DESC"
+)
+
+
+def _top(count: int, start: int = 0, kg: float = 500.0) -> list[dict[str, Any]]:
+    return [{"sku": f"SKU-{i:05d}", "quantity_kg": kg} for i in range(start, start + count)]
+
+
+def _ranked(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{**r, "vq_order_key_0": r["quantity_kg"]} for r in rows]
+
+
+def test_statement_key_keeps_the_row_window_as_the_serve_path_caps_it() -> None:
+    key = vqa._query_key
+    p = vqa._parse
+    plain = "SELECT sku FROM inventory ORDER BY quantity_kg DESC"
+    whole = {key(p(plain + tail), window=True) for tail in ("", " LIMIT 1000", " LIMIT 5000", " LIMIT 1000 OFFSET 0")}
+    assert len(whole) == 1, "no LIMIT, the cap and a LIMIT over it run the same"
+    assert key(p(plain + " LIMIT 5"), window=True) != key(p(plain + " LIMIT 10"), window=True)
+    assert key(p(plain + " LIMIT 5"), window=True) != key(p(plain + " LIMIT 5 OFFSET 5"), window=True)
+    assert key(p(plain), window=True) != key(p("SELECT sku FROM inventory ORDER BY quantity_kg"), window=True)
+    # The copy key sets the whole window aside: LIMIT and OFFSET.
+    assert len({key(p(plain + tail)) for tail in ("", " LIMIT 5", " LIMIT 10", " LIMIT 5 OFFSET 5")}) == 1
+    assert vqa._row_window(p(plain + " LIMIT 5 OFFSET 2")) == (5, 2)
+    assert vqa._row_window(p(plain + " LIMIT 2.5")) == (vqa.MAX_LIMIT, 0)
+
+
+def test_copy_at_another_row_window_is_refused_for_every_question() -> None:
+    """Re-served unchanged only: a new LIMIT or OFFSET is a copy, the confirmed question included."""
+    for sql in (HIGHEST_AT_10, HIGHEST["sql"] + " OFFSET 5"):
+        refused = _echo(LOWEST_10, sql, HIGHEST)
+        assert any(COPY in r and "vq_highest" in r for r in refused), sql
+        refused = _echo(HIGHEST["question"], sql, HIGHEST)
+        assert any(WINDOW in r and "vq_highest" in r for r in refused), sql
+        assert not any(COPY in r for r in refused)
+    assert _echo(HIGHEST["question"], HIGHEST["sql"], HIGHEST) == []
+    assert _echo(DELAYED["question"], DELAYED["sql"] + " LIMIT 5000", DELAYED) == []
+
+
+def test_example_runs_at_the_row_window_of_the_sql_that_ran() -> None:
+    """Review @ 92e6beb repro: ORDER BY 2 DESC LIMIT 10 is the 'highest' example at 10."""
+    assert vqa.example_echo(LOWEST_10, TOP_REWRITE_10, [HIGHEST], schema=SCHEMA) == []
+    assert vqa._at_window(vqa._parse(HIGHEST["sql"]), vqa._parse(TOP_REWRITE_10)) == HIGHEST_AT_10
+    runs = _Runs({TOP_REWRITE_10: _top(10), HIGHEST_AT_10: _top(10), HIGHEST["sql"]: _top(5)})
+    refused = _rows_echo(LOWEST_10, TOP_REWRITE_10, runs, HIGHEST)
+    assert any(ROWS in r and "vq_highest" in r for r in refused), refused
+    assert runs.calls == [TOP_REWRITE_10, HIGHEST_AT_10]
+    # The right SQL for the question returns other rows at that window: served.
+    lowest = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg ASC LIMIT 10"
+    runs = _Runs({lowest: _top(10, kg=1.0), HIGHEST_AT_10: _top(10), HIGHEST_RANKED: _ranked(_top(12))})
+    assert _rows_echo(LOWEST_10, lowest, runs, HIGHEST) == []
+
+
+def test_confirmed_question_cut_at_another_row_window_is_refused() -> None:
+    runs = _Runs({TOP_REWRITE_10: _top(10), HIGHEST_AT_10: _top(10), HIGHEST["sql"]: _top(5)})
+    refused = _rows_echo(HIGHEST["question"], TOP_REWRITE_10, runs, HIGHEST)
+    assert any(WINDOW in r and "vq_highest" in r for r in refused), refused
+    assert HIGHEST["sql"] in runs.calls, "its rows at its own window were compared too"
+    # At its own window the rewrite is the confirmed answer: served.
+    rewrite_5 = "SELECT sku, quantity_kg FROM inventory ORDER BY 2 DESC LIMIT 5"
+    runs = _Runs({rewrite_5: _top(5), HIGHEST["sql"]: _top(5)})
+    assert _rows_echo(HIGHEST["question"], rewrite_5, runs, HIGHEST) == []
+    assert runs.calls == [], "same window as the re-served example: nothing to compare"
+
+
+def test_tied_rows_at_the_cut_are_compared_as_ties() -> None:
+    """12 rows tie at the cap of 5. Another pick among them is still the example's answer."""
+    changed = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC, sku DESC LIMIT 5"
+    assert vqa.example_echo(LOWEST_10, changed, [HIGHEST], schema=SCHEMA) == []
+    runs = _Runs({changed: _top(5, start=7), HIGHEST["sql"]: _top(5), HIGHEST_RANKED: _ranked(_top(12) + _top(3, 20, 400.0))})
+    refused = _rows_echo(LOWEST_10, changed, runs, HIGHEST)
+    assert any(ROWS in r and "vq_highest" in r for r in refused), refused
+    assert runs.calls == [changed, HIGHEST["sql"], HIGHEST_RANKED]
+    # A row from below the tie is not one of the example's answers: served.
+    mixed = _top(4, start=7) + _top(1, 20, 400.0)
+    runs = _Runs({changed: mixed, HIGHEST["sql"]: _top(5), HIGHEST_RANKED: _ranked(_top(12) + _top(3, 20, 400.0))})
+    assert _rows_echo(LOWEST_10, changed, runs, HIGHEST) == []
+    # Ties that may run past the cap cannot be listed: refused.
+    runs = _Runs({changed: _top(5, start=7), HIGHEST["sql"]: _top(5), HIGHEST_RANKED: _ranked(_top(vqa.MAX_LIMIT))})
+    assert any("split tied rows" in r for r in _rows_echo(LOWEST_10, changed, runs, HIGHEST))
+
+
+def test_tied_window_lists_every_tie_at_both_edges() -> None:
+    rows = _top(3, 0, 9.0) + _top(4, 3, 7.0) + _top(2, 7, 5.0)
+    ranked = _ranked(rows)
+    every = vqa._tied_window(ranked, 1, (4, 0))
+    assert every == vqa._rows_key(_top(3, 0, 9.0) + _top(4, 3, 7.0))
+    assert vqa._tied_window(ranked, 1, (1, 4)) == vqa._rows_key(_top(4, 3, 7.0))
+    no_order = [dict(r) for r in rows]
+    assert vqa._tied_window(no_order, 0, (2, 0)) == vqa._rows_key(rows), "no ORDER BY: all tie"
+    assert vqa._tied_window(ranked, 1, (2, 50)) == vqa._rows_key([])
+    assert vqa._tied_window(_ranked(_top(vqa.MAX_LIMIT)), 1, (5, 0)) is None
+
+
+def test_a_window_whose_ties_cannot_be_listed_is_refused() -> None:
+    """ORDER BY 2 over *: which rows tie cannot be read, so the answer cannot be shown to differ."""
+    starry = {**HIGHEST, "sql": "SELECT * FROM inventory ORDER BY 2 DESC LIMIT 5"}
+    assert vqa._ranked_statement(vqa._parse(starry["sql"])) is None
+    changed = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC, sku DESC LIMIT 5"
+    runs = _Runs({changed: _top(5, start=7), starry["sql"]: _top(5)})
+    assert any("split tied rows" in r for r in _rows_echo(LOWEST_10, changed, runs, starry))
+    for sql in (
+        "SELECT sku FROM inventory UNION SELECT sku FROM transactions LIMIT 5",
+        "SELECT DISTINCT sku FROM inventory ORDER BY quantity_kg LIMIT 5",
+    ):
+        assert vqa._ranked_statement(vqa._parse(sql)) is None, sql
+
+
+def test_a_cte_that_shadows_a_table_is_still_compared() -> None:
+    """PR Bot 6241769492 (3): a CTE named like a table reads that table."""
+    shadow = (
+        "WITH inventory AS (SELECT sku, quantity_kg FROM inventory) "
+        "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 5"
+    )
+    assert vqa._tables(vqa._parse(shadow)) == set()
+    runs = _Runs({shadow: _top(5), HIGHEST["sql"]: _top(5)})
+    refused = _rows_echo(LOWEST_10, shadow, runs, HIGHEST)
+    assert any(ROWS in r and "vq_highest" in r for r in refused), refused
+    # SQL that names no table is compared with every example.
+    constant = "SELECT 1031 AS n"
+    runs = _Runs({constant: [{"n": 1031}], DELAYED["sql"]: [{"delayed_count": 1031}]})
+    refused = _rows_echo("How many shipments are not delayed?", constant, runs, DELAYED)
+    assert any(ROWS in r and "vq_delayed" in r for r in refused), refused
+
+
 # -- scope: grant and schema ---------------------------------------------------
 def test_example_must_be_inside_the_grant_and_the_current_schema() -> None:
     fits = vqa.example_fits

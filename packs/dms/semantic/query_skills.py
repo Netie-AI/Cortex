@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from CortexOS.dms.ask_scope import current_ask_scope
+from CortexOS.dms.ask_scope import current_ask_scope, examples_bound
 from packs.dms.skills.capture import cosine_similarity, normalize_trigger, text_embedding
 
 # High bar: avoid false skill hits that would skip a better metric route.
@@ -175,14 +175,11 @@ def find(
     threshold: float = DEFAULT_THRESHOLD,
 ) -> dict[str, Any] | None:
     """Return this Space's best active skill above threshold, or None."""
-    # The verified-query lane retrieves examples for the generator. A stored
-    # skill, including its exact trigger match, must not run ahead of that.
-    if (os.environ.get("CORTEX_VERIFIED_QUERY") or "").strip().lower() in {
-        "1",
-        "true",
-        "on",
-        "yes",
-    }:
+    # VERIFIED-QUERY (#309): while an ask has verified examples bound for the
+    # generator, a stored skill, including its exact trigger match, must not
+    # run ahead of them. Only that ask stands the store aside; every other
+    # ask in the process keeps its skills.
+    if examples_bound():
         return None
     space = _skill_space(space_id, scored_pack_id)
     if space is None:
