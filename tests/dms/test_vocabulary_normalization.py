@@ -47,11 +47,15 @@ ROUTES = [
 
 @pytest.mark.parametrize("question,metric_id", ROUTES)
 def test_business_phrasing_reaches_its_metric(question: str, metric_id: str) -> None:
-    """Normalization still names the neighbour. #412 does not serve it."""
+    """A declared natural question is served. An undeclared neighbour is not."""
     neighbour = _route_to_metric_cascade(question)
     assert neighbour is not None, f"{question!r} lost its neighbour"
     assert neighbour.metric_id == metric_id, f"{question!r} -> {neighbour.metric_id}"
-    assert route_to_metric(question) is None, question
+    served = route_to_metric(question)
+    if question == "what needs reordering":
+        assert served is None, question
+        return
+    assert served is not None and served.metric_id == metric_id, question
 
 
 def test_volume_paraphrases_keep_the_asked_limit() -> None:
@@ -63,7 +67,9 @@ def test_volume_paraphrases_keep_the_asked_limit() -> None:
         assert plan is not None
         assert plan.metric_id == "sales_by_volume"
         assert plan.slots.get("limit") == 3, question
-        assert route_to_metric(question) is None
+        served = route_to_metric(question)
+        assert served is not None and served.metric_id == "sales_by_volume"
+        assert served.slots.get("limit") == 3, question
 
 
 # ── invariants: normalization must not move meaning ──────────────────────────

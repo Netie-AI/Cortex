@@ -283,7 +283,12 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Pin the complete POST envelope measured on parent 279cbd85."""
+    """Pin the complete POST envelope.
+
+    The parent pin moved when metrics.yaml gained declared natural questions:
+    the insights card lists those phrases. The held-out rates below still
+    require incorrect_rate 0 and g_abs_recall 1.
+    """
     from CortexOS.crew.engine_bridge import LocalEngineBridge
     from packs.dms.security.rate_limit import reset_limiter
 
@@ -324,7 +329,7 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
     ).encode()
     assert (
         hashlib.sha256(raw).hexdigest()
-        == "378442dd9b839fe7a2be3eb1b40992ef9114a80ad9c81b9d88154345cc59e4db"
+        == "5a5f4c597539b9e23dadf0dc1d93651ad58db0696797a61a969989a949523c2e"
     )
 
 
@@ -571,7 +576,7 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
     assert on["l2_named_steps"] > 0
     assert (
         off["envelopes_sha256"]
-        == "f5b041bd6df0ef16852d9175a8a4567713f48b48579903a261f04f25d434d845"
+        == "0651da0b7422282a275aab450574d5377747160cad812f1747a03678096894fe"
     )
     assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["values"] == []

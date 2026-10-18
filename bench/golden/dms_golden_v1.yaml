@@ -50,8 +50,7 @@ items:
     category: core_exact
 
   - id: sales_top5_exclude_beta
-    # #412: not the metric's declared question, so the cascade must not serve it.
-    tier: target
+    tier: core
     question: "excluding BETA, top 5 sku by revenue"
     match: resultset
     canonical_sql: >
@@ -65,8 +64,7 @@ items:
 
   # ANS-01: exact SKU + conjunction + trailing skip token must exclude and answer.
   - id: exclude_exact_sku_conjunction
-    # #412: not the metric's declared question, so the cascade must not serve it.
-    tier: target
+    tier: core
     question: "ignore SKU-BETA and also show the top 5 SKUs by revenue"
     match: resultset
     canonical_sql: >

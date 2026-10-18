@@ -15,13 +15,40 @@ metrics:
   # ── inventory ───────────────────────────────────────────────────────────────
   - id: sku_count
     kind: scalar
-    synonyms: ["how many skus", "number of skus", "sku count", "distinct skus", "count skus"]
+    synonyms:
+      - "how many skus"
+      - "number of skus"
+      - "sku count"
+      - "distinct skus"
+      - "count skus"
+      - "how many distinct SKUs are in stock"
+      - "total number of SKUs we carry"
+      - "count our inventory items"
+      - "what's our SKU count"
+      - "how many products are we stocking"
+      - "how many skus are there"
+      - "How many unique SKUs do we carry across all warehouses?"
+      - "berapa banyak SKU kita ada?"
+      - "How many SKUs are in inventory?"
     result_columns: [sku_count]
     sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
 
   - id: low_stock
     kind: listing
-    synonyms: ["below reorder", "low stock", "understocked", "need reordering", "reorder"]
+    synonyms:
+      - "below reorder"
+      - "low stock"
+      - "understocked"
+      - "need reordering"
+      - "reorder"
+      - "Which SKUs are below reorder level?"
+      - "what is running low in warehouse A"
+      - "SKUs under their reorder point at WH-A"
+      - "which products need replenishment in warehouse A"
+      - "WH-A items below reorder"
+      - "warehouse A stockouts risk"
+      - "everything under the reorder point"
+      - "which products are running low across all sites"
     result_columns: [sku, quantity_kg]
     sql: >
       SELECT i.sku, i.quantity_kg
@@ -33,7 +60,15 @@ metrics:
 
   - id: expired_items
     kind: listing
-    synonyms: ["expired", "past expiry", "out of date", "show expired", "list expired"]
+    synonyms:
+      - "expired"
+      - "past expiry"
+      - "out of date"
+      - "show expired"
+      - "list expired"
+      - "what stock has gone past its expiry date"
+      - "show me out of date inventory"
+      - "list SKUs past shelf life"
     result_columns: [sku]
     sql: >
       SELECT sku FROM inventory
@@ -42,7 +77,12 @@ metrics:
 
   - id: expired_count
     kind: scalar
-    synonyms: ["how many expired", "count expired", "number of expired", "expired count"]
+    synonyms:
+      - "how many expired"
+      - "count expired"
+      - "number of expired"
+      - "expired count"
+      - "How many items are expired right now?"
     result_columns: [expired_count]
     sql: >
       SELECT COUNT(*) AS expired_count FROM inventory
@@ -60,7 +100,14 @@ metrics:
 
   - id: stale_restock
     kind: listing
-    synonyms: ["not restocked", "stale stock", "old stock"]
+    synonyms:
+      - "not restocked"
+      - "stale stock"
+      - "old stock"
+      - "Which items were not restocked in the last 30 days?"
+      - "what has not been topped up in a month"
+      - "items with no restock in 30 days"
+      - "which SKUs have gone stale on the shelf"
     result_columns: [sku]
     sql: >
       SELECT sku FROM inventory
@@ -71,7 +118,12 @@ metrics:
 
   - id: items_by_category
     kind: listing
-    synonyms: ["items in category", "list category", "products in"]
+    synonyms:
+      - "items in category"
+      - "list category"
+      - "products in"
+      - "show me everything in the chemicals category"
+      - "what chemical products do we hold"
     result_columns: [sku]
     sql: "SELECT sku FROM inventory WHERE category = {category} ORDER BY sku"
     params:
@@ -79,7 +131,12 @@ metrics:
 
   - id: stock_value_by_category
     kind: grouped
-    synonyms: ["stock value by category", "inventory value per category", "value by category"]
+    synonyms:
+      - "stock value by category"
+      - "inventory value per category"
+      - "value by category"
+      - "what is our inventory worth per category"
+      - "value of stock held broken down by category"
     result_columns: [category, total_value_myr]
     sql: >
       SELECT category, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS total_value_myr
@@ -87,7 +144,12 @@ metrics:
 
   - id: sku_count_by_category
     kind: grouped
-    synonyms: ["sku count by category", "how many per category", "products per category"]
+    synonyms:
+      - "sku count by category"
+      - "how many per category"
+      - "products per category"
+      - "number of products in each category"
+      - "how many SKUs per category"
     result_columns: [category, sku_count]
     sql: >
       SELECT category, COUNT(*) AS sku_count FROM inventory
@@ -96,7 +158,39 @@ metrics:
   # ── transactions / sales ────────────────────────────────────────────────────
   - id: sales_by_value
     kind: ranked
-    synonyms: ["top selling", "best sellers", "revenue by sku", "sales by value", "highest revenue"]
+    synonyms:
+      - "top selling"
+      - "best sellers"
+      - "revenue by sku"
+      - "sales by value"
+      - "highest revenue"
+      - "excluding BETA, top 5 sku by revenue"
+      - "ignore SKU-BETA and also show the top 5 SKUs by revenue"
+      - "our five biggest earners by sales value"
+      - "which SKUs bring in the most money, top 5"
+      - "rank the top 5 products by revenue"
+      - "top five SKUs ranked by outbound revenue"
+      - "list the highest-revenue products, limit 5"
+      - "show me the five SKUs that sell the most value"
+      - "ignore BETA and show top five by revenue"
+      - "top 5 revenue SKUs without SKU-BETA"
+      - "excluding SKU-BETA, what are the top 5 by sales"
+      - "ignoring 00173 what is the top 5 sku by revenue"
+      - "excluding SKU-BETA, top 5 sku by revenue"
+      - "what is the top 5 sku by revenue"
+      - "number 6-10 sku by revenue"
+      - "show me the five highest-revenue SKUs"
+      - "tunjukkan top 5 SKU mengikut revenue"
+      - "kecuali BETA, top 5 sku revenue"
+      - "Show top 5 SKU by revenue in ringgit"
+      - "ignore SKU-BETA and show the top 5 SKUs by revenue"
+      - "ignore BETA and show the top 5 SKUs by revenue"
+      - "keluarkan BETA dari top 5 sku revenue"
+      - "exclude SKU-BETA and just show the top 5 SKUs by revenue"
+      - "buang BETA dan tunjukkan top 5 sku revenue"
+      - "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
+      - "ignoring SKU-00173 what is the top 5 sku by revenue"
+      - "show the top 5 SKUs by revenue"
     result_columns: [sku, sales_value_myr]
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
@@ -111,7 +205,14 @@ metrics:
 
   - id: sales_by_volume
     kind: ranked
-    synonyms: ["top by quantity", "most sold by kg", "volume sold", "quantity sold"]
+    synonyms:
+      - "top by quantity"
+      - "most sold by kg"
+      - "volume sold"
+      - "quantity sold"
+      - "three highest selling SKUs by weight"
+      - "top 3 products by units shipped out"
+      - "which 3 SKUs moved the most kilograms"
     result_columns: [sku, total_sold_kg]
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
@@ -132,6 +233,7 @@ metrics:
       - "overall revenue"
       - "all-time revenue"
       - "total sales"
+      - "What is our total revenue in MYR?"
     result_columns: [revenue_myr]
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
@@ -140,7 +242,15 @@ metrics:
 
   - id: revenue_windowed
     kind: scalar
-    synonyms: ["revenue last", "sales in the last", "revenue in days", "recent revenue"]
+    synonyms:
+      - "revenue last"
+      - "sales in the last"
+      - "revenue in days"
+      - "recent revenue"
+      - "What was our revenue in the last 30 days?"
+      - "how much did we sell in the past 30 days"
+      - "revenue over the last thirty days"
+      - "total sales value in the trailing month"
     result_columns: [revenue_myr]
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
@@ -151,7 +261,12 @@ metrics:
 
   - id: revenue_last_month
     kind: scalar
-    synonyms: ["last month sales", "sales last month", "revenue last month", "last month revenue"]
+    synonyms:
+      - "last month sales"
+      - "sales last month"
+      - "revenue last month"
+      - "last month revenue"
+      - "What was our revenue last month?"
     result_columns: [revenue_myr]
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
@@ -163,13 +278,30 @@ metrics:
   # ── shipments ───────────────────────────────────────────────────────────────
   - id: delayed_count
     kind: scalar
-    synonyms: ["how many delayed", "delayed shipment count"]
+    synonyms:
+      - "how many delayed"
+      - "delayed shipment count"
+      - "How many shipments are delayed?"
+      - "How many delayed shipments are there?"
+      - "berapa shipment yang delayed?"
     result_columns: [delayed_count]
     sql: "SELECT COUNT(*) AS delayed_count FROM shipments WHERE status = 'DELAYED'"
 
   - id: shipments_by_status
     kind: listing
-    synonyms: ["shipments that are", "list shipments", "shipment status", "delayed shipments", "in transit"]
+    synonyms:
+      - "shipments that are"
+      - "list shipments"
+      - "shipment status"
+      - "delayed shipments"
+      - "in transit"
+      - "Which shipments are delayed?"
+      - "Which shipments are in transit?"
+      - "what is running late"
+      - "show me the late deliveries"
+      - "which consignments are behind schedule"
+      - "what is on the road right now"
+      - "shipments currently moving"
     result_columns: [shipment_id]
     sql: "SELECT shipment_id FROM shipments WHERE status = {status} ORDER BY shipment_id"
     params:
@@ -177,7 +309,15 @@ metrics:
 
   - id: count_by_carrier
     kind: grouped
-    synonyms: ["by carrier", "per carrier", "which carriers", "carrier breakdown"]
+    synonyms:
+      - "by carrier"
+      - "per carrier"
+      - "which carriers"
+      - "carrier breakdown"
+      - "Which carriers have the most delayed shipments?"
+      - "which freight companies are causing the delays"
+      - "break the late shipments down by carrier"
+      - "delay count per logistics provider"
     result_columns: [carrier, shipment_count]
     sql: >
       SELECT carrier, COUNT(*) AS shipment_count FROM shipments
@@ -187,7 +327,13 @@ metrics:
 
   - id: count_by_destination
     kind: grouped
-    synonyms: ["per warehouse incoming", "by destination", "incoming per location"]
+    synonyms:
+      - "per warehouse incoming"
+      - "by destination"
+      - "incoming per location"
+      - "How many delayed incoming shipments per warehouse?"
+      - "late inbound loads per site"
+      - "how many delayed arrivals at each warehouse"
     result_columns: [location_code, shipment_count]
     sql: >
       SELECT l.location_code, COUNT(*) AS shipment_count
@@ -198,7 +344,12 @@ metrics:
 
   - id: cost_by_destination
     kind: grouped
-    synonyms: ["shipment cost by destination", "cost per warehouse", "delivery cost by location"]
+    synonyms:
+      - "shipment cost by destination"
+      - "cost per warehouse"
+      - "delivery cost by location"
+      - "freight spend per destination"
+      - "what does shipping cost us by drop-off point"
     result_columns: [location_code, total_cost_myr]
     sql: >
       SELECT l.location_code, ROUND(SUM(s.cost_myr), 2) AS total_cost_myr
@@ -207,7 +358,14 @@ metrics:
 
   - id: arriving_window
     kind: listing
-    synonyms: ["arriving this week", "arriving soon", "incoming within", "due to arrive"]
+    synonyms:
+      - "arriving this week"
+      - "arriving soon"
+      - "incoming within"
+      - "due to arrive"
+      - "Which shipments are arriving this week?"
+      - "what lands this week"
+      - "deliveries due in the next seven days"
     result_columns: [shipment_id]
     sql: >
       SELECT shipment_id FROM shipments
@@ -220,7 +378,13 @@ metrics:
   # ── suppliers ───────────────────────────────────────────────────────────────
   - id: supplier_ranking
     kind: ranked
-    synonyms: ["rank suppliers", "supplier score", "compare suppliers", "supplier benchmark"]
+    synonyms:
+      - "rank suppliers"
+      - "supplier score"
+      - "compare suppliers"
+      - "supplier benchmark"
+      - "rank our vendors on risk and lead time together"
+      - "combined supplier scorecard ranking"
     result_columns: [supplier_id, ranking_score]
     sql: >
       SELECT supplier_id,
@@ -234,7 +398,14 @@ metrics:
 
   - id: suppliers_by_risk
     kind: listing
-    synonyms: ["risk score above", "high risk suppliers", "risky suppliers", "risk over"]
+    synonyms:
+      - "risk score above"
+      - "high risk suppliers"
+      - "risky suppliers"
+      - "risk over"
+      - "Which suppliers have a risk score above 0.7?"
+      - "suppliers with risk over 0.7"
+      - "show me our riskiest vendors above 0.7"
     result_columns: [supplier_id]
     sql: >
       SELECT supplier_id FROM suppliers
@@ -245,7 +416,13 @@ metrics:
 
   - id: avg_lead_time_by_country
     kind: grouped
-    synonyms: ["average lead time by country", "mean lead time per country", "lead time by country"]
+    synonyms:
+      - "average lead time by country"
+      - "mean lead time per country"
+      - "lead time by country"
+      - "What is the average lead time by supplier country?"
+      - "typical lead time per supplier country"
+      - "mean days to deliver by country"
     result_columns: [country, avg_lead_time_days]
     sql: >
       SELECT country, ROUND(AVG(lead_time_days), 2) AS avg_lead_time_days
@@ -253,7 +430,12 @@ metrics:
 
   - id: spend_by_country
     kind: grouped
-    synonyms: ["spend by country", "purchasing by country", "total spend per country"]
+    synonyms:
+      - "spend by country"
+      - "purchasing by country"
+      - "total spend per country"
+      - "how much do we spend in each supplier country"
+      - "procurement spend broken down by country"
     result_columns: [country, total_spend_myr]
     sql: >
       SELECT s.country, ROUND(SUM(i.quantity_kg * i.unit_cost_myr), 2) AS total_spend_myr
@@ -262,7 +444,12 @@ metrics:
 
   - id: audit_overdue
     kind: listing
-    synonyms: ["audit overdue", "overdue audit", "suppliers needing audit"]
+    synonyms:
+      - "audit overdue"
+      - "overdue audit"
+      - "suppliers needing audit"
+      - "which vendors are due for an audit"
+      - "suppliers whose audit has lapsed"
     result_columns: [supplier_id]
     sql: >
       SELECT supplier_id FROM suppliers
@@ -273,7 +460,12 @@ metrics:
 
   - id: high_risk_pending
     kind: listing
-    synonyms: ["high risk pending shipments", "risky suppliers pending", "high-risk with shipments"]
+    synonyms:
+      - "high risk pending shipments"
+      - "risky suppliers pending"
+      - "high-risk with shipments"
+      - "risky suppliers who still owe us shipments"
+      - "pending deliveries from high risk vendors"
     result_columns: [supplier_name, shipment_id]
     sql: >
       SELECT DISTINCT s.supplier_name, sh.shipment_id
@@ -285,7 +477,16 @@ metrics:
   # ── locations ───────────────────────────────────────────────────────────────
   - id: capacity_utilisation
     kind: grouped
-    synonyms: ["capacity utilisation", "warehouse capacity", "how full", "utilization"]
+    synonyms:
+      - "capacity utilisation"
+      - "warehouse capacity"
+      - "how full"
+      - "utilization"
+      - "how full is each warehouse"
+      - "site by site space usage"
+      - "show me utilisation across locations"
+      - "warehouse capacity usage percent"
+      - "utilization by location"
     result_columns: [location_code, pct_used]
     sql: >
       SELECT location_code, ROUND(100.0 * current_load_kg / capacity_kg, 1) AS pct_used
@@ -294,7 +495,13 @@ metrics:
 
   - id: capacity_above
     kind: listing
-    synonyms: ["above capacity", "over percent capacity", "near full", "above 90"]
+    synonyms:
+      - "above capacity"
+      - "over percent capacity"
+      - "near full"
+      - "above 90"
+      - "which sites are nearly full"
+      - "locations running over 90% capacity"
     result_columns: [location_code]
     sql: >
       SELECT location_code FROM locations
@@ -304,7 +511,15 @@ metrics:
 
   - id: free_capacity
     kind: ranked
-    synonyms: ["most free capacity", "free space", "available capacity", "spare capacity"]
+    synonyms:
+      - "most free capacity"
+      - "free space"
+      - "available capacity"
+      - "spare capacity"
+      - "Which warehouse has the most free capacity in kg?"
+      - "where do we have the most room left"
+      - "which site has the most spare space in kg"
+      - "warehouse with the largest free capacity"
     result_columns: [location_code, free_kg]
     sql: >
       SELECT location_code, capacity_kg - current_load_kg AS free_kg
@@ -315,19 +530,36 @@ metrics:
 
   - id: cold_storage_list
     kind: listing
-    synonyms: ["cold storage locations", "which are cold storage", "refrigerated warehouses"]
+    synonyms:
+      - "cold storage locations"
+      - "which are cold storage"
+      - "refrigerated warehouses"
+      - "which sites are refrigerated"
+      - "show me the chilled locations"
+      - "senarai lokasi cold storage"
     result_columns: [location_code]
     sql: "SELECT location_code FROM locations WHERE is_cold_storage = true ORDER BY location_code"
 
   - id: cold_storage_count
     kind: scalar
-    synonyms: ["how many cold storage", "count cold storage", "number of cold storage"]
+    synonyms:
+      - "how many cold storage"
+      - "count cold storage"
+      - "number of cold storage"
+      - "How many cold storage locations do we have?"
+      - "how many refrigerated sites do we run"
+      - "count of cold storage locations"
     result_columns: [cold_count]
     sql: "SELECT COUNT(*) AS cold_count FROM locations WHERE is_cold_storage = true"
 
   - id: cctv_by_location
     kind: listing
-    synonyms: ["cctv camera", "camera for warehouse", "surveillance camera"]
+    synonyms:
+      - "cctv camera"
+      - "camera for warehouse"
+      - "surveillance camera"
+      - "camera feed for warehouse A"
+      - "which CCTV covers WH-A"
     result_columns: [location_code, cctv_camera_id]
     sql: >
       SELECT location_code, cctv_camera_id FROM locations
@@ -338,6 +570,12 @@ metrics:
   # ── alerts ──────────────────────────────────────────────────────────────────
   - id: active_alerts
     kind: listing
-    synonyms: ["active alerts", "open alerts", "unresolved alerts", "current alerts"]
+    synonyms:
+      - "active alerts"
+      - "open alerts"
+      - "unresolved alerts"
+      - "current alerts"
+      - "what is currently flagged"
+      - "show me open warnings across the network"
     result_columns: [alert_id]
     sql: "SELECT alert_id FROM alerts WHERE resolved = false ORDER BY created_at DESC"

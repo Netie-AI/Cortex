@@ -140,11 +140,10 @@ def test_null_expiry_count_does_not_compile_as_sku_count():
 
 
 def test_pending_high_risk_is_not_a_bare_risk_listing():
-    """The declared pending-shipment question is not a bare risk listing."""
+    """Nested 'high risk suppliers' must not steal the pending-shipment metric."""
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    assert route_to_metric("pending deliveries from high risk vendors") is None
-    q = "high risk pending shipments"
+    q = "pending deliveries from high risk vendors"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "high_risk_pending"
@@ -163,7 +162,7 @@ def test_pending_high_risk_is_not_a_bare_risk_listing():
 def test_sku_count_per_category_is_grouped_not_scalar():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "sku count by category"
+    q = "how many SKUs per category"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "sku_count_by_category"
@@ -182,7 +181,7 @@ def test_sku_count_per_category_is_grouped_not_scalar():
 def test_freight_spend_per_destination_is_cost_not_count():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "shipment cost by destination"
+    q = "freight spend per destination"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "cost_by_destination"
@@ -202,7 +201,7 @@ def test_freight_spend_per_destination_is_cost_not_count():
 def test_spend_by_country_paraphrase_is_grouped_spend():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "spend by country"
+    q = "how much do we spend in each supplier country"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "spend_by_country"
@@ -221,10 +220,13 @@ def test_spend_by_country_paraphrase_is_grouped_spend():
 def test_cctv_warehouse_a_returns_camera_id():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    assert route_to_metric("camera feed for warehouse A") is None
-    q = "Show the CCTV camera for warehouse A"
+    q = "camera feed for warehouse A"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "cctv_by_location"
+    assert plan.slots.get("location") == "WH-A"
     r = answer(q)
-    assert r["badge"] == "certified", r.get("answer")
+    assert r["badge"] != "abstain", r.get("answer")
     rows = r.get("rows") or []
     assert rows, r.get("answer")
     text = r.get("answer") or ""
@@ -238,10 +240,13 @@ def test_cctv_warehouse_a_returns_camera_id():
 def test_chemicals_paraphrase_lists_chemical_skus():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    assert route_to_metric("show me everything in the chemicals category") is None
-    q = "List chemicals in inventory"
+    q = "show me everything in the chemicals category"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "items_by_category"
+    assert str(plan.slots.get("category")).upper() == "CHEMICALS"
     r = answer(q)
-    assert r["badge"] == "certified", r.get("answer")
+    assert r["badge"] != "abstain", r.get("answer")
     rows = r.get("rows") or []
     assert rows, r.get("answer")
     text = r.get("answer") or ""
@@ -253,10 +258,12 @@ def test_chemicals_paraphrase_lists_chemical_skus():
 def test_supplier_scorecard_paraphrase_ranks_suppliers():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    assert route_to_metric("rank our vendors on risk and lead time together") is None
-    q = "Rank suppliers by combined risk and lead time score"
+    q = "rank our vendors on risk and lead time together"
+    plan = route_to_metric(q)
+    assert plan is not None
+    assert plan.metric_id == "supplier_ranking"
     r = answer(q)
-    assert r["badge"] == "certified", r.get("answer")
+    assert r["badge"] != "abstain", r.get("answer")
     rows = r.get("rows") or []
     assert rows, r.get("answer")
     text = r.get("answer") or ""

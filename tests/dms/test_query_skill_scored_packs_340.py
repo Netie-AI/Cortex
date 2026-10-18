@@ -102,9 +102,6 @@ def test_must_fail_scored_pack_questions_never_written(
             body["provenance"]["layer"] not in ("certified", "governed_metric")
             for body in having
         ), having
-    elif pack == "dms_paraphrase_v1":
-        # #412: a paraphrase is not the declared question, so none is a rule serve.
-        assert _capture_candidates(bodies) == 0, pack
     else:
         assert _capture_candidates(bodies) >= 1, f"{pack}: no certified/governed answer to refuse"
     assert _rows(skills_db) == 0

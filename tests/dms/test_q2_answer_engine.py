@@ -243,32 +243,58 @@ def test_l2_disabled_by_default(monkeypatch):
     assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
 
 
-def _assert_not_served(r: dict) -> None:
-    """#412: an exclusion phrasing is not the declared ranking question."""
-    assert r["badge"] == "reconfirm", r.get("answer")
-    assert r.get("rows") in ([], None)
-    assert r.get("sql_used") is None
-    text = r.get("answer") or ""
-    assert "Yes runs that question" in text
-    assert "SKU-BETA" not in text.upper() or "not the declared question" in text
+def _assert_exclusion_visible(r: dict, excluded: list[str], *, n: int = 5) -> None:
+    """Customer-visible exclusion: non-empty ranking rows, text lists them, omitted SKUs stay out."""
+    rows = r.get("rows") or []
+    assert rows, f"exclusion returned zero rows: {r.get('answer')!r}"
+    assert 1 <= len(rows) <= n
+    skus = [str(row["sku"]).upper() for row in rows]
+    rendered = r.get("answer") or ""
+    assert rendered.strip(), "rendered answer was empty"
+    for token in excluded:
+        assert token.upper() not in skus
+        assert token.upper() not in rendered.upper()
+    for sku in skus:
+        assert sku in rendered.upper()
+    assert "None" not in rendered
+    assert "?" not in rendered
 
 
 def test_top_sku_excludes_named_sku():
-    _assert_not_served(answer_question("ignoring SKU-00173 what is the top 5 sku by revenue"))
+    r = answer_question("ignoring SKU-00173 what is the top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" in sql
+    assert "NOT" in sql and "IN" in sql
+    _assert_exclusion_visible(r, ["SKU-00173"])
 
 
 def test_top_sku_excludes_bare_beta_token():
-    """G4 — 'BETA' is not served as the delayed or unfiltered ranking."""
-    _assert_not_served(answer_question("excluding BETA, top 5 sku by revenue"))
+    """G4 — value normalization: 'BETA' must resolve to SKU-BETA in rows + answer text."""
+    r = answer_question("excluding BETA, top 5 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-BETA" in sql
+    _assert_exclusion_visible(r, ["SKU-BETA"])
 
 
 def test_top_sku_excludes_multiple_and_bare_token():
-    _assert_not_served(
-        answer_question(
-            "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
-        )
+    r = answer_question(
+        "excluding SKU-00173 and SKU-00241, what is the top 5 sku by revenue"
     )
-    _assert_not_served(answer_question("ignoring 00173 what is the top 5 sku by revenue"))
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "SKU-00173" in sql and "SKU-00241" in sql
+    _assert_exclusion_visible(r, ["SKU-00173", "SKU-00241"])
+
+    bare = answer_question("ignoring 00173 what is the top 5 sku by revenue")
+    assert bare["route"] == "sql"
+    bare_sql = (bare["sql_used"] or "").upper()
+    assert "SKU-00173" in bare_sql
+    _assert_exclusion_visible(bare, ["SKU-00173"])
 
 
 def test_query_skill_does_not_replay_stale_exclusions(tmp_path, monkeypatch):
@@ -311,7 +337,7 @@ def test_low_stock_followup_uses_inventory_not_placeholders():
 
     clear_session("lowstock-follow")
     first = answer_question(
-        "top selling",
+        "what is the top 5 sku by revenue",
         session_id="lowstock-follow",
     )
     assert first["route"] == "sql"
@@ -330,13 +356,15 @@ def test_low_stock_followup_uses_inventory_not_placeholders():
 
 
 def test_top_sku_ranks_6_to_10():
-    from CortexOS.dms.answer_engine import _route_to_metric_cascade, route_to_metric
-    from packs.dms.semantic.loader import compile_metric, load_all
-
-    question = "number 6-10 sku by revenue"
-    neighbour = _route_to_metric_cascade(question)
-    assert neighbour is not None and neighbour.metric_id == "sales_by_value"
-    sql = compile_metric(load_all(), neighbour.metric_id, neighbour.slots).upper()
-    assert "OFFSET 5" in sql and "LIMIT 5" in sql
-    assert route_to_metric(question) is None
-    _assert_not_served(answer_question(question))
+    r = answer_question("number 6-10 sku by revenue")
+    assert r["route"] == "sql"
+    assert r["layer"] == "governed_metric"
+    sql = (r["sql_used"] or "").upper()
+    assert "OFFSET 5" in sql
+    assert "LIMIT 5" in sql
+    # Must not collapse to a scalar total-revenue answer
+    assert "sales_value_myr" in (r.get("rows") or [{}])[0]
+    answer = r.get("answer") or ""
+    assert "None" not in answer
+    for row in r.get("rows") or []:
+        assert str(row["sku"]) in answer
