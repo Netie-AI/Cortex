@@ -871,38 +871,36 @@ def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
         con.close()
 
 
-# Function words in the first tokens of "what does the SOP-DOC-ZZ9 …" used to
-# substring-match any English .txt. Empty match must not invent a hit.
-_RAG_STOP = frozenset({
-    "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with",
-    "from", "per", "under", "about", "what", "which", "how", "does", "do",
-    "did", "is", "are", "was", "were", "our", "my", "your", "this", "that",
-    "say", "says", "state", "states", "according", "explain",
-})
-
-
-def _rag_content_tokens(question: str) -> list[str]:
-    return [
-        tok
-        for tok in re.findall(r"[a-z0-9][a-z0-9_-]*", question.lower())
-        if tok not in _RAG_STOP and len(tok) >= 4
-    ]
-
-
 def rag_answer(question: str) -> tuple[str, list[str]]:
-    """Stub file scan. Empty match returns no sources so the caller abstains."""
-    tokens = _rag_content_tokens(question)
-    sources: list[str] = []
-    snippets: list[str] = []
-    if tokens and CONTRACTS_DIR.is_dir():
-        for path in sorted(CONTRACTS_DIR.glob("*.txt")):
-            text = path.read_text(encoding="utf-8")
-            lowered = text.lower()
-            if any(tok in lowered for tok in tokens):
-                snippets.append(text[:400])
-                sources.append(path.name)
-    answer = snippets[0][:500] if snippets else ""
-    return answer, sources
+    """A cited answer from the supplier documents, or ``("", [])`` so the caller abstains.
+
+    RAG-01: passages are ranked by BM25 and gated on relevance; the model
+    answers only from them through OpenVault FreeRoute, citing each passage.
+    Without a model the answer quotes the best sentences and says so.
+    """
+    from CortexOS.rag import documents
+
+    paths = CONTRACTS_DIR.glob("*.txt") if CONTRACTS_DIR.is_dir() else ()
+    found = documents.answer(question, documents.load_passages(paths), _doc_model)
+    if found is None:
+        return "", []
+    return found.answer, found.sources
+
+
+def _doc_model(messages: list[dict[str, str]]) -> Any:
+    from CortexOS.integrations import freeroute
+    from CortexOS.rag import documents
+
+    # Document text leaves the box: the OpenVault leave-machine gate runs first.
+    out = freeroute.complete(
+        documents.TASK_DOC_ANSWER,
+        messages,
+        temperature=0.0,
+        max_tokens=400,
+        accept=lambda text: bool((text or "").strip()),
+        egress="leave",
+    )
+    return documents.ModelReply(ok=out.ok, text=out.text, reason=out.reason)
 
 
 def answer_question(
