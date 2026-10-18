@@ -151,9 +151,9 @@ def test_a_quote_needs_half_the_question_covered() -> None:
     assert '"Minimum order quantity: 50 units per SKU." [1]' in found.answer
 
 
-def test_contract_ask_document_answer_claims_no_warehouse_table(dms_http) -> None:  # noqa: F811
-    """/v1/contract/ask has no document badge, so the answer falls closed to
-    ABSTAIN; its source cards must not then list the warehouse grant."""
+def test_contract_ask_document_answer_is_badged_document(dms_http) -> None:  # noqa: F811
+    """1.7.0: the document answer is Badge.DOCUMENT, cites the document, and its
+    source cards name that document, never the warehouse grant."""
     dms_http.bind_session(SESSION, {"transactions": "TRUE", "inventory": "TRUE"}, space_id=SPACE)
 
     resp = dms_http.post(
@@ -162,8 +162,13 @@ def test_contract_ask_document_answer_claims_no_warehouse_table(dms_http) -> Non
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["provenance"]["badge"] == "abstain", body
+    assert body["provenance"]["badge"] == "document", body
+    assert body["provenance"]["layer"] == "rag", body
     assert f'"{PAYMENT}" [1]' in body["answer"], body["answer"]
     assert "Sources: [1] acme_agreement.txt" in body["answer"]
-    assert body["contributing_sources"] == [], body["contributing_sources"]
+    cards = body["contributing_sources"]
+    assert [(c["ref_id"], c["kind"], c["container"]) for c in cards] == [
+        ("acme_agreement.txt", "document", "documents")
+    ], cards
     assert body.get("rows") in ([], None) and body.get("sql_used") is None
+    assert body.get("drillthrough_token") is None

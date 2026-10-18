@@ -107,7 +107,7 @@ supported:
 
   - version: "1.6"
     spec: openapi-1.6.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive SCHEMA-CONTEXT-01 (#347): POST /v1/insights
@@ -122,6 +122,21 @@ supported:
       keep the 279cbd85 envelope. schema_context maxLength is 8192;
       the engine cap is 8192 UTF-8 bytes. 1.5 clients omit the field and
       get the 1.5 behaviour. canonical_manifest_bytes unchanged.
+
+  - version: "1.7"
+    spec: openapi-1.7.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive RAG-01 (#415): Badge gains document (a new Badge enum value)
+      for an answer drawn from the Space's documents. The answer text cites
+      the passages it used and ends with a Sources line naming each
+      document; contributing_sources carries one card per document with
+      kind "document" and container "documents". It is not governed data and
+      is never stamped session. Before 1.7 such an answer fell closed to
+      abstain with no source cards. 1.6 clients that do not know the value
+      ignore it. No field is added or removed. canonical_manifest_bytes
+      unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

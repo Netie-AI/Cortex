@@ -105,6 +105,7 @@ _FLAT_BADGE: dict[str, Badge] = {
     "refused": Badge.ABSTAIN,  # F40 — contract has no REFUSED badge; never SESSION
     "blocked": Badge.BLOCKED,
     "reconfirm": Badge.RECONFIRM,  # C-LOOP-A: asking, not an abstain and not SESSION
+    "document": Badge.DOCUMENT,  # 1.7.0 RAG-01: cited from the documents, never SESSION
 }
 
 
@@ -167,6 +168,13 @@ def _contributing_sources(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Sources panel cards from granted tables. Never invent on abstain."""
     if _is_abstain_signal(data):
         return []
+    if str(data.get("badge") or "").lower() == Badge.DOCUMENT.value:
+        # A document answer read no table: its cards are the documents it cites.
+        docs = [str(s) for s in data.get("sources") or [] if s]
+        return [
+            {"ref_id": doc, "container": "documents", "member": doc, "kind": "document"}
+            for doc in dict.fromkeys(docs)
+        ]
     names: list[str] = []
     granted = data.get("granted_sources")
     if isinstance(granted, list):

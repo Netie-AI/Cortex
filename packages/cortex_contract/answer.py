@@ -17,6 +17,9 @@ class Badge(str, Enum):
     # 1.5.0: the plan+SQL loop could not ground an answer and is asking the user.
     # Not an abstain. Older clients ignore the value.
     RECONFIRM = "reconfirm"
+    # 1.7.0: answered from the Space's documents, citing the passages it used.
+    # Not governed data, so never SESSION. Older clients ignore the value.
+    DOCUMENT = "document"
 
 
 class AbstainReason(str, Enum):
