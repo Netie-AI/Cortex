@@ -123,6 +123,21 @@ supported:
       the engine cap is 8192 UTF-8 bytes. 1.5 clients omit the field and
       get the 1.5 behaviour. canonical_manifest_bytes unchanged.
 
+  - version: "1.7"
+    spec: openapi-1.7.0.json
+    status: supported
+    contract_surface: true
+    notes: >
+      Additive RAG-01 (#415): Badge gains document (a new Badge enum value)
+      for an answer drawn from the Space's documents. The answer text cites
+      the passages it used and ends with a Sources line naming each
+      document; contributing_sources carries one card per document with
+      kind "document" and container "documents". It is not governed data and
+      is never stamped session. Before 1.7 such an answer fell closed to
+      abstain with no source cards. 1.6 clients that do not know the value
+      ignore it. No field is added or removed. canonical_manifest_bytes
+      unchanged.
+
   - version: "1.8"
     spec: openapi-1.8.0.json
     status: current
@@ -134,11 +149,10 @@ supported:
       match first. It is omitted when empty, is not a phrasing-match id, and
       does not mark a stored answer: the SQL was generated and executed on
       current data, and reused stays false. Nothing else on the wire
-      changes. Additive against 1.6.0, the previous spec published here.
-      Contract 1.7.0 is allocated to a separate change (#386), so this minor
-      is 1.8.0; if 1.7.0 lands first, this spec is regenerated on top of it.
-      1.6 clients ignore the field and keep their behaviour.
-      canonical_manifest_bytes unchanged.
+      changes. Additive against 1.7.0, the previous spec published here
+      (CONTRACT-1.7.0 #417 landed first; this spec was regenerated on top of
+      it, so Badge.document is in it too). 1.7 and 1.6 clients ignore the
+      field and keep their behaviour. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.
