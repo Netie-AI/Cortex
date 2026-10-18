@@ -1,4 +1,15 @@
 {
+ "amended": {
+  "by": "RAG-01",
+  "qids": [
+   "adversarial:best_price_no_fallback",
+   "adversarial:esg_weather",
+   "golden:fallback_best_price",
+   "paraphrase:fallback_turnover#0",
+   "paraphrase:fallback_turnover#1"
+  ],
+  "why": "bench expects abstain; main served the supplier contract text because one word matched"
+ },
  "modes": {
   "clock": 18,
   "exact": 134,
@@ -8,8 +19,8 @@
  "recorded_on": "96da7913c7f698cb607afd303195b9bae26bbf79",
  "sha256": {
   "adversarial:best_price_no_fallback": [
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b",
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b"
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
   ],
   "adversarial:category_ranking": [
    "9cde8e35a0657a6c85f04a9d9ba2a12a74586691e463669fda6bdf16a67b6133",
@@ -24,8 +35,8 @@
    "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
   ],
   "adversarial:esg_weather": [
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b",
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b"
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
   ],
   "adversarial:exclude_bare_beta": [
    "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
@@ -196,8 +207,8 @@
    "cc90873d9ab61abb5a4811f06bc8a493ba2bf759121ea385fc0f08adc231f4d3"
   ],
   "golden:fallback_best_price": [
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b",
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b"
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
   ],
   "golden:fallback_turnover": [
    "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
@@ -452,12 +463,12 @@
    "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
   ],
   "paraphrase:fallback_turnover#0": [
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b",
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b"
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
   ],
   "paraphrase:fallback_turnover#1": [
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b",
-   "6e1afa86d599fa5fde0e5c9b3fe85d8f8b1828a890c291c4f201488529ced03b"
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
   ],
   "paraphrase:high_risk_pending#0": [
    "087a3cee3a8cffd65bced3552980795d1fcede1ea1488d6013c6ee3b871257ff",
