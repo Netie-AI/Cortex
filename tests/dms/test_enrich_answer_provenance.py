@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from cortex_contract.answer import Badge, Provenance
 
 from CortexOS.api.contract_routes import _enrich_answer, _provenance_from_flat
@@ -182,3 +183,24 @@ def test_contract_ask_requires_grounding():
 
     src = inspect.getsource(contract_routes.contract_ask)
     assert "require_grounding=True" in src
+
+
+@pytest.mark.parametrize("layer", ["rag", "catalog", "sql_not_analyzable", "new_unmapped_layer"])
+def test_enrich_answer_claims_no_table_under_a_fail_closed_badge(layer):
+    """A layer the contract has no badge for falls closed to ABSTAIN, and then
+    no table card may claim the answer read it (RAG-01 follow-up)."""
+    verified = SimpleNamespace(manifest={"tables": {}})
+    data = _enrich_answer(
+        {
+            "answer": '"Payment terms: Net 30 from invoice date." [1]',
+            "route": layer,
+            "badge": "document" if layer == "rag" else layer,
+            "layer": layer,
+            "audit_id": "aud_doc",
+            "granted_sources": ["transactions", "inventory"],
+        },
+        session_id="ses_1",
+        verified=verified,
+    )
+    assert data["provenance"].badge == Badge.ABSTAIN
+    assert data["contributing_sources"] == []
