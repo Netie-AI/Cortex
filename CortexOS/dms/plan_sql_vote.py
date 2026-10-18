@@ -7,13 +7,15 @@ right about one time in four. So the ladder's first gated SQL is a candidate,
 not an answer:
 
 1. ``B``: the same model writes SQL for the question without the plan, through
-   the same gates. The same rows as the first candidate serve the first.
+   the same gates, with the ladder's error-fed retry. The same rows as the
+   first candidate serve the first.
 2. ``C``: otherwise the stronger route OpenVault configured writes it. The
    candidate whose rows ``C`` matches is served.
 3. No two candidates agree: nothing is served and the ladder reconfirms.
 
-A ``B`` whose SQL text repeats the first candidate's is the same reading, not a
-second one, and does not count. Rows are compared as a set, numbers to four
+A ``B`` that writes the same SQL text as the first candidate counts: on 500
+BIRD questions those agreed answers were right 41 times in 49, better than
+agreement between different SQL. Rows are compared as a set, numbers to four
 decimals. This module only compares; the ladder writes, gates and runs.
 """
 

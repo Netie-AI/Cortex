@@ -178,13 +178,16 @@ def test_three_readings_that_disagree_reconfirm(
     _assert_reconfirmed(body)
     assert closest in body["answer"]
     assert len(armed_openvault.chat_calls) == 5
-    assert plan_sql_vote.VOTE_SPLIT in armed_openvault.chat_calls[4]["body"]["messages"][1]["content"]
+    assert (
+        plan_sql_vote.VOTE_SPLIT in armed_openvault.chat_calls[4]["body"]["messages"][1]["content"]
+    )
 
 
-def test_a_repeated_sql_is_not_a_second_vote(
-    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+def test_the_same_sql_written_twice_counts_as_agreement(
+    armed_openvault, dms_http, execute_spy: list[str]
 ) -> None:
-    _stronger_route(armed_openvault, "", monkeypatch)
+    """Measured on 500 BIRD questions: the same SQL with and without the plan was
+    right 41 times in 49, better than agreement between different SQL."""
     _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     _reply(armed_openvault, f"  {GOOD_SQL.lower()} ;")
@@ -192,8 +195,61 @@ def test_a_repeated_sql_is_not_a_second_vote(
 
     body = _json(_ask(dms_http))
 
+    _assert_served(body, GOOD_SQL)
+    assert any("the same SQL" in line for line in _vote_lines(body)), body["assumptions"]
+    _assert_rung(body, plan_sql_ask.RUNG_PLAN)
+
+
+def test_a_second_reading_that_fails_is_fed_back_and_retried(
+    armed_openvault, dms_http, execute_spy: list[str]
+) -> None:
+    """Measured: in 21 of 221 right first answers the second reading was refused,
+    failed EXPLAIN or returned no rows. It gets the ladder's error-fed retry."""
+    bad = "SELECT no_such_col FROM transactions"
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, bad)
+    _reply(armed_openvault, SAME_ROWS_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_served(body, GOOD_SQL)
+    retry = armed_openvault.chat_calls[3]["body"]["messages"][1]["content"]
+    assert "UNKNOWN_COLUMN:no_such_col" in retry
+    assert "PLAN:" not in retry
+    assert body["model_calls"] == {"plan": 3, "error-fed-retry-1": 1, "total": 4}
+    assert any("a second SQL" in line for line in _vote_lines(body)), body["assumptions"]
+
+
+def test_a_first_sql_written_without_a_plan_has_no_same_prompt_second_reading(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the plan folded into the SQL call (#386) both readings would share one prompt
+    and always agree. The vote must not mistake that for confirmation."""
+    import dataclasses
+
+    from CortexOS.plan_sql import generator
+
+    real_plan = generator.FreeRoutePlanSqlGenerator.plan
+
+    def _unplanned(self, request):  # noqa: ANN001
+        return dataclasses.replace(real_plan(self, request), plan=())
+
+    monkeypatch.setattr(generator.FreeRoutePlanSqlGenerator, "plan", _unplanned)
+    _stronger_route(armed_openvault, "", monkeypatch)
+    _reply(armed_openvault, PLAN_TEXT)
+    _reply(armed_openvault, GOOD_SQL)
+    _reply(armed_openvault, GOOD_SQL)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
     _assert_reconfirmed(body)
-    assert any("repeated the first" in line for line in _vote_lines(body)), body["assumptions"]
+    # The plan call and the one SQL write: no second reading from the same prompt.
+    assert len(armed_openvault.chat_calls) == 2
+    assert "PLAN:" not in armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
+    assert any("without a plan" in line for line in _vote_lines(body)), body["assumptions"]
 
 
 def test_a_second_reading_without_a_route_stamp_stops_the_answer(

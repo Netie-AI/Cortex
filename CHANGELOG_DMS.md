@@ -13,8 +13,11 @@ reconfirm envelope (`badge=reconfirm`, `rows=[]`) whose assumptions carry
 lines and a `step vote` line saying which readings agreed. `model_calls` keeps its
 keys: the same-model reading counts under the rung that ran it, the stronger
 route's under `stronger-model`. No contract change. On BIRD Mini-Dev held-out
-(n=348) it cut wrong answers 120 to 34 and correct ones 166 to 99; see
-`docs/subagents_findings/2026-10-18_plan-sql-vote-measured.md`.
+(n=348) it cut wrong answers 120 to 34 and correct ones 166 to 99. Follow-up: the
+same SQL text written with and without the plan now counts as agreement, and the
+second reading gets the ladder's error-fed retry; the held-out run keeps 145
+correct answers at 77% precision. A first SQL written without a plan has no
+second reading. See `docs/subagents_findings/2026-10-18_plan-sql-vote-measured.md`.
 
 ## DBOS-3X (#331) -- 2026-10-16
 
