@@ -21,7 +21,6 @@ from tests.test_plan_sql.test_ai_sql_reads_table import _oracle, _rowset
 from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
     GRANT,
     PAYLOAD,
-    PLAN_TEXT,
     SESSION,
     _ask,
     _assert_rung,
@@ -53,7 +52,6 @@ def test_a_substituted_identifier_is_fed_back_and_never_served(
     armed_openvault, dms_http, execute_spy: list[str]
 ) -> None:
     named, other = _real_skus()
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, _kg_sql(other))
     _reply(armed_openvault, _kg_sql(named))
     dms_http.bind_session(SESSION, GRANT)
@@ -66,7 +64,9 @@ def test_a_substituted_identifier_is_fed_back_and_never_served(
     assert body["sql_used"].startswith(_kg_sql(named))
     # The substituted SQL never ran; only the one on the named SKU did.
     assert _ran(execute_spy) == [body["sql_used"]]
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    # One complete() per attempt (#386 folds the planner into the SQL call), so
+    # the error-fed retry is the second call.
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert LITERAL_UNGROUNDED in retry
     assert f"LITERAL_NOT_IN_QUESTION:{other}" in retry
     _assert_rung(body, plan_sql_ask.rung_retry(1))
@@ -77,7 +77,6 @@ def test_an_entity_the_data_lacks_reconfirms_instead_of_answering_for_another(
 ) -> None:
     """The heldout case: the model keeps substituting; nothing is served."""
     named, _ = _real_skus()
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, _kg_sql(named))
     _reply(armed_openvault, _kg_sql(named))
     dms_http.bind_session(SESSION, GRANT)
@@ -99,7 +98,6 @@ def test_the_named_identifier_is_served_on_the_first_write(
 ) -> None:
     """Positive control: a grounded identifier is not delayed by the check."""
     named, _ = _real_skus()
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, _kg_sql(named))
     dms_http.bind_session(SESSION, GRANT)
     oracle = _oracle(_kg_sql(named))
@@ -108,7 +106,8 @@ def test_the_named_identifier_is_served_on_the_first_write(
 
     assert _rowset(body["rows"]) == _rowset(oracle)
     assert body["sql_used"].startswith(_kg_sql(named))
-    assert len(armed_openvault.chat_calls) == 2
+    # One call: the first write, with the planner folded into it (#386).
+    assert len(armed_openvault.chat_calls) == 1
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
 
 
