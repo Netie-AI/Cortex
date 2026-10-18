@@ -27,6 +27,20 @@ FreeRoute ``complete``; the planner call is folded into it, so
 ``model_calls`` counts one call per rung attempt. Not a CI claim. 52 effect
 not measured.
 
+Round 4 (Lead data-policy ruling, Security NO 5559955242): ``schema_context``
+on the ask and value sampling sit behind ``CORTEX_GRANTED_CATALOG``, default
+off and separate from ``CORTEX_PLAN_SQL``, until dms#456. Off, the ask reads
+the field only for its declared type and answers as without it; no value is
+probed. On, a sampled column gives at most 8 distinct values, each stripped
+of control and bidi characters, cut to 64 characters and written as a quoted
+SQL string literal; the block fits inside the 8192-byte schema cap with the
+string; an ungranted table is never probed; only the stock OpenVault
+FreeRoute generator is handed values; steps carry counts and sizes only. A
+did-you-mean hint is not offered when the edit changes a digit or falls in a
+``_``-separated token shorter than 4 characters (``quantity_g`` gets no
+``quantity_kg``), and DuckDB's qualified ``Candidate bindings: :`` list is
+dropped from retry text.
+
 ## DBOS-3X (#331) -- 2026-10-16
 
 The `agentic`, `agents` and `full` extras take `dbos>=3.0.0,<4`. `uv.lock`

@@ -13,7 +13,12 @@ Order, each step stamped (``StepStamp``):
 3. ``sample``: distinct values from the granted payload columns DMS marked
    ``masked: false`` (contract 1.7.0), so filters can be grounded in what the
    tables actually hold. A column marked masked, or with no mask state, keeps
-   its name and type in the prompt and is never probed. No model call.
+   its name and type in the prompt and is never probed. Off unless
+   ``CORTEX_GRANTED_CATALOG`` is on (see below). At most 8 distinct values a
+   column, each stripped of control and bidi characters, cut to 64
+   characters and quoted as a SQL string literal; the block counts inside
+   #351's 8192-byte schema cap. Values go only to the OpenVault FreeRoute
+   generator, and steps record counts, never a value. No model call.
 4. ``sql``: one model call per attempt through the injected ``PlanSqlGenerator``
    (default: OpenVault FreeRoute). The #329 planner call is folded into this
    call: there is no serial planner or classifier before generation. A step
@@ -46,6 +51,12 @@ same steps, plus ``total``: one per call the ladder issues. A transport or
 proxy retry under that call (an upstream 429 retried by the cap proxy or the
 FreeRoute client) is not a step. DMS reads the per-step counts only from that
 object.
+
+``CORTEX_GRANTED_CATALOG`` (default off, separate from ``CORTEX_PLAN_SQL``)
+switches on both ``AskRequest.schema_context`` on this path and step 3. Off,
+the contract ask ignores ``schema_context`` past its declared type and probes
+no value: the answer is the one the same ask gets without that field. It
+stays off until DMS sends ``masked: false`` (dms#456).
 
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
 route-stamp failure, which never reaches a model result). PII wording in a
@@ -81,6 +92,10 @@ from CortexOS.plan_sql.generator import (
 )
 
 ENABLED_ENV = "CORTEX_PLAN_SQL"
+#: Default off. On: the contract ask reads ``schema_context`` and step 3
+#: samples ``masked: false`` columns. Lead / Security ruling on #386: off
+#: until dms#456. Not implied by ``CORTEX_PLAN_SQL``.
+CATALOG_ENV = "CORTEX_GRANTED_CATALOG"
 LAYER = "plan_sql"
 RECONFIRM = "reconfirm"
 
@@ -110,8 +125,10 @@ RUNG_STRONG = "stronger-model"
 RUNG_RECONFIRM = "reconfirm"
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_SAMPLE_ROWS = 8
+_SAMPLE_ROWS = plan_payload.SAMPLE_VALUES_PER_COLUMN
 _MAX_SAMPLE_COLUMNS = 12
+SAMPLE_OFF = "off"
+SAMPLE_NOT_OPENVAULT = "not sampled: the generator is not OpenVault FreeRoute"
 # Statement class from the extractor or the gate. Not a scan of the question.
 _DESTRUCTIVE_KINDS = (
     "INSERT",
@@ -135,6 +152,20 @@ def plan_sql_enabled() -> bool:
     return (os.environ.get(ENABLED_ENV) or "").strip().lower() in {"1", "true", "yes"}
 
 
+def granted_catalog_enabled() -> bool:
+    """``CORTEX_GRANTED_CATALOG``: schema_context on the ask, and value sampling. Default off."""
+    return (os.environ.get(CATALOG_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _openvault_routed(generator: object) -> bool:
+    """True only for the stock FreeRoute generator, whose one egress is OpenVault.
+
+    Exact class: an injected generator, or a subclass that could override
+    the call, never receives a sampled value.
+    """
+    return type(generator) is FreeRoutePlanSqlGenerator
+
+
 def default_generator() -> PlanSqlGenerator:
     return FreeRoutePlanSqlGenerator()
 
@@ -144,12 +175,14 @@ def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
 
     ``body.schema_context`` (contract 1.7.0) narrows the prompt to the grant
     intersected with that string. Absent or blank, the payload is the prompt.
+    With ``CORTEX_GRANTED_CATALOG`` off it is not read.
     """
     if body.dms_payload is None or not plan_sql_enabled():
         return None
+    schema_context = body.schema_context if granted_catalog_enabled() else None
     return plan_sql_answer(
         plan_payload.PlanSqlRequest(
-            body.question, body.dms_payload, schema_context=body.schema_context
+            body.question, body.dms_payload, schema_context=schema_context
         ),
         session_id=body.session_id,
         space_id=body.space_id,
@@ -519,24 +552,40 @@ def _sample_values(
 ) -> tuple[dict[str, dict[str, tuple[str, ...]]], str]:
     """Distinct values for payload columns the grant already allows. Never raises.
 
-    Only a column DMS marked ``masked: false`` (contract 1.7.0) is probed. A
-    column marked masked, or one with no mask state (an older consumer, or a
+    Nothing is probed while ``CORTEX_GRANTED_CATALOG`` is off. A table the
+    grant does not name is never probed, whatever the request carries. Only a
+    column DMS marked ``masked: false`` (contract 1.7.0) is probed. A column
+    marked masked, or one with no mask state (an older consumer, or a
     ``schema_context`` column the payload does not list), is never read here:
     its values do not reach a prompt, only its name and type do.
+
+    At most ``SAMPLE_VALUES_PER_COLUMN`` distinct values a column, each passed
+    through :func:`plan_payload.sample_text`, and the rendered block fits in
+    :func:`plan_catalog.sample_budget`. The returned reason holds counts and
+    sizes only, never a value.
     """
+    if not granted_catalog_enabled():
+        return {}, SAMPLE_OFF
     from CortexOS.execution.submit import execute_sql
 
     found: dict[str, dict[str, tuple[str, ...]]] = {}
     taken = 0
     errors = 0
     masked = 0
+    ungranted = 0
+    granted = _granted_names(grant)
     unmasked = plan_catalog.unmasked_columns(request.payload)
+    budget = plan_catalog.sample_budget(request)
     for table in request.payload.tables:
+        folded = fold_identifier(table.name.strip())
+        if folded not in granted:
+            ungranted += 1
+            continue
         if not _IDENT.fullmatch(table.name):
             continue
         cols: dict[str, tuple[str, ...]] = {}
         for column in table.columns:
-            if (fold_identifier(table.name.strip()), fold_identifier(column.name)) not in unmasked:
+            if (folded, fold_identifier(column.name)) not in unmasked:
                 masked += 1
                 continue
             if taken >= _MAX_SAMPLE_COLUMNS or not _IDENT.fullmatch(column.name):
@@ -556,15 +605,23 @@ def _sample_values(
                 value = row.get("v")
                 if value is None:
                     continue
-                vals.append(str(value)[:80])
+                text = plan_payload.sample_text(value)
+                if not text or text in vals:
+                    continue
+                vals.append(text)
                 if len(vals) >= _SAMPLE_ROWS:
                     break
             if vals:
                 cols[column.name] = tuple(vals)
         if cols:
             found[table.name] = cols
-    nvals = sum(len(v) for cols in found.values() for v in cols.values())
-    return found, f"columns={taken} values={nvals} errors={errors} masked={masked}"
+    fitted = plan_payload.fit_values(found, budget)
+    nvals = sum(len(v) for cols in fitted.values() for v in cols.values())
+    nbytes = len(plan_payload.render_values(fitted).encode("utf-8"))
+    return fitted, (
+        f"columns={taken} values={nvals} errors={errors} masked={masked} "
+        f"ungranted={ungranted} bytes={nbytes} budget={budget}"
+    )
 
 
 class _RouteRefusal:
@@ -754,6 +811,9 @@ def plan_sql_answer(
     if widened:
         steps.append(StepStamp.cortex("payload", "cortex:payload-check", "refused"))
         return stop(widened[0].split(":", 1)[0], ", ".join(widened))
+    if not granted_catalog_enabled():
+        # Off: the string is not read, here or by the sampler's byte budget.
+        request = replace(request, schema_context=None)
     request, unusable = plan_catalog.narrow(request, granted)
     if unusable:
         steps.append(
@@ -775,13 +835,18 @@ def plan_sql_answer(
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "no"))
         return _with_calls(_not_found(audit_id, steps))
 
-    sampled, sample_reason = _sample_values(grant, request)
+    gen = generator or default_generator()
+    # A sampled value goes only to OpenVault FreeRoute. Any other generator
+    # gets the names and types and no probe runs for it.
+    sampled: dict[str, dict[str, tuple[str, ...]]] = {}
+    if granted_catalog_enabled() and not _openvault_routed(gen):
+        sample_reason = SAMPLE_NOT_OPENVAULT
+    else:
+        sampled, sample_reason = _sample_values(grant, request)
     steps.append(StepStamp.cortex("sample", "cortex:column-values", sample_reason))
     request = replace(request, column_values=sampled)
     if confirm == "yes":
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "yes"))
-
-    gen = generator or default_generator()
 
     def _hint(detail: str) -> str:
         # The database's own candidate lists are dropped; only a typo of an
@@ -1058,6 +1123,7 @@ def plan_sql_answer(
 
 
 __all__ = [
+    "CATALOG_ENV",
     "EMPTY_RESULT",
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
@@ -1074,6 +1140,7 @@ __all__ = [
     "rung_retry",
     "default_generator",
     "grant_closest_question",
+    "granted_catalog_enabled",
     "plan_sql_answer",
     "plan_sql_enabled",
     "try_plan_sql",

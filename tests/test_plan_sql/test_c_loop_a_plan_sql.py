@@ -54,6 +54,10 @@ CAPTURE_BODY_SHA256 = "1e3e7cb43f91f816079cfd66befc9f73761ec6e8d3fca3fbae3e667f6
 @pytest.fixture(autouse=True)
 def _plan_sql_on(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    # Value sampling is behind CORTEX_GRANTED_CATALOG (#386, default off;
+    # tests/test_plan_sql/test_granted_catalog.py locks the default). The
+    # assertions here on the COLUMN VALUES block run with it on.
+    monkeypatch.setenv(plan_sql_ask.CATALOG_ENV, "1")
     monkeypatch.delenv(sm.ENABLED_ENV, raising=False)
     monkeypatch.delenv(sm.SCORED_ROUND_ENV, raising=False)
     sm.reset_space_memory_for_tests()

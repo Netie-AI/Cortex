@@ -257,6 +257,7 @@ async def contract_ask(body: AskRequest) -> Answer:
 
     def _ask() -> Answer:
         from CortexOS.dms.answer_engine import answer as answer_engine
+        from CortexOS.dms.plan_sql_ask import granted_catalog_enabled
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.session_manifests import (
             SessionExpired,
@@ -269,8 +270,12 @@ async def contract_ask(body: AskRequest) -> Answer:
         # Contract 1.7.0 (GEN-GRANTED-CATALOG-01): the same rule and status as
         # POST /v1/insights, before any model call. A string that parses and
         # declares no table is not malformed (problem_status 200): it reaches
-        # the plan+SQL path, which abstains by that name.
-        schema_problem = schema_ctx.problem(body.schema_context)
+        # the plan+SQL path, which abstains by that name. With
+        # CORTEX_GRANTED_CATALOG off (the default until dms#456) the field is
+        # not read past its declared type: the answer is the one main gives.
+        schema_problem = (
+            schema_ctx.problem(body.schema_context) if granted_catalog_enabled() else None
+        )
         if schema_problem is not None and schema_ctx.problem_status(schema_problem[0]) != 200:
             code, message = schema_problem
             raise HTTPException(
@@ -320,7 +325,8 @@ async def contract_ask(body: AskRequest) -> Answer:
                 from CortexOS.dms.plan_sql_ask import try_plan_sql
 
                 # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303). The prompt is
-                # the grant intersected with body.schema_context when sent.
+                # the grant intersected with body.schema_context when sent and
+                # CORTEX_GRANTED_CATALOG is on.
                 served = try_plan_sql(body, verified=verified)
             try:
                 result = served if served is not None else answer_engine(

@@ -130,7 +130,10 @@ supported:
     notes: >
       Additive GEN-GRANTED-CATALOG-01 (#386): AskRequest gains optional
       schema_context, the same string and rule as the 1.6 insights field
-      (maxLength 8192; the engine cap is 8192 UTF-8 bytes). It is used only
+      (maxLength 8192; the engine cap is 8192 UTF-8 bytes). The engine reads
+      it, and samples column values, only with CORTEX_GRANTED_CATALOG on
+      (off by default until dms#456); off, only the declared type is checked
+      and the ask is answered as without the field. It is used only
       by the plan+SQL path (dms_payload set and that path switched on): the
       SQL prompt is then the signed grant intersected with the tables,
       columns and joins the string declares, and a table outside the grant
@@ -142,7 +145,10 @@ supported:
       AskPayloadColumn gains optional masked (Security ruling on #386): the
       plan+SQL path samples a column's distinct values into its prompt only
       when masked is false. True or absent, the name and type may reach the
-      prompt and the values never do. This applies to 1.6 clients too: they
+      prompt and the values never do. A sampled column gives at most 8
+      distinct values, each cut to 64 characters with control and bidi
+      characters stripped, and the samples count inside the 8192-byte cap.
+      This applies to 1.6 clients too: they
       send no mask state, so their plan+SQL asks get no sampled values.
       1.6 clients omit schema_context and get the 1.6 prompt schema.
       canonical_manifest_bytes unchanged.

@@ -145,14 +145,19 @@ class AskRequest(BaseModel):
     # ``not found in the database`` and does not call a model.
     plan_sql_confirm: Literal["yes", "no"] | None = None
     # 1.7.0: the caller's schema shortlist, the same string and rule as
-    # ``InsightsSchemaContext.schema_context`` on POST /v1/insights. Checked
-    # on every ask; read only when the plan+SQL path answers it.
+    # ``InsightsSchemaContext.schema_context`` on POST /v1/insights. Read only
+    # when the engine's schema_context switch is on (off by default) and the
+    # plan+SQL path answers the ask; otherwise only its declared type applies.
     schema_context: str | None = Field(
         default=None,
         max_length=8192,
         description=(
             "1.7.0 caller shortlist, the SCHEMA-CONTEXT-01 string POST /v1/insights "
-            "takes. Used only by the plan+SQL path (dms_payload set and that path "
+            "takes. Read only when the engine has its schema_context switch on "
+            "(off by default). Off, only its declared type (string or null, "
+            "maxLength 8192) is checked and the answer is the one the same ask "
+            "gets without this field. On, it is "
+            "used only by the plan+SQL path (dms_payload set and that path "
             "switched on): its SQL prompt is then the signed grant intersected "
             "with the tables, columns and joins this string declares, and a table "
             "outside the grant is dropped. Absent or blank: the dms_payload "
