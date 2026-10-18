@@ -2,6 +2,21 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## METRIC-EXACT-01 (#412) -- 2026-10-18
+
+A keyword-cascade hit is served only when every meaning-changing word in the
+question is one the metric declares (its id, synonyms, result columns, or SQL
+literals). "How many shipments are not delayed?" was served as `delayed_count`
+1031; the warehouse has 10969 shipments that are not delayed. That question,
+and the same near-miss with "number of" or "never", now abstains with the
+model step off and reaches the model step when `DMS_L2_ENABLED` is on. An
+exact "How many shipments are delayed?" stays on the rule. A refused neighbour
+does not fall through to a space document. Short synonyms
+(under 16 characters) declare words the metrics already answer -- `no restock`,
+`least spare`, `most delayed` -- and the synonym matcher still skips them, so
+rule-served routes do not grow. The legacy delayed-row template does not pick
+the refused question back up.
+
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 
 Off unless `CORTEX_PLAN_SQL_VOTE=1` (with `CORTEX_PLAN_SQL=1`). On the

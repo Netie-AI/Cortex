@@ -571,7 +571,7 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
     assert on["l2_named_steps"] > 0
     assert (
         off["envelopes_sha256"]
-        == "f5b041bd6df0ef16852d9175a8a4567713f48b48579903a261f04f25d434d845"
+        == "847c8ee0ad131485bb7206597a01b6e36808a851fe21d2dbf7a98fde5411d9ce"
     )
     assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["values"] == []

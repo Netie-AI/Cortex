@@ -834,7 +834,7 @@ def _plan_from_declared_synonyms(q: str, q_raw: str) -> MetricPlan | None:
 
 
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
-def route_to_metric(question: str) -> MetricPlan | None:
+def _route_to_metric_cascade(question: str) -> MetricPlan | None:
     """Pick a governed metric + its slots.
 
     Two views of the question, deliberately kept apart:
@@ -1072,6 +1072,78 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
 
     return _plan_from_declared_synonyms(q, q_raw)
+
+
+def _exactness_guard_enabled() -> bool:
+    """Tests replace this to prove the must-fails need the guard."""
+    return True
+
+
+def _metric_declared_tokens(metric_id: str) -> set[str]:
+    """Words the metric itself uses: id, synonyms, result columns, SQL literals.
+
+    SQL keywords are not included. ``IS NOT NULL`` would otherwise make every
+    inventory metric look like it had declared a negation.
+    """
+    from packs.dms.semantic.loader import load_all
+
+    metric = load_all().metric(metric_id)
+    parts = [metric.id, *(metric.synonyms or []), *(metric.result_columns or [])]
+    parts.extend(re.findall(r"'([^']*)'", metric.sql or ""))
+    text = " ".join(str(part) for part in parts).lower().replace("_", " ")
+    return set(re.findall(r"[a-z0-9]+", text))
+
+
+def _unaccounted_invariants(question: str, metric_id: str) -> list[str]:
+    """Meaning-changing words in the question that the metric does not declare.
+
+    The set is ``vocabulary.INVARIANT_TOKENS``. It is not a list of phrasings.
+    A word the metric's own synonyms already use, such as ``not`` on
+    ``stale_restock``, is accounted for.
+    """
+    from packs.dms.semantic.vocabulary import INVARIANT_TOKENS
+
+    # The question as asked, not the router rewrite. Normalization may turn
+    # the discourse word "mean" into "average"; that invented word is not
+    # something the user said, and it must not make an exact question miss.
+    asked = (question or "").lower()
+    declared = _metric_declared_tokens(metric_id)
+    return [
+        token
+        for token in re.findall(r"[a-z]+", asked)
+        if token in INVARIANT_TOKENS and token not in declared
+    ]
+
+
+def route_to_metric(question: str) -> MetricPlan | None:
+    """Governed metric for an exact keyword match.
+
+    A cascade hit that still carries a meaning-changing word the metric does
+    not declare is a different question. It is not served, so the model step
+    can take it when that step is on. With the step off, the engine abstains
+    instead of serving the neighbouring metric.
+
+    Phrases under 16 characters in ``metrics.yaml`` only add declared words.
+    The synonym matcher already skips them, so they do not open a new route.
+    """
+    plan = _route_to_metric_cascade(question)
+    if plan is None or not _exactness_guard_enabled():
+        return plan
+    if _unaccounted_invariants(question, plan.metric_id):
+        return None
+    return plan
+
+
+def cascade_match_is_non_exact(question: str) -> bool:
+    """True when the keyword cascade would serve a metric the question outgrows.
+
+    The legacy delayed template must not pick the question up after this
+    refusal. With the guard off, this is false and the cascade answer stands.
+    """
+    if not _exactness_guard_enabled():
+        return False
+    plan = _route_to_metric_cascade(question)
+    return plan is not None and bool(_unaccounted_invariants(question, plan.metric_id))
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────
@@ -1930,6 +2002,11 @@ def answer(
                     refused["violations_blocked"] = list(l2_out.violations or [])
                     refused = _stamp_l2(refused, l2_out, sql_served=False)
                     return _done(refused)
+            if cascade_match_is_non_exact(question):
+                # The cascade recognised a neighbouring metric and refused it.
+                # A space document is another neighbour, so it must not answer
+                # this question either. The model step already had its turn.
+                return _abs("no governed metric or certified query matched")
             doc = _space_doc_rag()
             if doc is not None:
                 if l2_out is not None and l2_out.reason:

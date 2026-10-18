@@ -925,6 +925,7 @@ def answer_question(
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
+        from CortexOS.dms.answer_engine import cascade_match_is_non_exact
         from CortexOS.execution.manifest import ManifestError
 
         result = _engine_answer(
@@ -941,10 +942,13 @@ def answer_question(
         # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
         # until a dedicated governed metric exists. Word-boundary match only — bare
         # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
+        # A non-exact cascade hit (the question outgrows the metric) must not
+        # fall through to that template: it is the same overlap, served as rows.
         q = question.lower()
         if (
             result.get("route") == "needs_clarification"
             and not _model_step_enabled()
+            and not cascade_match_is_non_exact(question)
             and re.search(r"\b(delayed|late)\b", q)
             and _try_generate_ranked_sql(question)
         ):
