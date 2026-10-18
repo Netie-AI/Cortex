@@ -192,6 +192,12 @@ def _contributing_sources(data: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _badge_withheld(provenance: Any) -> bool:
+    """True when the badge the caller receives is ABSTAIN or BLOCKED."""
+    badge = provenance.get("badge") if isinstance(provenance, dict) else getattr(provenance, "badge", None)
+    return str(getattr(badge, "value", badge) or "") in {Badge.ABSTAIN.value, Badge.BLOCKED.value}
+
+
 def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> dict[str, Any]:
     """Attach T7 answer_id + drillthrough_token when SQL is present.
 
@@ -215,7 +221,9 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = [assumptions.strip()]
     elif not isinstance(assumptions, list):
         data["assumptions"] = []
-    if _is_abstain_signal(data):
+    if _is_abstain_signal(data) or _badge_withheld(data["provenance"]):
+        # A layer the contract has no badge for (document, catalog, unknown)
+        # falls closed to ABSTAIN; no table card may then claim it was read.
         data["contributing_sources"] = []
     elif not data.get("contributing_sources"):
         data["contributing_sources"] = _contributing_sources(data)
