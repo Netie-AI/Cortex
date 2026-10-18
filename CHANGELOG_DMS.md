@@ -2,6 +2,18 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## STALE-LAKE-JOIN-FORMS-01 (#410) -- 2026-10-18
+
+A query that reads a table with a declared value domain is checked for every
+declared column of that table, not only for an `exp.Column` of that name.
+`USING`, `NATURAL JOIN`, `COLUMNS(...)`, a subscript and a column list on a
+table alias abstain on a stale lake (`lake_value_domain_stale:<table>.<column>`)
+instead of returning 0.0. Parse or scope failure fails closed. The drift scan
+still reads the whole table and ignores row predicates; that is now written
+in the docstring and `docs/CORTEX_API.md`. `SET statement_timeout` in
+`execute_sql` runs before EXPLAIN and that scan. `DMS_L2_ENABLED` and
+`CORTEX_PLAN_SQL` stay off. No contract change.
+
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 
 Off unless `CORTEX_PLAN_SQL_VOTE=1` (with `CORTEX_PLAN_SQL=1`). On the
