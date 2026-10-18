@@ -2,7 +2,7 @@
 
 Assertions are on the HTTP response DMS receives: answer text, rows and the
 badge. With ``CORTEX_VERIFIED_QUERY`` off the answer carries no
-``verified_query_ids`` key and has exactly the 1.6.0 field set. The library is
+``verified_query_ids`` key and has exactly the 1.7.0 field set. The library is
 not read.
 
 With it on, confirmed examples are placed in the FreeRoute SQL prompt. The
@@ -379,9 +379,9 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     body = resp.json()
     spec = json.loads((ROOT / "contract" / "openapi-1.4.0.json").read_text(encoding="utf-8"))
     base = set(spec["components"]["schemas"]["Answer"]["properties"])
-    prior = json.loads((ROOT / "contract" / "openapi-1.6.0.json").read_text(encoding="utf-8"))
+    prior = json.loads((ROOT / "contract" / "openapi-1.7.0.json").read_text(encoding="utf-8"))
     # 1.5.0 fields (#329) are present and null. verified_query_ids (1.8.0)
-    # stays omitted, so the flag-off body is exactly the 1.6.0 Answer.
+    # stays omitted, so the flag-off body is exactly the 1.7.0 Answer.
     assert set(body) - base == {"reconfirm", "plan_sql_rung", "model_calls"}
     assert set(body) == set(prior["components"]["schemas"]["Answer"]["properties"])
     assert body["reconfirm"] is None and body["plan_sql_rung"] is None
