@@ -11,7 +11,7 @@ Order, each step stamped (``StepStamp``):
 2. ``payload``: every selected table and both ends of every join must be in the
    grant. A payload that widens the grant is refused before any model call.
 3. ``sample``: distinct values from the granted payload columns DMS marked
-   ``masked: false`` (contract 1.7.0), so filters can be grounded in what the
+   ``masked: false`` (contract 1.9.0), so filters can be grounded in what the
    tables actually hold. A column marked masked, or with no mask state, keeps
    its name and type in the prompt and is never probed. Off unless
    ``CORTEX_GRANTED_CATALOG`` is on (see below). At most 8 distinct values a
@@ -173,7 +173,7 @@ def default_generator() -> PlanSqlGenerator:
 def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
     """Flat answer for the contract ask, or ``None`` when this path is off.
 
-    ``body.schema_context`` (contract 1.7.0) narrows the prompt to the grant
+    ``body.schema_context`` (contract 1.9.0) narrows the prompt to the grant
     intersected with that string. Absent or blank, the payload is the prompt.
     With ``CORTEX_GRANTED_CATALOG`` off it is not read.
     """
@@ -554,7 +554,7 @@ def _sample_values(
 
     Nothing is probed while ``CORTEX_GRANTED_CATALOG`` is off. A table the
     grant does not name is never probed, whatever the request carries. Only a
-    column DMS marked ``masked: false`` (contract 1.7.0) is probed. A column
+    column DMS marked ``masked: false`` (contract 1.9.0) is probed. A column
     marked masked, or one with no mask state (an older consumer, or a
     ``schema_context`` column the payload does not list), is never read here:
     its values do not reach a prompt, only its name and type do.

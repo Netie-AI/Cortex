@@ -42,12 +42,12 @@ class AskPayloadColumn(BaseModel):
     name: str = Field(min_length=1)
     type: str | None = None
     description: str | None = None
-    # 1.7.0: the consumer's mask state for this column. Fail closed: only an
+    # 1.9.0: the consumer's mask state for this column. Fail closed: only an
     # explicit ``false`` lets the engine put this column's values in a prompt.
     masked: bool | None = Field(
         default=None,
         description=(
-            "1.7.0 the consumer's mask state for this column. The plan+SQL path "
+            "1.9.0 the consumer's mask state for this column. The plan+SQL path "
             "samples distinct values of a column into its model prompt only when "
             "this is false. True or absent: the column's name and type may reach "
             "the prompt, its values never do. A schema_context column this "
@@ -147,7 +147,7 @@ class AskRequest(BaseModel):
     # ``yes`` runs ``question`` (the closest question). ``no`` answers
     # ``not found in the database`` and does not call a model.
     plan_sql_confirm: Literal["yes", "no"] | None = None
-    # 1.7.0: the caller's schema shortlist, the same string and rule as
+    # 1.9.0: the caller's schema shortlist, the same string and rule as
     # ``InsightsSchemaContext.schema_context`` on POST /v1/insights. Read only
     # when the engine's schema_context switch is on (off by default) and the
     # plan+SQL path answers the ask; otherwise only its declared type applies.
@@ -155,7 +155,7 @@ class AskRequest(BaseModel):
         default=None,
         max_length=8192,
         description=(
-            "1.7.0 caller shortlist, the SCHEMA-CONTEXT-01 string POST /v1/insights "
+            "1.9.0 caller shortlist, the SCHEMA-CONTEXT-01 string POST /v1/insights "
             "takes. Read only when the engine has its schema_context switch on "
             "(off by default). Off, only its declared type (string or null, "
             "maxLength 8192) is checked and the answer is the one the same ask "
@@ -164,7 +164,7 @@ class AskRequest(BaseModel):
             "switched on): its SQL prompt is then the signed grant intersected "
             "with the tables, columns and joins this string declares, and a table "
             "outside the grant is dropped. Absent or blank: the dms_payload "
-            "schema is the prompt, as on 1.6. A value the insights rule refuses "
+            "schema is the prompt, as on 1.7. A value the insights rule refuses "
             "(over 8192 UTF-8 bytes, a control or format character, a line "
             "outside the shapes it parses) is HTTP 422 with that code before "
             "any model call. A string that declares no table, or no granted "

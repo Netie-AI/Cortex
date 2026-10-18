@@ -70,7 +70,7 @@ class PlanSqlRequest:
     payload: AskPayload
     column_values: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
     prior_failures: tuple[str, ...] = ()
-    # AskRequest.schema_context (contract 1.7.0), the SCHEMA-CONTEXT-01 string.
+    # AskRequest.schema_context (contract 1.9.0), the SCHEMA-CONTEXT-01 string.
     # Absent: the payload schema is used. Present: the ask seam replaces the
     # payload with grant ∩ this string before any prompt is built.
     schema_context: str | None = None

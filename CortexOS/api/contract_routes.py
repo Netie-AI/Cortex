@@ -275,7 +275,7 @@ async def contract_ask(body: AskRequest) -> Answer:
         )
         from CortexOS.insights import schema_context as schema_ctx
 
-        # Contract 1.7.0 (GEN-GRANTED-CATALOG-01): the same rule and status as
+        # Contract 1.9.0 (GEN-GRANTED-CATALOG-01): the same rule and status as
         # POST /v1/insights, before any model call. A string that parses and
         # declares no table is not malformed (problem_status 200): it reaches
         # the plan+SQL path, which abstains by that name. With

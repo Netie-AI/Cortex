@@ -4,7 +4,10 @@ Agents append one section per shipped feature. Sequential build log.
 
 ## GEN-GRANTED-CATALOG-01 (#386) -- 2026-10-17
 
-Contract 1.7.0: ``AskRequest`` gains optional ``schema_context``, the same
+Contract 1.9.0 (renumbered from 1.7.0 by the founder's 2026-10-18 ruling:
+main's 1.7.0 is #417's ``Badge.document`` and #321 takes 1.8.0; the frozen
+specs through 1.7.0 are unchanged): ``AskRequest`` gains optional
+``schema_context``, the same
 string and rule as the 1.6 field on ``POST /v1/insights``. On the plan+SQL
 path the SQL prompt is the signed grant intersected with the tables, columns
 and joins that string declares; a table outside the grant is dropped.
@@ -21,7 +24,7 @@ absent measure gets no hint. An executor error is scanned only after
 ``redact_db_error`` and its text is not fed back. ``AskPayloadColumn`` gains
 optional ``masked`` (Security ruling): only a column marked ``masked: false``
 is sampled into the prompt; masked or absent keeps the name and type and
-never the values, for 1.6 clients too. A schema type token reaches the
+never the values, for 1.7 and older clients too. A schema type token reaches the
 prompt only from a fixed list of SQL type words. Each attempt is one
 FreeRoute ``complete``; the planner call is folded into it, so
 ``model_calls`` counts one call per rung attempt. Not a CI claim. 52 effect
@@ -40,6 +43,17 @@ did-you-mean hint is not offered when the edit changes a digit or falls in a
 ``_``-separated token shorter than 4 characters (``quantity_g`` gets no
 ``quantity_kg``), and DuckDB's qualified ``Candidate bindings: :`` list is
 dropped from retry text.
+
+Round 5 (review of bb9ada4): the contract line is 1.9.0 (``openapi-1.9.0.json``
+regenerated; compat 1.7 is supported, 1.9 current, and 1.7 -> 1.9 is checked
+additive because 1.8 is not on main yet). compat 1.9 states the one wire
+change for older clients: a ``schema_context`` that is not a string, or is
+over 8192 characters, is now a request-validation 422 whatever the switches,
+where through 1.7 the unknown key was ignored. Did-you-mean words also split
+at a lower-to-upper case change and at any non-alphanumeric character, and a
+case change in either spelling counts for both: ``TempC`` gets no ``TempF``,
+``WeightG`` and ``weightg`` no ``WeightKg``, ``qty-g`` no ``qty-kg``; a typo
+inside a longer word (``CustomerNmae``) is still named.
 
 ## DBOS-3X (#331) -- 2026-10-16
 

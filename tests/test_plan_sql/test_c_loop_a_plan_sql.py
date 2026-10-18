@@ -30,7 +30,7 @@ from tests.dms.test_c7_02_manifest_before_explain import _badge, dms_http  # noq
 SESSION = "c-loop-a-303"
 QUESTION = "how many transactions of each type"
 GRANT = {"transactions": "TRUE"}
-# ``masked: false`` (contract 1.7.0): DMS marks these columns unmasked, so the
+# ``masked: false`` (contract 1.9.0): DMS marks these columns unmasked, so the
 # sampler may put their values in the prompt. Without it nothing is sampled.
 PAYLOAD: dict[str, Any] = {
     "tables": [

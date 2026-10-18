@@ -2,7 +2,7 @@
 
 The prompt sees the tables and columns the signed grant allows, intersected
 with the ``schema_context`` string DMS sends (``AskRequest.schema_context``,
-contract 1.7.0). That string is the SCHEMA-CONTEXT-01 shape, and
+contract 1.9.0). That string is the SCHEMA-CONTEXT-01 shape, and
 ``CortexOS.insights.schema_context`` is its only parser and its only rule:
 the ask route and ``POST /v1/insights`` refuse the same strings with the same
 codes, and read the same tables, columns and joins out of the ones they take.
@@ -46,9 +46,10 @@ _TYPO_EDITS = 1
 #: And at least this similar (``difflib`` ratio), so one changed letter in a
 #: short name is not a typo of a different word (``date`` is not ``data``).
 _TYPO_RATIO = 0.8
-#: An edit inside a ``_``-separated token shorter than this (both spellings)
-#: changes a unit, a currency or a period, not a letter of a word:
-#: ``quantity_g`` is not a typo of ``quantity_kg``.
+#: An edit inside a word shorter than this (both spellings) changes a unit, a
+#: currency or a period, not a letter of a word: ``quantity_g`` is not a typo
+#: of ``quantity_kg``, nor ``WeightG`` of ``WeightKg``. Words split at any
+#: non-alphanumeric character and at a lower-to-upper case change.
 _SHORT_TOKEN = 4
 _MAX_HINTS = 3
 _SQL_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -120,7 +121,7 @@ def narrow(request: PlanSqlRequest, granted: Iterable[str]) -> tuple[PlanSqlRequ
     the DuckDB way. Columns, types and joins come only from that string. A
     join is kept only when both of its tables are. The payload's own tables,
     columns and joins are not offered. The one thing read from the payload is
-    a kept column's ``masked`` state (contract 1.7.0), matched by folded table
+    a kept column's ``masked`` state (contract 1.9.0), matched by folded table
     and column name; a column the payload does not list has none, so the
     sampler leaves it alone.
 
@@ -203,44 +204,97 @@ def _edits(left: str, right: str) -> int:
     return rows[-1][-1]
 
 
-def _token(name: str, start: int, end: int) -> str:
-    """The ``_``-separated token of ``name`` around ``name[start:end]``."""
-    left = name.rfind("_", 0, start) + 1
-    right = name.find("_", end)
-    return name[left : len(name) if right < 0 else right]
+def _case_breaks(name: str) -> set[int]:
+    """The lower-to-upper case changes of ``name`` (``Temp|C``, ``Weight|Kg``)."""
+    return {i for i in range(1, len(name)) if name[i - 1].islower() and name[i].isupper()}
+
+
+def _word_breaks(name: str) -> set[int]:
+    """Positions ``i`` with a word break between ``name[i - 1]`` and ``name[i]``.
+
+    A non-alphanumeric character (``_``, ``-``, a space) breaks on both of its
+    sides, and so does a lower-to-upper case change (``Temp|C``,
+    ``Weight|Kg``). Structural: no unit, currency or period is listed.
+    """
+    breaks = _case_breaks(name)
+    for i in range(1, len(name)):
+        if not name[i - 1].isalnum() or not name[i].isalnum():
+            breaks.add(i)
+    return breaks
+
+
+def _words(name: str, breaks: set[int]) -> list[tuple[int, int]]:
+    """``(start, end)`` of each alphanumeric run of ``name`` split at ``breaks``."""
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    for i, ch in enumerate(name):
+        if start is not None and (i in breaks or not ch.isalnum()):
+            spans.append((start, i))
+            start = None
+        if start is None and ch.isalnum():
+            start = i
+    if start is not None:
+        spans.append((start, len(name)))
+    return spans
+
+
+def _edited_word_length(name: str, other: str, start: int, end: int) -> int:
+    """Length of the shortest word of ``name`` the edit at ``name[start:end]`` touches.
+
+    ``name`` and ``other`` share ``name[:start]`` and the text after ``end``
+    (case ignored), so a case change either spelling shows there is a word
+    break in both: ``weightg`` against ``WeightKg`` splits ``weight|g``, as a
+    model that lower-cases identifiers writes them. A separator break is not
+    carried over: the shared text has its own separators. An insertion point
+    (``start == end``), or a separator the other spelling turns into a letter
+    (``Weight_G`` against ``WeightKg``), touches the word on each side.
+    """
+    shift = len(other) - len(name)
+    other_breaks = _case_breaks(other)
+    breaks = _word_breaks(name)
+    breaks |= {i for i in other_breaks if 0 < i <= start}
+    breaks |= {i - shift for i in other_breaks if end <= i - shift < len(name)}
+    adjacent = not any(ch.isalnum() for ch in name[start:end])
+    touched = [
+        stop - begin
+        for begin, stop in _words(name, breaks)
+        if (begin < end and stop > start) or (adjacent and begin <= end and stop >= start)
+    ]
+    return min(touched, default=0)
 
 
 def _edit_is_a_different_word(left: str, right: str) -> bool:
     """True when the one edit between ``left`` and ``right`` changes a quantity.
 
-    The edit is where the two names stop sharing a prefix and a suffix. It is
-    a different word, not a typo, when it changes a digit (``fy2024`` and
-    ``fy2025``, ``q1_sales`` and ``q2_sales``), or when it falls inside a
-    ``_``-separated token shorter than ``_SHORT_TOKEN`` in both names
-    (``quantity_g`` and ``quantity_kg``, ``amount_usd`` and ``amount_usb``).
-    A structural rule: no unit, currency or period is listed.
+    The edit is where the two names stop sharing a prefix and a suffix (case
+    ignored). It is a different word, not a typo, when it changes a digit
+    (``fy2024`` and ``fy2025``, ``q1_sales`` and ``q2_sales``), or when it
+    falls inside a word shorter than ``_SHORT_TOKEN`` in both names. Words
+    split at a non-alphanumeric character and at a lower-to-upper case change:
+    ``quantity_g`` and ``quantity_kg``, ``amount_usd`` and ``amount_usb``,
+    ``TempC`` and ``TempF``, ``WeightG`` and ``WeightKg``, ``qty-g`` and
+    ``qty-kg``, ``Weight_G`` and ``WeightKg``. An edit that only adds, drops
+    or changes a separator (``txntype`` and ``txn_type``) is a typo. A
+    structural rule: no unit, currency or period is listed.
     """
+    shortest = min(len(left), len(right))
     prefix = 0
-    while prefix < min(len(left), len(right)) and left[prefix] == right[prefix]:
+    while prefix < shortest and left[prefix].lower() == right[prefix].lower():
         prefix += 1
     suffix = 0
-    while (
-        suffix < min(len(left), len(right)) - prefix
-        and left[-1 - suffix] == right[-1 - suffix]
-    ):
+    while suffix < shortest - prefix and left[-1 - suffix].lower() == right[-1 - suffix].lower():
         suffix += 1
-    changed_left = left[prefix : len(left) - suffix]
-    changed_right = right[prefix : len(right) - suffix]
-    changed = changed_left + changed_right
+    left_end, right_end = len(left) - suffix, len(right) - suffix
+    changed = left[prefix:left_end] + right[prefix:right_end]
     if any(ch.isdigit() for ch in changed):
         return True
-    if "_" in changed:
+    if not any(ch.isalnum() for ch in changed):
         return False
-    tokens = (
-        _token(left, prefix, len(left) - suffix),
-        _token(right, prefix, len(right) - suffix),
+    lengths = (
+        _edited_word_length(left, right, prefix, left_end),
+        _edited_word_length(right, left, prefix, right_end),
     )
-    return max(len(token) for token in tokens) < _SHORT_TOKEN
+    return max(lengths) < _SHORT_TOKEN
 
 
 def _is_typo(unknown: str, column: str) -> bool:
@@ -249,7 +303,7 @@ def _is_typo(unknown: str, column: str) -> bool:
         return False
     if _edits(left, right) > _TYPO_EDITS:
         return False
-    if _edit_is_a_different_word(left, right):
+    if _edit_is_a_different_word(unknown, column):
         return False
     return difflib.SequenceMatcher(None, left, right).ratio() >= _TYPO_RATIO
 
@@ -260,10 +314,11 @@ def did_you_mean(unknown: Sequence[str], columns: Sequence[str]) -> str:
     ``columns`` is the granted catalog the prompt showed (:func:`column_names`).
     A column is offered only when it is a typo of the unknown name: one edit,
     case ignored, and a ``difflib`` ratio of at least 0.8 (``txn_typo`` gives
-    ``txn_type``). An edit that changes a digit, or falls inside a short
-    ``_``-separated token, names a different unit or period and is not a typo
+    ``txn_type``). An edit that changes a digit, or falls inside a short word
+    (split at ``_``, any other non-alphanumeric and a lower-to-upper case
+    change), names a different unit or period and is not a typo
     (``quantity_g`` gets no ``quantity_kg``, ``fy2024_sales`` no
-    ``fy2025_sales``). Nothing else is offered and there is no fallback. A column
+    ``fy2025_sales``, ``TempC`` no ``TempF``). Nothing else is offered and there is no fallback. A column
     the question needs that is not in the catalog (``revenue`` on a table of
     ``quantity_kg``) gets no hint: offering a column that is not close is an
     invitation to answer a different question under the asked-for name.

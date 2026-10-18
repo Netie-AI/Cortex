@@ -3,7 +3,7 @@
 Red on the C-LOOP-A head: the prompt is the full payload, an unknown-column
 retry has no catalog hint, and the first attempt is a plan call plus a SQL
 call. Green here: the prompt is the grant intersected with
-``AskRequest.schema_context`` (contract 1.7.0), the retry carries a
+``AskRequest.schema_context`` (contract 1.9.0), the retry carries a
 did-you-mean hint, and each attempt is one FreeRoute call.
 
 ``schema_context`` is read by ``CortexOS.insights.schema_context`` only, the
@@ -840,7 +840,7 @@ def test_must_fail_ungranted_table_name_never_reaches_the_prompt_as_a_type(
     assert UNGRANTED_TABLE not in json.dumps(body)
 
 
-# -- the field: contract 1.7.0, the insights rule --------------------------------
+# -- the field: contract 1.9.0, the insights rule --------------------------------
 
 
 @pytest.mark.parametrize(
@@ -959,7 +959,7 @@ def test_blank_schema_context_is_absent(
     dms_http,  # noqa: F811
     blank: str,
 ) -> None:
-    """Blank is absent: the payload is the prompt, as on 1.6."""
+    """Blank is absent: the payload is the prompt, as on 1.7."""
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -970,39 +970,53 @@ def test_blank_schema_context_is_absent(
     _assert_served(body, GOOD_SQL, plan_sql_ask.RUNG_PLAN)
 
 
-def test_contract_1_7_declares_schema_context_on_ask_request() -> None:
+# Founder ruling 2026-10-18 (6245198497): main took 1.7.0 for Badge.document
+# (#417), #321 takes 1.8.0, and these fields land at 1.9.0. The frozen specs
+# through 1.7.0 never carry them.
+_FROZEN_WITHOUT_THESE_FIELDS = ("openapi-1.6.0.json", "openapi-1.7.0.json")
+
+
+def _contract_spec(name: str) -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[2] / "contract"
+    return json.loads((root / name).read_text(encoding="utf-8"))
+
+
+def test_contract_1_9_declares_schema_context_on_ask_request() -> None:
     from cortex_contract.answer import AskRequest
     from cortex_contract.version import CONTRACT_VERSION
 
-    assert CONTRACT_VERSION == "1.7.0"
+    assert CONTRACT_VERSION == "1.9.0"
     assert "schema_context" in AskRequest.model_fields
-    root = Path(__file__).resolve().parents[2] / "contract"
-    spec = json.loads((root / "openapi-1.7.0.json").read_text(encoding="utf-8"))
-    assert spec["info"]["version"] == "1.7.0"
+    spec = _contract_spec("openapi-1.9.0.json")
+    assert spec["info"]["version"] == "1.9.0"
     field = spec["components"]["schemas"]["AskRequest"]["properties"]["schema_context"]
     assert {"type": "string", "maxLength": 8192} in field["anyOf"], field
     assert {"type": "null"} in field["anyOf"], field
     assert "schema_context" not in spec["components"]["schemas"]["AskRequest"].get("required", [])
-    # 1.6.0 is frozen: its AskRequest never had the field.
-    old = json.loads((root / "openapi-1.6.0.json").read_text(encoding="utf-8"))
-    assert "schema_context" not in old["components"]["schemas"]["AskRequest"]["properties"]
+    # Frozen lines never had the field; main's 1.7.0 is the Badge.document line.
+    for name in _FROZEN_WITHOUT_THESE_FIELDS:
+        old = _contract_spec(name)
+        assert "schema_context" not in old["components"]["schemas"]["AskRequest"]["properties"]
+    main_1_7 = _contract_spec("openapi-1.7.0.json")
+    assert "document" in main_1_7["components"]["schemas"]["Badge"]["enum"]
+    assert "document" in spec["components"]["schemas"]["Badge"]["enum"]
 
 
-def test_contract_1_7_declares_the_column_mask_flag() -> None:
+def test_contract_1_9_declares_the_column_mask_flag() -> None:
     """``AskPayloadColumn.masked``: optional, boolean or null, default null."""
     from cortex_contract.answer import AskPayloadColumn
 
     assert AskPayloadColumn(name="c").masked is None
     assert AskPayloadColumn(name="c", masked=False).masked is False
-    root = Path(__file__).resolve().parents[2] / "contract"
-    spec = json.loads((root / "openapi-1.7.0.json").read_text(encoding="utf-8"))
-    old = json.loads((root / "openapi-1.6.0.json").read_text(encoding="utf-8"))
+    spec = _contract_spec("openapi-1.9.0.json")
     for name in ("AskPayloadColumn", "ContractAskPayloadColumn"):
         schema = spec["components"]["schemas"][name]
         field = schema["properties"]["masked"]
         assert field["anyOf"] == [{"type": "boolean"}, {"type": "null"}], field
         assert "masked" not in schema.get("required", [])
-        assert "masked" not in old["components"]["schemas"][name]["properties"]
+        for frozen in _FROZEN_WITHOUT_THESE_FIELDS:
+            old = _contract_spec(frozen)
+            assert "masked" not in old["components"]["schemas"][name]["properties"]
 
 
 # -- did-you-mean: a different unit or period is not a typo (review of 7bf8b64) --
@@ -1031,6 +1045,55 @@ def test_must_fail_an_edit_in_a_digit_run_or_short_token_gives_no_suggestion(
     assert plan_catalog.with_did_you_mean(detail, columns) == detail
     db_error = f'BINDER_ERROR: Referenced column "{unknown}" not found in FROM clause!'
     assert plan_catalog.unknown_column_hint(db_error, f"SELECT {unknown} FROM t", columns) == ""
+
+
+@pytest.mark.parametrize(
+    ("unknown", "columns"),
+    [
+        # Review of bb9ada4: a name with no ``_`` was one long token.
+        pytest.param("TempC", ["TempF"], id="pascal-celsius-not-fahrenheit"),
+        pytest.param("WeightG", ["WeightKg"], id="pascal-grams-not-kilograms"),
+        pytest.param("LengthCm", ["LengthMm"], id="pascal-cm-not-mm"),
+        pytest.param("PriceUsd", ["PriceUsb"], id="pascal-currency-code"),
+        pytest.param("qty-g", ["qty-kg"], id="hyphen-grams-not-kilograms"),
+        # A model that lower-cases identifiers: the column's case change still
+        # marks the word, so ``weightg`` is ``weight|g``.
+        pytest.param("tempc", ["TempF"], id="lowercased-celsius"),
+        pytest.param("weightg", ["WeightKg"], id="lowercased-grams"),
+        # A separator turned into a letter is still the short unit word.
+        pytest.param("Weight_G", ["WeightKg"], id="separator-to-unit-letter"),
+    ],
+)
+def test_must_fail_an_edit_in_a_short_case_or_punctuation_word_gives_no_suggestion(
+    unknown: str, columns: list[str]
+) -> None:
+    """Words also split at a lower-to-upper case change and at any
+    non-alphanumeric character, so a PascalCase or hyphenated unit is a short
+    word like ``quantity_g``'s ``g``. On bb9ada4 each of these offered the
+    other column."""
+    assert plan_catalog.did_you_mean([unknown], columns) == ""
+    detail = f"PLAN_SQL_GATE_REFUSED: UNKNOWN_COLUMN:{unknown}"
+    assert plan_catalog.with_did_you_mean(detail, columns) == detail
+    db_error = f'BINDER_ERROR: Referenced column "{unknown}" not found in FROM clause!'
+    assert plan_catalog.unknown_column_hint(db_error, f"SELECT {unknown} FROM t", columns) == ""
+
+
+@pytest.mark.parametrize(
+    ("unknown", "columns", "hint"),
+    [
+        pytest.param("CustomerNmae", ["CustomerName"], "CustomerName", id="pascal-swap"),
+        pytest.param("UnitPrcie", ["UnitPrice"], "UnitPrice", id="pascal-swap-2"),
+        pytest.param("OrderItems", ["OrderItem"], "OrderItem", id="pascal-plural"),
+        pytest.param("txntype", ["txn_type"], "txn_type", id="dropped-separator"),
+    ],
+)
+def test_case_split_still_names_a_typo_in_a_long_word(
+    unknown: str, columns: list[str], hint: str
+) -> None:
+    """Control for the case split: a typo inside a word of four or more
+    letters is still offered, so the must-fails above prove the short-word
+    rule and not a hint that never fires on PascalCase names."""
+    assert plan_catalog.did_you_mean([unknown], columns) == f"did you mean: {hint}"
 
 
 def test_must_fail_gram_question_gets_no_kilogram_hint_and_reconfirms(
@@ -1489,3 +1552,48 @@ def test_switch_off_default_ask_is_byte_identical_with_schema_context(
 
     extra = {"dms_payload": UNMASKED_PAYLOAD, "schema_context": value}
     assert _engine_bytes(dms_http, monkeypatch, **extra) == baseline
+
+
+@pytest.mark.parametrize(
+    ("value", "error_type"),
+    [
+        pytest.param(123, "string_type", id="not-a-string"),
+        pytest.param("x" * 8193, "string_too_long", id="over-max-length"),
+    ],
+)
+def test_switch_off_default_ask_types_schema_context_as_compat_1_9_states(
+    dms_http,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    value: object,
+    error_type: str,
+) -> None:
+    """The one wire change for an older client, stated in compat.yaml 1.9:
+    through 1.7 ``AskRequest`` ignored an unknown ``schema_context`` key; from
+    1.9 its declared type applies whatever the switches say, so a value that
+    is not a string, or is over maxLength, is a request-validation 422. The
+    engine is never reached."""
+
+    def tripwire(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("engine reached on a request that fails its declared type")
+
+    monkeypatch.setattr(plan_sql_ask, "plan_sql_answer", tripwire)
+    monkeypatch.delenv(plan_sql_ask.ENABLED_ENV, raising=False)
+    monkeypatch.delenv(plan_sql_ask.CATALOG_ENV, raising=False)
+    dms_http.bind_session(SESSION, GRANT)
+
+    resp = _ask(dms_http, payload=None, schema_context=value)
+
+    assert resp.status_code == 422, resp.text
+    errors = resp.json()["detail"]
+    assert any(
+        err["loc"] == ["body", "schema_context"] and err["type"] == error_type for err in errors
+    ), errors
+    import yaml
+
+    compat = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "contract" / "compat.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    (line,) = [entry for entry in compat["supported"] if entry["version"] == "1.9"]
+    assert "from 1.9 the declared type applies and such a value is HTTP 422" in line["notes"]
