@@ -125,32 +125,55 @@ supported:
 
   - version: "1.7"
     spec: openapi-1.7.0.json
+    status: supported
+    contract_surface: true
+    notes: >
+      Additive RAG-01 (#415): Badge gains document (a new Badge enum value)
+      for an answer drawn from the Space's documents. The answer text cites
+      the passages it used and ends with a Sources line naming each
+      document; contributing_sources carries one card per document with
+      kind "document" and container "documents". It is not governed data and
+      is never stamped session. Before 1.7 such an answer fell closed to
+      abstain with no source cards. 1.6 clients that do not know the value
+      ignore it. No field is added or removed. canonical_manifest_bytes
+      unchanged.
+
+  - version: "1.9"
+    spec: openapi-1.9.0.json
     status: current
     contract_surface: true
     notes: >
-      Additive GEN-GRANTED-CATALOG-01 (#386): AskRequest gains optional
-      schema_context, the same string and rule as the 1.6 insights field
-      (maxLength 8192; the engine cap is 8192 UTF-8 bytes). The engine reads
-      it, and samples column values, only with CORTEX_GRANTED_CATALOG on
-      (off by default until dms#456); off, only the declared type is checked
-      and the ask is answered as without the field. It is used only
-      by the plan+SQL path (dms_payload set and that path switched on): the
-      SQL prompt is then the signed grant intersected with the tables,
-      columns and joins the string declares, and a table outside the grant
-      is dropped. A value the insights rule refuses is HTTP 422 with that
-      code (schema_context_too_large, schema_context_forbidden_char,
-      schema_context_unparsed) before any model call. A string that
-      declares no table (schema_context_empty) or no granted table
-      (schema_context_ungranted) is a named 200 abstain.
+      Additive GEN-GRANTED-CATALOG-01 (#386). Numbered 1.9 by the founder's
+      2026-10-18 ruling (1.8 is reserved for #321); when this line was cut,
+      1.8 was not on main, so this step is checked additive against 1.7.
+      AskRequest gains optional schema_context, the same string and rule as
+      the 1.6 insights field (maxLength 8192; the engine cap is 8192 UTF-8
+      bytes). The engine reads it, and samples column values, only with
+      CORTEX_GRANTED_CATALOG on (off by default until dms#456); off, only
+      the declared type is checked and the ask is answered as without the
+      field. It is used only by the plan+SQL path (dms_payload set and that
+      path switched on): the SQL prompt is then the signed grant intersected
+      with the tables, columns and joins the string declares, and a table
+      outside the grant is dropped. A value the insights rule refuses is
+      HTTP 422 with that code (schema_context_too_large,
+      schema_context_forbidden_char, schema_context_unparsed) before any
+      model call. A string that declares no table (schema_context_empty) or
+      no granted table (schema_context_ungranted) is a named 200 abstain.
+      One wire change for older clients, whatever the switch: AskRequest
+      ignores unknown keys, so through 1.7 a schema_context key that was not
+      a string or null, or was longer than 8192 characters, was ignored; from
+      1.9 the declared type applies and such a value is HTTP 422
+      (request validation). A string or null within maxLength is answered as
+      before with the switch off.
       AskPayloadColumn gains optional masked (Security ruling on #386): the
       plan+SQL path samples a column's distinct values into its prompt only
       when masked is false. True or absent, the name and type may reach the
       prompt and the values never do. A sampled column gives at most 8
       distinct values, each cut to 64 characters with control and bidi
       characters stripped, and the samples count inside the 8192-byte cap.
-      This applies to 1.6 clients too: they
-      send no mask state, so their plan+SQL asks get no sampled values.
-      1.6 clients omit schema_context and get the 1.6 prompt schema.
+      This applies to 1.7 and older clients too: they send no mask state,
+      so their plan+SQL asks get no sampled values. 1.7 clients omit
+      schema_context and get the 1.7 prompt schema.
       canonical_manifest_bytes unchanged.
 
 deprecated:
