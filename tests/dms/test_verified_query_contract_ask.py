@@ -113,6 +113,25 @@ WINDOW_REWRITES = {
     ),
 }
 WINDOW_REASON = "a re-serve runs the example's statement unchanged"
+# Review @ c4f6a1b: the cut moved below the top level. The gate's LIMIT 1000 is
+# then the top-level window, so only the number of rows returned shows the copy.
+MOVED_CUTS = {
+    "derived_table_same_cap": (
+        LOWEST_Q,
+        "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+        "ORDER BY quantity_kg DESC LIMIT 5) AS t",
+    ),
+    "derived_table_new_cap": (
+        LOWEST_10_Q,
+        "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+        "ORDER BY quantity_kg DESC LIMIT 10) AS t",
+    ),
+    "qualify_new_cap": (
+        LOWEST_10_Q,
+        "SELECT sku, quantity_kg FROM inventory "
+        "QUALIFY row_number() OVER (ORDER BY quantity_kg DESC) <= 10",
+    ),
+}
 # The item's must-fail: near misses of a confirmed question, each answered by
 # a model that copies the stored SQL unchanged.
 DELAYED_NEAR_MISSES = (
@@ -1200,6 +1219,80 @@ def test_must_fail_confirmed_question_cut_at_another_row_window_never_served(
     _arm_model(monkeypatch, HIGHEST_10_REWRITE)
     body = _ask(ask_http, "alpha", HIGHEST_Q)
     _assert_echo_abstain(body, query.id, WINDOW_REASON)
+
+
+@pytest.mark.parametrize("rewrite", sorted(MOVED_CUTS))
+def test_must_fail_copy_cut_below_the_top_level_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch, rewrite: str
+) -> None:
+    """Review @ c4f6a1b repro: a derived-table LIMIT or a QUALIFY cut is still the example cut.
+
+    The served SQL's top-level window is the gate's LIMIT 1000, so the example
+    at that window differs. Its first rows by its own ORDER BY, as many as the
+    SQL returned (ties included), are the served rows.
+    """
+    asked, sql = MOVED_CUTS[rewrite]
+    _not_a_text_copy(asked, sql, HIGHEST_Q, HIGHEST_SQL)
+    count = 5 if asked == LOWEST_Q else 10
+    assert _is_top_by_quantity(_warehouse_rows(sql), count, highest=True), "the maximum, not the minimum"
+    _arm_model(monkeypatch, sql)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", asked)
+    _assert_echo_abstain(body, query.id, ROWS_REASON)
+    assert "500" not in body["answer"]
+    assert "Found" not in body["answer"]
+
+
+def test_must_fail_confirmed_question_cut_below_the_top_level_never_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confirmed 'Which 5' question never gets another row count from a hidden cut.
+
+    The second SQL keeps the example's top-level LIMIT 5, so the top-level
+    window alone would call it the example's window. It returns 3 rows.
+    """
+    query_sql = {
+        10: (
+            "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+            "ORDER BY quantity_kg DESC LIMIT 10) AS t"
+        ),
+        3: (
+            "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+            "ORDER BY quantity_kg DESC LIMIT 3) AS t LIMIT 5"
+        ),
+    }
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    for count, sql in query_sql.items():
+        _not_a_text_copy(HIGHEST_Q, sql, HIGHEST_Q, HIGHEST_SQL)
+        assert _is_top_by_quantity(_warehouse_rows(sql), count, highest=True)
+        _arm_model(monkeypatch, sql)
+        body = _ask(ask_http, "alpha", HIGHEST_Q)
+        _assert_echo_abstain(body, query.id, WINDOW_REASON)
+
+
+def test_new_sql_cut_below_the_top_level_is_served(
+    ask_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: the right '10 lowest' in a derived table returns other rows than the example."""
+    sql = (
+        "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+        "ORDER BY quantity_kg ASC LIMIT 10) AS t"
+    )
+    _arm_model(monkeypatch, sql)
+    ask_http.bind_session("alpha", INV_GRANT)
+    query = _confirm("alpha", HIGHEST_Q, HIGHEST_SQL)
+    body = _ask(ask_http, "alpha", LOWEST_10_Q)
+    _assert_served(body)
+    assert _is_top_by_quantity(body["rows"], 10, highest=False)
+    assert body["row_count"] == 10
+    assert body["answer"].startswith("Found 10 row(s).")
+    for row in body["rows"][:5]:
+        assert f"sku={row['sku']}, quantity_kg={row['quantity_kg']}" in body["answer"]
+    assert "and 5 more rows" in body["answer"]
+    assert "500" not in body["answer"]
+    assert body["verified_query_ids"] == [query.id]
 
 
 def test_confirmed_question_still_re_serves_unchanged_on_fresh_rows(

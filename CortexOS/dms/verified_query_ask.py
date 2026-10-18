@@ -31,12 +31,15 @@ Three steps, all in this module:
      question too when it cuts the example at another row window;
    * SQL written differently that returns an example's rows (column names,
      column order, row order and the row window aside) is that example's
-     answer too, and is held to the same rule. The example runs at the row
-     window of the SQL that ran, and a window that may split tied rows is
+     answer too, and is held to the same rule. The example runs at every row
+     window the SQL spells, at any depth, and at its own; an example with an
+     ``ORDER BY`` is also compared at the number of rows the SQL returned,
+     wherever the SQL put its cut. A window that may split tied rows is
      compared with the ties. This closes the equivalent rewrites the text
      comparison cannot see (``ORDER BY 2``, ``'X' = col``, ``col IN ('X')``,
      reordered conjuncts or columns, an added or changed ``ORDER BY``, any of
-     them with a new ``LIMIT``);
+     them with a new ``LIMIT``, the example in a derived table with its own
+     ``LIMIT``, a ``QUALIFY row_number() ... <= N`` cut);
    * SQL that carries an example's value or value-less filter into an answer
      for a question that does not ask for it abstains too.
 
@@ -210,17 +213,29 @@ def _valueless_filter_tokens(tree: exp.Expression) -> set[str]:
 Window = tuple[int, int]
 
 
+def _limit_has_options(node: exp.Expression) -> bool:
+    """True for ``LIMIT n PERCENT`` or ``... WITH TIES``: not a plain row count."""
+    options = node.args.get("limit_options")
+    if not isinstance(options, exp.Expression):
+        return False
+    return bool(options.args.get("percent") or options.args.get("with_ties"))
+
+
 def _row_window(tree: exp.Expression) -> Window | None:
     """``(LIMIT, OFFSET)`` of the top-level statement as the serve path runs it.
 
     The SQL gate (``sql_guardrail.validate_sql``) caps every statement: no
     ``LIMIT``, one above ``MAX_LIMIT``, or one that is not a whole number runs
     as ``LIMIT MAX_LIMIT``. No ``OFFSET`` is ``OFFSET 0``. ``None`` when the
-    ``OFFSET`` is not a whole number, so the window cannot be stated.
+    window cannot be stated: the ``OFFSET`` is not a whole number, or the
+    ``LIMIT`` is a share (``PERCENT``) or keeps ties, which the gate leaves as
+    written, so it is no row count.
     """
     cap = int(MAX_LIMIT)
     limit = cap
     node = tree.args.get("limit")
+    if isinstance(node, exp.Limit) and _limit_has_options(node):
+        return None
     if node is not None:
         try:
             limit = min(int(node.expression.this), cap)
@@ -249,6 +264,98 @@ def _at_window(tree: exp.Expression, window_of: exp.Expression) -> str:
         node = window_of.args.get(arg)
         copy.set(arg, node.copy() if node is not None else None)
     return copy.sql(dialect="duckdb")
+
+
+def _with_window(tree: exp.Expression, window: Window) -> str:
+    """``tree`` cut at ``window``: ``LIMIT window[0]`` and, when not 0, ``OFFSET window[1]``."""
+    copy = tree.copy()
+    copy.set("limit", exp.Limit(expression=exp.Literal.number(window[0])))
+    copy.set(
+        "offset",
+        exp.Offset(expression=exp.Literal.number(window[1])) if window[1] else None,
+    )
+    return copy.sql(dialect="duckdb")
+
+
+def _stated_rows(node: exp.Expression | None) -> int | None:
+    """The whole number a ``LIMIT``, ``FETCH`` or ``OFFSET`` clause states, else ``None``."""
+    if node is None or (isinstance(node, exp.Limit) and _limit_has_options(node)):
+        return None
+    if isinstance(node, exp.Fetch):
+        options = node.args.get("limit_options")
+        if isinstance(options, exp.Expression) and options.args.get("percent"):
+            return None
+        value = node.args.get("count")
+    else:
+        value = node.args.get("expression")
+    try:
+        return int(value.this)  # type: ignore[union-attr]
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _inner_windows(tree: exp.Expression) -> list[Window]:
+    """Row windows spelled below the top-level statement: a derived table, a CTE, a subquery.
+
+    The serve path caps only the top-level statement, so a ``LIMIT`` or
+    ``FETCH`` written inside the SQL is a cut of its own. A window this cannot
+    state (``PERCENT``, an expression) is left out; the row-count comparison in
+    :func:`result_echo` does not depend on how a cut is spelled.
+    """
+    cap = int(MAX_LIMIT)
+    out: list[Window] = []
+    for query in tree.find_all(exp.Query):
+        if query is tree:
+            continue
+        limit_node = query.args.get("limit")
+        offset_node = query.args.get("offset")
+        if limit_node is None and offset_node is None:
+            continue
+        limit = cap if limit_node is None else _stated_rows(limit_node)
+        offset = 0 if offset_node is None else _stated_rows(offset_node)
+        if limit is None or offset is None:
+            continue
+        window = (min(max(limit, 0), cap), max(offset, 0))
+        if _narrow(window) and window not in out:
+            out.append(window)
+    return out
+
+
+def _spelled_offsets(tree: exp.Expression) -> set[int]:
+    """Every whole-number ``OFFSET`` the SQL spells, at any depth."""
+    out: set[int] = set()
+    for node in tree.find_all(exp.Offset):
+        value = _stated_rows(node)
+        if value is not None and value >= 0:
+            out.add(value)
+    return out
+
+
+def _cut_only_at_top(tree: exp.Expression) -> bool:
+    """True when the top-level ``LIMIT``/``OFFSET`` is the only row cut the SQL can make.
+
+    A single SELECT with no nested query, no window function, no ``QUALIFY``,
+    no sample and no ``FETCH``. Anything else may cut rows below the top level,
+    where the top-level window does not show it.
+    """
+    if not isinstance(tree, exp.Select):
+        return False
+    limit = tree.args.get("limit")
+    if limit is not None and not isinstance(limit, exp.Limit):
+        return False
+    for node in tree.walk():
+        if node is tree:
+            continue
+        if isinstance(node, (exp.Query, exp.Window, exp.Qualify, exp.TableSample, exp.Fetch)):
+            return False
+        if isinstance(node, (exp.Limit, exp.Offset)) and node.parent is not tree:
+            return False
+    return True
+
+
+def _ranks(tree: exp.Expression) -> bool:
+    """True when the statement orders its rows, so a cut keeps the first ones of a rank."""
+    return tree.args.get("order") is not None
 
 
 def _query_key(tree: exp.Expression, *, window: bool = False) -> str | None:
@@ -783,42 +890,62 @@ def result_echo(
 
     :func:`example_echo` compares SQL text, so an equivalent rewrite of an
     example (``ORDER BY 2``, ``'X' = col``, ``col IN ('X')``, conjuncts or
-    output columns in another order, an added or changed ``ORDER BY``, any
-    of them with a new ``LIMIT``) is new SQL to it. This rule compares what
-    the customer would get. ``run`` executes one statement the way the serve
-    path does, under this session's manifest.
+    output columns in another order, an added or changed ``ORDER BY``, a new
+    ``LIMIT``, the example wrapped in a derived table or cut by ``QUALIFY``)
+    is new SQL to it. This rule compares what the customer would get. ``run``
+    executes one statement the way the serve path does, under this session's
+    manifest.
 
     Each example in the prompt that reads a table ``sql`` reads (every
-    example when ``sql`` names no table), and that this ask is not a re-serve
-    of, runs next to ``sql`` **at the row window of** ``sql``: its top-level
-    ``LIMIT``/``OFFSET`` is replaced by those of ``sql``, so a new row count
-    does not hide a copy (the copy rule sets the window aside the same way).
-    When the two results are the same multiset of rows (:func:`_rows_key`:
-    column names, column order and row order aside), the answer is that
-    example's answer and is refused. When the window keeps only part of the
-    result, ``sql``'s rows are also refused when they are one of the answers
-    the example's window may give with its ties (:func:`_tied_window`), so
-    tied rows picked differently do not hide a copy either.
+    example when ``sql`` names no table) is compared with the rows ``sql``
+    returns, column names, column order and row order aside
+    (:func:`_rows_key`). A cut may be spelled anywhere in ``sql``, so the
+    example's rows are taken at every window that could give them:
 
-    A re-served example is compared the same way when ``sql`` cuts it at
-    another row window: its rows at that window are not its confirmed
-    answer. The answer is served when a re-served example returns the same
-    rows at its own window, since two confirmed questions may share one
-    answer. Fail-closed:
+    * **spelled windows**: the example at the top-level row window of
+      ``sql`` (its ``LIMIT``/``OFFSET`` replaced by those of ``sql``), at its
+      own window, and at each window ``sql`` spells below the top level (a
+      derived table, a CTE, a subquery). The same multiset of rows is the
+      example's answer. When such a window keeps only part of the example
+      and returns as many rows as ``sql``, ``sql``'s rows are the example's
+      answer too when they are one of the picks the window may make among
+      tied rows (:func:`_tied_window`);
+    * **row count**: when the example orders its rows, its first rows by
+      that order, as many as ``sql`` returned, from the first row and from
+      every ``OFFSET`` either statement spells, ties included. This one does
+      not depend on where or how ``sql`` cuts: a ``LIMIT`` inside a derived
+      table, ``QUALIFY row_number() ... <= N`` or any other cut that keeps
+      the first N rows of the example's order returns rows this window
+      holds. An example with no ``ORDER BY`` ranks nothing, so any number of
+      its rows is also what a narrower question's right SQL returns (an
+      added filter); it is compared at the spelled windows only, and its
+      filters are held by :func:`example_echo`.
+
+    A re-served example (this ask is its confirmed question) is compared the
+    same way unless ``sql`` keeps the example's row window and can cut rows
+    nowhere else (:func:`_cut_only_at_top`): its rows at another window or
+    another row count are not its confirmed answer. The answer is served
+    when a re-served example returns the same rows at its own window, since
+    two confirmed questions may share one answer. Fail-closed:
 
     * ``sql`` or an example that cannot be run cannot be shown to differ, so
       the answer is refused;
     * two results that both fill the serve path's row cap (``MAX_LIMIT``)
       cannot be shown to differ past it, so the answer is refused;
     * a window whose ties cannot be listed (a set operation, ``ORDER BY 2``
-      over ``*``, ``DISTINCT`` ordered by a hidden value, ties past the cap)
-      cannot be shown to differ, so the answer is refused;
+      over ``*``, ``DISTINCT`` ordered by a hidden value, ties or an
+      ``OFFSET`` past the cap) cannot be shown to differ, so the answer is
+      refused, unless ``sql``'s rows have another number of columns than the
+      example's, which no window of the example returns;
     * a different question whose right answer happens to equal an example's
-      rows abstains too. That is the price of never serving a near miss.
+      rows at one of these windows abstains too, for instance a threshold on
+      the example's ``ORDER BY`` column that keeps exactly its first rows.
+      That is the price of never serving a near miss.
 
     Nothing runs when ``sql`` is a re-served example's whole statement
-    unchanged, or when no example to compare shares a table with it. An
-    example's rows are compared here and never served.
+    unchanged, or when no example to compare shares a table with it. Each
+    statement runs at most once per answer. An example's rows are compared
+    here and never served.
     """
     seen = _seen(examples)
     if not seen:
@@ -833,6 +960,7 @@ def result_echo(
     if statement is not None and any(ex.statement == statement for ex in served_by):
         return []
     window = _row_window(tree)
+    top_cut_only = window is not None and _cut_only_at_top(tree)
 
     def shares(ex: _Seen) -> bool:
         # A CTE's name counts as a table read, and SQL that names no table is
@@ -843,7 +971,7 @@ def result_echo(
     compared = [
         ex
         for ex in seen
-        if shares(ex) and (ex not in served_by or window is None or ex.window != window)
+        if shares(ex) and (ex not in served_by or not top_cut_only or ex.window != window)
     ]
     if not compared:
         return []
@@ -855,46 +983,95 @@ def result_echo(
             f"verified example {compared[0].id}"
         ]
     answer = _rows_key(rows)
+    count = len(rows)
+    width = len(rows[0]) if rows else 0
     cap = int(MAX_LIMIT)
-    own: dict[str, bool] = {}
+    inner = _inner_windows(tree)
+    offsets = _spelled_offsets(tree)
+    results: dict[str, list[dict[str, Any]] | Exception] = {}
+
+    def fetch(text: str) -> list[dict[str, Any]]:
+        if text not in results:
+            try:
+                results[text] = list(run(text))
+            except Exception as exc:  # noqa: BLE001 - kept, and raised to every reader
+                results[text] = exc
+        found = results[text]
+        if isinstance(found, Exception):
+            raise found
+        return found
 
     def same_at_own_window(ex: _Seen) -> bool:
-        if ex.id not in own:
-            try:
-                own[ex.id] = _rows_key(run(ex.sql)) == answer
-            except Exception:  # noqa: BLE001 - not run is not shown to be the same
-                own[ex.id] = False
-        return own[ex.id]
+        try:
+            return _rows_key(fetch(ex.sql)) == answer
+        except Exception:  # noqa: BLE001 - not run is not shown to be the same
+            return False
 
     def verdict(ex: _Seen) -> str:
         theirs_tree = _parse(ex.sql)
         if theirs_tree is None:
             return "unrun"
-        cut = ex.sql if window is not None and ex.window == window else _at_window(theirs_tree, tree)
-        try:
-            theirs = run(cut)
-        except Exception:  # noqa: BLE001 - an example that cannot run is not shown to differ
-            return "unrun"
-        if len(rows) >= cap and len(theirs) >= cap:
-            return "capped"
-        if _rows_key(theirs) == answer:
-            return "same"
-        if len(theirs) != len(rows):
-            return "differ"
-        if window is not None and not _narrow(window):
-            return "differ"
-        ranked = _ranked_statement(theirs_tree) if window is not None else None
+        # Spelled windows: the SQL's top-level window, the example's own, and
+        # every window the SQL spells below its top level.
+        at_top = ex.sql if window is not None and ex.window == window else _at_window(theirs_tree, tree)
+        cuts: dict[str, Window | None] = {at_top: window}
+        cuts.setdefault(ex.sql, ex.window)
+        for inner_window in inner:
+            cuts.setdefault(_with_window(theirs_tree, inner_window), inner_window)
+        tie_windows: list[Window] = []
+        unstated = False
+        widths: set[int] = set()
+
+        def as_wide() -> bool:
+            # Rows of another number of columns are no window of the example.
+            return not widths or width in widths
+
+        for text, cut in cuts.items():
+            if cut is not None and cut[0] < count:
+                continue  # a window of fewer rows cannot return these rows
+            try:
+                theirs = fetch(text)
+            except Exception:  # noqa: BLE001 - an example that cannot run is not shown to differ
+                return "unrun"
+            if count >= cap and len(theirs) >= cap:
+                return "capped"
+            if _rows_key(theirs) == answer:
+                return "same"
+            widths.update(len(row) for row in theirs[:1])
+            if len(theirs) != count:
+                continue
+            if cut is None:
+                unstated = True
+            elif _narrow(cut):
+                tie_windows.append(cut)
+        # Row count: the example's first rows by its own order, as many as
+        # the SQL returned, wherever and however the SQL cut them.
+        if _ranks(theirs_tree) and 0 < count < cap:
+            own_offset = 0 if ex.window is None else ex.window[1]
+            tie_windows.extend((count, offset) for offset in sorted(offsets | {own_offset}))
+        if not tie_windows:
+            return "untied" if unstated and as_wide() else "differ"
+        ranked = _ranked_statement(theirs_tree)
         if ranked is None:
-            return "untied"
+            return "untied" if as_wide() else "differ"
         ranked_sql, keys = ranked
         try:
-            ordered = run(ranked_sql)
+            ordered = fetch(ranked_sql)
         except Exception:  # noqa: BLE001 - an example that cannot run is not shown to differ
             return "unrun"
-        tied = _tied_window(ordered, keys, window) if window is not None else None
-        if tied is None:
-            return "untied"
-        return "same" if answer <= tied else "differ"
+        widths.update(
+            sum(1 for name in row if not str(name).startswith(_ORDER_KEY)) for row in ordered[:1]
+        )
+        if not as_wide():
+            return "differ"
+        found = "untied" if unstated else "differ"
+        for cut in dict.fromkeys(tie_windows):
+            tied = _tied_window(ordered, keys, cut)
+            if tied is None:
+                found = "untied"
+            elif answer <= tied:
+                return "same"
+        return found
 
     out: list[str] = []
     for ex in compared:

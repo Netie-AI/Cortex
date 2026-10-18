@@ -27,6 +27,9 @@ EQUIVALENT = (
     f"{HTTP}::test_must_fail_equivalent_copy_with_a_new_row_window_never_served",
     f"{HTTP}::test_must_fail_added_order_with_a_new_row_cap_never_served",
     f"{HTTP}::test_must_fail_confirmed_question_cut_at_another_row_window_never_served",
+    # Review @ c4f6a1b: a cut in a derived table or a QUALIFY hides no copy.
+    f"{HTTP}::test_must_fail_copy_cut_below_the_top_level_never_served",
+    f"{HTTP}::test_must_fail_confirmed_question_cut_below_the_top_level_never_served",
 )
 
 CASES: dict[str, list[str]] = {

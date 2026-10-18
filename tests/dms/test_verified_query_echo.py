@@ -521,6 +521,152 @@ def test_a_cte_that_shadows_a_table_is_still_compared() -> None:
     assert any(ROWS in r and "vq_delayed" in r for r in refused), refused
 
 
+# -- a cut below the top level hides no copy (review @ c4f6a1b) -----------------
+HIGHEST_AT_CAP = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 1000"
+# As the gate hands them over: a top-level LIMIT 1000 on each.
+DERIVED_5 = (
+    "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+    "ORDER BY quantity_kg DESC LIMIT 5) AS t LIMIT 1000"
+)
+DERIVED_10 = (
+    "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+    "ORDER BY quantity_kg DESC LIMIT 10) AS t LIMIT 1000"
+)
+QUALIFY_10 = (
+    "SELECT sku, quantity_kg FROM inventory "
+    "QUALIFY row_number() OVER (ORDER BY quantity_kg DESC) <= 10 LIMIT 1000"
+)
+LOWEST_5 = "Which 5 SKUs have the lowest quantity_kg in inventory?"
+
+
+def test_example_at_its_own_window_is_still_compared() -> None:
+    """Review @ c4f6a1b: the same-cap derived table returns exactly the example's rows."""
+    assert vqa.example_echo(LOWEST_5, DERIVED_5, [HIGHEST], schema=SCHEMA) == []
+    assert vqa._row_window(vqa._parse(DERIVED_5)) == (vqa.MAX_LIMIT, 0)
+    runs = _Runs({DERIVED_5: _top(5), HIGHEST_AT_CAP: _top(12) + _top(3, 20, 400.0), HIGHEST["sql"]: _top(5)})
+    refused = _rows_echo(LOWEST_5, DERIVED_5, runs, HIGHEST)
+    assert any(ROWS in r and "vq_highest" in r for r in refused), refused
+    assert runs.calls == [DERIVED_5, HIGHEST_AT_CAP, HIGHEST["sql"]]
+
+
+def test_cut_below_the_top_level_is_compared_at_the_row_count() -> None:
+    """Review @ c4f6a1b: a derived-table LIMIT 10 or QUALIFY ... <= 10 is the example at 10.
+
+    The top-level window is the gate's LIMIT 1000, where the example returns
+    15 rows. The example's first 10 rows by its ORDER BY, with the 12 tied at
+    500.0, hold the 10 served rows.
+    """
+    ranked = _ranked(_top(12) + _top(3, 20, 400.0))
+    for sql in (DERIVED_10, QUALIFY_10):
+        assert vqa.example_echo(LOWEST_10, sql, [HIGHEST], schema=SCHEMA) == [], sql
+        assert vqa._row_window(vqa._parse(sql)) == (vqa.MAX_LIMIT, 0)
+        runs = _Runs({
+            sql: _top(10, start=2),
+            HIGHEST_AT_CAP: _top(12) + _top(3, 20, 400.0),
+            HIGHEST_AT_10: _top(10),
+            HIGHEST_RANKED: ranked,
+        })
+        refused = _rows_echo(LOWEST_10, sql, runs, HIGHEST)
+        assert any(ROWS in r and "vq_highest" in r for r in refused), (sql, refused)
+        assert runs.calls[-1] == HIGHEST_RANKED, "compared at the row count, with ties"
+        assert HIGHEST["sql"] not in runs.calls, "its 5 rows cannot be these 10"
+    assert vqa._inner_windows(vqa._parse(DERIVED_10)) == [(10, 0)]
+    assert vqa._inner_windows(vqa._parse(QUALIFY_10)) == []
+    # The right SQL for the question, in a derived table: other rows, served.
+    lowest = (
+        "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+        "ORDER BY quantity_kg ASC LIMIT 10) AS t LIMIT 1000"
+    )
+    runs = _Runs({
+        lowest: _top(10, kg=1.0),
+        HIGHEST_AT_CAP: _top(12) + _top(3, 20, 400.0),
+        HIGHEST_AT_10: _top(10),
+        HIGHEST_RANKED: ranked,
+    })
+    assert _rows_echo(LOWEST_10, lowest, runs, HIGHEST) == []
+
+
+def test_an_offset_spelled_anywhere_is_where_a_cut_may_start() -> None:
+    """Rows 6 to 10 of the example's order, cut by QUALIFY and a top-level OFFSET."""
+    ordered = [{"sku": f"SKU-{i:05d}", "quantity_kg": float(100 - i)} for i in range(20)]
+    page = (
+        "SELECT sku, quantity_kg FROM inventory "
+        "QUALIFY row_number() OVER (ORDER BY quantity_kg DESC) <= 10 LIMIT 1000 OFFSET 5"
+    )
+    tree = vqa._parse(page)
+    assert vqa._spelled_offsets(tree) == {5}
+    at_top = vqa._at_window(vqa._parse(HIGHEST["sql"]), tree)
+    runs = _Runs({
+        page: ordered[5:10],
+        at_top: ordered[5:],
+        HIGHEST["sql"]: ordered[:5],
+        HIGHEST_RANKED: _ranked(ordered),
+    })
+    refused = _rows_echo(LOWEST_5, page, runs, HIGHEST)
+    assert any(ROWS in r and "vq_highest" in r for r in refused), refused
+    nested = (
+        "SELECT * FROM (SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC "
+        "LIMIT 5 OFFSET 5) AS t LIMIT 1000"
+    )
+    assert vqa._spelled_offsets(vqa._parse(nested)) == {5}
+    assert vqa._inner_windows(vqa._parse(nested)) == [(5, 5)]
+
+
+def test_re_serve_with_a_cut_below_the_top_level_is_compared() -> None:
+    """The confirmed question: the example's LIMIT 5 on top of a hidden LIMIT 3 is 3 rows."""
+    hidden = (
+        "SELECT sku, quantity_kg FROM (SELECT sku, quantity_kg FROM inventory "
+        "ORDER BY quantity_kg DESC LIMIT 3) AS t LIMIT 5"
+    )
+    assert vqa._row_window(vqa._parse(hidden)) == vqa._row_window(vqa._parse(HIGHEST["sql"]))
+    at_3 = "SELECT sku, quantity_kg FROM inventory ORDER BY quantity_kg DESC LIMIT 3"
+    runs = _Runs({hidden: _top(3), HIGHEST["sql"]: _top(5), at_3: _top(3)})
+    refused = _rows_echo(HIGHEST["question"], hidden, runs, HIGHEST)
+    assert any(WINDOW in r and "vq_highest" in r for r in refused), refused
+
+
+def test_only_a_single_select_keeps_its_cut_at_the_top() -> None:
+    top = vqa._cut_only_at_top
+    p = vqa._parse
+    assert top(p(HIGHEST["sql"]))
+    assert top(p("SELECT COUNT(1) FROM shipments WHERE 'DELAYED' = status"))
+    assert top(p("SELECT category, COUNT(*) AS n FROM inventory GROUP BY category LIMIT 5 OFFSET 2"))
+    for sql in (
+        DERIVED_5,
+        QUALIFY_10,
+        "WITH t AS (SELECT sku FROM inventory LIMIT 5) SELECT sku FROM t",
+        "SELECT sku FROM inventory WHERE sku IN (SELECT sku FROM inventory LIMIT 5)",
+        "SELECT sku, row_number() OVER (ORDER BY quantity_kg) AS r FROM inventory",
+        "SELECT sku FROM inventory USING SAMPLE 5 ROWS",
+        "SELECT sku FROM inventory FETCH FIRST 5 ROWS ONLY",
+        "SELECT sku FROM inventory UNION SELECT sku FROM transactions",
+    ):
+        assert not top(p(sql)), sql
+    assert vqa._row_window(p(HIGHEST["sql"] + " PERCENT")) is None, "a share is no row count"
+
+
+def test_rows_of_another_width_are_never_an_example_window() -> None:
+    """Ties past the cap cannot be listed, but no window of a 2-column example is 1 column wide."""
+    count_sql = "SELECT COUNT(*) AS n FROM inventory LIMIT 1000"
+    runs = _Runs({
+        count_sql: [{"n": 7433}],
+        HIGHEST_AT_CAP: _top(vqa.MAX_LIMIT),
+        HIGHEST["sql"]: _top(5),
+        HIGHEST_RANKED: _ranked(_top(vqa.MAX_LIMIT)),
+    })
+    assert _rows_echo("How many rows are in inventory?", count_sql, runs, HIGHEST) == []
+    # As wide as the example: the ties cannot be listed, so it is refused.
+    by_category = "SELECT category, COUNT(*) AS n FROM inventory GROUP BY category LIMIT 1000"
+    runs = _Runs({
+        by_category: [{"category": "a", "n": 3}],
+        HIGHEST_AT_CAP: _top(vqa.MAX_LIMIT),
+        HIGHEST["sql"]: _top(5),
+        HIGHEST_RANKED: _ranked(_top(vqa.MAX_LIMIT)),
+    })
+    refused = _rows_echo("How many rows per category?", by_category, runs, HIGHEST)
+    assert any("split tied rows" in r for r in refused), refused
+
+
 # -- scope: grant and schema ---------------------------------------------------
 def test_example_must_be_inside_the_grant_and_the_current_schema() -> None:
     fits = vqa.example_fits
