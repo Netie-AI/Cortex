@@ -141,8 +141,8 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
 }
-# #412: a cascade hit is served only when the metric declares every
-# meaning-changing word. Any other edit to answer_engine.py needs a new license.
+# #412: a cascade hit is served only when the question is the metric's
+# declared question. Any other edit to answer_engine.py needs a new license.
 _METRIC_EXACT_412_BASE = "dd891d297664a8c0baedb078a008163ae9db829c"
 _METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
     "cursor/not-delayed-exact-metric-5515": frozenset(
@@ -151,10 +151,10 @@ _METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
 }
 _METRIC_EXACT_412_EXACT_DIFF = {
     "CortexOS/dms/answer_engine.py": (
-        "abbc33e0167294e5466cacf329331b587a3c3653d4977f5310d56f0f7fb06eb6",
+        "2ee931ae1805635d661660597f5dad98ea855416463d3fdadc0f1dce58feebf6",
         (
             "_exactness_guard_enabled",
-            "_unaccounted_invariants",
+            "_exact_declared_plan",
             "cascade_match_is_non_exact",
         ),
     ),

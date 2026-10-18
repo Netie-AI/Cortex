@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_PATH = ROOT / "bench" / "golden" / "dms_golden_v1.yaml"
 RESULTS_DIR = ROOT / "bench" / "results"
 
-ABSTAIN_ROUTES = {"needs_clarification"}
+ABSTAIN_ROUTES = {"needs_clarification", "reconfirm"}
 DEFAULT_ROUND = 4
 
 

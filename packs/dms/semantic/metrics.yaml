@@ -15,13 +15,13 @@ metrics:
   # ── inventory ───────────────────────────────────────────────────────────────
   - id: sku_count
     kind: scalar
-    synonyms: ["how many skus", "number of skus", "sku count", "distinct skus", "count skus", "total skus"]
+    synonyms: ["how many skus", "number of skus", "sku count", "distinct skus", "count skus"]
     result_columns: [sku_count]
     sql: "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
 
   - id: low_stock
     kind: listing
-    synonyms: ["below reorder", "low stock", "understocked", "need reordering", "reorder", "under reorder"]
+    synonyms: ["below reorder", "low stock", "understocked", "need reordering", "reorder"]
     result_columns: [sku, quantity_kg]
     sql: >
       SELECT i.sku, i.quantity_kg
@@ -50,7 +50,7 @@ metrics:
 
   - id: expired_last_month
     kind: scalar
-    synonyms: ["expired last month", "how many expired last month", "expired previous month", "average expired"]
+    synonyms: ["expired last month", "how many expired last month", "expired previous month"]
     result_columns: [expired_count]
     sql: >
       SELECT COUNT(*) AS expired_count FROM inventory
@@ -60,7 +60,7 @@ metrics:
 
   - id: stale_restock
     kind: listing
-    synonyms: ["not restocked", "stale stock", "old stock", "no restock"]
+    synonyms: ["not restocked", "stale stock", "old stock"]
     result_columns: [sku]
     sql: >
       SELECT sku FROM inventory
@@ -96,7 +96,7 @@ metrics:
   # ── transactions / sales ────────────────────────────────────────────────────
   - id: sales_by_value
     kind: ranked
-    synonyms: ["top selling", "best sellers", "revenue by sku", "sales by value", "highest revenue", "most revenue", "total revenue"]
+    synonyms: ["top selling", "best sellers", "revenue by sku", "sales by value", "highest revenue"]
     result_columns: [sku, sales_value_myr]
     sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
@@ -111,7 +111,7 @@ metrics:
 
   - id: sales_by_volume
     kind: ranked
-    synonyms: ["top by quantity", "most sold by kg", "volume sold", "quantity sold", "highest selling"]
+    synonyms: ["top by quantity", "most sold by kg", "volume sold", "quantity sold"]
     result_columns: [sku, total_sold_kg]
     sql: >
       SELECT sku, SUM(quantity_kg) AS total_sold_kg
@@ -140,7 +140,7 @@ metrics:
 
   - id: revenue_windowed
     kind: scalar
-    synonyms: ["revenue last", "sales in the last", "revenue in days", "recent revenue", "revenue over", "total sales"]
+    synonyms: ["revenue last", "sales in the last", "revenue in days", "recent revenue"]
     result_columns: [revenue_myr]
     sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
@@ -177,7 +177,7 @@ metrics:
 
   - id: count_by_carrier
     kind: grouped
-    synonyms: ["by carrier", "per carrier", "which carriers", "carrier breakdown", "most delayed"]
+    synonyms: ["by carrier", "per carrier", "which carriers", "carrier breakdown"]
     result_columns: [carrier, shipment_count]
     sql: >
       SELECT carrier, COUNT(*) AS shipment_count FROM shipments
@@ -234,7 +234,7 @@ metrics:
 
   - id: suppliers_by_risk
     kind: listing
-    synonyms: ["risk score above", "high risk suppliers", "risky suppliers", "risk over", "risk below"]
+    synonyms: ["risk score above", "high risk suppliers", "risky suppliers", "risk over"]
     result_columns: [supplier_id]
     sql: >
       SELECT supplier_id FROM suppliers
@@ -304,7 +304,7 @@ metrics:
 
   - id: free_capacity
     kind: ranked
-    synonyms: ["most free capacity", "free space", "available capacity", "spare capacity", "least spare"]
+    synonyms: ["most free capacity", "free space", "available capacity", "spare capacity"]
     result_columns: [location_code, free_kg]
     sql: >
       SELECT location_code, capacity_kg - current_load_kg AS free_kg
@@ -315,7 +315,7 @@ metrics:
 
   - id: cold_storage_list
     kind: listing
-    synonyms: ["cold storage locations", "which are cold storage", "refrigerated warehouses", "total cold"]
+    synonyms: ["cold storage locations", "which are cold storage", "refrigerated warehouses"]
     result_columns: [location_code]
     sql: "SELECT location_code FROM locations WHERE is_cold_storage = true ORDER BY location_code"
 

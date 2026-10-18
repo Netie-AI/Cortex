@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
-
-ROOT = Path(__file__).resolve().parents[2]
-BASELINE_PATH = ROOT / "bench" / "golden" / "paraphrase_baseline.json"
 
 
 @pytest.fixture(scope="module")
@@ -27,10 +21,27 @@ def test_paraphrase_zero_confidently_wrong(paraphrase_report):
 
 
 def test_paraphrase_robustness_floor(paraphrase_report):
-    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    floor = float(baseline["robustness_floor"])
-    got = float(paraphrase_report["totals"]["robustness"])
-    assert got + 1e-9 >= floor, (
-        f"robustness {got} fell below committed floor {floor} — "
-        "fix regressions or raise the floor only after intentional gains"
-    )
+    """#412 retired keyword-cascade paraphrase serving.
+
+    The committed floor measured how often a different wording still compiled
+    the parent's SQL. A paraphrase is not the metric's declared question, so
+    it reconfirms. Wrong stays 0. Correct stays 0: none of these paraphrases
+    is itself a declared question, and teaching the cascade a new phrasing
+    would raise this count.
+    """
+    totals = paraphrase_report["totals"]
+    assert totals["wrong"] == 0
+    assert totals["error"] == 0
+    assert totals["total"] > 0
+    # A paraphrase of an answerable question reconfirms. The only correct
+    # rows here are paraphrases of a parent that already expected a refusal.
+    from bench.accuracy import load_golden
+
+    parents = {item.id: item for item in load_golden()}
+    served = [
+        row
+        for row in paraphrase_report["results"]
+        if row["outcome"] == "correct"
+        and parents[row["golden_id"]].match not in {"abstain", "blocked"}
+    ]
+    assert served == [], served

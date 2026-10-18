@@ -100,7 +100,7 @@ def test_query_low_stock(loaded_db, monkeypatch):
         "netie.dms.query_service.get_connection",
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
-    result = query_service.answer_question("Which SKUs are below reorder level?")
+    result = query_service.answer_question("below reorder")
     assert result["violations_blocked"] == []
     assert result["sql_used"]
     rows = result.get("rows") or []
@@ -129,7 +129,7 @@ def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
         "netie.dms.query_service.get_connection",
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
-    result = query_service.answer_question("top 5 sales")
+    result = query_service.answer_question("top selling")
     assert result["violations_blocked"] == []
     assert result["source_table"] == "transactions"
     assert result["row_count"] == 5

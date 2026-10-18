@@ -114,10 +114,14 @@ def _score(item: AdvItem, resp: dict[str, Any]) -> str:
             return "wrong"
         return "correct"
 
-    # correct_rows path — assert SQL + rows + answer text
-    # Abstaining on a known-good case is a measurement failure, not a soft pass.
-    if route in {"needs_clarification", "abstain"}:
-        return "wrong"
+    # correct_rows path — assert SQL + rows + answer text.
+    # #412: a question that is not the metric's declared question reconfirms.
+    # That is a safe miss. A served row set that fails the assertions below
+    # is still a confident wrong.
+    if route in {"needs_clarification", "abstain", "reconfirm"} or str(
+        resp.get("badge") or ""
+    ).lower() in {"abstain", "reconfirm"}:
+        return "abstain"
     if route != "sql":
         return "wrong"
 

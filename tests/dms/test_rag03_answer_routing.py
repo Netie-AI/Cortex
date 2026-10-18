@@ -160,16 +160,13 @@ def test_sop_doc_zz9_miss_abstains_not_first_file(dms_http) -> None:
 def test_metric_question_with_document_word_stays_governed(dms_http) -> None:
     dms_http.bind_session(SESSION, {"transactions": "TRUE"})
     body = _ask_dms(dms_http, METRIC_DOC_Q, SESSION)
+    # Not the declared revenue question, and not the agreement document.
     assert _badge(body) != "document", body
-    assert _badge(body) not in {"abstain", "blocked", "refused"}
-    rows = body.get("rows") or []
-    assert rows, f"governed metric returned no rows: {body.get('answer')!r}"
-    text = body.get("answer") or ""
-    assert text.strip(), "metric rendered no answer text"
-    revenue = float(rows[0].get("revenue_myr") or 0)
-    assert revenue > 0
-    assert "80375993" in text.replace(",", "") or str(int(revenue)) in text.replace(",", "")
+    assert _badge(body) == "reconfirm", body.get("answer")
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
     assert "acme_agreement.txt" not in _sources(body)
+    assert "Yes runs that question" in (body.get("answer") or "")
 
 
 def test_blocked_ddl_still_blocked_before_rag(dms_http) -> None:

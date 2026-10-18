@@ -30,7 +30,7 @@ introduces contract `1.5.0`. Later PRs in this chain rebase onto it.
 | #375 | Issue. `lock_images.py` hardcodes `--python-version 3.11` (follow-up to #360). |
 | #377 | Issue. `check_supply_chain` should fail on unlisted image-only packages (follow-up to #376). |
 | #383 | Issue. Drop unimported diskcache 5.6.3. |
-| #412 | Keyword cascade serves a metric only when the question's meaning-changing words are ones that metric declares. "not delayed" is not `delayed_count` 1031. |
+| #412 | Keyword cascade serves only an exact declared question. Any other cascade hit reconfirms (AI SQL when L2 is on). No word list. "not delayed" is not `delayed_count` 1031. |
 | trust_remote_code | Named ticket. No issue number was on the repo at this rewrite. `trust_remote_code=True` remains in `CortexOS/nlp/local_inference.py` and `scripts/finetune_dms_tone.py`. |
 | #378-#382 | Dependabot draft PRs (portalocker, nvidia-cusparse, nvidia-cufft, mpmath, dbos). |
 

@@ -83,7 +83,7 @@ _CERTIFY_BADGES = frozenset(
     }
 )
 _ABSTAIN_BADGES = frozenset(
-    {"abstain", "needs_clarification", "l3", "abstained"}
+    {"abstain", "needs_clarification", "l3", "abstained", "reconfirm"}
 )
 
 _STOP = frozenset(

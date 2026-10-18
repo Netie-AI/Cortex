@@ -29,20 +29,20 @@ GRANT = {"transactions": "TRUE"}
 WAREHOUSE_GRANT = {
     t: "TRUE" for t in ("inventory", "suppliers", "locations", "shipments", "transactions", "alerts")
 }
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "total revenue"
 # All four land on certified / governed_metric under GRANT, so each one is a
 # capture candidate. Order matches the 87ee2c60 probe shape: 4 scored asks.
 SCORED_QS = (
-    "what is our total revenue",
+    "total revenue",
     "Top 5 selling SKUs by revenue",
-    "excluding BETA, top 5 sku by revenue",
     "last month sales",
+    "top selling",
 )
 BETA_QS = SCORED_QS + (
-    "total revenue",
-    "top 5 sku by revenue",
-    "what were sales last month",
-    "Top 5 selling SKUs by volume",
+    "how many skus",
+    "show expired",
+    "high risk suppliers",
+    "delayed shipments",
 )
 
 
@@ -383,7 +383,7 @@ def test_legacy_unscoped_rows_survive_and_are_never_read(
     _legacy_table(
         skills_db,
         "INSERT INTO dms_query_skills (id, trigger_text, metric_id, created_at) VALUES "
-        "('legacy-1', 'what is our total revenue', 'revenue_total', '2026-10-01T00:00:00+00:00');",
+        "('legacy-1', 'total revenue', 'revenue_total', '2026-10-01T00:00:00+00:00');",
     )
     monkeypatch.setenv(FLAG, "1")
     assert query_skills.find(REVENUE_Q, space_id="alpha") is None

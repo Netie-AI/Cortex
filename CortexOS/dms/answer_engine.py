@@ -1079,71 +1079,137 @@ def _exactness_guard_enabled() -> bool:
     return True
 
 
-def _metric_declared_tokens(metric_id: str) -> set[str]:
-    """Words the metric itself uses: id, synonyms, result columns, SQL literals.
+def _declared_question_keys(metric_id: str) -> set[str]:
+    """Normalized synonyms the metric declares as its questions.
 
-    SQL keywords are not included. ``IS NOT NULL`` would otherwise make every
-    inventory metric look like it had declared a negation.
+    The whole question has to equal one of these. A question that only
+    contains the words is a different question.
     """
     from packs.dms.semantic.loader import load_all
 
     metric = load_all().metric(metric_id)
-    parts = [metric.id, *(metric.synonyms or []), *(metric.result_columns or [])]
-    parts.extend(re.findall(r"'([^']*)'", metric.sql or ""))
-    text = " ".join(str(part) for part in parts).lower().replace("_", " ")
-    return set(re.findall(r"[a-z0-9]+", text))
+    return {_normalize(phrase) for phrase in (metric.synonyms or []) if _normalize(phrase)}
 
 
-def _unaccounted_invariants(question: str, metric_id: str) -> list[str]:
-    """Meaning-changing words in the question that the metric does not declare.
+def _exact_declared_plan(question: str) -> MetricPlan | None:
+    """The metric whose declared question is this question, or None."""
+    key = _normalize(question)
+    if not key:
+        return None
+    from packs.dms.semantic.loader import load_all
 
-    The set is ``vocabulary.INVARIANT_TOKENS``. It is not a list of phrasings.
-    A word the metric's own synonyms already use, such as ``not`` on
-    ``stale_restock``, is accounted for.
-    """
-    from packs.dms.semantic.vocabulary import INVARIANT_TOKENS
-
-    # The question as asked, not the router rewrite. Normalization may turn
-    # the discourse word "mean" into "average"; that invented word is not
-    # something the user said, and it must not make an exact question miss.
-    asked = (question or "").lower()
-    declared = _metric_declared_tokens(metric_id)
-    return [
-        token
-        for token in re.findall(r"[a-z]+", asked)
-        if token in INVARIANT_TOKENS and token not in declared
+    matched = [
+        metric.id
+        for metric in load_all().metrics.values()
+        if key in _declared_question_keys(metric.id)
     ]
+    if len(matched) != 1:
+        return None
+    metric_id = matched[0]
+    plan = _route_to_metric_cascade(question)
+    if plan is not None and plan.metric_id == metric_id:
+        return plan
+    return _metric_plan(metric_id, {}, f"declared question → {metric_id}")
+
+
+def _closest_declared_question(question: str, metric_id: str) -> str:
+    """The declared question sharing the most words with what was asked."""
+    from packs.dms.semantic.loader import load_all
+
+    asked = set(_normalize(question).split())
+    best: tuple[tuple[int, int, str], str] | None = None
+    for phrase in load_all().metric(metric_id).synonyms or []:
+        text = " ".join(str(phrase).split())
+        if not text:
+            continue
+        overlap = len(asked & set(_normalize(text).split()))
+        rank = (overlap, len(text), text)
+        if best is None or rank > best[0]:
+            best = (rank, text)
+    if best is not None:
+        return best[1]
+    return metric_id.replace("_", " ")
 
 
 def route_to_metric(question: str) -> MetricPlan | None:
-    """Governed metric for an exact keyword match.
+    """Governed metric only when the question is that metric's declared question.
 
-    A cascade hit that still carries a meaning-changing word the metric does
-    not declare is a different question. It is not served, so the model step
-    can take it when that step is on. With the step off, the engine abstains
-    instead of serving the neighbouring metric.
-
-    Phrases under 16 characters in ``metrics.yaml`` only add declared words.
-    The synonym matcher already skips them, so they do not open a new route.
+    The keyword cascade still names a neighbour. It does not serve one.
+    With the guard off, the cascade answer stands so the must-fails can go red.
     """
-    plan = _route_to_metric_cascade(question)
-    if plan is None or not _exactness_guard_enabled():
-        return plan
-    if _unaccounted_invariants(question, plan.metric_id):
-        return None
-    return plan
+    if not _exactness_guard_enabled():
+        return _route_to_metric_cascade(question)
+    return _exact_declared_plan(question)
 
 
 def cascade_match_is_non_exact(question: str) -> bool:
-    """True when the keyword cascade would serve a metric the question outgrows.
+    """True when the keyword cascade names a metric the question does not declare.
 
-    The legacy delayed template must not pick the question up after this
-    refusal. With the guard off, this is false and the cascade answer stands.
+    That question is not served. The legacy delayed template must not pick it
+    up either. With the guard off, this is false and the cascade answer stands.
     """
     if not _exactness_guard_enabled():
         return False
     plan = _route_to_metric_cascade(question)
-    return plan is not None and bool(_unaccounted_invariants(question, plan.metric_id))
+    if plan is None:
+        return False
+    return _normalize(question) not in _declared_question_keys(plan.metric_id)
+
+
+def _metric_reconfirm(question: str, audit_id: str) -> dict[str, Any]:
+    """Why this question cannot be served, and the closest declared question."""
+    from CortexOS.dms.plan_sql_ask import reconfirm_answer
+
+    plan = _route_to_metric_cascade(question)
+    metric_id = plan.metric_id if plan is not None else ""
+    closest = _closest_declared_question(question, metric_id) if metric_id else ""
+    why = (
+        f"the question is not the declared question for {metric_id}, "
+        "so it cannot be served directly"
+    )
+    return {
+        "answer": reconfirm_answer(why, closest),
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "reconfirm",
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "reconfirm",
+        "badge": "reconfirm",
+        "metric_id": None,
+        "assumptions": why,
+        "total_count": 0,
+        "suggestions": [closest] if closest else [],
+        "reconfirm": {"why": why, "closest_question": closest},
+        # The plan is built so the NL choke-point still redacts the question.
+        "query_plan": _honest_plan(question, None, layer="reconfirm", assumptions=why),
+    }
+
+
+def _metric_not_found(audit_id: str) -> dict[str, Any]:
+    """No on the closest question. No SQL and no rows."""
+    from CortexOS.dms.plan_sql_ask import NOT_FOUND_ANSWER
+
+    return {
+        "answer": NOT_FOUND_ANSWER,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": "user answered no to the closest question",
+        "total_count": 0,
+        "suggestions": [],
+        "reconfirm": None,
+    }
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────
@@ -1731,6 +1797,7 @@ def answer(
     verified: VerifiedManifest | None = None,
     require_grounding: bool = False,
     stamp_l2_route: bool = False,
+    confirm: str | None = None,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
@@ -1786,6 +1853,15 @@ def answer(
         from CortexOS.dms.l2_generation import stamp_l2_envelope
 
         return stamp_l2_envelope(result, attempt, sql_served=sql_served)
+
+    # No on a reconfirm runs nothing. An exact declared question is a new ask.
+    if (
+        confirm == "no"
+        and cascade_match_is_non_exact(question)
+        and _exact_declared_plan(question) is None
+        and match_certified(question) is None
+    ):
+        return _done(_metric_not_found(audit_id))
 
     route = route_question(question)
 
@@ -2003,9 +2079,21 @@ def answer(
                     refused = _stamp_l2(refused, l2_out, sql_served=False)
                     return _done(refused)
             if cascade_match_is_non_exact(question):
-                # The cascade recognised a neighbouring metric and refused it.
-                # A space document is another neighbour, so it must not answer
-                # this question either. The model step already had its turn.
+                # The cascade named a neighbour. The question is not that
+                # metric's declared question, so it is not served. A subject
+                # the neighbour does not cover is still that refusal. With
+                # the model step off, ask the user. With the step on, that
+                # step already ran and did not produce SQL.
+                neighbour = _route_to_metric_cascade(question)
+                if neighbour is not None:
+                    mismatch = _metric_subject_mismatch(question, neighbour)
+                    if mismatch:
+                        return _abs(
+                            f"question subject '{mismatch}' does not match "
+                            f"metric '{neighbour.metric_id}' subject"
+                        )
+                if l2_out is None:
+                    return _done(_metric_reconfirm(question, audit_id))
                 return _abs("no governed metric or certified query matched")
             doc = _space_doc_rag()
             if doc is not None:

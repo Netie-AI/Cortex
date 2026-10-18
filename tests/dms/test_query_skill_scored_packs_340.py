@@ -102,6 +102,9 @@ def test_must_fail_scored_pack_questions_never_written(
             body["provenance"]["layer"] not in ("certified", "governed_metric")
             for body in having
         ), having
+    elif pack == "dms_paraphrase_v1":
+        # #412: a paraphrase is not the declared question, so none is a rule serve.
+        assert _capture_candidates(bodies) == 0, pack
     else:
         assert _capture_candidates(bodies) >= 1, f"{pack}: no certified/governed answer to refuse"
     assert _rows(skills_db) == 0
@@ -114,7 +117,8 @@ def test_must_fail_scored_round_env_writes_no_pack_question(
     monkeypatch.setenv("CORTEX_SCORED_ROUND", "1")
     ask_http.bind_session("alpha", WAREHOUSE_GRANT)
     bodies = _ask_all(ask_http, [q for qs in PACKS.values() for q in qs])
-    assert _capture_candidates(bodies) >= 100
+    # Declared certified questions still serve. Paraphrases do not (#412).
+    assert _capture_candidates(bodies) >= len(PACKS["certified_queries"])
     assert _rows(skills_db) == 0
 
 

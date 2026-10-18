@@ -624,15 +624,16 @@ categories:
     - id: cv_paged_total_followup
       question: "how many of them?"
       turns:
-        - "Which shipments are in transit?"
+        - "delayed shipments"
       persona: ops_manager
       engineer_intent: >
         78309fc - the listing hit the 1000-row guardrail cap with a failed COUNT
         probe and reported the page size as the total, then the follow-up
-        replayed that invented 1000 as a confident answer. Gold is the true
-        IN_TRANSIT count, which is larger than the cap.
+        replayed that invented 1000 as a confident answer. The setup turn is
+        the declared delayed-shipment question. Gold is the true DELAYED
+        count, which is larger than the cap.
       match: scalar
-      canonical_sql: "SELECT COUNT(*) AS followup_count FROM shipments WHERE status = 'IN_TRANSIT'"
+      canonical_sql: "SELECT COUNT(*) AS followup_count FROM shipments WHERE status = 'DELAYED'"
       key_columns: [followup_count]
       answer_must_not_contain: ["followup_count = 1000"]
       tags: [conversation, followup, truncation]

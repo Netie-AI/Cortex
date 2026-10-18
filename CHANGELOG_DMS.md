@@ -4,18 +4,15 @@ Agents append one section per shipped feature. Sequential build log.
 
 ## METRIC-EXACT-01 (#412) -- 2026-10-18
 
-A keyword-cascade hit is served only when every meaning-changing word in the
-question is one the metric declares (its id, synonyms, result columns, or SQL
-literals). "How many shipments are not delayed?" was served as `delayed_count`
-1031; the warehouse has 10969 shipments that are not delayed. That question,
-and the same near-miss with "number of" or "never", now abstains with the
-model step off and reaches the model step when `DMS_L2_ENABLED` is on. An
-exact "How many shipments are delayed?" stays on the rule. A refused neighbour
-does not fall through to a space document. Short synonyms
-(under 16 characters) declare words the metrics already answer -- `no restock`,
-`least spare`, `most delayed` -- and the synonym matcher still skips them, so
-rule-served routes do not grow. The legacy delayed-row template does not pick
-the refused question back up.
+The keyword cascade serves a metric only when the question is that metric's
+declared question (a synonym, the whole question, not a containing phrase).
+"How many shipments are not delayed?" was served as `delayed_count` 1031; the
+warehouse has 10969 shipments that are not delayed. A question the cascade
+only contains reconfirms: why it cannot be served directly, the closest
+declared question, Yes runs that question, No answers "not found in the
+database". With `DMS_L2_ENABLED` on, that question goes to the model step
+instead. The serve gate has no word list. The legacy delayed-row template
+does not pick the question back up.
 
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 

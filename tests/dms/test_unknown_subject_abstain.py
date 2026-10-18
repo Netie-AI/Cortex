@@ -175,7 +175,7 @@ def test_unbound_still_abstains(dms_http) -> None:
 
 
 def test_bound_demo_table_still_answers_r0005(dms_http) -> None:
-    body = _ask(dms_http, "what is our total revenue", WIDE_SESSION)
+    body = _ask(dms_http, "total revenue", WIDE_SESSION)
     assert body["badge"] == "governed_metric"
     assert body["route"] == "sql"
     assert body["grant_kind"] == "session"

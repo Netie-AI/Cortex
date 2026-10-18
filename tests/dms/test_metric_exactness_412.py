@@ -1,19 +1,19 @@
-"""#412: a near-miss of delayed_count must not be served as 1031.
+"""#412: the keyword cascade serves only a metric's declared question.
 
-On main with the model step off, "how many shipments are not delayed" took the
-L1 keyword cascade to ``delayed_count`` (1031). The warehouse has 10969
-shipments that are not delayed. The cascade still serves an exact delayed
-count. A question that adds a meaning-changing word the metric does not
-declare is not served: HTTP abstains, and with the model step on the question
-reaches that step.
+On main, "how many shipments are not delayed" took the L1 keyword cascade to
+``delayed_count`` (1031). The warehouse has 10969 shipments that are not
+delayed. A question that is not the declared question reconfirms: why it
+cannot be served directly, the closest declared question, Yes runs that
+question, No answers "not found in the database". With the model step on, the
+question goes to that step instead. The guard has no token list.
 
 Must-fails (each goes red with the guard removed; see
 test_metric_exactness_guard_mutations.py):
 
-* ``test_must_fail_near_miss_is_not_served_as_delayed_count`` -- three
+* ``test_must_fail_near_miss_is_not_served_as_delayed_count`` -- seven
   phrasings, ``POST /dms/query`` and ``POST /v1/contract/ask``.
 * ``test_must_fail_near_miss_reaches_the_model_step`` -- the same question is
-  handed to the model step, and the exact delayed count is not.
+  handed to the model step, and the declared delayed question is not.
 """
 
 from __future__ import annotations
@@ -40,8 +40,12 @@ NEAR_MISSES = [
     "How many shipments are not delayed?",
     "What is the number of shipments that are not delayed?",
     "How many shipments were never delayed?",
+    "How many shipments aren't delayed?",
+    "How many shipments are without delayed status?",
+    "How many shipments except delayed ones?",
+    "How many shipments are undelayed?",
 ]
-EXACT = "How many shipments are delayed?"
+DECLARED = "how many delayed"
 
 
 def _ask(client: Any, path: str, question: str) -> dict[str, Any]:
@@ -64,13 +68,21 @@ def _badge(body: dict[str, Any]) -> str:
 
 
 def _assert_not_the_delayed_count(body: dict[str, Any]) -> None:
-    assert _badge(body).lower() == "abstain", body
+    assert _badge(body).lower() == "reconfirm", body
     assert body.get("rows") in ([], None), body.get("rows")
     assert not body.get("sql_used"), body.get("sql_used")
     assert body.get("metric_id") in (None, ""), body.get("metric_id")
     text = str(body.get("answer") or "")
+    assert text.startswith("Reconfirm:"), text
+    assert "Closest question:" in text
+    assert "Yes runs that question" in text
+    assert "not found in the database" in text
     assert "1031" not in text and "1,031" not in text
     assert "10969" not in text and "10,969" not in text
+    recon = body.get("reconfirm") or {}
+    if recon:
+        assert recon.get("closest_question")
+        assert recon.get("why")
 
 
 def test_warehouse_counts_are_the_ones_this_bug_mixes_up() -> None:
@@ -101,13 +113,45 @@ def test_must_fail_near_miss_is_not_served_as_delayed_count(
         _assert_not_the_delayed_count(_ask(dms_http, path, question))
 
 
-def test_exact_delayed_count_stays_on_the_rule(dms_http: Any) -> None:  # noqa: F811
-    body = _ask(dms_http, "/dms/query", EXACT)
+def test_declared_delayed_question_stays_on_the_rule(dms_http: Any) -> None:  # noqa: F811
+    body = _ask(dms_http, "/dms/query", DECLARED)
     assert body.get("layer") == "governed_metric", body
     assert body.get("metric_id") == "delayed_count"
     rows = body.get("rows") or []
     assert rows and int(rows[0]["delayed_count"]) == DELAYED_COUNT
     assert "1031" in str(body.get("answer") or "").replace(",", "")
+
+
+def test_must_fail_no_answers_not_found(dms_http: Any) -> None:  # noqa: F811
+    dms_http.bind_session(SESSION, GRANT)
+    resp = dms_http.post(
+        "/v1/contract/ask",
+        json={
+            "question": NEAR_MISSES[0],
+            "session_id": SESSION,
+            "plan_sql_confirm": "no",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("answer") == "not found in the database"
+    assert body.get("rows") in ([], None)
+    assert not body.get("sql_used")
+    assert "1031" not in str(body.get("answer"))
+
+
+def test_gate_contains_no_token_list() -> None:
+    """The serve gate matches a declared question. It does not list words."""
+    from pathlib import Path
+
+    src = Path("CortexOS/dms/answer_engine.py").read_text(encoding="utf-8")
+    start = src.index("def _exactness_guard_enabled")
+    end = src.index("def _true_count")
+    gate = src[start:end]
+    assert "INVARIANT_TOKENS" not in gate
+    assert "frozenset" not in gate
+    for word in ("aren't", "undelayed", "without", "except", "never"):
+        assert word not in gate
 
 
 class _RecordingPort:
@@ -161,7 +205,7 @@ def test_must_fail_near_miss_reaches_the_model_step(
     assert "1031" not in str(near.get("answer") or "")
 
     port.questions.clear()
-    exact = answer(EXACT)
+    exact = answer(DECLARED)
     assert port.questions == []
     assert exact.get("layer") == "governed_metric"
     assert int(exact["rows"][0]["delayed_count"]) == DELAYED_COUNT
