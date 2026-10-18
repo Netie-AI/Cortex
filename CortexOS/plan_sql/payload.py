@@ -29,8 +29,7 @@ _PLAN_SYSTEM = (
     "listed, use them to match how that value is stored. "
     "Use only the tables, columns and joins listed. Do not write SQL."
 )
-_SQL_SYSTEM = (
-    "You write a single DuckDB SELECT that carries out the plan given. "
+_SQL_RULES = (
     "Use ONLY the tables, columns and joins listed. "
     "Take filter values from the question; use the sampled column values only to "
     "match how a value the question names is stored. Never replace a value the "
@@ -41,6 +40,9 @@ _SQL_SYSTEM = (
     "No DDL/DML. No comments. Prefer LIMIT 50. "
     "Return SQL only."
 )
+_SQL_SYSTEM = "You write a single DuckDB SELECT that carries out the plan given. " + _SQL_RULES
+# No plan: the vote's second reading (PLAN-SQL-VOTE-01) writes from the question alone.
+_DIRECT_SQL_SYSTEM = "You write a single DuckDB SELECT that answers the question. " + _SQL_RULES
 _RECONFIRM_SYSTEM = (
     "A read-only query over the listed tables could not be grounded. "
     "Reply with exactly two lines and no SQL:\n"
@@ -167,22 +169,14 @@ def sql_messages(
     block = values_block(request)
     if block:
         parts.extend(["", block])
-    parts.extend(
-        [
-            "",
-            "PLAN:",
-            *plan,
-            "",
-            f"QUESTION: {request.question}",
-            "",
-            "Emit one DuckDB SELECT.",
-        ]
-    )
+    if plan:
+        parts.extend(["", "PLAN:", *plan])
+    parts.extend(["", f"QUESTION: {request.question}", "", "Emit one DuckDB SELECT."])
     if prior_violations:
         parts.append("PREVIOUS VALIDATION ERRORS (fix these):")
         parts.extend(f"- {v}" for v in list(prior_violations)[:8])
     return [
-        {"role": "system", "content": _SQL_SYSTEM},
+        {"role": "system", "content": _SQL_SYSTEM if plan else _DIRECT_SQL_SYSTEM},
         {"role": "user", "content": "\n".join(parts)},
     ]
 

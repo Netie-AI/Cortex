@@ -2,6 +2,20 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## PLAN-SQL-VOTE-01 -- 2026-10-18
+
+Off unless `CORTEX_PLAN_SQL_VOTE=1` (with `CORTEX_PLAN_SQL=1`). On the
+`/v1/contract/ask` plan+SQL path, a SQL that ran with rows is served only when
+a second SQL reading returns the same rows: the same model without the plan,
+then the stronger route OpenVault configured. With no two agreeing, DMS gets a
+reconfirm envelope (`badge=reconfirm`, `rows=[]`) whose assumptions carry
+`PLAN_SQL_VOTE_SPLIT`. A served answer's assumptions carry `step vote-sql`
+lines and a `step vote` line saying which readings agreed. `model_calls` keeps its
+keys: the same-model reading counts under the rung that ran it, the stronger
+route's under `stronger-model`. No contract change. On BIRD Mini-Dev held-out
+(n=348) it cut wrong answers 120 to 34 and correct ones 166 to 99; see
+`docs/subagents_findings/2026-10-18_plan-sql-vote-measured.md`.
+
 ## DBOS-3X (#331) -- 2026-10-16
 
 The `agentic`, `agents` and `full` extras take `dbos>=3.0.0,<4`. `uv.lock`
