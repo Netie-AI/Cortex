@@ -149,3 +149,21 @@ def test_a_quote_needs_half_the_question_covered() -> None:
     found = documents.answer("minimum order quantity per SKU", passages, None)
     assert found is not None and found.method == "extractive"
     assert '"Minimum order quantity: 50 units per SKU." [1]' in found.answer
+
+
+def test_contract_ask_document_answer_claims_no_warehouse_table(dms_http) -> None:  # noqa: F811
+    """/v1/contract/ask has no document badge, so the answer falls closed to
+    ABSTAIN; its source cards must not then list the warehouse grant."""
+    dms_http.bind_session(SESSION, {"transactions": "TRUE", "inventory": "TRUE"}, space_id=SPACE)
+
+    resp = dms_http.post(
+        "/v1/contract/ask", json={"question": DOC_HIT_Q, "session_id": SESSION, "space_id": SPACE}
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provenance"]["badge"] == "abstain", body
+    assert f'"{PAYMENT}" [1]' in body["answer"], body["answer"]
+    assert "Sources: [1] acme_agreement.txt" in body["answer"]
+    assert body["contributing_sources"] == [], body["contributing_sources"]
+    assert body.get("rows") in ([], None) and body.get("sql_used") is None
