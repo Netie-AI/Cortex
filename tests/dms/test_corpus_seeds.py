@@ -355,6 +355,34 @@ def test_write_baseline_refuses_a_run_with_wrong_answers():
         _write_baseline(report, seeds_only=True, live=False)
 
 
+def test_recorded_reconfirm_seeds_name_the_closest_question():
+    """Seeds that used to answer now reconfirm with a recorded closest question.
+
+    They leave ``answering`` on purpose. The closest question is the
+    expectation, so a later ranking change fails here.
+    """
+    from bench.corpus import load_answering_baseline, load_reconfirm_baseline, load_seeds
+    from CortexOS.dms.query_service import answer_question
+    from packs.dms.semantic.loader import reload
+
+    reload()
+    recorded = load_reconfirm_baseline()
+    answering = load_answering_baseline()
+    assert recorded, "reconfirm baseline is empty"
+    overlap = sorted(set(recorded) & set(answering))
+    assert overlap == [], overlap
+    seeds = {seed.id: seed for seed in load_seeds()}
+    missing = sorted(set(recorded) - set(seeds))
+    assert missing == [], missing
+    for seed_id, closest in sorted(recorded.items()):
+        result = answer_question(seeds[seed_id].question)
+        got = str((result.get("reconfirm") or {}).get("closest_question") or "")
+        assert result.get("route") == "reconfirm", (seed_id, result.get("route"))
+        assert got == closest, (seed_id, got, closest)
+        assert result.get("rows") in ([], None)
+        assert not result.get("sql_used")
+
+
 def test_corpus_modules_do_not_import_dms():
     for rel in (
         "bench/corpus.py",

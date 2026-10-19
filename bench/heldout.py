@@ -38,10 +38,10 @@ NEAR_COPY = 0.85
 MIN_COPY_TOKENS = 4
 
 _REFUSAL_BADGES = frozenset({
-    "abstain", "refused", "blocked", "needs_clarification",
+    "abstain", "refused", "blocked", "needs_clarification", "reconfirm",
 })
 _REFUSAL_ROUTES = frozenset({
-    "needs_clarification", "abstain", "refused", "blocked",
+    "needs_clarification", "abstain", "refused", "blocked", "reconfirm",
 })
 _TOKEN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 

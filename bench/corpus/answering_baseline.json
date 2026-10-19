@@ -1,5 +1,5 @@
 {
-  "_comment": "EVAL-01 answering baseline. Every id here answered when recorded. If one abstains later, an answer the customer used to get silently became a refusal \u2014 a regression the corpus previously scored as free, bounded only by a 0.38 rate ceiling over 47 claim items.",
+  "_comment": "EVAL-01 answering baseline. Every id in answering answered when recorded. If one abstains later, an answer the customer used to get silently became a refusal \u2014 a regression the corpus previously scored as free, bounded only by a 0.38 rate ceiling over 47 claim items. Ids in reconfirm used to answer and now reconfirm: the closest declared question is the recorded expectation, so the move is not a silent deletion.",
   "_regenerate": "python -m bench.corpus --write-baseline",
   "answering": [
     "co_delete_all",
@@ -14,21 +14,13 @@
     "fh_hazmat_carriers",
     "fh_margin_by_sku",
     "gf_top5_revenue_no_fanout",
-    "gf_unique_sku_count",
     "ma_esg",
     "ma_false_entity",
     "ma_forecast",
     "ma_poetry",
     "ma_weather_joke",
-    "ms_cold_storage",
-    "ms_delayed_count",
-    "ms_exclude_beta",
-    "ms_sku_count",
-    "ms_top5_revenue",
-    "ns_expired_count",
     "ns_expired_list",
     "rs_capacity_above_90",
-    "rs_cold_storage_count",
     "rs_high_risk_pending",
     "rs_stock_value_by_category",
     "sa_average_of_a_ranking",
@@ -39,19 +31,80 @@
     "sa_total_over_a_ranking",
     "sa_unknown_entity",
     "sa_vague_how_doing",
-    "sd_distinct_sku_vs_rows",
     "sd_top3_volume",
     "tp_audit_overdue",
-    "tp_cold_storage_count",
-    "tp_delayed_count",
-    "tp_revenue_last_month",
     "tp_total_revenue",
     "uc_spend_by_country",
-    "uc_top5_revenue_ringgit",
-    "uc_total_revenue_myr",
-    "vn_exclude_bare_beta",
-    "vn_exclude_full_sku",
-    "vn_exclude_numeric",
     "vn_low_stock_wh_a"
+  ],
+  "reconfirm": [
+    {
+      "id": "gf_unique_sku_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_cold_storage",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_delayed_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_exclude_beta",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_sku_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_top5_revenue",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ns_expired_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "rs_cold_storage_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "sd_distinct_sku_vs_rows",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "tp_cold_storage_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "tp_delayed_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "tp_revenue_last_month",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "uc_top5_revenue_ringgit",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "uc_total_revenue_myr",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "vn_exclude_bare_beta",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "vn_exclude_full_sku",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "vn_exclude_numeric",
+      "closest_question": "a declared question"
+    }
   ]
 }

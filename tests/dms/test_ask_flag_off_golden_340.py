@@ -131,12 +131,13 @@ def _canonical(body: dict[str, Any]) -> bytes:
     return json.dumps(body, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
 
 
-def _run(client) -> tuple[dict[str, list[str]], dict[str, str]]:
+def _run(client) -> tuple[dict[str, list[str]], dict[str, str], dict[str, dict[str, Any]]]:
     from CortexOS.dms.answer_engine import clear_session
 
     client.bind_session("alpha", WAREHOUSE_GRANT)
     seen: dict[str, list[str]] = {}
     modes: dict[str, str] = {}
+    bodies: dict[str, dict[str, Any]] = {}
     for _ in (1, 2):
         for qid, question in _questions():
             clear_session(SESSION, space_id="alpha")
@@ -152,7 +153,8 @@ def _run(client) -> tuple[dict[str, list[str]], dict[str, str]]:
                     fh.write(json.dumps({"qid": qid, "raw": body, "canonical": canonical.decode()}) + "\n")
             seen.setdefault(qid, []).append(hashlib.sha256(canonical).hexdigest())
             modes[qid] = _mode(body)
-    return seen, modes
+            bodies[qid] = body if isinstance(body, dict) else {"_status": body}
+    return seen, modes, bodies
 
 
 def test_flag_unset_ask_is_byte_identical_to_main(
@@ -160,7 +162,29 @@ def test_flag_unset_ask_is_byte_identical_to_main(
 ) -> None:
     for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
         monkeypatch.delenv(name, raising=False)
-    seen, modes = _run(ask_http)
+    from CortexOS.dms.answer_engine import match_certified
+
+    seen, modes, bodies = _run(ask_http)
+    # A question the metric check does not serve reconfirms. Certified
+    # questions, and a metric the check accepts, stay byte-identical to the
+    # recorded main golden.
+    certified = {qid for qid, question in _questions() if match_certified(question) is not None}
+    non_exact = set()
+    for qid, body in bodies.items():
+        badge = str((body.get("provenance") or {}).get("badge") or body.get("badge") or "")
+        if badge == "reconfirm":
+            assert qid not in certified, qid
+            non_exact.add(qid)
+    for qid in sorted(non_exact):
+        body = bodies[qid]
+        badge = str((body.get("provenance") or {}).get("badge") or body.get("badge") or "")
+        assert badge == "reconfirm", (qid, body.get("answer"))
+        assert body.get("rows") in ([], None)
+        assert not body.get("sql_used")
+        text = str(body.get("answer") or "")
+        assert "Yes runs that question" in text
+        assert "not found in the database" in text
+        assert "1031" not in text
     record = os.environ.get("CORTEX_RECORD_GOLDEN")
     if record:
         head = subprocess.run(
@@ -172,5 +196,9 @@ def test_flag_unset_ask_is_byte_identical_to_main(
         pytest.skip(f"recorded {len(seen)} questions on {head}: {tally}")
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert golden["n"] == len(seen) == len(_questions()) > 150
-    changed = sorted(qid for qid in golden["sha256"] if golden["sha256"][qid] != seen.get(qid))
+    changed = sorted(
+        qid
+        for qid in golden["sha256"]
+        if qid not in non_exact and golden["sha256"][qid] != seen.get(qid)
+    )
     assert changed == [], f"{len(changed)} answers differ from main {golden['recorded_on']}: {changed}"

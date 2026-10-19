@@ -229,7 +229,11 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = [assumptions.strip()]
     elif not isinstance(assumptions, list):
         data["assumptions"] = []
-    if _is_abstain_signal(data) or _badge_withheld(data["provenance"]):
+    if (
+        _is_abstain_signal(data)
+        or str(data.get("badge") or "").lower() == "reconfirm"
+        or _badge_withheld(data["provenance"])
+    ):
         # A layer the contract has no badge for (document, catalog, unknown)
         # falls closed to ABSTAIN; no table card may then claim it was read.
         data["contributing_sources"] = []
@@ -324,6 +328,7 @@ async def contract_ask(body: AskRequest) -> Answer:
                     verified=verified,
                     require_grounding=True,
                     stamp_l2_route=True,
+                    confirm=body.plan_sql_confirm,
                 )
             except ManifestError as exc:
                 code = getattr(exc, "code", "manifest_error")

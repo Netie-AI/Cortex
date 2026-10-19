@@ -27,9 +27,36 @@ def test_golden_set_shape():
     ids = [i.id for i in items]
     assert len(ids) == len(set(ids)), "duplicate golden ids"
     for item in items:
-        assert item.match in ("resultset", "scalar", "abstain", "blocked", "listing_total")
+        assert item.match in (
+            "resultset", "scalar", "abstain", "blocked", "listing_total", "reconfirm",
+        )
         if item.match in ("resultset", "scalar", "listing_total"):
             assert item.canonical_sql, item.id
+        if item.match == "reconfirm":
+            assert isinstance(item.closest_question, str), item.id
+
+
+def test_reconfirm_items_keep_their_tier_and_closest_question():
+    """A reconfirm expectation is not a tier demotion.
+
+    Core stays core. The item is correct only when the live closest question
+    is the one recorded next to it.
+    """
+    from bench.accuracy import score_answer
+    from CortexOS.dms.query_service import answer_question
+    from packs.dms.semantic.loader import reload
+
+    reload()
+    recorded = [item for item in load_golden() if item.match == "reconfirm"]
+    assert recorded, "no golden item is recorded as reconfirm"
+    failures = []
+    for item in recorded:
+        assert item.tier in {"core", "target", "safety"}, item.id
+        result = answer_question(item.question)
+        scored = score_answer(item, result)
+        if scored.outcome != "correct":
+            failures.append((item.id, item.tier, scored.detail, result.get("route")))
+    assert failures == []
 
 
 def test_core_tier_all_correct(full_report):

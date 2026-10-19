@@ -141,6 +141,25 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
 }
+# #412: a model chooses the metric and a second call checks it. The cascade
+# functions stay for the suite double. Any other edit to answer_engine.py
+# needs a new license.
+_METRIC_EXACT_412_BASE = "dd891d297664a8c0baedb078a008163ae9db829c"
+_METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
+    "cursor/not-delayed-exact-metric-5515": frozenset(
+        {"CortexOS/dms/answer_engine.py"}
+    )
+}
+_METRIC_EXACT_412_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "5611e15e6a27bee2e395f392ed103205acb3543e55d2518f342b3452e4c8ff12",
+        (
+            "_exactness_guard_enabled",
+            "_exact_declared_plan",
+            "cascade_match_is_non_exact",
+        ),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -427,6 +446,54 @@ def _is_exact_c7_05_104p2_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_metric_exact_412_seam(path: str) -> bool:
+    """Allow only #412's exact metric-exactness seam on its branch."""
+    allowed = _METRIC_EXACT_412_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    if _git("cat-file", "-e", f"{_METRIC_EXACT_412_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _METRIC_EXACT_412_BASE)
+    for frozen_path, (expected_digest, seam_symbols) in (
+        _METRIC_EXACT_412_EXACT_DIFF.items()
+    ):
+        diff = _git(
+            "diff",
+            "--no-ext-diff",
+            "--unified=0",
+            f"{_METRIC_EXACT_412_BASE}..HEAD",
+            "--",
+            frozen_path,
+        )
+        assert diff.returncode == 0, diff.stderr
+        for symbol in seam_symbols:
+            assert symbol in diff.stdout, (
+                f"#412 metric-exactness seam missing {symbol!r} in {frozen_path}"
+            )
+        stable_diff = "\n".join(
+            line for line in diff.stdout.splitlines() if not line.startswith("index ")
+        )
+        digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+        assert digest == expected_digest, (
+            f"#412 exception covers only its exact metric-exactness seam in {frozen_path}; "
+            "any other edit needs its own license"
+        )
+    license_diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_METRIC_EXACT_412_BASE}..HEAD",
+        "--",
+        "tests/test_crew/test_cot_climb.py",
+    )
+    assert license_diff.returncode == 0, license_diff.stderr
+    assert "_is_exact_metric_exact_412_seam" in license_diff.stdout
+    assert (
+        "test_other_branch_editing_metric_exact_412_still_trips_guard"
+        in license_diff.stdout
+    )
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
     return sorted(
         path
@@ -437,6 +504,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_h2_254_seam(path)
             or _is_exact_extract_pin_277(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or _is_exact_metric_exact_412_seam(path)
         )
     )
 
@@ -492,6 +560,14 @@ def test_other_branch_editing_c7_05_seam_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-05-other-branch")
     path = "CortexOS/dms/answer_engine.py"
     assert _is_exact_c7_05_104p2_seam(path) is False
+
+
+def test_other_branch_editing_metric_exact_412_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/not-delayed-exact-metric-unlicensed")
+    path = "CortexOS/dms/answer_engine.py"
+    assert _is_exact_metric_exact_412_seam(path) is False
 
 
 def test_other_branch_editing_conftest_still_trips_guard(

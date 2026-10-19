@@ -86,7 +86,27 @@ def test_must_fail_scored_pack_questions_never_written(
     monkeypatch.setenv(FLAG, "1")
     ask_http.bind_session("alpha", WAREHOUSE_GRANT)
     bodies = _ask_all(ask_http, PACKS[pack], scored_pack_id=pack)
-    assert _capture_candidates(bodies) >= 1, f"{pack}: no certified/governed answer to refuse"
+    if pack == "c7_heldout_v1":
+        # The only former governed hit was spider_country_mean_lead_having.
+        # It is a HAVING near-miss of avg_lead_time_by_country (above, least),
+        # so a rule serve would be the wrong average. Zero rule serves is the
+        # correct outcome. The write refusal still holds, and re-serving that
+        # near-miss must fail this test.
+        having = [
+            body
+            for question, body in zip(PACKS[pack], bodies, strict=True)
+            if "mean lead time strictly above" in question
+        ]
+        assert having, "held-out HAVING question missing from the pack"
+        assert all(
+            body["provenance"]["layer"] not in ("certified", "governed_metric")
+            for body in having
+        ), having
+    elif pack == "dms_paraphrase_v1":
+        # #412: a paraphrase is not the declared question, so none is a rule serve.
+        assert _capture_candidates(bodies) == 0, pack
+    else:
+        assert _capture_candidates(bodies) >= 1, f"{pack}: no certified/governed answer to refuse"
     assert _rows(skills_db) == 0
 
 
@@ -97,7 +117,8 @@ def test_must_fail_scored_round_env_writes_no_pack_question(
     monkeypatch.setenv("CORTEX_SCORED_ROUND", "1")
     ask_http.bind_session("alpha", WAREHOUSE_GRANT)
     bodies = _ask_all(ask_http, [q for qs in PACKS.values() for q in qs])
-    assert _capture_candidates(bodies) >= 100
+    # Declared certified questions still serve. Paraphrases do not (#412).
+    assert _capture_candidates(bodies) >= len(PACKS["certified_queries"])
     assert _rows(skills_db) == 0
 
 
