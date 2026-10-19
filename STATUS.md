@@ -30,7 +30,7 @@ introduces contract `1.5.0`. Later PRs in this chain rebase onto it.
 | #375 | Issue. `lock_images.py` hardcodes `--python-version 3.11` (follow-up to #360). |
 | #377 | Issue. `check_supply_chain` should fail on unlisted image-only packages (follow-up to #376). |
 | #383 | Issue. Drop unimported diskcache 5.6.3. |
-| #412 | OpenVault chooses a declared metric (or none) and a second call checks it. The keyword cascade, synonym equality, and the `/dms/query` delayed/late regex do not serve. Disagreement reconfirms, or the AI SQL path when L2 is on. Unarmed fails closed. No eval synonyms. "not delayed" is not `delayed_count` 1031. "Exclude delayed … how many remain" is not a delayed listing. |
+| #412 | OpenVault chooses a declared metric (or none) and a second call checks it. The keyword cascade, synonym equality, the `/dms/query` delayed/late regex, and the noun pre-gates (`undefined_subject`, `_shape_refusal`) do not serve. The ontology lists the subjects that exist; a subject that is not among them reconfirms or abstains because the model said so. Disagreement reconfirms, or the AI SQL path when L2 is on. Unarmed fails closed. No eval synonyms. "not delayed" is not `delayed_count` 1031. "Exclude delayed … how many remain" and "how many outbound shipments" reach the port and are not a delayed listing. |
 | trust_remote_code | Named ticket. No issue number was on the repo at this rewrite. `trust_remote_code=True` remains in `CortexOS/nlp/local_inference.py` and `scripts/finetune_dms_tone.py`. |
 | #378-#382 | Dependabot draft PRs (portalocker, nvidia-cusparse, nvidia-cufft, mpmath, dbos). |
 

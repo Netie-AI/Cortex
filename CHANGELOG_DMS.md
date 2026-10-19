@@ -18,7 +18,11 @@ is copied in as a synonym. "How many shipments are not delayed?" is not
 suite's declared-wording double is not the customer path. `POST /dms/query`
 does not search for delayed or late and then run the pre-Q2 ranked listing:
 that path served "Exclude delayed shipments and tell me how many remain" as
-100 delayed rows after the engine had already abstained. An empty value
+100 delayed rows after the engine had already abstained. A noun the
+ontology does not define (`remain`, `outbound`, `forklift`) is no longer a
+regex that refuses before the model: the choose step is told which subjects
+exist, and a subject that is not among them reconfirms or abstains because
+the model said so. An empty value
 dictionary scanned before the lake exists is not cached, so certified
 questions with string literals (warehouse WH-A, outbound, CHEMICALS, PENDING)
 still serve once the lake is loaded.

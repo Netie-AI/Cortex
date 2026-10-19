@@ -18,13 +18,17 @@ UNARMED_CLOSEST = "a declared question"
 
 CHOOSE_INSTRUCTIONS = (
     "Choose the one governed metric that means the same thing as the question. "
-    "Use only the metric definitions. Return JSON and nothing else, with keys "
-    "metric_id, slots, and closest_question. metric_id is a defined id, or "
-    "none when no definition means the question. slots holds only filters the "
-    "definition declares. closest_question is the declared wording of the "
-    "nearest metric, or empty when there is none. Negation and complements "
-    "are different questions from the positive metric: a question that says "
-    "the opposite, an exception, or an absence is not that metric."
+    "Use only the metric definitions and the subjects the ontology lists. "
+    "Return JSON and nothing else, with keys metric_id, slots, and "
+    "closest_question. metric_id is a defined id, or none when no definition "
+    "means the question. slots holds only filters the definition declares. "
+    "closest_question is the declared wording of the nearest metric, or empty "
+    "when there is none. A question about a subject that is not in the "
+    "ontology list is none: do not substitute a nearby subject. A question no "
+    "definition can express, including a total over a ranking or a grouping "
+    "no definition returns, is none. Negation and complements are different "
+    "questions from the positive metric: a question that says the opposite, "
+    "an exception, or an absence is not that metric."
 )
 
 CHECK_INSTRUCTIONS = (

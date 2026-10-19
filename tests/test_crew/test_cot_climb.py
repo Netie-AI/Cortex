@@ -152,7 +152,7 @@ _METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
 }
 _METRIC_EXACT_412_EXACT_DIFF = {
     "CortexOS/dms/answer_engine.py": (
-        "6deb87749999e7edcecbfa586c283b13fb085f69338d9dd0ee36246bb5c8807d",
+        "5611e15e6a27bee2e395f392ed103205acb3543e55d2518f342b3452e4c8ff12",
         (
             "_exactness_guard_enabled",
             "_exact_declared_plan",

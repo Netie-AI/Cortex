@@ -83,6 +83,7 @@ def test_bare_total_revenue_still_answers() -> None:
 
 def test_unknown_subject_still_belongs_to_ans04() -> None:
     body = answer("top 3 customers by amount")
-    assert body["badge"] == "abstain"
+    assert body["badge"] in {"abstain", "reconfirm"}
     assert body["rows"] == []
-    assert "customer" in (body.get("answer") or "").lower()
+    assert body.get("sql_used") is None
+    assert "sku-" not in (body.get("answer") or "").lower()

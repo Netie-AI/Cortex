@@ -20,6 +20,22 @@ from CortexOS.dms.metric_choice import (
 )
 
 
+def ontology_subjects() -> str:
+    """Subjects the semantic layer defines, for the model. Not a serve gate."""
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+
+    base = load_semantic_layer()
+    lines = ["Tables:"]
+    tables = base.get("tables") or {}
+    for name in tables:
+        lines.append(f"- {name}")
+    lines.append("Glossary:")
+    for item in base.get("glossary") or []:
+        if isinstance(item, dict) and item.get("term"):
+            lines.append(f"- {item['term']}")
+    return "\n".join(lines)
+
+
 def metric_catalog() -> str:
     from packs.dms.semantic.loader import load_all
 
@@ -87,7 +103,11 @@ class OpenVaultMetricChoice:
                 {"role": "system", "content": CHOOSE_INSTRUCTIONS},
                 {
                     "role": "user",
-                    "content": f"Question: {question}\n\nMetrics:\n{metric_catalog()}",
+                    "content": (
+                        f"Question: {question}\n\n"
+                        f"Subjects:\n{ontology_subjects()}\n\n"
+                        f"Metrics:\n{metric_catalog()}"
+                    ),
                 },
             ],
             temperature=0.0,

@@ -41,6 +41,9 @@ NEAR_MISSES = [
 ]
 DECLARED = "how many delayed"
 REMAIN = "Exclude delayed shipments and tell me how many remain"
+OUTBOUND_SHIPMENTS = "how many outbound shipments"
+PORT_QUESTIONS = [REMAIN, OUTBOUND_SHIPMENTS]
+_CHOSE: list[str] = []
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +59,7 @@ def _recorded_metric_port() -> Any:
 
     class _Port:
         def choose(self, question: str) -> MetricSelection:
+            _CHOSE.append(question)
             return MetricSelection(
                 metric_id="delayed_count",
                 closest_question=DECLARED,
@@ -72,8 +76,10 @@ def _recorded_metric_port() -> Any:
                 why="the question does not mean delayed_count",
             )
 
+    _CHOSE.clear()
     register_metric_choice(_Port())
     yield
+    _CHOSE.clear()
     clear_metric_choice()
 
 
@@ -190,12 +196,21 @@ def _assert_not_a_delayed_listing(body: dict[str, Any]) -> None:
     }, body
 
 
-def test_must_fail_exclude_delayed_remain_is_not_a_delayed_listing(
-    dms_http: Any,  # noqa: F811
+@pytest.mark.parametrize("question", PORT_QUESTIONS)
+def test_must_fail_subject_question_reaches_the_port_and_is_not_delayed(
+    dms_http: Any, question: str  # noqa: F811
 ) -> None:
-    """'Exclude delayed shipments and tell me how many remain' is not 100 delayed rows."""
+    """A noun the old pre-gate extracted still reaches choose-and-check.
+
+    ``remain`` and ``outbound`` used to abstain before the port. They must
+    be seen by the port, and they must not come back as delayed rows or 1031.
+    """
     for path in ("/dms/query", "/v1/contract/ask"):
-        _assert_not_a_delayed_listing(_ask(dms_http, path, REMAIN))
+        before = len(_CHOSE)
+        body = _ask(dms_http, path, question)
+        assert question in _CHOSE[before:], _CHOSE
+        _assert_not_the_delayed_count(body)
+        _assert_not_a_delayed_listing(body)
 
 
 def test_serve_path_has_no_token_list_or_synonym_gate() -> None:
@@ -269,6 +284,7 @@ def test_serve_path_has_no_lexical_regex() -> None:
     pattern either.
     """
     import ast
+    from pathlib import Path
 
     question_fn = _top_function("CortexOS/dms/query_service.py", "answer_question")
     assert _regex_patterns(question_fn) == []
@@ -280,11 +296,27 @@ def test_serve_path_has_no_lexical_regex() -> None:
 
     answer_fn = _top_function("CortexOS/dms/answer_engine.py", "answer")
     answer_names = {node.id for node in ast.walk(answer_fn) if isinstance(node, ast.Name)}
+    answer_attrs = {node.attr for node in ast.walk(answer_fn) if isinstance(node, ast.Attribute)}
+    pre_gates = {"undefined_subject", "_shape_refusal"}
     assert answer_names.isdisjoint(_LEGACY_SERVE)
+    assert answer_names.isdisjoint(pre_gates), sorted(answer_names & pre_gates)
+    assert answer_attrs.isdisjoint(pre_gates)
     for pattern in _regex_patterns(answer_fn):
         low = pattern.lower()
         assert "delayed" not in low, pattern
         assert "late" not in low, pattern
+    # The model is told which subjects exist. The serve function does not
+    # decide that with a noun regex.
+    from CortexOS.dms.metric_choice import CHOOSE_INSTRUCTIONS
+    from packs.dms.metric_choice import ontology_subjects
+
+    assert "ontology" in CHOOSE_INSTRUCTIONS.lower()
+    subjects = ontology_subjects()
+    for name in ("inventory", "shipments", "suppliers", "locations"):
+        assert name in subjects
+    choose_src = Path("packs/dms/metric_choice.py").read_text(encoding="utf-8")
+    choose_body = choose_src.split("def choose", 1)[1].split("def check", 1)[0]
+    assert "ontology_subjects" in choose_body
 
 
 class _RecordingPort:

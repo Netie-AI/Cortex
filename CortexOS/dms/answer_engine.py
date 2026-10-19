@@ -1952,18 +1952,15 @@ def answer(
             sql = None
             session_rows = None
 
-    # L0 certified → L1 metric → L-skill → L3 abstain
+    # L0 certified → model choose-and-check → L-skill → L3 abstain.
     # Skills run after governed routes so golden/certified paths stay authoritative.
-    # Catalog browse is not a named warehouse subject — check it before
-    # undefined_subject, or "data" / "catalog" abstain as unknown nouns.
+    # A noun the ontology does not define, and a shape no metric can express,
+    # are the model's decision. They are not a regex that refuses first.
     if sql is None:
         from packs.dms.semantic.catalog_answer import is_catalog_intent
 
         if is_catalog_intent(question):
             return _done(_catalog_response(question, audit_id))
-        refused = _shape_refusal(question)
-        if refused:
-            return _abs(refused)
         cq = match_certified(question)
         if cq is not None:
             sql, layer, badge = cq.sql, "certified", "certified"
@@ -1976,13 +1973,6 @@ def answer(
             if violations:
                 return _abs(f"certified query {cq.id} unresolved literal {violations}")
         if sql is None:
-            unknown = undefined_subject(question)
-            if unknown:
-                named = ", ".join(_answerable_entities())
-                return _abs(
-                    f"the question names '{unknown}', which the semantic layer does "
-                    f"not define; it can answer about {named}"
-                )
             from CortexOS.dms.metric_choice import decide_metric
 
             # The cascade does not choose. A model does, and a second model
