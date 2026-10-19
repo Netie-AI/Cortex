@@ -1519,10 +1519,9 @@ numpy==2.4.6 \
     #   scipy
     #   sentence-transformers
     #   transformers
-nvidia-cublas==13.1.1.3 \
-    --hash=sha256:37936a16db8fe4ac1f065c2139360608a543a09275cb1a1af612e08cfa065436 \
-    --hash=sha256:b6cdce694e47ff6aadf0a69df1cab6628d696f5ff56e8d16af50309d855fa20f \
-    --hash=sha256:b7a210458267ac818974c53038fbec2e969d5c99f305ab15c72522fa9f001dd5
+nvidia-cublas==13.8.1.7 \
+    --hash=sha256:803b9974cd7164a481d0b11c25826498d383d0ef0c372573bc6577a344ddf74e \
+    --hash=sha256:c11a27fd4379510e5b1f84b367a2514d1e52fe5cc13442117a0e0a1addee3cf2
     # via
     #   cuda-toolkit
     #   nvidia-cudnn-cu13
