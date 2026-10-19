@@ -12,9 +12,10 @@ only contains reconfirms: why it cannot be served directly, the closest
 declared question, Yes runs that question, No answers "not found in the
 database". With `DMS_L2_ENABLED` on, that question goes to the model step
 instead. The serve gate has no word list. The legacy delayed-row template
-does not pick the question back up. Natural question forms, including
-"How many shipments are delayed?", are declared synonyms in `metrics.yaml`.
-Negated and complement forms are not.
+does not pick the question back up. Eval-set questions (golden, paraphrase,
+adversarial, seeds) are not copied into `metrics.yaml`. Golden items and
+corpus seeds that reconfirm keep their tier; the expectation is reconfirm
+with the closest declared question.
 
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 

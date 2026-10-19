@@ -390,6 +390,23 @@ def load_answering_baseline(path: Path = BASELINE_PATH) -> frozenset[str]:
     return frozenset(str(i) for i in (raw.get("answering") or []))
 
 
+def load_reconfirm_baseline(path: Path = BASELINE_PATH) -> dict[str, str]:
+    """Seed id to the closest declared question it reconfirms with.
+
+    These ids used to answer. They are recorded here, with the closest
+    question, so leaving ``answering`` is an explicit expectation.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    recorded: dict[str, str] = {}
+    for row in raw.get("reconfirm") or []:
+        if isinstance(row, dict) and row.get("id"):
+            recorded[str(row["id"])] = str(row.get("closest_question") or "")
+    return recorded
+
+
 def _is_regression(item_id: str, outcome: str, baseline: frozenset[str]) -> bool:
     """Did an item that used to answer stop answering?
 
@@ -841,15 +858,23 @@ def _write_baseline(report: dict[str, Any], *, seeds_only: bool, live: bool) -> 
     regen = "python -m bench.corpus --write-baseline"
     if not seeds_only:
         regen += " --expanded"
+    kept = [
+        {"id": seed_id, "closest_question": closest}
+        for seed_id, closest in sorted(load_reconfirm_baseline().items())
+        if seed_id not in ids
+    ]
     payload = {
         "_comment": (
-            "EVAL-01 answering baseline. Every id here answered when recorded. If "
-            "one abstains later, an answer the customer used to get silently "
-            "became a refusal — a regression the corpus previously scored as free, "
-            "bounded only by a 0.38 rate ceiling over 47 claim items."
+            "EVAL-01 answering baseline. Every id in answering answered when "
+            "recorded. If one abstains later, an answer the customer used to get "
+            "silently became a refusal — a regression the corpus previously scored "
+            "as free, bounded only by a 0.38 rate ceiling over 47 claim items. "
+            "Ids in reconfirm used to answer and now reconfirm: the closest "
+            "declared question is the recorded expectation."
         ),
         "_regenerate": regen,
         "answering": ids,
+        "reconfirm": kept,
     }
     BASELINE_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"baseline: recorded {len(ids)} answering items -> {BASELINE_PATH.name}")

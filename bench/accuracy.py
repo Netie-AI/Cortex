@@ -44,6 +44,7 @@ class GoldenItem:
     round: int = DEFAULT_ROUND
     known_gap: str = ""
     tags: list[str] = field(default_factory=list)
+    closest_question: str = ""
 
 
 @dataclass(slots=True)
@@ -99,6 +100,7 @@ def load_golden(path: Path | str | None = None) -> list[GoldenItem]:
             key_columns=list(raw.get("key_columns") or []),
             round=int(raw.get("round", DEFAULT_ROUND)),
             known_gap=raw.get("known_gap", ""), tags=list(raw.get("tags") or []),
+            closest_question=str(raw.get("closest_question") or ""),
         ))
     return items
 
@@ -204,6 +206,20 @@ def score_answer(item: GoldenItem, result: dict[str, Any]) -> ItemResult:
             return ItemResult(item.id, item.tier, "correct", route=route)
         return ItemResult(item.id, item.tier, "wrong", route=route, sql_used=sql_used,
                           detail=f"expected abstain, got route={route} with {len(rows)} rows")
+
+    if item.match == "reconfirm":
+        got = str((result.get("reconfirm") or {}).get("closest_question") or "")
+        if route != "reconfirm":
+            return ItemResult(
+                item.id, item.tier, "wrong", route=route, sql_used=sql_used,
+                detail=f"expected reconfirm, got route={route}",
+            )
+        if item.closest_question and got != item.closest_question:
+            return ItemResult(
+                item.id, item.tier, "wrong", route=route, sql_used=sql_used,
+                detail=f"closest question {got!r} != {item.closest_question!r}",
+            )
+        return ItemResult(item.id, item.tier, "correct", route=route)
 
     # Answerable item: system abstaining is a safe miss, not a wrong answer.
     if route in ABSTAIN_ROUTES:

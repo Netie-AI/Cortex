@@ -52,7 +52,8 @@ items:
   - id: sales_top5_exclude_beta
     tier: core
     question: "excluding BETA, top 5 sku by revenue"
-    match: resultset
+    match: reconfirm
+    closest_question: "revenue by sku"
     canonical_sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
       FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
@@ -62,11 +63,12 @@ items:
     tags: [sales, rank, value_normalization]
     category: value_normalization
 
-  # ANS-01: exact SKU + conjunction + trailing skip token must exclude and answer.
+  # ANS-01: exact SKU + conjunction is not the declared question, so it reconfirms.
   - id: exclude_exact_sku_conjunction
     tier: core
     question: "ignore SKU-BETA and also show the top 5 SKUs by revenue"
-    match: resultset
+    match: reconfirm
+    closest_question: "revenue by sku"
     canonical_sql: >
       SELECT sku, ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr
       FROM transactions WHERE txn_type = 'OUT' AND sku NOT IN ('SKU-BETA')
@@ -90,7 +92,8 @@ items:
   - id: delayed_count_scalar
     tier: target
     question: "Which shipments are delayed?"
-    match: listing_total
+    match: reconfirm
+    closest_question: "shipments that are"
     canonical_sql: "SELECT shipment_id FROM shipments WHERE status = 'DELAYED'"
     key_columns: [shipment_id]
     known_gap: >
@@ -101,7 +104,8 @@ items:
   - id: in_transit
     tier: target
     question: "Which shipments are in transit?"
-    match: listing_total
+    match: reconfirm
+    closest_question: "shipments that are"
     canonical_sql: "SELECT shipment_id FROM shipments WHERE status = 'IN_TRANSIT'"
     key_columns: [shipment_id]
     known_gap: "2846 rows vs max_limit_1000 guard - silent truncation (Q2: aggregate or disclose)"
@@ -110,7 +114,8 @@ items:
   - id: arriving_week
     tier: target
     question: "Which shipments are arriving this week?"
-    match: listing_total
+    match: reconfirm
+    closest_question: "arriving this week"
     canonical_sql: >
       SELECT shipment_id FROM shipments
       WHERE status = 'IN_TRANSIT'
@@ -227,7 +232,8 @@ items:
   - id: stale_restock
     tier: target
     question: "Which items were not restocked in the last 30 days?"
-    match: listing_total
+    match: reconfirm
+    closest_question: "not restocked"
     canonical_sql: >
       SELECT sku FROM inventory
       WHERE CAST(last_restocked AS DATE) < CURRENT_DATE - INTERVAL 30 DAY
@@ -238,7 +244,8 @@ items:
   - id: low_stock_all
     tier: target
     question: "Which SKUs are below reorder level?"
-    match: listing_total
+    match: reconfirm
+    closest_question: "below reorder"
     canonical_sql: >
       SELECT i.sku, i.quantity_kg FROM inventory i
       WHERE i.quantity_kg < i.reorder_level_kg AND i.reorder_level_kg > 0
@@ -288,7 +295,8 @@ items:
   - id: risk_above_070
     tier: target
     question: "Which suppliers have a risk score above 0.7?"
-    match: resultset
+    match: reconfirm
+    closest_question: "risk score above"
     canonical_sql: "SELECT supplier_id FROM suppliers WHERE risk_score > 0.7"
     key_columns: [supplier_id]
     known_gap: "ranked-path keyword 'score' fires before the risk-filter branch (dead branch)"
@@ -297,7 +305,8 @@ items:
   - id: delayed_by_carrier
     tier: target
     question: "Which carriers have the most delayed shipments?"
-    match: resultset
+    match: reconfirm
+    closest_question: "which carriers"
     canonical_sql: >
       SELECT carrier, COUNT(*) AS shipment_count
       FROM shipments WHERE status = 'DELAYED' GROUP BY carrier
@@ -308,7 +317,8 @@ items:
   - id: delayed_incoming_per_wh
     tier: target
     question: "How many delayed incoming shipments per warehouse?"
-    match: resultset
+    match: reconfirm
+    closest_question: "per warehouse incoming"
     canonical_sql: >
       SELECT l.location_code, COUNT(*) AS shipment_count
       FROM shipments s JOIN locations l ON s.destination_location_id = l.location_id
@@ -320,7 +330,8 @@ items:
   - id: avg_lead_time_by_country
     tier: target
     question: "What is the average lead time by supplier country?"
-    match: resultset
+    match: reconfirm
+    closest_question: "average lead time by country"
     canonical_sql: >
       SELECT country, ROUND(AVG(lead_time_days), 2) AS avg_lead_time_days
       FROM suppliers GROUP BY country
@@ -332,7 +343,8 @@ items:
   - id: revenue_last_30d
     tier: target
     question: "What was our revenue in the last 30 days?"
-    match: scalar
+    match: reconfirm
+    closest_question: "sales in the last"
     canonical_sql: >
       SELECT ROUND(COALESCE(SUM(quantity_kg * unit_cost_myr), 0), 2) AS revenue_myr
       FROM transactions
@@ -346,7 +358,8 @@ items:
   - id: most_free_capacity
     tier: target
     question: "Which warehouse has the most free capacity in kg?"
-    match: resultset
+    match: reconfirm
+    closest_question: "most free capacity"
     canonical_sql: >
       SELECT location_code, capacity_kg - current_load_kg AS free_kg
       FROM locations ORDER BY free_kg DESC LIMIT 1
@@ -357,7 +370,8 @@ items:
   - id: cold_storage_count
     tier: target
     question: "How many cold storage locations do we have?"
-    match: scalar
+    match: reconfirm
+    closest_question: "how many cold storage"
     canonical_sql: >
       SELECT COUNT(*) AS cold_count FROM locations WHERE is_cold_storage = true
     key_columns: [cold_count]

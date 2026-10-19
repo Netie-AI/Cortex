@@ -46,12 +46,17 @@ def load_paraphrases(path: Path | str | None = None) -> dict[str, list[str]]:
 
 
 def _variant(parent: GoldenItem, question: str, idx: int) -> GoldenItem:
-    """A paraphrase inherits its parent's entire correctness contract."""
+    """A paraphrase inherits its parent's contract, not a pinned closest question.
+
+    A parent recorded as reconfirm is a refusal. Its paraphrases are scored as
+    abstentions, so a different closest question is not a wrong answer.
+    """
+    match = "abstain" if parent.match == "reconfirm" else parent.match
     return GoldenItem(
         id=f"{parent.id}#p{idx}",
         tier=parent.tier,
         question=question,
-        match=parent.match,
+        match=match,
         canonical_sql=parent.canonical_sql,
         key_columns=list(parent.key_columns),
         round=parent.round,

@@ -59,9 +59,7 @@ HEADERS = {
 }
 _FROZEN_UUID = uuid.UUID("0123456789abcdef0123456789abcdef")
 # Measured on 279cbd85 with the frozen clock below, usage key absent.
-# Moved when metrics.yaml gained declared natural questions. The insights
-# card lists those phrases; usage and row_cap stay absent.
-_ABSENT_SHA256 = "11c7195469881d2052751509ec20a6d23957efd75dc2818001626cc2cb971ae1"
+_ABSENT_SHA256 = "6c38d0a89050612baebae9c32e4f77c511d365211d8d7cd4636656b9627c2e95"
 
 
 def _pack_tables(intent: str) -> set[str]:
