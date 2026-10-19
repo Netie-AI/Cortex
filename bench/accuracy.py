@@ -181,6 +181,10 @@ def _ensure_db_loaded() -> None:
     counts = warehouse_db.table_row_counts(db) if db.exists() else {}
     if not counts or sum(counts.values()) == 0 or _unmapped_rows(db):
         warehouse_db.load_inventory_csv()
+    # A scan taken before this load must not keep serving an empty dictionary.
+    from packs.dms.semantic.values import refresh
+
+    refresh()
 
 
 def score_answer(item: GoldenItem, result: dict[str, Any]) -> ItemResult:
