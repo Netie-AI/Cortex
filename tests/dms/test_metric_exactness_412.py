@@ -40,6 +40,7 @@ NEAR_MISSES = [
     "How many shipments are undelayed?",
 ]
 DECLARED = "how many delayed"
+REMAIN = "Exclude delayed shipments and tell me how many remain"
 
 
 @pytest.fixture(autouse=True)
@@ -169,6 +170,34 @@ def test_must_fail_no_answers_not_found(dms_http: Any) -> None:  # noqa: F811
     assert "1031" not in str(body.get("answer"))
 
 
+def _assert_not_a_delayed_listing(body: dict[str, Any]) -> None:
+    """The remain question must not come back as delayed rows or 1031."""
+    assert body.get("rows") in ([], None), body.get("rows")
+    assert not body.get("sql_used"), body.get("sql_used")
+    assert body.get("metric_id") in (None, ""), body.get("metric_id")
+    text = str(body.get("answer") or "")
+    low = text.lower()
+    assert "delayed shipment row" not in low, text
+    assert "sorted by days delayed" not in low, text
+    assert "1031" not in text.replace(",", "")
+    assert "1,031" not in text
+    badge = _badge(body).lower()
+    route = str(body.get("route") or "").lower()
+    assert badge in {"abstain", "reconfirm"} or route in {
+        "needs_clarification",
+        "reconfirm",
+        "abstain",
+    }, body
+
+
+def test_must_fail_exclude_delayed_remain_is_not_a_delayed_listing(
+    dms_http: Any,  # noqa: F811
+) -> None:
+    """'Exclude delayed shipments and tell me how many remain' is not 100 delayed rows."""
+    for path in ("/dms/query", "/v1/contract/ask"):
+        _assert_not_a_delayed_listing(_ask(dms_http, path, REMAIN))
+
+
 def test_serve_path_has_no_token_list_or_synonym_gate() -> None:
     """The customer serve path does not match synonyms or list negation words."""
     import ast
@@ -197,6 +226,65 @@ def test_serve_path_has_no_token_list_or_synonym_gate() -> None:
     assert "_normalize" not in decide
     for word in ("aren't", "undelayed", "without", "except", "never"):
         assert word not in decide
+
+
+_REGEX_ATTRS = frozenset(
+    {"search", "match", "fullmatch", "findall", "finditer", "compile", "sub", "subn", "split"}
+)
+_LEGACY_SERVE = frozenset({"_try_generate_ranked_sql", "_answer_question_legacy"})
+
+
+def _top_function(path: str, name: str) -> Any:
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    return next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _regex_patterns(fn: Any) -> list[str]:
+    import ast
+
+    found: list[str] = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in _REGEX_ATTRS or not node.args:
+            continue
+        arg = node.args[0]
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            found.append(arg.value)
+    return found
+
+
+def test_serve_path_has_no_lexical_regex() -> None:
+    """No lexical regex chooses a serve in ``answer`` or ``answer_question``.
+
+    ``POST /dms/query`` used to search ``\\b(delayed|late)\\b`` after the
+    engine abstained and then call ``_try_generate_ranked_sql``. That served
+    delayed rows for a complement. ``answer_question`` now has no regex and
+    does not call the ranked generator. ``answer`` has no delayed or late
+    pattern either.
+    """
+    import ast
+
+    question_fn = _top_function("CortexOS/dms/query_service.py", "answer_question")
+    assert _regex_patterns(question_fn) == []
+    names = {node.id for node in ast.walk(question_fn) if isinstance(node, ast.Name)}
+    attrs = {node.attr for node in ast.walk(question_fn) if isinstance(node, ast.Attribute)}
+    assert names.isdisjoint(_LEGACY_SERVE)
+    assert attrs.isdisjoint(_LEGACY_SERVE)
+    assert attrs.isdisjoint(_REGEX_ATTRS)
+
+    answer_fn = _top_function("CortexOS/dms/answer_engine.py", "answer")
+    answer_names = {node.id for node in ast.walk(answer_fn) if isinstance(node, ast.Name)}
+    assert answer_names.isdisjoint(_LEGACY_SERVE)
+    for pattern in _regex_patterns(answer_fn):
+        low = pattern.lower()
+        assert "delayed" not in low, pattern
+        assert "late" not in low, pattern
 
 
 class _RecordingPort:

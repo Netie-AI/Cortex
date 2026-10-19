@@ -15,7 +15,13 @@ Unarmed OpenVault fails closed. No word list and no synonym-equality gate sit
 in that decision. `metrics.yaml` is unchanged from main, so no eval question
 is copied in as a synonym. "How many shipments are not delayed?" is not
 `delayed_count` 1031 (the warehouse has 10969 that are not delayed). The
-suite's declared-wording double is not the customer path.
+suite's declared-wording double is not the customer path. `POST /dms/query`
+does not search for delayed or late and then run the pre-Q2 ranked listing:
+that path served "Exclude delayed shipments and tell me how many remain" as
+100 delayed rows after the engine had already abstained. An empty value
+dictionary scanned before the lake exists is not cached, so certified
+questions with string literals (warehouse WH-A, outbound, CHEMICALS, PENDING)
+still serve once the lake is loaded.
 
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 

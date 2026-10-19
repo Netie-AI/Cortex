@@ -910,61 +910,34 @@ def answer_question(
     space_id: str | None = None,
     require_grounding: bool = False,
 ) -> dict[str, Any]:
-    """Q2 — route through the layered answer engine (certified → governed metric →
-    L2 model step → abstain).
+    """Q2 — route through the layered answer engine.
 
-    An engine error is a named abstain with no rows, never the legacy keyword
-    generator (DECISION5-LEGACY-01). The answer says whether the model step or
-    the engine failed.
+    Certified SQL, then a model that chooses a governed metric and a second
+    model that checks it, then the L2 model step, then abstain. A word match
+    does not choose a serve. The pre-Q2 ranked-SQL generator is not on this
+    path (DECISION5-LEGACY-01): an engine abstain, including one that names
+    delayed or late shipments, is returned as the engine left it.
 
-    Bridge: with the model step (``DMS_L2_ENABLED``) off, when the engine abstains
-    but a ranked legacy SQL template still matches (delayed shipments), serve the
-    legacy path so pre-Q2 demo queries keep working until dedicated governed
-    metrics cover them. With the model step on, the engine's abstain is final: a
-    failed or refused model step must not be replaced by a rule answer.
+    An engine error is a named abstain with no rows. The answer says whether
+    the model step or the engine failed.
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
         from CortexOS.execution.manifest import ManifestError
 
-        result = _engine_answer(
+        # The engine envelope is the answer, including when nothing is granted.
+        # Do not open another connection and answer from the demo warehouse.
+        return _engine_answer(
             question,
             session_id=session_id,
             space_id=space_id,
             require_grounding=require_grounding,
         )
-        # A served turn that nothing grants must not fall through to the
-        # pre-Q2 ranked-SQL path. That bridge opens its own connection and
-        # would answer from the demo warehouse under the abstain.
-        if result.get("grant_kind") == "none":
-            return result
-        # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
-        # until a dedicated governed metric exists. Word-boundary match only — bare
-        # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
-        # A non-exact cascade hit (the question outgrows the metric) must not
-        # fall through to that template: it is the same overlap, served as rows.
-        q = question.lower()
-        if (
-            result.get("route") == "needs_clarification"
-            and result.get("metric_choice") != "refused"
-            and not _model_step_enabled()
-            and re.search(r"\b(delayed|late)\b", q)
-            and _try_generate_ranked_sql(question)
-        ):
-            return _answer_question_legacy(question, session_id=session_id)
-        return result
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.
         raise
     except Exception as exc:  # noqa: BLE001 — engine failure must not take the API down
         return engine_failure_abstain(exc)
-
-
-def _model_step_enabled() -> bool:
-    """True when the L2 model step is the configured answer path for engine misses."""
-    from CortexOS.dms.l2_generation import _env_on
-
-    return _env_on("DMS_L2_ENABLED")
 
 
 def _raised_in_model_step(exc: BaseException) -> bool:
