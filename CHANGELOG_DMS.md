@@ -2,20 +2,20 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
-## METRIC-EXACT-01 (#412) -- 2026-10-18
+## METRIC-MATCH-AI-01 (#412, folds #425) -- 2026-10-19
 
-The keyword cascade serves a metric only when the question is that metric's
-declared question (a synonym, the whole question, not a containing phrase).
-"How many shipments are not delayed?" was served as `delayed_count` 1031; the
-warehouse has 10969 shipments that are not delayed. A question the cascade
-only contains reconfirms: why it cannot be served directly, the closest
-declared question, Yes runs that question, No answers "not found in the
-database". With `DMS_L2_ENABLED` on, that question goes to the model step
-instead. The serve gate has no word list. The legacy delayed-row template
-does not pick the question back up. Eval-set questions (golden, paraphrase,
-adversarial, seeds) are not copied into `metrics.yaml`. Golden items and
-corpus seeds that reconfirm keep their tier; the expectation is reconfirm
-with the closest declared question.
+The keyword cascade and synonym equality no longer decide what is served.
+An OpenVault step reads the question plus the metric definitions and returns
+one declared metric and its filters, or none. It is told that negation and
+complements are not the positive metric. A second model call checks that the
+chosen metric means the question. Disagreement or uncertainty does not serve:
+the question reconfirms (closest question, Yes runs it, No is "not found in
+the database") or, when `DMS_L2_ENABLED` is on, goes to the AI SQL path.
+Unarmed OpenVault fails closed. No word list and no synonym-equality gate sit
+in that decision. `metrics.yaml` is unchanged from main, so no eval question
+is copied in as a synonym. "How many shipments are not delayed?" is not
+`delayed_count` 1031 (the warehouse has 10969 that are not delayed). The
+suite's declared-wording double is not the customer path.
 
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 

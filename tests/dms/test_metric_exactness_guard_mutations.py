@@ -1,8 +1,8 @@
-"""#412 guard-removed proof: the must-fails fail when the exactness guard is off.
+"""#412 guard-removed proof: the must-fails fail when the metric check is off.
 
-The subprocess loads tests/dms/metric_exactness_guard_off.py, which makes
-``route_to_metric`` serve the keyword cascade again. Each must-fail must then
-FAIL. The same tests pass with the guard on.
+The subprocess loads tests/dms/metric_exactness_guard_off.py, which serves the
+chosen metric without the meaning check. Each must-fail must then FAIL. The
+same tests pass with the check on.
 """
 
 from __future__ import annotations

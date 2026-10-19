@@ -597,5 +597,11 @@ def test_c7_04_subject_misroute_now_abstains(
     assert envelope["rows"] == []
     assert envelope["sql_used"] is None
     assert envelope["badge"] in {"abstain", "reconfirm"}
-    text = envelope["answer"] or ""
-    assert "subject 'overtime'" in text or "not the declared question" in text
+    text = (envelope["answer"] or "").lower()
+    assert (
+        "subject 'overtime'" in text
+        or "not the declared question" in text
+        or "not that metric's declared question" in text
+        or "can't answer" in text
+        or "cannot be served" in text
+    )

@@ -1,19 +1,13 @@
-"""#412: the keyword cascade serves only a metric's declared question.
+"""#412: a model chooses the metric, and a second model checks the meaning.
 
 On main, "how many shipments are not delayed" took the L1 keyword cascade to
 ``delayed_count`` (1031). The warehouse has 10969 shipments that are not
-delayed. A question that is not the declared question reconfirms: why it
-cannot be served directly, the closest declared question, Yes runs that
-question, No answers "not found in the database". With the model step on, the
-question goes to that step instead. The guard has no token list.
+delayed. These tests install a recorded port that picks ``delayed_count`` for
+the seven phrasings and a check that disagrees. The HTTP answer reconfirms.
+No answers "not found in the database". With the model step on, the phrasing
+is handed to that step. Removing the check serves 1031.
 
-Must-fails (each goes red with the guard removed; see
-test_metric_exactness_guard_mutations.py):
-
-* ``test_must_fail_near_miss_is_not_served_as_delayed_count`` -- seven
-  phrasings, ``POST /dms/query`` and ``POST /v1/contract/ask``.
-* ``test_must_fail_near_miss_reaches_the_model_step`` -- the same question is
-  handed to the model step, and the declared delayed question is not.
+The serve path has no token list and no synonym-equality gate.
 """
 
 from __future__ import annotations
@@ -46,6 +40,40 @@ NEAR_MISSES = [
     "How many shipments are undelayed?",
 ]
 DECLARED = "how many delayed"
+
+
+@pytest.fixture(autouse=True)
+def _recorded_metric_port() -> Any:
+    """A bad chooser picks delayed_count. The check refuses the seven phrasings."""
+    from CortexOS.dms.answer_engine import _normalize
+    from CortexOS.dms.metric_choice import (
+        MetricSelection,
+        MetricVerdict,
+        clear_metric_choice,
+        register_metric_choice,
+    )
+
+    class _Port:
+        def choose(self, question: str) -> MetricSelection:
+            return MetricSelection(
+                metric_id="delayed_count",
+                closest_question=DECLARED,
+                why="selected delayed_count",
+            )
+
+        def check(self, question: str, selection: MetricSelection) -> MetricVerdict:
+            del selection
+            if _normalize(question) == DECLARED:
+                return MetricVerdict(agrees=True, unsure=False, why="")
+            return MetricVerdict(
+                agrees=False,
+                unsure=False,
+                why="the question does not mean delayed_count",
+            )
+
+    register_metric_choice(_Port())
+    yield
+    clear_metric_choice()
 
 
 def _ask(client: Any, path: str, question: str) -> dict[str, Any]:
@@ -113,7 +141,8 @@ def test_must_fail_near_miss_is_not_served_as_delayed_count(
         _assert_not_the_delayed_count(_ask(dms_http, path, question))
 
 
-def test_declared_delayed_question_stays_on_the_rule(dms_http: Any) -> None:  # noqa: F811
+def test_agreed_metric_runs_governed_sql(dms_http: Any) -> None:  # noqa: F811
+    """The recorded port agrees that the declared wording is delayed_count."""
     body = _ask(dms_http, "/dms/query", DECLARED)
     assert body.get("layer") == "governed_metric", body
     assert body.get("metric_id") == "delayed_count"
@@ -140,18 +169,34 @@ def test_must_fail_no_answers_not_found(dms_http: Any) -> None:  # noqa: F811
     assert "1031" not in str(body.get("answer"))
 
 
-def test_gate_contains_no_token_list() -> None:
-    """The serve gate matches a declared question. It does not list words."""
+def test_serve_path_has_no_token_list_or_synonym_gate() -> None:
+    """The customer serve path does not match synonyms or list negation words."""
+    import ast
     from pathlib import Path
 
-    src = Path("CortexOS/dms/answer_engine.py").read_text(encoding="utf-8")
-    start = src.index("def _exactness_guard_enabled")
-    end = src.index("def _true_count")
-    gate = src[start:end]
-    assert "INVARIANT_TOKENS" not in gate
-    assert "frozenset" not in gate
+    engine = Path("CortexOS/dms/answer_engine.py").read_text(encoding="utf-8")
+    tree = ast.parse(engine)
+    answer = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "answer"
+    )
+    names = {node.id for node in ast.walk(answer) if isinstance(node, ast.Name)}
+    banned = {
+        "route_to_metric",
+        "_exact_declared_plan",
+        "_route_to_metric_cascade",
+        "cascade_match_is_non_exact",
+        "_declared_question_keys",
+        "INVARIANT_TOKENS",
+    }
+    assert names.isdisjoint(banned), sorted(names & banned)
+    choice = Path("CortexOS/dms/metric_choice.py").read_text(encoding="utf-8")
+    decide = choice.split("def decide_metric", 1)[1].split("\ndef ", 1)[0]
+    assert "INVARIANT_TOKENS" not in decide
+    assert "frozenset" not in decide
+    assert "_declared_question_keys" not in decide
+    assert "_normalize" not in decide
     for word in ("aren't", "undelayed", "without", "except", "never"):
-        assert word not in gate
+        assert word not in decide
 
 
 class _RecordingPort:
@@ -184,10 +229,10 @@ class _RecordingPort:
 def test_must_fail_near_miss_reaches_the_model_step(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Flags off, the near-miss used to stop at the rule. It now reaches L2.
+    """The check rejected the metric, so the question is handed to the SQL step.
 
-    The port returns no SQL, so the envelope still abstains. The exact delayed
-    count never reaches the port.
+    The SQL port returns nothing, so the envelope abstains. The wording the
+    check accepted does not reach that port.
     """
     from bench.accuracy import _ensure_db_loaded
     from CortexOS.dms import l2_generation

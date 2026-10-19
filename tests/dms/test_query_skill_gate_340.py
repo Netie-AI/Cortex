@@ -164,11 +164,22 @@ def _governed_answer(body: dict[str, Any]) -> None:
 
 
 def _only_skills_can_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Take L0/L1 out so a stored skill is the only path to rows."""
+    """Take certified and metric choice out so a stored skill is the only path."""
     from CortexOS.dms import answer_engine as ae
+    from CortexOS.dms.metric_choice import UNARMED_CLOSEST, MetricDecision, MetricSelection
 
     monkeypatch.setattr(ae, "match_certified", lambda _q: None)
     monkeypatch.setattr(ae, "route_to_metric", lambda _q: None)
+
+    def _none(question: str) -> MetricDecision:
+        del question
+        selection = MetricSelection(
+            closest_question=UNARMED_CLOSEST,
+            why="no declared metric was chosen, so it cannot be served directly",
+        )
+        return MetricDecision(False, selection, selection.why)
+
+    monkeypatch.setattr("CortexOS.dms.metric_choice.decide_metric", _none)
 
 
 def _skill_answer(body: dict[str, Any]) -> None:

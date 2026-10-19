@@ -136,7 +136,9 @@ def test_null_expiry_count_does_not_compile_as_sku_count():
     plan = route_to_metric(q)
     assert plan is None or plan.metric_id != "sku_count"
     r = answer(q)
-    assert r["badge"] == "abstain", r.get("answer")
+    assert r["badge"] == "reconfirm", r.get("answer")
+    assert not r.get("rows")
+    assert r.get("sql_used") is None
 
 
 def test_pending_high_risk_is_not_a_bare_risk_listing():

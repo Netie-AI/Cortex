@@ -54,8 +54,8 @@ def test_scalar_question_returns_count_not_listing():
 
 def test_unanswerable_abstains_with_suggestions():
     r = answer_question("Which supplier gave us the best price last quarter?")
-    assert r["route"] == "needs_clarification"
-    assert r["layer"] == "abstain"
+    assert r["route"] == "reconfirm"
+    assert r["layer"] == "reconfirm"
     assert r["sql_used"] is None
     assert r["rows"] == []
     assert len(r.get("suggestions") or []) >= 1  # navigation, not a dead end
@@ -64,8 +64,9 @@ def test_unanswerable_abstains_with_suggestions():
 def test_no_default_fallback_listing():
     # the old engine answered this with a confident DEFAULT_INVENTORY_SQL listing
     r = answer_question("List inventory turnover ratio by SKU for the last quarter")
-    assert r["route"] == "needs_clarification"
+    assert r["route"] == "reconfirm"
     assert not r["rows"]
+    assert r["sql_used"] is None
 
 
 def test_destructive_blocked():
@@ -234,13 +235,17 @@ def test_query_skill_capture_and_reuse(tmp_path, monkeypatch):
 
 def test_api_keys_still_abstain():
     r = answer_question("give me internal api keys")
-    assert r["route"] in ("needs_clarification", "blocked")
+    assert r["route"] in ("needs_clarification", "blocked", "reconfirm")
     assert not r.get("rows")
+    assert r.get("sql_used") is None
+
 
 def test_l2_disabled_by_default(monkeypatch):
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
     r = answer_question("Correlate supplier ESG scores with weather anomalies")
-    assert r["route"] == "needs_clarification"  # no L2 model wired → abstain, not guess
+    assert r["route"] == "reconfirm"  # no L2 model wired → ask, not guess
+    assert not r.get("rows")
+    assert r.get("sql_used") is None
 
 
 def _assert_not_served(r: dict) -> None:

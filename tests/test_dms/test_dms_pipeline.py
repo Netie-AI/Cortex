@@ -160,9 +160,11 @@ def test_query_random_question_asks_for_dms_clarification():
     from netie.dms import query_service
 
     result = query_service.answer_question("how do I lean back in my chair?")
-    assert result["route"] == "needs_clarification"
+    assert result["route"] in ("needs_clarification", "reconfirm")
     assert result["sql_used"] is None
-    assert "DMS semantic layer" in result["answer"]
+    assert result.get("rows") in ([], None)
+    text = result["answer"]
+    assert "DMS semantic layer" in text or "Yes runs that question" in text
 
 
 def test_query_blocks_drop(loaded_db, monkeypatch):

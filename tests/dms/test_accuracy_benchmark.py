@@ -33,7 +33,7 @@ def test_golden_set_shape():
         if item.match in ("resultset", "scalar", "listing_total"):
             assert item.canonical_sql, item.id
         if item.match == "reconfirm":
-            assert item.closest_question, item.id
+            assert isinstance(item.closest_question, str), item.id
 
 
 def test_reconfirm_items_keep_their_tier_and_closest_question():

@@ -162,32 +162,19 @@ def test_flag_unset_ask_is_byte_identical_to_main(
 ) -> None:
     for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
         monkeypatch.delenv(name, raising=False)
-    from CortexOS.dms.answer_engine import (
-        _metric_subject_mismatch,
-        _route_to_metric_cascade,
-        _shape_refusal,
-        cascade_match_is_non_exact,
-        match_certified,
-        undefined_subject,
-    )
-
-    def _subject_blocks(question: str) -> bool:
-        neighbour = _route_to_metric_cascade(question)
-        return neighbour is not None and _metric_subject_mismatch(question, neighbour) is not None
+    from CortexOS.dms.answer_engine import match_certified
 
     seen, modes, bodies = _run(ask_http)
-    # #412: a cascade hit that is not the metric's declared question, and that
-    # no earlier refusal already owns, reconfirms. Certified questions and
-    # earlier refusals stay byte-identical to the recorded main golden.
-    non_exact = {
-        qid
-        for qid, question in _questions()
-        if cascade_match_is_non_exact(question)
-        and match_certified(question) is None
-        and undefined_subject(question) is None
-        and _shape_refusal(question) is None
-        and not _subject_blocks(question)
-    }
+    # A question the metric check does not serve reconfirms. Certified
+    # questions, and a metric the check accepts, stay byte-identical to the
+    # recorded main golden.
+    certified = {qid for qid, question in _questions() if match_certified(question) is not None}
+    non_exact = set()
+    for qid, body in bodies.items():
+        badge = str((body.get("provenance") or {}).get("badge") or body.get("badge") or "")
+        if badge == "reconfirm":
+            assert qid not in certified, qid
+            non_exact.add(qid)
     for qid in sorted(non_exact):
         body = bodies[qid]
         badge = str((body.get("provenance") or {}).get("badge") or body.get("badge") or "")

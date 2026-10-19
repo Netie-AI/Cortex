@@ -1,5 +1,5 @@
 {
-  "_comment": "EVAL-01 answering baseline. Every id in answering answered when recorded. If one abstains later, an answer the customer used to get silently became a refusal — a regression the corpus previously scored as free, bounded only by a 0.38 rate ceiling over 47 claim items. Ids in reconfirm used to answer and now reconfirm: the closest declared question is the recorded expectation, so the move is not a silent deletion.",
+  "_comment": "EVAL-01 answering baseline. Every id in answering answered when recorded. If one abstains later, an answer the customer used to get silently became a refusal \u2014 a regression the corpus previously scored as free, bounded only by a 0.38 rate ceiling over 47 claim items. Ids in reconfirm used to answer and now reconfirm: the closest declared question is the recorded expectation, so the move is not a silent deletion.",
   "_regenerate": "python -m bench.corpus --write-baseline",
   "answering": [
     "co_delete_all",
@@ -38,22 +38,73 @@
     "vn_low_stock_wh_a"
   ],
   "reconfirm": [
-    {"id": "gf_unique_sku_count", "closest_question": "how many skus"},
-    {"id": "ms_cold_storage", "closest_question": "which are cold storage"},
-    {"id": "ms_delayed_count", "closest_question": "delayed shipment count"},
-    {"id": "ms_exclude_beta", "closest_question": "revenue by sku"},
-    {"id": "ms_sku_count", "closest_question": "sku count"},
-    {"id": "ms_top5_revenue", "closest_question": "revenue by sku"},
-    {"id": "ns_expired_count", "closest_question": "how many expired"},
-    {"id": "rs_cold_storage_count", "closest_question": "how many cold storage"},
-    {"id": "sd_distinct_sku_vs_rows", "closest_question": "how many skus"},
-    {"id": "tp_cold_storage_count", "closest_question": "how many cold storage"},
-    {"id": "tp_delayed_count", "closest_question": "how many delayed"},
-    {"id": "tp_revenue_last_month", "closest_question": "revenue last month"},
-    {"id": "uc_top5_revenue_ringgit", "closest_question": "revenue by sku"},
-    {"id": "uc_total_revenue_myr", "closest_question": "what was total revenue"},
-    {"id": "vn_exclude_bare_beta", "closest_question": "revenue by sku"},
-    {"id": "vn_exclude_full_sku", "closest_question": "revenue by sku"},
-    {"id": "vn_exclude_numeric", "closest_question": "revenue by sku"}
+    {
+      "id": "gf_unique_sku_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_cold_storage",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_delayed_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_exclude_beta",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_sku_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ms_top5_revenue",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "ns_expired_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "rs_cold_storage_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "sd_distinct_sku_vs_rows",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "tp_cold_storage_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "tp_delayed_count",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "tp_revenue_last_month",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "uc_top5_revenue_ringgit",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "uc_total_revenue_myr",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "vn_exclude_bare_beta",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "vn_exclude_full_sku",
+      "closest_question": "a declared question"
+    },
+    {
+      "id": "vn_exclude_numeric",
+      "closest_question": "a declared question"
+    }
   ]
 }

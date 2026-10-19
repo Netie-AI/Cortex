@@ -145,6 +145,7 @@ files = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-p tests.dms.metric_choice_plugin"
 markers = [
     "corpus_expanded: full paraphrase expansion (slow; set CORPUS_EXPANDED=1)",
 ]

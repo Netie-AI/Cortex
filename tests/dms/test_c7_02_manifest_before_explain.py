@@ -317,4 +317,5 @@ def test_contract_ask_c7_04_workday_stockouts_abstains_by_name(dms_http):
     assert _badge(body).lower() in {"abstain", "reconfirm"}
     assert body.get("sql_used") is None
     assert body.get("drillthrough_token") is None
-    assert "subject" in (body.get("answer") or "").lower()
+    text = (body.get("answer") or "").lower()
+    assert "subject" in text or "yes runs that question" in text

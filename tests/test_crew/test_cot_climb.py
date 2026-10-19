@@ -141,8 +141,9 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
 }
-# #412: a cascade hit is served only when the question is the metric's
-# declared question. Any other edit to answer_engine.py needs a new license.
+# #412: a model chooses the metric and a second call checks it. The cascade
+# functions stay for the suite double. Any other edit to answer_engine.py
+# needs a new license.
 _METRIC_EXACT_412_BASE = "dd891d297664a8c0baedb078a008163ae9db829c"
 _METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
     "cursor/not-delayed-exact-metric-5515": frozenset(
@@ -151,7 +152,7 @@ _METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
 }
 _METRIC_EXACT_412_EXACT_DIFF = {
     "CortexOS/dms/answer_engine.py": (
-        "2ee931ae1805635d661660597f5dad98ea855416463d3fdadc0f1dce58feebf6",
+        "6deb87749999e7edcecbfa586c283b13fb085f69338d9dd0ee36246bb5c8807d",
         (
             "_exactness_guard_enabled",
             "_exact_declared_plan",

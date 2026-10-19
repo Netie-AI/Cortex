@@ -925,7 +925,6 @@ def answer_question(
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
-        from CortexOS.dms.answer_engine import cascade_match_is_non_exact
         from CortexOS.execution.manifest import ManifestError
 
         result = _engine_answer(
@@ -947,8 +946,8 @@ def answer_question(
         q = question.lower()
         if (
             result.get("route") == "needs_clarification"
+            and result.get("metric_choice") != "refused"
             and not _model_step_enabled()
-            and not cascade_match_is_non_exact(question)
             and re.search(r"\b(delayed|late)\b", q)
             and _try_generate_ranked_sql(question)
         ):
