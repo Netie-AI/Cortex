@@ -102,8 +102,12 @@ On B the tie-break gained 38 correct answers and lost 8 (p = 9e-6), and added 14
 
 **Caveats.**
 - glm-5.3 is a stand-in for the production tier, which OpenVault configures. Its calls took 84 seconds on average through the stand-in.
-- 24 questions on B (10 on A) lost their stronger call to a failure, probably the generator's 45-second timeout, so the tie-break is if anything understated.
+- 24 questions on B (10 on A) lost their stronger call to a failure. Rerunning those 34 with a 240-second stronger-rung timeout gave 5 right and 3 wrong; 26 still abstained. So the 45-second timeout is not the main loss, and glm's median call through the free queue was 137 seconds, too slow to wait on in a chat.
 - Gemini was tried first. The group verifier ran on A (52 right / 16 wrong with the vote alone, 67 / 22 with the verifier added: EX 44.7%, precision 75.3%) before the day's quota ran out. Its NONE count may include a few calls lost to that quota, so it is a partial result. The Gemini engine run got 429 on every call and was discarded.
+
+**Two more checks on the same runs.**
+- **Strict mode** (serve an agreed pair only if glm's own SQL also matches it). Dev split A only, 68 agreed answers: precision rises from 76.5% (52 right, 16 wrong) to 83.6% (46 right, 9 wrong). It keeps 88% of the right answers and still lets through 56% of the wrong ones, so a single stronger reading is a modest filter. Not run on B.
+- **Where the abstains stand** (vote + glm-5.3 tie-break). Of the 126 abstained questions on B, 53 never produced runnable SQL (14 of 50 on A), 48 had candidates and none was right, and 25 already held a right reading among three or fewer distinct readings (20 of 50 on A). Asking the user to pick between readings could recover up to those 25, about 7 points of EX, without serving a wrong answer. It needs a contract field, so it is a proposal and not built.
 
 ## Repro
 1. Copy each BIRD Mini-Dev SQLite database into DuckDB (DuckDB's sqlite extension).
