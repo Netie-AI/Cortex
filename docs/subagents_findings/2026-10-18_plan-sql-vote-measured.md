@@ -76,7 +76,34 @@ On B the fixes gained 56 correct answers and lost 9 (p = 2e-9), and added 21 wro
 - **Plurality over seven readings** (A, B and five temperature-0.7 samples). EX reached 50% on A at 58% precision. Where A and B disagreed, even six of seven readings agreeing was right only 59 to 63% of the time: the wrong answers are consistent misreadings, so more samples from the same model do not separate them.
 - **Gemini as a verifier of the disputed groups** was not measured: its daily quota ran out.
 
-**What this says.** The recoverable losses came from the vote's own design. The rest (a right reading exists for 64% of questions on A, and the vote serves 37%) is a selection problem the same model cannot solve. A stronger model verifying the disputed groups is the next measurement; the scheduled check-in runs it when a stronger model has quota.
+**What this says.** The recoverable losses came from the vote's own design. The rest (a right reading exists for 64% of questions on A, and the vote serves 37%) is a selection problem the same model cannot solve. A stronger model breaking the ties is measured in the next section.
+
+## The stronger-route tie-break, measured (2026-10-19)
+When A and B disagree, the vote asks the stronger route OpenVault configured for a third SQL and serves the first or second reading it matches. Until now no stronger model was reachable. Today NVIDIA glm-5.3 was, so the local OpenVault stand-in published `routes.stronger = z-ai/glm-5.3` (codestral-2508 stayed the first model). Everything else is the same as above, run on main dd891d2. Each split ran once, paired against the same tree with no stronger route.
+
+| Split | Tree | OK | wrong | abstain | EX | answered precision | model calls per question |
+|---|---|---|---|---|---|---|---|
+| A (150, dev) | vote, no stronger route | 55 | 15 | 80 | 36.7% | 78.6% | 3.11 |
+| A (150, dev) | vote + glm-5.3 tie-break | 74 | 26 | 50 | 49.3% | 74.0% | 4.06 |
+| B (348, held out) | vote, no stronger route | 145 | 43 | 160 | 41.7% | 77.1% | 3.08 |
+| B (348, held out) | vote + glm-5.3 tie-break | 175 | 47 | 126 | 50.3% | 78.8% | 4.15 |
+
+On B the tie-break gained 38 correct answers and lost 8 (p = 9e-6), and added 14 wrong answers while removing 10. Against the single-shot path on B (166 right, 120 wrong, 2.22 calls per question), the vote with a tie-break serves 9 more right answers and 73 fewer wrong ones, at about twice the model calls.
+
+**How each served answer was reached** (right / wrong):
+
+| Path | A | B |
+|---|---|---|
+| A and B agree | 54 / 20 (73%) | 144 / 34 (81%) |
+| the stronger SQL matched the first reading | 10 / 1 | 14 / 8 |
+| the stronger SQL matched the second reading | 10 / 5 | 17 / 5 |
+
+34 of the 47 wrong answers on B come from two readings that agree on a consistent misreading. A third reading cannot catch those, so they are where the remaining wrong answers are.
+
+**Caveats.**
+- glm-5.3 is a stand-in for the production tier, which OpenVault configures. Its calls took 84 seconds on average through the stand-in.
+- 24 questions on B (10 on A) lost their stronger call to a failure, probably the generator's 45-second timeout, so the tie-break is if anything understated.
+- Gemini was tried first. The group verifier ran on A (52 right / 16 wrong with the vote alone, 67 / 22 with the verifier added: EX 44.7%, precision 75.3%) before the day's quota ran out. Its NONE count may include a few calls lost to that quota, so it is a partial result. The Gemini engine run got 429 on every call and was discarded.
 
 ## Repro
 1. Copy each BIRD Mini-Dev SQLite database into DuckDB (DuckDB's sqlite extension).
@@ -105,10 +132,7 @@ Safety gates stood in for correctness gates. The gates answer whether a query ma
 - "Assert the artifact the customer receives." Every count above comes from the envelope's rows.
 
 ## What follows
-1. **Measure the tie-break with a working stronger route.** During this session the candidates were all blocked:
-   - Gemini's quota ran out after 23 calls;
-   - NVIDIA glm-5.3 and mistral-medium returned 429;
-   - mistral-large returned 403.
+1. **Choose what a wrong answer costs.** The tie-break lifts EX above the single-shot path with far fewer wrong answers, but 47 wrong in 348 is not zero and most come from agreed pairs. Serving an agreed pair only when a third reading also matches would cut them, at a cost in correct answers; that is a separate measurement.
 2. **After #386 lands,** the first SQL is written without a plan, so the vote skips B and relies on the stronger route alone. B needs a framing of its own (a different instruction, or temperature above 0) to be a second reading again. Measure that before enabling the vote on top of #386.
 3. **Keep `CORTEX_PLAN_SQL` off in production** on either setting until a held-out pack of 300+ shows WRONG near 0.
 
