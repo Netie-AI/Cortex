@@ -295,6 +295,11 @@ async def contract_ask(body: AskRequest) -> Answer:
         grant.append(verified)
 
         from CortexOS.dms.space_memory_ask import try_solution_reuse
+        from CortexOS.dms.verified_query_ask import (
+            bind_verified_examples,
+            stamp_verified_examples,
+            take_verified_examples,
+        )
 
         reused, memory_fields = try_solution_reuse(
             body.question,
@@ -305,6 +310,8 @@ async def contract_ask(body: AskRequest) -> Answer:
         )
         from CortexOS.dms.ask_scope import ask_scope
 
+        manifest = getattr(verified, "manifest", None)
+        space = str(getattr(manifest, "space_id", "") or body.space_id or "")
         # The signed Space and scored pack reach the legacy query_skill store
         # through this scope, not through answer_engine (QUERY-SKILL #340).
         with ask_scope(
@@ -316,6 +323,21 @@ async def contract_ask(body: AskRequest) -> Answer:
 
                 # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
                 served = try_plan_sql(body, verified=verified)
+            # VERIFIED-QUERY (#309): examples are bound only for the generator the
+            # answer engine runs, and only when the flag is on. A reused C-MEM
+            # solution or a plan+SQL answer never carries them. Only examples
+            # over tables this session's grant names are offered, and the
+            # serve-time result comparison runs under this session's manifest.
+            tokens = None
+            if served is None:
+                tokens = bind_verified_examples(
+                    space_id=space,
+                    scored_pack_id=body.scored_pack_id,
+                    granted_tables=tuple(
+                        getattr(manifest, "row_predicates", None) or {}
+                    ),
+                    verified=verified,
+                )
             try:
                 result = served if served is not None else answer_engine(
                     body.question,
@@ -336,12 +358,27 @@ async def contract_ask(body: AskRequest) -> Answer:
 
                 # AI-ERROR-NO-500-01: the same named abstain as POST /dms/query.
                 result = engine_failure_abstain(exc)
+            finally:
+                example_meta = take_verified_examples(tokens)
 
         if isinstance(result, Answer):
             data = result.model_dump()
         else:
             data = dict(result)
-        data.update(memory_fields)
+        # Examples land on a served L2 answer only. Empty C-MEM fields must not
+        # wipe those reads. C-MEM still wins when it reused a solution.
+        served_generated = (
+            example_meta is not None
+            and not _is_abstain_signal(data)
+            and data.get("layer") == "generated"
+            and data.get("badge") == "L2_VALIDATED"
+            and isinstance(data.get("sql_used"), str)
+            and bool(data["sql_used"].strip())
+        )
+        if served_generated and example_meta is not None:
+            stamp_verified_examples(data, example_meta)
+        if not data.get("verified_query_ids"):
+            data.update(memory_fields)
         data = _enrich_answer(data, session_id=body.session_id, verified=verified)
         return Answer.model_validate(data)
 

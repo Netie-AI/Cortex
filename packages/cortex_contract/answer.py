@@ -3,7 +3,14 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
@@ -209,6 +216,29 @@ class Answer(BaseModel):
             "ignore it."
         ),
     )
+    # 1.8.0 (VERIFIED-QUERY #309): ids of the steward-confirmed examples that
+    # were in the SQL generator prompt for this served answer, best match
+    # first. One id per element, never a joined string. Omitted when empty.
+    # Not a phrasing-match id and not a stored answer. Older clients ignore it.
+    verified_query_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "1.8.0 ids of the steward-confirmed question/SQL examples that "
+            "were in the SQL generator prompt for this served answer, best "
+            "match first. The SQL was generated and executed on current data; "
+            "this does not mark a stored answer and reused stays false. "
+            "Omitted when no example was used. Older clients ignore it."
+        ),
+    )
+
+    # No return annotation: pydantic derives the serialization schema from it,
+    # and the published Answer schema must stay the field list above.
+    @model_serializer(mode="wrap")
+    def _omit_empty_verified_query_ids(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("verified_query_ids"):
+            data.pop("verified_query_ids", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):
