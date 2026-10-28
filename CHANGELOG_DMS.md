@@ -4,13 +4,16 @@ Agents append one section per shipped feature. Sequential build log.
 
 ## LOW-STOCK-GOLDEN-01 (#434) -- 2026-10-28
 
-`duckdb` stays on 1.x (`>=1.1,<2`). DuckDB 2.0.0 (2026-10-21) does not
-stable-sort `ORDER BY quantity_kg`. The low-stock metric is that order plus
-`LIMIT 1000`, and the cut falls inside 26 rows tied at 20 kg. 1.5.6 keeps
-SKU-00152 and SKU-00297; 2.0.0 keeps SKU-00075 and SKU-00348. The preview
-order of the quantity-1 ties changes with them. That is the whole flag-off
-golden drift (four low_stock answers). Both pages satisfy the SQL. The
-recorded page is the 1.5.6 one. A clock move does not change it. The
+A LIMIT that drops rows now orders by each outer table's `row_key`
+(inventory is the lot key `sku, location_id, storage_bin`; `sku` alone
+repeats). DuckDB does not stable-sort, so `ORDER BY quantity_kg LIMIT 1000`
+kept a different 1000 of the 1218 low-stock lots on 1.5.6 and on 2.0.0.
+The lot key is unique (0 duplicate lots). The served page is the first
+1000 of `quantity_kg, sku, location_id, storage_bin`. The cut is SKU-00423
+in, SKU-00471 out, both at 20 kg, on both engines. The joined `locations`
+key is appended after the lot key and does not move that cut. The four
+low-stock golden answers are re-recorded to that page. A result that
+already fits in its LIMIT is unchanged. The `<2` pin is gone. The
 must-fail is `test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
 
 ## CX-STRICT-01 -- 2026-10-28

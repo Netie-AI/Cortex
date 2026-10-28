@@ -23,6 +23,12 @@ things the SQL does not fix:
   preview bullet for a tied row is reduced to its key values, since SQL leaves
   the order of ties (and so which tied row the preview shows) undefined.
 
+The page tie (``apply_page_tiebreak``) appends the table's ``row_key`` when a
+LIMIT drops rows. That suffix is removed before the digest, so a page whose
+rows did not change stays on the recorded SQL. The raw ``sql_used`` still
+carries the key; ``test_low_stock_must_fail_if_clock_or_tie_drift_returns``
+locks it for the low-stock page.
+
 Re-record (on the base tree, never on this branch):
 ``CORTEX_RECORD_GOLDEN=<path> pytest tests/dms/test_ask_flag_off_golden_340.py``
 """
@@ -30,6 +36,7 @@ Re-record (on the base tree, never on this branch):
 from __future__ import annotations
 
 import collections
+import functools
 import hashlib
 import itertools
 import json
@@ -58,8 +65,10 @@ _CLOCK = re.compile(r"\b(current_date|current_timestamp|now\s*\(|today\s*\()", r
 _DATE_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ORDER_BY = re.compile(r"\border\s+by\b", re.IGNORECASE)
 _ROW_LINE = re.compile(r"^\s+·\s")
-# Exact-mode on main 96da7913. DuckDB 2.0.0 (2026-10-21) returns a different
-# tied page for the same SQL; these digests must not be rewritten to match it.
+# Total order quantity_kg, sku, location_id, storage_bin. The digest ignores
+# the appended row_key suffix; these bytes are the page itself. Rewriting the
+# golden file does not silence the must-fail: the digests are copied below
+# and the served SQL must still name the key.
 _LOW_STOCK_QIDS = (
     "adversarial:low_stock_followup",
     "golden:low_stock_all",
@@ -67,11 +76,12 @@ _LOW_STOCK_QIDS = (
     "paraphrase:low_stock_all#2",
 )
 _LOW_STOCK_RECORDED = {
-    "adversarial:low_stock_followup": "c415e6f6141f80c4bd96e4a4aeb1fedc0062c809e8d65d02a14cc1d85190ac90",
-    "golden:low_stock_all": "c415e6f6141f80c4bd96e4a4aeb1fedc0062c809e8d65d02a14cc1d85190ac90",
-    "paraphrase:low_stock_all#1": "7caa1ace6a7ba831eca21da4f0b936ad3d61d037a8fe317a8961a35e9d50f149",
-    "paraphrase:low_stock_all#2": "7caa1ace6a7ba831eca21da4f0b936ad3d61d037a8fe317a8961a35e9d50f149",
+    "adversarial:low_stock_followup": "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0",
+    "golden:low_stock_all": "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0",
+    "paraphrase:low_stock_all#1": "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae",
+    "paraphrase:low_stock_all#2": "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae",
 }
+_LOW_STOCK_KEY = "i.sku ASC, i.location_id ASC, i.storage_bin ASC"
 _CLOCK_DAYS = (date(2026, 10, 17), date(2026, 10, 22), date(2026, 10, 28))
 
 
@@ -131,9 +141,66 @@ def _tie_preview(body: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+@functools.cache
+def _row_keys() -> dict[str, list[str]]:
+    """Pack row keys. A trailing copy of one is the page tie the gate appends."""
+    layer = yaml.safe_load((ROOT / "packs" / "dms" / "semantic_layer.yaml").read_text(encoding="utf-8"))
+    out: dict[str, list[str]] = {}
+    for name, spec in (layer.get("tables") or {}).items():
+        key = [str(col) for col in (spec.get("row_key") or [])]
+        if key:
+            out[str(name)] = key
+    return out
+
+
+def _order_items(sql: str) -> tuple[re.Match[str] | None, list[str]]:
+    match = re.search(r"\border\s+by\b(?P<body>.*?)(?:\blimit\b|\boffset\b|$)", sql, re.IGNORECASE | re.DOTALL)
+    if match is None:
+        return None, []
+    items = [part.strip() for part in match.group("body").split(",") if part.strip()]
+    return match, items
+
+
+def _item_column(item: str) -> str:
+    token = item.split()[0].strip('"')
+    return token.split(".")[-1]
+
+
+def _strip_page_tiebreak(sql: str) -> str:
+    """Drop a trailing row-key suffix the gate appended after the question's own order.
+
+    The suffix is not part of the order the question asked for. Digests of a
+    page whose rows did not change stay on the recorded SQL. A page whose rows
+    did change still mismatches. The raw ``sql_used`` is not rewritten.
+    """
+    match, items = _order_items(sql)
+    if match is None or len(items) < 2:
+        return sql
+    names = [_item_column(item) for item in items]
+    keys = sorted(_row_keys().values(), key=len, reverse=True)
+    # A join appends one row_key per table. Peel each trailing key. A key that
+    # is the whole ORDER BY stays: that is the question's own order.
+    while len(names) >= 2:
+        drop = 0
+        for key in keys:
+            if len(key) < len(names) and names[-len(key) :] == key:
+                drop = len(key)
+                break
+        if not drop:
+            break
+        names = names[:-drop]
+        items = items[:-drop]
+    original = [_item_column(part.strip()) for part in match.group("body").split(",") if part.strip()]
+    if names == original:
+        return sql
+    return sql[: match.start("body")] + " " + ", ".join(items) + " " + sql[match.end("body") :]
+
+
 def _canonical(body: dict[str, Any]) -> bytes:
     mode = _mode(body)
     body = {k: v for k, v in body.items() if k not in VOLATILE_KEYS}
+    if body.get("sql_used"):
+        body["sql_used"] = _strip_page_tiebreak(str(body["sql_used"]))
     if mode == "clock":
         body = {k: v for k, v in body.items() if k not in CLOCK_KEYS}
     elif mode == "exact" and isinstance(body.get("rows"), list):
@@ -256,12 +323,13 @@ def test_low_stock_must_fail_if_clock_or_tie_drift_returns(
 ) -> None:
     """#434 must-fail.
 
-    Goes red if a date returns to these four answers, or if the tied low-stock
-    page leaves the bytes recorded on main 96da7913. Rewriting
+    Goes red if a date returns to these four answers, if the page tie leaves
+    the ORDER BY, or if the page leaves the total-order recording. Rewriting
     ``fixtures/ask_flag_off_golden_main.json`` does not silence it: the digests
     are copied here, the served SQL must contain no clock call and no date
-    literal, and the answer text plus the row multiset must match on
-    2026-10-17, 2026-10-22 and 2026-10-28.
+    literal and must name the inventory lot key in the ORDER BY, and the answer
+    text plus the row multiset must match on 2026-10-17, 2026-10-22 and
+    2026-10-28.
     """
     for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
         monkeypatch.delenv(name, raising=False)
@@ -277,13 +345,14 @@ def test_low_stock_must_fail_if_clock_or_tie_drift_returns(
             sql = str(body.get("sql_used") or "")
             assert _CLOCK.search(sql) is None, f"{qid} on {day} date dependency returned in SQL: {sql}"
             assert _DATE_LITERAL.search(sql) is None, f"{qid} on {day} date literal in SQL: {sql}"
+            assert _LOW_STOCK_KEY in sql, f"{qid} on {day} page tie left the ORDER BY: {sql}"
             views[day][qid] = _clock_view(body)
             digests[day][qid] = hashlib.sha256(_canonical(body)).hexdigest()
     first = _CLOCK_DAYS[0]
     for qid in _LOW_STOCK_QIDS:
         got = digests[first][qid]
         assert got == _LOW_STOCK_RECORDED[qid], (
-            f"{qid} left the recorded main 96da7913 page\n"
+            f"{qid} left the total-order low-stock page\n"
             f"sql: {views[first][qid][0]}\n"
             f"answer:\n{views[first][qid][1]}"
         )
