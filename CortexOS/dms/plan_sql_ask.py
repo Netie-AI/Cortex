@@ -169,6 +169,16 @@ def _gate(sql: str, grant: Any) -> Any:
     return run_gate(sql, load_semantic_layer(), verified=grant)
 
 
+def _tie_ordered_page(sql: str, grant: Any) -> str:
+    """Generated SQL uses the same page tie as a governed metric."""
+    from CortexOS.dms.sql_guardrail import apply_page_tiebreak
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+    from CortexOS.execution.submit import execute_count
+
+    semantic = load_semantic_layer()
+    return apply_page_tiebreak(sql, semantic, execute_count(grant, sql))
+
+
 def _sql_tables(sql: str) -> set[str]:
     import sqlglot
     from sqlglot import exp
@@ -924,6 +934,9 @@ def plan_sql_answer(
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
+        # Every refusal above has already returned. Tie the page here, then
+        # run that one statement. The count is not a second served execute.
+        served_sql = _tie_ordered_page(served_sql, grant)
         try:
             rows, _, _ = execute_sql(grant, served_sql)
         except LakeValueDomainStale as exc:

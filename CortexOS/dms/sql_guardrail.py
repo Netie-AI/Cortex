@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +20,25 @@ FORBIDDEN = (
     exp.TruncateTable,
 )
 MAX_LIMIT = 1000
+
+# The pre-enforce statement a caller passed, and the total-order page actually
+# fetched. ``ValidateGateResult.safe_sql`` reads this so a seat-locked caller
+# still reports the tied SQL. The map is the request context, not a process global.
+_SERVED_PAGE: ContextVar[dict[str, str] | None] = ContextVar("served_page_sql", default=None)
+
+
+def remember_served_page(original: str, tied: str) -> None:
+    if not original or original == tied:
+        return
+    current = dict(_SERVED_PAGE.get() or {})
+    current[original] = tied
+    _SERVED_PAGE.set(current)
+
+
+def served_page_sql(sql: str | None) -> str | None:
+    if sql is None:
+        return None
+    return (_SERVED_PAGE.get() or {}).get(sql, sql)
 
 
 @dataclass(slots=True)
@@ -150,6 +170,194 @@ def relation_function_violations(stmt: exp.Expression) -> list[str]:
             if isinstance(inner, exp.Func) and not isinstance(inner, exp.Unnest | exp.Lateral):
                 found.append(f"TABLE_FUNCTION:{_relation_function_name(inner)}")
     return found
+
+
+def _row_key(semantic: dict[str, Any], table: str) -> list[str]:
+    spec = (semantic.get("tables") or {}).get(table) or {}
+    cols = set(spec.get("columns") or [])
+    return [str(name) for name in (spec.get("row_key") or []) if str(name) in cols]
+
+
+def _under_window(node: exp.Expression) -> bool:
+    parent = node.parent
+    while parent is not None:
+        if isinstance(parent, exp.Window):
+            return True
+        parent = parent.parent
+    return False
+
+
+def _select_aggregate_without_group(stmt: exp.Select) -> bool:
+    """A scalar aggregate is one row. It has no tie to break."""
+    if stmt.args.get("group") is not None:
+        return False
+    for expr in stmt.expressions:
+        for node in expr.walk():
+            if isinstance(node, exp.AggFunc) and not _under_window(node):
+                return True
+    return False
+
+
+def _order_refs(order: exp.Order) -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for ordered in order.expressions:
+        expr = ordered.this if isinstance(ordered, exp.Ordered) else ordered
+        if isinstance(expr, exp.Column):
+            refs.add((expr.table or "", expr.name))
+        else:
+            refs.add(("", expr.sql(dialect="duckdb")))
+    return refs
+
+
+def _already_ordered(refs: set[tuple[str, str]], table: str, name: str) -> bool:
+    """True when this column is already an ORDER BY key.
+
+    An unqualified ``name`` covers every table. A qualified column covers only
+    that qualifier: ``l.location_id`` does not order ``i.location_id``.
+    """
+    return (table, name) in refs or ("", name) in refs
+
+
+def _cte_aliases(stmt: exp.Select) -> set[str]:
+    with_ = stmt.args.get("with_") or stmt.args.get("with")
+    if with_ is None:
+        return set()
+    names: set[str] = set()
+    for cte in with_.expressions or []:
+        alias = cte.alias
+        if alias:
+            names.add(str(alias))
+    return names
+
+
+def _outer_base_tables(stmt: exp.Select) -> list[exp.Table]:
+    """Tables in the outer FROM / JOIN. Subqueries and CTE names are not base keys."""
+    ctes = _cte_aliases(stmt)
+    found: list[exp.Table] = []
+
+    def take(node: exp.Expression | None) -> None:
+        if isinstance(node, exp.Table) and node.name and node.name not in ctes:
+            found.append(node)
+
+    from_ = stmt.args.get("from_") or stmt.args.get("from")
+    if from_ is not None:
+        take(from_.this)
+    for join in stmt.args.get("joins") or []:
+        take(join.this)
+    return found
+
+
+def _ordered(expr: exp.Expression) -> exp.Ordered:
+    return exp.Ordered(this=expr, desc=False)
+
+
+def _append_missing(order: exp.Order, refs: set[tuple[str, str]], columns: list[exp.Column]) -> None:
+    for col in columns:
+        table = col.table or ""
+        name = col.name
+        if not name or _already_ordered(refs, table, name):
+            continue
+        order.append("expressions", _ordered(col))
+        refs.add((table, name))
+
+
+def _group_key_columns(stmt: exp.Select) -> list[exp.Column]:
+    group = stmt.args.get("group")
+    cols: list[exp.Column] = []
+    for expr in group.expressions or []:
+        if isinstance(expr, exp.Column):
+            cols.append(expr.copy())
+    return cols
+
+
+def _distinct_columns(stmt: exp.Select) -> list[exp.Column]:
+    """DISTINCT output is totally ordered by the selected columns, not a hidden key."""
+    cols: list[exp.Column] = []
+    for expr in stmt.expressions:
+        if isinstance(expr, exp.Alias):
+            cols.append(exp.column(expr.alias))
+        elif isinstance(expr, exp.Column):
+            cols.append(expr.copy())
+    return cols
+
+
+def _row_key_columns(stmt: exp.Select, semantic: dict[str, Any]) -> list[exp.Column]:
+    cols: list[exp.Column] = []
+    for table in _outer_base_tables(stmt):
+        qual = table.alias or table.name
+        for name in _row_key(semantic, table.name):
+            cols.append(exp.column(name, table=qual))
+    return cols
+
+
+def _append_total_order(stmt: exp.Select, semantic: dict[str, Any]) -> None:
+    """Make an ordered page a total order.
+
+    GROUP BY ties break on the group key (a base-table column there is a
+    binder error). DISTINCT ties break on the selected columns. A plain
+    page ties on each outer table's ``row_key``. No ORDER BY stays unordered.
+    """
+    order = stmt.args.get("order")
+    if order is None or stmt.args.get("limit") is None:
+        return
+    if _select_aggregate_without_group(stmt):
+        return
+    refs = _order_refs(order)
+    if stmt.args.get("group") is not None:
+        columns = _group_key_columns(stmt)
+    elif stmt.args.get("distinct"):
+        columns = _distinct_columns(stmt)
+    else:
+        columns = _row_key_columns(stmt, semantic)
+    _append_missing(order, refs, columns)
+
+
+def _limit_value(stmt: exp.Select) -> int | None:
+    limit = stmt.args.get("limit")
+    if limit is None:
+        return None
+    try:
+        return int(limit.expression.this)
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _unlimited(sql: str) -> str:
+    """The statement with ORDER BY and LIMIT removed, for a page count."""
+    tree = sqlglot.parse_one(sql, read="duckdb")
+    tree.set("limit", None)
+    tree.set("order", None)
+    return tree.sql(dialect="duckdb")
+
+
+def apply_page_tiebreak(sql: str, semantic: dict[str, Any], total_count: int | None) -> str:
+    """Total-order a page that the LIMIT can cut. Leave every other statement byte-identical.
+
+    DuckDB does not stable-sort. When ``total_count`` is above the LIMIT, two
+    engine versions can return different rows for one ORDER BY. Append the
+    driving table's key (or the GROUP BY grain) so that page is a prefix of
+    one total order. Metric SQL and generated SQL both call this; there is no
+    per-question branch. A result that already fits in the LIMIT cannot drop a
+    tied row, so its SQL is untouched. An unknown count fails closed and
+    applies the key. A pack with no ``row_key`` is left alone.
+    """
+    try:
+        stmt = sqlglot.parse_one(sql, read="duckdb")
+    except Exception:
+        return sql
+    if not isinstance(stmt, exp.Select):
+        return sql
+    if stmt.args.get("order") is None or stmt.args.get("limit") is None:
+        return sql
+    limit = _limit_value(stmt)
+    if total_count is not None and limit is not None and total_count <= limit:
+        return sql
+    order = stmt.args["order"]
+    before = len(order.expressions)
+    _append_total_order(stmt, semantic)
+    if len(order.expressions) == before:
+        return sql
+    return stmt.sql(dialect="duckdb")
 
 
 def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
@@ -290,6 +498,7 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
 
     # #402: the same declared-value check execute_sql applies. On a lake that
     # does not store the declared values, a filter on them matches nothing.
+    # A stale lake is a refusal: do not count it and do not fetch it.
     from CortexOS.dms.warehouse_db import connection_instance, serving_value_domains
     from CortexOS.ontology.value_domain import stale_columns, stale_reason
 
@@ -303,6 +512,20 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
         entry.passed = False
         log_audit(entry)
         return stale, [], entry
+
+    # The statement is about to run. Count first so a result that already
+    # fits in the LIMIT keeps its SQL bytes.
+    try:
+        counted = con.execute(
+            "SELECT COUNT(*) FROM (" + _unlimited(result.safe_sql) + ") _page"
+        ).fetchone()
+        total = int(counted[0]) if counted else None
+    except Exception:  # noqa: BLE001
+        total = None
+    tied = apply_page_tiebreak(result.safe_sql, semantic, total)
+    if tied != result.safe_sql:
+        result = GuardrailResult(True, [], tied)
+        entry.safe_sql = tied
 
     rel = con.execute(result.safe_sql)
     rows_raw = rel.fetchall()

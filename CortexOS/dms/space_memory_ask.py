@@ -62,10 +62,15 @@ def try_solution_reuse(
         from CortexOS.dms.warehouse_db import load_semantic_layer
         from CortexOS.execution.submit import execute_sql
 
-        gate = run_gate(sql, load_semantic_layer())
+        semantic = load_semantic_layer()
+        gate = run_gate(sql, semantic)
         if not gate.passed or not gate.safe_sql:
             raise SqlGateAbstain("reused SQL failed the gate", violations=list(gate.violations))
-        rows, _, _ = execute_sql(grant, gate.safe_sql)
+        from CortexOS.dms.sql_guardrail import apply_page_tiebreak
+        from CortexOS.execution.submit import execute_count
+
+        served = apply_page_tiebreak(gate.safe_sql, semantic, execute_count(grant, gate.safe_sql))
+        rows, _, _ = execute_sql(grant, served)
         return rows
 
     reuse = get_space_memory().reuse_solution(

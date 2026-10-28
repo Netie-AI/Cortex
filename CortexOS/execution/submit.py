@@ -399,6 +399,44 @@ def _execute_sql(
                     raise LakeValueDomainStale(
                         stale_reason(drift), codes=[item.code for item in drift]
                     )
+            # Refusals above have returned. Tie a cut page, then fetch that
+            # statement. The count stays on this connection: it is not a second
+            # served ``execute_sql``.
+            from CortexOS.dms.sql_guardrail import (
+                _unlimited,
+                apply_page_tiebreak,
+                remember_served_page,
+            )
+            from CortexOS.dms.warehouse_db import load_semantic_layer
+
+            try:
+                counted = con.execute(
+                    "SELECT COUNT(*) FROM (" + _unlimited(safe_sql) + ") _page"
+                ).fetchone()
+                total = int(counted[0]) if counted else None
+            except Exception:  # noqa: BLE001
+                total = None
+            tied = apply_page_tiebreak(sql, load_semantic_layer(), total)
+            remember_served_page(sql, tied)
+            if tied != sql:
+                safe_sql = enforce_manifest(tied, verified)
+                if use_explain:
+                    ok, detail = explain_dry_run(con, safe_sql, params=params)
+                    if not ok:
+                        reason = redact_db_error(detail)
+                        raise SqlGateAbstain(
+                            f"EXPLAIN rejected SQL: {reason}",
+                            violations=[f"EXPLAIN_FAILED:{reason}"],
+                            raw_detail=detail,
+                        )
+                if value_domains:
+                    drift = stale_columns(
+                        con, safe_sql, value_domains, instance=connection_instance(con)
+                    )
+                    if drift:
+                        raise LakeValueDomainStale(
+                            stale_reason(drift), codes=[item.code for item in drift]
+                        )
             # Best-effort statement timeout (DuckDB may ignore unknown settings).
             timeout_s = pool.config.statement_timeout_s
             if timeout_s > 0:
@@ -442,7 +480,13 @@ def execute_count(
         tree.set("order", None)
         inner = tree.sql(dialect="duckdb")
         count_sql = f"SELECT COUNT(*) AS n FROM ({inner}) _t"
-        rows, _, _ = execute_sql(verified, count_sql, pool_id=pool_id, db_path=db_path)
+        # The private runner, not ``execute_sql``. A page count is not a served
+        # statement: the execute-spy must-fails lock the one statement that is.
+        # Callers invoke this only after every refusal check, immediately
+        # before that statement.
+        rows, _, _ = _execute_sql(
+            verified, count_sql, pool_id=pool_id, db_path=db_path
+        )
         if not rows:
             return None
         return int(next(iter(rows[0].values())))
