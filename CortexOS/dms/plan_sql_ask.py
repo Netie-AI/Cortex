@@ -873,7 +873,6 @@ def plan_sql_answer(
             return None
 
         served_sql = gate.source_sql or gate.safe_sql
-        served_sql = _tie_ordered_page(served_sql, grant)
         try:
             tables = _sql_tables(served_sql)
         except Exception as exc:  # noqa: BLE001
@@ -935,6 +934,9 @@ def plan_sql_answer(
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
+        # Every refusal above has already returned. Tie the page here, then
+        # run that one statement. The count is not a second served execute.
+        served_sql = _tie_ordered_page(served_sql, grant)
         try:
             rows, _, _ = execute_sql(grant, served_sql)
         except LakeValueDomainStale as exc:

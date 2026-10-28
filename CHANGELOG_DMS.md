@@ -13,8 +13,12 @@ The lot key is unique (0 duplicate lots). The served page is the first
 in, SKU-00471 out, both at 20 kg, on both engines. The joined `locations`
 key is appended after the lot key and does not move that cut. The four
 low-stock golden answers are re-recorded to that page. A result that
-already fits in its LIMIT is unchanged. The `<2` pin is gone. The
-must-fail is `test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
+already fits in its LIMIT is unchanged. The count runs only after every
+refusal, on the fetch itself: a statement the ladder will not serve is
+not counted. `answer_engine` and `l2_generation` stay seat-locked; their
+existing `execute_sql` is that fetch, and the gate reports the tied SQL.
+The `<2` pin is gone. The must-fail is
+`test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
 
 ## CX-STRICT-01 -- 2026-10-28
 

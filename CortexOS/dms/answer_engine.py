@@ -1971,16 +1971,6 @@ def answer(
         from CortexOS.execution.submit import execute_sql
 
         gate = run_gate(sql, semantic)
-        page_count: int | None = None
-        if gate.passed and gate.safe_sql and not (
-            session_rows is not None and len(session_rows) > 0 and layer == "session"
-        ):
-            # Tie the page before execute. A LIMIT that drops rows is not a
-            # stable sort until the driving key is in the ORDER BY.
-            from CortexOS.dms.sql_guardrail import apply_page_tiebreak
-
-            page_count = _true_count(gate.safe_sql, verified=verified)
-            gate.safe_sql = apply_page_tiebreak(gate.safe_sql, semantic, page_count)
         guard_result = gate  # ValidateGateResult shares passed/safe_sql/violations
         entry = AuditEntry(
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -2017,7 +2007,7 @@ def answer(
                         reason=f"{type(exc).__name__}: {exc}",
                     )
                 )
-            total_count = page_count
+            total_count = _true_count(gate.safe_sql, verified=verified)
             entry.row_count = len(rows)
             log_audit(entry)
     else:

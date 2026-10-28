@@ -370,13 +370,7 @@ def _l2_execute(sql: str, verified: Any) -> tuple[list[Any] | None, str | None]:
         from CortexOS.execution.submit import execute_sql
 
         try:
-            from CortexOS.dms.sql_guardrail import apply_page_tiebreak
-            from CortexOS.dms.warehouse_db import load_semantic_layer
-            from CortexOS.execution.submit import execute_count
-
-            semantic = load_semantic_layer()
-            served = apply_page_tiebreak(sql, semantic, execute_count(verified, sql))
-            rows, _, _ = execute_sql(verified, served)
+            rows, _, _ = execute_sql(verified, sql)
             return list(rows), None
         except ManifestError as exc:
             return None, type(exc).__name__

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +20,25 @@ FORBIDDEN = (
     exp.TruncateTable,
 )
 MAX_LIMIT = 1000
+
+# The pre-enforce statement a caller passed, and the total-order page actually
+# fetched. ``ValidateGateResult.safe_sql`` reads this so a seat-locked caller
+# still reports the tied SQL. The map is the request context, not a process global.
+_SERVED_PAGE: ContextVar[dict[str, str] | None] = ContextVar("served_page_sql", default=None)
+
+
+def remember_served_page(original: str, tied: str) -> None:
+    if not original or original == tied:
+        return
+    current = dict(_SERVED_PAGE.get() or {})
+    current[original] = tied
+    _SERVED_PAGE.set(current)
+
+
+def served_page_sql(sql: str | None) -> str | None:
+    if sql is None:
+        return None
+    return (_SERVED_PAGE.get() or {}).get(sql, sql)
 
 
 @dataclass(slots=True)
@@ -476,22 +496,9 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
         log_audit(entry)
         return result, [], entry
 
-    # Same page tie the contract path applies. Count first so a result that
-    # already fits in the LIMIT keeps its SQL bytes.
-    try:
-        counted = con.execute(
-            "SELECT COUNT(*) FROM (" + _unlimited(result.safe_sql) + ") _page"
-        ).fetchone()
-        total = int(counted[0]) if counted else None
-    except Exception:  # noqa: BLE001
-        total = None
-    tied = apply_page_tiebreak(result.safe_sql, semantic, total)
-    if tied != result.safe_sql:
-        result = GuardrailResult(True, [], tied)
-        entry.safe_sql = tied
-
     # #402: the same declared-value check execute_sql applies. On a lake that
     # does not store the declared values, a filter on them matches nothing.
+    # A stale lake is a refusal: do not count it and do not fetch it.
     from CortexOS.dms.warehouse_db import connection_instance, serving_value_domains
     from CortexOS.ontology.value_domain import stale_columns, stale_reason
 
@@ -505,6 +512,20 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
         entry.passed = False
         log_audit(entry)
         return stale, [], entry
+
+    # The statement is about to run. Count first so a result that already
+    # fits in the LIMIT keeps its SQL bytes.
+    try:
+        counted = con.execute(
+            "SELECT COUNT(*) FROM (" + _unlimited(result.safe_sql) + ") _page"
+        ).fetchone()
+        total = int(counted[0]) if counted else None
+    except Exception:  # noqa: BLE001
+        total = None
+    tied = apply_page_tiebreak(result.safe_sql, semantic, total)
+    if tied != result.safe_sql:
+        result = GuardrailResult(True, [], tied)
+        entry.safe_sql = tied
 
     rel = con.execute(result.safe_sql)
     rows_raw = rel.fetchall()
