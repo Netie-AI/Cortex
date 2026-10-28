@@ -36,6 +36,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,8 +55,24 @@ GOLDEN = Path(__file__).with_name("fixtures") / "ask_flag_off_golden_main.json"
 VOLATILE_KEYS = frozenset({"answer_id", "audit_id", "drillthrough_token"})
 CLOCK_KEYS = frozenset({"rows", "row_count", "answer"})
 _CLOCK = re.compile(r"\b(current_date|current_timestamp|now\s*\(|today\s*\()", re.IGNORECASE)
+_DATE_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ORDER_BY = re.compile(r"\border\s+by\b", re.IGNORECASE)
 _ROW_LINE = re.compile(r"^\s+·\s")
+# Exact-mode on main 96da7913. DuckDB 2.0.0 (2026-10-21) returns a different
+# tied page for the same SQL; these digests must not be rewritten to match it.
+_LOW_STOCK_QIDS = (
+    "adversarial:low_stock_followup",
+    "golden:low_stock_all",
+    "paraphrase:low_stock_all#1",
+    "paraphrase:low_stock_all#2",
+)
+_LOW_STOCK_RECORDED = {
+    "adversarial:low_stock_followup": "c415e6f6141f80c4bd96e4a4aeb1fedc0062c809e8d65d02a14cc1d85190ac90",
+    "golden:low_stock_all": "c415e6f6141f80c4bd96e4a4aeb1fedc0062c809e8d65d02a14cc1d85190ac90",
+    "paraphrase:low_stock_all#1": "7caa1ace6a7ba831eca21da4f0b936ad3d61d037a8fe317a8961a35e9d50f149",
+    "paraphrase:low_stock_all#2": "7caa1ace6a7ba831eca21da4f0b936ad3d61d037a8fe317a8961a35e9d50f149",
+}
+_CLOCK_DAYS = (date(2026, 10, 17), date(2026, 10, 22), date(2026, 10, 28))
 
 
 def _questions() -> list[tuple[str, str]]:
@@ -174,3 +191,104 @@ def test_flag_unset_ask_is_byte_identical_to_main(
     assert golden["n"] == len(seen) == len(_questions()) > 150
     changed = sorted(qid for qid in golden["sha256"] if golden["sha256"][qid] != seen.get(qid))
     assert changed == [], f"{len(changed)} answers differ from main {golden['recorded_on']}: {changed}"
+
+
+def _pin_clock(monkeypatch: pytest.MonkeyPatch, day: date) -> None:
+    """Point module-level ``date`` / ``datetime`` at one civil day.
+
+    ``datetime.date`` itself is immutable, so this replaces the names the
+    answer path imported. A later ``from datetime import date`` inside a
+    function still sees the wall clock; the SQL assertion below catches that
+    if it lands in ``sql_used``.
+    """
+
+    class _Date(date):
+        @classmethod
+        def today(cls) -> date:
+            return day
+
+    class _DateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return datetime(day.year, day.month, day.day, 12, 0, tzinfo=tz)
+
+    for mod in (
+        "CortexOS.dms.query_service",
+        "CortexOS.dms.generate_sample",
+        "CortexOS.dms.sql_guardrail",
+    ):
+        monkeypatch.setattr(f"{mod}.date", _Date, raising=False)
+        monkeypatch.setattr(f"{mod}.datetime", _DateTime, raising=False)
+
+
+def _ask_low_stock(client) -> dict[str, dict[str, Any]]:
+    from CortexOS.dms.answer_engine import clear_session
+
+    questions = dict(_questions())
+    client.bind_session("alpha", WAREHOUSE_GRANT)
+    out: dict[str, dict[str, Any]] = {}
+    for qid in _LOW_STOCK_QIDS:
+        clear_session(SESSION, space_id="alpha")
+        resp = client.post(
+            "/v1/contract/ask",
+            json={"question": questions[qid], "session_id": SESSION, "space_id": "alpha"},
+        )
+        if resp.status_code == 200:
+            out[qid] = resp.json()
+        else:
+            out[qid] = {"_status": resp.status_code, "answer": resp.text, "sql_used": "", "rows": []}
+    return out
+
+
+def _clock_view(body: dict[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+    rows = body.get("rows") if isinstance(body.get("rows"), list) else []
+    keys = _order_keys(str(body.get("sql_used") or "")) or ["quantity_kg"]
+    ordered = _sort_ties(list(rows), keys)
+    return (
+        str(body.get("sql_used") or ""),
+        str(body.get("answer") or ""),
+        tuple(_row_key(row) for row in ordered),
+    )
+
+
+def test_low_stock_must_fail_if_clock_or_tie_drift_returns(
+    ask_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """#434 must-fail.
+
+    Goes red if a date returns to these four answers, or if the tied low-stock
+    page leaves the bytes recorded on main 96da7913. Rewriting
+    ``fixtures/ask_flag_off_golden_main.json`` does not silence it: the digests
+    are copied here, the served SQL must contain no clock call and no date
+    literal, and the answer text plus the row multiset must match on
+    2026-10-17, 2026-10-22 and 2026-10-28.
+    """
+    for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
+        monkeypatch.delenv(name, raising=False)
+    views: dict[date, dict[str, tuple[str, str, tuple[str, ...]]]] = {}
+    digests: dict[date, dict[str, str]] = {}
+    for day in _CLOCK_DAYS:
+        with monkeypatch.context() as pinned:
+            _pin_clock(pinned, day)
+            bodies = _ask_low_stock(ask_http)
+        views[day] = {}
+        digests[day] = {}
+        for qid, body in bodies.items():
+            sql = str(body.get("sql_used") or "")
+            assert _CLOCK.search(sql) is None, f"{qid} on {day} date dependency returned in SQL: {sql}"
+            assert _DATE_LITERAL.search(sql) is None, f"{qid} on {day} date literal in SQL: {sql}"
+            views[day][qid] = _clock_view(body)
+            digests[day][qid] = hashlib.sha256(_canonical(body)).hexdigest()
+    first = _CLOCK_DAYS[0]
+    for qid in _LOW_STOCK_QIDS:
+        got = digests[first][qid]
+        assert got == _LOW_STOCK_RECORDED[qid], (
+            f"{qid} left the recorded main 96da7913 page\n"
+            f"sql: {views[first][qid][0]}\n"
+            f"answer:\n{views[first][qid][1]}"
+        )
+        for day in _CLOCK_DAYS[1:]:
+            assert views[day][qid] == views[first][qid], (
+                f"{qid} date dependency returned between {first} and {day}\n"
+                f"--- {first}\n{views[first][qid][1]}\n--- {day}\n{views[day][qid][1]}"
+            )

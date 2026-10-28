@@ -2,6 +2,17 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## LOW-STOCK-GOLDEN-01 (#434) -- 2026-10-28
+
+`duckdb` stays on 1.x (`>=1.1,<2`). DuckDB 2.0.0 (2026-10-21) does not
+stable-sort `ORDER BY quantity_kg`. The low-stock metric is that order plus
+`LIMIT 1000`, and the cut falls inside 26 rows tied at 20 kg. 1.5.6 keeps
+SKU-00152 and SKU-00297; 2.0.0 keeps SKU-00075 and SKU-00348. The preview
+order of the quantity-1 ties changes with them. That is the whole flag-off
+golden drift (four low_stock answers). Both pages satisfy the SQL. The
+recorded page is the 1.5.6 one. A clock move does not change it. The
+must-fail is `test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
+
 ## CX-STRICT-01 -- 2026-10-28
 
 `CORTEX_OV_STRICT` defaults off. Off, every FreeRoute chat body is the same
