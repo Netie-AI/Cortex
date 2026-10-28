@@ -52,6 +52,10 @@ class StepStamp:
     served_local: bool = False
     served_reason: str = ""
     served_call_id: str = ""
+    # Copied from the FreeRoute stamp when CORTEX_OV_STRICT is on. Empty stays
+    # out of public() and out of line() so a flag-off step reads as before.
+    model_requested: str = ""
+    model_served: str | None = None
 
     @classmethod
     def from_route(cls, step: str, route: freeroute.RouteStamp | None, reason: str) -> StepStamp:
@@ -65,6 +69,8 @@ class StepStamp:
             served_local=bool(route.served_local),
             served_reason=reason or route.served_reason,
             served_call_id=route.call_id,
+            model_requested=route.model_requested,
+            model_served=route.model_served,
         )
 
     @classmethod
@@ -80,12 +86,20 @@ class StepStamp:
         )
         if self.served_call_id:
             text += f" call={self.served_call_id}"
+        if self.model_requested or self.model_served:
+            shown = self.model_served if self.model_served else "none"
+            asked = self.model_requested or "none"
+            text += f" model_requested={asked} model_served={shown}"
         if self.served_reason:
             text += f" ({freeroute.redact(self.served_reason, limit=200)})"
         return text
 
     def public(self) -> dict[str, Any]:
-        return asdict(self)
+        body = asdict(self)
+        if not self.model_requested and self.model_served is None:
+            body.pop("model_requested", None)
+            body.pop("model_served", None)
+        return body
 
 
 @dataclass(frozen=True)
@@ -121,7 +135,12 @@ def _step(kind: str, out: freeroute.Completion) -> ModelStep:
 
 
 class FreeRoutePlanSqlGenerator:
-    """Default generator: two FreeRoute calls, plan then SQL. Never raises."""
+    """Default generator: two FreeRoute calls, plan then SQL.
+
+    Raises ``FreeRouteStrictError`` when ``CORTEX_OV_STRICT`` is on and
+    OpenVault refuses that pin or returns HTTP 429. The ladder must not
+    try another model after that.
+    """
 
     def __init__(
         self,
