@@ -37,6 +37,8 @@ import re
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -56,6 +58,9 @@ STORE_ENV = "CORTEX_FREEROUTE_SCOREBOARD"
 LEARN_ENV = "CORTEX_FREEROUTE_LEARN"
 SWITCH_ENV = "CORTEX_FREEROUTE"
 LOCAL_ONLY_ENV = "CORTEX_FREEROUTE_LOCAL_ONLY"
+# OpenVault #81: JSON ``strict: true`` pins ``model`` to that catalog id.
+# Default off. Off, the chat body is the same bytes as before this flag.
+STRICT_ENV = "CORTEX_OV_STRICT"
 
 ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
@@ -99,6 +104,13 @@ _REDACT = re.compile(
 
 _log = logging.getLogger(__name__)
 _lock = threading.Lock()
+# Held only while complete() swaps urllib.request.build_opener to read
+# Retry-After. openvault_client.request_json does not return response headers,
+# and that module stays untouched. The swap is restored before the lock drops.
+_header_capture_lock = threading.Lock()
+_response_headers: ContextVar[dict[str, str] | None] = ContextVar(
+    "freeroute_ov_response_headers", default=None
+)
 _learn_failures = 0
 _arming_cache: dict[tuple[str, str], tuple[float, Arming]] = {}
 _vault_cache: dict[str, tuple[float, _Vault]] = {}
@@ -807,9 +819,128 @@ def _same_model(requested: str, served: str) -> bool:
 MODEL_NOT_ALLOWLISTED = "FREEROUTE_MODEL_NOT_ALLOWLISTED"
 MODEL_NOT_SERVED = "FREEROUTE_MODEL_NOT_SERVED"
 NO_STRONGER_ROUTE = "FREEROUTE_NO_STRONGER_ROUTE"
-# OpenVault vault/proxy.py: strict pin, model absent from OV's catalog.
+# OpenVault vault/proxy.py (OpenVault #81): strict pin refusal. The gateway
+# returns 503 with this error type and does not swap models. A park puts
+# retry_after_s on the error object and Retry-After on the response.
 _OV_PIN_UNAVAILABLE = "pin_unavailable"
 _OV_NOT_IN_CATALOG = "not_in_catalog"
+_OV_RATE_LIMITED = "rate_limited"
+
+
+def strict_model_pin_enabled() -> bool:
+    """True only when ``CORTEX_OV_STRICT`` is 1, true, or yes. Default off."""
+    return (os.environ.get(STRICT_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _as_retry_seconds(value: Any) -> int | None:
+    """A non-negative whole number of seconds, or None when OV did not give one."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if value < 0 or value != value:
+            return None
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def note_response_headers(headers: Mapping[str, str] | None) -> None:
+    """Remember response headers for this task. Empty clears them.
+
+    The real urllib client fills these inside complete(). A test double that
+    replaces request_json can call this with the Retry-After it wants observed.
+    """
+    if not headers:
+        _response_headers.set({})
+        return
+    _response_headers.set({str(key): str(value) for key, value in headers.items()})
+
+
+def take_response_headers() -> dict[str, str]:
+    """Return headers noted since the last take, then clear them."""
+    found = _response_headers.get()
+    _response_headers.set(None)
+    return dict(found or {})
+
+
+def _header_map(headers: Any) -> dict[str, str]:
+    if headers is None:
+        return {}
+    try:
+        pairs = list(headers.items())
+    except (AttributeError, TypeError):
+        return {}
+    return {str(key): str(value) for key, value in pairs}
+
+
+def _call_noting_headers(send: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Call the chat transport and keep Retry-After from a real urllib response.
+
+    The JSON body is whatever the caller already built. A transport that never
+    builds an opener can note headers itself; those stay when urllib saw nothing.
+    """
+    box: dict[str, dict[str, str]] = {}
+    real_build = urllib.request.build_opener
+
+    def build_opener(*opener_args: Any, **opener_kwargs: Any) -> Any:
+        opener = real_build(*opener_args, **opener_kwargs)
+        real_open = opener.open
+
+        def open_and_note(req: Any, *open_args: Any, **open_kwargs: Any) -> Any:
+            try:
+                resp = real_open(req, *open_args, **open_kwargs)
+            except urllib.error.HTTPError as exc:
+                box["headers"] = _header_map(getattr(exc, "headers", None))
+                raise
+            box["headers"] = _header_map(getattr(resp, "headers", None))
+            return resp
+
+        opener.open = open_and_note
+        return opener
+
+    with _header_capture_lock:
+        urllib.request.build_opener = build_opener
+        try:
+            result = send(*args, **kwargs)
+        finally:
+            urllib.request.build_opener = real_build
+    if "headers" in box:
+        note_response_headers(box["headers"])
+    return result
+
+
+def _retry_after_s(data: Any, headers: Mapping[str, str]) -> int | None:
+    """Body ``error.retry_after_s`` when OV sent the key, else the Retry-After header.
+
+    A present null (circuit open) stays None and does not fall through to a header.
+    """
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict) and "retry_after_s" in err:
+            return _as_retry_seconds(err.get("retry_after_s"))
+    for key, value in headers.items():
+        if str(key).lower() == "retry-after":
+            return _as_retry_seconds(value)
+    return None
+
+
+def _strict_stop(status: int, data: Any) -> tuple[bool, str]:
+    """(stop, error type) when the flag is on and OV refused the pin or returned 429.
+
+    Anything else, including the flag off, is not a strict stop. The caller
+    keeps the existing Completion path.
+    """
+    if not strict_model_pin_enabled():
+        return False, ""
+    err_type, _reason = freeroute_ov_local.chat_error_fields(data)
+    if int(status) == 429:
+        return True, err_type or _OV_RATE_LIMITED
+    if err_type == _OV_PIN_UNAVAILABLE:
+        return True, err_type
+    return False, ""
 
 
 def openvault_policy_refusal(data: Any) -> str:
@@ -1055,6 +1186,10 @@ class RouteStamp:
     served_reason: str = ""
     learn_row_failed: bool = False
     route_source: str = ""
+    # Set only when CORTEX_OV_STRICT is on. Empty / None stay out of public()
+    # so a flag-off stamp dumps the same keys as before.
+    model_requested: str = ""
+    model_served: str | None = None
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -1072,7 +1207,69 @@ class RouteStamp:
         body = asdict(self)
         body["candidates"] = list(self.candidates)
         body["line"] = self.line()
+        if not self.model_requested and self.model_served is None:
+            body.pop("model_requested", None)
+            body.pop("model_served", None)
         return body
+
+
+class FreeRouteStrictError(Exception):
+    """OpenVault refused a strict pin or returned HTTP 429. No other model is tried.
+
+    ``retry_after_s`` is the wait OV named (body ``error.retry_after_s``, else
+    the ``Retry-After`` header). None when OV did not name one (circuit open).
+    ``model_served`` is null when the pin was not served.
+    """
+
+    status: int
+    error_type: str
+    retry_after_s: int | None
+    model_requested: str
+    model_served: str | None
+    stamp: RouteStamp | None
+    ask_stamps: list[dict[str, Any]]
+
+    def __init__(
+        self,
+        *,
+        status: int,
+        error_type: str,
+        retry_after_s: int | None,
+        model_requested: str,
+        model_served: str | None,
+        stamp: RouteStamp | None,
+    ) -> None:
+        self.status = int(status)
+        self.error_type = error_type
+        self.retry_after_s = retry_after_s
+        self.model_requested = model_requested
+        self.model_served = model_served
+        self.stamp = stamp
+        self.ask_stamps = []
+        shown = model_served if model_served else "none"
+        wait = "none" if retry_after_s is None else str(retry_after_s)
+        super().__init__(
+            f"FreeRouteStrictError: HTTP {self.status} {error_type} "
+            f"model_requested={model_requested or 'none'} model_served={shown} "
+            f"retry_after_s={wait}"
+        )
+
+
+def strict_error_detail(exc: FreeRouteStrictError) -> dict[str, Any]:
+    """JSON detail for the /ask HTTP error. No secret, no second model."""
+    return {
+        "code": "FreeRouteStrictError",
+        "error_type": exc.error_type,
+        "retry_after_s": exc.retry_after_s,
+        "model_requested": exc.model_requested,
+        "model_served": exc.model_served,
+        "stamps": list(exc.ask_stamps),
+    }
+
+
+def strict_error_status(exc: FreeRouteStrictError) -> int:
+    """429 stays 429. Every other strict refusal is the OV pin status, 503."""
+    return 429 if exc.status == 429 else 503
 
 
 @dataclass
@@ -1359,11 +1556,19 @@ def complete(
         body["tool_choice"] = "auto"
     if local_only_enabled():
         body.update(freeroute_ov_local.local_only_request_fields())
+    # OpenVault #81. JSON true only. Omitted when the flag is off so the
+    # dumped body matches the bytes this function sent before the flag existed.
+    if strict_model_pin_enabled():
+        body["strict"] = True
 
+    # Clear first so a transport that does not note headers cannot reuse an
+    # older response. A real urllib response replaces this inside the call.
+    note_response_headers({})
     send, impl = _transport()
     started = time.monotonic()
     try:
-        status, data = send(
+        status, data = _call_noting_headers(
+            send,
             "POST",
             "/v1/chat/completions",
             body=body,
@@ -1373,6 +1578,7 @@ def complete(
         )
     except Exception as exc:  # noqa: BLE001 - a transport must not crash the ask
         status, data = 0, {"error": {"message": f"transport error: {type(exc).__name__}"}}
+    response_headers = take_response_headers()
     latency_ms = round((time.monotonic() - started) * 1000.0, 1)
 
     stamp = RouteStamp(
@@ -1401,6 +1607,9 @@ def complete(
     stamp.served_model = served_model
     stamp.served_local = is_local
     stamp.served_reason = served_reason
+    if strict_model_pin_enabled():
+        stamp.model_requested = chosen.requested
+        stamp.model_served = served_model
     if status == 200 and isinstance(data, dict):
         stamp.served = str(data.get("model") or "")
         stamp.honored = _same_model(chosen.requested, stamp.served)
@@ -1482,6 +1691,20 @@ def complete(
             stamp.usable = False
     stamp.error = reason
     stamp.route_source = route_source
+    stop, err_type = _strict_stop(int(status), data)
+    strict_exc: FreeRouteStrictError | None = None
+    if stop:
+        wait = _retry_after_s(data if isinstance(data, dict) else None, response_headers)
+        strict_exc = FreeRouteStrictError(
+            status=int(status),
+            error_type=err_type,
+            retry_after_s=wait,
+            model_requested=stamp.model_requested or chosen.requested,
+            model_served=stamp.model_served,
+            stamp=stamp,
+        )
+        stamp.error = str(strict_exc)
+        reason = stamp.error
     if not _write_row(
         stamp,
         scored=scored,
@@ -1490,6 +1713,8 @@ def complete(
     ):
         stamp.learn_row_failed = True
     _journal_add(stamp)
+    if strict_exc is not None:
+        raise strict_exc
     return Completion(
         ok=status == 200 and stamp.usable,
         text=text,
@@ -1636,6 +1861,8 @@ __all__ = [
     "DEFAULT_FALLBACK_CAPS",
     "FALLBACK_MAX_TOKENS_ENV",
     "FreeRouteFallbackCapInvalid",
+    "FreeRouteStrictError",
+    "STRICT_ENV",
     "HEALTHY_MAX_TOKENS",
     "IMPL",
     "LEARN_ENV",
@@ -1680,6 +1907,9 @@ __all__ = [
     "router_fingerprint",
     "scoreboard",
     "stamp_router_fingerprint",
+    "strict_error_detail",
+    "strict_error_status",
+    "strict_model_pin_enabled",
     "store_error",
     "store_path",
     "store_state",

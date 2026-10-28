@@ -59,7 +59,8 @@ from __future__ import annotations
 import os
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
 
@@ -683,6 +684,22 @@ def _direct_gate(sql: str, gate: Any, granted: set[str]) -> str | None:
     return None
 
 
+@contextmanager
+def _stop_on_strict(steps: list[StepStamp]) -> Iterator[None]:
+    """A strict pin refusal or 429 stops the ladder and keeps the served stamp.
+
+    The exception already names retry_after_s. This records model_requested
+    and model_served on the ask step list, then lets the error surface.
+    """
+    try:
+        yield
+    except freeroute.FreeRouteStrictError as exc:
+        if exc.stamp is not None:
+            steps.append(StepStamp.from_route("strict", exc.stamp, str(exc)))
+        exc.ask_stamps = [step.public() for step in steps]
+        raise
+
+
 def plan_sql_answer(
     request: plan_payload.PlanSqlRequest,
     *,
@@ -1053,7 +1070,7 @@ def plan_sql_answer(
         return None
 
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
-    with freeroute.journal(split=split) as journal:
+    with freeroute.journal(split=split) as journal, _stop_on_strict(steps):
         answered = _round(
             gen,
             SQL_ATTEMPTS,

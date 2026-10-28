@@ -2,6 +2,15 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CX-STRICT-01 -- 2026-10-28
+
+`CORTEX_OV_STRICT` defaults off. Off, every FreeRoute chat body is the same
+bytes as before. On, each completion sends JSON `strict: true` (OpenVault #81,
+also accepted as header `X-OpenVault-Strict`). A `pin_unavailable` or HTTP 429
+raises `FreeRouteStrictError` with `retry_after_s` and the `/ask` path records
+`model_requested` and `model_served` on the served step instead of walking
+another model.
+
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
 
 Off unless `CORTEX_PLAN_SQL_VOTE=1` (with `CORTEX_PLAN_SQL=1`). On the
