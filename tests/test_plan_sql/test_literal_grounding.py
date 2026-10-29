@@ -177,18 +177,43 @@ def test_prompts_take_filter_values_from_the_question_not_the_samples() -> None:
     BIRD Mini-Dev split B through this path, removing it and adding an output
     contract raised EX from 41.7% to 47.7% (paired +38/-17, n=348)."""
     from CortexOS.plan_sql import payload as plan_payload
+    from CortexOS.plan_sql.generator import FreeRoutePlanSqlGenerator, ModelStep, StepStamp
 
     request = plan_payload.PlanSqlRequest(
         "kg of SKU-ZZZZZ",
         plan_payload.AskPayload.model_validate(PAYLOAD),
         column_values={"transactions": {"sku": ("SKU-00001",)}},
     )
-    prompts = [m["content"] for m in plan_payload.plan_messages(request)] + [
-        m["content"] for m in plan_payload.sql_messages(request, ["1. Read transactions."])
-    ]
-    text = " ".join(prompts)
-    assert "must come from them" not in text
-    assert "Ground every filter in the sampled column values" not in text
-    assert "Never replace a value the question names" in text
-    assert "Take every filter value from the question" in text
-    assert "Return the columns the question asks for" in text
+    # #386 folds the planner into the one sql() call, so plan_messages() is not
+    # sent. Guard the prompts the default generator does send: the folded first
+    # reading (sql_messages, no plan) and the vote's second reading
+    # (second_reading_messages), each built through sql_prompt(), which is the
+    # exact message list sql() hands to FreeRoute.
+    folded = ModelStep(
+        "plan", True, "", "folded", StepStamp.cortex("plan", "cortex:plan-folded", "folded")
+    )
+    generator = FreeRoutePlanSqlGenerator()
+    sent = {
+        reading: " ".join(
+            m["content"] for m in generator.sql_prompt(request, folded, reading=reading)
+        )
+        for reading in (plan_payload.FIRST_READING, plan_payload.SECOND_READING)
+    }
+    assert sent[plan_payload.FIRST_READING] == " ".join(
+        m["content"] for m in plan_payload.sql_messages(request, ())
+    )
+    assert sent[plan_payload.SECOND_READING] == " ".join(
+        m["content"] for m in plan_payload.second_reading_messages(request)
+    )
+    for reading, text in sent.items():
+        assert "SKU-00001" in text, reading  # the samples do reach the prompt
+        assert "must come from them" not in text, reading
+        assert "Ground every filter in the sampled column values" not in text, reading
+        assert "Never replace a value the question names" in text, reading
+        assert "Take filter values from the question" in text, reading
+        assert "Return the columns the question asks for" in text, reading
+    # plan_messages() stays for a generator that plans in its own call.
+    planned = " ".join(m["content"] for m in plan_payload.plan_messages(request))
+    assert "must come from them" not in planned
+    assert "Ground every filter in the sampled column values" not in planned
+    assert "Take every filter value from the question" in planned

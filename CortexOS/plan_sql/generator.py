@@ -126,6 +126,16 @@ class ModelStep:
 
 
 class PlanSqlGenerator(Protocol):
+    """The seam the ask path calls. ``sql(..., reading=SECOND_READING)`` is the
+    vote's second reading; the ask seam passes ``reading`` only on that call.
+
+    ``sql_prompt(request, plan, *, prior_violations=(), reading=FIRST_READING)``
+    (the exact messages ``sql()`` would send) is deliberately not a member: the
+    ask seam reads it with ``getattr`` and treats a generator without it as one
+    whose second reading cannot be shown to differ, so it gets no vote. A
+    Protocol member would make that fail-closed case unrepresentable.
+    """
+
     def plan(self, request: PlanSqlRequest) -> ModelStep: ...
 
     def sql(
@@ -134,6 +144,7 @@ class PlanSqlGenerator(Protocol):
         plan: ModelStep,
         *,
         prior_violations: Sequence[str] = (),
+        reading: str = FIRST_READING,
     ) -> ModelStep: ...
 
 

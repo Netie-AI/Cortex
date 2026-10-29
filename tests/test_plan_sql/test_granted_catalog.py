@@ -981,12 +981,39 @@ def _contract_spec(name: str) -> dict[str, Any]:
     return json.loads((root / name).read_text(encoding="utf-8"))
 
 
-def test_contract_1_9_declares_schema_context_on_ask_request() -> None:
-    from cortex_contract.answer import AskRequest
+def _specs_since_1_9() -> list[str]:
+    """Every published spec from 1.9.0 on, plus the current line's.
+
+    The fields land at 1.9.0; a later minor keeps them (removing one is a
+    contract major). Not pinned to a version literal, so a contract bump does
+    not break this file, while dropping a field from any later line does.
+    """
     from cortex_contract.version import CONTRACT_VERSION
 
-    assert CONTRACT_VERSION == "1.9.0"
+    root = Path(__file__).resolve().parents[2] / "contract"
+    names = set()
+    for path in root.glob("openapi-*.json"):
+        version = tuple(int(p) for p in path.name[len("openapi-") : -len(".json")].split("."))
+        if version >= (1, 9, 0):
+            names.add(path.name)
+    current = f"openapi-{CONTRACT_VERSION}.json"
+    assert (root / current).is_file(), f"no published spec for the current line {current}"
+    names.add(current)
+    assert "openapi-1.9.0.json" in names
+    return sorted(names)
+
+
+def test_contract_1_9_declares_schema_context_on_ask_request() -> None:
+    from cortex_contract.answer import AskRequest
+
     assert "schema_context" in AskRequest.model_fields
+    field = AskRequest.model_fields["schema_context"]
+    assert not field.is_required()
+    assert AskRequest.model_validate({"question": "q"}).schema_context is None
+    for name in _specs_since_1_9():
+        later = _contract_spec(name)["components"]["schemas"]["AskRequest"]
+        assert "schema_context" in later["properties"], name
+        assert "schema_context" not in later.get("required", []), name
     spec = _contract_spec("openapi-1.9.0.json")
     assert spec["info"]["version"] == "1.9.0"
     field = spec["components"]["schemas"]["AskRequest"]["properties"]["schema_context"]
@@ -1008,6 +1035,11 @@ def test_contract_1_9_declares_the_column_mask_flag() -> None:
 
     assert AskPayloadColumn(name="c").masked is None
     assert AskPayloadColumn(name="c", masked=False).masked is False
+    for name in _specs_since_1_9():
+        schemas = _contract_spec(name)["components"]["schemas"]
+        for model in ("AskPayloadColumn", "ContractAskPayloadColumn"):
+            assert "masked" in schemas[model]["properties"], (name, model)
+            assert "masked" not in schemas[model].get("required", []), (name, model)
     spec = _contract_spec("openapi-1.9.0.json")
     for name in ("AskPayloadColumn", "ContractAskPayloadColumn"):
         schema = spec["components"]["schemas"][name]
