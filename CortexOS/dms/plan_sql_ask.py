@@ -57,6 +57,7 @@ This path writes nothing to per-Space memory.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -110,7 +111,6 @@ ABSTAIN = Badge.ABSTAIN.value
 PIPELINE_FAILURE_EVENT = "plan_sql.pipeline_failure"
 TICKET_ACTOR = "cortex.plan_sql"
 DECLINED_REASON = "user declined the closest question"
-_TICKET_QUESTION_CHARS = 1000
 
 # Same-model writes (the first, plus error-fed regenerations). The stronger
 # pass gets one write: the failures are already in its prompt.
@@ -353,13 +353,20 @@ def _pipeline_failure_ticket(
 ) -> StepStamp:
     """Append a pipeline-failure ticket to the F1 audit ledger. Never raises.
 
-    The returned step says whether the ticket landed (its ledger ``seq``) or
-    that it did not. An audit outage does not turn the No into a 500, and a
-    ticket that was not written is visible on the envelope, not swallowed.
+    The ledger is immutable, so the ticket follows the ``goal_audit`` privacy
+    policy: identifiers and verdicts, never content (PDPA). The question is
+    carried as the SHA-256 of its UTF-8 bytes and its length, never as text;
+    the ``audit_id`` joins the ticket to the ask for anyone allowed to see it.
+
+    The returned step says whether the ticket was recorded or that it was not.
+    It never shows the global ledger ``seq``. An audit outage does not turn the
+    No into a 500, and a ticket that was not written is visible on the
+    envelope, not swallowed.
     """
     payload = {
         "audit_id": audit_id,
-        "question": question[:_TICKET_QUESTION_CHARS],
+        "question_sha256": hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        "question_chars": len(question),
         "reason": reason,
         "session_id": session_id,
         "space_id": space_id,
@@ -368,7 +375,7 @@ def _pipeline_failure_ticket(
     try:
         from CortexOS.audit import resolve_ledger
 
-        entry = resolve_ledger().append(TICKET_ACTOR, PIPELINE_FAILURE_EVENT, payload)
+        resolve_ledger().append(TICKET_ACTOR, PIPELINE_FAILURE_EVENT, payload)
     except Exception as exc:  # noqa: BLE001 - reported on the step and the log
         _LOG.warning(
             "plan_sql pipeline-failure ticket not recorded audit_id=%s: %s: %s",
@@ -379,9 +386,8 @@ def _pipeline_failure_ticket(
         return StepStamp.cortex(
             "ticket", "cortex:pipeline-failure-ticket", f"not recorded: {type(exc).__name__}"
         )
-    seq = getattr(entry, "seq", None)
     return StepStamp.cortex(
-        "ticket", "cortex:pipeline-failure-ticket", f"{PIPELINE_FAILURE_EVENT} seq={seq}"
+        "ticket", "cortex:pipeline-failure-ticket", f"{PIPELINE_FAILURE_EVENT} recorded"
     )
 
 

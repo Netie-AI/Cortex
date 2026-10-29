@@ -8,6 +8,7 @@ OpenVault (tests/freeroute_fake.py) or the recorded C-STAMP capture
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import itertools
 import json
@@ -1094,7 +1095,10 @@ def test_confirm_no_is_an_abstain_envelope_and_logs_a_pipeline_failure_ticket(
 
     The envelope DMS receives from POST /v1/contract/ask carries an abstain
     badge, never session, and no rows. The ticket is on the F1 ledger, keyed
-    by the envelope's audit_id, and the chain still verifies.
+    by the envelope's audit_id, and the chain still verifies. The ledger is
+    immutable, so the ticket carries identifiers and verdicts, never content
+    (goal_audit policy, PDPA): the question is a SHA-256 and a length, and its
+    text is nowhere in the entry. The step line does not expose the global seq.
     """
     dms_http.bind_session(SESSION, GRANT)
     assert _tickets(ticket_ledger) == []
@@ -1110,14 +1114,21 @@ def test_confirm_no_is_an_abstain_envelope_and_logs_a_pipeline_failure_ticket(
     assert ticket.actor == "cortex.plan_sql"
     assert ticket.payload == {
         "audit_id": body["audit_id"],
-        "question": QUESTION,
+        "question_sha256": hashlib.sha256(QUESTION.encode("utf-8")).hexdigest(),
+        "question_chars": len(QUESTION),
         "reason": "user declined the closest question",
         "session_id": SESSION,
         "space_id": None,
         "tables": ["transactions"],
     }
+    assert "question" not in ticket.payload
+    entry_text = json.dumps(dataclasses.asdict(ticket), sort_keys=True, default=str)
+    assert QUESTION not in entry_text
+    assert QUESTION.lower() not in entry_text.lower()
     step = next(line for line in body["assumptions"] if line.startswith("step ticket:"))
-    assert f"{TICKET_EVENT} seq={ticket.seq}" in step
+    assert step.startswith("step ticket:")
+    assert step.endswith(f"({TICKET_EVENT} recorded)"), step
+    assert "seq" not in step, step
     assert ticket_ledger.verify().ok
 
 
