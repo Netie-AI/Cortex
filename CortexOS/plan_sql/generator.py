@@ -6,6 +6,12 @@ asks for one SELECT (``prior_violations`` lets a caller feed gate errors back).
 ``sql()`` call so one attempt is one FreeRoute ``complete``. Each model step
 returns a ``ModelStep`` stamped from the actual FreeRoute response.
 
+``sql(..., reading=SECOND_READING)`` is the vote's second reading: its own
+framing (``payload.second_reading_messages``), so it is a different prompt from
+the folded first reading. ``sql_prompt()`` returns the exact messages ``sql()``
+would send, and ``ModelStep.prompt_sha256`` is the hash of the ones it did
+send, so the ask seam can refuse to count two readings of one prompt.
+
 The generator only produces text. It holds no executor and no DB handle, and
 it reaches a model only through ``CortexOS.integrations.freeroute`` (import
 contract ``plan-sql-freeroute-only``). The caller gates and executes, and refuses any step whose route
@@ -16,16 +22,18 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from CortexOS.integrations import freeroute
 from CortexOS.plan_sql.payload import (
+    FIRST_READING,
     PlanSqlRequest,
     plan_lines,
+    prompt_sha256,
+    reading_messages,
     reconfirm_messages,
-    sql_messages,
 )
 
 TASK_SQL = "plan-sql-sql"
@@ -112,6 +120,9 @@ class ModelStep:
     stamp: StepStamp
     route: freeroute.RouteStamp | None = None
     plan: tuple[str, ...] = ()
+    # payload.prompt_sha256 of the messages this step sent. Empty when the
+    # generator did not say (an injected one): no prompt is then provably distinct.
+    prompt_sha256: str = ""
 
 
 class PlanSqlGenerator(Protocol):
@@ -184,18 +195,34 @@ class FreeRoutePlanSqlGenerator:
         reason = "folded into the sql call"
         return ModelStep(kind, True, "", reason, StepStamp.cortex(kind, "cortex:plan-folded", reason))
 
+    def sql_prompt(
+        self,
+        request: PlanSqlRequest,
+        plan: ModelStep,
+        *,
+        prior_violations: Sequence[str] = (),
+        reading: str = FIRST_READING,
+    ) -> list[dict[str, Any]]:
+        """The exact messages :meth:`sql` sends for these arguments. No model call."""
+        return reading_messages(
+            request, plan.plan, reading=reading, prior_violations=prior_violations
+        )
+
     def sql(
         self,
         request: PlanSqlRequest,
         plan: ModelStep,
         *,
         prior_violations: Sequence[str] = (),
+        reading: str = FIRST_READING,
     ) -> ModelStep:
-        messages = sql_messages(request, plan.plan, prior_violations=prior_violations)
+        messages = self.sql_prompt(
+            request, plan, prior_violations=prior_violations, reading=reading
+        )
         out = self._complete(
             self._name(TASK_SQL), messages, lambda t: bool(_SELECT.search(t or ""))
         )
-        return _step(self._name("sql"), out)
+        return replace(_step(self._name("sql"), out), prompt_sha256=prompt_sha256(messages))
 
     def reconfirm(self, request: PlanSqlRequest, failures: Sequence[str]) -> ModelStep:
         """Ask why this would abstain, and for the closest answerable question."""

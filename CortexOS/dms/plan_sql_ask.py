@@ -45,7 +45,13 @@ With ``CORTEX_PLAN_SQL_VOTE=1`` a SQL that ran with rows is a candidate, not an
 answer: it is served only when a second, independent SQL returns the same rows
 (``plan_sql_vote``). A split serves nothing and goes straight to step 7. Vote
 calls count under the rung that ran them, the stronger route's under
-``stronger-model``.
+``stronger-model``. With the plan folded (step 4) neither reading carries a
+plan, so the second reading has its own framing
+(``payload.SECOND_READING``): a different prompt from the same granted
+catalog and question. It runs only because its prompt differs: a second
+reading whose prompt would hash (``payload.prompt_sha256``) to one the first
+reading sent, or that cannot be shown to differ, is skipped and the vote
+relies on the stronger route.
 
 The answer that leaves this path stamps the rung that produced it
 (``plan``, ``error-fed-retry-<N>``, ``stronger-model``, ``reconfirm``) on
@@ -151,7 +157,7 @@ _DESTRUCTIVE_KINDS = (
     "COPY",
 )
 
-# The vote's second reading writes from the question alone.
+# The vote's readings carry no plan; the second one also has its own framing.
 _NO_PLAN = ModelStep("plan", True, "", "", StepStamp.cortex("plan", "cortex:plan-sql-vote", ""))
 # A SQL that ran with rows: the model step that wrote it, the gated SQL, the rows.
 _Reading = tuple[ModelStep, str, list[dict[str, Any]]]
@@ -669,8 +675,9 @@ class _RouteRefusal:
         plan: ModelStep,
         *,
         prior_violations: Sequence[str] = (),
+        reading: str = plan_payload.FIRST_READING,
     ) -> ModelStep:
-        del request, plan, prior_violations
+        del request, plan, prior_violations, reading
         return self._no("sql-strong")
 
     def reconfirm(
@@ -819,6 +826,9 @@ def plan_sql_answer(
     vote_on = plan_sql_vote.vote_enabled()
     # Set when the vote split: no more writes, the ladder reconfirms.
     vote_split: list[str] = []
+    # payload.prompt_sha256 of every first-reading SQL prompt this ask sent.
+    # The vote's second reading is never one of these prompts.
+    first_prompts: set[str] = set()
 
     def _note_call(active: object, bucket: str) -> None:
         # A route refusal does not call complete(). Every other generator
@@ -913,6 +923,8 @@ def plan_sql_answer(
         priors = list(failures)
         for attempt in range(attempts):
             sql_step = active.sql(request, folded, prior_violations=priors)
+            if sql_step.prompt_sha256:
+                first_prompts.add(sql_step.prompt_sha256)
             _note_call(active, rung_of(attempt))
             steps.append(sql_step.stamp)
             _remember(sql_step, failed_models)
@@ -1118,7 +1130,7 @@ def plan_sql_answer(
             collect.append((sql_step, served_sql, rows))
             return None
         if vote_on:
-            picked = _vote((sql_step, served_sql, rows), rung, bool(plan.plan))
+            picked = _vote((sql_step, served_sql, rows), rung)
             if picked is None or isinstance(picked, dict):
                 return picked
             if picked[0] is not sql_step:
@@ -1138,20 +1150,65 @@ def plan_sql_answer(
             )
         )
 
+    def _note_vote(reason: str) -> None:
+        steps.append(StepStamp.cortex("vote", "cortex:plan-sql-vote", reason))
+
+    def _same_prompt(active: Any, first: ModelStep, priors: list[str]) -> str:
+        """Why the second reading's next prompt is not provably new, or ``""``.
+
+        Computed from the exact messages ``active.sql`` would send, before it
+        sends them. A generator that cannot show its prompt, or a first reading
+        with no recorded prompt hash, is not provably distinct.
+        """
+        build = getattr(active, "sql_prompt", None)
+        if not first.prompt_sha256 or build is None:
+            return "its prompt cannot be shown to differ from the first reading's"
+        would = plan_payload.prompt_sha256(
+            build(
+                request,
+                _NO_PLAN,
+                prior_violations=priors,
+                reading=plan_payload.SECOND_READING,
+            )
+        )
+        if would in first_prompts:
+            return "its prompt would be the first reading's prompt"
+        return ""
+
     def _check(
-        active: Any, bucket: str, rung: str, attempts: int = 1
+        active: Any,
+        bucket: str,
+        rung: str,
+        attempts: int = 1,
+        *,
+        first: ModelStep | None = None,
     ) -> _Reading | dict[str, Any] | None:
-        """One more SQL from the question alone, gated and run like the first.
+        """One more SQL in the second reading's framing, gated and run like the first.
 
         The reading, a stop envelope on a trust failure, or None when it gave no
         rows. A SQL that fails a gate, errors or returns no rows is fed back for
         up to ``attempts`` writes, as the ladder does for the first. Any other
         refusal of this SQL (an ungranted table included) only loses its vote:
         the candidate it checks already passed every gate.
+
+        With ``first`` (the same-model second reading), a write is sent only when
+        its prompt differs from every first-reading prompt this ask sent, and a
+        write whose sent prompt hash is not shown to differ is not counted.
+        Either way the reading is skipped (None) and a vote line says why.
         """
         priors: list[str] = []
         for n in range(attempts):
-            step = active.sql(request, _NO_PLAN, prior_violations=priors)
+            if first is not None:
+                why = _same_prompt(active, first, priors)
+                if why:
+                    _note_vote(f"no second reading: {why}")
+                    return None
+            step = active.sql(
+                request,
+                _NO_PLAN,
+                prior_violations=priors,
+                reading=plan_payload.SECOND_READING,
+            )
             _note_call(active, bucket if n == 0 else rung_retry(n))
             step = replace(step, stamp=replace(step.stamp, served_step=f"vote-{step.kind}"))
             steps.append(step.stamp)
@@ -1161,31 +1218,38 @@ def plan_sql_answer(
                 return stop(security[0], security[1])
             if security or not step.ok or _not_served(step):
                 return None
+            if first is not None:
+                sent = step.prompt_sha256
+                if not sent or sent in first_prompts:
+                    _note_vote(
+                        "no second reading: the prompt it sent is not shown to differ "
+                        "from the first reading's"
+                    )
+                    return None
+                _note_vote(
+                    f"second reading prompt sha256={sent[:12]} differs from "
+                    f"the first reading's sha256={first.prompt_sha256[:12]}"
+                )
             got: list[_Reading] = []
             _use_sql(step, _NO_PLAN, priors, rung, collect=got)
             if got:
                 return got[0]
         return None
 
-    def _vote(first: _Reading, rung: str, planned: bool) -> _Reading | dict[str, Any] | None:
+    def _vote(first: _Reading, rung: str) -> _Reading | dict[str, Any] | None:
         """The reading to serve, a stop envelope, or None when no two readings agree.
 
-        The second reading differs from the first only in having no plan. A first SQL
-        written without one would meet an identical prompt and always agree, so it has
-        no second reading from the same model.
+        #386 folds the plan into the SQL call, so neither reading carries one.
+        The second reading is written in its own framing and runs because its
+        prompt differs from the first's. When it would not, or that cannot be
+        shown, it is skipped and only the stronger route's reading can agree.
         """
-
-        def _note(reason: str) -> None:
-            steps.append(StepStamp.cortex("vote", "cortex:plan-sql-vote", reason))
-
-        second = _check(gen, rung, rung, SQL_ATTEMPTS) if planned else None
-        if not planned:
-            _note("no second reading: the first SQL was written without a plan")
+        second = _check(gen, rung, rung, SQL_ATTEMPTS, first=first[0])
         if isinstance(second, dict):
             return second
         if second is not None and plan_sql_vote.agree(first[2], second[2]):
             how = "the same SQL" if plan_sql_vote.same_sql(first[1], second[1]) else "a second SQL"
-            _note(f"agreed: {how} written without the plan returned the same rows")
+            _note_vote(f"agreed: {how} written from a different prompt returned the same rows")
             return first
         third = _check(_stronger_generator(failed_models), RUNG_STRONG, rung)
         if isinstance(third, dict):
@@ -1193,10 +1257,10 @@ def plan_sql_answer(
         if third is not None:
             for name, reading in (("first", first), ("second", second)):
                 if reading is not None and plan_sql_vote.agree(reading[2], third[2]):
-                    _note(f"agreed: the stronger route's SQL returned the {name} SQL's rows")
+                    _note_vote(f"agreed: the stronger route's SQL returned the {name} SQL's rows")
                     return reading
         detail = f"{plan_sql_vote.VOTE_SPLIT}: {plan_sql_vote.SPLIT_DETAIL}"
-        _note(detail)
+        _note_vote(detail)
         failures.append(detail)
         vote_split.append(rung)
         return None

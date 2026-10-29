@@ -55,6 +55,23 @@ case change in either spelling counts for both: ``TempC`` gets no ``TempF``,
 ``WeightG`` and ``weightg`` no ``WeightKg``, ``qty-g`` no ``qty-kg``; a typo
 inside a longer word (``CustomerNmae``) is still named.
 
+Round 6 (Lead option (a), after #421/#422 merged): the fold stays, and with
+``CORTEX_PLAN_SQL_VOTE=1`` the vote's second reading gets its own framing
+(``payload.SECOND_READING``: its own system prompt, and the question before
+the granted catalog), built only from the catalog, sampled values and the
+question. #422's rule "a first SQL written without a plan has no second
+reading" would have switched the vote off under the fold, so it is replaced
+by a prompt-hash rule: the second reading runs because its prompt differs.
+A write whose prompt would hash (sha256 of the exact messages, canonical
+JSON) to one the first reading sent, or that cannot be shown to differ, is
+skipped (``no second reading: ...``) and only the stronger route can agree;
+a sent prompt that matches is not counted. The vote line names both 12-char
+hash prefixes. #422's identical-SQL agreement and the second reading's
+error-fed retry are kept. Each folded vote ask makes one call fewer
+(``model_calls`` ``plan`` counts the first SQL and the second reading). Not
+a CI claim; the vote's BIRD numbers were measured before the fold and are not
+re-measured here.
+
 ## LOW-STOCK-GOLDEN-01 (#434) -- 2026-10-28
 
 A LIMIT that drops rows now orders by each outer table's `row_key`

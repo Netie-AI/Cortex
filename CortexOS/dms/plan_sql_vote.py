@@ -6,16 +6,24 @@ about four times in five, and a candidate that no second one matched was
 right about one time in four. So the ladder's first gated SQL is a candidate,
 not an answer:
 
-1. ``B``: the same model writes SQL for the question without the plan, through
-   the same gates, with the ladder's error-fed retry. The same rows as the
-   first candidate serve the first.
+1. ``B``: the same model writes SQL for the question from a different prompt,
+   through the same gates, with the ladder's error-fed retry. The same rows as
+   the first candidate serve the first.
 2. ``C``: otherwise the stronger route OpenVault configured writes it. The
    candidate whose rows ``C`` matches is served.
 3. No two candidates agree: nothing is served and the ladder reconfirms.
 
+Since #386 folds the plan into the one SQL call, neither candidate carries a
+plan. ``B`` differs from the first by framing instead (its own system prompt
+and layout over the same granted catalog and question,
+``payload.SECOND_READING``). ``B`` runs only when its prompt hash differs from
+every prompt the first candidate's round sent; otherwise it is skipped and
+only ``C`` can agree.
+
 A ``B`` that writes the same SQL text as the first candidate counts: on 500
 BIRD questions those agreed answers were right 41 times in 49, better than
-agreement between different SQL. Rows are compared as a set, numbers to four
+agreement between different SQL (measured before the fold, when ``B`` was the
+first prompt without its plan). Rows are compared as a set, numbers to four
 decimals. This module only compares; the ladder writes, gates and runs.
 """
 

@@ -7,6 +7,8 @@ grant names, or the ask is refused before any model sees the schema.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -21,6 +23,12 @@ JOIN_OUTSIDE_PAYLOAD = "PLAN_SQL_JOIN_OUTSIDE_PAYLOAD"
 
 MAX_PLAN_LINES = 8
 MAX_LINE_CHARS = 240
+#: Which framing a SQL prompt uses. The ladder's SQL (the folded first reading,
+#: and every error-fed or stronger write) is ``FIRST_READING``. The vote's
+#: second reading (PLAN-SQL-VOTE-01) is ``SECOND_READING``: its own system
+#: prompt and user layout, so the two readings are two different prompts.
+FIRST_READING = "first"
+SECOND_READING = "second"
 
 #: Lead data-policy ruling on #386: at most this many distinct sampled values
 #: of one column reach a prompt, each at most this many characters once
@@ -61,8 +69,17 @@ _SQL_RULES = (
     "Return SQL only."
 )
 _SQL_SYSTEM = "You write a single DuckDB SELECT that carries out the plan given. " + _SQL_RULES
-# No plan: the vote's second reading (PLAN-SQL-VOTE-01) writes from the question alone.
+# No plan: the folded first reading (#386) writes from the catalog and the question.
 _DIRECT_SQL_SYSTEM = "You write a single DuckDB SELECT that answers the question. " + _SQL_RULES
+# The vote's second reading under the fold. Neither reading carries a plan, so
+# this one differs in framing: its own system prompt, and a user layout that
+# puts the question before the catalog. Built from the same granted catalog,
+# sampled values and question, never from the first reading's SQL or rows.
+_SECOND_READING_SYSTEM = (
+    "You read a data question independently and write your own query for it. "
+    "Decide what the question counts or lists, which rows it keeps and which "
+    "columns it returns, then write a single DuckDB SELECT for that reading. " + _SQL_RULES
+)
 _RECONFIRM_SYSTEM = (
     "A read-only query over the listed tables could not be grounded. "
     "Reply with exactly two lines and no SQL:\n"
@@ -257,6 +274,52 @@ def sql_messages(
     ]
 
 
+def second_reading_messages(
+    request: PlanSqlRequest,
+    *,
+    prior_violations: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """The vote's second reading: the question first, then the granted catalog.
+
+    Same catalog, sampled values and SQL rules as :func:`sql_messages`, with a
+    different system prompt and order, so its hash never equals a first
+    reading's (:func:`prompt_sha256`). No plan and no first-reading SQL.
+    """
+    parts = [f"QUESTION: {request.question}", "", schema_block(request)]
+    block = values_block(request)
+    if block:
+        parts.extend(["", block])
+    parts.extend(["", "Write one DuckDB SELECT for the QUESTION above, from these tables only."])
+    if prior_violations:
+        parts.append("PREVIOUS VALIDATION ERRORS (fix these):")
+        parts.extend(f"- {v}" for v in list(prior_violations)[:8])
+    return [
+        {"role": "system", "content": _SECOND_READING_SYSTEM},
+        {"role": "user", "content": "\n".join(parts)},
+    ]
+
+
+def reading_messages(
+    request: PlanSqlRequest,
+    plan: Sequence[str],
+    *,
+    reading: str = FIRST_READING,
+    prior_violations: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """The SQL prompt for ``reading``. Anything but ``SECOND_READING`` is the first."""
+    if reading == SECOND_READING:
+        return second_reading_messages(request, prior_violations=prior_violations)
+    return sql_messages(request, plan, prior_violations=prior_violations)
+
+
+def prompt_sha256(messages: Sequence[Mapping[str, Any]]) -> str:
+    """sha256 of the exact messages sent: canonical JSON, keys sorted, UTF-8."""
+    canon = json.dumps(
+        [dict(m) for m in messages], sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
 def reconfirm_messages(
     request: PlanSqlRequest, failures: Sequence[str]
 ) -> list[dict[str, Any]]:
@@ -273,19 +336,24 @@ def reconfirm_messages(
 
 
 __all__ = [
+    "FIRST_READING",
     "JOIN_OUTSIDE_PAYLOAD",
     "PAYLOAD_WIDENS_GRANT",
     "PlanSqlRequest",
     "SAMPLE_VALUES_PER_COLUMN",
     "SAMPLE_VALUE_CHARS",
+    "SECOND_READING",
     "fit_values",
     "plan_lines",
     "plan_messages",
+    "prompt_sha256",
     "quote_sample",
+    "reading_messages",
     "reconfirm_messages",
     "render_values",
     "sample_text",
     "schema_block",
+    "second_reading_messages",
     "sql_messages",
     "values_block",
     "widening",
