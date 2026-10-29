@@ -1307,7 +1307,12 @@ def test_http_l2_join_form_abstains_and_must_fail_serves_zero(
 def test_statement_timeout_is_set_before_the_drift_scan(
     lake: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """EXPLAIN and the value-domain scan run under the statement timeout."""
+    """The statement-timeout SET is attempted before EXPLAIN and the value-domain scan.
+
+    On DuckDB 2.x the SET is a no-op (no ``statement_timeout`` setting; the
+    CatalogException is swallowed), so this asserts the order of the attempt,
+    not that the scan is bounded.
+    """
     from CortexOS.execution import submit, warehouse
 
     calls: list[str] = []

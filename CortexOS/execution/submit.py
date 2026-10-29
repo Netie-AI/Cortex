@@ -374,8 +374,10 @@ def _execute_sql(
         path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
         try:
-            # Bound EXPLAIN, the value-domain scan and the page count, not only the fetch.
-            # DuckDB may ignore an unknown setting; a failure here is not a refusal.
+            # The SET is attempted before EXPLAIN, the value-domain scan and the page count.
+            # On DuckDB 2.x it is a no-op: DuckDB has no statement_timeout setting, the SET
+            # raises CatalogException and it is swallowed here, so nothing is bounded.
+            # A failure here is not a refusal.
             timeout_s = pool.config.statement_timeout_s
             if timeout_s > 0:
                 try:

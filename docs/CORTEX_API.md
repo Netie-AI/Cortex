@@ -62,8 +62,8 @@ not those rows). The check sits in the query seam, so
 (`badge=abstain`); it is not fed back to the model as a retryable gate error.
 A subscript or an alias column list that the column guardrail cannot resolve
 (`UNKNOWN_COLUMN`) never reaches that check on plan+SQL: the ladder reconfirms
-and does not serve a zero. `DMS_L2_ENABLED` stays off by default for the same
-reason. The check is kept per read-only warehouse instance, so a lake
+and does not serve a zero. `DMS_L2_ENABLED` stays off by default; this check
+does not change that. The check is kept per read-only warehouse instance, so a lake
 renamed over the path is checked by the first instance that reads it. Rebuild the lake (`load_inventory_csv` or the
 lakehouse silver sync) to clear it. On `generate=true`, SQL whose sales measure
 pins a value outside the declared values is a named retry,

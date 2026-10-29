@@ -37,8 +37,9 @@ declared column of that table, not only for an `exp.Column` of that name.
 table alias abstain on a stale lake (`lake_value_domain_stale:<table>.<column>`)
 instead of returning 0.0. Parse or scope failure fails closed. The drift scan
 still reads the whole table and ignores row predicates; that is now written
-in the docstring and `docs/CORTEX_API.md`. `SET statement_timeout` in
-`execute_sql` runs before EXPLAIN and that scan. `DMS_L2_ENABLED` and
+in the docstring and `docs/CORTEX_API.md`. `execute_sql` attempts
+`SET statement_timeout` before EXPLAIN and that scan; on DuckDB 2.x the SET is a
+no-op (no such setting, the error is swallowed), so neither is bounded by it. `DMS_L2_ENABLED` and
 `CORTEX_PLAN_SQL` stay off. No contract change.
 
 ## PLAN-SQL-VOTE-01 -- 2026-10-18
