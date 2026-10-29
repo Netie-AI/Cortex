@@ -23,6 +23,12 @@ things the SQL does not fix:
   preview bullet for a tied row is reduced to its key values, since SQL leaves
   the order of ties (and so which tied row the preview shows) undefined.
 
+The page tie (``apply_page_tiebreak``) appends the table's ``row_key`` when a
+LIMIT drops rows. That suffix is removed before the digest, so a page whose
+rows did not change stays on the recorded SQL. The raw ``sql_used`` still
+carries the key; ``test_low_stock_must_fail_if_clock_or_tie_drift_returns``
+locks it for the low-stock page.
+
 Re-record (on the base tree, never on this branch):
 ``CORTEX_RECORD_GOLDEN=<path> pytest tests/dms/test_ask_flag_off_golden_340.py``
 """
@@ -30,12 +36,14 @@ Re-record (on the base tree, never on this branch):
 from __future__ import annotations
 
 import collections
+import functools
 import hashlib
 import itertools
 import json
 import os
 import re
 import subprocess
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,8 +62,27 @@ GOLDEN = Path(__file__).with_name("fixtures") / "ask_flag_off_golden_main.json"
 VOLATILE_KEYS = frozenset({"answer_id", "audit_id", "drillthrough_token"})
 CLOCK_KEYS = frozenset({"rows", "row_count", "answer"})
 _CLOCK = re.compile(r"\b(current_date|current_timestamp|now\s*\(|today\s*\()", re.IGNORECASE)
+_DATE_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ORDER_BY = re.compile(r"\border\s+by\b", re.IGNORECASE)
 _ROW_LINE = re.compile(r"^\s+·\s")
+# Total order quantity_kg, sku, location_id, storage_bin. The digest ignores
+# the appended row_key suffix; these bytes are the page itself. Rewriting the
+# golden file does not silence the must-fail: the digests are copied below
+# and the served SQL must still name the key.
+_LOW_STOCK_QIDS = (
+    "adversarial:low_stock_followup",
+    "golden:low_stock_all",
+    "paraphrase:low_stock_all#1",
+    "paraphrase:low_stock_all#2",
+)
+_LOW_STOCK_RECORDED = {
+    "adversarial:low_stock_followup": "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0",
+    "golden:low_stock_all": "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0",
+    "paraphrase:low_stock_all#1": "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae",
+    "paraphrase:low_stock_all#2": "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae",
+}
+_LOW_STOCK_KEY = "i.sku ASC, i.location_id ASC, i.storage_bin ASC"
+_CLOCK_DAYS = (date(2026, 10, 17), date(2026, 10, 22), date(2026, 10, 28))
 
 
 def _questions() -> list[tuple[str, str]]:
@@ -114,9 +141,66 @@ def _tie_preview(body: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+@functools.cache
+def _row_keys() -> dict[str, list[str]]:
+    """Pack row keys. A trailing copy of one is the page tie the gate appends."""
+    layer = yaml.safe_load((ROOT / "packs" / "dms" / "semantic_layer.yaml").read_text(encoding="utf-8"))
+    out: dict[str, list[str]] = {}
+    for name, spec in (layer.get("tables") or {}).items():
+        key = [str(col) for col in (spec.get("row_key") or [])]
+        if key:
+            out[str(name)] = key
+    return out
+
+
+def _order_items(sql: str) -> tuple[re.Match[str] | None, list[str]]:
+    match = re.search(r"\border\s+by\b(?P<body>.*?)(?:\blimit\b|\boffset\b|$)", sql, re.IGNORECASE | re.DOTALL)
+    if match is None:
+        return None, []
+    items = [part.strip() for part in match.group("body").split(",") if part.strip()]
+    return match, items
+
+
+def _item_column(item: str) -> str:
+    token = item.split()[0].strip('"')
+    return token.split(".")[-1]
+
+
+def _strip_page_tiebreak(sql: str) -> str:
+    """Drop a trailing row-key suffix the gate appended after the question's own order.
+
+    The suffix is not part of the order the question asked for. Digests of a
+    page whose rows did not change stay on the recorded SQL. A page whose rows
+    did change still mismatches. The raw ``sql_used`` is not rewritten.
+    """
+    match, items = _order_items(sql)
+    if match is None or len(items) < 2:
+        return sql
+    names = [_item_column(item) for item in items]
+    keys = sorted(_row_keys().values(), key=len, reverse=True)
+    # A join appends one row_key per table. Peel each trailing key. A key that
+    # is the whole ORDER BY stays: that is the question's own order.
+    while len(names) >= 2:
+        drop = 0
+        for key in keys:
+            if len(key) < len(names) and names[-len(key) :] == key:
+                drop = len(key)
+                break
+        if not drop:
+            break
+        names = names[:-drop]
+        items = items[:-drop]
+    original = [_item_column(part.strip()) for part in match.group("body").split(",") if part.strip()]
+    if names == original:
+        return sql
+    return sql[: match.start("body")] + " " + ", ".join(items) + " " + sql[match.end("body") :]
+
+
 def _canonical(body: dict[str, Any]) -> bytes:
     mode = _mode(body)
     body = {k: v for k, v in body.items() if k not in VOLATILE_KEYS}
+    if body.get("sql_used"):
+        body["sql_used"] = _strip_page_tiebreak(str(body["sql_used"]))
     if mode == "clock":
         body = {k: v for k, v in body.items() if k not in CLOCK_KEYS}
     elif mode == "exact" and isinstance(body.get("rows"), list):
@@ -202,3 +286,136 @@ def test_flag_unset_ask_is_byte_identical_to_main(
         if qid not in non_exact and golden["sha256"][qid] != seen.get(qid)
     )
     assert changed == [], f"{len(changed)} answers differ from main {golden['recorded_on']}: {changed}"
+
+
+def _pin_clock(monkeypatch: pytest.MonkeyPatch, day: date) -> None:
+    """Point module-level ``date`` / ``datetime`` at one civil day.
+
+    ``datetime.date`` itself is immutable, so this replaces the names the
+    answer path imported. A later ``from datetime import date`` inside a
+    function still sees the wall clock; the SQL assertion below catches that
+    if it lands in ``sql_used``.
+    """
+
+    class _Date(date):
+        @classmethod
+        def today(cls) -> date:
+            return day
+
+    class _DateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return datetime(day.year, day.month, day.day, 12, 0, tzinfo=tz)
+
+    for mod in (
+        "CortexOS.dms.query_service",
+        "CortexOS.dms.generate_sample",
+        "CortexOS.dms.sql_guardrail",
+    ):
+        monkeypatch.setattr(f"{mod}.date", _Date, raising=False)
+        monkeypatch.setattr(f"{mod}.datetime", _DateTime, raising=False)
+
+
+def _serve_low_stock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A recorded metric port that chooses ``low_stock`` for the four pages.
+
+    Since #412 a model chooses the metric (``dms-metric-choose``) and a second
+    call checks it. The suite double serves only a declared wording, and none
+    of these four is one, so with the double they reconfirm and no page is
+    fetched. This port is not an armed measurement. It picks the metric main's
+    cascade picked, with the same assumption text, so the page a customer
+    receives when ``low_stock`` is served stays locked to the total order.
+    """
+    from CortexOS.dms import metric_choice
+    from CortexOS.dms.metric_choice import MetricSelection, MetricVerdict
+
+    asked = {question for qid, question in _questions() if qid in _LOW_STOCK_QIDS}
+
+    class _LowStockChoice:
+        def choose(self, question: str) -> MetricSelection:
+            if question not in asked:
+                return MetricSelection(why="not one of the four low-stock pages")
+            return MetricSelection(metric_id="low_stock", why="items below reorder level")
+
+        def check(self, question: str, selection: MetricSelection) -> MetricVerdict:
+            agrees = question in asked and selection.metric_id == "low_stock"
+            return MetricVerdict(agrees=agrees, unsure=not agrees, why="")
+
+    monkeypatch.setattr(metric_choice, "_port", _LowStockChoice())
+
+
+def _ask_low_stock(client) -> dict[str, dict[str, Any]]:
+    from CortexOS.dms.answer_engine import clear_session
+
+    questions = dict(_questions())
+    client.bind_session("alpha", WAREHOUSE_GRANT)
+    out: dict[str, dict[str, Any]] = {}
+    for qid in _LOW_STOCK_QIDS:
+        clear_session(SESSION, space_id="alpha")
+        resp = client.post(
+            "/v1/contract/ask",
+            json={"question": questions[qid], "session_id": SESSION, "space_id": "alpha"},
+        )
+        if resp.status_code == 200:
+            out[qid] = resp.json()
+        else:
+            out[qid] = {"_status": resp.status_code, "answer": resp.text, "sql_used": "", "rows": []}
+    return out
+
+
+def _clock_view(body: dict[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+    rows = body.get("rows") if isinstance(body.get("rows"), list) else []
+    keys = _order_keys(str(body.get("sql_used") or "")) or ["quantity_kg"]
+    ordered = _sort_ties(list(rows), keys)
+    return (
+        str(body.get("sql_used") or ""),
+        str(body.get("answer") or ""),
+        tuple(_row_key(row) for row in ordered),
+    )
+
+
+def test_low_stock_must_fail_if_clock_or_tie_drift_returns(
+    ask_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """#434 must-fail.
+
+    Goes red if a date returns to these four answers, if the page tie leaves
+    the ORDER BY, or if the page leaves the total-order recording. Rewriting
+    ``fixtures/ask_flag_off_golden_main.json`` does not silence it: the digests
+    are copied here, the served SQL must contain no clock call and no date
+    literal and must name the inventory lot key in the ORDER BY, and the answer
+    text plus the row multiset must match on 2026-10-17, 2026-10-22 and
+    2026-10-28. The metric is chosen by a recorded port (``_serve_low_stock``),
+    so the page is fetched.
+    """
+    for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
+        monkeypatch.delenv(name, raising=False)
+    _serve_low_stock(monkeypatch)
+    views: dict[date, dict[str, tuple[str, str, tuple[str, ...]]]] = {}
+    digests: dict[date, dict[str, str]] = {}
+    for day in _CLOCK_DAYS:
+        with monkeypatch.context() as pinned:
+            _pin_clock(pinned, day)
+            bodies = _ask_low_stock(ask_http)
+        views[day] = {}
+        digests[day] = {}
+        for qid, body in bodies.items():
+            sql = str(body.get("sql_used") or "")
+            assert _CLOCK.search(sql) is None, f"{qid} on {day} date dependency returned in SQL: {sql}"
+            assert _DATE_LITERAL.search(sql) is None, f"{qid} on {day} date literal in SQL: {sql}"
+            assert _LOW_STOCK_KEY in sql, f"{qid} on {day} page tie left the ORDER BY: {sql}"
+            views[day][qid] = _clock_view(body)
+            digests[day][qid] = hashlib.sha256(_canonical(body)).hexdigest()
+    first = _CLOCK_DAYS[0]
+    for qid in _LOW_STOCK_QIDS:
+        got = digests[first][qid]
+        assert got == _LOW_STOCK_RECORDED[qid], (
+            f"{qid} left the total-order low-stock page\n"
+            f"sql: {views[first][qid][0]}\n"
+            f"answer:\n{views[first][qid][1]}"
+        )
+        for day in _CLOCK_DAYS[1:]:
+            assert views[day][qid] == views[first][qid], (
+                f"{qid} date dependency returned between {first} and {day}\n"
+                f"--- {first}\n{views[first][qid][1]}\n--- {day}\n{views[day][qid][1]}"
+            )

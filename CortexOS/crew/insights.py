@@ -1593,10 +1593,29 @@ async def _run_insights(
                 schema_context=supplied,
             )
         except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
-            # The caller sees a named abstain; operators still see the bug.
-            _log.exception("generative_ask raised; answering a named ABSTAIN")
-            reason = f"generative_error:{type(exc).__name__}"
-            gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
+            from CortexOS.integrations.freeroute import FreeRouteStrictError
+
+            if isinstance(exc, FreeRouteStrictError):
+                # The pin was refused. Do not relabel it and do not try another model.
+                reason = (
+                    f"FreeRouteStrictError: HTTP {exc.status} {exc.error_type} "
+                    f"retry_after_s={exc.retry_after_s}"
+                )
+                gen = {
+                    "ok": False,
+                    "status": "ABSTAIN",
+                    "refuse_reason": reason,
+                    "retry_after_s": exc.retry_after_s,
+                    "model_requested": exc.model_requested,
+                    "model_served": exc.model_served,
+                }
+                if exc.stamp is not None:
+                    gen["stamp"] = exc.stamp.public()
+            else:
+                # The caller sees a named abstain; operators still see the bug.
+                _log.exception("generative_ask raised; answering a named ABSTAIN")
+                reason = f"generative_error:{type(exc).__name__}"
+                gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
         if not gen.get("ok") and gen.get("status") == "ABSTAIN":
             return _attach_generative(
                 _generative_abstain(

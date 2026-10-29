@@ -119,6 +119,16 @@ OpenVault tier. If the ladder is exhausted, reconfirm by saying why and
 suggesting the closest answerable question. Yes runs it. No answers "not found
 in the database" and logs a pipeline-failure ticket.
 
+Founder rulings of 2026-10-29:
+- **Lane choice.** A model may send a question to the document lane before the
+  SQL ladder runs. Any other lane decision, a document miss, or a router failure
+  falls through to the ladder. A lane decision never reconfirms or abstains on its
+  own.
+- **Split readings.** When two SQL readings disagree, the reconfirm may offer up to
+  three of them. Each is shown as a plain-language description with a row count
+  and no values. A picked reading runs again through every gate under the session
+  grant.
+
 Direct abstain only for ungranted tables or destructive SQL. A wrong answer is
 never served (WRONG=0).
 
