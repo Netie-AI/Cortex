@@ -81,6 +81,9 @@ sensitive_columns:
 
 tables:
   inventory:
+    # Lot grain. `sku` is the object id and is not unique (~14.5 lots per SKU).
+    # Served SQL that orders and pages ties on this key (sql_guardrail).
+    row_key: [sku, location_id, storage_bin]
     columns:
       - sku
       - sku_name
@@ -95,6 +98,7 @@ tables:
       - expiry_date
       - is_hazardous
   suppliers:
+    row_key: [supplier_id]
     columns:
       - supplier_id
       - supplier_name
@@ -107,6 +111,7 @@ tables:
       - last_audit_date
       - risk_score
   locations:
+    row_key: [location_id]
     columns:
       - location_id
       - location_code
@@ -121,6 +126,7 @@ tables:
       - is_cold_storage
       - manager_name
   shipments:
+    row_key: [shipment_id]
     columns:
       - shipment_id
       - sku
@@ -134,6 +140,7 @@ tables:
       - tracking_number
       - cost_myr
   transactions:
+    row_key: [txn_id]
     columns:
       - txn_id
       - sku
@@ -145,6 +152,7 @@ tables:
       - timestamp
       - reference_doc
   alerts:
+    row_key: [alert_id]
     columns:
       - alert_id
       - alert_type

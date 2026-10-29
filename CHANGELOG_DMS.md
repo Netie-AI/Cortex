@@ -55,6 +55,50 @@ case change in either spelling counts for both: ``TempC`` gets no ``TempF``,
 ``WeightG`` and ``weightg`` no ``WeightKg``, ``qty-g`` no ``qty-kg``; a typo
 inside a longer word (``CustomerNmae``) is still named.
 
+## LOW-STOCK-GOLDEN-01 (#434) -- 2026-10-28
+
+A LIMIT that drops rows now orders by each outer table's `row_key`
+(inventory is the lot key `sku, location_id, storage_bin`; `sku` alone
+repeats). DuckDB does not stable-sort, so `ORDER BY quantity_kg LIMIT 1000`
+kept a different 1000 of the 1218 low-stock lots on 1.5.6 and on 2.0.0.
+The lot key is unique (0 duplicate lots). The served page is the first
+1000 of `quantity_kg, sku, location_id, storage_bin`. The cut is SKU-00423
+in, SKU-00471 out, both at 20 kg, on both engines. The joined `locations`
+key is appended after the lot key and does not move that cut. The four
+low-stock golden answers are re-recorded to that page. A result that
+already fits in its LIMIT is unchanged. The count runs only after every
+refusal, on the fetch itself: a statement the ladder will not serve is
+not counted. `answer_engine` and `l2_generation` stay seat-locked; their
+existing `execute_sql` is that fetch, and the gate reports the tied SQL.
+The `<2` pin is gone. The must-fail is
+`test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
+
+## CX-STRICT-01 -- 2026-10-28
+
+`CORTEX_OV_STRICT` defaults off. Off, every FreeRoute chat body is the same
+bytes as before. On, each completion sends JSON `strict: true` (OpenVault #81,
+also accepted as header `X-OpenVault-Strict`). A `pin_unavailable` or HTTP 429
+raises `FreeRouteStrictError` with `retry_after_s` and the `/ask` path records
+`model_requested` and `model_served` on the served step instead of walking
+another model.
+
+## PLAN-SQL-VOTE-01 -- 2026-10-18
+
+Off unless `CORTEX_PLAN_SQL_VOTE=1` (with `CORTEX_PLAN_SQL=1`). On the
+`/v1/contract/ask` plan+SQL path, a SQL that ran with rows is served only when
+a second SQL reading returns the same rows: the same model without the plan,
+then the stronger route OpenVault configured. With no two agreeing, DMS gets a
+reconfirm envelope (`badge=reconfirm`, `rows=[]`) whose assumptions carry
+`PLAN_SQL_VOTE_SPLIT`. A served answer's assumptions carry `step vote-sql`
+lines and a `step vote` line saying which readings agreed. `model_calls` keeps its
+keys: the same-model reading counts under the rung that ran it, the stronger
+route's under `stronger-model`. No contract change. On BIRD Mini-Dev held-out
+(n=348) it cut wrong answers 120 to 34 and correct ones 166 to 99. Follow-up: the
+same SQL text written with and without the plan now counts as agreement, and the
+second reading gets the ladder's error-fed retry; the held-out run keeps 145
+correct answers at 77% precision. A first SQL written without a plan has no
+second reading. See `docs/subagents_findings/2026-10-18_plan-sql-vote-measured.md`.
+
 ## DBOS-3X (#331) -- 2026-10-16
 
 The `agentic`, `agents` and `full` extras take `dbos>=3.0.0,<4`. `uv.lock`
