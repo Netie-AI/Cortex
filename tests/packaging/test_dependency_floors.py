@@ -19,7 +19,7 @@ PYPROJECT = ROOT / "pyproject.toml"
 _FLOORS = {
     "litellm": "1.84.0",
     "cryptography": "50.0.0",
-    "pillow": "12.3.0",
+    "pillow": "13.0.0",
     "starlette": "1.3.1",
     "fastapi": "0.141",
 }
@@ -51,6 +51,21 @@ def test_vulnerable_floors_are_high_enough() -> None:
         assert any(token in d.replace(" ", "").lower() for d in deps), (
             f"{name} must be >={floor} (found {deps})"
         )
+
+
+def test_every_resolved_pillow_meets_the_floor() -> None:
+    """uv.lock may fork pillow by interpreter. Every fork is the patched floor."""
+    from packaging.version import Version
+
+    if sys.version_info >= (3, 11):
+        import tomllib as loader
+    else:
+        import tomli as loader  # type: ignore[no-redef]
+    lock = loader.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    versions = [pkg["version"] for pkg in lock["package"] if pkg["name"] == "pillow"]
+    assert versions, "uv.lock resolved no pillow"
+    floor = Version(_FLOORS["pillow"])
+    assert all(Version(version) >= floor for version in versions), versions
 
 
 def test_starlette_is_a_direct_dependency() -> None:

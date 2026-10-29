@@ -19,9 +19,12 @@ Checks, all offline:
    is ``ARG PYTHON_VERSION`` from the four shipped Dockerfiles; they must
    agree, each must have the arg, and ``uv.lock`` must have a resolution
    entry for that version. An entry is a top-level ``resolution-markers``
-   line that selects the version and names it (``== '3.11.*'`` is the
-   entry for 3.11; ``>= '3.15'`` is the entry for 3.15, not for 3.16 or
-   3.99). The platform stays Linux x86_64, which is what
+   line that, intersected with the lock's ``requires-python``, selects
+   that X.Y and no older minor. ``== '3.11.*'`` is the entry for 3.11.
+   When ``requires-python`` is ``>=3.11``, uv writes that same fork as
+   ``python_full_version < '3.12'`` because the floor already excludes
+   3.10; that line is the 3.11 entry. ``>= '3.15'`` is the entry for
+   3.15, not for 3.16 or 3.99. The platform stays Linux x86_64, which is what
    ``scripts/lock_images.py`` compiles for.
    A package ``uv.lock`` holds at more than one version is compared at the
    version that target selects. Zero matches or more than one match is a
@@ -68,6 +71,7 @@ import tomllib
 import yaml
 from packaging.markers import Marker, default_environment
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
@@ -364,35 +368,74 @@ def _image_env(python_version: str) -> dict[str, str]:
     return env
 
 
-def _marker_names_version(marker: str, python_version: str) -> bool:
-    """True when ``marker`` names this X.Y, including the ``X.Y.*`` wildcard.
+def _minor_pair(python_version: str) -> tuple[int, int]:
+    major, minor = python_version.split(".")[:2]
+    return int(major), int(minor)
 
-    ``3.11`` matches ``== '3.11.*'``. ``3.15`` matches ``>= '3.15'`` and does
-    not match a 3.16 or 3.99 environment. ``3.1`` does not match inside
-    ``3.11``.
+
+def _older_minors(major: int, minor: int):
+    """Minors older than ``major.minor``, down through 3.0."""
+    scan_major, scan_minor = major, minor
+    while scan_major > 3 or (scan_major == 3 and scan_minor > 0):
+        if scan_minor == 0:
+            scan_major -= 1
+            scan_minor = 40
+        else:
+            scan_minor -= 1
+        if scan_major < 3:
+            return
+        yield scan_major, scan_minor
+
+
+def _marker_selects_minor(
+    marker: Marker, major: int, minor: int, requires: SpecifierSet
+) -> bool:
+    """True when this X.Y.0 satisfies both the marker and ``requires-python``.
+
+    X.Y.0 is the image environment (``python_full_version`` ``X.Y.0``) and the
+    representative of the X.Y series: ``== 'X.Y.*'`` and ``< 'X.(Y+1)'`` both
+    contain it.
     """
-    return (
-        re.search(
-            rf"(?<![\d.]){re.escape(python_version)}(?!\d)(?!\.\d)",
-            marker,
-        )
-        is not None
+    version = Version(f"{major}.{minor}.0")
+    if not requires.contains(version, prereleases=True):
+        return False
+    return marker.evaluate(_image_env(f"{major}.{minor}"))
+
+
+def _marker_is_resolution_entry(marker: str, python_version: str, requires: SpecifierSet) -> bool:
+    """True when ``marker`` is the entry for this X.Y.
+
+    The marker must select this minor and no older minor that
+    ``requires-python`` still allows. The entry is that marker's oldest
+    selected minor. ``>= '3.15'`` is the entry for 3.15 and not for 3.99.
+    uv omits a lower bound that ``requires-python`` already states, so
+    ``python_full_version < '3.12'`` under ``>=3.11`` selects 3.11 and not
+    3.10.
+    """
+    parsed = Marker(marker)
+    major, minor = _minor_pair(python_version)
+    if not _marker_selects_minor(parsed, major, minor, requires):
+        return False
+    return not any(
+        _marker_selects_minor(parsed, older_major, older_minor, requires)
+        for older_major, older_minor in _older_minors(major, minor)
     )
 
 
 def lock_has_resolution_entry(root: Path, python_version: str) -> bool:
     """True when a top-level ``resolution-markers`` line is this version's entry.
 
-    The line must select the image environment and name that version. A range
-    that merely includes it is the entry for the version it names, not for
-    every version the range happens to cover. No markers is no entry.
+    Evaluated with ``packaging.markers`` and ``packaging.specifiers`` against
+    ``python_full_version`` X.Y.0, intersected with the lock's
+    ``requires-python``. A range that also covers an older supported minor is
+    not this version's entry. No markers is no entry.
     """
     lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    raw = lock.get("requires-python")
+    requires = SpecifierSet(raw if isinstance(raw, str) else "")
     markers = list(lock.get("resolution-markers") or [])
-    env = _image_env(python_version)
     return any(
-        _marker_names_version(marker, python_version) and Marker(marker).evaluate(env)
-        for marker in markers
+        _marker_is_resolution_entry(marker, python_version, requires) for marker in markers
     )
 
 
