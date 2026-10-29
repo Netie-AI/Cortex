@@ -14,10 +14,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HTTP = "tests/dms/test_metric_exactness_412.py"
+# #424: the real OpenVault adapter through a scripted FreeRoute.
+ADAPTER = "tests/dms/test_metric_choice_adapter_424.py"
 
 MUST_FAIL = [
     "test_must_fail_near_miss_is_not_served_as_delayed_count",
     "test_must_fail_near_miss_reaches_the_model_step",
+    "test_must_fail_non_boolean_check_is_not_served",
+    "test_must_fail_served_answer_carries_no_refusal_prose",
 ]
 
 
@@ -32,6 +36,7 @@ def _pytest(guard_off: bool) -> subprocess.CompletedProcess[str]:
         "-p",
         "no:cacheprovider",
         HTTP,
+        ADAPTER,
         "-k",
         "must_fail",
     ]

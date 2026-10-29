@@ -86,6 +86,14 @@ def _known_slots(metric_id: str, slots: Any) -> dict[str, Any]:
     return clean
 
 
+def _chosen_why(metric_id: str) -> str:
+    return f"the metric chooser chose the declared metric {metric_id}"
+
+
+def _agreed_why(metric_id: str) -> str:
+    return f"{_chosen_why(metric_id)} and the meaning check agreed"
+
+
 class OpenVaultMetricChoice:
     """FreeRoute is the only model path. Unarmed or unreadable output is none."""
 
@@ -137,11 +145,17 @@ class OpenVaultMetricChoice:
         closest = " ".join(str(body.get("closest_question") or "").split())
         if not closest:
             closest = UNARMED_CLOSEST
+        if metric_id == "none":
+            why = "the metric chooser did not accept a declared metric"
+        else:
+            # A served answer carries this why as its assumption. It states
+            # what was chosen. Refusal prose belongs only on none.
+            why = _chosen_why(metric_id)
         return MetricSelection(
             metric_id=metric_id,
             slots=_known_slots(metric_id, body.get("slots")),
             closest_question=closest,
-            why="the metric chooser did not accept a declared metric",
+            why=why,
         )
 
     def check(self, question: str, selection: MetricSelection) -> MetricVerdict:
@@ -186,6 +200,24 @@ class OpenVaultMetricChoice:
                 unsure=True,
                 why="the metric check returned nothing usable",
             )
-        unsure = bool(body.get("unsure"))
-        agrees = bool(body.get("agrees")) and not unsure
-        return MetricVerdict(agrees=agrees, unsure=unsure, why="")
+        # Only the JSON booleans agrees=true and unsure=false agree. A string
+        # ("false", "no", "true"), a number, null or a missing key is not an
+        # agreement: truthiness would read "false" as yes and serve the
+        # positive metric for its complement (#412).
+        raw_agrees = body.get("agrees")
+        raw_unsure = body.get("unsure")
+        if raw_agrees is True and raw_unsure is False:
+            selection.why = _agreed_why(selection.metric_id)
+            return MetricVerdict(agrees=True, unsure=False, why="")
+        if raw_agrees is False and raw_unsure is False:
+            return MetricVerdict(agrees=False, unsure=False, why="")
+        if raw_unsure is True:
+            return MetricVerdict(agrees=False, unsure=True, why="")
+        return MetricVerdict(
+            agrees=False,
+            unsure=True,
+            why=(
+                "the metric check did not answer with a plain yes or no, "
+                "so it cannot be served directly"
+            ),
+        )
