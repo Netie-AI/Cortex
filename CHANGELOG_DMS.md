@@ -2,6 +2,33 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## LOW-STOCK-GOLDEN-01 (#434) -- 2026-10-28
+
+A LIMIT that drops rows now orders by each outer table's `row_key`
+(inventory is the lot key `sku, location_id, storage_bin`; `sku` alone
+repeats). DuckDB does not stable-sort, so `ORDER BY quantity_kg LIMIT 1000`
+kept a different 1000 of the 1218 low-stock lots on 1.5.6 and on 2.0.0.
+The lot key is unique (0 duplicate lots). The served page is the first
+1000 of `quantity_kg, sku, location_id, storage_bin`. The cut is SKU-00423
+in, SKU-00471 out, both at 20 kg, on both engines. The joined `locations`
+key is appended after the lot key and does not move that cut. The four
+low-stock golden answers are re-recorded to that page. A result that
+already fits in its LIMIT is unchanged. The count runs only after every
+refusal, on the fetch itself: a statement the ladder will not serve is
+not counted. `answer_engine` and `l2_generation` stay seat-locked; their
+existing `execute_sql` is that fetch, and the gate reports the tied SQL.
+The `<2` pin is gone. The must-fail is
+`test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
+
+## CX-STRICT-01 -- 2026-10-28
+
+`CORTEX_OV_STRICT` defaults off. Off, every FreeRoute chat body is the same
+bytes as before. On, each completion sends JSON `strict: true` (OpenVault #81,
+also accepted as header `X-OpenVault-Strict`). A `pin_unavailable` or HTTP 429
+raises `FreeRouteStrictError` with `retry_after_s` and the `/ask` path records
+`model_requested` and `model_served` on the served step instead of walking
+another model.
+
 ## STALE-LAKE-JOIN-FORMS-01 (#410) -- 2026-10-18
 
 A query that reads a table with a declared value domain is checked for every

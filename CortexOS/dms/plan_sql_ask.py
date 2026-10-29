@@ -59,7 +59,8 @@ from __future__ import annotations
 import os
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
 
@@ -166,6 +167,16 @@ def _gate(sql: str, grant: Any) -> Any:
     from CortexOS.dms.warehouse_db import load_semantic_layer
 
     return run_gate(sql, load_semantic_layer(), verified=grant)
+
+
+def _tie_ordered_page(sql: str, grant: Any) -> str:
+    """Generated SQL uses the same page tie as a governed metric."""
+    from CortexOS.dms.sql_guardrail import apply_page_tiebreak
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+    from CortexOS.execution.submit import execute_count
+
+    semantic = load_semantic_layer()
+    return apply_page_tiebreak(sql, semantic, execute_count(grant, sql))
 
 
 def _sql_tables(sql: str) -> set[str]:
@@ -683,6 +694,22 @@ def _direct_gate(sql: str, gate: Any, granted: set[str]) -> str | None:
     return None
 
 
+@contextmanager
+def _stop_on_strict(steps: list[StepStamp]) -> Iterator[None]:
+    """A strict pin refusal or 429 stops the ladder and keeps the served stamp.
+
+    The exception already names retry_after_s. This records model_requested
+    and model_served on the ask step list, then lets the error surface.
+    """
+    try:
+        yield
+    except freeroute.FreeRouteStrictError as exc:
+        if exc.stamp is not None:
+            steps.append(StepStamp.from_route("strict", exc.stamp, str(exc)))
+        exc.ask_stamps = [step.public() for step in steps]
+        raise
+
+
 def plan_sql_answer(
     request: plan_payload.PlanSqlRequest,
     *,
@@ -907,6 +934,9 @@ def plan_sql_answer(
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
+        # Every refusal above has already returned. Tie the page here, then
+        # run that one statement. The count is not a second served execute.
+        served_sql = _tie_ordered_page(served_sql, grant)
         try:
             rows, _, _ = execute_sql(grant, served_sql)
         except LakeValueDomainStale as exc:
@@ -1053,7 +1083,7 @@ def plan_sql_answer(
         return None
 
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
-    with freeroute.journal(split=split) as journal:
+    with freeroute.journal(split=split) as journal, _stop_on_strict(steps):
         answered = _round(
             gen,
             SQL_ATTEMPTS,

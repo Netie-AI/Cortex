@@ -295,6 +295,11 @@ async def contract_ask(body: AskRequest) -> Answer:
         grant.append(verified)
 
         from CortexOS.dms.space_memory_ask import try_solution_reuse
+        from CortexOS.integrations.freeroute import (
+            FreeRouteStrictError,
+            strict_error_detail,
+            strict_error_status,
+        )
 
         reused, memory_fields = try_solution_reuse(
             body.question,
@@ -315,7 +320,14 @@ async def contract_ask(body: AskRequest) -> Answer:
                 from CortexOS.dms.plan_sql_ask import try_plan_sql
 
                 # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
-                served = try_plan_sql(body, verified=verified)
+                # A strict pin refusal is not an answer and not a second model.
+                try:
+                    served = try_plan_sql(body, verified=verified)
+                except FreeRouteStrictError as exc:
+                    raise HTTPException(
+                        status_code=strict_error_status(exc),
+                        detail=strict_error_detail(exc),
+                    ) from exc
             try:
                 result = served if served is not None else answer_engine(
                     body.question,
@@ -325,6 +337,11 @@ async def contract_ask(body: AskRequest) -> Answer:
                     require_grounding=True,
                     stamp_l2_route=True,
                 )
+            except FreeRouteStrictError as exc:
+                raise HTTPException(
+                    status_code=strict_error_status(exc),
+                    detail=strict_error_detail(exc),
+                ) from exc
             except ManifestError as exc:
                 code = getattr(exc, "code", "manifest_error")
                 raise HTTPException(

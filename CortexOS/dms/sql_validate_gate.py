@@ -39,6 +39,14 @@ class ValidateGateResult:
     manifest_refused: bool = False
     source_sql: str | None = None
 
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name != "safe_sql" or not isinstance(value, str):
+            return value
+        from CortexOS.dms.sql_guardrail import served_page_sql
+
+        return served_page_sql(value)
+
 
 class SqlGateAbstain(Exception):
     """Raised when validation/EXPLAIN retries are exhausted — caller must abstain."""
