@@ -1808,6 +1808,27 @@ def _honest_plan(
     return base
 
 
+def document_envelope(
+    question: str,
+    audit_id: str,
+    answer_text: str,
+    sources: list[str],
+    *,
+    grant: tuple[str, list[str]] | None = None,
+) -> dict[str, Any]:
+    """A cited document answer (RAG-01). ``grant`` stamps kind and sources."""
+    result: dict[str, Any] = {
+        "answer": answer_text, "sql_used": None, "chart_spec": None, "audit_id": audit_id,
+        "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
+        "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
+        "total_count": 0,
+        "query_plan": _honest_plan(question, None, layer="rag"),
+    }
+    if grant is not None:
+        result = _stamp_grant(result, kind=grant[0], sources=grant[1])
+    return result
+
+
 # ── the engine ────────────────────────────────────────────────────────────────
 def answer(
     question: str,
@@ -1899,13 +1920,7 @@ def answer(
         ans, sources = rag_answer(question)
         if not ans or not sources:
             return None
-        return {
-            "answer": ans, "sql_used": None, "chart_spec": None, "audit_id": audit_id,
-            "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
-            "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
-            "total_count": 0,
-            "query_plan": _honest_plan(question, None, layer="rag"),
-        }
+        return document_envelope(question, audit_id, ans, sources)
 
     layer = badge = ""
     sql: str | None = None
