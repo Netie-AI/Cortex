@@ -878,11 +878,24 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     answers only from them through OpenVault FreeRoute, citing each passage.
     A failed or unarmed model, a NOT_IN_DOCUMENTS reply or a reply without a
     valid citation serves nothing: ``("", [])``.
+
+    RAG-RANK-01: with ``CORTEX_DOC_RANK`` set, local models reorder the
+    passages that clear the same gate before the reader model sees them. A
+    requested stage that did not run adds one fixed engine line to a served
+    answer. Unset, this path is unchanged.
     """
-    from CortexOS.rag import documents
+    from CortexOS.rag import doc_rank, documents
 
     paths = CONTRACTS_DIR.glob("*.txt") if CONTRACTS_DIR.is_dir() else ()
-    found = documents.answer(question, documents.load_passages(paths), _doc_model)
+    passages = documents.load_passages(paths)
+    stages = doc_rank.stages_from_env()
+    if not stages:
+        found = documents.answer(question, passages, _doc_model)
+    else:
+        sel = doc_rank.select(question, passages, stages)
+        found = documents.read(question, sel.top, _doc_model)
+        if found is not None and sel.note:
+            return f"{found.answer}\n{sel.note}", found.sources
     if found is None:
         return "", []
     return found.answer, found.sources

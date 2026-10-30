@@ -244,7 +244,7 @@ def _run(client) -> tuple[dict[str, list[str]], dict[str, str], dict[str, dict[s
 def test_flag_unset_ask_is_byte_identical_to_main(
     ask_http, skills_db: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
+    for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND", "CORTEX_DOC_RANK"):
         monkeypatch.delenv(name, raising=False)
     from CortexOS.dms.answer_engine import match_certified
 
@@ -388,7 +388,7 @@ def test_low_stock_must_fail_if_clock_or_tie_drift_returns(
     2026-10-28. The metric is chosen by a recorded port (``_serve_low_stock``),
     so the page is fetched.
     """
-    for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND"):
+    for name in ("CORTEX_QUERY_SKILL", "DMS_QUERY_SKILL_CAPTURE", "DMS_L2_ENABLED", "CORTEX_SCORED_ROUND", "CORTEX_DOC_RANK"):
         monkeypatch.delenv(name, raising=False)
     _serve_low_stock(monkeypatch)
     views: dict[date, dict[str, tuple[str, str, tuple[str, ...]]]] = {}
