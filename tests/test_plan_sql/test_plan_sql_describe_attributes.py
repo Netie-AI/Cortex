@@ -41,7 +41,11 @@ from CortexOS.plan_sql import describe
 CORPUS = Path(__file__).resolve().parents[1] / "test_execution" / "hostile_sql_corpus.json"
 MARK = describe.MARK
 
-GRANTED: dict[str, list[str]] = {"t": ["k", "a", "b", "c"], "u": ["k", "a", "c", "flag"]}
+GRANTED: dict[str, list[str]] = {
+    "t": ["k", "a", "b", "c"],
+    "u": ["k", "a", "c", "flag"],
+    "s": ["k", "e"],
+}
 T_ROWS = (
     "('x', 1, 60, 'SKU-1'), ('x', 2, NULL, 'SKU-2'), ('y', 3, 50, 'OTHER'), "
     "('z', NULL, 90, NULL), ('w', 5, 70, 'sku-3')"
@@ -129,23 +133,16 @@ CONSTRUCTS: dict[str, tuple[str, str, str, str, bool]] = {
     ),
     "anti_join": (
         "SELECT t.k FROM t ANTI JOIN u ON t.k = u.k",
-        "Returns t.k from t that have no match in u on t.k is u.k",
+        "Returns t.k from t, keeping only rows with no match in u on t.k is u.k",
         "SELECT t.k FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE t.k = u.k)",
         "SELECT t.k FROM t JOIN u ON t.k = u.k",
         False,
     ),
     "semi_join": (
         "SELECT t.k FROM t SEMI JOIN u ON t.k = u.k",
-        "Returns t.k from t that have a match in u on t.k is u.k",
+        "Returns t.k from t, keeping only rows with some match in u on t.k is u.k",
         "SELECT t.k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE t.k = u.k)",
         "SELECT t.k FROM t JOIN u ON t.k = u.k",
-        False,
-    ),
-    "anti_join_using": (
-        "SELECT k FROM t ANTI JOIN u USING (k)",
-        "Returns k from t that have no match in u on k",
-        "SELECT k FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE t.k = u.k)",
-        "SELECT t.k FROM t JOIN u USING (k)",
         False,
     ),
     "left_join": (
@@ -169,29 +166,6 @@ CONSTRUCTS: dict[str, tuple[str, str, str, str, bool]] = {
         "Returns t.k and u.a from t, matched to u on t.k is u.k",
         "SELECT t.k, u.a FROM t, u WHERE t.k = u.k",
         "SELECT t.k, u.a FROM t LEFT JOIN u ON t.k = u.k",
-        False,
-    ),
-    "comma_join": (
-        "SELECT t.k, u.k FROM t, u",
-        "Returns t.k and u.k from t, paired with every row of u",
-        "SELECT t.k, u.k FROM t CROSS JOIN u",
-        "SELECT t.k, u.k FROM t JOIN u ON t.k = u.k",
-        False,
-    ),
-    "cross_join": (
-        "SELECT t.k, u.k FROM t CROSS JOIN u",
-        "Returns t.k and u.k from t, paired with every row of u",
-        "SELECT t.k, u.k FROM t, u",
-        "SELECT t.k, u.k FROM t JOIN u ON t.k = u.k",
-        False,
-    ),
-    "positional_join": (
-        "SELECT t.k, u.k FROM t POSITIONAL JOIN u",
-        "Returns t.k and u.k from t, paired by position with u, "
-        "padding the shorter one with empty values",
-        "SELECT l.k, r.k FROM (SELECT k, row_number() OVER () AS p FROM t) AS l "
-        "FULL JOIN (SELECT k, row_number() OVER () AS p FROM u) AS r ON l.p = r.p",
-        "SELECT t.k, u.k FROM t, u",
         False,
     ),
     "nulls_first": (
@@ -224,30 +198,6 @@ CONSTRUCTS: dict[str, tuple[str, str, str, str, bool]] = {
         "SELECT k, b FROM t ORDER BY b NULLS FIRST",
         True,
     ),
-    "except": (
-        "SELECT k FROM t EXCEPT SELECT k FROM u",
-        "Returns k from t and u, keeping distinct rows of the first query result "
-        "that are not in the second",
-        "SELECT DISTINCT k FROM t WHERE NOT EXISTS "
-        "(SELECT 1 FROM u WHERE u.k IS NOT DISTINCT FROM t.k)",
-        "SELECT k FROM t UNION SELECT k FROM u",
-        False,
-    ),
-    "intersect": (
-        "SELECT k FROM t INTERSECT SELECT k FROM u",
-        "Returns k from t and u, keeping distinct rows found in both query results",
-        "SELECT DISTINCT k FROM t WHERE EXISTS "
-        "(SELECT 1 FROM u WHERE u.k IS NOT DISTINCT FROM t.k)",
-        "SELECT k FROM t UNION SELECT k FROM u",
-        False,
-    ),
-    "union_by_name": (
-        "SELECT k, c FROM t UNION ALL BY NAME SELECT c, k FROM u",
-        "Returns k and c from t and u, combining 2 query results, matching columns by name",
-        "SELECT k, c FROM t UNION ALL SELECT k, c FROM u",
-        "SELECT k, c FROM t UNION ALL SELECT c, k FROM u",
-        False,
-    ),
 }
 
 
@@ -268,40 +218,42 @@ def test_duckdb_runs_each_construct_as_its_statement_says(case: str) -> None:
     assert view(_duckdb_rows(other)) != view(rows), "the data must tell the readings apart"
 
 
-# A nested query's output keeps its name only if it reads that granted column
-# unchanged: ``SELECT k FROM (SELECT c AS k FROM t)`` returns c, so naming it
-# "k" would be false. Each: (SQL, exact statement, SQL the granted name claims).
-RENAMED_THROUGH: dict[str, tuple[str, str, str]] = {
-    "subquery_renames": (
-        "SELECT k FROM (SELECT c AS k FROM t) AS s",
-        "Returns computed value 1 from t, computed with 1 nested query",
-        "SELECT k FROM t",
-    ),
-    "cte_renames": (
-        "WITH s AS (SELECT c AS k FROM t) SELECT k FROM s",
-        "Returns computed value 1 from t, computed with 1 nested query",
-        "SELECT k FROM t",
-    ),
+# A nested query's output could be named after a granted column it no longer
+# holds: ``SELECT k FROM (SELECT c AS k FROM t)`` returns c. These rendered
+# through the nested-query fallback before (as "computed value 1 ..., computed
+# with 1 nested query" and "k from t, computed with 1 nested query"); under the
+# core grammar (PICK-READING-01) every nested query, CTE and set operation
+# refuses, so none of them is offered. Each: (SQL, SQL the column's name claims).
+RENAMED_THROUGH: dict[str, tuple[str, str]] = {
+    "subquery_renames": ("SELECT k FROM (SELECT c AS k FROM t) AS s", "SELECT k FROM t"),
+    "cte_renames": ("WITH s AS (SELECT c AS k FROM t) SELECT k FROM s", "SELECT k FROM t"),
     "union_mixes_columns": (
         "SELECT k FROM t UNION ALL SELECT c FROM u",
-        "Returns computed value 1 from t and u, combining 2 query results",
         "SELECT k FROM t UNION ALL SELECT k FROM u",
     ),
 }
 
 
 @pytest.mark.parametrize("case", sorted(RENAMED_THROUGH))
-def test_must_fail_a_renamed_output_is_not_named_as_the_column(case: str) -> None:
-    sql, expected, named = RENAMED_THROUGH[case]
-    assert _say(sql) == expected
+def test_must_fail_a_renamed_output_refuses(case: str) -> None:
+    sql, named = RENAMED_THROUGH[case]
+    with pytest.raises(describe.DescribeError):
+        _say(sql)
     assert _bag(_duckdb_rows(sql)) != _bag(_duckdb_rows(named)), "the name would be false"
 
 
-def test_an_unrenamed_nested_output_keeps_its_name() -> None:
-    sql = "SELECT k FROM (SELECT k, a FROM t WHERE a > 1) AS s"
-    assert _say(sql) == "Returns k from t, computed with 1 nested query"
-    star = "WITH s AS (SELECT * FROM t) SELECT x.k FROM s AS x"
-    assert _say(star) == "Returns k from t, computed with 1 nested query"
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT k FROM (SELECT k, a FROM t WHERE a > 1) AS s",
+        "WITH s AS (SELECT * FROM t) SELECT x.k FROM s AS x",
+    ],
+)
+def test_an_unrenamed_nested_output_refuses(sql: str) -> None:
+    """Was rendered as "Returns k from t, computed with 1 nested query", which
+    dropped the nested WHERE; outside the core grammar now."""
+    with pytest.raises(describe.DescribeError):
+        _say(sql)
 
 
 # -- 2. what is not stated exactly refuses ---------------------------------------------
@@ -350,6 +302,29 @@ REFUSED: dict[str, str] = {
     "union_limit_percent": "SELECT k FROM t UNION SELECT k FROM u LIMIT 40%",
     "fallback_star_exclude": "SELECT * EXCLUDE (a) FROM t UNION SELECT * EXCLUDE (a) FROM t",
     "fallback_schema_table": "WITH s AS (SELECT k FROM other.t) SELECT k FROM s",
+    # PICK-READING-01 core grammar: these were CONSTRUCTS that rendered (comma,
+    # CROSS and POSITIONAL joins, USING, EXCEPT, INTERSECT, UNION BY NAME).
+    # Each is outside the core grammar now, so it refuses.
+    "anti_join_using": "SELECT k FROM t ANTI JOIN u USING (k)",
+    "comma_join": "SELECT t.k, u.k FROM t, u",
+    "cross_join": "SELECT t.k, u.k FROM t CROSS JOIN u",
+    "positional_join": "SELECT t.k, u.k FROM t POSITIONAL JOIN u",
+    "except": "SELECT k FROM t EXCEPT SELECT k FROM u",
+    "intersect": "SELECT k FROM t INTERSECT SELECT k FROM u",
+    "union_by_name": "SELECT k, c FROM t UNION ALL BY NAME SELECT c, k FROM u",
+    # Core grammar limits, each a must-fail for its guard.
+    "left_join_then_inner_join": ("SELECT t.k FROM t LEFT JOIN u ON t.k = u.k JOIN s ON t.k = s.k"),
+    "inner_join_then_left_join": ("SELECT t.k FROM t JOIN u ON t.k = u.k LEFT JOIN s ON t.k = s.k"),
+    "two_relations_one_alias": "SELECT x.k FROM t AS x JOIN u AS x ON x.k = x.k",
+    "alias_is_another_table": "SELECT u.k FROM t AS u JOIN u AS t ON u.k = t.k",
+    "alias_is_a_column": "SELECT a.k FROM t AS a",
+    "limit_decimal": "SELECT k FROM t LIMIT 2.5",
+    "in_list_column": "SELECT k FROM t WHERE a IN (b, 2)",
+    "between_column_bound": "SELECT k FROM t WHERE a BETWEEN b AND 3",
+    "case_column_label": "SELECT CASE WHEN a > 1 THEN c END FROM t",
+    "group_by_case_not_output": (
+        "SELECT COUNT(*) FROM t GROUP BY CASE WHEN a > 1 THEN 'p' ELSE 'q' END"
+    ),
 }
 
 
@@ -439,6 +414,13 @@ def _generated() -> list[str]:
         "a > EXTRACT(year FROM CURRENT_DATE)",
         "a IS TRUE",
         "a IN (b, 1 + 1)",
+        "a > -1",
+        "a = CAST('1' AS INTEGER)",
+        "a IN (1, NULL)",
+        "a <> NULL",
+        "c LIKE NULL",
+        "a BETWEEN NULL AND 2",
+        "a = CAST(NULL AS INTEGER)",
     ]
     joins = [
         "JOIN u ON t.k = u.k",
@@ -489,6 +471,9 @@ def _generated() -> list[str]:
         "COLUMNS('a|b')",
         "UNNEST([1, 2])",
         "CASE WHEN a > 1 THEN 'p' ELSE 'q' END",
+        "CASE WHEN a > 1 THEN 'p' END",
+        "CASE WHEN a > 1 THEN NULL ELSE 'q' END",
+        "CASE a WHEN 1 THEN 'p' END",
         "k, COUNT(*) AS n",
         "a AS b, b AS a",
         "COALESCE(c, 'p')",
@@ -576,6 +561,14 @@ def _generated() -> list[str]:
 
 
 GENERATED = _generated()
+# How much of the universe still describes under the core grammar
+# (PICK-READING-01), measured on this head; each floor is the count minus a
+# margin, so a renderer that started refusing in-grammar SQL fails here.
+# Measured: 95 described / 561 checked (sensitivity), 87 described (wiring),
+# 104 injected.
+DESCRIBED_FLOOR = 80
+CHECKED_FLOOR = 500
+INJECTED_FLOOR = 100
 
 
 def _universe() -> Iterator[str]:
@@ -591,7 +584,11 @@ def _granted_for(sql: str) -> dict[str, list[str]]:
     except Exception:  # noqa: BLE001 - describe refuses it too
         return {}
     names = sorted({c.name for c in tree.find_all(exp.Column) if c.name and c.name != "*"})
-    names += [i.name for i in tree.find_all(exp.Identifier) if i.name]
+    # A relation's own alias is not a column of the payload (the core grammar
+    # refuses an alias that is a column's name, so granting it would hide the
+    # aliased cases from the property).
+    aliases = {a.name for a in tree.find_all(exp.TableAlias)}
+    names += [i.name for i in tree.find_all(exp.Identifier) if i.name and i.name not in aliases]
     return {t.name: sorted(set(names)) for t in tree.find_all(exp.Table) if t.name}
 
 
@@ -619,28 +616,9 @@ def _carried(value: object) -> bool:
 
 
 def _read_nodes(tree: exp.Expression) -> list[exp.Expression]:
-    """The nodes whose attributes the statement depends on, chosen by the path the
-    renderer takes, not by describe's declarations."""
-    if isinstance(tree, exp.Select) and describe._simple(tree):
-        return list(tree.walk())
-    read: list[exp.Expression] = []
-    for node in tree.walk():
-        if isinstance(node, (exp.Table, exp.TableAlias, exp.SetOperation)):
-            read.append(node)
-    for key in ("limit", "offset"):
-        value = tree.args.get(key)
-        if isinstance(value, exp.Expression):
-            read.append(value)
-    for select in describe._output_selects(tree):
-        for projection in select.expressions:
-            # An output is named by its column, or by position: only these are read.
-            inner = projection.this if isinstance(projection, exp.Alias) else projection
-            read.extend(
-                n for n in (projection, inner) if isinstance(n, (exp.Alias, exp.Column, exp.Star))
-            )
-            if isinstance(inner, exp.Column) and isinstance(inner.this, exp.Star):
-                read.append(inner.this)
-    return read
+    """The nodes whose attributes the statement depends on. The nested-query
+    fallback is gone (PICK-READING-01 core grammar): a statement reads every node."""
+    return list(tree.walk())
 
 
 # Removing these does not change what the query returns, or the statement is
@@ -655,26 +633,19 @@ MEANING_PRESERVED: dict[tuple[type[exp.Expression], str], str] = {
         exp.Identifier,
         "this",
     ): "a name, checked against the grant (step 5); an alias's is never printed",
-    (exp.Union, "distinct"): "'combining N query results' is true with or without duplicates",
-    (exp.Union, "order"): "the fallback states no order; 'first N rows' is true for any",
-    (exp.Except, "order"): "the fallback states no order; 'first N rows' is true for any",
-    (exp.Intersect, "order"): "the fallback states no order; 'first N rows' is true for any",
-    (exp.Window, "alias"): "a window alias is never printed",
 }
 # Value-specific equivalences: removing kind INNER, OUTER (under LEFT) or
 # CROSS gives the same join.
 SAME_JOIN = {("kind", "INNER"), ("kind", "OUTER"), ("kind", "CROSS")}
 
 
-def _meaning_preserved(node: exp.Expression, key: str, value: object, fallback: bool) -> bool:
+def _meaning_preserved(node: exp.Expression, key: str, value: object) -> bool:
     if (type(node), key) in MEANING_PRESERVED:
         return True
     if isinstance(node, exp.Join) and (key, str(value).upper()) in SAME_JOIN:
         return True
     if isinstance(node, exp.Count) and key == "this" and isinstance(value, exp.Star):
         return True  # COUNT() is COUNT(*) in DuckDB
-    if fallback and isinstance(node, exp.Column) and key == "table":
-        return True  # the fallback names an output by its column, never its qualifier
     return isinstance(node, describe._VALUE_TYPES)  # a value is redacted by design
 
 
@@ -730,7 +701,6 @@ def test_property_every_attribute_a_statement_reads_changes_it_or_refuses() -> N
         if base is None or base.endswith(describe.SHORTENED) or "..." in base:
             continue
         described += 1
-        fallback = not (isinstance(tree, exp.Select) and describe._simple(tree))
         paths = _paths(tree)
         for node in _read_nodes(tree):
             for key, value in list(node.args.items()):
@@ -740,7 +710,7 @@ def test_property_every_attribute_a_statement_reads_changes_it_or_refuses() -> N
                 structural = isinstance(value, (exp.Expression, list))
                 if not _carried(value) or (structural and node.arg_types.get(key, True)):
                     continue
-                if _meaning_preserved(node, key, value, fallback):
+                if _meaning_preserved(node, key, value):
                     continue
                 changed = _without(tree, paths[id(node)], key)
                 if changed is None or changed == base_sql:
@@ -750,16 +720,14 @@ def test_property_every_attribute_a_statement_reads_changes_it_or_refuses() -> N
                 if after is not None and after == base:
                     silent.append((sql, type(node).__name__, key, base))
     assert not silent, silent[:5]
-    assert described >= 200 and checked >= 800, (described, checked)
+    # Was ``described >= 200 and checked >= 800``: under the core grammar
+    # (PICK-READING-01) the nested-query, set-operation and window SQL of the
+    # universe refuses, so fewer statements are described.
+    assert described >= DESCRIBED_FLOOR and checked >= CHECKED_FLOOR, (described, checked)
 
 
-def _declared(node: exp.Expression, simple: bool) -> bool:
-    table = (
-        describe._HANDLED
-        if simple or not isinstance(node, exp.SetOperation)
-        else (describe._SET_OPERATIONS)
-    )
-    declared = table.get(type(node))
+def _declared(node: exp.Expression) -> bool:
+    declared = describe._HANDLED.get(type(node))
     if declared is None:
         return False
     return all(
@@ -777,26 +745,12 @@ def test_property_every_node_a_statement_reads_carries_only_declared_attributes(
         if tree is None or _describe(sql, _granted_for(sql)) is None:
             continue
         described += 1
-        simple = isinstance(tree, exp.Select) and describe._simple(tree)
         for node in _read_nodes(tree):
-            if simple and not isinstance(node, describe._READ_FAMILIES):
+            if not isinstance(node, describe._READ_FAMILIES):
                 continue
-            if not simple and not isinstance(
-                node,
-                (
-                    exp.Table,
-                    exp.TableAlias,
-                    exp.SetOperation,
-                    exp.Limit,
-                    exp.Offset,
-                    exp.Alias,
-                    exp.Column,
-                    exp.Star,
-                ),
-            ):
-                continue
-            assert _declared(node, simple), (sql, type(node).__name__, node.args)
-    assert described >= 150, described
+            assert _declared(node), (sql, type(node).__name__, node.args)
+    # Was ``described >= 150``: see DESCRIBED_FLOOR.
+    assert described >= DESCRIBED_FLOOR, described
 
 
 def _carriers() -> dict[type[exp.Expression], list[tuple[str, exp.Expression, tuple[Any, ...]]]]:
@@ -827,7 +781,7 @@ def test_property_every_undeclared_attribute_refuses_when_injected(
     these classes are covered without editing this test.
     """
     carriers = _carriers()
-    tables = {**describe._HANDLED, **describe._SET_OPERATIONS}
+    tables = describe._HANDLED
     missing: list[str] = []
     injected = 0
     for cls, declared in tables.items():
@@ -848,7 +802,7 @@ def test_property_every_undeclared_attribute_refuses_when_injected(
                     describe.statement(sql, keep_literal=_never, granted=granted)
             injected += 1
     assert not missing, f"no generated SQL describes a node of: {missing}"
-    assert injected >= 150, injected
+    assert injected >= INJECTED_FLOOR, injected
 
 
 def test_generated_sql_reaches_every_declared_attribute() -> None:
@@ -863,15 +817,10 @@ def test_generated_sql_reaches_every_declared_attribute() -> None:
             for key, value in node.args.items():
                 if _carried(value):
                     reached.add((type(node), key))
-    tables = {**describe._HANDLED, **describe._SET_OPERATIONS}
-    # The arg names an older sqlglot used for ``with_`` and ``from_``: declared so
-    # an older sqlglot is read the same way, never carried on this one.
-    unreachable = {
-        (exp.Select, "from"),
-        (exp.Union, "with"),
-        (exp.Except, "with"),
-        (exp.Intersect, "with"),
-    }
+    tables = describe._HANDLED
+    # The arg name an older sqlglot used for ``from_``: declared so an older
+    # sqlglot is read the same way, never carried on this one.
+    unreachable = {(exp.Select, "from")}
     not_reached = sorted(
         f"{cls.__name__}.{key}"
         for cls, declared in tables.items()
@@ -915,8 +864,8 @@ def test_the_gate_admits_the_supported_constructs() -> None:
             admitted.update(type(node) for node in _read_nodes(tree))
     for case in CONSTRUCTS.values():
         enforce_manifest(case[0], verified)  # each supported construct passes the gate
-    declared = set(describe._HANDLED) | set(describe._SET_OPERATIONS)
-    assert declared <= admitted | {exp.Var, exp.Paren, exp.TableAlias}, sorted(
+    declared = set(describe._HANDLED)
+    assert declared <= admitted | {exp.Paren, exp.TableAlias}, sorted(
         c.__name__ for c in declared - admitted
     )
 
@@ -926,14 +875,9 @@ def test_the_gate_admits_the_supported_constructs() -> None:
 # Classes the rendering code names that it does not read for meaning: it only
 # refuses on them, counts them for a marker, or checks them as leaves.
 NOT_READ_FOR_MEANING = {
-    "Anonymous",  # refused in a row count; a leaf the fallback alone allows
     "Identifier",  # a leaf: names are rewritten to granted text first
-    "Query",  # refused in a row count
-    "Subquery",  # counted: "computed with N nested queries"
-    "CTE",  # counted, and its name is never printed
-    "Window",  # counted: "window functions"
-    "Lateral",  # routes to the fallback
-    "SetOperation",  # read through _SET_OPERATIONS by exact class
+    "Var",  # the mark, or a reference already named in granted text
+    "Literal",  # a value: redacted, or a LIMIT count / COUNT(1) printed as itself
     "Expression",  # type annotations
     "Mapping",
 }
@@ -941,26 +885,15 @@ RENDERERS = (
     "_render_select",
     "_from_text",
     "_condition",
+    "_part",
+    "_case",
     "_operand",
     "_projection",
     "_aggregate",
     "_column",
-    "_limit_text",
-    "_count",
     "_table",
     "_reference",
-    "_set_phrase",
-    "_output_name",
-    "_output_names",
-    "_output_selects",
-    "_branches",
-    "_render_fallback",
-    "_relations",
-    "_derived",
-    "_reads_column",
-    "_query_reads",
     "_join_shape",
-    "_star_of",
 )
 
 
@@ -993,7 +926,7 @@ def _named_classes() -> set[str]:
 
 def test_must_fail_every_class_the_renderer_reads_is_declared() -> None:
     """Removing a class from ``_HANDLED`` while the renderer still reads it fails here."""
-    declared = {cls.__name__ for cls in (*describe._HANDLED, *describe._SET_OPERATIONS)}
+    declared = {cls.__name__ for cls in describe._HANDLED}
     named = _named_classes()
     assert {"Like", "Join", "Ordered", "Star", "Limit"} <= named  # the scan sees the renderer
     undeclared = sorted(named - declared - NOT_READ_FOR_MEANING)
@@ -1001,7 +934,10 @@ def test_must_fail_every_class_the_renderer_reads_is_declared() -> None:
 
 
 def test_vocabulary_holds_the_new_words() -> None:
-    for word in ("does", "match", "paired", "keeping", "have", "values", "position", "second"):
+    # Was also "paired", "have", "position" and "second": the comma, CROSS and
+    # POSITIONAL joins and EXCEPT are outside the core grammar (PICK-READING-01),
+    # so their phrases are gone.
+    for word in ("does", "match", "keeping", "only", "some", "values", "when", "otherwise"):
         assert word in describe.VOCABULARY, word
 
 

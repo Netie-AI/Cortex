@@ -62,20 +62,24 @@ def test_fixture_readings_are_distinct_and_name_their_aggregate() -> None:
         assert "for each txn_type" in text and "from transactions" in text
 
 
+# Was "the honest fallback": these rendered as "computed with 1 nested query",
+# "window functions" and "combining 2 query results". PICK-READING-01 core
+# grammar: the fallback is removed (it dropped WHERE and QUALIFY and merged
+# nested scopes), so a query outside the core grammar is not offered.
 @pytest.mark.parametrize(
-    ("sql", "needle"),
+    "sql",
     [
-        ("WITH x AS (SELECT a FROM t) SELECT a FROM x", "computed with 1 nested query"),
-        ("SELECT a FROM t WHERE b IN (SELECT b FROM u)", "computed with 1 nested query"),
-        ("SELECT a, ROW_NUMBER() OVER (ORDER BY b) AS r FROM t", "window functions"),
-        ("SELECT a FROM t UNION SELECT a FROM u", "combining 2 query results"),
+        "WITH x AS (SELECT a FROM t) SELECT a FROM x",
+        "SELECT a FROM t WHERE b IN (SELECT b FROM u)",
+        "SELECT a, ROW_NUMBER() OVER (ORDER BY b) AS r FROM t",
+        "SELECT a FROM t UNION SELECT a FROM u",
     ],
     ids=["cte", "subquery", "window", "set_operation"],
 )
-def test_complex_queries_get_the_honest_fallback(sql: str, needle: str) -> None:
-    text = _say(sql)
-    assert text.startswith("Returns ")
-    assert needle in text, text
+def test_must_fail_complex_queries_refuse(sql: str) -> None:
+    with pytest.raises(describe.DescribeError) as refused:
+        _say(sql)
+    assert "unparsable" not in str(refused.value)
 
 
 # Each case: SQL whose sentinels (zq_*, 4711*, 2019*) occur nowhere else.
@@ -108,23 +112,50 @@ REDACT = {
     "subquery": "SELECT a FROM t WHERE b IN (SELECT b FROM u WHERE c = 'zq_m')",
     "cte": "WITH x AS (SELECT a FROM t WHERE c = 'zq_n') SELECT a FROM x",
     "offset": "SELECT a FROM t LIMIT 5 OFFSET 4711",
+    # In the core grammar: a CASE output repeated in GROUP BY or named by its
+    # position, a NOT IN list, a CAST in a HAVING, a kept LIMIT next to a value.
+    "group_by_case_output": (
+        "SELECT CASE WHEN qty > 4711 THEN 'zq_big' ELSE 'zq_small' END AS g, COUNT(*) AS n "
+        "FROM t GROUP BY CASE WHEN qty > 4711 THEN 'zq_big' ELSE 'zq_small' END"
+    ),
+    "order_by_case_ordinal": (
+        "SELECT CASE WHEN qty > 4711 THEN 'zq_big' ELSE 'zq_small' END AS g FROM t ORDER BY 1"
+    ),
+    "not_in": "SELECT a FROM t WHERE c NOT IN ('zq_o', 'zq_p')",
+    "having_cast": "SELECT a FROM t GROUP BY a HAVING MAX(d) > CAST('2019-01-02' AS DATE)",
+    "limit_and_value": "SELECT a FROM t WHERE c = 'zq_q' LIMIT 3",
 }
 _SENTINEL = re.compile(r"zq_\w+|4711(?:\.5)?|4712|2019[-\d: ]*|'%Y'|%Y|-\s*<a value>")
 
 
-# The honest fallback names only output columns and tables, so a literal under
-# it is not shown even as the mark.
-_FALLBACK_CASES = {"cte", "subquery"}
+# PICK-READING-01 core grammar: these rendered before (two through the removed
+# nested-query fallback, the rest with a function, a CASE key, an INTERVAL, an
+# OFFSET or a bare literal output printed as SQL text). Each is outside the core
+# grammar now, so it refuses, which also prints no literal.
+REDACT_REFUSED = {
+    "cte",
+    "subquery",
+    "group_by_case",
+    "order_by_case",
+    "order_by_coalesce",
+    "where_coalesce",
+    "where_interval",
+    "where_function_argument",
+    "where_like",
+    "unaliased_literal",
+    "offset",
+}
 
 
 @pytest.mark.parametrize("case", sorted(REDACT))
 def test_every_literal_in_every_clause_is_redacted(case: str) -> None:
     sql = REDACT[case]
+    if case in REDACT_REFUSED:
+        with pytest.raises(describe.DescribeError):
+            _say(sql)
+        return
     text = _say(sql)
-    if case in _FALLBACK_CASES:
-        assert "nested query" in text, text
-    else:
-        assert describe.MARK in text, text
+    assert describe.MARK in text, text
     sentinels = {m.group(0).strip() for m in _SENTINEL.finditer(sql)} - {"-"}
     assert sentinels or case == "boolean", sql
     for sentinel in sentinels:
@@ -184,6 +215,9 @@ def test_unparsable_sql_refuses() -> None:
 # strip missed.
 COMMENTED = {
     "projection": "SELECT a, COALESCE(b /* zq_c1 */, c) AS k FROM t",
+    "projection_aggregate": "SELECT a, SUM(b /* zq_c10 */) AS k FROM t GROUP BY a",
+    "where_comparison": "SELECT a FROM t WHERE b /* zq_c11 */ > 1 AND c IS NULL",
+    "order_by": "SELECT a FROM t ORDER BY a /* zq_c12 */ DESC",
     "from_table": "SELECT a FROM t /* zq_c2 */",
     "where": "SELECT a FROM t WHERE COALESCE(b, c /* zq_c3 */) > 1 AND c IS NULL",
     "case": "SELECT CASE WHEN q /* zq_c4 */ > 1 THEN 'x' ELSE 'y' END AS k FROM t",
@@ -195,12 +229,22 @@ COMMENTED = {
 }
 
 
+# PICK-READING-01 core grammar: these rendered before; COALESCE and a CTE are
+# outside the core grammar now, so they refuse (the in-grammar cases above
+# keep the strip exercised).
+COMMENTED_REFUSED = {"projection", "where", "order_by_fallback", "inside_cte"}
+
+
 @pytest.mark.parametrize("case", sorted(COMMENTED))
 def test_a_comment_never_reaches_the_statement(case: str) -> None:
     sql = COMMENTED[case]
     tree = sqlglot.parse_one(sql, read="duckdb")
     # The channel is real: sqlglot keeps the comment and prints it.
     assert "zq_c" in tree.sql(dialect="duckdb"), case
+    if case in COMMENTED_REFUSED:
+        with pytest.raises(describe.DescribeError):
+            _say(sql)
+        return
     text = _say(sql)
     assert "zq_c" not in text, text
     assert "/*" not in text and "--" not in text, text
@@ -264,7 +308,9 @@ def test_hostile_corpus_never_prints_a_literal_or_a_comment() -> None:
         for comment in comments:
             if comment.strip():
                 assert comment.strip() not in text, (comment, sql, text)
-    assert rendered >= 90 and refused >= 1, (rendered, refused)
+    # Was ``rendered >= 90``: the corpus is hostile SQL, and under the core
+    # grammar (PICK-READING-01) 4 of its 106 cases render; the rest refuse.
+    assert rendered >= 4 and refused >= 90, (rendered, refused)
 
 
 # -- the cap and purity --------------------------------------------------------------
@@ -276,8 +322,13 @@ def test_cap_statement_bounds_the_text() -> None:
     assert capped.endswith(" (shortened)")
     assert len(capped) == describe.STATEMENT_CAP + len(describe.SHORTENED) <= 312
     wide = ", ".join(f"col_{i}" for i in range(200))
-    text = _say(f"SELECT {wide} FROM t")
-    assert len(text) <= 312 and text.endswith("(shortened)")
+    # Was rendered cut, ending in "(shortened)": a cut statement can end inside a
+    # phrase ("is not" cut to "is"), so under the core grammar (PICK-READING-01)
+    # a statement longer than the cap refuses instead.
+    with pytest.raises(describe.DescribeError, match="too long"):
+        _say(f"SELECT {wide} FROM t")
+    fits = ", ".join(f"col_{i}" for i in range(30))
+    assert len(_say(f"SELECT {fits} FROM t")) <= describe.STATEMENT_CAP
 
 
 def test_statement_is_pure_and_never_sees_the_question() -> None:
@@ -362,12 +413,31 @@ def test_a_model_chosen_name_never_reaches_the_statement(case: str) -> None:
     _words_are_granted_or_fixed(text, PAYLOAD_ONLY)
 
 
+# PICK-READING-01 core grammar: these rendered before (a self-join, USING, a
+# CTE, a subquery and a UNION); each is outside the core grammar now.
+NAMED_REFUSED = {
+    "self_join_aliases",
+    "using_join",
+    "cte_name_mixed_case",
+    "cte_name_and_column",
+    "cte_name_as_column",
+    "subquery_alias",
+    "union_alias",
+}
+
+
 def test_named_cases_render_without_their_names() -> None:
     """Not vacuous: the cases above render (refusing all would also pass them)."""
+    for case in NAMED_REFUSED:
+        with pytest.raises(describe.DescribeError):
+            _say(NAMED[case], PAYLOAD_ONLY)
     rendered = {
-        case: _say(sql, PAYLOAD_ONLY) for case, sql in NAMED.items() if case != "cte_name_as_column"
+        case: _say(sql, PAYLOAD_ONLY) for case, sql in NAMED.items() if case not in NAMED_REFUSED
     }
-    assert rendered["quoted_alias"].startswith("Returns computed value 1 (CASE WHEN quantity_kg")
+    # The CASE is stated in words now, not as SQL text.
+    assert rendered["quoted_alias"].startswith(
+        f"Returns computed value 1 (when quantity_kg is more than {describe.MARK} then "
+    )
     assert "for each computed value 1" in rendered["quoted_alias"]
     assert "for each computed value 1" in rendered["label_alias"]
     assert "sorted by number of rows descending" in rendered["label_alias"]
@@ -375,12 +445,7 @@ def test_named_cases_render_without_their_names() -> None:
     assert "having total of quantity_kg is more than" in rendered["aggregate_alias"]
     assert rendered["renamed_column"] == "Returns sku from transactions, sorted by sku"
     assert "transactions.quantity_kg" in rendered["table_alias"]
-    assert "on transactions.sku is transactions.sku" in rendered["self_join_aliases"]
-    assert "matched to transactions on sku" in rendered["using_join"]
-    assert rendered["cte_name_mixed_case"] == (
-        "Returns computed value 1 and computed value 2 from transactions, computed with 1 nested query"
-    )
-    assert rendered["union_alias"].startswith("Returns computed value 1 from transactions")
+    assert "for each computed value 1" in rendered["table_alias"]
     assert "for each computed value 1" in rendered["ordinal_to_alias"]
     assert "sorted by computed value 1" in rendered["ordinal_to_alias"]
 
@@ -448,14 +513,17 @@ def test_names_print_in_the_payload_spelling() -> None:
     text = _say('SELECT "TXNTYPE", COUNT(DISTINCT sku) FROM TRANSACTIONS GROUP BY txntype', granted)
     assert text == "Returns TxnType and number of distinct Sku for each TxnType from Transactions"
     assert "TXNTYPE" not in text and "TRANSACTIONS" not in text
-    fallback = _say("WITH x AS (SELECT SKU FROM TRANSACTIONS) SELECT SKU FROM x", granted)
-    assert fallback == "Returns Sku from Transactions, computed with 1 nested query"
+    # Was the fallback "Returns Sku from Transactions, computed with 1 nested
+    # query": a CTE is outside the core grammar (PICK-READING-01), so it refuses.
+    with pytest.raises(describe.DescribeError):
+        _say("WITH x AS (SELECT SKU FROM TRANSACTIONS) SELECT SKU FROM x", granted)
 
 
-def test_a_table_function_source_gets_the_fallback() -> None:
-    """A source with no granted name prints none: the gate refuses it before describe."""
-    text = _say("SELECT * FROM read_parquet('zq_path.parquet')", PAYLOAD_ONLY)
-    assert text == "Returns all columns"
+def test_must_fail_a_table_function_source_refuses() -> None:
+    """Was "Returns all columns" through the fallback: a source with no granted
+    name is outside the core grammar (PICK-READING-01), so it refuses."""
+    with pytest.raises(describe.DescribeError):
+        _say("SELECT * FROM read_parquet('zq_path.parquet')", PAYLOAD_ONLY)
 
 
 # -- PICK-READING-01 binding: a name is described as DuckDB binds it ---------------------
@@ -527,24 +595,11 @@ BINDING: dict[str, tuple[str, str, str, str]] = {
         "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING MAX(t.b) > 65",
         "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING MAX(SUM(t.a)) > 65",
     ),
-    "having_inside_aggregate_filter": (
-        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE b > 55) > 1",
-        "Returns k and total of a for each k from t having COUNT(*) FILTER(WHERE b > "
-        f"{describe.MARK}) is more than {describe.MARK}",
-        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE t.b > 55) > 1",
-        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE SUM(t.a) > 55) > 1",
-    ),
     "order_inside_aggregate": (
         "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY MAX(b) DESC",
         "Returns k and total of b for each k from t, sorted by largest b descending",
         "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY MAX(t.b) DESC",
         "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY SUM(t.b) DESC",
-    ),
-    "order_part_of_expression": (
-        "SELECT a AS b, b AS a FROM t ORDER BY b + 0",
-        f"Returns a and b from t, sorted by b + {describe.MARK}",
-        "SELECT a AS b, b AS a FROM t ORDER BY t.b + 0",
-        "SELECT a AS b, b AS a FROM t ORDER BY t.a + 0",
     ),
     "where_column": (
         "SELECT a AS b FROM t WHERE b > 55",
@@ -557,12 +612,6 @@ BINDING: dict[str, tuple[str, str, str, str]] = {
         "Returns total of a and number of rows for each k from t",
         "SELECT SUM(a) AS k, COUNT(*) AS n FROM t GROUP BY t.k",
         "SELECT SUM(a) AS k, COUNT(*) AS n FROM t GROUP BY SUM(t.a)",
-    ),
-    "select_list_column": (
-        "SELECT a AS b, b + 0 AS c FROM t",
-        f"Returns a and computed value 2 (b + {describe.MARK}) from t",
-        "SELECT a AS b, t.b + 0 AS c FROM t",
-        "SELECT a AS b, t.a + 0 AS c FROM t",
     ),
 }
 
@@ -613,6 +662,14 @@ UNBOUND_NAMES: dict[str, str] = {
     "grouping_expression_having": "SELECT a + 0 AS b, b AS a FROM t GROUP BY a + 0, b HAVING b > 2",
     # Clauses the statement does not describe.
     "qualify": "SELECT a FROM t QUALIFY a > 1",
+    # PICK-READING-01 core grammar: these three were BINDING cases that rendered
+    # (an aggregate FILTER, ``b + 0`` as a sort key and as an output, each
+    # printed as SQL text). Arithmetic and FILTER are outside the core grammar.
+    "having_inside_aggregate_filter": (
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE b > 55) > 1"
+    ),
+    "order_part_of_expression": "SELECT a AS b, b AS a FROM t ORDER BY b + 0",
+    "select_list_column": "SELECT a AS b, b + 0 AS c FROM t",
     "distinct_on": "SELECT DISTINCT ON (k) k, a FROM t ORDER BY k, a",
 }
 

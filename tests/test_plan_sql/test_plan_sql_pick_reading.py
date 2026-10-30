@@ -395,13 +395,14 @@ NAMED_BUCKETS: dict[str, tuple[str, str, str]] = {
         "size",
         "FROM transactions AS heavy",
     ),
-    "subquery_alias": (
-        "SELECT light AS light, COUNT(*) AS n FROM (SELECT CASE WHEN quantity_kg > 100 "
-        "THEN 'heavy' ELSE 'light' END AS light FROM transactions) AS heavy GROUP BY light",
-        "light",
-        ") AS heavy GROUP BY light",
-    ),
 }
+# PICK-READING-01 core grammar: this variant was in NAMED_BUCKETS and was
+# offered through the nested-query fallback. A subquery is outside the core
+# grammar now, so the offer is suppressed (test below), which prints no name.
+SUBQUERY_BUCKET = (
+    "SELECT light AS light, COUNT(*) AS n FROM (SELECT CASE WHEN quantity_kg > 100 "
+    "THEN 'heavy' ELSE 'light' END AS light FROM transactions) AS heavy GROUP BY light"
+)
 # The bucket reading as a CTE named with one label whose column carries the
 # other, in two spellings DuckDB folds together.
 CTE_BUCKET = (
@@ -444,8 +445,7 @@ def test_split_offer_never_prints_a_model_chosen_name(
             or word in granted
             or word in {"CASE", "WHEN", "THEN", "ELSE", "END", "computed", "value"}
         ), (word, statement)
-    if variant != "subquery_alias":  # the nested-query fallback prints no tree text
-        assert plan_describe.MARK in statement, statement
+    assert plan_describe.MARK in statement, statement
     held = _held(bucket_reading["reading_id"])
     assert name in held.served_sql, "the name reached describe"
 
@@ -453,6 +453,26 @@ def test_split_offer_never_prints_a_model_chosen_name(
     picked = _json(_pick(dms_http, bucket_reading["reading_id"]))
     _assert_served_pick(picked, bucket, bucket_reading["reading_id"], statement, 2, 3)
     assert picked["rows"][0][key] in {"heavy", "light"}
+
+
+def test_subquery_named_reading_is_not_offered(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was offered (as "computed value 1 ..., computed with 1 nested query"): a
+    subquery is outside the core grammar, so no reading is offered and the
+    reconfirm is still returned, with no label anywhere in the envelope."""
+    sqls = (GOOD_SQL, SUBQUERY_BUCKET, KG_SQL)
+    assert sorted(tuple(r.values()) for r in _oracle(SUBQUERY_BUCKET)) == sorted(
+        tuple(r.values()) for r in _oracle(BUCKET_SQL)
+    )
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _offer(dms_http)
+
+    _assert_suppressed(body, "describe-failed (DescribeError)")
+    text = json.dumps(body).lower()
+    assert "heavy" not in text and "light" not in text
 
 
 def test_cte_named_reading_never_prints_its_name(
@@ -621,8 +641,11 @@ ATTRIBUTE_READINGS: dict[str, AttributeReading] = {
         question=QUESTION,
         grant=INVENTORY_GRANT,
         payload=INVENTORY_PAYLOAD,
-        statement="Returns txn_type and number of rows for each txn_type from transactions "
-        "that have no match in inventory on transactions.sku is inventory.sku "
+        # Was "from transactions that have no match in inventory on ...": the core
+        # grammar (PICK-READING-01) words a SEMI or ANTI join so it reads the same
+        # after any other join.
+        statement="Returns txn_type and number of rows for each txn_type from transactions, "
+        "keeping only rows with no match in inventory on transactions.sku is inventory.sku "
         "and inventory.is_hazardous",
         inverse="matched to inventory",
         clause=f"ANTI JOIN inventory {_HAZARD_ON}",
@@ -669,6 +692,122 @@ def test_must_fail_reading_statement_states_node_attributes(
     assert picked["assumptions"][0] == f"reading: {expected}"
     assert _rowset(picked["rows"]) == _rowset(_oracle(spec.claimed))
     assert _rowset(picked["rows"]) != _rowset(_oracle(spec.other))
+
+
+# PICK-READING-01 core grammar: readings 885f540 offered under a false statement.
+# Each is the second of three split readings and passes every gate; 885f540's
+# describe rendered it, so the split offered it and a pick would have served it
+# with that statement as ``reading: ...``:
+#
+# * ``sku <> NULL`` was "sku is not NULL" (true of no row in DuckDB; alone it
+#   returns no rows and is never a split reading, so it is ORed here);
+# * ``NOT LIKE ... OR sku <> NULL`` was "... or sku is not NULL" (true of
+#   every row with a sku, while the query keeps only the NOT LIKE rows);
+# * a nested ``* REPLACE (txn_type AS sku)`` named its output "sku" while it
+#   holds txn_type;
+# * a self-join was "matched to transactions on transactions.sku is
+#   transactions.sku and ...", one table for two instances;
+# * an EXISTS whose subquery reuses the outer alias went through the fallback,
+#   which dropped the WHERE it sits in.
+#
+# Each is outside the core grammar now: nothing is offered (no statement is
+# shown, so none can be false), and the customer still gets the reconfirm.
+# Each: (the reading, its question, a token of it the executed SQL carries).
+NOT_OFFERED: dict[str, tuple[str, str, str]] = {
+    "neq_null": (
+        f"{_COUNT_BY_TYPE} WHERE quantity_kg > 100 OR sku <> NULL GROUP BY txn_type",
+        QUESTION,
+        "<> NULL",
+    ),
+    "not_like_or_neq_null": (
+        f"{_COUNT_BY_TYPE} WHERE sku NOT LIKE '{NOT_LIKE_PATTERN}' OR sku <> NULL "
+        "GROUP BY txn_type",
+        NOT_LIKE_QUESTION,
+        "<> NULL",
+    ),
+    "nested_star_replace": (
+        "SELECT sku, MIN(quantity_kg) AS n FROM (SELECT * REPLACE (txn_type AS sku) "
+        "FROM transactions) AS q GROUP BY sku",
+        QUESTION,
+        "REPLACE",
+    ),
+    "self_join": (
+        "SELECT a.txn_type, COUNT(*) AS n FROM transactions AS a JOIN transactions AS b "
+        "ON a.sku = b.sku AND a.quantity_kg < b.quantity_kg GROUP BY a.txn_type",
+        QUESTION,
+        "AS b",
+    ),
+    "exists_reused_alias": (
+        "SELECT txn_type, MAX(quantity_kg) AS n FROM transactions AS t WHERE EXISTS "
+        "(SELECT 1 FROM transactions AS t WHERE t.quantity_kg > 100) GROUP BY txn_type",
+        QUESTION,
+        "EXISTS",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(NOT_OFFERED))
+def test_must_fail_a_reading_outside_the_core_grammar_is_not_offered(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    sql, question, token = NOT_OFFERED[case]
+    sqls = (GOOD_SQL, sql, KG_SQL)
+    keys = {plan_sql_vote.result_key(_oracle(s)) for s in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _offer(dms_http, question=question)
+
+    # The reading ran (it is a real split reading, not one the gate dropped) ...
+    assert plan_sql_vote.VOTE_SPLIT in _steps(body)
+    assert any(token in ran for ran in _ran(execute_spy)), _ran(execute_spy)
+    # ... and nothing is offered: no statement, no reading id, no hold.
+    _assert_suppressed(body, "describe-failed (DescribeError)")
+    assert "plan_sql_reading_id" not in body
+    assert body["answer"] == plan_sql_ask.reconfirm_answer(WHY, CLOSEST)
+    assert "reading:" not in "\n".join(body["assumptions"])
+    assert "NULL" not in json.dumps(body["reconfirm"])
+
+
+# ``GROUP BY (1)`` is the ordinal: DuckDB groups by the first output. 885f540
+# redacted the parenthesized 1 as a value ("for each <a value>"), so the statement
+# hid what the rows are per. It is in the core grammar: the parentheses resolve.
+PAREN_ORDINAL_SQL = "SELECT sku, SUM(quantity_kg) AS kg FROM transactions GROUP BY (1)"
+PAREN_ORDINAL_STATEMENT = (
+    "Returns sku and total of quantity_kg for each sku from transactions, first 1000 rows"
+)
+
+
+def test_must_fail_a_parenthesized_ordinal_is_stated_as_its_output(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sqls = (GOOD_SQL, PAREN_ORDINAL_SQL, KG_SQL)
+    keys = {plan_sql_vote.result_key(_oracle(s)) for s in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    assert _rowset(_oracle(PAREN_ORDINAL_SQL)) == _rowset(
+        _oracle("SELECT sku, SUM(quantity_kg) AS kg FROM transactions GROUP BY sku")
+    )
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _offer(dms_http)
+
+    _assert_readings_offered(body, sqls)
+    _assert_no_values(body, sqls, QUESTION)
+    reading = _readings(body)[1]
+    assert reading["statement"] == PAREN_ORDINAL_STATEMENT, reading["statement"]
+    assert plan_describe.MARK not in reading["statement"]
+    assert "GROUP BY (1)" in _held(reading["reading_id"]).served_sql
+
+    picked = _json(_pick(dms_http, reading["reading_id"]))
+    _assert_served_pick(
+        picked, PAREN_ORDINAL_SQL, reading["reading_id"], PAREN_ORDINAL_STATEMENT, 2, 3
+    )
+    assert picked["assumptions"][0] == f"reading: {PAREN_ORDINAL_STATEMENT}"
+    assert {row["sku"] for row in picked["rows"]} == {
+        row["sku"] for row in _oracle("SELECT DISTINCT sku FROM transactions")
+    }
 
 
 # -- 2, 3: byte identity -----------------------------------------------------------
