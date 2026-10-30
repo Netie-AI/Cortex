@@ -4,8 +4,10 @@ The stub this replaces returned the first 400 characters of any file sharing one
 word with the question. The quote fallback that followed (the best
 keyword-matching sentences, served under badge=document when the model failed or
 cited nothing) let a word-overlap rule choose what was served. That fallback is
-gone too: with no model citation there is no document answer, and the turn
-abstains.
+gone too: with no model citation there is no document answer. The turn then
+falls through to the engine, which abstains or, since #424, reconfirms (CLAUDE.md
+section 9: a direct abstain is only for ungranted tables or destructive SQL).
+Either way nothing from the documents is served and the badge is not green.
 
 Assertions are on the served envelopes (CLAUDE.md s8): ``POST /dms/query`` and
 ``POST /v1/contract/ask``. They check the badge, rows, sources, source cards and
@@ -66,26 +68,29 @@ def _assert_document(body: dict[str, Any]) -> str:
     return text
 
 
+NOT_SERVED = ("abstain", "reconfirm")
+
+
 def _assert_no_document_text(text: str) -> None:
-    assert "can't answer" in text, text
+    assert "can't answer" in text or text.startswith("Reconfirm:"), text
     assert PAYMENT not in text and "Net 30" not in text, text
     assert "acme_agreement.txt" not in text and "Acme" not in text, text
     assert "Quoted from the documents" not in text, text
 
 
 def _assert_abstained(body: dict[str, Any]) -> None:
-    """``POST /dms/query``: an abstain, not a document answer of any kind."""
-    assert _badge(body) == "abstain", body
-    assert body.get("layer") == "abstain" and body.get("route") != "rag", body
+    """``POST /dms/query``: an abstain or reconfirm, not a document answer of any kind."""
+    assert _badge(body) in NOT_SERVED, body
+    assert body.get("layer") in NOT_SERVED and body.get("route") != "rag", body
     assert body.get("rows") in ([], None) and body.get("sql_used") is None, body
     assert "acme_agreement.txt" not in _sources(body), body
     _assert_no_document_text(body.get("answer") or "")
 
 
 def _assert_contract_abstained(body: dict[str, Any]) -> None:
-    """``POST /v1/contract/ask``: abstain badge and no document source card."""
-    assert body["provenance"]["badge"] == "abstain", body
-    assert body["provenance"]["layer"] == "abstain", body
+    """``POST /v1/contract/ask``: abstain or reconfirm badge and no document source card."""
+    assert body["provenance"]["badge"] in NOT_SERVED, body
+    assert body["provenance"]["layer"] in NOT_SERVED, body
     assert body.get("route") != "rag", body
     cards = body.get("contributing_sources") or []
     assert not [c for c in cards if c.get("kind") == "document"], cards
