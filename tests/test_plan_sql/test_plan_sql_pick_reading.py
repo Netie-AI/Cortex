@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
@@ -985,6 +986,129 @@ def test_must_fail_a_reading_naming_what_describe_cannot_see_is_not_offered(
     assert spec.sql in _ran(execute_spy) or any(
         spec.sql.split(" GROUP BY ")[0] in ran for ran in _ran(execute_spy)
     ), _ran(execute_spy)
+    # ... and nothing is offered: no statement, no reading id, no hold.
+    _assert_suppressed(body, "describe-failed (DescribeError)")
+    assert "plan_sql_reading_id" not in body
+    assert body["answer"] == plan_sql_ask.reconfirm_answer(WHY, CLOSEST)
+    assert "reading:" not in "\n".join(body["assumptions"])
+    assert body["rows"] in ([], None) and body["sql_used"] is None
+
+
+# PICK-READING-01 round 5 (differential fuzz: each statement run on the real
+# lake and on a payload-columns-only copy). a9595e8 offered each of these, and
+# a pick would have served it as ``reading: <statement>``:
+#
+# * ``SELECT DISTINCT ... ORDER BY <a key that is not an output>`` was "sorted
+#   by sku descending" / "sorted by largest sku"; DuckDB sorts each distinct row
+#   by ``first(<key>)`` of an arbitrary source row, so the served row is not
+#   one the stated sort picks (the fuzz saw it differ between the two copies);
+# * ``LEFT JOIN inventory ... HAVING inventory.is_hazardous`` (directly or
+#   through an output's name) was "keeping rows of transactions with no match
+#   having ...", while the HAVING drops every unmatched row's group.
+#
+# Each must not be offered now. ``proof`` checks a fact on the lake, through
+# :func:`_oracle`, that shows the a9595e8 statement was false.
+@dataclasses.dataclass(frozen=True)
+class FuzzReading:
+    sql: str
+    grant: dict[str, str]
+    payload: dict[str, Any]
+    proof: Callable[[], None]
+    ran: str  # a piece of the SQL as the gate serves it (it makes ORDER BY total)
+
+
+def _distinct_sorts_by_an_arbitrary_row(sql: str) -> Callable[[], None]:
+    def proof() -> None:
+        plan = "\n".join(str(v) for row in _oracle(f"EXPLAIN {sql}") for v in row.values())
+        assert '"first"' in plan, plan
+
+    return proof
+
+
+_HAZARD_LEFT = (
+    "FROM transactions LEFT JOIN inventory ON transactions.sku = inventory.sku "
+    "AND inventory.is_hazardous"
+)
+_HAZARD_GROUP = "GROUP BY inventory.is_hazardous"
+
+
+def _having_drops_the_unmatched_rows(sql: str) -> Callable[[], None]:
+    def proof() -> None:
+        # The rows are the inner join's ...
+        inner = sql.replace(" LEFT JOIN ", " JOIN ")
+        assert _rowset(_oracle(sql)) == _rowset(_oracle(inner))
+        # ... although transactions has rows with no match.
+        (unmatched,) = _oracle(
+            "SELECT COUNT(*) AS n FROM transactions ANTI JOIN inventory "
+            "ON transactions.sku = inventory.sku AND inventory.is_hazardous"
+        )
+        assert unmatched["n"] > 0
+
+    return proof
+
+
+_DISTINCT_BY_SKU = "SELECT DISTINCT txn_type FROM transactions ORDER BY sku DESC LIMIT 1"
+_DISTINCT_BY_MAX = (
+    "SELECT DISTINCT COUNT(*) AS n FROM transactions GROUP BY txn_type ORDER BY MAX(sku)"
+)
+_HAVING_DIRECT = (
+    f"SELECT inventory.is_hazardous, COUNT(*) AS n {_HAZARD_LEFT} {_HAZARD_GROUP} "
+    "HAVING inventory.is_hazardous"
+)
+_HAVING_BY_NAME = (
+    f"SELECT inventory.is_hazardous AS h, COUNT(*) AS n {_HAZARD_LEFT} {_HAZARD_GROUP} "
+    "HAVING h IS NOT NULL"
+)
+FUZZ_READINGS: dict[str, FuzzReading] = {
+    "distinct_sorted_by_a_column_not_an_output": FuzzReading(
+        _DISTINCT_BY_SKU,
+        GRANT,
+        PAYLOAD,
+        _distinct_sorts_by_an_arbitrary_row(_DISTINCT_BY_SKU),
+        "SELECT DISTINCT txn_type FROM transactions ORDER BY sku DESC",
+    ),
+    "distinct_sorted_by_an_aggregate_not_an_output": FuzzReading(
+        _DISTINCT_BY_MAX,
+        GRANT,
+        PAYLOAD,
+        _distinct_sorts_by_an_arbitrary_row(_DISTINCT_BY_MAX),
+        "GROUP BY txn_type ORDER BY MAX(sku)",
+    ),
+    "having_reads_the_table_of_a_left_join": FuzzReading(
+        _HAVING_DIRECT,
+        INVENTORY_GRANT,
+        INVENTORY_PAYLOAD,
+        _having_drops_the_unmatched_rows(_HAVING_DIRECT),
+        "HAVING inventory.is_hazardous",
+    ),
+    "having_reads_the_table_of_a_left_join_by_an_output_name": FuzzReading(
+        _HAVING_BY_NAME,
+        INVENTORY_GRANT,
+        INVENTORY_PAYLOAD,
+        _having_drops_the_unmatched_rows(_HAVING_BY_NAME),
+        "HAVING NOT h IS NULL",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(FUZZ_READINGS))
+def test_must_fail_a_round_five_fuzz_reading_is_not_offered(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    spec = FUZZ_READINGS[case]
+    sqls = (GOOD_SQL, spec.sql, KG_SQL)
+    keys = {plan_sql_vote.result_key(_oracle(s)) for s in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    spec.proof()
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, spec.grant)
+
+    body = _offer(dms_http, payload=spec.payload)
+
+    # The reading passed every gate and ran ...
+    assert plan_sql_vote.VOTE_SPLIT in _steps(body), _steps(body)
+    # (``_ran`` drops every SELECT DISTINCT as a sample probe: read the spy.)
+    assert any(spec.ran in ran for ran in execute_spy), "\n".join(execute_spy)
     # ... and nothing is offered: no statement, no reading id, no hold.
     _assert_suppressed(body, "describe-failed (DescribeError)")
     assert "plan_sql_reading_id" not in body

@@ -28,8 +28,9 @@ anything else:
   AND of comparisons or boolean columns. Every granted table at most once in
   the statement (no self-join); every relation name or alias distinct, and
   none equal to another granted table or a column of a table it reads. A SEMI
-  or ANTI join's table is read only in its own ON; no WHERE reads the table of
-  a LEFT JOIN (it would drop the unmatched rows "keeping rows" promises).
+  or ANTI join's table is read only in its own ON; no WHERE, and no HAVING
+  outside an aggregate (directly or through an output's name), reads the table
+  of a LEFT JOIN (it would drop the unmatched rows "keeping rows" promises).
 * Outputs: a granted column, ``*`` or ``t.*`` with no modifier (and then no
   ordinal or output-name reference), ``COUNT(*)``, ``COUNT(1)``,
   ``COUNT(col)``, ``COUNT(DISTINCT col)``, ``SUM`` / ``AVG`` / ``MIN`` / ``MAX``
@@ -46,7 +47,10 @@ anything else:
   resolved) or a ``CASE`` identical to an output. ``HAVING`` with DuckDB's
   name binding. ``ORDER BY`` granted columns, aggregates, ordinals or output
   names, with ``DESC`` and ``NULLS FIRST`` stated (``NULLS LAST`` is DuckDB's
-  default, so it is the unstated case). ``LIMIT n``, said as ``int(n)``.
+  default, so it is the unstated case); under ``DISTINCT`` only a key that is
+  an output (an ordinal, an output's name, or the SQL text of an output),
+  since DuckDB sorts each distinct row by an arbitrary source row's value of
+  any other key. ``LIMIT n``, said as ``int(n)``.
 
 Order, on a copy of the parsed tree, before anything is rendered:
 
@@ -620,6 +624,8 @@ class _Grammar:
                     raise DescribeError("an ORDER BY the statement does not describe")
                 self.ok(ordered)
                 self.order_key(ordered.this)
+                if distinct is not None:
+                    self.distinct_order_key(ordered.this)
         limit = select.args.get("limit")
         if limit is not None:
             count = limit.expression
@@ -845,6 +851,34 @@ class _Grammar:
         else:
             self.paren(node)
             self.column(_unparen(node))
+
+    def distinct_order_key(self, node: exp.Expression) -> None:
+        """Under DISTINCT, a sort key must be an output.
+
+        DuckDB runs ``SELECT DISTINCT x ... ORDER BY y`` by sorting each distinct
+        row by ``first(y)`` of an arbitrary source row (PICK-READING-01 fuzz:
+        ``SELECT DISTINCT txn_type ... ORDER BY sku DESC LIMIT 1`` was stated
+        "sorted by sku descending" and served a row no such sort picks). So a key
+        is accepted only when it is an ordinal, a bare name of an output's alias
+        (a whole ORDER BY key binds the alias first) or an expression whose SQL
+        text is that of an output. Anything else refuses.
+        """
+        inner = _unparen(node)
+        if _ordinal(inner) is not None:
+            return
+        if isinstance(inner, exp.Column) and not inner.table:
+            name = fold_identifier(inner.name)
+            if any(
+                isinstance(p, exp.Alias) and p.alias and fold_identifier(p.alias) == name
+                for p in self.select.expressions
+            ):
+                return
+        text = inner.sql(dialect=_DIALECT, comments=False)
+        for position in range(1, len(self.select.expressions) + 1):
+            output = _projection_inner(self.select, position)
+            if output.sql(dialect=_DIALECT, comments=False) == text:
+                return
+        raise DescribeError("a DISTINCT sorted by a key that is not an output")
 
     def order_key(self, node: exp.Expression) -> None:
         self.paren(node)
@@ -1180,8 +1214,9 @@ def _name(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> se
     output's alias where DuckDB binds the alias, and an ordinal, is shown as
     what that output is (:func:`_reference`). Every output alias is dropped.
     Anything else raises, and so do: an output name another name could be
-    (:func:`_check_output_names`); a WHERE that reads the table of a LEFT JOIN
-    (it drops the unmatched rows the statement says are kept); and a bare
+    (:func:`_check_output_names`); a WHERE, or a HAVING outside an aggregate
+    (directly or through an output's name), that reads the table of a LEFT
+    JOIN (it drops the unmatched rows the statement says are kept); and a bare
     column read as a condition unless the payload types it BOOLEAN.
     """
     approved: set[int] = set()
@@ -1212,8 +1247,9 @@ def _name(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> se
     grouped = _grouped_names(select, ordinals)
 
     pending: dict[int, int] = dict(ordinals)
+    left_reads: set[int] = set()  # columns that read the table of a LEFT JOIN
     for column in list(select.find_all(exp.Column)):
-        clause, _in_aggregate, top = _clause(column, select)
+        clause, in_aggregate, top = _clause(column, select)
         scope = _scope(relations, clause, top)
         qualified: list[_Relation] = []
         if column.table:
@@ -1246,10 +1282,17 @@ def _name(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> se
         if len(owners) > 1:
             raise DescribeError("a name more than one table of the clause has")
         owner = owners[0]
-        if clause == "where" and owner.shape == "left":
-            # "keeping rows of t with no match" is false once WHERE reads the
-            # joined table: an unmatched row's columns are empty there.
-            raise DescribeError("a WHERE that reads the table of a LEFT JOIN")
+        if owner.shape == "left":
+            if clause == "where":
+                # "keeping rows of t with no match" is false once WHERE reads the
+                # joined table: an unmatched row's columns are empty there.
+                raise DescribeError("a WHERE that reads the table of a LEFT JOIN")
+            if clause == "having" and not in_aggregate:
+                # The same for a HAVING that tests the joined table's grouped
+                # value: the groups of unmatched rows hold an empty one.
+                raise DescribeError("a HAVING that reads the table of a LEFT JOIN")
+            if not in_aggregate:
+                left_reads.add(id(column))
         if _bare_condition(column) and catalog.types.get(owner.key, {}).get(folded) not in (
             _BOOLEAN_TYPES
         ):
@@ -1267,6 +1310,13 @@ def _name(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> se
         relation.node.set("alias", None)
 
     references = [node for node in select.walk() if id(node) in pending]
+    for node in references:
+        if isinstance(node, exp.Column) and _clause(node, select)[0] == "having":
+            output = _projection_inner(select, pending[id(node)])
+            if any(id(c) in left_reads for c in output.find_all(exp.Column)):
+                # A HAVING name bound to an output that reads the joined table
+                # outside an aggregate tests that table's value, as above.
+                raise DescribeError("a HAVING that reads the table of a LEFT JOIN")
     if references and any(
         _is_star(_projection_inner(select, i)) for i in range(1, len(select.expressions) + 1)
     ):

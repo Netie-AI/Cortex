@@ -1119,6 +1119,138 @@ def test_must_fail_a_bare_name_another_table_lists_refuses(con: Any) -> None:
     _check_claims(con, qualified, False)
 
 
+# PICK-READING-01 differential fuzz: under DISTINCT, DuckDB sorts each distinct
+# row by ``first(<key>)`` of an arbitrary source row when the key is not an
+# output. a9595e8 stated "sorted by b" for each of these, and the order served
+# is not one a sort by b gives. Each now refuses.
+DISTINCT_ORDER_REFUSES: dict[str, str] = {
+    "column_not_an_output": "SELECT DISTINCT flag FROM t ORDER BY b",
+    "column_not_an_output_with_limit": "SELECT DISTINCT k FROM t ORDER BY b DESC LIMIT 1",
+    "aggregate_not_an_output": "SELECT DISTINCT COUNT(*) FROM t GROUP BY flag ORDER BY MAX(b)",
+    "second_key_not_an_output": "SELECT DISTINCT k, a FROM t ORDER BY k, b",
+    "parenthesized_key_not_an_output": "SELECT DISTINCT k FROM t ORDER BY (b)",
+    # Textual identity, not binding: describe does not decide that ``k`` here
+    # is the output ``t.k``, so a spelling that differs refuses.
+    "other_spelling_of_an_output": "SELECT DISTINCT t.k FROM t ORDER BY k",
+    "key_of_a_star": "SELECT DISTINCT * FROM t ORDER BY k",
+}
+
+
+@pytest.mark.parametrize("case", sorted(DISTINCT_ORDER_REFUSES))
+def test_must_fail_a_distinct_sorted_by_a_key_that_is_not_an_output_refuses(
+    con: Any, case: str
+) -> None:
+    sql = DISTINCT_ORDER_REFUSES[case]
+    assert isinstance(_rows(con, sql), list), "a query DuckDB runs"
+    with pytest.raises(describe.DescribeError, match="a DISTINCT sorted by a key that is not"):
+        _say(sql)
+
+
+def test_a_distinct_sort_key_that_is_not_an_output_is_an_arbitrary_rows_value(con: Any) -> None:
+    """Why it refuses: the order DuckDB serves is not "sorted by b".
+
+    Each flag's b values: TRUE 60, 50, 50, 10; FALSE NULL, 70, 20; NULL 90.
+    Sorted by b (by the smallest or the largest of a flag's values) the flags
+    come TRUE, FALSE, NULL. DuckDB sorts by the first row's b instead
+    (TRUE 60, FALSE NULL, NULL 90), so it serves TRUE, NULL, FALSE.
+    """
+    sql = DISTINCT_ORDER_REFUSES["column_not_an_output"]
+    plan = con.execute(f"EXPLAIN {sql}").fetchall()[0][1]
+    assert '"first"' in plan, plan
+    served = _rows(con, sql)
+    for chosen in ("MIN", "MAX"):
+        claimed = _rows(con, f"SELECT flag FROM t GROUP BY flag ORDER BY {chosen}(b)")
+        assert claimed == [(True,), (False,), (None,)]
+        assert served != claimed, (served, claimed)
+
+
+# Still described under DISTINCT: a key that is an output, named by its
+# position, by its alias or by its own SQL text.
+DISTINCT_ORDER_DESCRIBED: dict[str, tuple[str, str]] = {
+    "same_column": (
+        "SELECT DISTINCT k FROM t ORDER BY k DESC",
+        "Returns distinct k from t, sorted by k descending",
+    ),
+    "parenthesized_same_column": (
+        "SELECT DISTINCT k FROM t ORDER BY (k)",
+        "Returns distinct k from t, sorted by k",
+    ),
+    "ordinal": (
+        "SELECT DISTINCT k, a FROM t ORDER BY 2 DESC, 1",
+        "Returns distinct k and a from t, sorted by a descending, k",
+    ),
+    "output_alias": (
+        "SELECT DISTINCT k, COUNT(*) AS n FROM t GROUP BY k ORDER BY n DESC, k",
+        "Returns distinct k and number of rows for each k from t, "
+        "sorted by number of rows descending, k",
+    ),
+    "same_aggregate": (
+        "SELECT DISTINCT COUNT(*) FROM t GROUP BY flag ORDER BY COUNT(*)",
+        "Returns distinct number of rows for each flag from t, sorted by number of rows",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(DISTINCT_ORDER_DESCRIBED))
+def test_a_distinct_sorted_by_an_output_is_described(con: Any, case: str) -> None:
+    sql, expected = DISTINCT_ORDER_DESCRIBED[case]
+    assert _check_claims(con, sql, True) == expected
+
+
+# The HAVING twin of ``left_join_where_reads_the_joined_table``: a HAVING that
+# tests the LEFT-joined table's value outside an aggregate drops the groups of
+# the unmatched rows, so "keeping rows of t with no match" is false. a9595e8
+# rendered each. Inside an aggregate it is still described (below).
+HAVING_LEFT_REFUSES: dict[str, tuple[str, str]] = {
+    "qualified_column": (
+        "SELECT t.k, COUNT(*) FROM t LEFT JOIN u ON t.k = u.k GROUP BY t.k, u.a HAVING u.a > 0",
+        "SELECT t.k, COUNT(*) FROM t JOIN u ON t.k = u.k GROUP BY t.k, u.a HAVING u.a > 0",
+    ),
+    "bare_column": (
+        "SELECT t.k, COUNT(*) FROM t LEFT JOIN s ON t.k = s.k GROUP BY t.k, e HAVING e IS NOT NULL",
+        "SELECT t.k, COUNT(*) FROM t JOIN s ON t.k = s.k GROUP BY t.k, e HAVING e IS NOT NULL",
+    ),
+    "through_an_output_name": (
+        "SELECT t.k, u.a AS m, COUNT(*) FROM t LEFT JOIN u ON t.k = u.k GROUP BY t.k, u.a "
+        "HAVING m > 0",
+        "SELECT t.k, u.a AS m, COUNT(*) FROM t JOIN u ON t.k = u.k GROUP BY t.k, u.a HAVING m > 0",
+    ),
+    "through_a_computed_output": (
+        "SELECT t.k, CASE WHEN u.a > 0 THEN 'p' ELSE 'n' END AS m, COUNT(*) AS n "
+        "FROM t LEFT JOIN u ON t.k = u.k GROUP BY t.k, 2 HAVING m = 'p'",
+        "SELECT t.k, CASE WHEN u.a > 0 THEN 'p' ELSE 'n' END AS m, COUNT(*) AS n "
+        "FROM t JOIN u ON t.k = u.k GROUP BY t.k, 2 HAVING m = 'p'",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(HAVING_LEFT_REFUSES))
+def test_must_fail_a_having_that_reads_the_table_of_a_left_join_refuses(
+    con: Any, case: str
+) -> None:
+    sql, inner = HAVING_LEFT_REFUSES[case]
+    # No unmatched row survives: the rows are the inner join's ...
+    assert _bag(_rows(con, sql)) == _bag(_rows(con, inner))
+    # ... although t has rows with no match.
+    assert _rows(con, "SELECT COUNT(*) FROM t ANTI JOIN u ON t.k = u.k") != [(0,)]
+    with pytest.raises(describe.DescribeError, match="a HAVING that reads the table of a LEFT"):
+        _say(sql)
+
+
+def test_a_having_aggregate_over_the_table_of_a_left_join_is_described(con: Any) -> None:
+    head = "SELECT t.k, MAX(u.a) AS m FROM t LEFT JOIN u ON t.k = u.k GROUP BY t.k"
+    said = "Returns t.k and largest u.a for each t.k from t, matched to u on t.k is u.k, "
+    assert _check_claims(con, f"{head} HAVING COUNT(u.a) > 0 ORDER BY m", True) == (
+        f"{said}keeping rows of t with no match having number of non-empty u.a is more than "
+        f"{MARK}, sorted by largest u.a"
+    )
+    # Through an output's name: the output is an aggregate, so it is the same case.
+    assert _check_claims(con, f"{head} HAVING m > 2 ORDER BY m", True) == (
+        f"{said}keeping rows of t with no match having largest u.a is more than {MARK}, "
+        "sorted by largest u.a"
+    )
+
+
 # -- 3. the property: random core queries render true statements or refuse --------------
 
 _COLUMNS: dict[str, dict[str, str]] = {
