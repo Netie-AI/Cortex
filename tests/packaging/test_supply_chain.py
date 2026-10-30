@@ -496,3 +496,16 @@ def test_every_image_only_entry_has_a_reason_and_is_used() -> None:
     for name, reason in sc.IMAGE_ONLY_PACKAGES.items():
         assert len(reason.split()) >= 5, f"{name}: give a real reason"
         assert name in used, f"{name} is listed but no image lock holds it; delete the entry"
+
+
+# -- #383: diskcache stays out of the base install and every image ------------
+
+
+def test_diskcache_is_not_a_base_dependency_or_in_any_image() -> None:
+    """GHSA-w8v5-vhqr-4h9v has no fixed release and nothing imports diskcache."""
+    project = sc._pyproject(ROOT)["project"]
+    base = {sc.canonicalize_name(sc.Requirement(s).name) for s in project["dependencies"]}
+    assert "diskcache" not in base
+    for variant in sc.VARIANTS:
+        pins, _ = sc.parse_lock(ROOT / "requirements" / f"image-{variant}.lock.txt")
+        assert "diskcache" not in pins, f"image-{variant}.lock.txt ships diskcache"

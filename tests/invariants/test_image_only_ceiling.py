@@ -15,6 +15,8 @@ does not keep the unhashed wheel the slim base ships).
 
 from __future__ import annotations
 
+import pytest
+
 from scripts import check_supply_chain as sc
 
 _IMAGE_ONLY_CEILING: frozenset[str] = frozenset({"poetry-core", "wheel"})
@@ -28,6 +30,10 @@ def test_image_only_packages_stay_inside_the_ceiling() -> None:
     )
 
 
-def test_ceiling_check_can_fail() -> None:
-    planted = {**sc.IMAGE_ONLY_PACKAGES, "evil-extra": "planted"}
-    assert set(planted) - _IMAGE_ONLY_CEILING == {"evil-extra"}
+def test_ceiling_check_can_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grow the real list and run the real assertion: it must raise."""
+    monkeypatch.setattr(
+        sc, "IMAGE_ONLY_PACKAGES", {**sc.IMAGE_ONLY_PACKAGES, "evil-extra": "planted"}
+    )
+    with pytest.raises(AssertionError, match="evil-extra"):
+        test_image_only_packages_stay_inside_the_ceiling()
