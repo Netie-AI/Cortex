@@ -32,12 +32,12 @@ def classify_with_model(text: str) -> ClassifyResult:
 
     model_id = DEFAULT_MODEL
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=False)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,
-        trust_remote_code=True,
+        trust_remote_code=False,
     )
     if device == "cpu":
         model = model.to(device)

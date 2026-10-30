@@ -330,7 +330,7 @@ def lake_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     from CortexOS.api.app import create_app
 
-    yield TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    yield TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     catalog.reset_mode_cache()
 
 

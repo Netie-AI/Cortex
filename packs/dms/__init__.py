@@ -27,10 +27,12 @@ def register_engine_seams() -> None:
     from packs.dms.audit import ledger
     from packs.dms.generative.l2_adapter import DmsL2Generation
     from packs.dms.metric_choice import OpenVaultMetricChoice
+    from packs.dms.security.request_authorizer import register_request_authorizer
 
     register_ledger(ledger)
     register_l2_generation(DmsL2Generation())
     register_default_metric_choice(OpenVaultMetricChoice())
+    register_request_authorizer()
 
 
 register_engine_seams()
