@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from bench.lanes import assert_contract_answer, lane_line
-from CortexOS.dms import lane_ask
+from CortexOS.dms import lane_ask, query_service
 from tests.test_plan_sql.test_plan_sql_pick_reading import (  # noqa: F401
     GRANT,
     SESSION,
@@ -33,8 +33,11 @@ from tests.test_plan_sql.test_plan_sql_pick_reading import (  # noqa: F401
     execute_spy,
 )
 
+SPACE = "alpha"
 DOCUMENTS = '{"lane":"documents"}'
-DOC_REPLY = "Acme invoices are payable Net 30 from the invoice date [1]."
+DOC_TEXT = (
+    "Acme invoices are payable Net 30 from the invoice date [1].\nSources: [1] acme_agreement.txt"
+)
 
 
 def test_pick_skips_the_router_and_serves_the_held_reading(
@@ -42,14 +45,20 @@ def test_pick_skips_the_router_and_serves_the_held_reading(
 ) -> None:
     monkeypatch.delenv(lane_ask.ENABLED_ENV, raising=False)
     _script_split(armed_openvault, monkeypatch)
-    dms_http.bind_session(SESSION, GRANT)
-    reading = _readings(_offer(dms_http))[0]
+    # A Space is bound, so no other skip applies: only the pick skip stands
+    # between the router and the held reading.
+    dms_http.bind_session(SESSION, GRANT, space_id=SPACE)
+    reading = _readings(_offer(dms_http, space_id=SPACE))[0]
     calls = len(armed_openvault.chat_calls)
 
-    # Were the router to run, it would be told "documents" and given a cited reply.
+    # Were the router to run, it would be told "documents" and the document lane
+    # would return a cited answer, which would then be served in place of the pick.
     monkeypatch.setenv(lane_ask.ENABLED_ENV, "1")
-    armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY)
-    resp = _pick(dms_http, reading["reading_id"])
+    armed_openvault.reply(DOCUMENTS)
+    monkeypatch.setattr(
+        query_service, "rag_answer", lambda *_a, **_k: (DOC_TEXT, ["acme_agreement.txt"])
+    )
+    resp = _pick(dms_http, reading["reading_id"], space_id=SPACE)
     assert resp.status_code == 200, resp.text
     body: dict[str, Any] = _json(resp)
     assert_contract_answer(body)
