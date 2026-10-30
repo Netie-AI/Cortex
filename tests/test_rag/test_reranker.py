@@ -78,3 +78,72 @@ async def test_semaphore_serializes_concurrent_slow_reranks(monkeypatch):
     elapsed = time.perf_counter() - t0
 
     assert elapsed >= 0.12
+
+
+# -- RAG-RANK-01: sync score() and constructor kwargs ----------------------------
+
+
+class _Predicts:
+    def __init__(self, out):
+        self.out = out
+
+    def predict(self, pairs, **kwargs):  # noqa: ARG002
+        if isinstance(self.out, Exception):
+            raise self.out
+        return self.out
+
+
+def test_score_is_none_when_the_model_is_missing(monkeypatch):
+    monkeypatch.setattr(BGEReranker, "_get_cross_encoder", lambda self: None)
+    assert BGEReranker().score("q", ["a", "b"]) is None
+
+
+@pytest.mark.parametrize(
+    "out",
+    [RuntimeError("predict failed"), [0.5, float("nan")], [0.5], [[0.1, 0.2, 0.3]]],
+    ids=["raises", "non-finite", "too-few", "too-many"],
+)
+def test_score_is_none_on_unusable_output(monkeypatch, out):
+    model = _Predicts(out)
+    monkeypatch.setattr(BGEReranker, "_get_cross_encoder", lambda self: model)
+    assert BGEReranker().score("q", ["a", "b"]) is None
+
+
+def test_score_returns_floats(monkeypatch):
+    import numpy as np
+
+    model = _Predicts(np.array([0.25, -1.5]))
+    monkeypatch.setattr(BGEReranker, "_get_cross_encoder", lambda self: model)
+    scores = BGEReranker().score("q", ["a", "b"])
+    assert scores == [0.25, -1.5]
+    assert all(type(s) is float for s in scores)
+
+
+def _recording_cross_encoder(monkeypatch):
+    import sys
+    import types
+
+    calls = []
+
+    class CrossEncoder:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    fake = types.ModuleType("sentence_transformers")
+    fake.CrossEncoder = CrossEncoder
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake)
+    return calls
+
+
+def test_no_model_kwargs_constructs_exactly_as_before(monkeypatch):
+    """/search builds BGEReranker() with no kwargs; its CrossEncoder call is unchanged."""
+    calls = _recording_cross_encoder(monkeypatch)
+    assert BGEReranker().ensure_loaded() is True
+    assert calls == [(("BAAI/bge-reranker-v2-m3",), {"device": None})]
+
+
+def test_model_kwargs_reach_the_constructor(monkeypatch):
+    calls = _recording_cross_encoder(monkeypatch)
+    r = BGEReranker("/abs/dir", model_kwargs={"local_files_only": True, "max_length": 512})
+    assert r.ensure_loaded() is True
+    assert calls == [(("/abs/dir",), {"device": None, "local_files_only": True, "max_length": 512})]
