@@ -234,11 +234,13 @@ def execute_sql(
     The statement, and the text of any error it raises, are noted on the
     request's attempt record (:mod:`CortexOS.sql_attempts`).
 
-    Declared value domains (#402): when the post-enforce SQL names a column
-    with a declared value domain and the lake it runs on stores values the
-    declaration does not (a build that predates it, or another loader),
+    Declared value domains (#402, #410): when the post-enforce SQL reads a
+    table with a declared value domain and the lake it runs on stores values
+    the declaration does not (a build that predates it, or another loader),
     ``LakeValueDomainStale`` (a ``SqlGateAbstain``) is raised before any row is
-    fetched: a filter on the declared values would match nothing there.
+    fetched: a filter on the declared values would match nothing there. Every
+    declared column of every table read is checked, not only columns written
+    as ``exp.Column``.
     ``value_domains`` defaults to the serving warehouse's declaration
     (``warehouse_db.serving_value_domains``); ``()`` checks nothing.
     """
@@ -372,6 +374,16 @@ def _execute_sql(
         path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
         try:
+            # The SET is attempted before EXPLAIN, the value-domain scan and the page count.
+            # On DuckDB 2.x it is a no-op: DuckDB has no statement_timeout setting, the SET
+            # raises CatalogException and it is swallowed here, so nothing is bounded.
+            # A failure here is not a refusal.
+            timeout_s = pool.config.statement_timeout_s
+            if timeout_s > 0:
+                try:
+                    con.execute(f"SET statement_timeout='{int(timeout_s * 1000)}ms'")
+                except Exception:  # noqa: BLE001
+                    pass
             if use_explain:
                 ok, detail = explain_dry_run(con, safe_sql, params=params)
                 if not ok:
@@ -392,6 +404,7 @@ def _execute_sql(
 
                 # Kept per read-only instance this cursor reads, never per path:
                 # a file renamed over the path is a later instance's to check.
+                # The scan ignores row predicates; see value_domain._drift_counts.
                 drift = stale_columns(
                     con, safe_sql, value_domains, instance=connection_instance(con)
                 )
@@ -437,13 +450,6 @@ def _execute_sql(
                         raise LakeValueDomainStale(
                             stale_reason(drift), codes=[item.code for item in drift]
                         )
-            # Best-effort statement timeout (DuckDB may ignore unknown settings).
-            timeout_s = pool.config.statement_timeout_s
-            if timeout_s > 0:
-                try:
-                    con.execute(f"SET statement_timeout='{int(timeout_s * 1000)}ms'")
-                except Exception:  # noqa: BLE001
-                    pass
             try:
                 rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
                 rows_raw = rel.fetchall()

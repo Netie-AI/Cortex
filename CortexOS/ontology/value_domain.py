@@ -13,13 +13,16 @@ Four uses, one declaration:
   ``undeclared_values`` then counts and names any stored value the declaration
   does not list; such a value is reported, never guessed at or mapped.
 * ``stale_columns`` - at query time (``execute_sql`` and ``guard_and_execute``,
-  the seams every served answer runs through), before SQL that names a
-  declared column fetches a row, the lake it runs on is checked for stored
-  values a canonical filter or grouping would misread: a declared source
-  spelling the build did not map (a lake built before the declaration, or by
-  another loader), or a value the declaration does not list. Either one is a
-  named abstain (``lake_value_domain_stale:<table>.<column>``), never a served
-  zero.
+  the seams every served answer runs through), before SQL that reads a table
+  with a declared column fetches a row, the lake it runs on is checked for
+  stored values a canonical filter or grouping would misread: a declared
+  source spelling the build did not map (a lake built before the declaration,
+  or by another loader), or a value the declaration does not list. Either one
+  is a named abstain (``lake_value_domain_stale:<table>.<column>``), never a
+  served zero. The check is every declared column of every base table the
+  statement reads. A filter can bind that column without an ``exp.Column``
+  node (``USING``, ``NATURAL JOIN``, ``COLUMNS()``, a subscript, a column
+  list on a table alias); naming each form would miss the next one.
 * ``prompt_values`` - the canonical values go into the model's generation context.
 * ``canonicalize_sql`` - SQL written against source spellings (gold and
   held-out files, which never change) is run through the same mapping before it
@@ -286,14 +289,36 @@ class LakeDrift:
         )
 
 
-def domains_in_sql(sql: str, domains: Iterable[ValueDomain]) -> tuple[ValueDomain, ...]:
-    """Declared domains whose column ``sql`` names, on a table ``sql`` reads.
+def _base_tables(tree: exp.Expression) -> set[str] | None:
+    """Lowercased base tables ``tree`` reads, or None when scope cannot be proven.
 
-    Matched by column name whenever the domain's table is read anywhere in the
-    statement, so a reference through a CTE, a derived table or an alias counts:
-    the check reads more columns rather than miss one. SQL that does not parse
-    is treated as naming every declared domain (fail closed). ``SELECT *`` names
-    no column: a listing shows what is stored and filters nothing.
+    A CTE reference is not a read of a base table of the same name. Anything
+    the scope builder cannot settle returns None so the caller fails closed.
+    """
+    from CortexOS.execution.sql_scope import ScopeError, cte_reference_ids
+
+    try:
+        cte_ids = cte_reference_ids(tree, allow_recursive=True)
+    except ScopeError:
+        return None
+    return {
+        table.name.lower()
+        for table in tree.find_all(exp.Table)
+        if table.name and id(table) not in cte_ids
+    }
+
+
+def domains_in_sql(sql: str, domains: Iterable[ValueDomain]) -> tuple[ValueDomain, ...]:
+    """Every declared domain of every base table ``sql`` reads.
+
+    A declared column can be filtered, grouped or joined without an
+    ``exp.Column`` node: ``USING``, ``NATURAL JOIN``, ``COLUMNS(...)``, a
+    subscript (``t['txn_type']``) or a column list on a table alias. Checking
+    the table, rather than each of those shapes, fails closed for all of them
+    and for any later one. A reference through a CTE or a derived table still
+    counts, because the base table is in the statement. SQL that does not
+    parse, or whose scopes cannot be proven, is treated as naming every
+    declared domain (fail closed).
     """
     domains = tuple(domains)
     if not sql or not domains:
@@ -304,11 +329,10 @@ def domains_in_sql(sql: str, domains: Iterable[ValueDomain]) -> tuple[ValueDomai
         return domains
     if tree is None:
         return domains
-    tables = {t.name.lower() for t in tree.find_all(exp.Table)}
-    columns = {c.name.lower() for c in tree.find_all(exp.Column)}
-    return tuple(
-        d for d in domains if d.table.lower() in tables and d.column.lower() in columns
-    )
+    names = _base_tables(tree)
+    if names is None:
+        return domains
+    return tuple(d for d in domains if d.table.lower() in names)
 
 
 _LAKE_CACHE: dict[tuple[Hashable, str, ValueDomain], tuple[int, int] | None] = {}
@@ -323,7 +347,14 @@ def clear_lake_cache() -> None:
 
 
 def _drift_counts(con: Any, d: ValueDomain, schema: str) -> tuple[int, int] | None:
-    """(unmapped rows, undeclared rows) for one column; None when the lake lacks it."""
+    """(unmapped rows, undeclared rows) for one column; None when the lake lacks it.
+
+    The scan reads the whole table on ``con``. It does not apply the session's
+    row predicates (row grants). A session whose own rows are all mapped still
+    abstains when rows outside its grant are stale. That is fail-closed: the
+    serve-or-abstain bit can name rows the session is not allowed to read, and
+    it never serves a figure from them.
+    """
     ref = _ref(schema, d.table)
     if not _has_column(con, ref, d.column):
         return None
@@ -353,8 +384,9 @@ def lake_drift(
 ) -> tuple[LakeDrift, ...]:
     """Declared columns in the lake ``con`` reads that hold values the declaration does not.
 
-    One aggregate scan per column. ``instance`` names the database instance
-    ``con`` reads, one whose data cannot change while it lives (the serving
+    One aggregate scan per column, of the whole table: the session's row
+    predicates are not applied (see ``_drift_counts``). ``instance`` names the
+    database instance ``con`` reads, one whose data cannot change while it lives (the serving
     warehouse's cached read-only instance: ``warehouse.connection_instance``);
     the result is kept per instance, so it is scanned once, and a later instance
     on the same path (a rebuild, a file renamed over it) is scanned afresh. With
@@ -389,12 +421,12 @@ def stale_columns(
     schema: str = "",
     instance: Hashable | None = None,
 ) -> tuple[LakeDrift, ...]:
-    """Declared columns ``sql`` names that the lake does not hold as declared.
+    """Declared columns of tables ``sql`` reads that the lake does not hold as declared.
 
-    Empty when ``sql`` names no declared column, or when every one it names
-    stores only declared canonical values. A non-empty result is a named
-    abstain (``stale_reason``); it names columns and row counts, never a value.
-    ``instance`` is as for ``lake_drift``.
+    Empty when ``sql`` reads no table with a declared column, or when every
+    such column stores only declared canonical values. A non-empty result is a
+    named abstain (``stale_reason``); it names columns and row counts, never a
+    value. ``instance`` is as for ``lake_drift``.
     """
     named = domains_in_sql(sql, domains)
     if not named:
