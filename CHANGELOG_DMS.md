@@ -17,7 +17,13 @@ are the request payload's granted tables and columns, in the payload's
 spelling: a computed output is ``computed value N`` (its position), a
 reference to a projection alias is shown as what that projection is, a table
 alias as its granted table, and a CTE or subquery alias never. Any other name
-suppresses the offer. No value, preview, column list, SQL, rung or model is on
+suppresses the offer. A bare name that is both a granted column and an output's
+alias is described as DuckDB binds it: ORDER BY (a whole key) and HAVING (a name
+GROUP BY does not list) take the output, so ``SUM(quantity_kg) AS quantity_kg
+... HAVING quantity_kg > ...`` reads "having total of quantity_kg"; WHERE,
+GROUP BY, the SELECT list and an aggregate's arguments take the column. Two
+outputs sharing the name, a HAVING over ROLLUP or a grouping expression,
+QUALIFY and DISTINCT ON suppress the offer. No value, preview, column list, SQL, rung or model is on
 the wire.
 Yes and No keep their meaning. ``AskRequest.plan_sql_reading_id`` is the
 pick: it re-runs the held reading's SQL through every gate under the current

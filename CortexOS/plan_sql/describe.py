@@ -29,7 +29,13 @@ Order, on a copy of the parsed tree, before anything is rendered:
    the model's. A computed output is named by its position
    (``computed value 2``), a reference to a projection alias is shown as what
    that projection is, a table alias is shown as its granted table, and a CTE
-   or subquery alias is never printed. Any other name raises.
+   or subquery alias is never printed. Any other name raises. A bare name
+   that is both a granted column and a projection's alias is bound as DuckDB
+   binds it: ORDER BY and HAVING take the alias first, WHERE and GROUP BY the
+   column. With ``SUM(quantity_kg) AS quantity_kg``, ``HAVING quantity_kg >
+   ...`` filters on the total and is described so; where the binding is not
+   known (two outputs share the name, ``GROUP BY ALL`` under HAVING, QUALIFY,
+   DISTINCT ON) the statement raises.
 5. Fail closed: every remaining leaf must be a kind this module knows. Any
    other leaf (a JSON path part, a placeholder, a node a later sqlglot adds,
    an identifier step 4 did not approve) or a comment that survived step 1
@@ -389,6 +395,75 @@ def _reference(
     return var
 
 
+def _grouped_names(select: exp.Select, ordinals: dict[int, int]) -> set[str] | None:
+    """Folded names of the columns GROUP BY lists. None when it lists anything else.
+
+    An ordinal counts as the projection it names. ``GROUP BY ALL``, ``ROLLUP``,
+    ``CUBE``, ``GROUPING SETS`` or an expression give None: how DuckDB binds a
+    HAVING name against those is not established here, so it is not guessed.
+    """
+    group = select.args.get("group")
+    if group is None:
+        return set()
+    if not isinstance(group, exp.Group):
+        return None
+    if any(value for key, value in group.args.items() if key != "expressions"):
+        return None
+    names: set[str] = set()
+    for item in group.expressions:
+        inner = _projection_inner(select, ordinals[id(item)]) if id(item) in ordinals else item
+        if not isinstance(inner, exp.Column) or isinstance(inner.this, exp.Star):
+            return None
+        names.add(fold_identifier(inner.name))
+    return names
+
+
+def _bare_order_key(column: exp.Column) -> bool:
+    """Whether ``column`` is a whole ORDER BY key: only parentheses or COLLATE around it."""
+    node: exp.Expression = column
+    parent = node.parent
+    while isinstance(parent, exp.Paren) or (
+        isinstance(parent, exp.Collate) and node.arg_key == "this"
+    ):
+        node, parent = parent, parent.parent
+    return isinstance(parent, exp.Ordered) and node.arg_key == "this"
+
+
+def _binds_to_alias(column: exp.Column, select: exp.Select, grouped: set[str] | None) -> bool:
+    """Whether DuckDB binds bare ``column``, also a projection's alias, to that projection.
+
+    DuckDB's rules (checked against DuckDB itself; pinned by
+    ``tests/test_plan_sql/test_plan_sql_describe.py``):
+
+    * Inside an aggregate's arguments or its FILTER: the column.
+    * SELECT list, WHERE, GROUP BY: the column (an alias only when no column
+      has the name). JOIN ON: the column (ON never sees an output's alias).
+    * ORDER BY: the alias when the name is the whole key (parentheses and
+      COLLATE aside); the column when it is part of a larger expression.
+    * HAVING: the column when GROUP BY lists it, otherwise the alias.
+
+    Anything else (a clause not listed, a HAVING over a grouping
+    :func:`_grouped_names` does not resolve) raises :class:`DescribeError`.
+    """
+    clause: str | None = None
+    node: exp.Expression = column
+    while node.parent is not None and node.parent is not select:
+        if isinstance(node.parent, (exp.AggFunc, exp.Filter)):
+            return False
+        node = cast(exp.Expression, node.parent)
+    if node.parent is select:
+        clause = node.arg_key
+    if clause in {"expressions", "where", "group", "joins"}:
+        return False
+    if clause == "order":
+        return _bare_order_key(column)
+    if clause == "having":
+        if grouped is None:
+            raise DescribeError("a HAVING name whose grouping is not resolved")
+        return fold_identifier(column.name) not in grouped
+    raise DescribeError("a name whose binding is not known")
+
+
 def _name_simple(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> set[int]:
     """Rewrite every name in ``select`` to granted text. Returns the approved node ids.
 
@@ -398,7 +473,16 @@ def _name_simple(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]
     that is a projection's alias, and an ordinal, is shown as what that
     projection is (:func:`_reference`). Every projection alias is dropped.
     Anything else raises.
+
+    A bare name that is both a granted column and a projection's alias is
+    bound the way DuckDB binds it (:func:`_binds_to_alias`), so the statement
+    describes what the query computes, not the other reading of the name.
     """
+    if select.args.get("qualify") is not None:
+        raise DescribeError("a QUALIFY clause the statement does not describe")
+    distinct = select.args.get("distinct")
+    if isinstance(distinct, exp.Distinct) and distinct.args.get("on") is not None:
+        raise DescribeError("a DISTINCT ON the statement does not describe")
     approved: set[int] = set()
     sources: dict[str, str] = {}
     for table in list(select.find_all(exp.Table)):
@@ -415,10 +499,11 @@ def _name_simple(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]
         for part in ("alias", "db", "catalog"):
             table.set(part, None)
     local = catalog.columns_of(sources.values())
-    aliases: dict[str, int] = {}
+    aliases: dict[str, list[int]] = {}
     for position, projection in enumerate(select.expressions, 1):
         if isinstance(projection, exp.Alias) and projection.alias:
-            aliases.setdefault(fold_identifier(projection.alias), position)
+            aliases.setdefault(fold_identifier(projection.alias), []).append(position)
+    grouped = _grouped_names(select, ordinals)
 
     for join in select.args.get("joins") or []:
         using = join.args.get("using") or []
@@ -445,10 +530,14 @@ def _name_simple(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]
             continue
         pool = catalog.columns.get(owner, {}) if owner else local
         folded = fold_identifier(column.name)
-        if folded in pool:
+        positions = aliases.get(folded, []) if owner is None else []
+        if positions and (folded not in pool or _binds_to_alias(column, select, grouped)):
+            if len(positions) > 1:
+                # DuckDB takes one of the outputs that share the name; say none.
+                raise DescribeError("a name that more than one output is called")
+            pending[id(column)] = positions[0]
+        elif folded in pool:
             column.set("this", _approve(approved, pool[folded]))
-        elif owner is None and folded in aliases:
-            pending[id(column)] = aliases[folded]
         else:
             raise DescribeError("a name that is not a granted column")
 

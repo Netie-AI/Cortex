@@ -15,6 +15,7 @@ import inspect
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 import sqlglot
@@ -455,3 +456,189 @@ def test_a_table_function_source_gets_the_fallback() -> None:
     """A source with no granted name prints none: the gate refuses it before describe."""
     text = _say("SELECT * FROM read_parquet('zq_path.parquet')", PAYLOAD_ONLY)
     assert text == "Returns all columns"
+
+
+# -- PICK-READING-01 binding: a name is described as DuckDB binds it ---------------------
+
+# A bare name that is both a granted column and a projection's alias. DuckDB binds
+# it to the alias in ORDER BY (a whole key) and HAVING (not grouped), and to the
+# column everywhere else. Each case: (SQL, the exact statement, the same query
+# with the binding the statement claims spelled out, the same query with the
+# other binding, which DuckDB either rejects or answers differently on this data).
+# ``test_duckdb_binds_as_the_statement_says`` runs all three on real DuckDB, so a
+# DuckDB that changed its rules fails here, not on a served answer. The first six
+# were described as the raw column before this fix.
+BIND_GRANTED: dict[str, list[str]] = {"t": ["k", "a", "b"]}
+BIND_ROWS = "('x', 1, 60), ('x', 2, 70), ('y', 3, 50), ('z', 4, 90)"
+BINDING: dict[str, tuple[str, str, str, str]] = {
+    # Alias first: these were described as the raw column before the fix.
+    "having_alias_of_total": (
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k HAVING b > 100",
+        f"Returns k and total of b for each k from t having total of b is more than {describe.MARK}",
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k HAVING SUM(t.b) > 100",
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k HAVING t.b > 100",
+    ),
+    "having_alias_no_group_by": (
+        "SELECT SUM(b) AS b FROM t HAVING b > 200",
+        f"Returns total of b from t having total of b is more than {describe.MARK}",
+        "SELECT SUM(b) AS b FROM t HAVING SUM(t.b) > 200",
+        "SELECT SUM(b) AS b FROM t HAVING t.b > 200",
+    ),
+    "having_alias_not_grouped": (
+        "SELECT a AS b, COUNT(*) AS n FROM t GROUP BY a HAVING b > 2",
+        f"Returns a and number of rows for each a from t having a is more than {describe.MARK}",
+        "SELECT a AS b, COUNT(*) AS n FROM t GROUP BY a HAVING t.a > 2",
+        "SELECT a AS b, COUNT(*) AS n FROM t GROUP BY a HAVING t.b > 2",
+    ),
+    "order_alias_of_total": (
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY b DESC",
+        "Returns k and total of b for each k from t, sorted by total of b descending",
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY SUM(t.b) DESC",
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY t.b DESC",
+    ),
+    "order_alias_swapped": (
+        "SELECT a AS b, b AS a FROM t ORDER BY b",
+        "Returns a and b from t, sorted by a",
+        "SELECT a AS b, b AS a FROM t ORDER BY t.a",
+        "SELECT a AS b, b AS a FROM t ORDER BY t.b",
+    ),
+    "order_alias_parenthesized": (
+        "SELECT a AS b, b AS a FROM t ORDER BY ((b)) DESC",
+        "Returns a and b from t, sorted by a descending",
+        "SELECT a AS b, b AS a FROM t ORDER BY t.a DESC",
+        "SELECT a AS b, b AS a FROM t ORDER BY t.b DESC",
+    ),
+    # Column first: the alias-first rule must not reach these.
+    "having_grouped_column": (
+        "SELECT a AS b, b AS a FROM t GROUP BY a, b HAVING b > 2",
+        f"Returns a and b for each a and b from t having b is more than {describe.MARK}",
+        "SELECT a AS b, b AS a FROM t GROUP BY a, b HAVING t.b > 2",
+        "SELECT a AS b, b AS a FROM t GROUP BY a, b HAVING t.a > 2",
+    ),
+    "having_grouped_by_ordinal": (
+        "SELECT a AS b, b AS a FROM t GROUP BY 1, 2 HAVING b > 2",
+        f"Returns a and b for each a and b from t having b is more than {describe.MARK}",
+        "SELECT a AS b, b AS a FROM t GROUP BY 1, 2 HAVING t.b > 2",
+        "SELECT a AS b, b AS a FROM t GROUP BY 1, 2 HAVING t.a > 2",
+    ),
+    "having_inside_aggregate": (
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING MAX(b) > 65",
+        f"Returns k and total of a for each k from t having largest b is more than {describe.MARK}",
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING MAX(t.b) > 65",
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING MAX(SUM(t.a)) > 65",
+    ),
+    "having_inside_aggregate_filter": (
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE b > 55) > 1",
+        "Returns k and total of a for each k from t having COUNT(*) FILTER(WHERE b > "
+        f"{describe.MARK}) is more than {describe.MARK}",
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE t.b > 55) > 1",
+        "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING COUNT(*) FILTER (WHERE SUM(t.a) > 55) > 1",
+    ),
+    "order_inside_aggregate": (
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY MAX(b) DESC",
+        "Returns k and total of b for each k from t, sorted by largest b descending",
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY MAX(t.b) DESC",
+        "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY SUM(t.b) DESC",
+    ),
+    "order_part_of_expression": (
+        "SELECT a AS b, b AS a FROM t ORDER BY b + 0",
+        f"Returns a and b from t, sorted by b + {describe.MARK}",
+        "SELECT a AS b, b AS a FROM t ORDER BY t.b + 0",
+        "SELECT a AS b, b AS a FROM t ORDER BY t.a + 0",
+    ),
+    "where_column": (
+        "SELECT a AS b FROM t WHERE b > 55",
+        f"Returns a from t where b is more than {describe.MARK}",
+        "SELECT a AS b FROM t WHERE t.b > 55",
+        "SELECT a AS b FROM t WHERE t.a > 55",
+    ),
+    "group_by_column": (
+        "SELECT SUM(a) AS k, COUNT(*) AS n FROM t GROUP BY k",
+        "Returns total of a and number of rows for each k from t",
+        "SELECT SUM(a) AS k, COUNT(*) AS n FROM t GROUP BY t.k",
+        "SELECT SUM(a) AS k, COUNT(*) AS n FROM t GROUP BY SUM(t.a)",
+    ),
+    "select_list_column": (
+        "SELECT a AS b, b + 0 AS c FROM t",
+        f"Returns a and computed value 2 (b + {describe.MARK}) from t",
+        "SELECT a AS b, t.b + 0 AS c FROM t",
+        "SELECT a AS b, t.a + 0 AS c FROM t",
+    ),
+}
+
+
+def _duckdb_rows(sql: str) -> list[tuple[Any, ...]] | str:
+    """``sql`` on a scratch table ``t``: its rows in order, or the DuckDB error class."""
+    duckdb = pytest.importorskip("duckdb")
+    con = duckdb.connect()
+    try:
+        con.execute("CREATE TABLE t (k VARCHAR, a INTEGER, b INTEGER)")
+        con.execute(f"INSERT INTO t VALUES {BIND_ROWS}")
+        try:
+            return [tuple(row) for row in con.execute(sql).fetchall()]
+        except duckdb.Error as exc:
+            return type(exc).__name__
+    finally:
+        con.close()
+
+
+@pytest.mark.parametrize("case", sorted(BINDING))
+def test_must_fail_a_shared_name_is_described_as_duckdb_binds_it(case: str) -> None:
+    sql, expected, _claimed, _other = BINDING[case]
+    assert _say(sql, BIND_GRANTED) == expected
+
+
+@pytest.mark.parametrize("case", sorted(BINDING))
+def test_duckdb_binds_as_the_statement_says(case: str) -> None:
+    """The binding each statement claims is the one DuckDB uses, on this data."""
+    sql, _expected, claimed, other = BINDING[case]
+    rows = _duckdb_rows(sql)
+    assert isinstance(rows, list), rows
+    assert rows == _duckdb_rows(claimed)
+    assert _duckdb_rows(other) != rows, "the data must tell the two bindings apart"
+
+
+# Where DuckDB's binding is not one the statement can state, it refuses.
+UNBOUND_NAMES: dict[str, str] = {
+    # DuckDB takes the last of two outputs that share a name.
+    "two_outputs_one_name_order": "SELECT a AS x, b AS x FROM t ORDER BY x",
+    "two_outputs_one_name_having": (
+        "SELECT k, SUM(a) AS x, SUM(b) AS x FROM t GROUP BY k HAVING x > 5"
+    ),
+    "two_outputs_shadow_column": "SELECT a AS b, k AS b FROM t ORDER BY b",
+    # GROUP BY ALL binds a HAVING name to the alias, unlike a listed GROUP BY (the
+    # leaf check also refuses GROUP BY ALL); ROLLUP and expressions are not resolved.
+    "group_by_all_having": "SELECT a AS b, b AS a FROM t GROUP BY ALL HAVING b > 2",
+    "rollup_having": "SELECT a AS b, b AS a FROM t GROUP BY ROLLUP (a, b) HAVING b > 2",
+    "grouping_expression_having": "SELECT a + 0 AS b, b AS a FROM t GROUP BY a + 0, b HAVING b > 2",
+    # Clauses the statement does not describe.
+    "qualify": "SELECT a FROM t QUALIFY a > 1",
+    "distinct_on": "SELECT DISTINCT ON (k) k, a FROM t ORDER BY k, a",
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNBOUND_NAMES))
+def test_must_fail_an_unresolved_binding_refuses(case: str) -> None:
+    with pytest.raises(describe.DescribeError):
+        _say(UNBOUND_NAMES[case], BIND_GRANTED)
+
+
+def test_duckdb_takes_the_last_of_two_outputs_that_share_a_name() -> None:
+    """Why two outputs with one name refuse: DuckDB binds the second, a first-wins
+    rule would describe the first, and nothing promises either stays true."""
+    assert _duckdb_rows(UNBOUND_NAMES["two_outputs_one_name_order"]) == _duckdb_rows(
+        "SELECT a AS x, b AS x FROM t ORDER BY t.b"
+    )
+    assert _duckdb_rows(UNBOUND_NAMES["two_outputs_one_name_order"]) != _duckdb_rows(
+        "SELECT a AS x, b AS x FROM t ORDER BY t.a"
+    )
+
+
+def test_duckdb_group_by_all_binds_having_to_the_alias() -> None:
+    """Why GROUP BY ALL refuses: it does not follow the listed-GROUP BY rule."""
+    listed = _duckdb_rows("SELECT a AS b, b AS a FROM t GROUP BY a, b HAVING b > 2")
+    group_all = _duckdb_rows(UNBOUND_NAMES["group_by_all_having"])
+    assert sorted(group_all) == sorted(
+        _duckdb_rows("SELECT a AS b, b AS a FROM t GROUP BY ALL HAVING t.a > 2")
+    )
+    assert sorted(listed) != sorted(group_all)

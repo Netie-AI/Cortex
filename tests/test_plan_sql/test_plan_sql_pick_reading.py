@@ -470,6 +470,93 @@ def test_cte_named_reading_never_prints_its_name(
         assert "heavy" not in _held(reading["reading_id"]).statement.lower()
 
 
+# PICK-READING-01 binding: a reading's statement says what its SQL computes. A name
+# that is both a granted column and a projection's alias is bound as DuckDB binds
+# it: ORDER BY and HAVING take the alias, GROUP BY and WHERE the column. Each
+# case: (the readings, the index of the case's reading, its exact statement, a
+# reading of the name the statement must not make, the clause that names it).
+# The picked reading is served with ``reading: <statement>`` as its first
+# assumption, so a wrong binding is a false description on a served answer.
+_TOTAL_ALIAS = (
+    "SELECT txn_type, SUM(quantity_kg) AS quantity_kg FROM transactions GROUP BY txn_type"
+)
+HAVING_ALIAS_SQL = f"{_TOTAL_ALIAS} HAVING quantity_kg > 100000"
+ORDER_ALIAS_SQL = f"{_TOTAL_ALIAS} ORDER BY quantity_kg DESC LIMIT 2"
+GROUP_COLUMN_SQL = (
+    "SELECT SUM(quantity_kg) AS txn_type, COUNT(*) AS n FROM transactions GROUP BY txn_type"
+)
+ALIAS_BINDING: dict[str, tuple[tuple[str, str, str], int, str, str, str]] = {
+    "having_alias": (
+        (GOOD_SQL, HAVING_ALIAS_SQL, KG_SQL),
+        2,
+        "Returns txn_type and total of quantity_kg for each txn_type from transactions "
+        f"having total of quantity_kg is more than {plan_describe.MARK}, first 1000 rows",
+        "having quantity_kg",
+        "HAVING quantity_kg > 100000",
+    ),
+    "order_alias": (
+        (GOOD_SQL, SKU_SQL, ORDER_ALIAS_SQL),
+        3,
+        "Returns txn_type and total of quantity_kg for each txn_type from transactions, "
+        "sorted by total of quantity_kg descending, txn_type, first 2 rows",
+        "sorted by quantity_kg",
+        "ORDER BY quantity_kg DESC",
+    ),
+    # Control: GROUP BY binds the column, so the alias-first rule must stay out of it.
+    "group_column_control": (
+        (GOOD_SQL, GROUP_COLUMN_SQL, KG_SQL),
+        2,
+        "Returns total of quantity_kg and number of rows for each txn_type from transactions, "
+        "first 1000 rows",
+        "for each total of",
+        "GROUP BY txn_type",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(ALIAS_BINDING))
+def test_must_fail_reading_statement_binds_names_as_duckdb_does(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    sqls, index, expected, wrong, clause = ALIAS_BINDING[case]
+    sql = sqls[index - 1]
+    keys = {plan_sql_vote.result_key(_oracle(s)) for s in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _offer(dms_http)
+
+    _assert_readings_offered(body, sqls)
+    _assert_no_values(body, sqls, QUESTION)
+    reading = _readings(body)[index - 1]
+    assert reading["statement"] == expected, reading["statement"]
+    assert wrong not in reading["statement"]
+    shown = f"({index}) {expected}, {reading['row_count']} "
+    assert shown in body["answer"], body["answer"]
+    # The executor adds its row cap and a tiebreak; the clause with the name is kept.
+    served = _held(reading["reading_id"]).served_sql
+    assert sql.split(" FROM ")[0] in served, served
+    assert clause in served, served
+
+    # Picked, the reading is served under that statement, and its rows are what
+    # the statement says: per-type totals, never a single row's kilograms.
+    picked = _json(_pick(dms_http, reading["reading_id"]))
+    _assert_served_pick(picked, sql, reading["reading_id"], expected, index, 3)
+    assert picked["assumptions"][0] == f"reading: {expected}"
+    oracle = _oracle(sql)
+    if case == "group_column_control":
+        assert len(picked["rows"]) == len(_oracle("SELECT DISTINCT txn_type FROM transactions"))
+        assert picked["rows"][0]["txn_type"] > 1000, picked["rows"]
+        return
+    raw_max = _oracle("SELECT MAX(quantity_kg) AS m FROM transactions")[0]["m"]
+    assert all(row["quantity_kg"] > 100000 > raw_max for row in picked["rows"]), picked["rows"]
+    if case == "order_alias":
+        totals = [row["quantity_kg"] for row in picked["rows"]]
+        assert totals == sorted(totals, reverse=True) == [r["quantity_kg"] for r in oracle]
+        assert len(picked["rows"]) == 2
+
+
 # -- 2, 3: byte identity -----------------------------------------------------------
 
 
