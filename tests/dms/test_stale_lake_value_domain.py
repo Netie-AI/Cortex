@@ -716,9 +716,12 @@ def test_execute_sql_refuses_a_stale_lake_before_fetching(
         assert isinstance(caught.value, SqlGateAbstain)  # callers that only know the gate abstain
         assert caught.value.violations == [STALE]
         assert str(caught.value).startswith(f"{STALE}: ") and NOT_MAPPED in str(caught.value)
-        # SQL that names no declared column is not held to it.
-        rows, _, _ = submit.execute_sql(verified, "SELECT COUNT(*) AS n FROM transactions")
-        assert rows[0]["n"] == sum(_stored(lake).values())
+        # Reading the table checks its declared columns, even with no column token.
+        with pytest.raises(LakeValueDomainStale):
+            submit.execute_sql(verified, "SELECT COUNT(*) AS n FROM transactions")
+        # A table with no declared domain is not held to one.
+        rows, _, _ = submit.execute_sql(verified, "SELECT COUNT(*) AS n FROM inventory")
+        assert rows[0]["n"] > 0
         # Opting out is explicit, and shows what the check prevents: a silent zero.
         (zero,) = submit.execute_sql(verified, REVENUE_SQL, value_domains=())[0]
         assert zero == {"revenue_myr": 0.0}
@@ -945,14 +948,43 @@ def test_crew_l2_serve_checks_the_lake_before_serving_model_sql(
             "WITH s AS (SELECT * FROM transactions) SELECT s.txn_type, COUNT(*) FROM s GROUP BY 1",
             True,
         ),
-        ("SELECT * FROM transactions WHERE sku = 'SKU-1'", False),
-        ("SELECT SUM(quantity_kg) FROM transactions", False),
+        ("SELECT * FROM transactions WHERE sku = 'SKU-1'", True),
+        ("SELECT SUM(quantity_kg) FROM transactions", True),
+        ("SELECT COUNT(*) AS n FROM inventory", False),
         ("SELECT category, COUNT(*) FROM inventory GROUP BY 1", False),
         ("SELECT txn_type FROM other_table", False),
+        (
+            "WITH transactions AS (SELECT 1 AS n) SELECT n FROM transactions",
+            False,
+        ),
         ("SELECT txn_type FROM transactions WHERE (", True),  # does not parse: fail closed
+        (
+            "SELECT SUM(quantity_kg * unit_cost_myr) AS revenue_myr FROM transactions "
+            "JOIN (SELECT 'outbound' AS txn_type) f USING (txn_type)",
+            True,
+        ),
+        (
+            "SELECT SUM(quantity_kg) FROM transactions "
+            "NATURAL JOIN (SELECT 'outbound' AS txn_type) f",
+            True,
+        ),
+        (
+            "SELECT SUM(quantity_kg) FROM transactions WHERE COLUMNS('txn_type') = 'outbound'",
+            True,
+        ),
+        (
+            "SELECT SUM(t.quantity_kg) FROM transactions t WHERE t['txn_type'] = 'outbound'",
+            True,
+        ),
+        (
+            "SELECT SUM(q * c) FROM transactions AS t(i, s, l, k, q, c, o, ts, r) WHERE k = 'outbound'",
+            True,
+        ),
     ],
 )
-def test_domains_in_sql_reads_the_declared_column_by_name(sql: str, hit: bool) -> None:
+def test_domains_in_sql_checks_every_declared_column_of_every_table_read(
+    sql: str, hit: bool
+) -> None:
     got = vd.domains_in_sql(sql, _domains())
     assert [d.key for d in got] == (["transactions.txn_type"] if hit else [])
 
@@ -988,3 +1020,332 @@ def test_lake_drift_counts_rows_never_values() -> None:
         assert vd.lake_drift(empty, _domains()) == ()  # no table: nothing to misread
     finally:
         empty.close()
+
+
+# ── #410: five forms that filter txn_type without an exp.Column node ─────────
+#
+# Each form on a stale lake is a named abstain. With stale_columns forced to
+# return nothing, the same HTTP call serves revenue_myr = 0.0. That second
+# half is the must-fail: it is what goes red in the abstain assertion when the
+# guard is removed, and what this test records as the served zero.
+
+
+def _revenue_form(body: str) -> str:
+    return (
+        "SELECT ROUND(COALESCE(SUM(" + body + "), 0), 2) AS revenue_myr "
+    )
+
+
+JOIN_FORMS: dict[str, str] = {
+    "using": (
+        _revenue_form("quantity_kg * unit_cost_myr")
+        + "FROM transactions JOIN (SELECT 'outbound' AS txn_type) f USING (txn_type)"
+    ),
+    "natural": (
+        _revenue_form("quantity_kg * unit_cost_myr")
+        + "FROM transactions NATURAL JOIN (SELECT 'outbound' AS txn_type) f"
+    ),
+    "columns": (
+        _revenue_form("quantity_kg * unit_cost_myr")
+        + "FROM transactions WHERE COLUMNS('txn_type') = 'outbound'"
+    ),
+    "subscript": (
+        _revenue_form("t.quantity_kg * t.unit_cost_myr")
+        + "FROM transactions t WHERE t['txn_type'] = 'outbound'"
+    ),
+    "alias_list": (
+        _revenue_form("q * c")
+        + "FROM transactions AS t(i, s, l, k, q, c, o, ts, r) WHERE k = 'outbound'"
+    ),
+}
+
+
+def _assert_no_served_zero(body: dict[str, Any]) -> None:
+    text = json.dumps(body)
+    assert "0.0" not in text, text
+    assert not re.search(r"\b(OUT|IN)\b", text), text
+
+
+def _submit_form(client: TestClient, signing_key: Any, sql: str) -> Any:
+    from cortex_contract.execution import PoolSpec, SubmitRequest
+
+    req = SubmitRequest(
+        pool=PoolSpec(id="pool-a"),
+        plan={"kind": "sql"},
+        body={"sql": sql},
+        manifest=_signed(signing_key, predicates={"transactions": "1=1"}),
+    )
+    return client.post("/v1/contract/submit", json=req.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize("form", sorted(JOIN_FORMS))
+def test_http_submit_join_form_abstains_and_must_fail_serves_zero(
+    serve: Any,
+    lake: Path,
+    verifier: Any,  # noqa: F811
+    issuer: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    form: str,
+) -> None:
+    """Client SQL on POST /v1/contract/submit. All five forms reach the seam."""
+    _unmap(lake)
+    client = serve(lake)
+    sql = JOIN_FORMS[form]
+    refused = _submit_form(client, issuer, sql)
+    assert refused.status_code == 403, refused.text
+    detail = refused.json()["detail"]
+    assert detail["code"] == "sql_gate_abstain"
+    assert STALE in detail["message"] and NOT_MAPPED in detail["message"]
+    _assert_no_served_zero(refused.json())
+
+    monkeypatch.setattr(vd, "stale_columns", lambda *args, **kwargs: ())
+    served = _submit_form(client, issuer, sql)
+    assert served.status_code == 200, served.text
+    body = served.json()
+    assert body["ok"] is True
+    assert body["output"]["rows"] == [{"revenue_myr": 0.0}]
+
+
+def _queue_plan_sql(fake: Any, sql: str) -> None:
+    fenced = f"```sql\n{sql};\n```"
+    for _ in range(8):
+        _model_reply(fake, fenced)
+
+
+# subscript and alias_list are refused by the column guardrail (UNKNOWN_COLUMN)
+# before execute, so they never become a served zero on this path. The three
+# forms that pass that guardrail are the ones the lake check has to stop.
+_PLAN_SQL_REACHES = ("columns", "natural", "using")
+_PLAN_SQL_COLUMN_GATE = ("alias_list", "subscript")
+
+
+@pytest.mark.parametrize("form", _PLAN_SQL_REACHES)
+def test_http_plan_sql_join_form_abstains_and_must_fail_serves_zero(
+    serve: Any,
+    lake: Path,
+    armed_openvault: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    form: str,
+) -> None:
+    """POST /v1/contract/ask with CORTEX_PLAN_SQL=1. The model writes the form."""
+    from CortexOS.dms import plan_sql_ask
+
+    monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    monkeypatch.delenv("CORTEX_PLAN_SQL_VOTE", raising=False)
+    _unmap(lake)
+    sql = JOIN_FORMS[form]
+    _queue_plan_sql(armed_openvault, sql)
+    client = serve(lake)
+
+    def ask() -> dict[str, Any]:
+        res = client.post(
+            "/v1/contract/ask",
+            json={
+                "question": REVENUE_Q,
+                "session_id": SESSION,
+                "dms_payload": PLAN_SQL_PAYLOAD,
+            },
+        )
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    body = ask()
+    assert body["provenance"]["badge"] == "abstain", body["answer"]
+    assert body["provenance"]["layer"] == "abstain"
+    assert body["rows"] in ([], None)
+    assert body["sql_used"] is None
+    assert STALE in body["answer"] and NOT_MAPPED in body["answer"]
+    _assert_no_served_zero(body)
+
+    monkeypatch.setattr(vd, "stale_columns", lambda *args, **kwargs: ())
+    _queue_plan_sql(armed_openvault, sql)
+    served = ask()
+    assert served["provenance"]["badge"] == "session", served["answer"]
+    assert served["rows"] == [{"revenue_myr": 0.0}]
+    assert "0.0" in served["answer"]
+
+
+@pytest.mark.parametrize("form", _PLAN_SQL_COLUMN_GATE)
+def test_http_plan_sql_column_gate_does_not_serve_the_join_form_zero(
+    serve: Any,
+    lake: Path,
+    armed_openvault: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    form: str,
+) -> None:
+    """These two forms never reach execute on plan+SQL: unknown-column refusal."""
+    from CortexOS.dms import plan_sql_ask
+
+    monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    monkeypatch.delenv("CORTEX_PLAN_SQL_VOTE", raising=False)
+    _unmap(lake)
+    sql = JOIN_FORMS[form]
+    _queue_plan_sql(armed_openvault, sql)
+    client = serve(lake)
+
+    def ask() -> dict[str, Any]:
+        res = client.post(
+            "/v1/contract/ask",
+            json={
+                "question": REVENUE_Q,
+                "session_id": SESSION,
+                "dms_payload": PLAN_SQL_PAYLOAD,
+            },
+        )
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    body = ask()
+    assert body["provenance"]["badge"] == "reconfirm", body["answer"]
+    assert body["rows"] in ([], None)
+    _assert_no_served_zero(body)
+    # The column refusal is on the gate step, not always in the answer sentence.
+    assert "UNKNOWN_COLUMN" in json.dumps(body["assumptions"])
+
+    monkeypatch.setattr(vd, "stale_columns", lambda *args, **kwargs: ())
+    _queue_plan_sql(armed_openvault, sql)
+    served = ask()
+    assert served["provenance"]["badge"] == "reconfirm", served["answer"]
+    assert served["rows"] in ([], None)
+    _assert_no_served_zero(served)
+    assert served["provenance"]["badge"] != "session"
+    assert "UNKNOWN_COLUMN" in json.dumps(served["assumptions"])
+
+
+def _climb_accepting(sql: str) -> Any:
+    async def climb(intent: str, ranking: Any, **kwargs: Any) -> dict[str, Any]:
+        del intent, ranking, kwargs
+        return {
+            "ok": True,
+            "status": "ABSTAIN",
+            "sql": sql,
+            "valid": True,
+            "stamp": {
+                "call_id": "call-join-form",
+                "served_provider": "p",
+                "served_model": "m",
+                "served_local": True,
+                "served_reason": "",
+            },
+            "check": "test",
+            "tables": ["transactions"],
+            "identity": "cortex:crew:generative-ask",
+            "route": {"label": "stub", "model": "stub"},
+            "refuse_reason": "",
+            "note": "",
+            "climb": {},
+        }
+
+    return climb
+
+
+@pytest.mark.parametrize("form", sorted(JOIN_FORMS))
+def test_http_l2_join_form_abstains_and_must_fail_serves_zero(
+    serve: Any,
+    lake: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    form: str,
+) -> None:
+    """POST /v1/insights with DMS_L2_ENABLED. Generation is already accepted.
+
+    The static measure check and the column guardrail refuse some of these
+    forms before serve. This test starts where that acceptance ends: l2_serve
+    executes the form. The lake check is what stops the zero.
+    """
+    from CortexOS.crew import cot_climb
+    from CortexOS.crew.engine_bridge import LocalEngineBridge
+
+    async def miss(self: Any, question: str) -> dict[str, Any]:
+        del self, question
+        return {
+            "ok": True,
+            "answer": "Engine abstained.",
+            "badge": "abstain",
+            "layer": "l1",
+            "audit_id": None,
+            "row_count": 0,
+            "rows": [],
+            "sql_used": None,
+            "assumptions": "",
+        }
+
+    monkeypatch.setenv("DMS_L2_ENABLED", "1")
+    monkeypatch.setattr(cot_climb, "climb", _climb_accepting(JOIN_FORMS[form]))
+    monkeypatch.setattr(LocalEngineBridge, "ask", miss)
+    _unmap(lake)
+    client = serve(lake)
+
+    def post() -> dict[str, Any]:
+        res = client.post(
+            "/v1/insights",
+            json={
+                "intent": REVENUE_Q,
+                "ask": True,
+                "generate": True,
+                "session_id": SESSION,
+            },
+        )
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    body = post()
+    assert body["status"] == "ABSTAIN", body.get("answer")
+    assert body["answer_step"] == "value_domain"
+    assert body["badge"] == "abstain" and body["layer"] == "abstain"
+    assert body["values"] == [] and body["rows"] == []
+    assert STALE in body["answer"] and NOT_MAPPED in body["answer"]
+    _assert_no_served_zero(body)
+
+    monkeypatch.setattr(vd, "stale_columns", lambda *args, **kwargs: ())
+    served = post()
+    assert served["status"] == "CERTIFIED", served.get("answer")
+    assert served["badge"] == "L2_VALIDATED"
+    assert served["values"] == [{"revenue_myr": 0.0}]
+    assert "revenue_myr=0.0" in served["answer"]
+
+
+def test_statement_timeout_is_set_before_the_drift_scan(
+    lake: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The statement-timeout SET is attempted before EXPLAIN and the value-domain scan.
+
+    On DuckDB 2.x the SET is a no-op (no ``statement_timeout`` setting; the
+    CatalogException is swallowed), so this asserts the order of the attempt,
+    not that the scan is bounded.
+    """
+    from CortexOS.execution import submit, warehouse
+
+    calls: list[str] = []
+    real_get = warehouse.get_connection
+
+    class _Spy:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        def execute(self, sql: str, *args: Any, **kwargs: Any) -> Any:
+            calls.append(str(sql))
+            return self._inner.execute(sql, *args, **kwargs)
+
+        def close(self) -> None:
+            self._inner.close()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._inner, name)
+
+    def wrapped(path: Any, **kwargs: Any) -> Any:
+        return _Spy(real_get(path, **kwargs))
+
+    monkeypatch.setattr(warehouse, "get_connection", wrapped)
+    monkeypatch.setattr(submit, "get_connection", wrapped)
+    monkeypatch.setattr(submit, "DEFAULT_DB", lake)
+    vd.clear_lake_cache()
+    _bind()
+    verified = get_session_registry().resolve(SESSION)
+    try:
+        submit.execute_sql(verified, REVENUE_SQL)
+    finally:
+        warehouse.close_cached_connections()
+        reset_session_registry_for_tests()
+    timeout_at = next(i for i, sql in enumerate(calls) if sql.startswith("SET statement_timeout"))
+    scan_at = next(i for i, sql in enumerate(calls) if "FILTER (WHERE" in sql)
+    assert timeout_at < scan_at, calls
