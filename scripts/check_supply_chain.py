@@ -54,6 +54,15 @@ Checks, all offline:
    ``DEMO_KEYS_IN_IMAGE`` and names the file. A compose file that does not
    mention the key is clean, because the image ``ENV`` still applies. The same
    ``git ls-files`` list and ``GIT_LS_FILES_FAILED`` stop apply.
+8. Every package in an image lock is either one ``uv.lock`` resolves for the
+   image target, or on ``IMAGE_ONLY_PACKAGES`` with a reason (#377). Anything
+   else is ``IMAGE_ONLY_UNLISTED``: an image would install code that no test
+   environment ever installed.
+9. Each image lock carries uv's own header, and the ``--python-version`` and
+   ``--python-platform`` it records are the Dockerfiles' ``ARG
+   PYTHON_VERSION`` and ``x86_64-unknown-linux-gnu`` (#375). A lock compiled
+   for another interpreter is ``LOCK_TARGET_MISMATCH``; a lock with no header
+   is ``LOCK_TARGET_UNKNOWN``.
 
 Regenerate with ``uv lock`` and ``python scripts/lock_images.py``; never edit a
 lock by hand. This script reports. It never installs or regenerates anything.
@@ -85,6 +94,30 @@ DENYLIST: frozenset[tuple[str, str]] = frozenset(
 #: Platform half of the image target. Python comes from the Dockerfiles.
 #: The image locks are compiled for Linux x86_64 (``scripts/lock_images.py``).
 IMAGE_PLATFORM = "Linux x86_64"
+
+#: ``--python-platform`` value ``scripts/lock_images.py`` compiles with.
+IMAGE_UV_PLATFORM = "x86_64-unknown-linux-gnu"
+
+#: Packages an image lock may hold that ``uv.lock`` never resolves, each with
+#: why. The ceiling is frozen in ``tests/invariants/test_image_only_ceiling.py``:
+#: this list may only shrink without an ``INVARIANT-CHANGE:`` sign-off (#377).
+IMAGE_ONLY_PACKAGES: dict[str, str] = {
+    "poetry-core": (
+        "build backend from requirements/build.in and [build-system]; the "
+        "images install the project with --no-deps --no-build-isolation, so "
+        "it must come hashed from the lock"
+    ),
+    "wheel": (
+        "pinned in requirements/build.in (#376) so the image does not keep the "
+        "unhashed wheel python:3.11-slim ships; no dependency in uv.lock needs it"
+    ),
+}
+
+IMAGE_ONLY_UNLISTED = "IMAGE_ONLY_UNLISTED"
+LOCK_TARGET_MISMATCH = "LOCK_TARGET_MISMATCH"
+LOCK_TARGET_UNKNOWN = "LOCK_TARGET_UNKNOWN"
+
+_COMPILE_HEADER = re.compile(r"^#\s+uv pip compile\s+(?P<args>.*)$")
 
 _PYTHON_ARG = re.compile(r"^ARG\s+PYTHON_VERSION=(?P<version>\d+\.\d+)\s*(?:#.*)?$")
 
@@ -519,6 +552,72 @@ def _mismatch_lines(root: Path, python_version: str) -> list[str]:
                     f"{path.name}: {name}=={image_version} disagrees with uv.lock {name}=={locked}"
                 )
     return lines
+
+
+def lock_compile_target(path: Path) -> tuple[str | None, str | None]:
+    """``(--python-version, --python-platform)`` from uv's header in a lock.
+
+    ``(None, None)`` when the lock has no ``uv pip compile`` header line.
+    """
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.startswith("#"):
+            break
+        match = _COMPILE_HEADER.match(raw)
+        if not match:
+            continue
+        args = match.group("args").split()
+        found: dict[str, str] = {}
+        for flag in ("--python-version", "--python-platform"):
+            if flag in args and args.index(flag) + 1 < len(args):
+                found[flag] = args[args.index(flag) + 1]
+        return found.get("--python-version"), found.get("--python-platform")
+    return None, None
+
+
+def check_lock_targets(root: Path) -> list[str]:
+    """Fail an image lock compiled for another Python or platform (#375)."""
+    version, problems = resolve_image_target(root)
+    if version is None or problems:
+        return []  # that named error is the whole result (check_version_agreement)
+    out: list[str] = []
+    for variant in VARIANTS:
+        path = root / "requirements" / f"image-{variant}.lock.txt"
+        if not path.is_file():
+            continue
+        python, platform = lock_compile_target(path)
+        if python is None:
+            out.append(
+                f"{LOCK_TARGET_UNKNOWN}: {path.name} has no uv compile header, so the "
+                f"Python it was resolved for is unknown; run `python scripts/lock_images.py {variant}`"
+            )
+            continue
+        if python != version or platform != IMAGE_UV_PLATFORM:
+            out.append(
+                f"{LOCK_TARGET_MISMATCH}: {path.name} was compiled for Python {python} on "
+                f"{platform}, the Dockerfiles ship Python {version} on {IMAGE_UV_PLATFORM}; "
+                f"run `python scripts/lock_images.py {variant}`"
+            )
+    return out
+
+
+def check_image_only(root: Path) -> list[str]:
+    """Fail an image-lock package that ``uv.lock`` never resolves and no reason covers (#377)."""
+    version, problems = resolve_image_target(root)
+    if version is None or problems:
+        return []
+    resolved = uv_resolution_for_image(root, version)
+    out: list[str] = []
+    for variant in VARIANTS:
+        path = root / "requirements" / f"image-{variant}.lock.txt"
+        if not path.is_file():
+            continue
+        pins, _parse_problems = parse_lock(path)
+        for name in sorted(set(pins) - set(resolved) - set(IMAGE_ONLY_PACKAGES)):
+            out.append(
+                f"{IMAGE_ONLY_UNLISTED}: {path.name}: {name}=={pins[name]} is not in uv.lock "
+                f"for {image_target_label(version)} and not on IMAGE_ONLY_PACKAGES"
+            )
+    return out
 
 
 def check_version_agreement(root: Path) -> list[str]:
@@ -1016,6 +1115,8 @@ def run(root: Path = ROOT) -> list[str]:
     for variant in VARIANTS:
         problems += check_image_lock(root, variant)
     problems += check_version_agreement(root)
+    problems += check_image_only(root)
+    problems += check_lock_targets(root)
     for name, variant in DOCKERFILES.items():
         problems += check_dockerfile(root, name, variant)
     return problems
@@ -1081,7 +1182,8 @@ def main(argv: list[str] | Path | None = None) -> int:
         return 1
     print(
         f"supply chain OK: uv.lock current, {len(VARIANTS)} hashed image locks, "
-        f"shared pins agree with uv.lock, "
+        f"shared pins agree with uv.lock, no unlisted image-only packages, "
+        f"locks compiled for the Dockerfiles' Python, "
         f"{len(DOCKERFILES)} Dockerfiles, denylist clean, "
         "no DMS_AUTH_DISABLED or CORTEX_DEV_MODE in images"
     )

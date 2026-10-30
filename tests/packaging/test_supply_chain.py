@@ -300,7 +300,7 @@ def test_align_uv_lock_flag_selects_constraints_not_a_blanket_upgrade(tmp_path: 
     assert align is True
     constraints = tmp_path / "constraints.txt"
     constraints.write_text("boto3==1.43.108\n", encoding="utf-8")
-    cmd = lock_images.compile_command("core", ("boto3",), constraints)
+    cmd = lock_images.compile_command("core", ("boto3",), constraints, python_version="3.11")
     assert "--constraints" in cmd
     assert "--overrides" not in cmd
     assert str(constraints) in cmd
@@ -393,3 +393,106 @@ def test_image_uv_version_skew_passes_when_agreement_guard_removed(
     _plant_image_pin(tree, "litellm", "1.84.0")
     monkeypatch.setattr(sc, "check_version_agreement", lambda _root: [])
     assert sc.run(tree) == []
+
+
+# -- #375: the image locks are compiled for the Dockerfiles' Python ------------
+
+
+def test_locks_record_the_dockerfile_python() -> None:
+    version, problems = sc.agreed_image_python(ROOT)
+    assert problems == []
+    for variant in sc.VARIANTS:
+        lock = ROOT / "requirements" / f"image-{variant}.lock.txt"
+        assert sc.lock_compile_target(lock) == (version, sc.IMAGE_UV_PLATFORM)
+    assert sc.check_lock_targets(ROOT) == []
+
+
+def test_dockerfiles_moved_to_another_python_fail_the_locks(tree: Path) -> None:
+    """Must fail: all four Dockerfiles agree on 3.12, the locks were compiled for 3.11."""
+    for name in sc.DOCKERFILES:
+        _set_python_version(tree, name, "3.12")
+    problems = sc.run(tree)
+    for variant in sc.VARIANTS:
+        assert any(
+            p.startswith(f"{sc.LOCK_TARGET_MISMATCH}: image-{variant}.lock.txt was compiled "
+                         "for Python 3.11") and "ship Python 3.12" in p
+            for p in problems
+        ), problems
+
+
+def test_lock_without_uv_header_has_an_unknown_target(tree: Path) -> None:
+    lock = tree / "requirements" / "image-core.lock.txt"
+    body = [ln for ln in lock.read_text(encoding="utf-8").splitlines(True) if not ln.startswith("#")]
+    lock.write_text("".join(body), encoding="utf-8")
+    assert any(
+        p.startswith(f"{sc.LOCK_TARGET_UNKNOWN}: image-core.lock.txt") for p in sc.run(tree)
+    )
+
+
+def test_lock_compiled_for_another_platform_fails(tree: Path) -> None:
+    _edit(
+        tree / "requirements" / "image-full.lock.txt",
+        "--python-platform x86_64-unknown-linux-gnu",
+        "--python-platform aarch64-unknown-linux-gnu",
+    )
+    assert any(
+        p.startswith(f"{sc.LOCK_TARGET_MISMATCH}: image-full.lock.txt") for p in sc.run(tree)
+    )
+
+
+def test_lock_images_targets_the_dockerfile_python(tmp_path: Path) -> None:
+    for name in sc.DOCKERFILES:
+        (tmp_path / name).write_text("ARG PYTHON_VERSION=3.12\n", encoding="utf-8")
+    assert lock_images.image_python(tmp_path) == "3.12"
+    cmd = lock_images.compile_command("core", python_version="3.12")
+    assert cmd[cmd.index("--python-version") + 1] == "3.12"
+    assert "--no-header" not in cmd
+
+
+def test_lock_images_refuses_when_dockerfiles_disagree(tmp_path: Path) -> None:
+    """Fail closed: nothing is compiled for a guessed interpreter."""
+    for name in sc.DOCKERFILES:
+        (tmp_path / name).write_text("ARG PYTHON_VERSION=3.11\n", encoding="utf-8")
+    (tmp_path / "Dockerfile.full").write_text("ARG PYTHON_VERSION=3.12\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="image Python version disagrees"):
+        lock_images.image_python(tmp_path)
+    (tmp_path / "Dockerfile.core").write_text("FROM python:3.11-slim\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="PYTHON_VERSION arg is missing"):
+        lock_images.image_python(tmp_path)
+
+
+# -- #377: image-only packages must be listed with a reason --------------------
+
+
+def test_planted_image_only_package_fails_and_removing_it_passes(tree: Path) -> None:
+    lock = tree / "requirements" / "image-core.lock.txt"
+    clean = lock.read_text(encoding="utf-8")
+    lock.write_text(clean + "evil-extra==1.0.0 \\\n    --hash=sha256:" + "a" * 64 + "\n",
+                    encoding="utf-8")
+    problems = sc.run(tree)
+    assert problems == [
+        f"{sc.IMAGE_ONLY_UNLISTED}: image-core.lock.txt: evil-extra==1.0.0 is not in uv.lock "
+        "for CPython 3.11, Linux x86_64 and not on IMAGE_ONLY_PACKAGES"
+    ]
+    lock.write_text(clean, encoding="utf-8")
+    assert sc.run(tree) == []
+
+
+def test_image_only_check_is_what_catches_the_plant(tree: Path, monkeypatch) -> None:
+    """With the check stubbed out the same plant passes, so the check is load-bearing."""
+    lock = tree / "requirements" / "image-core.lock.txt"
+    lock.write_text(lock.read_text(encoding="utf-8")
+                    + "evil-extra==1.0.0 \\\n    --hash=sha256:" + "b" * 64 + "\n",
+                    encoding="utf-8")
+    monkeypatch.setattr(sc, "check_image_only", lambda root: [])
+    assert sc.run(tree) == []
+
+
+def test_every_image_only_entry_has_a_reason_and_is_used() -> None:
+    used: set[str] = set()
+    for variant in sc.VARIANTS:
+        pins, _ = sc.parse_lock(ROOT / "requirements" / f"image-{variant}.lock.txt")
+        used |= set(pins)
+    for name, reason in sc.IMAGE_ONLY_PACKAGES.items():
+        assert len(reason.split()) >= 5, f"{name}: give a real reason"
+        assert name in used, f"{name} is listed but no image lock holds it; delete the entry"
