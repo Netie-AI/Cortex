@@ -86,6 +86,39 @@ def _known_slots(metric_id: str, slots: Any) -> dict[str, Any]:
     return clean
 
 
+# A resolution at or above this is an exact, normalised or declared-encoding
+# match (values.resolve steps 1-3). Containment and fuzzy matches score below.
+_EXACT_VALUE = 0.95
+
+
+def _inexact_values(metric_id: str, slots: dict[str, Any]) -> list[str]:
+    """Slot values the model wrote that are not a stored value of their column.
+
+    Containment and fuzzy matching would map ``NOT_DELAYED`` or ``UNDELAYED``
+    back to ``DELAYED``, so a model's slot counts only when it names a stored
+    value exactly (case, spacing and declared encodings aside).
+    """
+    from packs.dms.semantic import values as valuedict
+    from packs.dms.semantic.loader import load_all
+
+    spec = load_all().metric(metric_id).params
+    loose: list[str] = []
+    for key, raw in slots.items():
+        param = spec.get(key) or {}
+        column = param.get("column")
+        if param.get("kind") not in ("value", "filter", "not_in") or not column:
+            continue
+        items = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+        for item in items:
+            text = "" if item is None else str(item).strip()
+            if not text:
+                continue
+            res = valuedict.resolve(text, column)
+            if res.value is None or res.confidence < _EXACT_VALUE:
+                loose.append(f"{key}={text}")
+    return loose
+
+
 def _chosen_why(metric_id: str) -> str:
     return f"the metric chooser chose the declared metric {metric_id}"
 
@@ -145,6 +178,16 @@ class OpenVaultMetricChoice:
         closest = " ".join(str(body.get("closest_question") or "").split())
         if not closest:
             closest = UNARMED_CLOSEST
+        slots = _known_slots(metric_id, body.get("slots"))
+        loose = _inexact_values(metric_id, slots) if metric_id != "none" else []
+        if loose:
+            return MetricSelection(
+                closest_question=closest,
+                why=(
+                    "the metric chooser named a filter value that is not a stored value "
+                    f"({', '.join(loose)}), so it cannot be served directly"
+                ),
+            )
         if metric_id == "none":
             why = "the metric chooser did not accept a declared metric"
         else:
@@ -153,7 +196,7 @@ class OpenVaultMetricChoice:
             why = _chosen_why(metric_id)
         return MetricSelection(
             metric_id=metric_id,
-            slots=_known_slots(metric_id, body.get("slots")),
+            slots=slots,
             closest_question=closest,
             why=why,
         )

@@ -11,6 +11,10 @@ the customer envelope of ``POST /v1/contract/ask``: badge, answer text, rows.
    them served ``delayed_count`` (1031) for "How many shipments are not
    delayed?", the #412 WRONG.
 2. A served metric's envelope does not carry the chooser's refusal prose.
+3. A slot value the model writes must be a stored value of its column.
+   Containment and fuzzy matching resolved ``NOT_DELAYED``, ``UNDELAYED`` and
+   ``NOT_IN_TRANSIT`` back to the positive value, so with an agreeing check
+   "not delayed" served the delayed shipments.
 """
 
 from __future__ import annotations
@@ -63,6 +67,11 @@ class _FakeFreeRoute:
 
     def __init__(self, check_body: dict[str, Any]) -> None:
         self.check_body = check_body
+        self.choose_body: dict[str, Any] = {
+            "metric_id": "delayed_count",
+            "slots": {},
+            "closest_question": DECLARED,
+        }
         self.tasks: list[str] = []
 
     def complete(self, task: str, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
@@ -72,12 +81,7 @@ class _FakeFreeRoute:
         del messages, kwargs
         self.tasks.append(task)
         if task == CHOOSE_TASK:
-            body = {
-                "metric_id": "delayed_count",
-                "slots": {},
-                "closest_question": DECLARED,
-            }
-            return Completion(ok=True, text=json.dumps(body))
+            return Completion(ok=True, text=json.dumps(self.choose_body))
         if task == CHECK_TASK:
             return Completion(ok=True, text=json.dumps(self.check_body))
         return Completion(ok=False, reason=f"scripted refusal for {task}")
@@ -200,3 +204,51 @@ def test_must_fail_served_answer_carries_no_refusal_prose(
     # What was served is stated: the metric and that the check agreed.
     assert "delayed_count" in assumptions, assumptions
     assert "agreed" in assumptions.lower(), assumptions
+
+
+# Slot values a model wrote for "not delayed" / "not in transit" that are not
+# stored statuses. Each one contains, or is close to, a stored value.
+NEGATED_SLOTS = {
+    "not_delayed": "NOT_DELAYED",
+    "undelayed": "UNDELAYED",
+    "non_delayed": "non-delayed",
+    "not_in_transit": "NOT_IN_TRANSIT",
+}
+
+
+@pytest.mark.parametrize("status", NEGATED_SLOTS.values(), ids=NEGATED_SLOTS.keys())
+def test_must_fail_a_slot_that_is_not_a_stored_value_is_not_served(
+    dms_http: Any, adapter: Any, status: str  # noqa: F811
+) -> None:
+    adapter.check_body = AGREES
+    adapter.choose_body = {
+        "metric_id": "shipments_by_status",
+        "slots": {"status": status},
+        "closest_question": "list shipments that are delayed",
+    }
+    body = _ask(dms_http, NOT_DELAYED)
+    from CortexOS.dms.metric_choice import CHOOSE_TASK
+
+    assert CHOOSE_TASK in adapter.tasks, adapter.tasks
+    assert _badge(body).lower() == "reconfirm", body
+    assert body.get("rows") in ([], None), body.get("rows")
+    assert not body.get("sql_used"), body.get("sql_used")
+    text = str(body.get("answer") or "")
+    assert text.startswith("Reconfirm:"), text
+    assert str(DELAYED_COUNT) not in _number_free(text), text
+    assert "DELAYED'" not in json.dumps(body), body
+
+
+def test_a_stored_slot_value_still_serves(dms_http: Any, adapter: Any) -> None:  # noqa: F811
+    """Control: a stored status, in any case or spacing, serves the listing."""
+    adapter.check_body = AGREES
+    adapter.choose_body = {
+        "metric_id": "shipments_by_status",
+        "slots": {"status": "delayed"},
+        "closest_question": "list shipments that are delayed",
+    }
+    body = _ask(dms_http, "list shipments that are delayed")
+    assert _badge(body).lower() == "governed_metric", body
+    assert _stamp(body, "metric_id") == "shipments_by_status", body
+    assert body.get("rows"), body
+    assert str(DELAYED_COUNT) in _number_free(str(body.get("answer") or "")), body
