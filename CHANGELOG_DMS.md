@@ -4,8 +4,8 @@ Agents append one section per shipped feature. Sequential build log.
 
 ## VERIFIED-QUERY (#321, refs #309) -- 2026-10-30
 
-Contract 1.10.0: `Answer.verified_query_ids` (optional, omitted when empty, so
-flag-off bodies keep the 1.9.0 field set). Off unless `CORTEX_VERIFIED_QUERY`
+Contract 1.11.0: `Answer.verified_query_ids` (optional, omitted when empty, so
+flag-off bodies keep the 1.10.0 field set; 1.10 clients ignore it). Off unless `CORTEX_VERIFIED_QUERY`
 is set. When on, the answer engine's generator is offered steward-confirmed
 example queries over tables the session grant names, and lists the examples
 it was shown, best first, in `verified_query_ids`. An example is never served
@@ -15,6 +15,76 @@ offsets, ties included), abstains with `VQ_EXAMPLE_ECHO` unless the question
 is the one the steward confirmed and the statement is unchanged. A reused C-MEM
 solution or a plan+SQL answer never carries examples. The verified-query
 library is kept out of the serve path by new import-linter contracts.
+
+## PICK-READING-01 (contract 1.10.0) -- 2026-10-30
+
+Founder ruling 2026-10-29 (CLAUDE.md section 9, split readings). With
+``CORTEX_PLAN_SQL``, ``CORTEX_PLAN_SQL_VOTE`` and the new
+``CORTEX_PLAN_SQL_READINGS`` (default off) all on, a vote split's reconfirm
+offers up to three of the disagreeing readings in
+``reconfirm.readings``: ``{reading_id, statement, row_count, expires_at}``.
+The statement is written by Cortex (``CortexOS/plan_sql/describe.py``) from
+the gated SQL's syntax tree after every SQL comment is stripped and every
+literal is replaced with ``<a value>``; the only literal it shows is the LIMIT
+row cap. A model-written name is free text too, so the only names it prints
+are the request payload's granted tables and columns, in the payload's
+spelling: a computed output is ``computed value N`` (its position), a
+reference to a projection alias is shown as what that projection is, a table
+alias as its granted table, and a CTE or subquery alias never. Any other name
+suppresses the offer. A bare name that is both a granted column and an output's
+alias is described as DuckDB binds it: ORDER BY (a whole key) and HAVING (a name
+GROUP BY does not list) take the output, so ``SUM(quantity_kg) AS quantity_kg
+... HAVING quantity_kg > ...`` reads "having total of quantity_kg"; WHERE,
+GROUP BY, the SELECT list and an aggregate's arguments take the column. Two
+outputs sharing the name, a HAVING over ROLLUP or a grouping expression,
+QUALIFY and DISTINCT ON suppress the offer. Every attribute of every node the
+statement reads is stated or suppresses the offer: ``NOT LIKE`` / ``NOT ILIKE``
+read "does not match", SEMI and ANTI joins "that have a match in" / "that have
+no match in", a single LEFT JOIN "keeping rows of <table> with no match",
+``NULLS FIRST`` "with empty values first", EXCEPT and INTERSECT (DISTINCT) the
+rows they keep, ``t.*`` "all columns of t"; RIGHT, FULL, ASOF and NATURAL
+joins, ``* EXCLUDE``, ``LIMIT n%``, FETCH, ROLLUP, CUBE, GROUPING SETS,
+GROUP BY ALL, a schema-qualified or sampled table, ``MAX(x, n)``, an ordinal or
+output reference over a star, and EXCEPT/INTERSECT ALL suppress it. A nested
+query's output keeps a granted name only when it passes that column on
+unrenamed. No value, preview, column list, SQL, rung or model is on
+the wire.
+Yes and No keep their meaning. ``AskRequest.plan_sql_reading_id`` is the
+pick: it re-runs the held reading's SQL through every gate under the current
+session grant, with no model call, and every 200 response to a pick echoes
+the id in ``Answer.plan_sql_reading_id``. Flags off, or no split, the
+response bytes are unchanged.
+
+DMS steps before any customer flag-on (not needed to merge the engine side):
+
+1. Vendor ``contract/openapi-1.10.0.json`` and its ``.sha256``, regenerate the
+   client, pin ``cortex-contract>=1.10,<2``, and sort specs by version
+   (``1.10`` sorts before ``1.2`` as text).
+2. client.py: also drop ``plan_sql_reading_id`` when it is None.
+3. ``apply_reconfirm``: copy readings into the reconfirm block as
+   ``{index, statement, row_count}`` only. Keep ``reading_id``, the question,
+   payload, schema_context and session on the server-side pending entry, never
+   in the browser.
+4. ``ConfirmBody.reading: int | None`` (1-3).
+5. ``/ask/confirm`` and ``confirm_reconfirm``: re-ask with the same question,
+   payload, schema_context, session and Space plus ``plan_sql_reading_id``,
+   and no ``plan_sql_confirm``. On every 200, a missing echo or a different id
+   is engine skew: do not show the answer. With the echo, a served answer is
+   the pick; a reconfirm or abstain carrying the echo is shown as a fresh
+   reconfirm or abstain, never as the pick. A 409
+   ``plan_sql_reading_unbound`` or ``plan_sql_reading_unavailable`` says the
+   reading expired and offers a new ask with its own badge.
+6. "None of these" is the existing No path (``decline_envelope`` plus
+   ``record_decline``).
+7. Badge: a served answer carrying the echo maps to ``L2_ANOMALOUS`` with the
+   label "you chose this reading; not confirmed by a second reading", never
+   ``L2_VALIDATED``.
+8. DMS CI gates on ``POST /v1/chat/ask`` and ``/v1/chat/ask/confirm`` with
+   ``assert_envelope_valid``, including Cortex test 1b's CASE-label split: the
+   offer envelope is abstained with empty values, sources and token, each
+   block item is exactly ``{index, statement, row_count}``, and no reading's
+   result value appears anywhere; a pick's values equal the Cortex rows under
+   ``L2_ANOMALOUS`` with ``audit_id`` and ``drillthrough_token``.
 
 ## METRIC-RECONFIRM-QUALITY -- 2026-10-30
 

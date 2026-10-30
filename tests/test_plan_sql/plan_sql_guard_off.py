@@ -26,5 +26,7 @@ def pytest_configure(config: Any) -> None:
         payload.widening = lambda request, granted: []  # type: ignore[assignment]
     elif guard == "payload_scope":
         plan_sql_ask._sql_tables = lambda sql: set()  # type: ignore[assignment]
+    elif guard == "reading_binding":
+        plan_sql_ask._reading_bound = lambda *args, **kwargs: True  # type: ignore[assignment]
     else:
         raise RuntimeError(f"unknown PLAN_SQL_GUARD_OFF={guard!r}")

@@ -402,7 +402,7 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     spec = json.loads((ROOT / "contract" / "openapi-1.4.0.json").read_text(encoding="utf-8"))
     base = set(spec["components"]["schemas"]["Answer"]["properties"])
     prior = json.loads((ROOT / "contract" / "openapi-1.9.0.json").read_text(encoding="utf-8"))
-    # 1.5.0 fields (#329) are present and null. verified_query_ids (1.10.0)
+    # 1.5.0 fields (#329) are present and null. verified_query_ids (1.11.0)
     # stays omitted, so the flag-off body is exactly the 1.9.0 Answer.
     assert set(body) - base == {"reconfirm", "plan_sql_rung", "model_calls"}
     assert set(body) == set(prior["components"]["schemas"]["Answer"]["properties"])
@@ -410,7 +410,9 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     assert set(body["reconfirm"]) == {"why", "closest_question"}
     assert body["plan_sql_rung"] is None
     assert body["model_calls"] is None
-    assert list(body) == [f for f in Answer.model_fields if f != "verified_query_ids"]
+    # plan_sql_reading_id (1.10.0, #453) is omitted too: this ask sent no pick.
+    omitted = {"verified_query_ids", "plan_sql_reading_id"}
+    assert list(body) == [f for f in Answer.model_fields if f not in omitted]
     _assert_not_verified(body)
     assert body["memory_ids_read"] == []
     assert [s.served_op for s in sm.get_space_memory().stamps(space_id="alpha")] == [
@@ -587,7 +589,7 @@ def test_answer_serialization_omits_empty_verified_query_ids() -> None:
     got = Answer.model_validate({**base, "verified_query_ids": ["vq_1", "vq_2"]})
     assert got.model_dump()["verified_query_ids"] == ["vq_1", "vq_2"]
     assert Answer.model_validate_json(got.model_dump_json()).verified_query_ids == ["vq_1", "vq_2"]
-    spec = json.loads((ROOT / "contract" / "openapi-1.10.0.json").read_text(encoding="utf-8"))
+    spec = json.loads((ROOT / "contract" / "openapi-1.11.0.json").read_text(encoding="utf-8"))
     field = spec["components"]["schemas"]["Answer"]["properties"]["verified_query_ids"]
     assert field["type"] == "array" and field["items"] == {"type": "string"}
     assert "verified_query_id" not in spec["components"]["schemas"]["Answer"]["properties"]

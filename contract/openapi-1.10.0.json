@@ -225,6 +225,18 @@
             "description": "1.5.0 logical FreeRoute complete() calls per ladder step, plus total. One count per complete() the ladder issues. Transport or proxy retries (an upstream 429 retried by the cap proxy or the FreeRoute client) are not counted. Keys that ran: plan, error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. total is their sum. DMS reads per-step counts only from this object. Null when this path made no model call. 1.4 clients ignore it.",
             "title": "Model Calls"
           },
+          "plan_sql_reading_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.10.0 the plan_sql_reading_id this ask sent, on every 200 response to a pick: a served answer, a reconfirm the pick re-gated into, or a direct abstain. Omitted on every other answer. A served pick (sql_used set) is an answer the user chose between disagreeing readings: a second reading did not confirm it, and it must not be presented as validated. On it plan_sql_rung is the rung whose model wrote the reading in the offering ask, served_* name that model, provenance.query_source carries that earlier call id, and model_calls is null. A reconfirm or abstain carrying the echo is presented as what it is, never as the pick. A 200 to a pick without this echo, or with another id, came from an engine that ignored the field.",
+            "title": "Plan Sql Reading Id"
+          },
           "plan_sql_rung": {
             "anyOf": [
               {
@@ -338,14 +350,6 @@
               "type": "string"
             },
             "title": "Suggestions",
-            "type": "array"
-          },
-          "verified_query_ids": {
-            "description": "1.10.0 ids of the steward-confirmed question/SQL examples that were in the SQL generator prompt for this served answer, best match first. The SQL was generated and executed on current data; this does not mark a stored answer and reused stays false. Omitted when no example was used. Older clients ignore it.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Verified Query Ids",
             "type": "array"
           }
         },
@@ -576,6 +580,20 @@
               }
             ],
             "title": "Plan Sql Confirm"
+          },
+          "plan_sql_reading_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.10.0 a PlanSqlReading.reading_id from a prior reconfirm. Send it with the same question, dms_payload, schema_context, session and Space as the ask that offered it, and without plan_sql_confirm. The engine re-runs that reading's SQL through every gate under the current session grant, with no model call. Without dms_payload, or together with plan_sql_confirm, it is HTTP 422. An id the engine does not hold for this session, Space, manifest, request and scored pack, or one past its expiry, is HTTP 409 plan_sql_reading_unbound; an engine with readings switched off answers HTTP 409 plan_sql_reading_unavailable. Through 1.9 this key was ignored: check Answer.plan_sql_reading_id.",
+            "title": "Plan Sql Reading Id"
           },
           "question": {
             "minLength": 1,
@@ -1302,6 +1320,19 @@
             "description": "1.5.0 logical FreeRoute complete() calls per ladder step, plus total. One count per complete() the ladder issues. Transport or proxy retries (an upstream 429 retried by the cap proxy or the FreeRoute client) are not counted. Keys that ran: plan, error-fed-retry-<N> (N starts at 1), stronger-model, reconfirm. total is their sum. DMS reads per-step counts only from this object. Null when this path made no model call. 1.4 clients ignore it.",
             "title": "Model Calls"
           },
+          "plan_sql_reading_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1.10.0 the plan_sql_reading_id this ask sent, on every 200 response to a pick: a served answer, a reconfirm the pick re-gated into, or a direct abstain. Omitted on every other answer. A served pick (sql_used set) is an answer the user chose between disagreeing readings: a second reading did not confirm it, and it must not be presented as validated. On it plan_sql_rung is the rung whose model wrote the reading in the offering ask, served_* name that model, provenance.query_source carries that earlier call id, and model_calls is null. A reconfirm or abstain carrying the echo is presented as what it is, never as the pick. A 200 to a pick without this echo, or with another id, came from an engine that ignored the field.",
+            "title": "Plan Sql Reading Id"
+          },
           "plan_sql_rung": {
             "anyOf": [
               {
@@ -1423,14 +1454,6 @@
               "type": "string"
             },
             "title": "Suggestions",
-            "type": "array"
-          },
-          "verified_query_ids": {
-            "description": "1.10.0 ids of the steward-confirmed question/SQL examples that were in the SQL generator prompt for this served answer, best match first. The SQL was generated and executed on current data; this does not mark a stored answer and reused stays false. Omitted when no example was used. Older clients ignore it.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Verified Query Ids",
             "type": "array"
           }
         },
@@ -1628,6 +1651,21 @@
             ],
             "default": null,
             "title": "Plan Sql Confirm"
+          },
+          "plan_sql_reading_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1.10.0 a PlanSqlReading.reading_id from a prior reconfirm. Send it with the same question, dms_payload, schema_context, session and Space as the ask that offered it, and without plan_sql_confirm. The engine re-runs that reading's SQL through every gate under the current session grant, with no model call. Without dms_payload, or together with plan_sql_confirm, it is HTTP 422. An id the engine does not hold for this session, Space, manifest, request and scored pack, or one past its expiry, is HTTP 409 plan_sql_reading_unbound; an engine with readings switched off answers HTTP 409 plan_sql_reading_unavailable. Through 1.9 this key was ignored: check Answer.plan_sql_reading_id.",
+            "title": "Plan Sql Reading Id"
           },
           "question": {
             "minLength": 1,
@@ -2178,13 +2216,60 @@
         "title": "MemoryRead",
         "type": "object"
       },
+      "ContractPlanSqlReading": {
+        "description": "1.10.0: one reading a split reconfirm offers. No values, no SQL, no rows.\n\nWhen two SQL readings of the question disagree, the reconfirm may offer up\nto three of them. Send ``AskRequest.plan_sql_reading_id`` = ``reading_id``\n(with the same question, ``dms_payload``, ``schema_context``, session and\nSpace) to run that reading again through every gate under the session\ngrant.",
+        "properties": {
+          "expires_at": {
+            "description": "1.10.0 ISO-8601 UTC. The hold lives at most 600 s and never past the session manifest's expiry. A pick after it is HTTP 409 plan_sql_reading_unbound.",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "reading_id": {
+            "description": "1.10.0 opaque id the engine holds; read only by exact id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reading Id",
+            "type": "string"
+          },
+          "row_count": {
+            "description": "1.10.0 rows this reading returned in the offering ask, after its LIMIT.",
+            "minimum": 1,
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "statement": {
+            "description": "1.10.0 plain-language description Cortex wrote from the gated SQL's syntax tree after replacing every literal in it with '<a value>'. It contains no returned value and no SQL comment; the only literal it shows is the LIMIT row cap. The bound holds after the response scrub.",
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reading_id",
+          "statement",
+          "row_count",
+          "expires_at"
+        ],
+        "title": "PlanSqlReading",
+        "type": "object"
+      },
       "ContractPlanSqlReconfirm": {
-        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs closest_question, No answers not found in the\ndatabase, or send ``AskRequest.plan_sql_reading_id`` to run one reading\n(1.10.0). Older clients ignore the object.",
         "properties": {
           "closest_question": {
             "minLength": 1,
             "title": "Closest Question",
             "type": "string"
+          },
+          "readings": {
+            "description": "1.10.0 up to three disagreeing readings of the question, each a description with a row count and no values. Present only when the engine's readings switch is on and the vote split; omitted when empty.",
+            "items": {
+              "$ref": "#/components/schemas/PlanSqlReading"
+            },
+            "maxItems": 3,
+            "title": "Readings",
+            "type": "array"
           },
           "why": {
             "minLength": 1,
@@ -4321,13 +4406,60 @@
         "title": "PauseBody",
         "type": "object"
       },
+      "PlanSqlReading": {
+        "description": "1.10.0: one reading a split reconfirm offers. No values, no SQL, no rows.\n\nWhen two SQL readings of the question disagree, the reconfirm may offer up\nto three of them. Send ``AskRequest.plan_sql_reading_id`` = ``reading_id``\n(with the same question, ``dms_payload``, ``schema_context``, session and\nSpace) to run that reading again through every gate under the session\ngrant.",
+        "properties": {
+          "expires_at": {
+            "description": "1.10.0 ISO-8601 UTC. The hold lives at most 600 s and never past the session manifest's expiry. A pick after it is HTTP 409 plan_sql_reading_unbound.",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "reading_id": {
+            "description": "1.10.0 opaque id the engine holds; read only by exact id.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reading Id",
+            "type": "string"
+          },
+          "row_count": {
+            "description": "1.10.0 rows this reading returned in the offering ask, after its LIMIT.",
+            "minimum": 1.0,
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "statement": {
+            "description": "1.10.0 plain-language description Cortex wrote from the gated SQL's syntax tree after replacing every literal in it with '<a value>'. It contains no returned value and no SQL comment; the only literal it shows is the LIMIT row cap. The bound holds after the response scrub.",
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reading_id",
+          "statement",
+          "row_count",
+          "expires_at"
+        ],
+        "title": "PlanSqlReading",
+        "type": "object"
+      },
       "PlanSqlReconfirm": {
-        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs that question. No answers\n``not found in the database``. Older clients ignore the object.",
+        "description": "1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.\n\nPresent only when the loop could not ground an answer. Yes\n(``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to\n``closest_question``) runs closest_question, No answers not found in the\ndatabase, or send ``AskRequest.plan_sql_reading_id`` to run one reading\n(1.10.0). Older clients ignore the object.",
         "properties": {
           "closest_question": {
             "minLength": 1,
             "title": "Closest Question",
             "type": "string"
+          },
+          "readings": {
+            "description": "1.10.0 up to three disagreeing readings of the question, each a description with a row count and no values. Present only when the engine's readings switch is on and the vote split; omitted when empty.",
+            "items": {
+              "$ref": "#/components/schemas/PlanSqlReading"
+            },
+            "maxItems": 3,
+            "title": "Readings",
+            "type": "array"
           },
           "why": {
             "minLength": 1,

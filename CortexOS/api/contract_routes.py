@@ -269,7 +269,13 @@ async def contract_ask(body: AskRequest) -> Answer:
 
     def _ask() -> Answer:
         from CortexOS.dms.answer_engine import answer as answer_engine
-        from CortexOS.dms.plan_sql_ask import granted_catalog_enabled
+        from CortexOS.dms.plan_sql_ask import (
+            READING_UNAVAILABLE,
+            READING_UNAVAILABLE_MESSAGE,
+            ReadingUnbound,
+            granted_catalog_enabled,
+            readings_on,
+        )
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.session_manifests import (
             SessionExpired,
@@ -316,7 +322,17 @@ async def contract_ask(body: AskRequest) -> Answer:
             ) from exc
         grant.append(verified)
 
-        from CortexOS.dms.space_memory_ask import try_solution_reuse
+        # Contract 1.10.0 (PICK-READING-01): a pick runs one held reading of an
+        # earlier split. It never reads per-Space memory and never falls
+        # through to the answer engine.
+        picking = body.plan_sql_reading_id is not None
+        if picking and not readings_on():
+            raise HTTPException(
+                status_code=409,
+                detail={"code": READING_UNAVAILABLE, "message": READING_UNAVAILABLE_MESSAGE},
+            )
+
+        from CortexOS.dms.space_memory_ask import memory_off, try_solution_reuse
         from CortexOS.dms.verified_query_ask import (
             bind_verified_examples,
             stamp_verified_examples,
@@ -328,12 +344,16 @@ async def contract_ask(body: AskRequest) -> Answer:
             strict_error_status,
         )
 
-        reused, memory_fields = try_solution_reuse(
-            body.question,
-            session_id=body.session_id,
-            space_id=body.space_id,
-            verified=verified,
-            scored_pack_id=body.scored_pack_id,
+        reused, memory_fields = (
+            (None, memory_off())
+            if picking
+            else try_solution_reuse(
+                body.question,
+                session_id=body.session_id,
+                space_id=body.space_id,
+                verified=verified,
+                scored_pack_id=body.scored_pack_id,
+            )
         )
         from CortexOS.dms.ask_scope import ask_scope
         from CortexOS.dms.metric_choice import is_no_closest
@@ -364,6 +384,16 @@ async def contract_ask(body: AskRequest) -> Answer:
                         status_code=strict_error_status(exc),
                         detail=strict_error_detail(exc),
                     ) from exc
+                except ReadingUnbound as exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": exc.code, "message": str(exc)},
+                    ) from exc
+            if picking and served is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": READING_UNAVAILABLE, "message": READING_UNAVAILABLE_MESSAGE},
+                )
             # VERIFIED-QUERY (#309): examples are bound only for the generator the
             # answer engine runs, and only when the flag is on. A reused C-MEM
             # solution or a plan+SQL answer never carries them. Only examples
