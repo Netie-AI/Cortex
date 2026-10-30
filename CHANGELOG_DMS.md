@@ -12,7 +12,13 @@ offers up to three of the disagreeing readings in
 The statement is written by Cortex (``CortexOS/plan_sql/describe.py``) from
 the gated SQL's syntax tree after every SQL comment is stripped and every
 literal is replaced with ``<a value>``; the only literal it shows is the LIMIT
-row cap. No value, preview, column list, SQL, rung or model is on the wire.
+row cap. A model-written name is free text too, so the only names it prints
+are the request payload's granted tables and columns, in the payload's
+spelling: a computed output is ``computed value N`` (its position), a
+reference to a projection alias is shown as what that projection is, a table
+alias as its granted table, and a CTE or subquery alias never. Any other name
+suppresses the offer. No value, preview, column list, SQL, rung or model is on
+the wire.
 Yes and No keep their meaning. ``AskRequest.plan_sql_reading_id`` is the
 pick: it re-runs the held reading's SQL through every gate under the current
 session grant, with no model call, and every 200 response to a pick echoes

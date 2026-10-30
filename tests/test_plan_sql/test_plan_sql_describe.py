@@ -31,15 +31,29 @@ def _never(_text: str) -> bool:
     return False
 
 
-def _say(sql: str) -> str:
-    return describe.statement(sql, keep_literal=_never)
+# The granted payload the unit cases describe against: every table and column
+# their SQL reads. A name outside it is refused (see the alias cases below).
+_T_COLUMNS = ["a", "b", "c", "d", "j", "q", "x", "id", "qty", "flag", "kind"]
+GRANTED: dict[str, list[str]] = {
+    "t": _T_COLUMNS + [f"col_{i}" for i in range(200)],
+    "u": ["a", "b", "c", "id", "kind"],
+    "transactions": ["txn_type", "sku", "quantity_kg"],
+}
+
+
+def _say(sql: str, granted: dict[str, list[str]] | None = None) -> str:
+    return describe.statement(
+        sql, keep_literal=_never, granted=GRANTED if granted is None else granted
+    )
 
 
 def test_fixture_readings_are_distinct_and_name_their_aggregate() -> None:
     good, sku, kg = (_say(sql) for sql in (GOOD_SQL, SKU_SQL, KG_SQL))
     assert len({good, sku, kg}) == 3
     assert "number of rows" in good and "txn_type" in good
-    assert "sorted by n descending" in good
+    # Was "sorted by n descending": ``n`` is the model's alias, so the reference
+    # is shown as what it names (PICK-READING-01 review: an alias is a channel).
+    assert "sorted by number of rows descending" in good
     assert "number of distinct sku" in sku
     assert "total of quantity_kg" in kg
     for text in (good, sku, kg):
@@ -127,7 +141,7 @@ def test_the_limit_count_is_the_only_literal_shown() -> None:
 
 def test_a_kept_literal_is_the_only_one_shown() -> None:
     sql = "SELECT a FROM t WHERE c = 'zq_keep' AND d = 'zq_drop'"
-    text = describe.statement(sql, keep_literal=lambda value: value == "zq_keep")
+    text = describe.statement(sql, keep_literal=lambda value: value == "zq_keep", granted=GRANTED)
     assert "zq_keep" in text and "zq_drop" not in text
     assert describe.MARK in text
 
@@ -135,7 +149,7 @@ def test_a_kept_literal_is_the_only_one_shown() -> None:
 def test_ordinals_name_the_projection_not_a_value() -> None:
     text = _say("SELECT txn_type, COUNT(*) AS n FROM transactions GROUP BY 1 ORDER BY 2 DESC")
     assert "for each txn_type" in text
-    assert "sorted by n descending" in text
+    assert "sorted by number of rows descending" in text
     assert describe.MARK not in text
     unaliased = _say("SELECT txn_type, COUNT(*) FROM transactions GROUP BY 1 ORDER BY 2")
     assert "sorted by number of rows" in unaliased
@@ -205,11 +219,25 @@ def _corpus() -> list[str]:
     return [case["sql"] for case in json.loads(CORPUS.read_text(encoding="utf-8"))["cases"]]
 
 
+def _every_name_granted(sql: str) -> dict[str, list[str]]:
+    """A payload that grants every table and column name the SQL spells.
+
+    The corpus is about literals and comments, so its names are granted here
+    to reach the literal paths; the alias cases below grant only the payload.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, read="duckdb")
+    except Exception:  # noqa: BLE001 - describe refuses it too
+        return {}
+    names = sorted({c.name for c in tree.find_all(exp.Column) if c.name and c.name != "*"})
+    return {t.name: names for t in tree.find_all(exp.Table) if t.name}
+
+
 def test_hostile_corpus_never_prints_a_literal_or_a_comment() -> None:
     rendered = refused = 0
     for sql in _corpus():
         try:
-            text = _say(sql)
+            text = _say(sql, _every_name_granted(sql))
         except describe.DescribeError:
             refused += 1
             continue
@@ -253,10 +281,177 @@ def test_cap_statement_bounds_the_text() -> None:
 
 def test_statement_is_pure_and_never_sees_the_question() -> None:
     params = inspect.signature(describe.statement).parameters
-    assert list(params) == ["sql", "keep_literal"]
+    # ``granted`` (PICK-READING-01 review) is the payload's names, not the question.
+    assert list(params) == ["sql", "keep_literal", "granted"]
     assert _say(KG_SQL) == _say(KG_SQL)
 
 
 def test_vocabulary_holds_the_fixed_words() -> None:
     for word in ("returns", "number", "rows", "total", "sorted", "descending", "first"):
         assert word in describe.VOCABULARY
+
+
+# -- PICK-READING-01 review: a model-chosen name is a value channel ---------------------
+
+# Each case hides the sentinels zq_hi / zq_lo (the CASE labels of a bucket
+# reading) in a name the model chose, never in a literal. Only names of the
+# granted payload may be printed, so a sentinel in the output is a leak.
+PAYLOAD_ONLY: dict[str, list[str]] = {"transactions": ["txn_type", "sku", "quantity_kg"]}
+_BUCKET = "CASE WHEN quantity_kg > 100 THEN 'heavy' ELSE 'light' END"
+NAMED = {
+    "quoted_alias": f'SELECT {_BUCKET} AS "zq_hi or zq_lo", COUNT(*) AS n FROM transactions GROUP BY 1',
+    "label_alias": (
+        f"SELECT {_BUCKET} AS zq_hi, COUNT(*) AS zq_lo FROM transactions "
+        "GROUP BY zq_hi ORDER BY zq_lo DESC"
+    ),
+    "alias_in_where": (
+        f"SELECT {_BUCKET} AS zq_hi FROM transactions WHERE zq_hi IS NOT NULL ORDER BY zq_hi"
+    ),
+    "aggregate_alias": (
+        "SELECT txn_type, SUM(quantity_kg) AS zq_hi FROM transactions GROUP BY txn_type "
+        "HAVING zq_hi > 1 ORDER BY zq_hi"
+    ),
+    "renamed_column": "SELECT sku AS zq_hi FROM transactions ORDER BY zq_hi",
+    "table_alias": (
+        "SELECT CASE WHEN zq_hi.quantity_kg > 100 THEN 'heavy' ELSE 'light' END AS size "
+        "FROM transactions AS zq_hi GROUP BY CASE WHEN zq_hi.quantity_kg > 100 "
+        "THEN 'heavy' ELSE 'light' END"
+    ),
+    "self_join_aliases": (
+        "SELECT zq_hi.sku, COUNT(*) FROM transactions AS zq_hi "
+        "JOIN transactions AS zq_lo ON zq_hi.sku = zq_lo.sku GROUP BY zq_hi.sku"
+    ),
+    "using_join": "SELECT COUNT(*) FROM transactions AS zq_hi JOIN transactions AS zq_lo USING (sku)",
+    "cte_name_mixed_case": (
+        f"WITH Zq_hi AS (SELECT {_BUCKET} AS size FROM transactions) "
+        "SELECT size, COUNT(*) AS n FROM ZQ_HI GROUP BY size"
+    ),
+    "cte_name_and_column": (
+        f"WITH zq_hi AS (SELECT {_BUCKET} AS zq_lo FROM transactions) "
+        "SELECT zq_lo, COUNT(*) AS n FROM zq_hi GROUP BY zq_lo"
+    ),
+    "cte_name_as_column": f"WITH zq_hi AS (SELECT {_BUCKET} AS b FROM transactions) SELECT zq_hi FROM zq_hi",
+    "subquery_alias": (
+        f"SELECT zq_lo AS zq_lo, COUNT(*) AS n FROM (SELECT {_BUCKET} AS zq_lo "
+        "FROM transactions) AS zq_hi GROUP BY zq_lo"
+    ),
+    "union_alias": "SELECT sku AS zq_hi FROM transactions UNION SELECT txn_type FROM transactions",
+    "ordinal_to_alias": f"SELECT {_BUCKET} AS zq_hi, COUNT(*) FROM transactions GROUP BY 1 ORDER BY 1",
+}
+_NAMED_SENTINEL = re.compile(r"zq_\w+", re.IGNORECASE)
+
+
+def _words_are_granted_or_fixed(text: str, granted: dict[str, list[str]]) -> None:
+    names = set(granted) | {c for cols in granted.values() for c in cols}
+    sql_words = {"case", "when", "then", "else", "end", "count", "sum", "is", "not", "null"}
+    for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text.replace(describe.MARK, "")):
+        assert word in names or word.lower() in describe.VOCABULARY | sql_words, (word, text)
+
+
+@pytest.mark.parametrize("case", sorted(NAMED))
+def test_a_model_chosen_name_never_reaches_the_statement(case: str) -> None:
+    sql = NAMED[case]
+    try:
+        text = _say(sql, PAYLOAD_ONLY)
+    except describe.DescribeError:
+        return  # refusing is allowed: the offer is suppressed
+    assert not _NAMED_SENTINEL.search(text), text
+    for label in ("heavy", "light", "100"):
+        assert label not in text, text
+    _words_are_granted_or_fixed(text, PAYLOAD_ONLY)
+
+
+def test_named_cases_render_without_their_names() -> None:
+    """Not vacuous: the cases above render (refusing all would also pass them)."""
+    rendered = {
+        case: _say(sql, PAYLOAD_ONLY) for case, sql in NAMED.items() if case != "cte_name_as_column"
+    }
+    assert rendered["quoted_alias"].startswith("Returns computed value 1 (CASE WHEN quantity_kg")
+    assert "for each computed value 1" in rendered["quoted_alias"]
+    assert "for each computed value 1" in rendered["label_alias"]
+    assert "sorted by number of rows descending" in rendered["label_alias"]
+    assert "where computed value 1 is not empty" in rendered["alias_in_where"]
+    assert "having total of quantity_kg is more than" in rendered["aggregate_alias"]
+    assert rendered["renamed_column"] == "Returns sku from transactions, sorted by sku"
+    assert "transactions.quantity_kg" in rendered["table_alias"]
+    assert "on transactions.sku is transactions.sku" in rendered["self_join_aliases"]
+    assert "matched to transactions on sku" in rendered["using_join"]
+    assert rendered["cte_name_mixed_case"] == (
+        "Returns computed value 1 and computed value 2 from transactions, computed with 1 nested query"
+    )
+    assert rendered["union_alias"].startswith("Returns computed value 1 from transactions")
+    assert "for each computed value 1" in rendered["ordinal_to_alias"]
+    assert "sorted by computed value 1" in rendered["ordinal_to_alias"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT sku FROM zq_heavy",
+        "SELECT COUNT(*) FROM zq_heavy",
+        "SELECT zq_heavy FROM transactions",
+        "SELECT zq_heavy.sku FROM transactions",
+        "SELECT transactions.zq_heavy FROM transactions",
+        "SELECT sku FROM transactions AS t(zq_heavy, zq_light, q)",
+        "SELECT list_transform([quantity_kg], zq_heavy -> zq_heavy + 1) FROM transactions",
+        "SELECT {zq_heavy: quantity_kg} FROM transactions",
+        "SELECT CAST(sku AS zq_heavy) FROM transactions",
+        "SELECT zq_heavy_fn(sku) FROM transactions",
+        "SELECT sku FROM transactions WHERE EXTRACT(zq_heavy FROM sku) > 1",
+        "SELECT struct_pack(zq_heavy := sku) FROM transactions",
+        "SELECT (sku AS zq_heavy) FROM transactions",
+        "SELECT * REPLACE (sku AS zq_heavy) FROM transactions",
+        "SELECT * RENAME (sku AS zq_heavy) FROM transactions",
+        "SELECT sku FROM transactions LIMIT zq_heavy",
+        "WITH x AS (SELECT sku FROM transactions) SELECT sku FROM x LIMIT zq_heavy",
+        "WITH x AS (SELECT sku FROM transactions) SELECT sku FROM zq_heavy",
+        "SELECT txn_type FROM transactions UNION SELECT sku FROM zq_heavy",
+    ],
+    ids=[
+        "ungranted_table",
+        "ungranted_table_count",
+        "ungranted_column",
+        "unknown_qualifier",
+        "qualified_ungranted_column",
+        "alias_renames_columns",
+        "lambda_parameter",
+        "struct_key",
+        "user_defined_type",
+        "unknown_function",
+        "unknown_date_part",
+        "named_argument",
+        "nested_alias",
+        "star_replace",
+        "star_rename",
+        "named_limit",
+        "fallback_named_limit",
+        "fallback_ungranted_table",
+        "set_operation_ungranted_table",
+    ],
+)
+def test_a_name_outside_the_payload_refuses(sql: str) -> None:
+    sqlglot.parse_one(sql, read="duckdb")  # each case parses: it refuses on its name
+    with pytest.raises(describe.DescribeError) as refused:
+        _say(sql, PAYLOAD_ONLY)
+    assert "unparsable" not in str(refused.value)
+
+
+def test_an_empty_grant_names_nothing() -> None:
+    with pytest.raises(describe.DescribeError):
+        _say(GOOD_SQL, {})
+
+
+def test_names_print_in_the_payload_spelling() -> None:
+    """Case and quoting are the model's, so the payload's spelling is printed instead."""
+    granted = {"Transactions": ["TxnType", "Sku"]}
+    text = _say('SELECT "TXNTYPE", COUNT(DISTINCT sku) FROM TRANSACTIONS GROUP BY txntype', granted)
+    assert text == "Returns TxnType and number of distinct Sku for each TxnType from Transactions"
+    assert "TXNTYPE" not in text and "TRANSACTIONS" not in text
+    fallback = _say("WITH x AS (SELECT SKU FROM TRANSACTIONS) SELECT SKU FROM x", granted)
+    assert fallback == "Returns Sku from Transactions, computed with 1 nested query"
+
+
+def test_a_table_function_source_gets_the_fallback() -> None:
+    """A source with no granted name prints none: the gate refuses it before describe."""
+    text = _say("SELECT * FROM read_parquet('zq_path.parquet')", PAYLOAD_ONLY)
+    assert text == "Returns all columns"

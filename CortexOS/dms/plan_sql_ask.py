@@ -361,6 +361,22 @@ def _granted_names(grant: Any) -> set[str]:
     return {fold_identifier(str(name)) for name in grant.row_predicates}
 
 
+def _describe_catalog(
+    request: plan_payload.PlanSqlRequest, granted: set[str]
+) -> dict[str, list[str]]:
+    """The names a reading's statement may print: granted payload tables and their columns.
+
+    A model-written alias is free text that executes fine, so ``plan_sql.describe``
+    prints no name outside this (PICK-READING-01 review). ``request`` is the
+    narrowed request the prompt saw.
+    """
+    names: dict[str, list[str]] = {}
+    for table in request.payload.tables:
+        if fold_identifier(table.name.strip()) in granted:
+            names.setdefault(table.name.strip(), [c.name for c in table.columns])
+    return names
+
+
 def _is_scored_round(scored_pack_id: str | None) -> bool:
     from CortexOS.memory.space_memory import get_space_memory
 
@@ -1556,8 +1572,10 @@ def plan_sql_answer(
                 return []
         try:
             keep = _display_literal(question)
+            names = _describe_catalog(request, granted)
             statements = [
-                plan_describe.statement(sql, keep_literal=keep) for (_s, sql, _r), _w in chosen
+                plan_describe.statement(sql, keep_literal=keep, granted=names)
+                for (_s, sql, _r), _w in chosen
             ]
         except Exception as exc:  # noqa: BLE001 - nothing offered is safe; a 500 is not
             _note_readings(f"offered=0 reason=describe-failed ({type(exc).__name__})")

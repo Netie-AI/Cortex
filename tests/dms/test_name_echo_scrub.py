@@ -507,7 +507,7 @@ def test_reading_statements_withhold_invented_names(
     monkeypatch.setattr(
         describe,
         "statement",
-        lambda sql, *, keep_literal: f"Returns {GHOST} reading {next(counter)}",
+        lambda sql, *, keep_literal, granted: f"Returns {GHOST} reading {next(counter)}",
     )
     dms_http.bind_session(SESSION, GRANT)
 
@@ -546,7 +546,7 @@ def test_a_scrubbed_statement_still_fits_the_published_length(
     monkeypatch.setattr(
         describe,
         "statement",
-        lambda sql, *, keep_literal: f"r{next(counter)} " + " ".join(["q"] * 148),
+        lambda sql, *, keep_literal, granted: f"r{next(counter)} " + " ".join(["q"] * 148),
     )
     dms_http.bind_session(SESSION, GRANT)
 

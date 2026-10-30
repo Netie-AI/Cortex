@@ -359,6 +359,117 @@ def test_split_offer_never_prints_case_labels(
     assert picked["rows"][0]["size"] in {"heavy", "light"}
 
 
+# PICK-READING-01 review: a model-written name is a value channel exactly like a
+# literal. Each variant is the bucket reading with its CASE labels moved into a
+# name the model chose: a quoted column alias, a bare label alias (also used in
+# GROUP BY and ORDER BY), a table alias, and a derived table named with one
+# label whose output column is named with the other. Each passes the gate,
+# lineage and literal grounding and returns the bucket rows; the statement may
+# print only the payload's granted names. Value: (SQL, the label column's key
+# in the rows, the name as the held SQL spells it). The CTE form is below: the
+# SQL gate refuses a CTE reference today, so it never reaches describe.
+NAMED_BUCKETS: dict[str, tuple[str, str, str]] = {
+    "quoted_alias": (
+        "SELECT CASE WHEN quantity_kg > 100 THEN 'heavy' ELSE 'light' END "
+        'AS "heavy or light", COUNT(*) AS n FROM transactions GROUP BY 1',
+        "heavy or light",
+        'AS "heavy or light"',
+    ),
+    "label_alias": (
+        "SELECT CASE WHEN quantity_kg > 100 THEN 'heavy' ELSE 'light' END AS heavy, "
+        "COUNT(*) AS n FROM transactions GROUP BY heavy ORDER BY heavy",
+        "heavy",
+        "GROUP BY heavy ORDER BY heavy",
+    ),
+    "table_alias": (
+        "SELECT CASE WHEN heavy.quantity_kg > 100 THEN 'heavy' ELSE 'light' END AS size, "
+        "COUNT(*) AS n FROM transactions AS heavy "
+        "GROUP BY CASE WHEN heavy.quantity_kg > 100 THEN 'heavy' ELSE 'light' END",
+        "size",
+        "FROM transactions AS heavy",
+    ),
+    "subquery_alias": (
+        "SELECT light AS light, COUNT(*) AS n FROM (SELECT CASE WHEN quantity_kg > 100 "
+        "THEN 'heavy' ELSE 'light' END AS light FROM transactions) AS heavy GROUP BY light",
+        "light",
+        ") AS heavy GROUP BY light",
+    ),
+}
+# The bucket reading as a CTE named with one label whose column carries the
+# other, in two spellings DuckDB folds together.
+CTE_BUCKET = (
+    "WITH Heavy AS (SELECT CASE WHEN quantity_kg > 100 THEN 'heavy' ELSE 'light' END "
+    "AS light FROM transactions) SELECT light AS light, COUNT(*) AS n FROM HEAVY GROUP BY light"
+)
+
+
+@pytest.mark.parametrize("variant", sorted(NAMED_BUCKETS))
+def test_split_offer_never_prints_a_model_chosen_name(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    bucket, key, name = NAMED_BUCKETS[variant]
+    sqls = (GOOD_SQL, bucket, KG_SQL)
+    keys = {plan_sql_vote.result_key(_oracle(sql)) for sql in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    # The same labels and counts as the bucket reading: only the names differ.
+    assert sorted(tuple(r.values()) for r in _oracle(bucket)) == sorted(
+        tuple(r.values()) for r in _oracle(BUCKET_SQL)
+    )
+    for word in ("heavy", "light", "100"):
+        assert word not in QUESTION
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _offer(dms_http)
+
+    _assert_readings_offered(body, sqls)
+    checked = _assert_no_values(body, sqls, QUESTION)
+    assert {"heavy", "light"} <= set(checked)
+    text = json.dumps(body).lower()
+    assert "heavy" not in text and "light" not in text, _readings(body)
+    bucket_reading = _readings(body)[1]
+    statement = bucket_reading["statement"]
+    # Only fixed words, the mark, numbers and the payload's granted names.
+    granted = {c["name"] for t in PAYLOAD["tables"] for c in t["columns"]} | {"transactions"}
+    for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", statement.replace(plan_describe.MARK, "")):
+        assert (
+            word.lower() in plan_describe.VOCABULARY
+            or word in granted
+            or word in {"CASE", "WHEN", "THEN", "ELSE", "END", "computed", "value"}
+        ), (word, statement)
+    if variant != "subquery_alias":  # the nested-query fallback prints no tree text
+        assert plan_describe.MARK in statement, statement
+    held = _held(bucket_reading["reading_id"])
+    assert name in held.served_sql, "the name reached describe"
+
+    # Picked, the reading is served, and only then do its labels appear.
+    picked = _json(_pick(dms_http, bucket_reading["reading_id"]))
+    _assert_served_pick(picked, bucket, bucket_reading["reading_id"], statement, 2, 3)
+    assert picked["rows"][0][key] in {"heavy", "light"}
+
+
+def test_cte_named_reading_never_prints_its_name(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A guard, not a must-fail: the SQL gate refuses the CTE reference today, so the
+    reading is not offered. If the gate ever admits it, its names must still not show
+    (``describe`` refuses or names it by position: test_plan_sql_describe)."""
+    sqls = (GOOD_SQL, CTE_BUCKET, KG_SQL)
+    assert sorted(tuple(r.values()) for r in _oracle(CTE_BUCKET)) == sorted(
+        tuple(r.values()) for r in _oracle(BUCKET_SQL)
+    )
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _offer(dms_http)
+
+    text = json.dumps(body).lower()
+    assert "heavy" not in text and "light" not in text, _readings(body)
+    assert _readings_note(body) in {"offered=2", "offered=3"}, body["assumptions"]
+    for reading in _readings(body):
+        assert "heavy" not in _held(reading["reading_id"]).statement.lower()
+
+
 # -- 2, 3: byte identity -----------------------------------------------------------
 
 
@@ -749,7 +860,9 @@ def _assert_suppressed(body: dict[str, Any], reason: str) -> None:
 def test_offer_suppressed_on_collision(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(plan_describe, "statement", lambda sql, *, keep_literal: "Returns n")
+    monkeypatch.setattr(
+        plan_describe, "statement", lambda sql, *, keep_literal, granted: "Returns n"
+    )
     _script_split(armed_openvault, monkeypatch)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -759,7 +872,7 @@ def test_offer_suppressed_on_collision(
 def test_offer_suppressed_on_describe_error(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def refuse(sql: str, *, keep_literal: Any) -> str:
+    def refuse(sql: str, *, keep_literal: Any, granted: Any) -> str:
         raise plan_describe.DescribeError("unknown leaf JSONPathRoot")
 
     monkeypatch.setattr(plan_describe, "statement", refuse)

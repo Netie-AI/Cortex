@@ -20,10 +20,20 @@ Order, on a copy of the parsed tree, before anything is rendered:
    string forms that are not ``exp.Literal`` subclasses. A minus directly over
    a value goes with it. The one exemption is the count of a ``LIMIT``, shown
    as "first N rows"; a leaf ``keep_literal`` accepts is also kept.
-4. Fail closed: every remaining leaf must be a kind this module knows. Any
-   other leaf (a JSON path part, a placeholder, a node a later sqlglot adds)
-   or a comment that survived step 1 raises :class:`DescribeError`; the caller
-   then offers nothing.
+4. Name only what the request granted. A model-written alias (of a column,
+   a table, a CTE or a subquery) is free text that executes fine, so it is a
+   value channel exactly like a literal: ``CASE ... END AS "heavy or light"``
+   would print the CASE labels. No model-chosen identifier reaches a statement
+   unless it names a granted table or column of the request payload
+   (``granted``), and then it is printed in the payload's own spelling, never
+   the model's. A computed output is named by its position
+   (``computed value 2``), a reference to a projection alias is shown as what
+   that projection is, a table alias is shown as its granted table, and a CTE
+   or subquery alias is never printed. Any other name raises.
+5. Fail closed: every remaining leaf must be a kind this module knows. Any
+   other leaf (a JSON path part, a placeholder, a node a later sqlglot adds,
+   an identifier step 4 did not approve) or a comment that survived step 1
+   raises :class:`DescribeError`; the caller then offers nothing.
 
 ``keep_literal`` is display redaction only: it decides whether a literal that
 is already in the gated SQL is printed or shown as :data:`MARK`. It never
@@ -32,14 +42,18 @@ writes, picks, gates or routes SQL.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import cast
 
 import sqlglot
 from sqlglot import exp
 
+from CortexOS.identifier_fold import fold_identifier
+
 #: What every redacted value is shown as.
 MARK = "<a value>"
+#: How a computed output is named: by its position, never by the model's alias.
+COMPUTED = "computed value"
 #: Longest statement before the shortened marker is appended.
 STATEMENT_CAP = 300
 SHORTENED = " (shortened)"
@@ -64,6 +78,51 @@ _VALUE_TYPES: tuple[type[exp.Expression], ...] = tuple(
         )
     )
     if isinstance(cls, type)
+)
+
+# The date parts an ``INTERVAL`` unit or an ``EXTRACT`` part may name. A unit is
+# printed, so it is a fixed word or the statement is refused.
+_UNITS = frozenset(
+    {
+        *(
+            f"{unit}{plural}"
+            for unit in (
+                "year",
+                "month",
+                "week",
+                "day",
+                "hour",
+                "minute",
+                "second",
+                "millisecond",
+                "microsecond",
+                "nanosecond",
+                "quarter",
+                "decade",
+            )
+            for plural in ("", "s")
+        ),
+        "century",
+        "centuries",
+        "millennium",
+        "millennia",
+        "dow",
+        "doy",
+        "isodow",
+        "isoyear",
+        "yearweek",
+        "epoch",
+        "era",
+        "julian",
+        "dayofweek",
+        "dayofmonth",
+        "dayofyear",
+        "weekday",
+        "weekofyear",
+        "timezone",
+        "timezone_hour",
+        "timezone_minute",
+    }
 )
 
 _AGGREGATES: dict[type[exp.Expression], str] = {
@@ -95,6 +154,7 @@ _PHRASES = (
     "smallest",
     "largest",
     "a computed value",
+    "computed value",
     "all columns",
     "for each",
     "and",
@@ -140,6 +200,36 @@ class DescribeError(ValueError):
     """The SQL cannot be described without risking a value: offer nothing."""
 
 
+#: Granted table name -> its column names, as the request payload spells them.
+Granted = Mapping[str, Iterable[str]]
+
+
+class _Catalog:
+    """The granted tables and columns of the request payload, keyed by DuckDB fold."""
+
+    def __init__(self, granted: Granted) -> None:
+        self.tables: dict[str, str] = {}
+        self.columns: dict[str, dict[str, str]] = {}
+        for table, columns in granted.items():
+            name = str(table)
+            key = fold_identifier(name)
+            if not name or key in self.tables:
+                continue
+            self.tables[key] = name
+            pool = self.columns.setdefault(key, {})
+            for column in columns:
+                text = str(column)
+                if text:
+                    pool.setdefault(fold_identifier(text), text)
+
+    def columns_of(self, keys: Iterable[str]) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        for key in keys:
+            for folded, text in self.columns.get(key, {}).items():
+                merged.setdefault(folded, text)
+        return merged
+
+
 def cap_statement(text: str) -> str:
     """``text`` cut to :data:`STATEMENT_CAP` characters plus the shortened marker.
 
@@ -150,10 +240,12 @@ def cap_statement(text: str) -> str:
     return text[:STATEMENT_CAP] + SHORTENED
 
 
-def statement(sql: str, *, keep_literal: Callable[[str], bool]) -> str:
+def statement(sql: str, *, keep_literal: Callable[[str], bool], granted: Granted) -> str:
     """A plain-language statement of ``sql`` in which no redacted value appears.
 
-    Raises :class:`DescribeError` on a parse failure, an out-of-range ordinal,
+    ``granted`` is the request payload's granted tables, each with its column
+    names: the only names a statement may print. Raises :class:`DescribeError`
+    on a parse failure, an out-of-range ordinal, a name that is not granted,
     an unknown leaf or a comment that survived stripping.
     """
     try:
@@ -162,11 +254,17 @@ def statement(sql: str, *, keep_literal: Callable[[str], bool]) -> str:
         raise DescribeError(f"unparsable: {type(exc).__name__}") from None
     if tree is None:
         raise DescribeError("empty statement")
+    catalog = _Catalog(granted)
     _strip_comments(tree)
-    _resolve_ordinals(tree)
+    ordinals = _resolve_ordinals(tree)
     kept = _redact(tree, keep_literal)
-    _leaf_check(tree, kept)
-    return cap_statement(_render(tree))
+    if isinstance(tree, exp.Select) and _simple(tree):
+        approved = _name_simple(tree, catalog, ordinals)
+        _leaf_check(tree, kept, approved)
+        return cap_statement(_render_select(tree))
+    # The fallback prints no tree text: only names it takes from the catalog.
+    _leaf_check(tree, kept, None)
+    return cap_statement(_render_fallback(tree, catalog))
 
 
 def _walk(tree: exp.Expression) -> list[exp.Expression]:
@@ -191,30 +289,32 @@ def _ordinal(node: exp.Expression) -> int | None:
     return None
 
 
-def _projection_for(select: exp.Select, position: int) -> exp.Expression:
-    projections = select.expressions
-    if position < 1 or position > len(projections):
-        raise DescribeError(f"ordinal {position} is out of range")
-    chosen = projections[position - 1]
-    if isinstance(chosen, exp.Alias) and chosen.alias:
-        return exp.column(chosen.alias, quoted=chosen.args["alias"].quoted)
-    return (chosen.this if isinstance(chosen, exp.Alias) else chosen).copy()
+def _resolve_ordinals(tree: exp.Expression) -> dict[int, int]:
+    """Replace each ordinal with a placeholder mark. Returns id(placeholder) -> position.
 
-
-def _resolve_ordinals(tree: exp.Expression) -> None:
+    The placeholder prints as :data:`MARK` if nothing names it; the simple
+    renderer names it by the projection it points at (step 4).
+    """
+    refs: dict[int, int] = {}
     for select in list(tree.find_all(exp.Select)):
+        count = len(select.expressions)
+        items: list[exp.Expression] = []
         group = select.args.get("group")
         if isinstance(group, exp.Group):
-            for item in list(group.expressions):
-                position = _ordinal(item)
-                if position is not None:
-                    item.replace(_projection_for(select, position))
+            items.extend(group.expressions)
         order = select.args.get("order")
         if isinstance(order, exp.Order):
-            for ordered in order.expressions:
-                position = _ordinal(ordered.this) if isinstance(ordered, exp.Ordered) else None
-                if position is not None:
-                    ordered.this.replace(_projection_for(select, position))
+            items.extend(o.this for o in order.expressions if isinstance(o, exp.Ordered))
+        for item in items:
+            position = _ordinal(item)
+            if position is None:
+                continue
+            if position < 1 or position > count:
+                raise DescribeError(f"ordinal {position} is out of range")
+            mark = exp.Var(this=MARK)
+            item.replace(mark)
+            refs[id(mark)] = position
+    return refs
 
 
 # -- step 3: redaction --------------------------------------------------------------
@@ -255,32 +355,152 @@ def _redact(tree: exp.Expression, keep_literal: Callable[[str], bool]) -> set[in
     return kept
 
 
-# -- step 4: fail-closed leaf check -------------------------------------------------
+# -- step 4: names -------------------------------------------------------------------
+
+
+def _approve(approved: set[int], name: str) -> exp.Identifier:
+    ident = exp.to_identifier(name)
+    approved.add(id(ident))
+    return ident
+
+
+def _projection_inner(select: exp.Select, position: int) -> exp.Expression:
+    projection = select.expressions[position - 1]
+    return projection.this if isinstance(projection, exp.Alias) else projection
+
+
+def _reference(
+    select: exp.Select, position: int, pending: dict[int, int], approved: set[int]
+) -> exp.Expression:
+    """What a reference to projection ``position`` is shown as: never its alias."""
+    inner = _projection_inner(select, position)
+    if isinstance(inner, exp.Star) or (
+        isinstance(inner, exp.Column) and isinstance(inner.this, exp.Star)
+    ):
+        raise DescribeError("a reference to all columns")
+    label = f"{COMPUTED} {position}"
+    if not any(id(node) in pending for node in inner.walk()):
+        if isinstance(inner, exp.Column):
+            label = _column(inner)
+        else:
+            label = _aggregate(inner) or label
+    var = exp.Var(this=label)
+    approved.add(id(var))
+    return var
+
+
+def _name_simple(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> set[int]:
+    """Rewrite every name in ``select`` to granted text. Returns the approved node ids.
+
+    A table must be granted; its alias is dropped and a column qualified by
+    it is shown qualified by the granted table. A column must be a granted
+    column of a table in FROM, printed in the payload's spelling. A bare name
+    that is a projection's alias, and an ordinal, is shown as what that
+    projection is (:func:`_reference`). Every projection alias is dropped.
+    Anything else raises.
+    """
+    approved: set[int] = set()
+    sources: dict[str, str] = {}
+    for table in list(select.find_all(exp.Table)):
+        if not isinstance(table.this, exp.Identifier):
+            raise DescribeError("a source that is not a granted table")
+        key = fold_identifier(table.name)
+        if key not in catalog.tables:
+            raise DescribeError("a table that is not granted")
+        alias = table.args.get("alias")
+        if isinstance(alias, exp.TableAlias) and alias.columns:
+            raise DescribeError("a table alias that renames columns")
+        sources[fold_identifier(table.alias_or_name)] = key
+        table.set("this", _approve(approved, catalog.tables[key]))
+        for part in ("alias", "db", "catalog"):
+            table.set(part, None)
+    local = catalog.columns_of(sources.values())
+    aliases: dict[str, int] = {}
+    for position, projection in enumerate(select.expressions, 1):
+        if isinstance(projection, exp.Alias) and projection.alias:
+            aliases.setdefault(fold_identifier(projection.alias), position)
+
+    for join in select.args.get("joins") or []:
+        using = join.args.get("using") or []
+        named = []
+        for item in using:
+            name = item.name if isinstance(item, (exp.Identifier, exp.Column)) else ""
+            if not name or fold_identifier(name) not in local:
+                raise DescribeError("a USING name that is not a granted column")
+            named.append(_approve(approved, local[fold_identifier(name)]))
+        if using:
+            join.set("using", named)
+
+    pending: dict[int, int] = dict(ordinals)
+    for column in list(select.find_all(exp.Column)):
+        if column.args.get("db") or column.args.get("catalog"):
+            raise DescribeError("a qualified name that is not a granted column")
+        owner: str | None = None
+        if column.table:
+            owner = sources.get(fold_identifier(column.table))
+            if owner is None:
+                raise DescribeError("a qualifier that is not a granted table")
+            column.set("table", _approve(approved, catalog.tables[owner]))
+        if isinstance(column.this, exp.Star):
+            continue
+        pool = catalog.columns.get(owner, {}) if owner else local
+        folded = fold_identifier(column.name)
+        if folded in pool:
+            column.set("this", _approve(approved, pool[folded]))
+        elif owner is None and folded in aliases:
+            pending[id(column)] = aliases[folded]
+        else:
+            raise DescribeError("a name that is not a granted column")
+
+    references = [node for node in select.walk() if id(node) in pending]
+    for node in references:
+        node.replace(_reference(select, pending[id(node)], pending, approved))
+    for projection in list(select.expressions):
+        if isinstance(projection, exp.Alias):
+            projection.replace(projection.this)
+    return approved
+
+
+# -- step 5: fail-closed leaf check -------------------------------------------------
 
 
 def _children(node: exp.Expression) -> list[exp.Expression]:
     return list(node.iter_expressions())
 
 
-def _allowed_leaf(node: exp.Expression, kept: set[int]) -> bool:
-    if isinstance(node, (exp.Identifier, exp.Star, exp.Null, exp.DataType, exp.Distinct)):
+def _allowed_leaf(node: exp.Expression, kept: set[int], approved: set[int] | None) -> bool:
+    """Whether a leaf may stay. ``approved`` is None for the fallback, which prints no tree text."""
+    if isinstance(node, exp.Identifier):
+        return approved is None or id(node) in approved
+    if isinstance(node, exp.DataType):
+        return approved is None or node.this != exp.DataType.Type.USERDEFINED
+    if isinstance(node, (exp.Star, exp.Null, exp.Distinct)):
         return True
     if isinstance(node, exp.Var):
-        return node.name == MARK or node.arg_key == "unit" or isinstance(node.parent, exp.Extract)
+        if node.name == MARK or (approved is not None and id(node) in approved):
+            return True
+        if node.arg_key == "unit" or isinstance(node.parent, exp.Extract):
+            return approved is None or node.name.lower() in _UNITS
+        return False
     if _is_value(node):
         return id(node) in kept
+    if isinstance(node, exp.Anonymous):
+        # A function sqlglot does not know prints its name as written.
+        return approved is None
     if isinstance(node, exp.Func):
         return not _children(node)
     return False
 
 
-def _leaf_check(tree: exp.Expression, kept: set[int]) -> None:
+def _leaf_check(tree: exp.Expression, kept: set[int], approved: set[int] | None) -> None:
     for node in _walk(tree):
         if node.comments:
             raise DescribeError("a comment survived stripping")
+        if approved is not None and isinstance(node, exp.Anonymous):
+            raise DescribeError("a function name that is not a known function")
         if _children(node):
             continue
-        if not _allowed_leaf(node, kept):
+        if not _allowed_leaf(node, kept, approved):
             raise DescribeError(f"unknown leaf {type(node).__name__}")
 
 
@@ -315,6 +535,7 @@ def _aggregate(node: exp.Expression) -> str:
 
 
 def _column(node: exp.Column) -> str:
+    """A column already rewritten to granted names by :func:`_name_simple`."""
     table = node.table
     return f"{table}.{node.name}" if table else node.name
 
@@ -370,26 +591,24 @@ def _condition(node: exp.Expression | None) -> str:
     return _sql(node)
 
 
-def _projection(node: exp.Expression) -> str:
-    alias = node.alias if isinstance(node, exp.Alias) else ""
-    inner = node.this if isinstance(node, exp.Alias) else node
-    named = f" as {alias}" if alias else ""
-    if isinstance(inner, exp.Star):
+def _projection(node: exp.Expression, position: int) -> str:
+    """One output, never under its alias (step 4 dropped every projection alias)."""
+    if isinstance(node, exp.Star):
         return "all columns"
-    if isinstance(inner, exp.Column):
-        text = _operand(inner)
-        return f"{text}{named}" if alias and alias != inner.name else text
-    words = _aggregate(inner)
+    if isinstance(node, exp.Column):
+        return _operand(node)
+    words = _aggregate(node)
     if words:
-        return f"{words}{named}"
-    label = f"a computed value {alias}" if alias else "a computed value"
-    return f"{label} ({_sql(inner)})"
+        return words
+    if isinstance(node, exp.Var) and node.name != MARK:
+        return node.name  # a reference to an earlier projection, already named
+    return f"{COMPUTED} {position} ({_sql(node)})"
 
 
 def _table(node: exp.Expression) -> str:
     if isinstance(node, exp.Table):
         return node.name
-    return _sql(node)
+    raise DescribeError("a source that is not a granted table")
 
 
 def _arg(node: exp.Expression, *names: str) -> exp.Expression | None:
@@ -416,32 +635,60 @@ def _from_text(select: exp.Select) -> str:
     return ", ".join(p for p in parts if p)
 
 
+def _named_source(node: exp.Expression | None) -> bool:
+    return isinstance(node, exp.Table) and isinstance(node.this, exp.Identifier)
+
+
 def _simple(tree: exp.Expression) -> bool:
+    """One SELECT over named tables only. Anything else gets the honest fallback.
+
+    A table function or LATERAL source has no granted name to show, so it is
+    described by the fallback, which prints no tree text.
+    """
     if not isinstance(tree, exp.Select):
         return False
     if tree.args.get("with") or tree.args.get("with_"):
         return False
+    source = _arg(tree, "from_", "from")
+    if isinstance(source, exp.From) and not _named_source(source.this):
+        return False
+    if any(not _named_source(join.this) for join in tree.args.get("joins") or []):
+        return False
     return not any(
-        isinstance(node, (exp.Subquery, exp.CTE, exp.Window, exp.SetOperation))
+        isinstance(node, (exp.Subquery, exp.CTE, exp.Window, exp.SetOperation, exp.Lateral))
         for node in tree.walk()
         if node is not tree
     )
+
+
+def _count(node: exp.Expression | None) -> str:
+    """A LIMIT or OFFSET count: values and marks only, never a name."""
+    if node is None:
+        raise DescribeError("a row count with no value")
+    for part in node.walk():
+        if isinstance(part, (exp.Identifier, exp.Column, exp.Anonymous, exp.Query)):
+            raise DescribeError("a row count that names something")
+        if isinstance(part, exp.Var) and part.name != MARK:
+            raise DescribeError("a row count that names something")
+    return _operand(node)
 
 
 def _limit_text(select: exp.Expression) -> list[str]:
     parts: list[str] = []
     offset = select.args.get("offset")
     if isinstance(offset, exp.Offset):
-        parts.append(f"skipping {_operand(offset.expression)} rows")
+        parts.append(f"skipping {_count(offset.expression)} rows")
     limit = select.args.get("limit")
     if isinstance(limit, exp.Limit) and limit.expression is not None:
-        count = _operand(limit.expression)
+        count = _count(limit.expression)
         parts.append(f"first {count} {'row' if count == '1' else 'rows'}")
     return parts
 
 
 def _render_select(select: exp.Select) -> str:
-    projections = _join_words(_projection(p) for p in select.expressions)
+    projections = _join_words(
+        _projection(p, position) for position, p in enumerate(select.expressions, 1)
+    )
     if isinstance(select.args.get("distinct"), exp.Distinct):
         projections = f"distinct {projections}"
     text = f"Returns {projections}"
@@ -473,32 +720,60 @@ def _render_select(select: exp.Select) -> str:
     return text
 
 
-def _output_names(tree: exp.Expression) -> str:
+def _output_name(projection: exp.Expression, position: int, columns: dict[str, str]) -> str:
+    """A granted column's payload spelling, or the output's position. Never an alias."""
+    inner = projection.this if isinstance(projection, exp.Alias) else projection
+    if isinstance(inner, exp.Star) or (
+        isinstance(inner, exp.Column) and isinstance(inner.this, exp.Star)
+    ):
+        return "all columns"
+    if isinstance(inner, exp.Column):
+        folded = fold_identifier(inner.name)
+        renamed = isinstance(projection, exp.Alias) and fold_identifier(projection.alias) != folded
+        if folded in columns and not renamed:
+            return columns[folded]
+    return f"{COMPUTED} {position}"
+
+
+def _output_names(tree: exp.Expression, catalog: _Catalog) -> str:
     select: exp.Expression | None = tree
     while isinstance(select, exp.SetOperation):
         select = select.this
     if not isinstance(select, exp.Select):
         return "a computed value"
-    names = []
-    for projection in select.expressions:
-        name = projection.alias_or_name
-        if isinstance(projection, exp.Star) or (
-            isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)
-        ):
-            names.append("all columns")
-        elif name and name != MARK:
-            names.append(name)
-        else:
-            names.append("a computed value")
-    return _join_words(names)
+    columns = catalog.columns_of(catalog.tables)
+    return _join_words(
+        _output_name(projection, position, columns)
+        for position, projection in enumerate(select.expressions, 1)
+    )
 
 
-def _render_fallback(tree: exp.Expression) -> str:
-    ctes = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
-    tables = sorted({t.name for t in tree.find_all(exp.Table) if t.name and t.name not in ctes})
-    nested = len(list(tree.find_all(exp.Subquery))) + len(ctes)
+def _fallback_tables(tree: exp.Expression, catalog: _Catalog) -> tuple[list[str], int]:
+    """The granted tables the tree reads, in payload spelling, and its CTE count.
+
+    A reference to a CTE is not printed (its name is the model's). A named
+    source that is neither a CTE nor a granted table raises.
+    """
+    ctes = {fold_identifier(cte.alias_or_name) for cte in tree.find_all(exp.CTE)}
+    tables: set[str] = set()
+    for table in tree.find_all(exp.Table):
+        if not isinstance(table.this, exp.Identifier):
+            continue  # a table function: no name of its own to print
+        key = fold_identifier(table.name)
+        qualified = bool(table.args.get("db") or table.args.get("catalog"))
+        if key in ctes and not qualified:
+            continue
+        if key not in catalog.tables:
+            raise DescribeError("a table that is not granted")
+        tables.add(catalog.tables[key])
+    return sorted(tables), len(ctes)
+
+
+def _render_fallback(tree: exp.Expression, catalog: _Catalog) -> str:
+    tables, cte_count = _fallback_tables(tree, catalog)
+    nested = len(list(tree.find_all(exp.Subquery))) + cte_count
     combined = len(list(tree.find_all(exp.SetOperation)))
-    text = f"Returns {_output_names(tree)}"
+    text = f"Returns {_output_names(tree, catalog)}"
     if tables:
         text += f" from {_join_words(tables)}"
     extras: list[str] = []
@@ -518,18 +793,14 @@ def _render_fallback(tree: exp.Expression) -> str:
     return text
 
 
-def _render(tree: exp.Expression) -> str:
-    if isinstance(tree, exp.Select) and _simple(tree):
-        return _render_select(tree)
-    return _render_fallback(tree)
-
-
 __all__ = [
+    "COMPUTED",
     "MARK",
     "SHORTENED",
     "STATEMENT_CAP",
     "VOCABULARY",
     "DescribeError",
+    "Granted",
     "cap_statement",
     "statement",
 ]
