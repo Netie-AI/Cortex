@@ -2,6 +2,20 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## VERIFIED-QUERY (#321, refs #309) -- 2026-10-30
+
+Contract 1.11.0: `Answer.verified_query_ids` (optional, omitted when empty, so
+flag-off bodies keep the 1.10.0 field set; 1.10 clients ignore it). Off unless `CORTEX_VERIFIED_QUERY`
+is set. When on, the answer engine's generator is offered steward-confirmed
+example queries over tables the session grant names, and lists the examples
+it was shown, best first, in `verified_query_ids`. An example is never served
+for a different question: a served SQL that copies an example, or matches an
+example's result at any row window it spells (derived tables, CTEs, QUALIFY,
+offsets, ties included), abstains with `VQ_EXAMPLE_ECHO` unless the question
+is the one the steward confirmed and the statement is unchanged. A reused C-MEM
+solution or a plan+SQL answer never carries examples. The verified-query
+library is kept out of the serve path by new import-linter contracts.
+
 ## PICK-READING-01 (contract 1.10.0) -- 2026-10-30
 
 Founder ruling 2026-10-29 (CLAUDE.md section 9, split readings). With

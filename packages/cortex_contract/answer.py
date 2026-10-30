@@ -366,14 +366,32 @@ class Answer(BaseModel):
         ),
     )
 
+    # 1.11.0 (VERIFIED-QUERY #309): ids of the steward-confirmed examples that
+    # were in the SQL generator prompt for this served answer, best match
+    # first. One id per element, never a joined string. Omitted when empty.
+    # Not a phrasing-match id and not a stored answer. Older clients ignore it.
+    verified_query_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "1.11.0 ids of the steward-confirmed question/SQL examples that "
+            "were in the SQL generator prompt for this served answer, best "
+            "match first. The SQL was generated and executed on current data; "
+            "this does not mark a stored answer and reused stays false. "
+            "Omitted when no example was used. Older clients ignore it."
+        ),
+    )
+
     @model_serializer(mode="wrap")
     def _omit_empty_optional(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
         # No return annotation: the JSON schema stays the model's own. A null
-        # echo is omitted, so an answer to an ask without a pick serializes
-        # exactly as on 1.9.
+        # reading echo and an empty verified_query_ids are omitted, so an
+        # answer without either serializes exactly as on 1.9.
         data = handler(self)
-        if isinstance(data, dict) and data.get("plan_sql_reading_id") is None:
-            data.pop("plan_sql_reading_id", None)
+        if isinstance(data, dict):
+            if data.get("plan_sql_reading_id") is None:
+                data.pop("plan_sql_reading_id", None)
+            if not data.get("verified_query_ids"):
+                data.pop("verified_query_ids", None)
         return data
 
 

@@ -178,7 +178,7 @@ supported:
 
   - version: "1.10"
     spec: openapi-1.10.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive PICK-READING-01 (founder ruling 2026-10-29, CLAUDE.md section
@@ -224,6 +224,23 @@ supported:
       id, no rows, process-local, at most 600 s and never past the manifest
       expiry, bound as above. 1.9 clients send no pick and get the 1.9
       envelope byte for byte. canonical_manifest_bytes unchanged.
+
+  - version: "1.11"
+    spec: openapi-1.11.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive VERIFIED-QUERY (#309). Numbered 1.11, the next free minor when
+      it merged: 1.9 (#386) and 1.10 (#453) landed first, and the 1.8 slot
+      held for this line was never published, so no 1.8 spec exists. Answer gains optional
+      verified_query_ids (list of str), the ids of steward-confirmed examples
+      that were in the SQL generator prompt for this served answer, best
+      match first. It is omitted when empty, is not a phrasing-match id, and
+      does not mark a stored answer: the SQL was generated and executed on
+      current data, and reused stays false. Nothing else on the wire
+      changes. Additive against 1.10.0, the previous spec published here.
+      1.10 and older clients ignore the field and keep their behaviour.
+      canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

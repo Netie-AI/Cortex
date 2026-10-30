@@ -1,0 +1,1407 @@
+"""VERIFIED-QUERY (#309): steward-confirmed examples in the SQL generator's context.
+
+Off unless ``CORTEX_VERIFIED_QUERY`` is set. When off, the ask binds nothing,
+:func:`generation_examples` returns ``None`` before touching the library, and
+the historical phrase lanes are left alone.
+
+Three steps, all in this module:
+
+1. **Retrieve.** Only examples whose tables are inside the session's grant and
+   whose tables and columns still exist in the semantic layer are candidates.
+   Lexical similarity over the confirmed questions orders them. That is not an
+   exact-phrase table, and it never picks an answer: it decides which pairs
+   the model reads.
+2. **Generate.** The chosen pairs go into the prompt the SQL generator already
+   sends. The model writes the SELECT. An example's SQL never produces the
+   answer; it is executed only by the serve-time result comparison below.
+3. **Check before serving.** :func:`example_echo` compares the SQL that ran
+   with the examples that were in the prompt, and :func:`result_echo`
+   compares the rows. An example is context for new SQL, never the answer to
+   another question:
+
+   * an example's statement is re-served only unchanged, only for the
+     question the steward confirmed with it (C-MEM's normalised question
+     key), and only while that example is still inside the session grant and
+     the current schema. "Unchanged" is the whole canonical statement,
+     ``ORDER BY`` and the row window (``LIMIT``/``OFFSET``, as the serve path
+     caps it) included. That is the one re-serve, and it is a fresh
+     execution;
+   * the example's SQL with only its names or its row window changed is a
+     copy. A copy abstains for any other question, and for the confirmed
+     question too when it cuts the example at another row window;
+   * SQL written differently that returns an example's rows (column names,
+     column order, row order and the row window aside) is that example's
+     answer too, and is held to the same rule. The example runs at every row
+     window the SQL spells, at any depth, and at its own; an example with an
+     ``ORDER BY`` is also compared at the number of rows the SQL returned,
+     wherever the SQL put its cut. A window that may split tied rows is
+     compared with the ties. This closes the equivalent rewrites the text
+     comparison cannot see (``ORDER BY 2``, ``'X' = col``, ``col IN ('X')``,
+     reordered conjuncts or columns, an added or changed ``ORDER BY``, any of
+     them with a new ``LIMIT``, the example in a derived table with its own
+     ``LIMIT``, a ``QUALIFY row_number() ... <= N`` cut);
+   * SQL that carries an example's value or value-less filter into an answer
+     for a question that does not ask for it abstains too.
+
+   Each refusal is ``VQ_EXAMPLE_ECHO``. It runs in main's plausibility step,
+   so a refused answer is not served, promoted or remembered.
+
+When the flag is on, the ask does not also consult ``match_certified`` or
+``route_to_metric``.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import re
+import threading
+from collections import Counter
+from collections.abc import Callable, Collection, Iterable, Mapping
+from contextvars import ContextVar, Token
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any
+
+import sqlglot
+from sqlglot import exp
+
+from CortexOS.dms.sql_guardrail import MAX_LIMIT
+from CortexOS.memory.space_memory import question_key
+from CortexOS.memory.verified_query import get_verified_queries
+
+ENABLED_ENV = "CORTEX_VERIFIED_QUERY"
+ASK_ACTOR = "cortex:contract-ask"
+ECHO_CODE = "VQ_EXAMPLE_ECHO"
+
+# Share of the token union two questions must have before the confirmed one
+# is put in the prompt. This is a prompt-budget filter, not a safety control:
+# it only decides which pairs the model reads. Whatever it admits, the
+# serve-time check (example_echo) refuses SQL that answers the example's
+# question instead of this one. Set just under 0.42, the score of the
+# paraphrase pair in the unit must-fail
+#   test_must_fail_paraphrase_of_certified_question_reaches_the_example
+# It was not tuned on a scored pack.
+RETRIEVE_MIN = 0.35
+_TOKEN = re.compile(r"[a-z0-9]+")
+
+_TRUTHY = {"1", "true", "on", "yes"}
+
+
+def verified_query_enabled() -> bool:
+    return (os.environ.get(ENABLED_ENV) or "").strip().lower() in _TRUTHY
+
+
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(_TOKEN.findall((text or "").lower()))
+
+
+def lexical_similarity(left: str, right: str) -> float:
+    """Share of the token union. Not an exact-phrase lookup."""
+    a = _tokens(left)
+    b = _tokens(right)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def retrieve_example_ids(question: str, candidates: list[tuple[str, str]]) -> list[str]:
+    """Ids whose question is lexically near ``question``, best score first.
+
+    ``candidates`` is ``(id, question)``. A score under :data:`RETRIEVE_MIN`
+    is not an example. There is no normalized-phrase dict and no equality
+    shortcut. At most :data:`EXAMPLE_CAP` ids are returned.
+    """
+    from CortexOS.memory.verified_query import EXAMPLE_CAP
+
+    scored: list[tuple[float, str]] = []
+    seen: set[str] = set()
+    for qid, text in candidates:
+        key = str(qid).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        score = lexical_similarity(question, text)
+        if score >= RETRIEVE_MIN:
+            scored.append((score, key))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [qid for _score, qid in scored[:EXAMPLE_CAP]]
+
+
+# -- SQL facts used by the scope filter and the serve-time check ---------------
+def _parse(sql: str) -> exp.Expression | None:
+    try:
+        trees = [tree for tree in sqlglot.parse(sql or "", read="duckdb") if tree is not None]
+    except Exception:  # noqa: BLE001 - unparseable SQL is never an example
+        return None
+    return trees[0] if len(trees) == 1 else None
+
+
+def _name_tokens(name: str) -> list[str]:
+    return _TOKEN.findall((name or "").lower())
+
+
+def _cte_names(tree: exp.Expression) -> set[str]:
+    return {str(cte.alias or "").lower() for cte in tree.find_all(exp.CTE) if cte.alias}
+
+
+def _table_refs(tree: exp.Expression) -> set[str]:
+    """Every name read as a table, a CTE's name included."""
+    return {str(t.name or "").lower() for t in tree.find_all(exp.Table) if t.name}
+
+
+def _tables(tree: exp.Expression) -> set[str]:
+    return _table_refs(tree) - _cte_names(tree)
+
+
+def _columns(tree: exp.Expression) -> set[str]:
+    return {str(c.name or "").lower() for c in tree.find_all(exp.Column) if c.name}
+
+
+def _aliases(tree: exp.Expression) -> set[str]:
+    named = {str(a.alias or "").lower() for a in tree.find_all(exp.Alias) if a.alias}
+    return named | _cte_names(tree)
+
+
+def _literal_text(lit: exp.Literal) -> str:
+    return str(lit.this or "").strip().lower()
+
+
+def _predicate_values(pred: exp.Expression) -> set[str]:
+    """Literals on the value side of one comparison.
+
+    ``status = 'DELAYED'`` gives ``delayed``; ``100.0 * load / cap > 90`` gives
+    ``90`` only, since a constant inside the column expression is not a value
+    the question chooses.
+    """
+    if isinstance(pred, exp.In):
+        sides: list[Any] = list(pred.expressions)
+    elif isinstance(pred, exp.Between):
+        sides = [pred.args.get("low"), pred.args.get("high")]
+    elif isinstance(pred, exp.Binary):
+        sides = [pred.left, pred.right]
+    else:
+        sides = [pred]
+    return {
+        text
+        for side in sides
+        if isinstance(side, exp.Expression) and side.find(exp.Column) is None
+        for lit in side.find_all(exp.Literal)
+        if (text := _literal_text(lit))
+    }
+
+
+def _comparison_literals(tree: exp.Expression) -> set[str]:
+    """Values the query compares against: ``status = 'DELAYED'``, ``x > 90``."""
+    return {text for pred in tree.find_all(exp.Predicate) for text in _predicate_values(pred)}
+
+
+def _valueless_filter_tokens(tree: exp.Expression) -> set[str]:
+    """Words of the columns in filters that compare against no value (``is_hazardous = true``).
+
+    A filter with a value is held to the value rule instead.
+    """
+    out: set[str] = set()
+    for pred in tree.find_all(exp.Predicate):
+        if _predicate_values(pred):
+            continue
+        for col in pred.find_all(exp.Column):
+            out.update(tok for tok in _name_tokens(col.name) if len(tok) >= 3)
+    return out
+
+
+Window = tuple[int, int]
+
+
+def _limit_has_options(node: exp.Expression) -> bool:
+    """True for ``LIMIT n PERCENT`` or ``... WITH TIES``: not a plain row count."""
+    options = node.args.get("limit_options")
+    if not isinstance(options, exp.Expression):
+        return False
+    return bool(options.args.get("percent") or options.args.get("with_ties"))
+
+
+def _row_window(tree: exp.Expression) -> Window | None:
+    """``(LIMIT, OFFSET)`` of the top-level statement as the serve path runs it.
+
+    The SQL gate (``sql_guardrail.validate_sql``) caps every statement: no
+    ``LIMIT``, one above ``MAX_LIMIT``, or one that is not a whole number runs
+    as ``LIMIT MAX_LIMIT``. No ``OFFSET`` is ``OFFSET 0``. ``None`` when the
+    window cannot be stated: the ``OFFSET`` is not a whole number, or the
+    ``LIMIT`` is a share (``PERCENT``) or keeps ties, which the gate leaves as
+    written, so it is no row count.
+    """
+    cap = int(MAX_LIMIT)
+    limit = cap
+    node = tree.args.get("limit")
+    if isinstance(node, exp.Limit) and _limit_has_options(node):
+        return None
+    if node is not None:
+        try:
+            limit = min(int(node.expression.this), cap)
+        except (TypeError, ValueError, AttributeError):
+            limit = cap
+    offset = 0
+    node = tree.args.get("offset")
+    if node is not None:
+        try:
+            offset = int(node.expression.this)
+        except (TypeError, ValueError, AttributeError):
+            return None
+    return limit, offset
+
+
+def _narrow(window: Window) -> bool:
+    """True when the window keeps only part of what fits under ``MAX_LIMIT``."""
+    limit, offset = window
+    return limit < int(MAX_LIMIT) or offset > 0
+
+
+def _at_window(tree: exp.Expression, window_of: exp.Expression) -> str:
+    """``tree`` with the top-level ``LIMIT``/``OFFSET`` of ``window_of``."""
+    copy = tree.copy()
+    for arg in ("limit", "offset"):
+        node = window_of.args.get(arg)
+        copy.set(arg, node.copy() if node is not None else None)
+    return copy.sql(dialect="duckdb")
+
+
+def _with_window(tree: exp.Expression, window: Window) -> str:
+    """``tree`` cut at ``window``: ``LIMIT window[0]`` and, when not 0, ``OFFSET window[1]``."""
+    copy = tree.copy()
+    copy.set("limit", exp.Limit(expression=exp.Literal.number(window[0])))
+    copy.set(
+        "offset",
+        exp.Offset(expression=exp.Literal.number(window[1])) if window[1] else None,
+    )
+    return copy.sql(dialect="duckdb")
+
+
+def _stated_rows(node: exp.Expression | None) -> int | None:
+    """The whole number a ``LIMIT``, ``FETCH`` or ``OFFSET`` clause states, else ``None``."""
+    if node is None or (isinstance(node, exp.Limit) and _limit_has_options(node)):
+        return None
+    if isinstance(node, exp.Fetch):
+        options = node.args.get("limit_options")
+        if isinstance(options, exp.Expression) and options.args.get("percent"):
+            return None
+        value = node.args.get("count")
+    else:
+        value = node.args.get("expression")
+    try:
+        return int(value.this)  # type: ignore[union-attr]
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _inner_windows(tree: exp.Expression) -> list[Window]:
+    """Row windows spelled below the top-level statement: a derived table, a CTE, a subquery.
+
+    The serve path caps only the top-level statement, so a ``LIMIT`` or
+    ``FETCH`` written inside the SQL is a cut of its own. A window this cannot
+    state (``PERCENT``, an expression) is left out; the row-count comparison in
+    :func:`result_echo` does not depend on how a cut is spelled.
+    """
+    cap = int(MAX_LIMIT)
+    out: list[Window] = []
+    for query in tree.find_all(exp.Query):
+        if query is tree:
+            continue
+        limit_node = query.args.get("limit")
+        offset_node = query.args.get("offset")
+        if limit_node is None and offset_node is None:
+            continue
+        limit = cap if limit_node is None else _stated_rows(limit_node)
+        offset = 0 if offset_node is None else _stated_rows(offset_node)
+        if limit is None or offset is None:
+            continue
+        window = (min(max(limit, 0), cap), max(offset, 0))
+        if _narrow(window) and window not in out:
+            out.append(window)
+    return out
+
+
+def _spelled_offsets(tree: exp.Expression) -> set[int]:
+    """Every whole-number ``OFFSET`` the SQL spells, at any depth."""
+    out: set[int] = set()
+    for node in tree.find_all(exp.Offset):
+        value = _stated_rows(node)
+        if value is not None and value >= 0:
+            out.add(value)
+    return out
+
+
+def _cut_only_at_top(tree: exp.Expression) -> bool:
+    """True when the top-level ``LIMIT``/``OFFSET`` is the only row cut the SQL can make.
+
+    A single SELECT with no nested query, no window function, no ``QUALIFY``,
+    no sample and no ``FETCH``. Anything else may cut rows below the top level,
+    where the top-level window does not show it.
+    """
+    if not isinstance(tree, exp.Select):
+        return False
+    limit = tree.args.get("limit")
+    if limit is not None and not isinstance(limit, exp.Limit):
+        return False
+    for node in tree.walk():
+        if node is tree:
+            continue
+        if isinstance(node, (exp.Query, exp.Window, exp.Qualify, exp.TableSample, exp.Fetch)):
+            return False
+        if isinstance(node, (exp.Limit, exp.Offset)) and node.parent is not tree:
+            return False
+    return True
+
+
+def _ranks(tree: exp.Expression) -> bool:
+    """True when the statement orders its rows, so a cut keeps the first ones of a rank."""
+    return tree.args.get("order") is not None
+
+
+def _without_page_tiebreak(sql: str) -> str:
+    """``sql`` before the guardrail appended its page tiebreak (#435), else ``sql``.
+
+    The serve path totals the order of a page its LIMIT cuts. A copy of an
+    example still has to read as that copy, so the copy rule compares the
+    statement the model wrote. Only a suffix the guardrail itself would append
+    is dropped.
+    """
+    from CortexOS.dms.sql_guardrail import apply_page_tiebreak
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+
+    try:
+        tree = sqlglot.parse_one(sql, read="duckdb")
+    except Exception:  # noqa: BLE001 - unparseable SQL is compared as written
+        return sql
+    order = tree.args.get("order") if isinstance(tree, exp.Select) else None
+    if order is None or tree.args.get("limit") is None:
+        return sql
+    semantic = load_semantic_layer()
+    for keep in range(1, len(order.expressions)):
+        shorter = tree.copy()
+        shorter.args["order"].set("expressions", list(shorter.args["order"].expressions[:keep]))
+        text = shorter.sql(dialect="duckdb")
+        if apply_page_tiebreak(text, semantic, None) == sql:
+            return text
+    return sql
+
+
+def _query_key(tree: exp.Expression, *, window: bool = False) -> str | None:
+    """Canonical text of a query, or ``None`` if it cannot be made.
+
+    Always set aside: output names (a reference to one in ``ORDER BY``/
+    ``HAVING``/``QUALIFY``/``GROUP BY`` is replaced by the expression it
+    names), table aliases, column qualifiers, identifier quoting and case.
+
+    ``window=False`` is the copy rule's key. The top-level row window
+    (``LIMIT`` and ``OFFSET``) is set aside too, so a copy that only renames
+    or re-cuts is still a copy. Setting these aside can only make two
+    different queries look alike, which refuses more, never less.
+
+    ``window=True`` is the re-serve rule's key: the whole statement, with the
+    row window as the serve path runs it (:func:`_row_window`). Only a
+    statement with this key equal to an example's is that example unchanged.
+    """
+    bounds: Window | None = None
+    if window:
+        bounds = _row_window(tree)
+        if bounds is None:
+            return None
+    try:
+        copy = tree.copy()
+        copy.set("limit", None)
+        copy.set("offset", None)
+        for table in copy.find_all(exp.Table):
+            if table.alias:
+                table.set("alias", None)
+        for col in copy.find_all(exp.Column):
+            if col.table:
+                col.set("table", None)
+        for select in list(copy.find_all(exp.Select)):
+            named = {
+                str(proj.alias).lower(): proj.this
+                for proj in select.expressions
+                if isinstance(proj, exp.Alias) and proj.alias
+            }
+            for arg in ("order", "having", "qualify", "group"):
+                node = select.args.get(arg)
+                if node is None:
+                    continue
+                for col in list(node.find_all(exp.Column)):
+                    target = named.get(str(col.name or "").lower())
+                    if target is not None:
+                        col.replace(target.copy())
+            select.set(
+                "expressions",
+                [p.this if isinstance(p, exp.Alias) else p for p in select.expressions],
+            )
+        for ident in copy.find_all(exp.Identifier):
+            ident.set("quoted", False)
+        text = copy.sql(dialect="duckdb", normalize=True, pretty=False)
+    except Exception:  # noqa: BLE001 - no key means no proof it is not a copy
+        return None
+    if bounds is None:
+        return text
+    return f"{text} LIMIT {bounds[0]} OFFSET {bounds[1]}"
+
+
+def _canonical_expression(node: exp.Expression) -> str:
+    copy = node.copy()
+    for col in copy.find_all(exp.Column):
+        if col.table:
+            col.set("table", None)
+    for ident in copy.find_all(exp.Identifier):
+        ident.set("quoted", False)
+    return copy.sql(dialect="duckdb", normalize=True, pretty=False)
+
+
+_ORDER_KEY = "vq_order_key_"
+
+
+def _ranked_statement(tree: exp.Expression) -> tuple[str, int] | None:
+    """``tree`` with no row window and its ``ORDER BY`` values added as outputs.
+
+    Returns the SQL and the number of order keys, named ``vq_order_key_<i>``.
+    A positional or output-name reference is replaced by the expression it
+    names. ``None`` when that cannot be done without changing which rows the
+    statement returns: a set operation, a positional reference over ``*``, or
+    ``DISTINCT`` with an order key that is not an output.
+    """
+    if not isinstance(tree, exp.Select):
+        return None
+    projections = list(tree.expressions)
+    if any(str(p.alias_or_name or "").lower().startswith(_ORDER_KEY) for p in projections):
+        return None
+    star = any(p.is_star for p in projections)
+    named = {
+        str(p.alias).lower(): p.this for p in projections if isinstance(p, exp.Alias) and p.alias
+    }
+    keys: list[exp.Expression] = []
+    order = tree.args.get("order")
+    for item in order.expressions if order is not None else []:
+        node = item.this if isinstance(item, exp.Ordered) else item
+        if isinstance(node, exp.Literal) and not node.is_string:
+            try:
+                position = int(node.this)
+            except (TypeError, ValueError):
+                return None
+            if star or not 1 <= position <= len(projections):
+                return None
+            target = projections[position - 1]
+            node = target.this if isinstance(target, exp.Alias) else target
+        elif isinstance(node, exp.Column) and not node.table:
+            node = named.get(str(node.name or "").lower(), node)
+        keys.append(node.copy())
+    distinct = tree.args.get("distinct")
+    if distinct is not None:
+        if distinct.args.get("on") is not None or star:
+            return None
+        shown = {
+            _canonical_expression(p.this if isinstance(p, exp.Alias) else p) for p in projections
+        }
+        if any(_canonical_expression(key) not in shown for key in keys):
+            return None
+    copy = tree.copy()
+    copy.set("limit", None)
+    copy.set("offset", None)
+    copy.set(
+        "expressions",
+        [*copy.expressions, *(exp.alias_(key, f"{_ORDER_KEY}{i}") for i, key in enumerate(keys))],
+    )
+    return copy.sql(dialect="duckdb"), len(keys)
+
+
+def _touch(word: str, term: str) -> bool:
+    """Same word, or one is the other plus a short ending (``sku``/``skus``).
+
+    Numbers must match exactly. No word list: this is spelling only.
+    """
+    if word == term:
+        return True
+    if any(ch.isdigit() for ch in word + term):
+        return False
+    short, long_ = sorted((word, term), key=len)
+    return len(short) >= 3 and long_.startswith(short) and len(long_) - len(short) <= 2
+
+
+def _touches_any(word: str, terms: Iterable[str]) -> bool:
+    return any(_touch(word, term) for term in terms)
+
+
+# -- step 1: which examples may be read at all --------------------------------
+def current_schema() -> dict[str, frozenset[str]]:
+    """Tables and their columns as the semantic layer states them now."""
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+
+    layer = load_semantic_layer() or {}
+    tables = layer.get("tables") or {}
+    return {
+        str(name).lower(): frozenset(str(col).lower() for col in (spec or {}).get("columns") or [])
+        for name, spec in tables.items()
+        if isinstance(spec, dict)
+    }
+
+
+def example_fits(
+    sql: str,
+    *,
+    granted_tables: Collection[str] | None,
+    schema: Mapping[str, Collection[str]],
+) -> bool:
+    """True when the example reads only granted tables and current columns.
+
+    An example whose table left the grant, or whose table or column is gone
+    from the semantic layer, is not put in front of the model. Unparseable SQL
+    is out.
+    """
+    tree = _parse(sql)
+    if tree is None:
+        return False
+    tables = _tables(tree)
+    if not tables:
+        return False
+    if granted_tables is not None and not tables <= {t.lower() for t in granted_tables}:
+        return False
+    if not tables <= set(schema):
+        return False
+    known: set[str] = set()
+    for table in tables:
+        known.update(schema[table])
+    return _columns(tree) <= known | _aliases(tree)
+
+
+def generation_examples(
+    *,
+    space_id: str,
+    question: str,
+    scored_pack_id: str | None = None,
+    granted_tables: Collection[str] | None = None,
+    schema: Mapping[str, Collection[str]] | None = None,
+) -> dict[str, Any] | None:
+    """Prompt examples for one Space, or ``None`` when off, empty, or not retrieved.
+
+    Only examples inside the grant and the current schema are scored. Lexical
+    similarity names the ids. A question that is not near any of them gets no
+    examples. ``verified_query_ids`` lists the retrieved examples, best first.
+    Memory fields name those C-MEM solutions.
+    """
+    if not verified_query_enabled():
+        return None
+    space = (space_id or "").strip()
+    if not space:
+        return None
+    found = get_verified_queries().examples(
+        space_id=space, actor=ASK_ACTOR, scored_pack_id=scored_pack_id
+    )
+    if not found:
+        return None
+    layout = current_schema() if schema is None else schema
+    found = [
+        ex
+        for ex in found
+        if example_fits(ex.query.sql, granted_tables=granted_tables, schema=layout)
+    ]
+    chosen = retrieve_example_ids(
+        question, [(ex.query.id, ex.query.question) for ex in found]
+    )
+    by_id = {ex.query.id: ex for ex in found}
+    picked = [by_id[qid] for qid in chosen if qid in by_id]
+    if not picked:
+        return None
+    prompt = [
+        {"id": ex.query.id, "question": ex.query.question, "sql": ex.query.sql} for ex in picked
+    ]
+    return {
+        "question": question,
+        "schema": {table: sorted(cols) for table, cols in layout.items()},
+        "granted_tables": (
+            None if granted_tables is None else sorted({str(t).lower() for t in granted_tables})
+        ),
+        "prompt": prompt,
+        "verified_query_ids": [item["id"] for item in prompt],
+        "memory_ids_read": [ex.entry.id for ex in picked],
+        "memory_reads": [
+            {**ex.entry.provenance(), "served_at": ex.read_stamp.served_at} for ex in picked
+        ],
+    }
+
+
+_PREAMBLE = (
+    "VERIFIED EXAMPLES from this Space. They show question/SQL pairs a steward "
+    "confirmed. Write a new SELECT for the QUESTION. An example is not the query "
+    "to execute. Take every filter value from the QUESTION, never from an example."
+)
+
+
+def question_with_examples(question: str, examples: list[dict[str, Any]]) -> str:
+    """Put examples in front of the question the SQL generator already sends.
+
+    The generator is unchanged. It copies this string into the FreeRoute prompt
+    and writes a new SELECT. The example SQL never produces the answer; only
+    the serve-time result comparison (:func:`result_echo`) runs it.
+    """
+    lines = [_PREAMBLE]
+    for item in examples:
+        qid = str(item.get("id") or "").strip()
+        asked = str(item.get("question") or "").strip()
+        sql = str(item.get("sql") or "").strip()
+        if not asked or not sql:
+            continue
+        lines.append(f"EXAMPLE {qid}:")
+        lines.append(f"Question: {asked}")
+        lines.append(f"SQL: {sql}")
+    if len(lines) == 1:
+        return question
+    lines.append("")
+    lines.append(question)
+    return "\n".join(lines)
+
+
+# -- step 3: the SQL that ran must answer this question, not an example's -----
+def same_question(asked: str, confirmed: str) -> bool:
+    """True when ``asked`` is the question the steward confirmed.
+
+    The comparison is C-MEM's solution key (:func:`question_key`): case,
+    spacing and end punctuation aside, every word in its place and every
+    symbol kept. "above 300 ... below 10" is not "below 300 ... above 10",
+    and "> 300" is not "< 300". It is applied only to an example retrieval
+    already put in the prompt, and only to decide whether that example's SQL
+    may be re-served. It never chooses an example or an answer.
+    """
+    key = question_key(asked or "")
+    return bool(key) and key == question_key(confirmed or "")
+
+
+@dataclass(frozen=True, slots=True)
+class _Seen:
+    id: str
+    question: str
+    sql: str
+    words: frozenset[str]
+    literals: frozenset[str]
+    valueless: frozenset[str]
+    key: str | None
+    statement: str | None
+    window: Window | None
+    tables: frozenset[str]
+
+
+def _seen(examples: Iterable[Mapping[str, Any]]) -> list[_Seen]:
+    out: list[_Seen] = []
+    for item in examples:
+        sql = str(item.get("sql") or "")
+        tree = _parse(sql)
+        if tree is None:
+            continue
+        question = str(item.get("question") or "")
+        out.append(
+            _Seen(
+                id=str(item.get("id") or ""),
+                question=question,
+                sql=sql,
+                words=_tokens(question),
+                literals=frozenset(_comparison_literals(tree)),
+                valueless=frozenset(_valueless_filter_tokens(tree)),
+                key=_query_key(tree),
+                statement=_query_key(tree, window=True),
+                window=_row_window(tree),
+                tables=frozenset(_tables(tree)),
+            )
+        )
+    return out
+
+
+def _re_serve_test(
+    question: str,
+    schema: Mapping[str, Collection[str]] | None,
+    granted_tables: Collection[str] | None,
+) -> Callable[[_Seen], bool]:
+    """``ex -> True`` when this ask is a re-serve of example ``ex``.
+
+    The question is the example's confirmed question (:func:`same_question`),
+    and the example still reads only granted tables and current columns
+    (:func:`example_fits`). The schema is read once, and only if needed.
+    """
+    layout_box: list[Mapping[str, Collection[str]]] = []
+
+    def re_serve(ex: _Seen) -> bool:
+        if not same_question(question, ex.question):
+            return False
+        if not layout_box:
+            layout_box.append(current_schema() if schema is None else schema)
+        return example_fits(ex.sql, granted_tables=granted_tables, schema=layout_box[0])
+
+    return re_serve
+
+
+def example_echo(
+    question: str,
+    sql: str,
+    examples: Iterable[Mapping[str, Any]],
+    *,
+    schema: Mapping[str, Collection[str]] | None = None,
+    granted_tables: Collection[str] | None = None,
+) -> list[str]:
+    """Named refusals when ``sql`` answers a retrieved example instead of ``question``.
+
+    Empty means serve. Each entry starts with :data:`ECHO_CODE`. All rules are
+    fail-closed.
+
+    A **re-serve** is the one case where an example's own SQL may answer: the
+    question is the example's confirmed question (:func:`same_question`), and
+    the example still reads only tables in ``granted_tables`` and tables and
+    columns in ``schema`` (:func:`example_fits`). The SQL is executed fresh.
+
+    * **copy**: SQL that is an example's SQL (row window and names aside) is
+      refused unless this ask is a re-serve of that example and the SQL is
+      that example's whole statement unchanged, ``ORDER BY`` and row window
+      (``LIMIT``/``OFFSET`` as the serve path caps it) included. No word in
+      the question can make a copy acceptable for another question: a near
+      miss ("pending" for "delayed", "lowest" for "highest", "inbound", "not",
+      reordered words, a paraphrase, another row count) abstains. The
+      confirmed question with the example cut at another row window abstains
+      too.
+    * **value**: a value the SQL compares against that is also in an
+      example's SQL must be spelled in the question, unless this ask is a
+      re-serve of that example. ``status = 'DELAYED'`` for "pending
+      shipments" is refused even when the SQL is not a copy.
+    * **dropped filter**: when the SQL keeps a filter that has no value
+      (``is_hazardous = true``) from an example, the question must still say
+      the word the example's question used for it.
+
+    SQL that cannot be parsed or canonicalised is refused too. SQL that is
+    written differently but returns an example's rows is :func:`result_echo`'s
+    to refuse.
+    """
+    seen = _seen(examples)
+    if not seen:
+        return []
+    tree = _parse(sql)
+    if tree is None:
+        return [f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples"]
+    asked = _tokens(question)
+    re_serve = _re_serve_test(question, schema, granted_tables)
+
+    out: list[str] = []
+
+    for value in sorted(_comparison_literals(tree)):
+        sources = [ex for ex in seen if value in ex.literals]
+        if not sources or any(re_serve(ex) for ex in sources):
+            continue
+        parts = _TOKEN.findall(value)
+        if parts and all(_touches_any(part, asked) for part in parts):
+            continue
+        out.append(
+            f"{ECHO_CODE}: the value '{value}' comes from verified example "
+            f"{sources[0].id} and the question does not ask for it"
+        )
+
+    kept = _valueless_filter_tokens(tree)
+    for ex in seen:
+        shared = kept & ex.valueless
+        if not shared:
+            continue
+        for word in sorted(ex.words):
+            if _touches_any(word, asked):
+                continue
+            term = next((t for t in sorted(shared) if _touch(word, t)), None)
+            if term is not None:
+                out.append(
+                    f"{ECHO_CODE}: the SQL keeps the '{term}' filter of verified example "
+                    f"{ex.id}, whose question says '{word}', and this question does not"
+                )
+
+    key = _query_key(tree)
+    if key is None:
+        out.append(f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples")
+        return out
+    statement = _query_key(tree, window=True)
+    copied = [ex for ex in seen if ex.key is None or ex.key == key]
+    unchanged = [
+        ex
+        for ex in copied
+        if statement is not None and ex.statement == statement and re_serve(ex)
+    ]
+    if copied and not unchanged:
+        for ex in copied:
+            if not same_question(question, ex.question):
+                why = "and only the question the steward confirmed for it may re-serve it"
+            elif not re_serve(ex):
+                why = "but that example no longer fits this session's grant and the current schema"
+            else:
+                why = (
+                    "cut at another row window (LIMIT/OFFSET), and a re-serve runs "
+                    "the example's statement unchanged"
+                )
+            out.append(
+                f"{ECHO_CODE}: the SQL is verified example {ex.id} "
+                f"(row window and names aside), {why}"
+            )
+    return out
+
+
+# -- step 3, by result: the rows served must not be an example's rows ----------
+RunSql = Callable[[str], list[dict[str, Any]]]
+
+
+def _cell(value: Any) -> str:
+    """One value as the result comparison sees it.
+
+    Numbers compare by value to ten significant digits (``1031`` is
+    ``1031.0``), text by its trimmed, case-folded spelling. Setting these
+    aside can only make two results look alike, which refuses more, never
+    less.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            number = float(value)
+        except (OverflowError, ValueError):
+            return str(value)
+        if math.isnan(number):
+            return "nan"
+        return format(number, ".10g")
+    return str(value).strip().casefold()
+
+
+def _rows_key(rows: Iterable[Mapping[str, Any]]) -> Counter[tuple[str, ...]]:
+    """Rows as a multiset, with column names, column order and row order set aside."""
+    return Counter(tuple(sorted(_cell(v) for v in row.values())) for row in rows)
+
+
+def _tied_window(
+    ranked: list[dict[str, Any]], keys: int, window: Window
+) -> Counter[tuple[str, ...]] | None:
+    """Rows that ``window`` may keep from ``ranked``, with every tie at its edges.
+
+    ``ranked`` is a :func:`_ranked_statement` result: ordered, with ``keys``
+    order values per row. A window that cuts through rows with equal order
+    values may keep any of them, so all of them are returned (no ``ORDER BY``
+    makes every row a tie). ``None`` when the ties may run past ``MAX_LIMIT``.
+    """
+    names = [f"{_ORDER_KEY}{i}" for i in range(keys)]
+
+    def order(row: Mapping[str, Any]) -> tuple[str, ...]:
+        return tuple(_cell(row.get(name)) for name in names)
+
+    capped = len(ranked) >= int(MAX_LIMIT)
+    limit, offset = window
+    start, stop = max(offset, 0), min(max(offset, 0) + max(limit, 0), len(ranked))
+    if start >= stop:
+        return None if capped else Counter()
+    first, last = order(ranked[start]), order(ranked[stop - 1])
+    while start > 0 and order(ranked[start - 1]) == first:
+        start -= 1
+    while stop < len(ranked) and order(ranked[stop]) == last:
+        stop += 1
+    if capped and stop >= len(ranked):
+        return None
+    return _rows_key(
+        {k: v for k, v in row.items() if not str(k).startswith(_ORDER_KEY)}
+        for row in ranked[start:stop]
+    )
+
+
+def result_echo(
+    question: str,
+    sql: str,
+    examples: Iterable[Mapping[str, Any]],
+    *,
+    run: RunSql,
+    schema: Mapping[str, Collection[str]] | None = None,
+    granted_tables: Collection[str] | None = None,
+) -> list[str]:
+    """Named refusals when the rows ``sql`` returns are a retrieved example's rows.
+
+    :func:`example_echo` compares SQL text, so an equivalent rewrite of an
+    example (``ORDER BY 2``, ``'X' = col``, ``col IN ('X')``, conjuncts or
+    output columns in another order, an added or changed ``ORDER BY``, a new
+    ``LIMIT``, the example wrapped in a derived table or cut by ``QUALIFY``)
+    is new SQL to it. This rule compares what the customer would get. ``run``
+    executes one statement the way the serve path does, under this session's
+    manifest.
+
+    Each example in the prompt that reads a table ``sql`` reads (every
+    example when ``sql`` names no table) is compared with the rows ``sql``
+    returns, column names, column order and row order aside
+    (:func:`_rows_key`). A cut may be spelled anywhere in ``sql``, so the
+    example's rows are taken at every window that could give them:
+
+    * **spelled windows**: the example at the top-level row window of
+      ``sql`` (its ``LIMIT``/``OFFSET`` replaced by those of ``sql``), at its
+      own window, and at each window ``sql`` spells below the top level (a
+      derived table, a CTE, a subquery). The same multiset of rows is the
+      example's answer. When such a window keeps only part of the example
+      and returns as many rows as ``sql``, ``sql``'s rows are the example's
+      answer too when they are one of the picks the window may make among
+      tied rows (:func:`_tied_window`);
+    * **row count**: when the example orders its rows, its first rows by
+      that order, as many as ``sql`` returned, from the first row and from
+      every ``OFFSET`` either statement spells, ties included. This one does
+      not depend on where or how ``sql`` cuts: a ``LIMIT`` inside a derived
+      table, ``QUALIFY row_number() ... <= N`` or any other cut that keeps
+      the first N rows of the example's order returns rows this window
+      holds. An example with no ``ORDER BY`` ranks nothing, so any number of
+      its rows is also what a narrower question's right SQL returns (an
+      added filter); it is compared at the spelled windows only, and its
+      filters are held by :func:`example_echo`.
+
+    A re-served example (this ask is its confirmed question) is compared the
+    same way unless ``sql`` keeps the example's row window and can cut rows
+    nowhere else (:func:`_cut_only_at_top`): its rows at another window or
+    another row count are not its confirmed answer. The answer is served
+    when a re-served example returns the same rows at its own window, since
+    two confirmed questions may share one answer. Fail-closed:
+
+    * ``sql`` or an example that cannot be run cannot be shown to differ, so
+      the answer is refused;
+    * two results that both fill the serve path's row cap (``MAX_LIMIT``)
+      cannot be shown to differ past it, so the answer is refused;
+    * a window whose ties cannot be listed (a set operation, ``ORDER BY 2``
+      over ``*``, ``DISTINCT`` ordered by a hidden value, ties or an
+      ``OFFSET`` past the cap) cannot be shown to differ, so the answer is
+      refused, unless ``sql``'s rows have another number of columns than the
+      example's, which no window of the example returns;
+    * a different question whose right answer happens to equal an example's
+      rows at one of these windows abstains too, for instance a threshold on
+      the example's ``ORDER BY`` column that keeps exactly its first rows.
+      That is the price of never serving a near miss.
+
+    Nothing runs when ``sql`` is a re-served example's whole statement
+    unchanged, or when no example to compare shares a table with it. Each
+    statement runs at most once per answer. An example's rows are compared
+    here and never served.
+    """
+    seen = _seen(examples)
+    if not seen:
+        return []
+    tree = _parse(sql)
+    if tree is None:
+        return [f"{ECHO_CODE}: the SQL that ran cannot be compared with the verified examples"]
+    read = _table_refs(tree)
+    re_serve = _re_serve_test(question, schema, granted_tables)
+    served_by = [ex for ex in seen if re_serve(ex)]
+    statement = _query_key(tree, window=True)
+    if statement is not None and any(ex.statement == statement for ex in served_by):
+        return []
+    window = _row_window(tree)
+    top_cut_only = window is not None and _cut_only_at_top(tree)
+
+    def shares(ex: _Seen) -> bool:
+        # A CTE's name counts as a table read, and SQL that names no table is
+        # compared with every example: an unread table is no proof of a
+        # different answer.
+        return not read or bool(ex.tables & read)
+
+    compared = [
+        ex
+        for ex in seen
+        if shares(ex) and (ex not in served_by or not top_cut_only or ex.window != window)
+    ]
+    if not compared:
+        return []
+    try:
+        rows = run(sql)
+    except Exception:  # noqa: BLE001 - rows that cannot be read cannot be shown to differ
+        return [
+            f"{ECHO_CODE}: the rows of the SQL that ran cannot be compared with "
+            f"verified example {compared[0].id}"
+        ]
+    answer = _rows_key(rows)
+    count = len(rows)
+    width = len(rows[0]) if rows else 0
+    cap = int(MAX_LIMIT)
+    inner = _inner_windows(tree)
+    offsets = _spelled_offsets(tree)
+    results: dict[str, list[dict[str, Any]] | Exception] = {}
+
+    def fetch(text: str) -> list[dict[str, Any]]:
+        if text not in results:
+            try:
+                results[text] = list(run(text))
+            except Exception as exc:  # noqa: BLE001 - kept, and raised to every reader
+                results[text] = exc
+        found = results[text]
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    def same_at_own_window(ex: _Seen) -> bool:
+        try:
+            return _rows_key(fetch(ex.sql)) == answer
+        except Exception:  # noqa: BLE001 - not run is not shown to be the same
+            return False
+
+    def verdict(ex: _Seen) -> str:
+        theirs_tree = _parse(ex.sql)
+        if theirs_tree is None:
+            return "unrun"
+        # Spelled windows: the SQL's top-level window, the example's own, and
+        # every window the SQL spells below its top level.
+        at_top = ex.sql if window is not None and ex.window == window else _at_window(theirs_tree, tree)
+        cuts: dict[str, Window | None] = {at_top: window}
+        cuts.setdefault(ex.sql, ex.window)
+        for inner_window in inner:
+            cuts.setdefault(_with_window(theirs_tree, inner_window), inner_window)
+        tie_windows: list[Window] = []
+        unstated = False
+        widths: set[int] = set()
+
+        def as_wide() -> bool:
+            # Rows of another number of columns are no window of the example.
+            return not widths or width in widths
+
+        for text, cut in cuts.items():
+            if cut is not None and cut[0] < count:
+                continue  # a window of fewer rows cannot return these rows
+            try:
+                theirs = fetch(text)
+            except Exception:  # noqa: BLE001 - an example that cannot run is not shown to differ
+                return "unrun"
+            if count >= cap and len(theirs) >= cap:
+                return "capped"
+            if _rows_key(theirs) == answer:
+                return "same"
+            widths.update(len(row) for row in theirs[:1])
+            if len(theirs) != count:
+                continue
+            if cut is None:
+                unstated = True
+            elif _narrow(cut):
+                tie_windows.append(cut)
+        # Row count: the example's first rows by its own order, as many as
+        # the SQL returned, wherever and however the SQL cut them.
+        if _ranks(theirs_tree) and 0 < count < cap:
+            own_offset = 0 if ex.window is None else ex.window[1]
+            tie_windows.extend((count, offset) for offset in sorted(offsets | {own_offset}))
+        if not tie_windows:
+            return "untied" if unstated and as_wide() else "differ"
+        ranked = _ranked_statement(theirs_tree)
+        if ranked is None:
+            return "untied" if as_wide() else "differ"
+        ranked_sql, keys = ranked
+        try:
+            ordered = fetch(ranked_sql)
+        except Exception:  # noqa: BLE001 - an example that cannot run is not shown to differ
+            return "unrun"
+        widths.update(
+            sum(1 for name in row if not str(name).startswith(_ORDER_KEY)) for row in ordered[:1]
+        )
+        if not as_wide():
+            return "differ"
+        found = "untied" if unstated else "differ"
+        for cut in dict.fromkeys(tie_windows):
+            tied = _tied_window(ordered, keys, cut)
+            if tied is None:
+                found = "untied"
+            elif answer <= tied:
+                return "same"
+        return found
+
+    out: list[str] = []
+    for ex in compared:
+        found = verdict(ex)
+        if ex in served_by and found == "same" and same_at_own_window(ex):
+            continue
+        if found == "same" and ex in served_by:
+            out.append(
+                f"{ECHO_CODE}: the SQL returns the rows of verified example {ex.id} cut "
+                "at another row window (LIMIT/OFFSET), and a re-serve runs the "
+                "example's statement unchanged"
+            )
+        elif found == "same":
+            out.append(
+                f"{ECHO_CODE}: the SQL returns the rows of verified example {ex.id} "
+                "(columns, order and row window aside), and only the question the "
+                "steward confirmed for it may re-serve them"
+            )
+        elif found == "capped":
+            out.append(
+                f"{ECHO_CODE}: the SQL and verified example {ex.id} both fill the "
+                f"{cap}-row cap, so their rows cannot be shown to differ"
+            )
+        elif found == "untied":
+            out.append(
+                f"{ECHO_CODE}: the SQL and verified example {ex.id} are cut by a row "
+                "window that may split tied rows, so their rows cannot be shown to differ"
+            )
+        elif found == "unrun":
+            out.append(
+                f"{ECHO_CODE}: verified example {ex.id} could not be run to show its "
+                "rows differ from this answer"
+            )
+    if out and any(same_at_own_window(ex) for ex in served_by if shares(ex)):
+        return []
+    return out
+
+
+def _session_runner(verified: Any) -> RunSql:
+    """Run one statement as the contract ask serves one: SQL gate, then the manifest."""
+
+    def run(statement: str) -> list[dict[str, Any]]:
+        if verified is None:
+            raise RuntimeError("no session manifest to run the comparison under")
+        from CortexOS.dms.sql_validate_gate import run_gate
+        from CortexOS.dms.warehouse_db import load_semantic_layer
+        from CortexOS.execution import submit
+
+        gate = run_gate(statement, load_semantic_layer())
+        if not gate.passed or not gate.safe_sql:
+            raise RuntimeError(f"SQL gate refused the statement: {gate.violations}")
+        rows, _queue_ms, _exec_ms = submit.execute_sql(verified, gate.safe_sql)
+        return list(rows)
+
+    return run
+
+
+@dataclass(frozen=True, slots=True)
+class _AskBind:
+    space_id: str
+    scored_pack_id: str | None
+    granted_tables: frozenset[str] | None
+    verified: Any = None
+
+
+_ASK: ContextVar[_AskBind | None] = ContextVar("verified_query_ask", default=None)
+_USED: ContextVar[dict[str, Any] | None] = ContextVar("verified_query_used", default=None)
+
+
+def examples_bound() -> bool:
+    """True inside an ask that :func:`bind_verified_examples` armed (flag on).
+
+    The mark lives in :mod:`CortexOS.dms.ask_scope`, the one engine module the
+    legacy query-skill store may import (#340). The store reads it so that it
+    stands aside only for that ask: its exact-trigger replay must not answer
+    ahead of the examples the generator reads. Every other ask keeps its
+    query skills.
+    """
+    from CortexOS.dms.ask_scope import examples_bound as marked
+
+    return marked()
+_PHRASE_LOCK = threading.Lock()
+_PHRASE_DEPTH = 0
+_PHRASE_SAVED: list[tuple[Any, str, Any]] | None = None
+
+
+def _no_phrase_match(*_args: Any, **_kwargs: Any) -> None:
+    """Stand-in so the exact-phrase and metric-phrase lanes do not also run."""
+    return None
+
+
+def _suspend_exact_phrase_match() -> bool:
+    """While the flag is on, do not also serve from the phrase tables.
+
+    ``match_certified`` is an exact normalized-phrase dict. ``route_to_metric``
+    is the keyword cascade. Retrieval into the generator replaces both for
+    this ask. Flag off leaves them as they are.
+    """
+    global _PHRASE_DEPTH, _PHRASE_SAVED
+    if not verified_query_enabled():
+        return False
+    import CortexOS.dms.answer_engine as answer_engine
+
+    with _PHRASE_LOCK:
+        if _PHRASE_DEPTH == 0:
+            saved: list[tuple[Any, str, Any]] = []
+            for name in ("match_certified", "route_to_metric"):
+                saved.append((answer_engine, name, getattr(answer_engine, name)))
+                setattr(answer_engine, name, _no_phrase_match)
+            _PHRASE_SAVED = saved
+        _PHRASE_DEPTH += 1
+    return True
+
+
+def _resume_exact_phrase_match(active: bool) -> None:
+    global _PHRASE_DEPTH, _PHRASE_SAVED
+    if not active:
+        return
+    with _PHRASE_LOCK:
+        if _PHRASE_DEPTH <= 0:
+            return
+        _PHRASE_DEPTH -= 1
+        if _PHRASE_DEPTH == 0 and _PHRASE_SAVED is not None:
+            for mod, name, fn in _PHRASE_SAVED:
+                setattr(mod, name, fn)
+            _PHRASE_SAVED = None
+
+
+class _ExamplePort:
+    """L2 port wrapper.
+
+    ``generate_candidates`` puts examples into the question string the
+    generator prompts with. ``leftover_literals`` is the serve-time check:
+    main's plausibility step calls it on the SQL that ran, before the answer
+    is served, promoted or remembered, and abstains on anything it returns.
+    The SQL rules (:func:`example_echo`) run first; when they pass, the rows
+    are compared (:func:`result_echo`) under the session manifest the ask
+    was bound with.
+    """
+
+    _vq_examples = True
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def generate_candidates(
+        self,
+        question: str,
+        schema: dict[str, Any],
+        *,
+        prior_violations: list[str] | None = None,
+    ) -> list[str]:
+        bound = _ASK.get()
+        asked = question
+        passed = schema
+        if bound is not None:
+            meta = generation_examples(
+                space_id=bound.space_id,
+                question=question,
+                scored_pack_id=bound.scored_pack_id,
+                granted_tables=bound.granted_tables,
+            )
+            if meta is not None:
+                asked = question_with_examples(question, list(meta["prompt"]))
+                passed = dict(schema or {})
+                passed["verified_examples"] = meta["prompt"]
+                _USED.set(meta)
+        return self._inner.generate_candidates(
+            asked, passed, prior_violations=prior_violations
+        )
+
+    def leftover_literals(self, sql: str) -> list[str]:
+        inner = getattr(self._inner, "leftover_literals", None)
+        found = [str(item) for item in (inner(sql) or [])] if callable(inner) else []
+        meta = _USED.get()
+        if meta is not None:
+            question = str(meta.get("question") or "")
+            prompt = list(meta.get("prompt") or [])
+            echo = example_echo(
+                question,
+                _without_page_tiebreak(sql),
+                prompt,
+                schema=meta.get("schema"),
+                granted_tables=meta.get("granted_tables"),
+            )
+            if not echo:
+                bound = _ASK.get()
+                echo = result_echo(
+                    question,
+                    sql,
+                    prompt,
+                    run=_session_runner(None if bound is None else bound.verified),
+                    schema=meta.get("schema"),
+                    granted_tables=meta.get("granted_tables"),
+                )
+            found.extend(echo)
+        return found
+
+
+_Tokens = tuple[Token[Any], Token[Any], Any, bool, Token[bool]]
+
+
+def bind_verified_examples(
+    *,
+    space_id: str,
+    scored_pack_id: str | None,
+    granted_tables: Collection[str] | None = None,
+    verified: Any = None,
+) -> _Tokens | None:
+    """Arm example loading for this ask. ``None`` when the flag is off.
+
+    ``verified`` is the session's verified manifest. The serve-time result
+    comparison runs under it; without it, an answer from a prompt that held
+    examples cannot be compared and abstains.
+
+    The L2 port is restored when the ask ends. A test that stubs
+    ``resolve_l2_generation`` is left alone: its stub is not installed as the
+    process port.
+    """
+    if not verified_query_enabled():
+        return None
+    from CortexOS.dms import l2_generation
+    from CortexOS.dms.ask_scope import clear_examples_bound, mark_examples_bound
+
+    phrase = _suspend_exact_phrase_match()
+    marked = mark_examples_bound()
+    restore: Any = None
+    try:
+        try:
+            port = l2_generation.resolve_l2_generation()
+        except l2_generation.L2NotRegistered:
+            port = None
+        if (
+            port is not None
+            and port is l2_generation._port
+            and not getattr(port, "_vq_examples", False)
+        ):
+            l2_generation.register_l2_generation(_ExamplePort(port))
+            restore = port
+        grant = (
+            frozenset(str(t).lower() for t in granted_tables)
+            if granted_tables is not None
+            else None
+        )
+        return (
+            _ASK.set(
+                _AskBind(
+                    space_id=space_id,
+                    scored_pack_id=scored_pack_id,
+                    granted_tables=grant,
+                    verified=verified,
+                )
+            ),
+            _USED.set(None),
+            restore,
+            phrase,
+            marked,
+        )
+    except Exception:
+        clear_examples_bound(marked)
+        _resume_exact_phrase_match(phrase)
+        raise
+
+
+def take_verified_examples(tokens: _Tokens | None) -> dict[str, Any] | None:
+    """Return examples that were placed in a prompt, and put the L2 port back."""
+    if tokens is None:
+        return None
+    from CortexOS.dms.ask_scope import clear_examples_bound
+
+    meta = _USED.get()
+    ask_token, used_token, restore, phrase, marked = tokens
+    _USED.reset(used_token)
+    _ASK.reset(ask_token)
+    clear_examples_bound(marked)
+    if restore is not None:
+        from CortexOS.dms.l2_generation import register_l2_generation
+
+        register_l2_generation(restore)
+    _resume_exact_phrase_match(phrase)
+    return meta
+
+
+def stamp_verified_examples(data: dict[str, Any], meta: dict[str, Any]) -> None:
+    """Record that the generator saw these examples. Does not mark a stored answer."""
+    ids = list(meta["verified_query_ids"])
+    note = (
+        f"verified examples {', '.join(ids)} were in the SQL prompt. "
+        "The SQL was generated and executed on current data. Not a stored answer."
+    )
+    assumptions = data.get("assumptions")
+    if isinstance(assumptions, str) and assumptions.strip():
+        data["assumptions"] = assumptions.rstrip() + "; " + note
+    elif isinstance(assumptions, list) and assumptions:
+        first = str(assumptions[0]).rstrip()
+        data["assumptions"] = [first + "; " + note, *assumptions[1:]]
+    else:
+        data["assumptions"] = note
+    data["verified_query_ids"] = ids
+    data["memory_ids_read"] = list(meta["memory_ids_read"])
+    data["memory_reads"] = list(meta["memory_reads"])
+    data["reused"] = False
