@@ -129,7 +129,7 @@ def test_memory_api_survives_store_reopen(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_routes, "_STORE", fresh_store())
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     vec = [1.0] + [0.0] * 63
     up = client.post(
         "/api/memory/upsert",

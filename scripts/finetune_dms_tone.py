@@ -60,12 +60,12 @@ def finetune(*, model_id: str, output_dir: Path, max_steps: int = 50) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Model: {model_id}  device: {device}  steps: {max_steps}")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=False)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,
-        trust_remote_code=True,
+        trust_remote_code=False,
     )
     if device == "cpu":
         model = model.to(device)

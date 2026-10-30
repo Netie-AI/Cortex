@@ -47,7 +47,7 @@ def _engine_down(*args: Any, **kwargs: Any) -> dict[str, Any]:
 def _safe(client: TestClient) -> TestClient:
     """Same app, but a server exception comes back as a 500 instead of raising."""
     return TestClient(
-        client.app, raise_server_exceptions=False, headers={"X-API-Key": "dms-demo-admin-key"}
+        client.app, raise_server_exceptions=False, headers={"X-API-Key": "pytest-admin-key"}
     )
 
 

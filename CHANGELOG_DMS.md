@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## METRIC-RECONFIRM-QUALITY -- 2026-10-30
+
+Follows #424. The governed-metric reconfirm's closest question is asked back
+through the same choose and check before it is offered, so Yes runs a question
+that is served. A suggestion that is not served, or that shows a metric id, is
+replaced by the fixed text "No question close to this one can be confirmed as
+answerable."; Yes on it answers "not found in the database". The chooser now
+returns a plain-language `why`, and reconfirm text no longer shows metric ids
+or slot names. No on the metric reconfirm logs the same F1 pipeline-failure
+ticket as the plan+SQL path (question SHA-256 and length only). The legacy
+bridge's document miss falls through to the ladder instead of a blank
+envelope. `answer_engine.py` unchanged. No armed run on this branch.
+
 ## GEN-GRANTED-CATALOG-01 (#386) -- 2026-10-17
 
 Contract 1.9.0 (renumbered from 1.7.0 by the founder's 2026-10-18 ruling:

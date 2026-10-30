@@ -119,6 +119,20 @@ def _inexact_values(metric_id: str, slots: dict[str, Any]) -> list[str]:
     return loose
 
 
+def _names_a_metric_id(text: str) -> bool:
+    """Whether customer text shows a declared metric id. Ids are internal."""
+    from packs.dms.semantic.loader import load_all
+
+    folded = text.casefold()
+    return any(mid.casefold() in folded for mid in load_all().metrics)
+
+
+def _customer_text(raw: Any) -> str:
+    """One line of model text for the customer, or empty when it shows an id."""
+    text = " ".join(str(raw or "").split())
+    return "" if not text or _names_a_metric_id(text) else text
+
+
 def _chosen_why(metric_id: str) -> str:
     return f"the metric chooser chose the declared metric {metric_id}"
 
@@ -175,21 +189,26 @@ class OpenVaultMetricChoice:
                 load_all().metric(metric_id)
             except SemanticError:
                 metric_id = "none"
-        closest = " ".join(str(body.get("closest_question") or "").split())
-        if not closest:
-            closest = UNARMED_CLOSEST
+        # The engine asks this back before it is offered (answerable_closest).
+        closest = _customer_text(body.get("closest_question")) or UNARMED_CLOSEST
         slots = _known_slots(metric_id, body.get("slots"))
         loose = _inexact_values(metric_id, slots) if metric_id != "none" else []
         if loose:
+            # The slot names are internal; the reconfirm does not show them.
             return MetricSelection(
                 closest_question=closest,
                 why=(
-                    "the metric chooser named a filter value that is not a stored value "
-                    f"({', '.join(loose)}), so it cannot be served directly"
+                    "the question filters on a value the data does not store, "
+                    "so it cannot be served directly"
                 ),
             )
         if metric_id == "none":
-            why = "the metric chooser did not accept a declared metric"
+            stated = _customer_text(body.get("why"))
+            why = (
+                f"{stated.rstrip('.')}, so it cannot be served directly"
+                if stated
+                else "the metric chooser did not accept a declared metric"
+            )
         else:
             # A served answer carries this why as its assumption. It states
             # what was chosen. Refusal prose belongs only on none.
