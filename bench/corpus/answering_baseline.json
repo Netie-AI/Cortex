@@ -40,71 +40,71 @@
   "reconfirm": [
     {
       "id": "gf_unique_sku_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "ms_cold_storage",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "ms_delayed_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "ms_exclude_beta",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "ms_sku_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "ms_top5_revenue",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "ns_expired_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "rs_cold_storage_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "sd_distinct_sku_vs_rows",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "tp_cold_storage_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "tp_delayed_count",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "tp_revenue_last_month",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "uc_top5_revenue_ringgit",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "uc_total_revenue_myr",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "vn_exclude_bare_beta",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "vn_exclude_full_sku",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     },
     {
       "id": "vn_exclude_numeric",
-      "closest_question": "a declared question"
+      "closest_question": "No question close to this one can be confirmed as answerable."
     }
   ]
 }
