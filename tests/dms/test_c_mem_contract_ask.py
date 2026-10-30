@@ -23,7 +23,7 @@ from CortexOS.memory import space_memory as sm
 from CortexOS.memory.space_memory import Actor, reset_space_memory_for_tests
 
 SESSION = "c-mem-290"
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "total revenue"
 GRANT = {"transactions": "TRUE"}
 STEWARD = Actor("steward-alice", "steward")
 

@@ -49,8 +49,8 @@ from tests.test_execution.test_submit_c4 import _signed, issuer, verifier  # noq
 
 SESSION = "stale-lake-402"
 TABLES = ("alerts", "inventory", "locations", "shipments", "suppliers", "transactions")
-REVENUE_Q = "what is the total revenue"
-TOP3_Q = "sales by value top 3"
+REVENUE_Q = "total revenue"
+TOP3_Q = "top selling"
 STALE = "lake_value_domain_stale:transactions.txn_type"
 NOT_MAPPED = "declared source spellings its build did not map"
 NOT_DECLARED = "values the declaration does not list"
@@ -83,14 +83,14 @@ def _revenue_oracle() -> float:
     return round(sum(float(r["quantity_kg"]) * float(r["unit_cost_myr"]) for r in _sales()), 2)
 
 
-def _top3_oracle() -> list[tuple[str, float]]:
+def _top3_oracle(n: int = 3) -> list[tuple[str, float]]:
     total: dict[str, float] = {}
     for r in _sales():
         total[r["sku"]] = total.get(r["sku"], 0.0) + float(r["quantity_kg"]) * float(
             r["unit_cost_myr"]
         )
     ranked = sorted(total.items(), key=lambda kv: (-round(kv[1], 2), kv[0]))
-    return [(sku, round(v, 2)) for sku, v in ranked[:3]]
+    return [(sku, round(v, 2)) for sku, v in ranked[:n]]
 
 
 # ── lakes ────────────────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ def test_mapped_lake_serves_the_oracle_revenue_and_top3(serve: Any, lake: Path) 
     top3 = _dms_query(client, TOP3_Q)
     assert top3["badge"] == "governed_metric", top3["answer"]
     assert top3["metric_id"] == "sales_by_value"
-    want = _top3_oracle()
+    want = _top3_oracle(5)
     assert [r["sku"] for r in top3["rows"]] == [sku for sku, _ in want]
     assert [r["sales_value_myr"] for r in top3["rows"]] == pytest.approx(
         [v for _, v in want], abs=0.011

@@ -96,6 +96,25 @@ def test_optional_filter_and_defaults():
     assert "'DELAYED'" in compile_metric(m, "count_by_carrier", {})
 
 
+def test_empty_value_scan_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scan before the lake exists must not pin an empty dictionary."""
+    calls = {"n": 0}
+
+    def scan() -> dict[str, list[str]]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {}
+        return {"location_code": ["WH-A"]}
+
+    monkeypatch.setattr(vd, "_scan_dictionaries", scan)
+    vd.refresh()
+    try:
+        assert vd.values_for("location_code") == []
+        assert vd.values_for("location_code") == ["WH-A"]
+    finally:
+        vd.refresh()
+
+
 def test_certified_covers_core_golden():
     from bench.accuracy import load_golden
 

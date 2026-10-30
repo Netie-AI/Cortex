@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from CortexOS.dms.answer_engine import route_to_metric
+from CortexOS.dms.answer_engine import _route_to_metric_cascade, route_to_metric
 from packs.dms.semantic.vocabulary import (
     INVARIANT_TOKENS,
     normalize_for_routing,
@@ -47,9 +47,11 @@ ROUTES = [
 
 @pytest.mark.parametrize("question,metric_id", ROUTES)
 def test_business_phrasing_reaches_its_metric(question: str, metric_id: str) -> None:
-    plan = route_to_metric(question)
-    assert plan is not None, f"{question!r} abstained"
-    assert plan.metric_id == metric_id, f"{question!r} -> {plan.metric_id}"
+    """Normalization still names the neighbour. #412 does not serve it."""
+    neighbour = _route_to_metric_cascade(question)
+    assert neighbour is not None, f"{question!r} lost its neighbour"
+    assert neighbour.metric_id == metric_id, f"{question!r} -> {neighbour.metric_id}"
+    assert route_to_metric(question) is None, question
 
 
 def test_volume_paraphrases_keep_the_asked_limit() -> None:
@@ -57,10 +59,11 @@ def test_volume_paraphrases_keep_the_asked_limit() -> None:
         "three highest selling SKUs by weight",
         "which 3 SKUs moved the most kilograms",
     ):
-        plan = route_to_metric(question)
+        plan = _route_to_metric_cascade(question)
         assert plan is not None
         assert plan.metric_id == "sales_by_volume"
         assert plan.slots.get("limit") == 3, question
+        assert route_to_metric(question) is None
 
 
 # ── invariants: normalization must not move meaning ──────────────────────────
@@ -93,17 +96,20 @@ def test_numbers_survive_normalization(question: str) -> None:
 def test_slots_are_read_from_the_original_question() -> None:
     """The router reads slots from the raw text, so a rewrite of the *words*
     cannot move a *value*. Threshold, direction and limit are checked together."""
-    plan = route_to_metric("which vendors have risk above 0.85")
+    plan = _route_to_metric_cascade("which vendors have risk above 0.85")
     assert plan is not None and plan.metric_id == "suppliers_by_risk"
     assert plan.slots["threshold"] == 0.85
+    assert route_to_metric("which vendors have risk above 0.85") is None
 
-    least = route_to_metric("which site has the least spare space")
+    least = _route_to_metric_cascade("which site has the least spare space")
     assert least is not None and least.metric_id == "free_capacity"
     assert least.slots["direction"] == "ASC"
+    assert route_to_metric("which site has the least spare space") is None
 
-    most = route_to_metric("which site has the most spare space")
+    most = _route_to_metric_cascade("which site has the most spare space")
     assert most is not None and most.metric_id == "free_capacity"
     assert most.slots["direction"] == "DESC"
+    assert route_to_metric("which site has the most spare space") is None
 
 
 def test_normalization_is_idempotent() -> None:

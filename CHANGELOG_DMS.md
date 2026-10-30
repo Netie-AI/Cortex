@@ -99,6 +99,31 @@ raises `FreeRouteStrictError` with `retry_after_s` and the `/ask` path records
 `model_requested` and `model_served` on the served step instead of walking
 another model.
 
+## METRIC-MATCH-AI-01 (#412, folds #425) -- 2026-10-19
+
+The keyword cascade and synonym equality no longer decide what is served.
+An OpenVault step reads the question plus the metric definitions and returns
+one declared metric and its filters, or none. It is told that negation and
+complements are not the positive metric. A second model call checks that the
+chosen metric means the question. Disagreement or uncertainty does not serve:
+the question reconfirms (closest question, Yes runs it, No is "not found in
+the database") or, when `DMS_L2_ENABLED` is on, goes to the AI SQL path.
+Unarmed OpenVault fails closed. No word list and no synonym-equality gate sit
+in that decision. `metrics.yaml` is unchanged from main, so no eval question
+is copied in as a synonym. "How many shipments are not delayed?" is not
+`delayed_count` 1031 (the warehouse has 10969 that are not delayed). The
+suite's declared-wording double is not the customer path. `POST /dms/query`
+does not search for delayed or late and then run the pre-Q2 ranked listing:
+that path served "Exclude delayed shipments and tell me how many remain" as
+100 delayed rows after the engine had already abstained. A noun the
+ontology does not define (`remain`, `outbound`, `forklift`) is no longer a
+regex that refuses before the model: the choose step is told which subjects
+exist, and a subject that is not among them reconfirms or abstains because
+the model said so. An empty value
+dictionary scanned before the lake exists is not cached, so certified
+questions with string literals (warehouse WH-A, outbound, CHEMICALS, PENDING)
+still serve once the lake is loaded.
+
 ## STALE-LAKE-JOIN-FORMS-01 (#410) -- 2026-10-18
 
 A query that reads a table with a declared value domain is checked for every

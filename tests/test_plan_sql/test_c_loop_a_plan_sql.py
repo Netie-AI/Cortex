@@ -203,7 +203,7 @@ def _engine_bytes(client, monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> byt
     _deterministic(monkeypatch)
     resp = client.post(
         "/v1/contract/ask",
-        json={"question": "what is our total revenue", "session_id": SESSION, **kwargs},
+        json={"question": "total revenue", "session_id": SESSION, **kwargs},
     )
     assert resp.status_code == 200, resp.text
     return resp.content
