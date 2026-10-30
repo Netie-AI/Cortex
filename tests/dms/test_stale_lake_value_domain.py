@@ -649,7 +649,7 @@ def test_plan_sql_ladder_stops_by_name_on_a_stale_lake_and_never_retries(
     monkeypatch.setattr(submit, "execute_sql", spy)
     if not mapped:
         _unmap(lake)
-    _model_reply(armed_openvault, "1. Read transactions.\n2. Sum quantity_kg of sales.")
+    # One FreeRoute call per attempt (GEN-GRANTED-CATALOG-01): no plan reply.
     _model_reply(armed_openvault, f"```sql\n{SALES_KG_SQL};\n```")
     _model_reply(armed_openvault, f"```sql\n{ALL_KG_SQL};\n```")
     client = serve(lake)
@@ -684,7 +684,7 @@ def test_plan_sql_ladder_stops_by_name_on_a_stale_lake_and_never_retries(
     # One model SQL (as gated: a row bound added), refused on the lake; the
     # filter-dropping rewrite was never asked for, so it never ran.
     assert len(ran) == 1 and ran[0].startswith(SALES_KG_SQL), ran
-    assert len(armed_openvault.chat_calls) == 2  # the plan and that one SQL
+    assert len(armed_openvault.chat_calls) == 1  # that one SQL; no separate plan call
     assert len(armed_openvault.replies) == 1
 
 

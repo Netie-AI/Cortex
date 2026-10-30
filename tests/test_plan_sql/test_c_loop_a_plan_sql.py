@@ -24,29 +24,26 @@ from cortex_contract.answer import AskRequest
 from CortexOS.dms import plan_sql_ask
 from CortexOS.integrations import freeroute
 from CortexOS.memory import space_memory as sm
-from CortexOS.plan_sql.generator import TASK_PLAN, TASK_SQL, ModelStep, StepStamp
+from CortexOS.plan_sql.generator import TASK_SQL, ModelStep, StepStamp
 from tests.dms.test_c7_02_manifest_before_explain import _badge, dms_http  # noqa: F401
 
 SESSION = "c-loop-a-303"
 QUESTION = "how many transactions of each type"
 GRANT = {"transactions": "TRUE"}
+# ``masked: false`` (contract 1.9.0): DMS marks these columns unmasked, so the
+# sampler may put their values in the prompt. Without it nothing is sampled.
 PAYLOAD: dict[str, Any] = {
     "tables": [
         {
             "name": "transactions",
             "columns": [
-                {"name": "txn_type", "type": "VARCHAR", "description": "IN or OUT"},
-                {"name": "sku", "type": "VARCHAR"},
-                {"name": "quantity_kg", "type": "DOUBLE"},
+                {"name": "txn_type", "type": "VARCHAR", "description": "IN or OUT", "masked": False},
+                {"name": "sku", "type": "VARCHAR", "masked": False},
+                {"name": "quantity_kg", "type": "DOUBLE", "masked": False},
             ],
         }
     ]
 }
-PLAN_TEXT = (
-    "1. Read transactions.\n"
-    "2. Group by txn_type and count rows.\n"
-    "3. Order by the count, largest first."
-)
 GOOD_SQL = "SELECT txn_type, COUNT(*) AS n FROM transactions GROUP BY txn_type ORDER BY n DESC"
 PROVIDER = "groq"
 MODEL = "openai/gpt-oss-120b"
@@ -57,6 +54,10 @@ CAPTURE_BODY_SHA256 = "1e3e7cb43f91f816079cfd66befc9f73761ec6e8d3fca3fbae3e667f6
 @pytest.fixture(autouse=True)
 def _plan_sql_on(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    # Value sampling is behind CORTEX_GRANTED_CATALOG (#386, default off;
+    # tests/test_plan_sql/test_granted_catalog.py locks the default). The
+    # assertions here on the COLUMN VALUES block run with it on.
+    monkeypatch.setenv(plan_sql_ask.CATALOG_ENV, "1")
     monkeypatch.delenv(sm.ENABLED_ENV, raising=False)
     monkeypatch.delenv(sm.SCORED_ROUND_ENV, raising=False)
     sm.reset_space_memory_for_tests()
@@ -227,13 +228,12 @@ def test_flag_off_or_no_payload_ask_is_byte_identical(
     assert _engine_bytes(dms_http, monkeypatch, **extra) == baseline
 
 
-# -- plan, then SQL, through FreeRoute ------------------------------------------
+# -- one SQL call through FreeRoute (plan folded into that call) -----------------
 
 
 def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, f"```sql\n{GOOD_SQL};\n```")
     dms_http.bind_session(SESSION, GRANT)
 
@@ -256,44 +256,36 @@ def test_payload_ask_plans_then_writes_sql_via_freeroute_with_stamped_steps(
     assert [s["member"] for s in body["contributing_sources"]] == ["transactions"]
 
     lines = body["assumptions"]
-    assert lines[:3] == [
-        "plan: 1. Read transactions.",
-        "plan: 2. Group by txn_type and count rows.",
-        "plan: 3. Order by the count, largest first.",
-    ]
+    assert not any(line.startswith("plan:") for line in lines)
     by_step = {line.split(":", 1)[0]: line for line in lines if line.startswith("step ")}
     assert list(by_step) == [
         "step grant",
         "step payload",
         "step sample",
-        "step plan",
         "step sql",
         "step gate",
         "step execute",
         "step rung",
     ]
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
-    for step in ("step plan", "step sql"):
-        assert "served_by=openvault-freeroute" in by_step[step]
-        assert f"served_provider={PROVIDER}" in by_step[step]
-        assert f"served_model={MODEL}" in by_step[step]
+    assert "served_by=openvault-freeroute" in by_step["step sql"]
+    assert f"served_provider={PROVIDER}" in by_step["step sql"]
+    assert f"served_model={MODEL}" in by_step["step sql"]
     for step in ("step grant", "step payload", "step gate", "step execute"):
         assert "served_by=cortex:" in by_step[step]
         assert "served_provider=none" in by_step[step]
 
     calls = armed_openvault.chat_calls
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert armed_openvault.non_openvault_calls == []
-    plan_prompt = calls[0]["body"]["messages"][1]["content"]
-    sql_prompt = calls[1]["body"]["messages"][1]["content"]
-    assert "transactions(txn_type VARCHAR -- IN or OUT, sku VARCHAR, quantity_kg DOUBLE)" in plan_prompt
-    assert "COLUMN VALUES" in plan_prompt
-    assert "transactions.txn_type:" in plan_prompt
-    assert any(token in plan_prompt for token in ("'IN'", "'OUT'", "'ADJUST'", "'WRITE_OFF'"))
-    assert "Do not write SQL" in calls[0]["body"]["messages"][0]["content"]
-    assert "PLAN:\n1. Read transactions." in sql_prompt
-    assert [r[0] for r in _route_rows()] == [TASK_PLAN, TASK_SQL]
-    assert [r[2] for r in _route_rows()] == [None, "gate_pass"]
+    prompt = calls[0]["body"]["messages"][1]["content"]
+    assert "transactions(txn_type VARCHAR -- IN or OUT, sku VARCHAR, quantity_kg DOUBLE)" in prompt
+    assert "COLUMN VALUES" in prompt
+    assert "transactions.txn_type:" in prompt
+    assert any(token in prompt for token in ("'IN'", "'OUT'", "'ADJUST'", "'WRITE_OFF'"))
+    assert "Use ONLY the tables" in calls[0]["body"]["messages"][0]["content"]
+    assert [r[0] for r in _route_rows()] == [TASK_SQL]
+    assert [r[2] for r in _route_rows()] == ["gate_pass"]
 
 
 def test_payload_ask_with_join_replays_recorded_openvault_response(
@@ -303,7 +295,6 @@ def test_payload_ask_with_join_replays_recorded_openvault_response(
     raw = (CAPTURE / "resp_body.json").read_bytes()
     assert hashlib.sha256(raw).hexdigest() == CAPTURE_BODY_SHA256
     recorded = json.loads(raw)
-    _reply(armed_openvault, "1. Read inventory.\n2. Return five skus.")
     armed_openvault.replies.append((200, recorded))
     dms_http.bind_session(SESSION, {"inventory": "TRUE", "transactions": "TRUE"})
     payload = {
@@ -380,7 +371,6 @@ def test_plan_sql_session_success_never_stamps_l2_validated(
 
     monkeypatch.setenv("DMS_L2_ENABLED", l2_flag)
     monkeypatch.setattr(l2_generation, "_port", _L2PortTripwire())
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -394,13 +384,13 @@ def test_plan_sql_session_success_never_stamps_l2_validated(
     assert b"l2_validated" not in resp.content.lower()
     assert "Not validated for accuracy" in body["provenance"]["assumptions"]
     assert "Not validated for accuracy" in body["assumptions"][-1]
-    assert len(armed_openvault.chat_calls) == 2
+    assert len(armed_openvault.chat_calls) == 1
 
 
 def test_response_without_served_stamp_is_refused(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
-    armed_openvault.reply(PLAN_TEXT)
+    armed_openvault.reply(GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
     body = _json(_ask(dms_http))
     _assert_not_answered(body, plan_sql_ask.ROUTE_STAMP_MISSING)
@@ -514,7 +504,6 @@ def test_must_fail_provider_env_keys_never_bypass_openvault(
 def test_must_fail_gate_violating_sql_is_refused_not_executed(
     armed_openvault, dms_http, execute_spy: list[str], sql: str, code: str, needle: str  # noqa: F811
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, sql)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -524,18 +513,16 @@ def test_must_fail_gate_violating_sql_is_refused_not_executed(
     assert needle in body["answer"]
     assert _ran(execute_spy) == []
     assert all("read_csv" not in sql.lower() for sql in execute_spy)
-    assert len(armed_openvault.chat_calls) == 2
-    assert [r[2] for r in _route_rows()] == [None, "gate_fail"]
+    assert len(armed_openvault.chat_calls) == 1
+    assert [r[2] for r in _route_rows()] == ["gate_fail"]
 
 
 def test_must_fail_sql_outside_payload_is_refused_even_inside_grant(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
     outside = "SELECT sku FROM inventory LIMIT 5"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, outside)
     _reply(armed_openvault, outside)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, outside)
     _reply(armed_openvault, "WHY: inventory was not selected\nCLOSEST: how many transactions of each type")
     dms_http.bind_session(SESSION, {"transactions": "TRUE", "inventory": "TRUE"})
@@ -551,19 +538,20 @@ def test_must_fail_sql_outside_payload_is_refused_even_inside_grant(
         call["body"]["messages"][1]["content"] for call in armed_openvault.chat_calls
     ]
     assert any(plan_sql_ask.OUTSIDE_PAYLOAD in prompt for prompt in prompts)
-    assert len(armed_openvault.chat_calls) > 2
+    # Both same-model writes ran, one complete() each (the planner is folded
+    # into the SQL call). No stronger route is configured here, so no third call.
+    assert len(armed_openvault.chat_calls) == plan_sql_ask.SQL_ATTEMPTS
 
 
 def test_multi_statement_or_dml_never_reaches_execute(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, "SELECT * FROM transactions; DROP TABLE transactions")
     dms_http.bind_session(SESSION, GRANT)
     body = _json(_ask(dms_http))
     _assert_not_answered(body, plan_sql_ask.NO_SELECT)
     assert _ran(execute_spy) == []
-    assert len(armed_openvault.chat_calls) == 2
+    assert len(armed_openvault.chat_calls) == 1
 
 
 def test_must_fail_lateral_table_function_never_serves_file_metadata(
@@ -590,10 +578,8 @@ def test_must_fail_lateral_table_function_never_serves_file_metadata(
         "SELECT t.txn_type, m.path_in_schema AS path_in_schema, m.stats_max AS stats_max "
         f"FROM transactions AS t, LATERAL parquet_metadata('{outside.as_posix()}') AS m"
     )
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, hostile)
     _reply(armed_openvault, hostile)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, hostile)
     _reply(armed_openvault, f"WHY: the SQL was refused\nCLOSEST: {QUESTION}")
     dms_http.bind_session(SESSION, GRANT)
@@ -658,7 +644,6 @@ def test_must_fail_payload_cannot_widen_the_signed_grant(
     armed_openvault, dms_http, execute_spy: list[str], case: str  # noqa: F811
 ) -> None:
     grant, payload, needle = _WIDEN_CASES[case]
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, "SELECT sku FROM inventory LIMIT 5")
     dms_http.bind_session(SESSION, grant)
 
@@ -673,14 +658,13 @@ def test_must_fail_payload_cannot_widen_the_signed_grant(
 def test_unbound_space_is_refused_before_any_model_call(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT, space_id="alpha")
     body = _json(_ask(dms_http, space_id="alpha"))
     assert body["rows"]  # control: bound Space answers
     resp = _ask(dms_http, space_id="beta")
     assert resp.status_code == 409, resp.text
-    assert len(armed_openvault.chat_calls) == 2
+    assert len(armed_openvault.chat_calls) == 1
 
 
 # -- #290 scored-pack guard: no memory writes, no route learning ------------------
@@ -695,7 +679,6 @@ def test_scored_round_writes_no_memory_and_never_trains_the_route(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, scored: str | None, split: str  # noqa: F811
 ) -> None:
     monkeypatch.setenv(sm.ENABLED_ENV, "1")
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT, space_id="alpha")
     extra = {"scored_pack_id": scored} if scored else {}
@@ -707,7 +690,7 @@ def test_scored_round_writes_no_memory_and_never_trains_the_route(
     ops = [s.served_op for s in sm.get_space_memory().stamps(space_id="alpha")]
     assert "write" not in ops
     assert sm.get_space_memory().read(space_id="alpha", kind="solution", actor="t")[0] == []
-    assert [r[1] for r in _route_rows()] == [split, split]
+    assert [r[1] for r in _route_rows()] == [split]
 
 
 # -- thinking loop: sample, retry, stronger model, reconfirm ----------------------
@@ -717,7 +700,6 @@ def test_must_fail_unknown_column_retries_and_does_not_execute_it(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
     """A column the gate rejects is fed back and rewritten. The bad SQL never runs."""
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, "SELECT no_such_col FROM transactions")
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -727,9 +709,9 @@ def test_must_fail_unknown_column_retries_and_does_not_execute_it(
     assert body["rows"] and body["sql_used"].startswith(GOOD_SQL)
     assert all("no_such_col" not in sql.lower() for sql in execute_spy)
     assert _ran(execute_spy) == [body["sql_used"]]
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert "UNKNOWN_COLUMN:no_such_col" in retry
-    assert len(armed_openvault.chat_calls) == 3
+    assert len(armed_openvault.chat_calls) == 2
     _assert_rung(body, plan_sql_ask.rung_retry(1))
 
 
@@ -745,7 +727,6 @@ def test_must_fail_empty_result_retries_where_the_old_head_abstained(
         "SELECT txn_type, COUNT(*) AS n FROM transactions "
         "WHERE txn_type = 'NOT_A_TYPE' GROUP BY txn_type"
     )
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, empty)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -754,8 +735,8 @@ def test_must_fail_empty_result_retries_where_the_old_head_abstained(
 
     assert body["rows"] and body["provenance"]["badge"] == "session"
     assert plan_sql_ask.EMPTY_RESULT not in body["answer"]
-    assert len(armed_openvault.chat_calls) == 3
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    assert len(armed_openvault.chat_calls) == 2
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert plan_sql_ask.EMPTY_RESULT in retry
     assert "NOT_A_TYPE" in retry
     assert _ran(execute_spy)[-1] == body["sql_used"]
@@ -777,7 +758,6 @@ def test_implausible_all_null_rows_are_fed_back(
         return real(verified, sql, **kwargs)
 
     monkeypatch.setattr(submit, "execute_sql", fake)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -785,7 +765,7 @@ def test_implausible_all_null_rows_are_fed_back(
     body = _json(_ask(dms_http))
 
     assert body["rows"] and body["provenance"]["badge"] == "session"
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert plan_sql_ask.IMPLAUSIBLE_RESULT in retry
     _assert_rung(body, plan_sql_ask.rung_retry(1))
 
@@ -797,10 +777,8 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
     configured = "openai/gpt-oss-20b"
     _stronger_route(armed_openvault, configured, monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, GOOD_SQL, model=configured)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -808,19 +786,19 @@ def test_exhausted_retries_then_a_stronger_openvault_model(
 
     assert body["rows"] and body["sql_used"].startswith(GOOD_SQL)
     models = [call["body"]["model"] for call in armed_openvault.chat_calls]
-    assert len(models) == 5
-    assert models[0] == models[1] == models[2]
-    assert models[3] == models[4] == configured
-    assert models[3] != models[0]
+    assert len(models) == 3
+    assert models[0] == models[1]
+    assert models[2] == configured
+    assert models[2] != models[0]
     assert "qwen/qwen3.6-27b" not in models
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
-    strong = armed_openvault.chat_calls[4]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
+    strong = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
     assert "UNKNOWN_COLUMN:no_such_col" in retry
     assert "UNKNOWN_COLUMN:no_such_col" in strong
     assert any(line.startswith("step escalate:") for line in body["assumptions"])
-    assert any(line.startswith("step plan-strong:") for line in body["assumptions"])
+    assert any(line.startswith("step sql-strong:") for line in body["assumptions"])
     assert "served_by=openvault-freeroute" in next(
-        line for line in body["assumptions"] if line.startswith("step plan-strong:")
+        line for line in body["assumptions"] if line.startswith("step sql-strong:")
     )
     assert armed_openvault.non_openvault_calls == []
     _assert_rung(body, plan_sql_ask.RUNG_STRONG)
@@ -834,10 +812,8 @@ def test_still_unresolved_reconfirm_names_why_and_the_closest_question(
     closest = "how many transactions of each type"
     configured = "openai/gpt-oss-20b"
     _stronger_route(armed_openvault, configured, monkeypatch)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, bad, model=configured)
     _reply(armed_openvault, f"WHY: {why}\nCLOSEST: {closest}", model=configured)
     dms_http.bind_session(SESSION, GRANT)
@@ -871,22 +847,18 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     _stronger_route(armed_openvault, configured, monkeypatch)
     dms_http.bind_session(SESSION, GRANT)
 
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     planned = _json(_ask(dms_http, question="how many of each type"))
     _assert_rung(planned, "plan")
     planned_model = armed_openvault.chat_calls[0]["body"]["model"]
 
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, GOOD_SQL)
     retried = _json(_ask(dms_http, question="count the types again"))
     _assert_rung(retried, "error-fed-retry-1")
 
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, GOOD_SQL, model=configured)
     stronger = _json(_ask(dms_http, question="count types on the stronger model"))
     _assert_rung(stronger, "stronger-model")
@@ -894,10 +866,8 @@ def test_ladder_rung_stamps_appear_on_the_answer(
     assert models[0] == planned_model
     assert configured in models
 
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, bad, model=configured)
     _reply(
         armed_openvault,
@@ -956,7 +926,8 @@ def test_model_calls_stamp_matches_complete_count(
     """Must-fail: model_calls counts logical complete() calls, not transport retries.
 
     Full ladder: plan, at least one numbered error-fed retry, stronger, then
-    reconfirm. The fake injects two HTTP 429 retries on the plan call. DMS
+    reconfirm. The fake injects two HTTP 429 retries on the first (``plan``
+    rung) call. DMS
     reads per-step counts only from Answer.model_calls. The stamp stays equal
     to the logical complete() count. The fake's raw attempt counter is higher.
     Dropping one step, or adding the 429s into the stamp, disagrees with that
@@ -975,10 +946,8 @@ def test_model_calls_stamp_matches_complete_count(
     plan_retries = 2
     _stronger_route(armed_openvault, configured, monkeypatch)
     transport = _plan_call_transport_retries(armed_openvault, monkeypatch, plan_retries)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, bad, model=configured)
     _reply(
         armed_openvault,
@@ -990,12 +959,14 @@ def test_model_calls_stamp_matches_complete_count(
     body = _json(_ask(dms_http))
 
     calls = body["model_calls"]
+    # One complete() per attempt: the planner is folded into the SQL call
+    # (GEN-GRANTED-CATALOG-01), so no rung carries a second, planning call.
     assert calls == {
-        "plan": 2,
+        "plan": 1,
         "error-fed-retry-1": 1,
-        "stronger-model": 2,
+        "stronger-model": 1,
         "reconfirm": 1,
-        "total": 6,
+        "total": 4,
     }
     steps = {key: value for key, value in calls.items() if key != "total"}
     assert sum(steps.values()) == calls["total"] == seen["n"]
@@ -1016,7 +987,6 @@ def test_confirm_yes_runs_the_closest_question(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:
     closest = "how many transactions of each type"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -1032,7 +1002,6 @@ def test_confirm_yes_runs_the_closest_question(
 def test_confirm_no_answers_not_found_in_the_database(
     armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -1051,7 +1020,6 @@ def test_pii_wording_is_not_an_abstain_and_is_not_masked(
     armed_openvault, dms_http  # noqa: F811
 ) -> None:
     question = "list operator emails and phone numbers"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
 
@@ -1059,8 +1027,8 @@ def test_pii_wording_is_not_an_abstain_and_is_not_masked(
 
     assert body["rows"] and body["provenance"]["badge"] == "session"
     assert "abstain" not in body["answer"].lower()
-    plan_prompt = armed_openvault.chat_calls[0]["body"]["messages"][1]["content"]
-    assert "emails" in plan_prompt and "phone numbers" in plan_prompt
+    prompt = armed_openvault.chat_calls[0]["body"]["messages"][1]["content"]
+    assert "emails" in prompt and "phone numbers" in prompt
 
 
 # DMS executor body and the named model/strict/provider rejection live in
@@ -1109,7 +1077,6 @@ def test_off_policy_served_model_reconfirms_not_abstain(
     missing = "not-a-catalogue-model"
     _stronger_route(armed_openvault, missing, monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     armed_openvault.replies.append(
@@ -1145,7 +1112,7 @@ def test_off_policy_served_model_reconfirms_not_abstain(
     asked = [call["body"]["model"] for call in armed_openvault.chat_calls]
     assert missing in asked
     assert "qwen/qwen3.6-27b" not in asked
-    served = next(line for line in body["assumptions"] if line.startswith("step plan-strong:"))
+    served = next(line for line in body["assumptions"] if line.startswith("step sql-strong:"))
     assert f"served_model={missing}" in served
     assert f"served_provider={PROVIDER}" in served
     assert armed_openvault.non_openvault_calls == []
@@ -1191,11 +1158,9 @@ def test_unserved_pin_reconfirms_and_names_the_missing_model(
     configured = "openai/gpt-oss-20b"
     _stronger_route(armed_openvault, configured, monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    # Stronger plan and SQL: OV stamps a different model than the one it was asked for.
-    _reply(armed_openvault, PLAN_TEXT, model=MODEL)
+    # Stronger SQL: OV stamps a different model than the one it was asked for.
     _reply(armed_openvault, GOOD_SQL, model=MODEL)
     _reply(armed_openvault, "WHY: ignored substitute\nCLOSEST: ignored substitute", model=MODEL)
     dms_http.bind_session(SESSION, GRANT)
@@ -1216,7 +1181,7 @@ def test_unserved_pin_reconfirms_and_names_the_missing_model(
         if call["body"]["model"] == configured
     ]
     assert strong
-    served = next(line for line in body["assumptions"] if line.startswith("step plan-strong:"))
+    served = next(line for line in body["assumptions"] if line.startswith("step sql-strong:"))
     assert f"served_model={MODEL}" in served
     assert f"served_provider={PROVIDER}" in served
     assert armed_openvault.non_openvault_calls == []
@@ -1227,7 +1192,6 @@ def test_unset_stronger_route_does_not_pick_a_provider(
 ) -> None:
     _stronger_route(armed_openvault, "", monkeypatch)
     bad = "SELECT no_such_col FROM transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     dms_http.bind_session(SESSION, GRANT)

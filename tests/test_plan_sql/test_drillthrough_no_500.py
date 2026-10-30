@@ -16,7 +16,6 @@ from CortexOS.memory import space_memory as sm
 from tests.dms.test_c7_02_manifest_before_explain import dms_http  # noqa: F401
 from tests.test_plan_sql.test_c_loop_a_plan_sql import (
     GRANT,
-    PLAN_TEXT,
     SESSION,
     _ask,
     _json,
@@ -53,7 +52,7 @@ def drill_client(dms_http):  # noqa: F811
 
 
 def _ladder_answer(fake, client, sql: str) -> dict[str, Any]:
-    _reply(fake, PLAN_TEXT)
+    # One FreeRoute call per attempt (GEN-GRANTED-CATALOG-01): the SQL reply only.
     _reply(fake, f"```sql\n{sql};\n```")
     client.bind_session(SESSION, GRANT)
     body = _json(_ask(client))

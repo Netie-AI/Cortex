@@ -320,11 +320,6 @@ PAYLOAD: dict[str, Any] = {
         }
     ]
 }
-PLAN_TEXT = (
-    "1. Read transactions.\n"
-    "2. Group by txn_type and count rows.\n"
-    "3. Order by the count, largest first."
-)
 GOOD_SQL = "SELECT txn_type, COUNT(*) AS n FROM transactions GROUP BY txn_type ORDER BY n DESC"
 
 
@@ -359,7 +354,7 @@ def test_ask_success_stamps_model_requested_and_served(
 ) -> None:
     """A served /ask step line carries model_requested and model_served."""
     _arm_ask(monkeypatch, tmp_path)
-    _reply(armed_openvault, PLAN_TEXT)
+    # GEN-GRANTED-CATALOG-01 (#386): the plan is folded into the one SQL call.
     _reply(armed_openvault, f"```sql\n{GOOD_SQL};\n```")
     dms_http.bind_session(SESSION, GRANT)
     resp = dms_http.post(
@@ -369,12 +364,12 @@ def test_ask_success_stamps_model_requested_and_served(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["served_model"] == PIN
-    plan = next(line for line in body["assumptions"] if line.startswith("step plan:"))
+    # No separate plan call, so no plan step line: every model step is the SQL call.
+    assert not any(line.startswith("step plan:") for line in body["assumptions"])
     sql = next(line for line in body["assumptions"] if line.startswith("step sql:"))
-    for line in (plan, sql):
-        assert f"model_requested={PIN}" in line
-        assert f"model_served={PIN}" in line
-    assert armed_openvault.chat_calls
+    assert f"model_requested={PIN}" in sql
+    assert f"model_served={PIN}" in sql
+    assert len(armed_openvault.chat_calls) == 1
     assert all(call["body"]["strict"] is True for call in armed_openvault.chat_calls)
 
 
@@ -385,7 +380,6 @@ def test_ask_strict_refusal_does_not_fall_back(
     _arm_ask(monkeypatch, tmp_path)
     _pin_unavailable(armed_openvault, retry_after_s=12)
     # A fallback would consume this and serve it. It must stay queued.
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
     resp = dms_http.post(
