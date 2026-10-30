@@ -49,10 +49,15 @@ class BGEReranker:
         *,
         max_concurrent: int = 1,
         device: str | None = None,
+        model_kwargs: dict[str, Any] | None = None,
     ) -> None:
+        """``model_kwargs`` are extra keyword arguments for the ``CrossEncoder``
+        constructor. They are passed only when given, so a caller that names
+        none constructs exactly as before."""
         self._sem = asyncio.Semaphore(max_concurrent)
         self._model_name = model_name
         self._device = device
+        self._model_kwargs = dict(model_kwargs) if model_kwargs else None
         self._cross_encoder: Any | None = None
         self._load_failed = False
 
@@ -64,7 +69,12 @@ class BGEReranker:
         try:
             from sentence_transformers import CrossEncoder
 
-            self._cross_encoder = CrossEncoder(self._model_name, device=self._device)
+            if self._model_kwargs:
+                self._cross_encoder = CrossEncoder(
+                    self._model_name, device=self._device, **self._model_kwargs
+                )
+            else:
+                self._cross_encoder = CrossEncoder(self._model_name, device=self._device)
             return self._cross_encoder
         except Exception as exc:
             log.debug(
@@ -73,6 +83,34 @@ class BGEReranker:
             )
             self._load_failed = True
             return None
+
+    def ensure_loaded(self) -> bool:
+        """Load the cross-encoder now. False when it could not be loaded."""
+        return self._get_cross_encoder() is not None
+
+    def score(self, query: str, texts: list[str]) -> list[float] | None:
+        """One relevance score per text, or None when no usable score exists.
+
+        None (with a WARNING) when the model did not load, when ``predict``
+        raises, when it returns the wrong number of scores, or when any score
+        is not finite. Never silently zero.
+        """
+        if not texts:
+            return []
+        model = self._get_cross_encoder()
+        if model is None:
+            log.warning("BGE reranker not loaded; no rerank scores")
+            return None
+        try:
+            raw = model.predict([(query, t) for t in texts], show_progress_bar=False)
+            arr = np.asarray(raw, dtype=float).reshape(-1)
+        except Exception as exc:
+            log.warning("BGE reranker predict failed: %s", type(exc).__name__)
+            return None
+        if arr.shape[0] != len(texts) or not bool(np.all(np.isfinite(arr))):
+            log.warning("BGE reranker returned unusable scores (n=%d for %d texts)", arr.shape[0], len(texts))
+            return None
+        return [float(x) for x in arr]
 
     def _score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
         if not pairs:
