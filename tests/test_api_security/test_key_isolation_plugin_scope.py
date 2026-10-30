@@ -39,9 +39,10 @@ def _fixture_names(tree: ast.Module) -> set[str]:
 
 
 def test_plugin_is_the_only_addopts_plugin():
+    # tests.dms.metric_choice_plugin came from main (#424); any other plugin fails here.
     lines = (ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
     assert [ln.strip() for ln in lines if ln.strip().startswith("addopts")] == [
-        'addopts = "-p tests.api_key_isolation"'
+        'addopts = "-p tests.api_key_isolation -p tests.dms.metric_choice_plugin"'
     ]
 
 

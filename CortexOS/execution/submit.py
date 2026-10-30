@@ -25,6 +25,7 @@ from CortexOS.execution.session_manifests import get_session_registry
 from CortexOS.execution.telemetry import new_run_id, record_run
 from CortexOS.execution.warehouse import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     read_only_queries_enabled,
     warehouse_path,
@@ -99,7 +100,7 @@ def submit_request(body: SubmitRequest) -> QueryResult:
     """HTTP/contract entry: bind and/or execute under a signed manifest."""
     import duckdb
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, redact_db_error
 
     run_id = new_run_id()
     kind = _plan_kind(dict(body.plan or {}))
@@ -181,7 +182,12 @@ def submit_request(body: SubmitRequest) -> QueryResult:
         # EXPLAIN refused the SQL (a column the lake does not have), or the
         # engine failed running it (a bad cast, an overflow). Either way it is a
         # named refusal for the caller to abstain on, never an HTTP 500.
+        # The raw engine text quotes post-enforce SQL: the run record keeps it,
+        # the caller gets only the redacted text.
         status = SQL_GATE_ABSTAIN if isinstance(exc, SqlGateAbstain) else SQL_RUNTIME_ERROR
+        raw = getattr(exc, "raw_detail", None)
+        redacted_at_source = raw is not None or isinstance(exc, SqlGateAbstain)
+        shown = str(exc) if redacted_at_source else redact_db_error(exc)
         record_run(
             run_id=run_id,
             kind=kind,
@@ -191,9 +197,21 @@ def submit_request(body: SubmitRequest) -> QueryResult:
             queue_ms=queue_ms,
             exec_ms=exec_ms,
             issuer_kid=issuer_kid,
-            error=str(exc),
+            error=raw or str(exc),
         )
-        return QueryResult(ok=False, status=status, run_id=run_id, error=str(exc))
+        return QueryResult(ok=False, status=status, run_id=run_id, error=shown)
+
+
+def _redacted_db_error(exc: Exception, shown: str) -> Exception:
+    """A copy of ``exc`` that carries only ``shown``; the raw text is on ``raw_detail``."""
+    import duckdb
+
+    try:
+        redacted: Exception = type(exc)(shown)
+    except Exception:  # noqa: BLE001 - a class with an unusual constructor
+        redacted = duckdb.Error(shown)
+    redacted.raw_detail = str(exc)  # type: ignore[attr-defined]
+    return redacted
 
 
 def execute_sql(
@@ -204,6 +222,7 @@ def execute_sql(
     db_path: Any = None,
     explain_gate: bool | None = None,
     params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     """Enforce + execute rewritten SQL. Returns (rows, queue_ms, exec_ms).
 
@@ -211,10 +230,136 @@ def execute_sql(
     truthy), run DuckDB EXPLAIN after manifest enforce and before fetch.
     ``params`` are forwarded to both EXPLAIN and the fetch execute so bind
     placeholders in caller SQL survive predicate wrapping.
+
+    The statement, and the text of any error it raises, are noted on the
+    request's attempt record (:mod:`CortexOS.sql_attempts`).
+
+    Declared value domains (#402, #410): when the post-enforce SQL reads a
+    table with a declared value domain and the lake it runs on stores values
+    the declaration does not (a build that predates it, or another loader),
+    ``LakeValueDomainStale`` (a ``SqlGateAbstain``) is raised before any row is
+    fetched: a filter on the declared values would match nothing there. Every
+    declared column of every table read is checked, not only columns written
+    as ``exp.Column``.
+    ``value_domains`` defaults to the serving warehouse's declaration
+    (``warehouse_db.serving_value_domains``); ``()`` checks nothing.
     """
+    from CortexOS.sql_attempts import note_error, note_sql
+
+    note_sql(sql)
+    try:
+        return _execute_sql(
+            verified,
+            sql,
+            pool_id=pool_id,
+            db_path=db_path,
+            explain_gate=explain_gate,
+            params=params,
+            value_domains=value_domains,
+        )
+    except Exception as exc:
+        note_error(str(exc))
+        raise
+
+
+#: DuckDB's default schema: what a bare table reference and a bare grant key name.
+_DEFAULT_SCHEMA = "main"
+
+
+def granted_column_names(verified: VerifiedManifest, *, db_path: Any = None) -> frozenset[str]:
+    """Column names of the tables this grant names, folded as DuckDB compares them.
+
+    Read from the warehouse catalog that ``execute_sql`` runs on, and resolved
+    as the manifest's ``_grant_key`` resolves a reference: a grant key
+    ``schema.table`` matches only that schema, and a bare key matches only the
+    table in DuckDB's default schema ``main``. A same-named table in any other
+    schema, or in another attached catalog, is a different relation and its
+    columns are not granted. Empty when the catalog cannot be read: callers
+    treat a name they cannot place as not granted.
+    """
+    from pathlib import Path
+
+    from CortexOS.identifier_fold import fold_identifier
+
+    wanted: set[tuple[str, str]] = set()
+    for key in verified.row_predicates:
+        parts = str(key).split(".")
+        schema = fold_identifier(parts[-2]) if len(parts) > 1 else _DEFAULT_SCHEMA
+        wanted.add((schema, fold_identifier(parts[-1])))
+    if not wanted:
+        return frozenset()
+    path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
+    if not Path(path).exists():
+        return frozenset()
+    try:
+        con = get_connection(path, read_only=True)
+        try:
+            rows = con.execute(
+                "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+                "WHERE table_catalog = current_database()"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - an unreadable catalog grants nothing
+        return frozenset()
+    out: set[str] = set()
+    for schema, table, column in rows:
+        if (fold_identifier(str(schema)), fold_identifier(str(table))) in wanted:
+            out.add(fold_identifier(str(column)))
+    return frozenset(out)
+
+
+_ENGINE_BUILTINS: frozenset[str] | None = None
+
+
+def engine_builtin_names() -> frozenset[str]:
+    """Names of the engine's own functions and types, folded as DuckDB compares them.
+
+    Read from DuckDB's catalog of internal entries on a database with no
+    data, so a macro or type defined in a warehouse is never among them. Empty
+    when the catalog cannot be read: callers then treat every function name as
+    a name they cannot place. A successful read is kept for the process, since
+    the built-ins of one engine build do not change.
+    """
+    global _ENGINE_BUILTINS
+    if _ENGINE_BUILTINS is not None:
+        return _ENGINE_BUILTINS
+    from CortexOS.identifier_fold import fold_identifier
+
+    try:
+        con = get_connection(":memory:")
+        try:
+            rows = con.execute(
+                "SELECT function_name FROM duckdb_functions() WHERE internal "
+                "UNION SELECT type_name FROM duckdb_types() WHERE internal"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - an unreadable catalog names no built-in
+        return frozenset()
+    _ENGINE_BUILTINS = frozenset(fold_identifier(str(name)) for (name,) in rows if name)
+    return _ENGINE_BUILTINS
+
+
+def _execute_sql(
+    verified: VerifiedManifest,
+    sql: str,
+    *,
+    pool_id: str | None = None,
+    db_path: Any = None,
+    explain_gate: bool | None = None,
+    params: Sequence[Any] | None = None,
+    value_domains: Sequence[Any] | None = None,
+) -> tuple[list[dict[str, Any]], float, float]:
     import os
 
-    from CortexOS.dms.sql_validate_gate import SqlGateAbstain, explain_dry_run
+    import duckdb
+
+    from CortexOS.dms.sql_validate_gate import (
+        SqlGateAbstain,
+        explain_dry_run,
+        redact_db_error,
+    )
 
     safe_sql = enforce_manifest(sql, verified)
     use_explain = (
@@ -229,22 +374,90 @@ def execute_sql(
         path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
         try:
-            if use_explain:
-                ok, detail = explain_dry_run(con, safe_sql, params=params)
-                if not ok:
-                    raise SqlGateAbstain(
-                        f"EXPLAIN rejected SQL: {detail}",
-                        violations=[f"EXPLAIN_FAILED:{detail}"],
-                    )
-            # Best-effort statement timeout (DuckDB may ignore unknown settings).
+            # The SET is attempted before EXPLAIN, the value-domain scan and the page count.
+            # On DuckDB 2.x it is a no-op: DuckDB has no statement_timeout setting, the SET
+            # raises CatalogException and it is swallowed here, so nothing is bounded.
+            # A failure here is not a refusal.
             timeout_s = pool.config.statement_timeout_s
             if timeout_s > 0:
                 try:
                     con.execute(f"SET statement_timeout='{int(timeout_s * 1000)}ms'")
                 except Exception:  # noqa: BLE001
                     pass
-            rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
-            rows_raw = rel.fetchall()
+            if use_explain:
+                ok, detail = explain_dry_run(con, safe_sql, params=params)
+                if not ok:
+                    # The raw text quotes post-enforce SQL. It rides on raw_detail for the audit sink.
+                    reason = redact_db_error(detail)
+                    raise SqlGateAbstain(
+                        f"EXPLAIN rejected SQL: {reason}",
+                        violations=[f"EXPLAIN_FAILED:{reason}"],
+                        raw_detail=detail,
+                    )
+            if value_domains is None:
+                from CortexOS.dms.warehouse_db import serving_value_domains
+
+                value_domains = serving_value_domains()
+            if value_domains:
+                from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
+                from CortexOS.ontology.value_domain import stale_columns, stale_reason
+
+                # Kept per read-only instance this cursor reads, never per path:
+                # a file renamed over the path is a later instance's to check.
+                # The scan ignores row predicates; see value_domain._drift_counts.
+                drift = stale_columns(
+                    con, safe_sql, value_domains, instance=connection_instance(con)
+                )
+                if drift:
+                    raise LakeValueDomainStale(
+                        stale_reason(drift), codes=[item.code for item in drift]
+                    )
+            # Refusals above have returned. Tie a cut page, then fetch that
+            # statement. The count stays on this connection: it is not a second
+            # served ``execute_sql``.
+            from CortexOS.dms.sql_guardrail import (
+                _unlimited,
+                apply_page_tiebreak,
+                remember_served_page,
+            )
+            from CortexOS.dms.warehouse_db import load_semantic_layer
+
+            try:
+                counted = con.execute(
+                    "SELECT COUNT(*) FROM (" + _unlimited(safe_sql) + ") _page"
+                ).fetchone()
+                total = int(counted[0]) if counted else None
+            except Exception:  # noqa: BLE001
+                total = None
+            tied = apply_page_tiebreak(sql, load_semantic_layer(), total)
+            remember_served_page(sql, tied)
+            if tied != sql:
+                safe_sql = enforce_manifest(tied, verified)
+                if use_explain:
+                    ok, detail = explain_dry_run(con, safe_sql, params=params)
+                    if not ok:
+                        reason = redact_db_error(detail)
+                        raise SqlGateAbstain(
+                            f"EXPLAIN rejected SQL: {reason}",
+                            violations=[f"EXPLAIN_FAILED:{reason}"],
+                            raw_detail=detail,
+                        )
+                if value_domains:
+                    drift = stale_columns(
+                        con, safe_sql, value_domains, instance=connection_instance(con)
+                    )
+                    if drift:
+                        raise LakeValueDomainStale(
+                            stale_reason(drift), codes=[item.code for item in drift]
+                        )
+            try:
+                rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
+                rows_raw = rel.fetchall()
+            except duckdb.Error as exc:
+                # Same class, redacted text: a run-time error quotes post-enforce SQL
+                # too. The raw text rides on raw_detail (and __cause__) for the
+                # audit/journal sink only.
+                raise _redacted_db_error(exc, redact_db_error(exc)) from exc
             columns = [d[0] for d in rel.description] if rel.description else []
             rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
         finally:
@@ -273,7 +486,13 @@ def execute_count(
         tree.set("order", None)
         inner = tree.sql(dialect="duckdb")
         count_sql = f"SELECT COUNT(*) AS n FROM ({inner}) _t"
-        rows, _, _ = execute_sql(verified, count_sql, pool_id=pool_id, db_path=db_path)
+        # The private runner, not ``execute_sql``. A page count is not a served
+        # statement: the execute-spy must-fails lock the one statement that is.
+        # Callers invoke this only after every refusal check, immediately
+        # before that statement.
+        rows, _, _ = _execute_sql(
+            verified, count_sql, pool_id=pool_id, db_path=db_path
+        )
         if not rows:
             return None
         return int(next(iter(rows[0].values())))
@@ -287,9 +506,11 @@ __all__ = [
     "PoolMismatch",
     "PoolRequired",
     "SqlRequired",
+    "engine_builtin_names",
     "execute_count",
     "execute_sql",
     "get_verifier",
+    "granted_column_names",
     "refresh_jwks",
     "set_verifier_for_tests",
     "submit_request",

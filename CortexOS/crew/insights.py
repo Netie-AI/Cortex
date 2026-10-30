@@ -30,6 +30,7 @@ from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
 from CortexOS.insights.caller_ontology import SOURCE_CALLER, CallerCatalog
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
+from CortexOS.ontology.value_domain import LAKE_STALE
 
 # Calls to freeroute.complete() during run_insights. None outside that call.
 _model_calls: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
@@ -64,6 +65,11 @@ _ENGINE_LAYERS = frozenset(
 _ENGINE_BADGES = frozenset(
     {"certified", "governed_metric", "query_skill", "l0", "l1", "governed"}
 )
+# The phase/layer CortexOS.crew.l2_serve sets on the answer it serves. Its SQL
+# is the model's generate SQL that l2_serve executed after its gates; it is not
+# an EngineBridge answer even though its status is CERTIFIED.
+_L2_SERVE_PHASE = "l2_serve"
+_L2_SERVE_LAYER = "generated"
 
 # Engine badges this spine will certify. L2/generated is free-form: refuse.
 _CERTIFY_BADGES = frozenset(
@@ -77,7 +83,7 @@ _CERTIFY_BADGES = frozenset(
     }
 )
 _ABSTAIN_BADGES = frozenset(
-    {"abstain", "needs_clarification", "l3", "abstained"}
+    {"abstain", "needs_clarification", "l3", "abstained", "reconfirm"}
 )
 
 _STOP = frozenset(
@@ -199,9 +205,11 @@ def public_law(*, shell_public: dict[str, Any] | None = None) -> dict[str, Any]:
         ),
         "plan_source": (
             "ontology_plan only when this answer's SQL is NL then ontology "
-            "plan then FreeRoute SQL then validate, or NL then ontology then "
-            "the certified query that ontology resolved (served as stored; "
-            "served_reason names it; no model called). Else other. Request "
+            "plan then FreeRoute SQL then validate (a model wrote it), "
+            "including that SQL as l2_serve executed and served it; "
+            "served_* then name the model. A certified query that ontology "
+            "resolved, served as stored with no model called, is other; "
+            "served_reason and generative.check name it. Else other. Request "
             "mode=ontology_plan is not a stamp. Never bind_plan here."
         ),
         "cot_climb": _cot_public_map(),
@@ -1199,11 +1207,34 @@ def normalize_plan_source(raw: Any) -> str:
     return val if val in PLAN_SOURCES else PLAN_SOURCE_OTHER
 
 
+def certified_query_served(gen: dict[str, Any] | None) -> bool:
+    """True when generate returned a stored certified query and called no model.
+
+    Read from the markers ``certified_serve.served_envelope`` sets (its
+    ``check`` and ``identity``), which ``_attach_generative`` carries onto the
+    attached ``generative`` block.
+    """
+    from CortexOS.crew import certified_serve
+
+    if not isinstance(gen, dict):
+        return False
+    check = str(gen.get("check") or "")
+    return (
+        check.startswith(f"{certified_serve.CHECK}:")
+        or gen.get("identity") == certified_serve.IDENTITY
+    )
+
+
 def generated_ontology_sql(gen: dict[str, Any] | None) -> str | None:
-    """SELECT from NL -> ontology ranking -> FreeRoute -> validate. Else None."""
+    """SELECT from NL -> ontology ranking -> FreeRoute -> validate. Else None.
+
+    A certified query served as stored is not model SQL: None.
+    """
     if not isinstance(gen, dict):
         return None
     if not gen.get("ok") or not gen.get("valid"):
+        return None
+    if certified_query_served(gen):
         return None
     sql = str(gen.get("sql") or "").strip()
     if not sql or not _SELECT_SQL.match(sql):
@@ -1211,8 +1242,31 @@ def generated_ontology_sql(gen: dict[str, Any] | None) -> str | None:
     return sql
 
 
+def l2_served_sql(envelope: dict[str, Any], gen: dict[str, Any] | None = None) -> str | None:
+    """The model-written SQL ``l2_serve`` executed and served on this answer. Else None."""
+    if envelope.get("phase") != _L2_SERVE_PHASE:
+        return None
+    if str(envelope.get("status") or "") != "CERTIFIED":
+        return None
+    if str(envelope.get("layer") or "").strip().lower() != _L2_SERVE_LAYER:
+        return None
+    if envelope.get("model_called") is not True:
+        return None
+    attached = envelope.get("generative")
+    if certified_query_served(gen) or certified_query_served(
+        attached if isinstance(attached, dict) else None
+    ):
+        return None
+    sql = str(envelope.get("sql_used") or "").strip()
+    if not sql or not _SELECT_SQL.match(sql):
+        return None
+    return sql
+
+
 def engine_answered(envelope: dict[str, Any]) -> bool:
     """True when the customer answer came from EngineBridge L0/L1, not generate SQL."""
+    if l2_served_sql(envelope) is not None:
+        return False
     if str(envelope.get("status") or "") == "CERTIFIED":
         return True
     if envelope.get("phase") == "ask":
@@ -1276,9 +1330,14 @@ def stamp_plan_source(
     envelope: dict[str, Any],
     gen: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Producer stamp. query_sql is set only alongside honest ontology_plan."""
+    """Producer stamp. query_sql is set only alongside honest ontology_plan.
+
+    ontology_plan means a model wrote the SQL this answer carries: the validated
+    generate SQL, or the SQL ``l2_serve`` executed from it (query_sql is then the
+    SQL that ran). A certified query served as stored stays other.
+    """
     attached = envelope.get("generative")
-    sql = generated_ontology_sql(gen)
+    sql = l2_served_sql(envelope, gen) or generated_ontology_sql(gen)
     if sql is None and isinstance(attached, dict):
         sql = generated_ontology_sql(attached)
     source = decide_plan_source(
@@ -1310,6 +1369,7 @@ async def generative_ask(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
     pack_dir: Path | str | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """NL then ontology then CoT/route/improve through FreeRoute. No numbers. No DuckDB.
 
@@ -1320,7 +1380,9 @@ async def generative_ask(
     ontology plan (measure/group_by) folded into the SQL prompt -- not a stamp.
     """
     from CortexOS.crew import certified_serve, cot_climb, l2_serve
+    from CortexOS.insights import schema_context as schema_mod
 
+    supplied = schema_mod.supplied_schema(schema_context)
     # GEN-CERTIFIED-MEASURE-01: a certified measure that resolves the ask is
     # served as stored (or the ask abstains by name); the model is not asked to
     # re-derive a formula that is already law.
@@ -1331,7 +1393,8 @@ async def generative_ask(
     # model's SQL against the stored plan itself; certified serve steps aside
     # so that path stays as #287 measured it.
     hit = None
-    if ranking.get("source") != SOURCE_CALLER and not l2_serve.enabled():
+    # A caller schema is another Space. Pack certified SQL is not its law.
+    if ranking.get("source") != SOURCE_CALLER and not l2_serve.enabled() and not supplied:
         hit = certified_serve.resolve(
             intent, ranking, query_plan=query_plan, pack_dir=pack_dir
         )
@@ -1341,7 +1404,12 @@ async def generative_ask(
         return certified_serve.abstain_envelope(hit)
 
     out = await cot_climb.climb(
-        intent, ranking, complete=complete, bearer=bearer, query_plan=query_plan
+        intent,
+        ranking,
+        complete=complete,
+        bearer=bearer,
+        query_plan=query_plan,
+        schema_context=supplied,
     )
     if out.get("ok"):
         check = str(out.get("check") or "")
@@ -1403,11 +1471,14 @@ async def run_insights(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
     caller: CallerCatalog | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """Count freeroute.complete() calls, then run the ontology / ask / generate spine."""
+    from CortexOS.insights import schema_context as schema_mod
+
     token = _model_calls.set([])
     try:
-        return await _run_insights(
+        out = await _run_insights(
             intent,
             bridge=bridge,
             ask=ask,
@@ -1418,7 +1489,14 @@ async def run_insights(
             bearer=bearer,
             query_plan=query_plan,
             caller=caller,
+            schema_context=schema_context,
         )
+        # Row cap is part of the schema_context result only. The pack path
+        # does not gain row_cap or truncated, so its envelope stays put.
+        if generate and schema_mod.supplied_schema(schema_context):
+            out = schema_mod.stamp_row_cap(out)
+        schema_mod.publish_usage(schema_mod.usage_from_calls(_model_calls.get() or []))
+        return out
     finally:
         _model_calls.reset(token)
 
@@ -1435,6 +1513,7 @@ async def _run_insights(
     bearer: str | None = None,
     query_plan: dict[str, Any] | None = None,
     caller: CallerCatalog | None = None,
+    schema_context: str | None = None,
 ) -> dict[str, Any]:
     """Ontology first. Optional DMS ask and/or FreeRoute generative-ask.
 
@@ -1469,11 +1548,17 @@ async def _run_insights(
             )
         )
 
+    from CortexOS.insights import schema_context as schema_mod
+
     ranking = select_ranking(text, pack_dir=pack_dir, caller=caller)
     caller_mode = ranking.get("source") == SOURCE_CALLER
+    supplied = schema_mod.supplied_schema(schema_context)
     gen: dict[str, Any] | None = None
     if generate:
-        if not ranking.get("ok"):
+        # Pack ranking is the fallback only when no caller schema was sent.
+        # A supplied schema is the ontology the model writes against, including
+        # a Space whose question shares no tokens with the engine pack.
+        if not ranking.get("ok") and not supplied:
             return _refuse(
                 intent=text,
                 ranking=ranking,
@@ -1505,12 +1590,32 @@ async def _run_insights(
                 bearer=bearer,
                 query_plan=query_plan,
                 pack_dir=pack_dir,
+                schema_context=supplied,
             )
         except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
-            # The caller sees a named abstain; operators still see the bug.
-            _log.exception("generative_ask raised; answering a named ABSTAIN")
-            reason = f"generative_error:{type(exc).__name__}"
-            gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
+            from CortexOS.integrations.freeroute import FreeRouteStrictError
+
+            if isinstance(exc, FreeRouteStrictError):
+                # The pin was refused. Do not relabel it and do not try another model.
+                reason = (
+                    f"FreeRouteStrictError: HTTP {exc.status} {exc.error_type} "
+                    f"retry_after_s={exc.retry_after_s}"
+                )
+                gen = {
+                    "ok": False,
+                    "status": "ABSTAIN",
+                    "refuse_reason": reason,
+                    "retry_after_s": exc.retry_after_s,
+                    "model_requested": exc.model_requested,
+                    "model_served": exc.model_served,
+                }
+                if exc.stamp is not None:
+                    gen["stamp"] = exc.stamp.public()
+            else:
+                # The caller sees a named abstain; operators still see the bug.
+                _log.exception("generative_ask raised; answering a named ABSTAIN")
+                reason = f"generative_error:{type(exc).__name__}"
+                gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
         if not gen.get("ok") and gen.get("status") == "ABSTAIN":
             return _attach_generative(
                 _generative_abstain(
@@ -1531,7 +1636,7 @@ async def _run_insights(
                 ),
                 gen,
             )
-        if not ask or caller_mode:
+        if not ask or caller_mode or bool(supplied):
             validation = _validation(
                 status="ABSTAIN",
                 ranking=ranking,
@@ -1594,6 +1699,23 @@ async def _run_insights(
                 reason=(
                     "caller_ontology_ask_unsupported: engine /dms/query trials "
                     "serve only the engine pack; send generate=true"
+                ),
+                shell_public=shell_public,
+            ),
+            gen,
+        )
+
+    if supplied:
+        # The caller sent its own schema. Engine-pack trials answer the pack's
+        # data, not the caller's, so none is run.
+        return _attach_generative(
+            _refuse(
+                intent=text,
+                ranking=ranking,
+                reason=(
+                    schema_mod.SCHEMA_CONTEXT_ASK_UNSUPPORTED
+                    + ": engine /dms/query trials serve only the engine pack; "
+                    "send generate=true"
                 ),
                 shell_public=shell_public,
             ),
@@ -1690,6 +1812,11 @@ async def _run_insights(
                 shell_public=shell_public,
                 attempted=attempted,
             )
+            if f"{LAKE_STALE}:" in str(envelope.get("assumptions") or ""):
+                # #402: the lake does not hold the declared values the ranked
+                # trial filters on. That is the answer; a lower-ranked trial
+                # would answer a different question on the same lake.
+                return _attach_generative(last_abstain, gen)
             continue
         # REFUSE this trial; try the next constrained question unless the engine is gone.
         badge = str(envelope.get("badge") or "")

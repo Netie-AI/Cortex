@@ -1,6 +1,6 @@
 """Optional DBOS Transact runtime for S1 durable agent resume.
 
-Install: ``pip install -e ".[agents]"`` (pins ``dbos>=2.28.0,<3``).
+Install: ``pip install -e ".[agents]"`` (pins ``dbos>=3.0.0,<4``).
 Without the library, callers fall back to ops-DB step checkpoints in
 ``registry`` — same resume semantics, no external orchestrator.
 
@@ -27,22 +27,16 @@ _launched = False
 _generation = 0
 _configured_url: str | None = None
 APP_NAME = "cortex-dms-agents"
+# Keep stable across dbos upgrades: launch() only recovers PENDING workflows of the
+# current version, and run_agent() re-entering an unrecovered workflow_id blocks
+# forever on its result. Stop every dbos 2.x process before starting a 3.x one
+# instead (3.x reads 2.x workflows; 2.x cannot read 3.x ones).
 APP_VERSION = "s1-dbos-resume-v1"
 
 
 def generation() -> int:
     """Bumps on destroy(); callers re-bind step wrappers after a simulated kill."""
     return _generation
-
-
-def _admin_server_enabled() -> bool:
-    raw = (os.environ.get("DBOS_RUN_ADMIN_SERVER") or "").strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return False
-    if raw in ("1", "true", "yes", "on"):
-        return True
-    # Default off in pytest to avoid Windows port fights.
-    return os.environ.get("PYTEST_CURRENT_TEST") is None
 
 
 def _system_database_url() -> str | None:
@@ -72,7 +66,6 @@ def ensure_configured(*, system_database_url: str | None = None) -> bool:
     config: dict[str, Any] = {
         "name": APP_NAME,
         "application_version": APP_VERSION,
-        "run_admin_server": _admin_server_enabled(),
         "system_database_url": url,
     }
     DBOS(config=config)  # type: ignore[misc]

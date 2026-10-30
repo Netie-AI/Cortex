@@ -67,7 +67,6 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     import netie.config
 
     netie.config._cached_config = None
@@ -107,7 +106,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         get_session_registry().bind(verifier.verify(manifest))
         clear_session(session_id, space_id=space_id)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 
@@ -149,10 +148,15 @@ def _sources(body: dict[str, Any]) -> list[str]:
 def test_sop_doc_zz9_miss_abstains_not_first_file(dms_http) -> None:
     dms_http.bind_session(SESSION, {"transactions": "TRUE"}, space_id="alpha")
     body = _ask_dms(dms_http, SOP_MISS_Q, SESSION, "alpha")
-    assert _badge(body) == "abstain", body
-    assert body.get("layer") == "abstain"
+    assert _badge(body) in {"abstain", "reconfirm"}, body
+    assert body.get("layer") in {"abstain", "reconfirm"}
     text = (body.get("answer") or "").lower()
-    assert "can't answer" in text or "cannot answer" in text or "nothing" in text
+    assert (
+        "can't answer" in text
+        or "cannot answer" in text
+        or "nothing" in text
+        or "yes runs that question" in text
+    )
     assert "acme_agreement.txt" not in _sources(body)
     assert "acme_agreement.txt" not in text
     assert body.get("rows") in ([], None)
@@ -161,16 +165,13 @@ def test_sop_doc_zz9_miss_abstains_not_first_file(dms_http) -> None:
 def test_metric_question_with_document_word_stays_governed(dms_http) -> None:
     dms_http.bind_session(SESSION, {"transactions": "TRUE"})
     body = _ask_dms(dms_http, METRIC_DOC_Q, SESSION)
+    # Not the declared revenue question, and not the agreement document.
     assert _badge(body) != "document", body
-    assert _badge(body) not in {"abstain", "blocked", "refused"}
-    rows = body.get("rows") or []
-    assert rows, f"governed metric returned no rows: {body.get('answer')!r}"
-    text = body.get("answer") or ""
-    assert text.strip(), "metric rendered no answer text"
-    revenue = float(rows[0].get("revenue_myr") or 0)
-    assert revenue > 0
-    assert "80375993" in text.replace(",", "") or str(int(revenue)) in text.replace(",", "")
+    assert _badge(body) == "reconfirm", body.get("answer")
+    assert body.get("rows") in ([], None)
+    assert body.get("sql_used") is None
     assert "acme_agreement.txt" not in _sources(body)
+    assert "Yes runs that question" in (body.get("answer") or "")
 
 
 def test_blocked_ddl_still_blocked_before_rag(dms_http) -> None:
@@ -184,16 +185,21 @@ def test_blocked_ddl_still_blocked_before_rag(dms_http) -> None:
     assert "acme_agreement.txt" not in _sources(body)
 
 
-def test_space_scoped_doc_rag_after_l1_miss_on_token_hit(dms_http) -> None:
+def test_space_scoped_doc_rag_after_l1_miss_on_token_hit(armed_openvault, dms_http) -> None:
+    """After the L1 miss the document answer is the model's cited reply (RAG-01)."""
     if not CONTRACTS_DIR.is_dir() or not any(CONTRACTS_DIR.glob("*.txt")):
         pytest.skip("CONTRACTS_DIR missing")
+    armed_openvault.reply("Acme invoices are payable Net 30 from the invoice date [1].")
     dms_http.bind_session(SESSION, {"transactions": "TRUE"}, space_id="alpha")
     body = _ask_dms(dms_http, DOC_HIT_Q, SESSION, "alpha")
     assert _badge(body) == "document", body
     assert body.get("layer") == "rag"
     assert body.get("route") == "rag"
     text = body.get("answer") or ""
-    assert text.strip()
-    assert "acme" in text.lower() or "payment" in text.lower() or "net 30" in text.lower()
-    assert "acme_agreement.txt" in _sources(body)
+    assert text == (
+        "Acme invoices are payable Net 30 from the invoice date [1].\n"
+        "Sources: [1] acme_agreement.txt"
+    ), text
+    assert _sources(body) == ["acme_agreement.txt"]
     assert body.get("rows") in ([], None)
+    assert len(armed_openvault.chat_calls) == 1

@@ -114,9 +114,14 @@ def test_declared_yaml_synonyms_hit_stated_metric(question: str, metric_id: str)
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
     plan = route_to_metric(question)
-    assert plan is not None, question
-    assert plan.metric_id == metric_id, (question, plan.metric_id)
     r = answer(question)
+    if plan is None:
+        # A longer wording is not the declared question (#412).
+        assert r["badge"] == "reconfirm", (question, r.get("answer"))
+        assert not r.get("rows")
+        assert r.get("sql_used") is None
+        return
+    assert plan.metric_id == metric_id, (question, plan.metric_id)
     assert r["badge"] != "abstain", r.get("answer")
     assert r.get("rows"), r.get("answer")
     text = r.get("answer") or ""
@@ -131,14 +136,17 @@ def test_null_expiry_count_does_not_compile_as_sku_count():
     plan = route_to_metric(q)
     assert plan is None or plan.metric_id != "sku_count"
     r = answer(q)
-    assert r["badge"] == "abstain", r.get("answer")
+    assert r["badge"] == "reconfirm", r.get("answer")
+    assert not r.get("rows")
+    assert r.get("sql_used") is None
 
 
 def test_pending_high_risk_is_not_a_bare_risk_listing():
-    """Nested 'high risk suppliers' must not steal the pending-shipment metric."""
+    """The declared pending-shipment question is not a bare risk listing."""
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "pending deliveries from high risk vendors"
+    assert route_to_metric("pending deliveries from high risk vendors") is None
+    q = "high risk pending shipments"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "high_risk_pending"
@@ -157,7 +165,7 @@ def test_pending_high_risk_is_not_a_bare_risk_listing():
 def test_sku_count_per_category_is_grouped_not_scalar():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "how many SKUs per category"
+    q = "sku count by category"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "sku_count_by_category"
@@ -176,7 +184,7 @@ def test_sku_count_per_category_is_grouped_not_scalar():
 def test_freight_spend_per_destination_is_cost_not_count():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "freight spend per destination"
+    q = "shipment cost by destination"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "cost_by_destination"
@@ -196,7 +204,7 @@ def test_freight_spend_per_destination_is_cost_not_count():
 def test_spend_by_country_paraphrase_is_grouped_spend():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "how much do we spend in each supplier country"
+    q = "spend by country"
     plan = route_to_metric(q)
     assert plan is not None
     assert plan.metric_id == "spend_by_country"
@@ -215,13 +223,10 @@ def test_spend_by_country_paraphrase_is_grouped_spend():
 def test_cctv_warehouse_a_returns_camera_id():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "camera feed for warehouse A"
-    plan = route_to_metric(q)
-    assert plan is not None
-    assert plan.metric_id == "cctv_by_location"
-    assert plan.slots.get("location") == "WH-A"
+    assert route_to_metric("camera feed for warehouse A") is None
+    q = "Show the CCTV camera for warehouse A"
     r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
+    assert r["badge"] == "certified", r.get("answer")
     rows = r.get("rows") or []
     assert rows, r.get("answer")
     text = r.get("answer") or ""
@@ -235,13 +240,10 @@ def test_cctv_warehouse_a_returns_camera_id():
 def test_chemicals_paraphrase_lists_chemical_skus():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "show me everything in the chemicals category"
-    plan = route_to_metric(q)
-    assert plan is not None
-    assert plan.metric_id == "items_by_category"
-    assert str(plan.slots.get("category")).upper() == "CHEMICALS"
+    assert route_to_metric("show me everything in the chemicals category") is None
+    q = "List chemicals in inventory"
     r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
+    assert r["badge"] == "certified", r.get("answer")
     rows = r.get("rows") or []
     assert rows, r.get("answer")
     text = r.get("answer") or ""
@@ -253,12 +255,10 @@ def test_chemicals_paraphrase_lists_chemical_skus():
 def test_supplier_scorecard_paraphrase_ranks_suppliers():
     from CortexOS.dms.answer_engine import answer, route_to_metric
 
-    q = "rank our vendors on risk and lead time together"
-    plan = route_to_metric(q)
-    assert plan is not None
-    assert plan.metric_id == "supplier_ranking"
+    assert route_to_metric("rank our vendors on risk and lead time together") is None
+    q = "Rank suppliers by combined risk and lead time score"
     r = answer(q)
-    assert r["badge"] != "abstain", r.get("answer")
+    assert r["badge"] == "certified", r.get("answer")
     rows = r.get("rows") or []
     assert rows, r.get("answer")
     text = r.get("answer") or ""
@@ -322,6 +322,7 @@ TOP3_CATEGORY_SALES_PHRASES = (
 )
 
 # Independent of certified YAML: map sku -> category via GROUP BY, not DISTINCT.
+# txn_type is the ontology's canonical 'outbound': the lake build maps source OUT (#387).
 _ORACLE_CATEGORY_SALES = """
 SELECT m.category,
        ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
@@ -331,7 +332,7 @@ JOIN (
     FROM inventory
     GROUP BY sku
 ) m ON t.sku = m.sku
-WHERE t.txn_type = 'OUT'
+WHERE t.txn_type = 'outbound'
 GROUP BY m.category
 ORDER BY sales_value_myr DESC, m.category ASC
 """
@@ -340,14 +341,14 @@ SELECT i.category,
        ROUND(SUM(t.quantity_kg * t.unit_cost_myr), 2) AS sales_value_myr
 FROM transactions t
 JOIN inventory i ON t.sku = i.sku
-WHERE t.txn_type = 'OUT'
+WHERE t.txn_type = 'outbound'
 GROUP BY i.category
 ORDER BY sales_value_myr DESC, i.category ASC
 LIMIT 1
 """
 _OUT_REVENUE = """
 SELECT ROUND(SUM(quantity_kg * unit_cost_myr), 2)
-FROM transactions WHERE txn_type = 'OUT'
+FROM transactions WHERE txn_type = 'outbound'
 """
 
 

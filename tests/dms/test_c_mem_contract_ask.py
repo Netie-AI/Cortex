@@ -23,7 +23,7 @@ from CortexOS.memory import space_memory as sm
 from CortexOS.memory.space_memory import Actor, reset_space_memory_for_tests
 
 SESSION = "c-mem-290"
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "total revenue"
 GRANT = {"transactions": "TRUE"}
 STEWARD = Actor("steward-alice", "steward")
 
@@ -63,7 +63,6 @@ def ask_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.delenv(sm.ENABLED_ENV, raising=False)
     monkeypatch.delenv(sm.SCORED_ROUND_ENV, raising=False)
     import netie.config
@@ -100,7 +99,7 @@ def ask_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         get_session_registry().bind(verifier.verify(manifest))
         clear_session(session_id, space_id=space_id)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 

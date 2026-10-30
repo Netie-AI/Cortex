@@ -38,7 +38,11 @@ def api_keys_env(monkeypatch):
     monkeypatch.delenv("DMS_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("PACK", "dms")
     monkeypatch.delenv("CONSTRUCTOR_SKIN_DIR", raising=False)
-    return {"viewer": "sk-viewer-test"}
+    return {
+        "viewer": "sk-viewer-test",
+        "steward": "sk-steward-test",
+        "admin": "sk-admin-test",
+    }
 
 
 @pytest.fixture
@@ -262,16 +266,16 @@ def test_recommend_foundry_picks_orchestrator(dms_client, api_keys_env):
     assert res.json()["recommendation"]["pattern"] == "orchestrator_subagent"
 
 
-def test_run_compiles_with_viewer_key(dms_client, api_keys_env):
+def test_run_refuses_viewer_key(dms_client, api_keys_env):
     res = dms_client.post(
         "/cortex/constructor/run",
         json=SAMPLE,
         headers={"X-API-Key": api_keys_env["viewer"]},
     )
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert set(body["nodes"]) == {"n1", "n2", "n3", "n4"}
-    assert body["actor"] == "api_viewer"
+    assert res.status_code == 403, res.text
+    assert res.json()["detail"] == (
+        "Requires role 'steward' or higher (caller='viewer' actor='api_viewer')"
+    )
 
 
 def test_ontology_catalog_is_live_yaml(dms_client, api_keys_env):
@@ -331,11 +335,12 @@ def test_run_seeds_fetch_onto_document_ref(dms_client, api_keys_env):
             ],
             "edges": [{"from": "c1", "to": "a1"}],
         },
-        headers={"X-API-Key": api_keys_env["viewer"]},
+        headers={"X-API-Key": api_keys_env["steward"]},
     )
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["ok"] is True
+    assert body["actor"] == "api_steward"
     assert body["fetches"]["c1"]["table"] == "inventory"
     assert body["fetches"]["c1"]["row_count"] >= 1
     out = body["nodes"]["c1"]["output"]
@@ -396,12 +401,23 @@ def test_demo_keys_rejected_when_refused(monkeypatch):
     assert resolve_caller("dms-demo-viewer-key") is None
 
 
-def test_ov_token_resolves_via_openvault(monkeypatch):
+def _ov_verify_returns(monkeypatch, tmp_path, body):
     monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
     monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    token_file = tmp_path / "cortex_ov_service_token"
+    token_file.write_text("svc-test-token", encoding="utf-8")
+    token_file.chmod(0o600)
+    monkeypatch.setenv("CORTEX_OV_SERVICE_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("CORTEX_OV_VERIFY_URL", raising=False)
     monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        lambda *a, **k: {"ok": True, "key": {"key_id": "k1", "tier": "free"}},
+        "CortexOS.integrations.openvault_client.request_json",
+        lambda *a, **k: (200, body),
+    )
+
+
+def test_ov_token_resolves_via_openvault(monkeypatch, tmp_path):
+    _ov_verify_returns(
+        monkeypatch, tmp_path, {"ok": True, "valid": True, "key_id": "k1", "tier": "free"}
     )
     from packs.dms.security.api_auth import resolve_caller
 
@@ -411,24 +427,16 @@ def test_ov_token_resolves_via_openvault(monkeypatch):
     assert caller.actor == "ov_k1"
 
 
-def test_ov_token_rejects_valid_false(monkeypatch):
-    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
-    monkeypatch.delenv("DMS_API_KEYS", raising=False)
-    monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        lambda *a, **k: {"ok": True, "valid": False},
-    )
+def test_ov_token_rejects_valid_false(monkeypatch, tmp_path):
+    _ov_verify_returns(monkeypatch, tmp_path, {"ok": True, "valid": False})
     from packs.dms.security.api_auth import resolve_caller
 
     assert resolve_caller("ov_dead") is None
 
 
-def test_ov_token_accepts_flat_valid_true(monkeypatch):
-    monkeypatch.setenv("DMS_REFUSE_DEMO_KEYS", "1")
-    monkeypatch.delenv("DMS_API_KEYS", raising=False)
-    monkeypatch.setattr(
-        "CortexOS.integrations.openvault_client.post_json",
-        lambda *a, **k: {"ok": True, "valid": True, "key_id": "flat1", "tier": "free"},
+def test_ov_token_accepts_flat_valid_true(monkeypatch, tmp_path):
+    _ov_verify_returns(
+        monkeypatch, tmp_path, {"ok": True, "valid": True, "key_id": "flat1", "tier": "free"}
     )
     from packs.dms.security.api_auth import resolve_caller
 

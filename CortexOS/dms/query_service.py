@@ -13,10 +13,13 @@ from typing import Any, Literal
 from CortexOS.dms.sql_guardrail import audit_log, guard_and_execute, validate_sql
 from CortexOS.dms.warehouse_db import (
     DEFAULT_DB,
+    connection_instance,
     get_connection,
     load_semantic_layer,
     read_only_queries_enabled,
+    serving_value_domains,
 )
+from CortexOS.ontology import value_domain
 from CortexOS.routing.judgment_model import JudgmentModel, JudgmentRequest
 from CortexOS.routing.tiers import Tier
 from packs.dms.security.reversible import secure_reversible
@@ -291,7 +294,7 @@ def _sales_sql(question: str) -> tuple[str, int, str]:
         "ROUND(SUM(quantity_kg * unit_cost_myr), 2) AS sales_value_myr, "
         "COUNT(*) AS transaction_count "
         "FROM transactions "
-        "WHERE txn_type = 'OUT' "
+        "WHERE txn_type = 'outbound' "
         f"GROUP BY sku ORDER BY {metric} {direction}, sku ASC LIMIT {limit}"
     )
     return sql, limit, f"{metric} {direction}"
@@ -868,38 +871,50 @@ def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
         con.close()
 
 
-# Function words in the first tokens of "what does the SOP-DOC-ZZ9 …" used to
-# substring-match any English .txt. Empty match must not invent a hit.
-_RAG_STOP = frozenset({
-    "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with",
-    "from", "per", "under", "about", "what", "which", "how", "does", "do",
-    "did", "is", "are", "was", "were", "our", "my", "your", "this", "that",
-    "say", "says", "state", "states", "according", "explain",
-})
-
-
-def _rag_content_tokens(question: str) -> list[str]:
-    return [
-        tok
-        for tok in re.findall(r"[a-z0-9][a-z0-9_-]*", question.lower())
-        if tok not in _RAG_STOP and len(tok) >= 4
-    ]
-
-
 def rag_answer(question: str) -> tuple[str, list[str]]:
-    """Stub file scan. Empty match returns no sources so the caller abstains."""
-    tokens = _rag_content_tokens(question)
-    sources: list[str] = []
-    snippets: list[str] = []
-    if tokens and CONTRACTS_DIR.is_dir():
-        for path in sorted(CONTRACTS_DIR.glob("*.txt")):
-            text = path.read_text(encoding="utf-8")
-            lowered = text.lower()
-            if any(tok in lowered for tok in tokens):
-                snippets.append(text[:400])
-                sources.append(path.name)
-    answer = snippets[0][:500] if snippets else ""
-    return answer, sources
+    """A cited answer from the supplier documents, or ``("", [])`` so the caller abstains.
+
+    RAG-01: passages are ranked by BM25 and gated on relevance; the model
+    answers only from them through OpenVault FreeRoute, citing each passage.
+    A failed or unarmed model, a NOT_IN_DOCUMENTS reply or a reply without a
+    valid citation serves nothing: ``("", [])``.
+
+    RAG-RANK-01: with ``CORTEX_DOC_RANK`` set, local models reorder the
+    passages that clear the same gate before the reader model sees them. A
+    requested stage that did not run adds one fixed engine line to a served
+    answer. Unset, this path is unchanged.
+    """
+    from CortexOS.rag import doc_rank, documents
+
+    paths = CONTRACTS_DIR.glob("*.txt") if CONTRACTS_DIR.is_dir() else ()
+    passages = documents.load_passages(paths)
+    stages = doc_rank.stages_from_env()
+    if not stages:
+        found = documents.answer(question, passages, _doc_model)
+    else:
+        sel = doc_rank.select(question, passages, stages)
+        found = documents.read(question, sel.top, _doc_model)
+        if found is not None and sel.note:
+            return f"{found.answer}\n{sel.note}", found.sources
+    if found is None:
+        return "", []
+    return found.answer, found.sources
+
+
+def _doc_model(messages: list[dict[str, str]]) -> Any:
+    from CortexOS.integrations import freeroute
+    from CortexOS.rag import documents
+
+    # Document text leaves the box: the OpenVault leave-machine gate runs first.
+    out = freeroute.complete(
+        documents.TASK_DOC_ANSWER,
+        messages,
+        temperature=0.0,
+        max_tokens=400,
+        accept=lambda text: bool((text or "").strip()),
+        egress="leave",
+    )
+    return documents.ModelReply(ok=out.ok, text=out.text, reason=out.reason)
 
 
 def answer_question(
@@ -909,45 +924,76 @@ def answer_question(
     space_id: str | None = None,
     require_grounding: bool = False,
 ) -> dict[str, Any]:
-    """Q2 — route through the layered answer engine (certified → governed metric →
-    abstain). Falls back to the legacy heuristic path only if the engine is
-    unavailable, so behavior degrades safely rather than breaking.
+    """Q2 — route through the layered answer engine.
 
-    Bridge: when the engine abstains but a ranked legacy SQL template still matches
-    (delayed shipments / sales / supplier ranking), serve the legacy path so
-    pre-Q2 demo queries keep working until dedicated governed metrics cover them.
+    Certified SQL, then a model that chooses a governed metric and a second
+    model that checks it, then the L2 model step, then abstain. A word match
+    does not choose a serve. The pre-Q2 ranked-SQL generator is not on this
+    path (DECISION5-LEGACY-01): an engine abstain, including one that names
+    delayed or late shipments, is returned as the engine left it.
+
+    An engine error is a named abstain with no rows. The answer says whether
+    the model step or the engine failed.
     """
     try:
         from CortexOS.dms.answer_engine import answer as _engine_answer
         from CortexOS.execution.manifest import ManifestError
 
-        result = _engine_answer(
+        # The engine envelope is the answer, including when nothing is granted.
+        # Do not open another connection and answer from the demo warehouse.
+        return _engine_answer(
             question,
             session_id=session_id,
             space_id=space_id,
             require_grounding=require_grounding,
         )
-        # A served turn that nothing grants must not fall through to the
-        # pre-Q2 ranked-SQL path. That bridge opens its own connection and
-        # would answer from the demo warehouse under the abstain.
-        if result.get("grant_kind") == "none":
-            return result
-        # Narrow bridge: "most delayed N rows" style questions are still legacy-ranked
-        # until a dedicated governed metric exists. Word-boundary match only — bare
-        # `"late" in q` falsely hits "correlate" and would defeat Q2 abstain.
-        q = question.lower()
-        if (
-            result.get("route") == "needs_clarification"
-            and re.search(r"\b(delayed|late)\b", q)
-            and _try_generate_ranked_sql(question)
-        ):
-            return _answer_question_legacy(question, session_id=session_id)
-        return result
     except ManifestError:
         # Never swallow manifest/security refusals into the legacy path.
         raise
-    except Exception:  # noqa: BLE001 — engine failure must not take the API down
-        return _answer_question_legacy(question, session_id=session_id)
+    except Exception as exc:  # noqa: BLE001 — engine failure must not take the API down
+        return engine_failure_abstain(exc)
+
+
+def _raised_in_model_step(exc: BaseException) -> bool:
+    """Whether the exception propagated out of the L2 model step (``attempt_l2``)."""
+    try:
+        from CortexOS.dms.l2_generation import attempt_l2
+    except Exception:  # noqa: BLE001 — the abstain must not depend on this import
+        return False
+    code = getattr(attempt_l2, "__code__", None)
+    tb = exc.__traceback__
+    while tb is not None:
+        if code is not None and tb.tb_frame.f_code is code:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def engine_failure_abstain(exc: BaseException) -> dict[str, Any]:
+    """Named abstain for an engine error. No rows and no SQL: nothing was verified.
+
+    Only the exception type is named; its message can carry engine internals.
+    """
+    step = "the model step" if _raised_in_model_step(exc) else "the answer engine"
+    reason = (
+        f"{step} failed ({type(exc).__name__}); no rule-based answer was substituted"
+    )
+    return {
+        "answer": f"I can't answer that: {reason}.",
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": str(uuid.uuid4()),
+        "violations_blocked": [],
+        "route": "needs_clarification",
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": reason,
+        "total_count": 0,
+        "suggestions": [],
+    }
 
 
 def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
@@ -1008,9 +1054,34 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
     query_plan = plan_query(question, sql)
     con = get_connection(DEFAULT_DB, read_only=read_only_queries_enabled())
     try:
-        guard_result, rows, entry = guard_and_execute(sql, semantic, con)
+        # #402: the rule SQL filters declared values ('outbound'); on a lake that
+        # does not store them it would serve a silent zero. Name it instead.
+        stale = value_domain.stale_columns(
+            con, sql, serving_value_domains(), instance=connection_instance(con)
+        )
+        if not stale:
+            guard_result, rows, entry = guard_and_execute(sql, semantic, con)
     finally:
         con.close()
+
+    if stale:
+        reason = value_domain.stale_reason(stale)
+        return {
+            "answer": f"I can't answer that from the DMS semantic layer with confidence ({reason}).",
+            "sql_used": None,
+            "chart_spec": None,
+            "audit_id": audit_id,
+            "violations_blocked": [],
+            "route": "needs_clarification",
+            "rows": [],
+            "row_count": 0,
+            "source_table": None,
+            "layer": "abstain",
+            "badge": "abstain",
+            "assumptions": reason,
+            "total_count": 0,
+            "query_plan": query_plan.to_dict(),
+        }
 
     alerts_summary = get_alerts_summary()
     show_alerts = any(w in question.lower() for w in ("location", "inventory", "warehouse", "capacity", "alert"))

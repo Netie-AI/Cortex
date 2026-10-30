@@ -95,6 +95,9 @@ if (Test-Path $PidFile) {
 }
 
 $env:PACK = $Pack
+# Auth-off is not implied. create_app logs and raises AUTH_DISABLED_WITHOUT_DEV_MODE
+# when DMS_AUTH_DISABLED is truthy unless CORTEX_DEV_MODE is also 1, true, or yes.
+# Images do not set the flag. Local docker auth-off is docker-compose.dev.yml.
 if (-not $env:DMS_AUTH_DISABLED) {
     if (-not $env:DMS_API_KEYS) {
         $env:DMS_API_KEYS = "viewer:dms-demo-viewer-key;steward:dms-demo-steward-key;admin:dms-demo-admin-key"

@@ -1,0 +1,674 @@
+{
+ "amended": {
+  "by": "RAG-01",
+  "qids": [
+   "adversarial:best_price_no_fallback",
+   "adversarial:esg_weather",
+   "golden:fallback_best_price",
+   "paraphrase:fallback_turnover#0",
+   "paraphrase:fallback_turnover#1"
+  ],
+  "why": "bench expects abstain; main served the supplier contract text because one word matched"
+ },
+ "modes": {
+  "clock": 18,
+  "exact": 134,
+  "unordered": 11
+ },
+ "n": 163,
+ "recorded_on": "96da7913c7f698cb607afd303195b9bae26bbf79",
+ "sha256": {
+  "adversarial:best_price_no_fallback": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "adversarial:category_ranking": [
+   "9cde8e35a0657a6c85f04a9d9ba2a12a74586691e463669fda6bdf16a67b6133",
+   "9cde8e35a0657a6c85f04a9d9ba2a12a74586691e463669fda6bdf16a67b6133"
+  ],
+  "adversarial:delete_all": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "adversarial:drop_inventory": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "adversarial:esg_weather": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "adversarial:exclude_bare_beta": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "adversarial:exclude_bare_numeric": [
+   "c9c18d96657431e1dce648bc4904e74517c9f16c04512cf0a07ce7d24dbd6028",
+   "c9c18d96657431e1dce648bc4904e74517c9f16c04512cf0a07ce7d24dbd6028"
+  ],
+  "adversarial:exclude_exact_sku_conjunction": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "adversarial:exclude_full_sku_beta": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "adversarial:exclude_nonexistent_sku": [
+   "675d79ee64cacb47cb2aa6620d7ad4faa764de42f6fcd82b3b980544a31d994f",
+   "675d79ee64cacb47cb2aa6620d7ad4faa764de42f6fcd82b3b980544a31d994f"
+  ],
+  "adversarial:gen_no_silent_template": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "adversarial:gen_poetry_request": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "adversarial:gen_truncate": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "adversarial:gen_unknown_entity_literal": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "adversarial:how_many_skus": [
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065",
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065"
+  ],
+  "adversarial:low_stock_followup": [
+   "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0",
+   "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0"
+  ],
+  "adversarial:ranks_6_to_10": [
+   "600b99728275805e43bdac2a50a7ccddbe027113bc31c9f51225c144c68822b6",
+   "600b99728275805e43bdac2a50a7ccddbe027113bc31c9f51225c144c68822b6"
+  ],
+  "adversarial:sum_of_ranking": [
+   "3b09a0354c2956b3025fb1d2ee330ad14bc1b82c9b521da7a6a3c96f8e364e3a",
+   "3b09a0354c2956b3025fb1d2ee330ad14bc1b82c9b521da7a6a3c96f8e364e3a"
+  ],
+  "adversarial:top5_exact_sentinel": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "adversarial:top5_paraphrase_sentinel": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "adversarial:top5_revenue": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "adversarial:total_revenue_g6": [
+   "a4ca949ac1881f21e4bf2b3c8754f5fcc1799773e4c749d86d7a63790d6684f1",
+   "a4ca949ac1881f21e4bf2b3c8754f5fcc1799773e4c749d86d7a63790d6684f1"
+  ],
+  "adversarial:unknown_subject_customers": [
+   "83168028e8e4dab2cf844502ddd0c625e4082848e916c5359b7682d70d16e96f",
+   "83168028e8e4dab2cf844502ddd0c625e4082848e916c5359b7682d70d16e96f"
+  ],
+  "adversarial:weather_joke": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "golden:abstain_category_ranking": [
+   "9cde8e35a0657a6c85f04a9d9ba2a12a74586691e463669fda6bdf16a67b6133",
+   "9cde8e35a0657a6c85f04a9d9ba2a12a74586691e463669fda6bdf16a67b6133"
+  ],
+  "golden:abstain_joke": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "golden:abstain_sum_of_ranking": [
+   "3b09a0354c2956b3025fb1d2ee330ad14bc1b82c9b521da7a6a3c96f8e364e3a",
+   "3b09a0354c2956b3025fb1d2ee330ad14bc1b82c9b521da7a6a3c96f8e364e3a"
+  ],
+  "golden:abstain_unknown_subject_customers": [
+   "83168028e8e4dab2cf844502ddd0c625e4082848e916c5359b7682d70d16e96f",
+   "83168028e8e4dab2cf844502ddd0c625e4082848e916c5359b7682d70d16e96f"
+  ],
+  "golden:abstain_weather": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "golden:active_alerts": [
+   "451eb643ffd7ea1fe482a0c8fd2e2c8fbc586fe318ec68abbba246bc211b5c84",
+   "451eb643ffd7ea1fe482a0c8fd2e2c8fbc586fe318ec68abbba246bc211b5c84"
+  ],
+  "golden:arriving_week": [
+   "f3c42cbeee03b74c93098dbd20173ffa68a4e0d42861369a8c1e1f43d541c933",
+   "f3c42cbeee03b74c93098dbd20173ffa68a4e0d42861369a8c1e1f43d541c933"
+  ],
+  "golden:audit_overdue": [
+   "69ae3f1c3e254e9ce7661ef2358e12a087e9944de6cd61b44768c6f69e9e7652",
+   "69ae3f1c3e254e9ce7661ef2358e12a087e9944de6cd61b44768c6f69e9e7652"
+  ],
+  "golden:avg_lead_time_by_country": [
+   "4798fde012cfc1079c11c9f665f13f8829ceb962419e119a05d6587ddc2425bd",
+   "4798fde012cfc1079c11c9f665f13f8829ceb962419e119a05d6587ddc2425bd"
+  ],
+  "golden:blocked_delete": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "golden:blocked_drop": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "golden:capacity_above_90": [
+   "251828f23a20422e5690887a9a830490bf5ac253241ec4d5412f5d23ae76c9d6",
+   "251828f23a20422e5690887a9a830490bf5ac253241ec4d5412f5d23ae76c9d6"
+  ],
+  "golden:capacity_utilisation": [
+   "c003c33cc27938fcf7f45e302340617e2504a0f8ff67cbf8422df32f3a0f1503",
+   "c003c33cc27938fcf7f45e302340617e2504a0f8ff67cbf8422df32f3a0f1503"
+  ],
+  "golden:cctv_wh_a": [
+   "c228b66bb6e8d7b3d4b6a98a71dfa7a2b80948a0112b031b17217e4317d497be",
+   "c228b66bb6e8d7b3d4b6a98a71dfa7a2b80948a0112b031b17217e4317d497be"
+  ],
+  "golden:chemicals_list": [
+   "2de97e7da2dab2da6aa2438d0b13708e4cb6ae8434927c66214a0bcf648d6d01",
+   "2de97e7da2dab2da6aa2438d0b13708e4cb6ae8434927c66214a0bcf648d6d01"
+  ],
+  "golden:cold_storage": [
+   "196c79e9ca22750ae92ca9199eee721eec4b0b152ab3b2e2ce84582e997ae94d",
+   "196c79e9ca22750ae92ca9199eee721eec4b0b152ab3b2e2ce84582e997ae94d"
+  ],
+  "golden:cold_storage_count": [
+   "3bcb692c97670e5cb6513c1c400bb881993773122f153913ef9b7eedca557c36",
+   "3bcb692c97670e5cb6513c1c400bb881993773122f153913ef9b7eedca557c36"
+  ],
+  "golden:cost_by_destination": [
+   "f8dba4f502f669af66c9ad6af29b0e84e8292181e30ac458d27b2e9dd9d6f9f6",
+   "f8dba4f502f669af66c9ad6af29b0e84e8292181e30ac458d27b2e9dd9d6f9f6"
+  ],
+  "golden:delayed_by_carrier": [
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3",
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3"
+  ],
+  "golden:delayed_count_scalar": [
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924",
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924"
+  ],
+  "golden:delayed_incoming_per_wh": [
+   "cb4d7f4322e6e34f075fd5e394d37bc7584988373519398b1a3d481d2a02c30e",
+   "cb4d7f4322e6e34f075fd5e394d37bc7584988373519398b1a3d481d2a02c30e"
+  ],
+  "golden:exclude_exact_sku_conjunction": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "golden:expired_items": [
+   "cc90873d9ab61abb5a4811f06bc8a493ba2bf759121ea385fc0f08adc231f4d3",
+   "cc90873d9ab61abb5a4811f06bc8a493ba2bf759121ea385fc0f08adc231f4d3"
+  ],
+  "golden:fallback_best_price": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "golden:fallback_turnover": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "golden:high_risk_pending": [
+   "04610b2af0d91246abc018b69786b41066635b0143c9f663f02b8d3916752c62",
+   "04610b2af0d91246abc018b69786b41066635b0143c9f663f02b8d3916752c62"
+  ],
+  "golden:in_transit": [
+   "12a88df6a9f622ac07456fa034f31b9ff55abb2c066059ffda565596980613ce",
+   "12a88df6a9f622ac07456fa034f31b9ff55abb2c066059ffda565596980613ce"
+  ],
+  "golden:low_stock_all": [
+   "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0",
+   "91b8ac62159bd1a56c5b7825ec2e759d1314e7fcbfc5fb74e7ed011c8e7b96b0"
+  ],
+  "golden:low_stock_wh_a": [
+   "bbcae3d9e3f31676ea706d83cf4be58024cc8829683a51111e1c3eda226434d9",
+   "bbcae3d9e3f31676ea706d83cf4be58024cc8829683a51111e1c3eda226434d9"
+  ],
+  "golden:most_free_capacity": [
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01",
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01"
+  ],
+  "golden:revenue_last_30d": [
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29",
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29"
+  ],
+  "golden:risk_above_070": [
+   "8649f569cf33e8f7cb3a49d753d2fcced2c3d4ae87491beaf9bb64a292e55c8a",
+   "8649f569cf33e8f7cb3a49d753d2fcced2c3d4ae87491beaf9bb64a292e55c8a"
+  ],
+  "golden:sales_top3_volume": [
+   "b005038022ba41f7437f1f320bac6d3f275c0de9a5433bb1baf725d95a9dbeb0",
+   "b005038022ba41f7437f1f320bac6d3f275c0de9a5433bb1baf725d95a9dbeb0"
+  ],
+  "golden:sales_top5_exclude_beta": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "golden:sales_top5_value": [
+   "9c42098591106b45ae1a331683dfab11b35c288a87dc6bdeb25d86337f1e1d49",
+   "9c42098591106b45ae1a331683dfab11b35c288a87dc6bdeb25d86337f1e1d49"
+  ],
+  "golden:sku_count": [
+   "59bd4d95fef081eba34959a8991905728b5719464c6a0bf1333f3f8d4b076fcb",
+   "59bd4d95fef081eba34959a8991905728b5719464c6a0bf1333f3f8d4b076fcb"
+  ],
+  "golden:sku_count_by_category": [
+   "7de21f3f1c647fe1ee97c6dc1ca7bf12236fcc612389a3c86de9f2d8616e4f0d",
+   "7de21f3f1c647fe1ee97c6dc1ca7bf12236fcc612389a3c86de9f2d8616e4f0d"
+  ],
+  "golden:spend_by_country": [
+   "453947963c89a492b4f40a987f1ec48786a3efa7e5d9c6fb7ef2ac8cb86f7f26",
+   "453947963c89a492b4f40a987f1ec48786a3efa7e5d9c6fb7ef2ac8cb86f7f26"
+  ],
+  "golden:stale_restock": [
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009",
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009"
+  ],
+  "golden:stock_value_by_category": [
+   "dfb24697778fdf04dcfefb2a5c39f8ba9d075f115ed3d2ebb56c64c129bffc4b",
+   "dfb24697778fdf04dcfefb2a5c39f8ba9d075f115ed3d2ebb56c64c129bffc4b"
+  ],
+  "golden:supplier_ranking": [
+   "98f1aa152dec1dfa951ab9be94d93714f271981b932619966e4ff17f7168a64d",
+   "98f1aa152dec1dfa951ab9be94d93714f271981b932619966e4ff17f7168a64d"
+  ],
+  "paraphrase:abstain_joke#0": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:abstain_joke#1": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:abstain_weather#0": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:abstain_weather#1": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:active_alerts#0": [
+   "b514b5fe2bd154430e8fbe55034dafbdd18ba533c8ce37c84b14ce7ece566308",
+   "b514b5fe2bd154430e8fbe55034dafbdd18ba533c8ce37c84b14ce7ece566308"
+  ],
+  "paraphrase:active_alerts#1": [
+   "b514b5fe2bd154430e8fbe55034dafbdd18ba533c8ce37c84b14ce7ece566308",
+   "b514b5fe2bd154430e8fbe55034dafbdd18ba533c8ce37c84b14ce7ece566308"
+  ],
+  "paraphrase:arriving_week#0": [
+   "f3c42cbeee03b74c93098dbd20173ffa68a4e0d42861369a8c1e1f43d541c933",
+   "f3c42cbeee03b74c93098dbd20173ffa68a4e0d42861369a8c1e1f43d541c933"
+  ],
+  "paraphrase:arriving_week#1": [
+   "f3c42cbeee03b74c93098dbd20173ffa68a4e0d42861369a8c1e1f43d541c933",
+   "f3c42cbeee03b74c93098dbd20173ffa68a4e0d42861369a8c1e1f43d541c933"
+  ],
+  "paraphrase:audit_overdue#0": [
+   "454ba490a4e124f8d0f40cd40d16bf9fc1fd810ed94d7826de7efd5bf6585656",
+   "454ba490a4e124f8d0f40cd40d16bf9fc1fd810ed94d7826de7efd5bf6585656"
+  ],
+  "paraphrase:audit_overdue#1": [
+   "454ba490a4e124f8d0f40cd40d16bf9fc1fd810ed94d7826de7efd5bf6585656",
+   "454ba490a4e124f8d0f40cd40d16bf9fc1fd810ed94d7826de7efd5bf6585656"
+  ],
+  "paraphrase:avg_lead_time_by_country#0": [
+   "4798fde012cfc1079c11c9f665f13f8829ceb962419e119a05d6587ddc2425bd",
+   "4798fde012cfc1079c11c9f665f13f8829ceb962419e119a05d6587ddc2425bd"
+  ],
+  "paraphrase:avg_lead_time_by_country#1": [
+   "4798fde012cfc1079c11c9f665f13f8829ceb962419e119a05d6587ddc2425bd",
+   "4798fde012cfc1079c11c9f665f13f8829ceb962419e119a05d6587ddc2425bd"
+  ],
+  "paraphrase:blocked_delete#0": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "paraphrase:blocked_delete#1": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "paraphrase:blocked_drop#0": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "paraphrase:blocked_drop#1": [
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761",
+   "473174b904995419be161e5d38fa0d4b7a9e3fdb06c45ee3cfaa63844cfbc761"
+  ],
+  "paraphrase:capacity_above_90#0": [
+   "90dd7e854da3867ae32f3a91f6933a4343a04836ce2317c0fcca5429a9dd513b",
+   "90dd7e854da3867ae32f3a91f6933a4343a04836ce2317c0fcca5429a9dd513b"
+  ],
+  "paraphrase:capacity_above_90#1": [
+   "90dd7e854da3867ae32f3a91f6933a4343a04836ce2317c0fcca5429a9dd513b",
+   "90dd7e854da3867ae32f3a91f6933a4343a04836ce2317c0fcca5429a9dd513b"
+  ],
+  "paraphrase:capacity_utilisation#0": [
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381",
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381"
+  ],
+  "paraphrase:capacity_utilisation#1": [
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381",
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381"
+  ],
+  "paraphrase:capacity_utilisation#2": [
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381",
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381"
+  ],
+  "paraphrase:capacity_utilisation#3": [
+   "41ab672d51aecd4385385ee2ead972341c5871fa268f50a8ca154e179f7ec18d",
+   "41ab672d51aecd4385385ee2ead972341c5871fa268f50a8ca154e179f7ec18d"
+  ],
+  "paraphrase:capacity_utilisation#4": [
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381",
+   "a069f77ddc4570fbe8396dbe4d78b5ff8988495e525f350fa089dcc1399b0381"
+  ],
+  "paraphrase:cctv_wh_a#0": [
+   "e821b6a05cd908a04c690549bfbef40f4047dc7c1516e1413bd2f03e23a663c9",
+   "e821b6a05cd908a04c690549bfbef40f4047dc7c1516e1413bd2f03e23a663c9"
+  ],
+  "paraphrase:cctv_wh_a#1": [
+   "e821b6a05cd908a04c690549bfbef40f4047dc7c1516e1413bd2f03e23a663c9",
+   "e821b6a05cd908a04c690549bfbef40f4047dc7c1516e1413bd2f03e23a663c9"
+  ],
+  "paraphrase:chemicals_list#0": [
+   "90b1f962730a6af50e65ceb1f9a8bd92d4140f3afec5e602fe961f63a473376f",
+   "90b1f962730a6af50e65ceb1f9a8bd92d4140f3afec5e602fe961f63a473376f"
+  ],
+  "paraphrase:chemicals_list#1": [
+   "90b1f962730a6af50e65ceb1f9a8bd92d4140f3afec5e602fe961f63a473376f",
+   "90b1f962730a6af50e65ceb1f9a8bd92d4140f3afec5e602fe961f63a473376f"
+  ],
+  "paraphrase:cold_storage#0": [
+   "f8e3e89fd7be0531c8f7863372da2d57c1083a0987924ef7531d53037b2b8acf",
+   "f8e3e89fd7be0531c8f7863372da2d57c1083a0987924ef7531d53037b2b8acf"
+  ],
+  "paraphrase:cold_storage#1": [
+   "f8e3e89fd7be0531c8f7863372da2d57c1083a0987924ef7531d53037b2b8acf",
+   "f8e3e89fd7be0531c8f7863372da2d57c1083a0987924ef7531d53037b2b8acf"
+  ],
+  "paraphrase:cold_storage_count#0": [
+   "3bcb692c97670e5cb6513c1c400bb881993773122f153913ef9b7eedca557c36",
+   "3bcb692c97670e5cb6513c1c400bb881993773122f153913ef9b7eedca557c36"
+  ],
+  "paraphrase:cold_storage_count#1": [
+   "3bcb692c97670e5cb6513c1c400bb881993773122f153913ef9b7eedca557c36",
+   "3bcb692c97670e5cb6513c1c400bb881993773122f153913ef9b7eedca557c36"
+  ],
+  "paraphrase:cost_by_destination#0": [
+   "77a8b6831b77ebfeb4f4f3c0e3bbc6f96ee760131f01304bc1be7a6fb3129187",
+   "77a8b6831b77ebfeb4f4f3c0e3bbc6f96ee760131f01304bc1be7a6fb3129187"
+  ],
+  "paraphrase:cost_by_destination#1": [
+   "77a8b6831b77ebfeb4f4f3c0e3bbc6f96ee760131f01304bc1be7a6fb3129187",
+   "77a8b6831b77ebfeb4f4f3c0e3bbc6f96ee760131f01304bc1be7a6fb3129187"
+  ],
+  "paraphrase:delayed_by_carrier#0": [
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3",
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3"
+  ],
+  "paraphrase:delayed_by_carrier#1": [
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3",
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3"
+  ],
+  "paraphrase:delayed_by_carrier#2": [
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3",
+   "8c37b456ec80108e73f639b721c803b10ae979a3ad92485a43230518fe0e37e3"
+  ],
+  "paraphrase:delayed_count_scalar#0": [
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924",
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924"
+  ],
+  "paraphrase:delayed_count_scalar#1": [
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924",
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924"
+  ],
+  "paraphrase:delayed_count_scalar#2": [
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924",
+   "fddc801c2b49f01095ad2c964e9d628835d4b647f69b3f58ebdd2ea2a3561924"
+  ],
+  "paraphrase:delayed_incoming_per_wh#0": [
+   "cb4d7f4322e6e34f075fd5e394d37bc7584988373519398b1a3d481d2a02c30e",
+   "cb4d7f4322e6e34f075fd5e394d37bc7584988373519398b1a3d481d2a02c30e"
+  ],
+  "paraphrase:delayed_incoming_per_wh#1": [
+   "cb4d7f4322e6e34f075fd5e394d37bc7584988373519398b1a3d481d2a02c30e",
+   "cb4d7f4322e6e34f075fd5e394d37bc7584988373519398b1a3d481d2a02c30e"
+  ],
+  "paraphrase:expired_items#0": [
+   "e8546a305685d9c90a7cba9e2b66cf4e4fc67874409302cf83cac2c29327223b",
+   "e8546a305685d9c90a7cba9e2b66cf4e4fc67874409302cf83cac2c29327223b"
+  ],
+  "paraphrase:expired_items#1": [
+   "e8546a305685d9c90a7cba9e2b66cf4e4fc67874409302cf83cac2c29327223b",
+   "e8546a305685d9c90a7cba9e2b66cf4e4fc67874409302cf83cac2c29327223b"
+  ],
+  "paraphrase:expired_items#2": [
+   "e8546a305685d9c90a7cba9e2b66cf4e4fc67874409302cf83cac2c29327223b",
+   "e8546a305685d9c90a7cba9e2b66cf4e4fc67874409302cf83cac2c29327223b"
+  ],
+  "paraphrase:fallback_best_price#0": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:fallback_best_price#1": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:fallback_turnover#0": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:fallback_turnover#1": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:high_risk_pending#0": [
+   "087a3cee3a8cffd65bced3552980795d1fcede1ea1488d6013c6ee3b871257ff",
+   "087a3cee3a8cffd65bced3552980795d1fcede1ea1488d6013c6ee3b871257ff"
+  ],
+  "paraphrase:high_risk_pending#1": [
+   "087a3cee3a8cffd65bced3552980795d1fcede1ea1488d6013c6ee3b871257ff",
+   "087a3cee3a8cffd65bced3552980795d1fcede1ea1488d6013c6ee3b871257ff"
+  ],
+  "paraphrase:in_transit#0": [
+   "12a88df6a9f622ac07456fa034f31b9ff55abb2c066059ffda565596980613ce",
+   "12a88df6a9f622ac07456fa034f31b9ff55abb2c066059ffda565596980613ce"
+  ],
+  "paraphrase:in_transit#1": [
+   "12a88df6a9f622ac07456fa034f31b9ff55abb2c066059ffda565596980613ce",
+   "12a88df6a9f622ac07456fa034f31b9ff55abb2c066059ffda565596980613ce"
+  ],
+  "paraphrase:low_stock_all#0": [
+   "e69d8aedb348a665c35e989f090f20b93605b8992ea84beb9a0a2c48774b5dae",
+   "e69d8aedb348a665c35e989f090f20b93605b8992ea84beb9a0a2c48774b5dae"
+  ],
+  "paraphrase:low_stock_all#1": [
+   "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae",
+   "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae"
+  ],
+  "paraphrase:low_stock_all#2": [
+   "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae",
+   "802482d2c774b1df9f8f5bb21c0fe54f24e84e9c96a06a59aa6511d0b03796ae"
+  ],
+  "paraphrase:low_stock_wh_a#0": [
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d",
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d"
+  ],
+  "paraphrase:low_stock_wh_a#1": [
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d",
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d"
+  ],
+  "paraphrase:low_stock_wh_a#2": [
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d",
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d"
+  ],
+  "paraphrase:low_stock_wh_a#3": [
+   "989e171501c9ff58246843257b0e46c7d8f9bd82a5785aeb3c5b026bb809354b",
+   "989e171501c9ff58246843257b0e46c7d8f9bd82a5785aeb3c5b026bb809354b"
+  ],
+  "paraphrase:low_stock_wh_a#4": [
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d",
+   "5fbf356465db08fedac955317171943db3df2df994d8c71abf9092406ab6a32d"
+  ],
+  "paraphrase:most_free_capacity#0": [
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01",
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01"
+  ],
+  "paraphrase:most_free_capacity#1": [
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01",
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01"
+  ],
+  "paraphrase:most_free_capacity#2": [
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01",
+   "d2a697127b55a8f9fffad75794b20ab5b637e94899d2c3f0c0551b621ae1ad01"
+  ],
+  "paraphrase:revenue_last_30d#0": [
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29",
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29"
+  ],
+  "paraphrase:revenue_last_30d#1": [
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29",
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29"
+  ],
+  "paraphrase:revenue_last_30d#2": [
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29",
+   "7746c45097442994d621588ed1431141c5eb88cb85b9f01451acf0895a6c7f29"
+  ],
+  "paraphrase:risk_above_070#0": [
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a",
+   "c5a54b7d68ecf47be842d18c3fd6d2bbf9d25fbc8269b20a60f72350020f7c4a"
+  ],
+  "paraphrase:risk_above_070#1": [
+   "8649f569cf33e8f7cb3a49d753d2fcced2c3d4ae87491beaf9bb64a292e55c8a",
+   "8649f569cf33e8f7cb3a49d753d2fcced2c3d4ae87491beaf9bb64a292e55c8a"
+  ],
+  "paraphrase:risk_above_070#2": [
+   "8649f569cf33e8f7cb3a49d753d2fcced2c3d4ae87491beaf9bb64a292e55c8a",
+   "8649f569cf33e8f7cb3a49d753d2fcced2c3d4ae87491beaf9bb64a292e55c8a"
+  ],
+  "paraphrase:sales_top3_volume#0": [
+   "b72023706d80498947bd9b9e85aecaff8c8517b28ebd5e295478f952cdcda4e2",
+   "b72023706d80498947bd9b9e85aecaff8c8517b28ebd5e295478f952cdcda4e2"
+  ],
+  "paraphrase:sales_top3_volume#1": [
+   "b72023706d80498947bd9b9e85aecaff8c8517b28ebd5e295478f952cdcda4e2",
+   "b72023706d80498947bd9b9e85aecaff8c8517b28ebd5e295478f952cdcda4e2"
+  ],
+  "paraphrase:sales_top3_volume#2": [
+   "b72023706d80498947bd9b9e85aecaff8c8517b28ebd5e295478f952cdcda4e2",
+   "b72023706d80498947bd9b9e85aecaff8c8517b28ebd5e295478f952cdcda4e2"
+  ],
+  "paraphrase:sales_top5_exclude_beta#0": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "paraphrase:sales_top5_exclude_beta#1": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "paraphrase:sales_top5_exclude_beta#2": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "paraphrase:sales_top5_exclude_beta#3": [
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d",
+   "2ab9cb7f8f0bef55ae5a81b15c1758285991e79e60555524415382d8d9fe010d"
+  ],
+  "paraphrase:sales_top5_value#0": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "paraphrase:sales_top5_value#1": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "paraphrase:sales_top5_value#2": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "paraphrase:sales_top5_value#3": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "paraphrase:sales_top5_value#4": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "paraphrase:sales_top5_value#5": [
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b",
+   "1f89b2da845ddc292cdbc9b26511840e7a4a89960ac804e04e250244a7ac267b"
+  ],
+  "paraphrase:sku_count#0": [
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065",
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065"
+  ],
+  "paraphrase:sku_count#1": [
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065",
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065"
+  ],
+  "paraphrase:sku_count#2": [
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065",
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065"
+  ],
+  "paraphrase:sku_count#3": [
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065",
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065"
+  ],
+  "paraphrase:sku_count#4": [
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065",
+   "8f66d393826e787437db063cf11ba7b3bf8df70dbc0447b66e41f1aeeef53065"
+  ],
+  "paraphrase:sku_count_by_category#0": [
+   "3d2c83e31c97a9fb324d8ec325fbbd7b2b51eba2b7c7529d73bb7c58d36e1da0",
+   "3d2c83e31c97a9fb324d8ec325fbbd7b2b51eba2b7c7529d73bb7c58d36e1da0"
+  ],
+  "paraphrase:sku_count_by_category#1": [
+   "3d2c83e31c97a9fb324d8ec325fbbd7b2b51eba2b7c7529d73bb7c58d36e1da0",
+   "3d2c83e31c97a9fb324d8ec325fbbd7b2b51eba2b7c7529d73bb7c58d36e1da0"
+  ],
+  "paraphrase:spend_by_country#0": [
+   "e57ee46fc8a8ccefebd032f546b90803dfc762195c60154dd86927375499f04e",
+   "e57ee46fc8a8ccefebd032f546b90803dfc762195c60154dd86927375499f04e"
+  ],
+  "paraphrase:spend_by_country#1": [
+   "e57ee46fc8a8ccefebd032f546b90803dfc762195c60154dd86927375499f04e",
+   "e57ee46fc8a8ccefebd032f546b90803dfc762195c60154dd86927375499f04e"
+  ],
+  "paraphrase:stale_restock#0": [
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009",
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009"
+  ],
+  "paraphrase:stale_restock#1": [
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009",
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009"
+  ],
+  "paraphrase:stale_restock#2": [
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009",
+   "cdb2df76f1cbec7e3679b474648e24cc9942e43997aca7d0b9060f9ac699f009"
+  ],
+  "paraphrase:stock_value_by_category#0": [
+   "d9fa75cd9ddf72318bbd9c719a350a5aa8c32815c4182c0ae91cdccc7c3d7ad0",
+   "d9fa75cd9ddf72318bbd9c719a350a5aa8c32815c4182c0ae91cdccc7c3d7ad0"
+  ],
+  "paraphrase:stock_value_by_category#1": [
+   "d9fa75cd9ddf72318bbd9c719a350a5aa8c32815c4182c0ae91cdccc7c3d7ad0",
+   "d9fa75cd9ddf72318bbd9c719a350a5aa8c32815c4182c0ae91cdccc7c3d7ad0"
+  ],
+  "paraphrase:supplier_ranking#0": [
+   "8110ce65aa7d9770cdee7da7c26e253e5ac230c0389e35c72a730fe92377e5d2",
+   "8110ce65aa7d9770cdee7da7c26e253e5ac230c0389e35c72a730fe92377e5d2"
+  ],
+  "paraphrase:supplier_ranking#1": [
+   "8110ce65aa7d9770cdee7da7c26e253e5ac230c0389e35c72a730fe92377e5d2",
+   "8110ce65aa7d9770cdee7da7c26e253e5ac230c0389e35c72a730fe92377e5d2"
+  ]
+ }
+}

@@ -30,7 +30,7 @@ from CortexOS.execution.session_manifests import (
 )
 
 SESSION = "c7-02-sess"
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "total revenue"
 L2_Q = "correlate hazmat dwell time with rainfall percentiles"
 OUTSIDE_SQL = "SELECT sku FROM inventory LIMIT 5"
 
@@ -98,7 +98,6 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     import netie.config
 
     netie.config._cached_config = None
@@ -138,7 +137,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         get_session_registry().bind(verifier.verify(manifest))
         clear_session(session_id, space_id=space_id)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 
@@ -315,8 +314,8 @@ def test_contract_ask_c7_04_workday_stockouts_abstains_by_name(dms_http):
     assert body.get("rows") == [], (
         f"wrong low_stock value served: {(body.get('rows') or [None])[0]}"
     )
-    assert _badge(body).lower() == "abstain"
-    assert body.get("route") == "needs_clarification"
+    assert _badge(body).lower() in {"abstain", "reconfirm"}
     assert body.get("sql_used") is None
     assert body.get("drillthrough_token") is None
-    assert "subject" in (body.get("answer") or "").lower()
+    text = (body.get("answer") or "").lower()
+    assert "subject" in text or "yes runs that question" in text

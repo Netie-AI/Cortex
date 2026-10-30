@@ -7,8 +7,10 @@ C4: every warehouse connection in CortexOS goes through this module so
 
 from __future__ import annotations
 
+import itertools
 import os
 import threading
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,11 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = Path(os.environ.get("DMS_WAREHOUSE_DB") or ROOT / "data" / "dms_demo.duckdb")
 
 _RO_LOCK = threading.Lock()
-_RO_CONNECTIONS: dict[str, Any] = {}
+# path -> (cached read-only parent, its instance number). A number is never reused.
+_RO_CONNECTIONS: dict[str, tuple[Any, int]] = {}
+_RO_NUMBERS = itertools.count(1)
+# Each cursor handed out from a cached parent -> that parent's (path, number).
+_CURSOR_INSTANCE: weakref.WeakKeyDictionary[Any, tuple[str, int]] = weakref.WeakKeyDictionary()
 
 
 def warehouse_path(db_path: Path | str | None = None) -> Path:
@@ -65,30 +71,57 @@ def get_connection(db_path: Path | str | None = None, *, read_only: bool = False
 def _read_only_cursor(path: Path) -> Any | None:
     key = str(path)
     with _RO_LOCK:
-        parent = _RO_CONNECTIONS.get(key)
-        if parent is None:
+        cached = _RO_CONNECTIONS.get(key)
+        if cached is None:
             import duckdb
 
             try:
                 parent = duckdb.connect(key, read_only=True)
             except Exception:  # noqa: BLE001
                 return None
-            _RO_CONNECTIONS[key] = parent
+            cached = (parent, next(_RO_NUMBERS))
+            _RO_CONNECTIONS[key] = cached
+        parent, number = cached
+        try:
+            cursor = parent.cursor()
+        except Exception:  # noqa: BLE001
+            if _RO_CONNECTIONS.get(key) is cached:
+                _RO_CONNECTIONS.pop(key, None)
+            return None
+        _CURSOR_INSTANCE[cursor] = (key, number)
+    return cursor
+
+
+def connection_instance(con: Any) -> tuple[str, int] | None:
+    """The read-only database instance ``con`` reads, as ``(path, number)``, or None.
+
+    Named only for a cursor this module handed out from its cached read-only
+    instance. That instance reads the file it opened for as long as it lives:
+    no writer can take the file while it is open, a rebuild in this process
+    (``connect_write``, a read-write ``get_connection``) evicts it first, and a
+    file renamed over the path is read only by a later instance. So what a
+    check finds on that instance stays true for every cursor of it. The number
+    is never reused; a later instance on the same path is a different name even
+    though the path, and the file's stamp, may say nothing changed.
+
+    None for anything else (a read-write or in-memory connection, one opened
+    elsewhere): its data can change under it, so a caller must not reuse a
+    verdict about it.
+    """
     try:
-        return parent.cursor()
-    except Exception:  # noqa: BLE001
         with _RO_LOCK:
-            _RO_CONNECTIONS.pop(key, None)
+            return _CURSOR_INSTANCE.get(con)
+    except TypeError:  # not weak-referenceable or not hashable: not one of ours
         return None
 
 
 def _evict_read_only(path: Path) -> None:
     key = str(path)
     with _RO_LOCK:
-        con = _RO_CONNECTIONS.pop(key, None)
-    if con is not None:
+        cached = _RO_CONNECTIONS.pop(key, None)
+    if cached is not None:
         try:
-            con.close()
+            cached[0].close()
         except Exception:  # noqa: BLE001
             pass
 
@@ -96,9 +129,9 @@ def _evict_read_only(path: Path) -> None:
 def close_cached_connections() -> None:
     """Release cached read-only instances (tests, and before a reload)."""
     with _RO_LOCK:
-        for con in _RO_CONNECTIONS.values():
+        for parent, _number in _RO_CONNECTIONS.values():
             try:
-                con.close()
+                parent.close()
             except Exception:  # noqa: BLE001
                 pass
         _RO_CONNECTIONS.clear()
@@ -118,6 +151,7 @@ __all__ = [
     "DEFAULT_DB",
     "close_cached_connections",
     "connect_write",
+    "connection_instance",
     "get_connection",
     "read_only_queries_enabled",
     "warehouse_path",

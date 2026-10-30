@@ -8,6 +8,7 @@ because a search endpoint was unreachable.
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import urllib.error
@@ -123,16 +124,126 @@ def search(query: str, *, max_results: int = 6) -> dict[str, Any]:
     return {"ok": bool(deduped), "query": q, "results": deduped[:max_results]}
 
 
-def fetch(url: str, *, max_chars: int = 12000) -> dict[str, Any]:
-    """Fetch one page and return readable text. http/https only."""
+def non_public_reason(url: str) -> str:
+    """Why ``url`` is not a public internet address, or "" when it is.
+
+    An agent reading untrusted pages can be told to fetch loopback services
+    (the engine, OpenVault's key store), the LAN or a cloud metadata endpoint.
+    Every address the host resolves to must be global; a name that does not
+    resolve is refused rather than assumed public.
+    """
+    import ipaddress
+    import socket
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "only http/https urls may be fetched"
+    try:
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        return f"bad url ({exc})"
+    if not host:
+        return "url has no host"
+    if host.lower() in {"localhost", "localhost.localdomain"} or host.lower().endswith(
+        (".localhost", ".local", ".internal")
+    ):
+        return f"host '{host}' is local, not public"
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError) as exc:
+        return f"host '{host}' does not resolve ({exc})"
+    for info in infos:
+        addr = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        if not addr.is_global:
+            return f"host '{host}' resolves to non-public address {addr}"
+    return ""
+
+
+class _PublicOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        why = non_public_reason(newurl)
+        if why:
+            raise urllib.error.URLError(f"redirect refused: {why}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+class _PeerCheck:
+    """Re-check the address actually connected to.
+
+    :func:`non_public_reason` resolves the name once; the socket resolves it
+    again. A DNS answer that flips to 127.0.0.1 in between (rebinding) would
+    pass the first check, so the connected peer is verified before any request
+    bytes are sent. Skipped only when urllib routed the request through an
+    operator-configured proxy (the socket is then to the proxy, which may
+    itself be on loopback); the target was still checked by name first.
+    """
+
+    host: str
+    sock: Any
+
+    def connect(self) -> None:
+        import ipaddress
+
+        super().connect()  # type: ignore[misc]
+        if getattr(self, "_tunnel_host", None):
+            return  # https through a CONNECT proxy
+        peer = str(self.sock.getpeername()[0]).split("%", 1)[0]
+        if not ipaddress.ip_address(peer).is_global:
+            self.close()  # type: ignore[attr-defined]
+            raise OSError(f"refused: connected to non-public address {peer}")
+
+
+class _PublicHTTPConnection(_PeerCheck, http.client.HTTPConnection):
+    pass
+
+
+class _PublicHTTPSConnection(_PeerCheck, http.client.HTTPSConnection):
+    pass
+
+
+class _PublicHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):  # type: ignore[no-untyped-def]
+        # plain http through a proxy: the socket is to the proxy, not the target
+        cls = http.client.HTTPConnection if req.has_proxy() else _PublicHTTPConnection
+        return self.do_open(cls, req)
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):  # type: ignore[no-untyped-def]
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+def _get_public(url: str, *, timeout: float) -> bytes:
+    opener = urllib.request.build_opener(
+        _PublicHTTPHandler(), _PublicHTTPSHandler(), _PublicOnlyRedirects()
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept-Language": "en"})
+    with opener.open(req, timeout=timeout) as resp:
+        return resp.read(_MAX_BYTES)
+
+
+def fetch(url: str, *, max_chars: int = 12000, public_only: bool = False) -> dict[str, Any]:
+    """Fetch one page and return readable text. http/https only.
+
+    ``public_only`` (the agent broker) refuses loopback / private / link-local /
+    metadata targets, including ones reached through a redirect.
+    """
     target = (url or "").strip()
     parsed = urllib.parse.urlparse(target)
     if parsed.scheme not in ("http", "https"):
         return {"ok": False, "error": "only http/https urls may be fetched", "url": target}
     if not parsed.netloc:
         return {"ok": False, "error": "url has no host", "url": target}
+    if public_only:
+        why = non_public_reason(target)
+        if why:
+            return {"ok": False, "error": f"refused: {why}", "url": target}
     try:
-        raw = _get(target, timeout=_TIMEOUT + 5)
+        if public_only:
+            raw = _get_public(target, timeout=_TIMEOUT + 5)
+        else:
+            raw = _get(target, timeout=_TIMEOUT + 5)
     except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
         return {"ok": False, "error": str(exc)[:200], "url": target}
 

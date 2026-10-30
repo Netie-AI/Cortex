@@ -1,9 +1,10 @@
 """Stable Cortex Insights API for DMS generative-ask and AirGPT skin.
 
-Sibling to ``/v1/contract/*`` (not a cortex-contract version bump). Same
-``run_insights`` as Crew chrome. Callers never send provider keys; OpenVault
-FreeRoute holds them. AirGPT uses this path (plus ``/dms/sidecar/insights``);
-there is no parallel invent stack.
+Sibling to ``/v1/contract/*``. ``schema_context`` and ``usage`` are pinned in
+contract 1.6.0 (``InsightsSchemaContext``, ``InsightsUsage``). ``InsightsAskIn``
+stays the frozen component. Same ``run_insights`` as Crew chrome. Callers
+never send provider keys; OpenVault FreeRoute holds them. AirGPT uses this
+path (plus ``/dms/sidecar/insights``); there is no parallel invent stack.
 
 Lives outside ``CortexOS/api`` so the engine API tree does not import Crew
 (AST pin in tests/test_freeroute_core.py).
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from CortexOS.insights import caller_ontology as caller_onto
 from CortexOS.insights import keys as insight_keys
+from CortexOS.insights import schema_context as schema_mod
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -72,6 +74,9 @@ class InsightsWireIn(InsightsAskIn):
     query_plan: Any = None
     ranked_metric: Any = None
     generate_retry: Any = None
+    #: Granted-schema prompt (DMS ``schema_context``). Replaces the pack table
+    #: list when present. Any so a non-string is a named 422, not a pydantic 422.
+    schema_context: Any = None
 
 
 #: Documented on the (non-contract) ``insights.ask`` operation only.
@@ -124,6 +129,8 @@ def _caller_refused(purpose: str) -> JSONResponse:
         "values": [],
         "live_5000_ci": False,
     }
+    # No model call has run, so there are no counts to report.
+    schema_mod.reported_usage(None)
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=401)
 
@@ -173,6 +180,8 @@ def _invalid_request(
         "audit_id": None,
         "live_5000_ci": False,
     }
+    # A refused request did not report counts. Leave the key off.
+    schema_mod.reported_usage(None)
     core.stamp_router_fingerprint(body)
     return JSONResponse(body, status_code=status_code)
 
@@ -303,10 +312,21 @@ async def execute_insights(
     from CortexOS.crew import insights as insights_mod
     from CortexOS.crew.engine_bridge import LocalEngineBridge
 
+    schema_mod.clear_usage()
     intent = resolved_intent(body)
     if not intent:
         raise HTTPException(status_code=400, detail="intent or question is required")
     wire = await wire_body(body, request)
+    raw_schema = wire.schema_context
+    if isinstance(raw_schema, str):
+        schema_mod.log_schema_context(raw_schema)
+    schema_problem = schema_mod.problem(raw_schema)
+    if schema_problem is not None:
+        code, detail = schema_problem
+        return _invalid_request(
+            code, detail, intent=intent, status_code=schema_mod.problem_status(code)
+        )
+    schema_text = schema_mod.accepted_text(raw_schema)
     extras = sorted((wire.model_extra or {}).keys())
     if extras:
         return _invalid_request(
@@ -350,15 +370,21 @@ async def execute_insights(
             )
             if bearer is None:
                 return _caller_refused("generative_ask")
-    result = await insights_mod.run_insights(
-        intent,
-        bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
-        ask=wire.ask,
-        generate=wire.generate,
-        bearer=bearer,
-        query_plan=query_plan,
-        caller=caller,
-    )
+    from CortexOS.sql_attempts import recording
+
+    # NAME-ECHO-INSIGHTS-01: the statements this ask tried are recorded so the
+    # response scrub can withhold names outside the caller's grant.
+    with recording() as attempts:
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
+            ask=wire.ask,
+            generate=wire.generate,
+            bearer=bearer,
+            query_plan=query_plan,
+            caller=caller,
+            schema_context=schema_text,
+        )
     # A plain demo body (no request-extension field) gets exactly the envelope
     # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
     # only for callers that sent an extension field.
@@ -370,7 +396,83 @@ async def execute_insights(
     out = stamp_api(result, consumer=consumer, alias=alias)
     if extended:
         out["api"]["received"] = _received(wire, source)
-    return out
+    usage = schema_mod.reported_usage(schema_text)
+    if usage is not None:
+        out["usage"] = usage
+    return _scrub_names(
+        out, attempts, wire=wire, intent=intent, caller=caller, schema_text=schema_text
+    )
+
+
+def _ranking_names(ranking: Any) -> set[str]:
+    """Tables and columns the served ranking lists (it is returned as ``ontology``)."""
+    names: set[str] = set()
+    if not isinstance(ranking, dict):
+        return names
+    for key in ("locations", "metrics", "certified"):
+        for row in ranking.get(key) or []:
+            if not isinstance(row, dict):
+                continue
+            raw_where = row.get("where")
+            where: dict[str, Any] = raw_where if isinstance(raw_where, dict) else {}
+            for value in (where.get("table"), where.get("primary_key")):
+                if isinstance(value, str):
+                    names.add(value)
+            for field in ("tables", "columns"):
+                names.update(str(v) for v in where.get(field) or [] if isinstance(v, str))
+            names.update(str(v) for v in row.get("exclude_columns") or [] if isinstance(v, str))
+    return names
+
+
+def _session_grant(wire: InsightsWireIn) -> Any:
+    """The session grant this ask names, or None (then no name counts as granted)."""
+    from CortexOS.execution.session_manifests import get_session_registry
+
+    try:
+        return get_session_registry().resolve(wire.session_id, space_id=wire.space_id)
+    except Exception:  # noqa: BLE001 - unresolved grant: nothing is granted
+        return None
+
+
+def _scrub_names(
+    out: dict[str, Any],
+    attempts: Any,
+    *,
+    wire: InsightsWireIn,
+    intent: str,
+    caller: caller_onto.CallerCatalog | None,
+    schema_text: str | None,
+) -> Any:
+    """NAME-ECHO-INSIGHTS-01: withhold names outside the grant from the free text.
+
+    Kept: names in the caller's question and ids, the tables and columns of a
+    caller schema_context or caller ontology (the caller's own), the ranking
+    the response returns as ``ontology``, and the session grant. Rows, values
+    and SQL are never changed (:func:`CortexOS.api.response_scrub.scrub_envelope`).
+    """
+    from CortexOS.api.response_scrub import scrub_envelope, split_names
+
+    if not attempts.sql and not attempts.errors:
+        return out
+    declared: set[str] = set()
+    if schema_text:
+        for table, columns in schema_mod.parsed_catalog(schema_text).items():
+            declared.add(table)
+            declared.update(columns)
+    if caller is not None:
+        for table, columns in caller.tables.items():
+            declared.add(table)
+            declared.update(columns)
+        declared.update(caller.measures)
+    declared |= _ranking_names(out.get("ontology"))
+    texts = [str(v) for v in (intent, wire.question, wire.session_id, wire.space_id) if v]
+    return scrub_envelope(
+        out,
+        attempts,
+        verified=_session_grant(wire),
+        caller_texts=texts,
+        caller_names=split_names(declared),
+    )
 
 
 @router.get("", operation_id="insights.law")

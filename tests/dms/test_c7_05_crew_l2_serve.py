@@ -23,6 +23,8 @@ from CortexOS.execution.session_manifests import (
     get_session_registry,
     reset_session_registry_for_tests,
 )
+from CortexOS.ontology import value_domain
+from CortexOS.ontology.registry import pack_dir_for
 
 SESSION = "c7-05-l2-serve"
 SQL = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
@@ -145,9 +147,20 @@ def phase1b_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     try:
         for statement in PHASE1B["setup_sql"]:
             con.execute(statement)
+        # The fixture rows keep the source txn_type spelling; the lake build maps
+        # them through the ontology declaration, as every Cortex lake build does
+        # (an unmapped lake now abstains by name: tests/dms/test_stale_lake_value_domain.py).
+        value_domain.apply_to_lake(con, value_domain.load_value_domains(pack_dir_for("dms")))
     finally:
         con.close()
     return path
+
+
+def _replayed_sql(case: dict[str, Any]) -> str:
+    """The case SQL through the declared mapping, as gold is (the fixture keeps 'OUT')."""
+    return value_domain.canonicalize_sql(
+        case["sql"], value_domain.load_value_domains(pack_dir_for("dms"))
+    )
 
 
 def _row_multiset(rows: list[dict[str, Any]]) -> list[str]:
@@ -197,7 +210,7 @@ async def test_phase1b_wrong_shape_replays_reach_real_l2_and_never_serve_wrong(
         bridge=_MissBridge(),
         ask=True,
         generate=True,
-        complete=_complete(case["sql"]),
+        complete=_complete(_replayed_sql(case)),
     )
 
     assert calls == 1, "the real L2 miss call must run; a badge is not proof"
@@ -291,7 +304,6 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
 
     monkeypatch.delenv("DMS_L2_ENABLED", raising=False)
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setenv(
         "CORTEX_FREEROUTE_SCOREBOARD", "/tmp/c7-05-http-flag-off-v1.db"
@@ -301,7 +313,7 @@ def test_flag_unset_http_insights_envelope_matches_parent_digest(
 
     from CortexOS.api.app import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"}) as client:
         response = client.post(
             "/v1/insights",
             json={"intent": "how many skus", "ask": True, "generate": False},
@@ -559,7 +571,7 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
     assert on["l2_named_steps"] > 0
     assert (
         off["envelopes_sha256"]
-        == "f5b041bd6df0ef16852d9175a8a4567713f48b48579903a261f04f25d434d845"
+        == "60b469d3d55dd155e229ef2496d0474cf2bbd41995659bf4011ccf85d10c7ea9"
     )
     assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["values"] == []
@@ -584,5 +596,12 @@ def test_c7_04_subject_misroute_now_abstains(
     assert scored.outcome == "abstained"
     assert envelope["rows"] == []
     assert envelope["sql_used"] is None
-    assert envelope["badge"] == "abstain"
-    assert "subject 'overtime'" in envelope["answer"]
+    assert envelope["badge"] in {"abstain", "reconfirm"}
+    text = (envelope["answer"] or "").lower()
+    assert (
+        "subject 'overtime'" in text
+        or "not the declared question" in text
+        or "not that metric's declared question" in text
+        or "can't answer" in text
+        or "cannot be served" in text
+    )

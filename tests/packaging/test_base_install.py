@@ -19,6 +19,8 @@ BASE_MODULES = [
     "CortexOS.execution.tool_runner",
     "CortexOS.execution.errors",
     "CortexOS.memory.store",
+    "CortexOS.rag.documents",
+    "CortexOS.rag.doc_rank",
     "cortex_contract",
     "cortex_contract.version",
     "cortex_contract.answer",
@@ -68,3 +70,24 @@ def test_agentic_entrypoint_gated() -> None:
 
     with pytest.raises(FeatureNotInstalled):
         _ = execution.execute_run_plan
+
+
+def test_doc_rank_absent_under_core(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RAG-RANK-01 under the core profile: no local model, BM25 order kept."""
+    from CortexOS.rag import doc_rank, documents
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    doc_rank.reset_for_tests()
+    try:
+        assert doc_rank.embedder() == (None, "extra_missing")
+        assert doc_rank.scorer() == (None, "extra_missing")
+        passages = [
+            documents.Passage(f"{i}.txt", "late delivery penalty " + "x " * i) for i in range(6)
+        ]
+        q = "late delivery penalty"
+        sel = doc_rank.select(q, passages, frozenset({"dense", "rerank"}))
+        assert sel.top == documents.retrieve(q, passages)
+        assert sel.trace.skipped == {"dense": "extra_missing", "rerank": "extra_missing"}
+        assert "not installed on this host" in sel.note
+    finally:
+        doc_rank.reset_for_tests()

@@ -88,7 +88,7 @@ def test_no_configured_keys_means_only_an_openvault_token_gets_through(app_clien
         verified.append(token)
         return api_auth.Caller(role="viewer", actor="ov_k1")
 
-    monkeypatch.setattr(api_auth, "_caller_from_openvault", _fake_vault)
+    monkeypatch.setattr(api_auth, "verify_openvault_key", _fake_vault)
     assert app_client.get("/api/apps").status_code == 401
     assert app_client.get("/api/apps", headers={"X-API-Key": "made-up"}).status_code == 401
     res = app_client.get("/api/apps", headers={"Authorization": "Bearer ov_realtokenxx"})

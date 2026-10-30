@@ -141,6 +141,25 @@ _C7_05_104P2_EXACT_DIFF = {
         ),
     ),
 }
+# #412: a model chooses the metric and a second call checks it. The cascade
+# functions stay for the suite double. Any other edit to answer_engine.py
+# needs a new license.
+_METRIC_EXACT_412_BASE = "dd891d297664a8c0baedb078a008163ae9db829c"
+_METRIC_EXACT_412_BRANCH_EXCEPTIONS = {
+    "cursor/not-delayed-exact-metric-5515": frozenset(
+        {"CortexOS/dms/answer_engine.py"}
+    )
+}
+_METRIC_EXACT_412_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "5611e15e6a27bee2e395f392ed103205acb3543e55d2518f342b3452e4c8ff12",
+        (
+            "_exactness_guard_enabled",
+            "_exact_declared_plan",
+            "cascade_match_is_non_exact",
+        ),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -427,6 +446,54 @@ def _is_exact_c7_05_104p2_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_metric_exact_412_seam(path: str) -> bool:
+    """Allow only #412's exact metric-exactness seam on its branch."""
+    allowed = _METRIC_EXACT_412_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset())
+    if path not in allowed:
+        return False
+    if _git("cat-file", "-e", f"{_METRIC_EXACT_412_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _METRIC_EXACT_412_BASE)
+    for frozen_path, (expected_digest, seam_symbols) in (
+        _METRIC_EXACT_412_EXACT_DIFF.items()
+    ):
+        diff = _git(
+            "diff",
+            "--no-ext-diff",
+            "--unified=0",
+            f"{_METRIC_EXACT_412_BASE}..HEAD",
+            "--",
+            frozen_path,
+        )
+        assert diff.returncode == 0, diff.stderr
+        for symbol in seam_symbols:
+            assert symbol in diff.stdout, (
+                f"#412 metric-exactness seam missing {symbol!r} in {frozen_path}"
+            )
+        stable_diff = "\n".join(
+            line for line in diff.stdout.splitlines() if not line.startswith("index ")
+        )
+        digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+        assert digest == expected_digest, (
+            f"#412 exception covers only its exact metric-exactness seam in {frozen_path}; "
+            "any other edit needs its own license"
+        )
+    license_diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_METRIC_EXACT_412_BASE}..HEAD",
+        "--",
+        "tests/test_crew/test_cot_climb.py",
+    )
+    assert license_diff.returncode == 0, license_diff.stderr
+    assert "_is_exact_metric_exact_412_seam" in license_diff.stdout
+    assert (
+        "test_other_branch_editing_metric_exact_412_still_trips_guard"
+        in license_diff.stdout
+    )
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
     return sorted(
         path
@@ -437,6 +504,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_h2_254_seam(path)
             or _is_exact_extract_pin_277(path)
             or _is_exact_c7_05_104p2_seam(path)
+            or _is_exact_metric_exact_412_seam(path)
         )
     )
 
@@ -492,6 +560,14 @@ def test_other_branch_editing_c7_05_seam_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/c7-05-other-branch")
     path = "CortexOS/dms/answer_engine.py"
     assert _is_exact_c7_05_104p2_seam(path) is False
+
+
+def test_other_branch_editing_metric_exact_412_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/not-delayed-exact-metric-unlicensed")
+    path = "CortexOS/dms/answer_engine.py"
+    assert _is_exact_metric_exact_412_seam(path) is False
 
 
 def test_other_branch_editing_conftest_still_trips_guard(
@@ -740,9 +816,10 @@ async def test_think_text_is_consumed_in_sql_prompt(
 
 
 @pytest.mark.asyncio
-async def test_pinned_26_is_like_with_like_without_inventing_percent(
+async def test_pinned_26_excludes_the_serve_set_without_inventing_percent(
     crew_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """#343: 21 of the pinned 26 are L0 serve-set ids or questions; they score nothing."""
     _armed(monkeypatch)
     assert len(cot_climb.DMS_180_CURATED) == 26
     fake = _script("", "", "")
@@ -750,8 +827,23 @@ async def test_pinned_26_is_like_with_like_without_inventing_percent(
         corpus=cot_climb.LIKE_WITH_LIKE_CORPUS,
         complete=fake,
     )
-    assert report["this_run"]["n"] == 26
-    assert report["like_with_like"] is True
+    kept = {
+        "trap_last_month",
+        "trap_short_paraphrase",
+        "trap_delayed_count",
+        "trap_stock_by_bin",
+        "trap_how_full_synonym",
+    }
+    assert report["this_run"]["n"] == 5
+    assert report["excluded_n"] == 21
+    assert set(report["excluded_ids"]) == set(cot_climb.DMS_180_IDS) - kept
+    assert {"cq_sku_count", "cq_sales_top3_volume", "cq_sku_count_by_category",
+            "cq_supplier_ranking", "trap_categoty"} <= set(report["excluded_ids"])
+    assert all(
+        row["reason"].startswith(("serve_set_id:", "serve_set_question:"))
+        for row in report["excluded"]
+    )
+    assert report["like_with_like"] is False
     assert report["this_run"]["validated"] == 0
     assert report["this_run"]["wrong"] == 0
     assert report["this_run"]["gen"] == "0.00%"
@@ -762,14 +854,16 @@ async def test_pinned_26_is_like_with_like_without_inventing_percent(
     assert report["this_run"]["exact"] != "38.46%"
     assert report["vs_baseline"]["this_run_exact"] == "0.00%"
     assert report["this_run"]["exact_matched"] == 0
-    assert report["this_run"]["gold_n"] >= 1
+    assert report["this_run"]["gold_n"] == 0
+    assert report["this_run"]["gold"] == "NO_GOLD"  # 0.00% exact is not a score
+    assert report["gold"]["status"] == "NO_GOLD"
     assert report["complete"] is False
     assert report["status"] == "INCOMPLETE"
     assert report["replaces_baseline"] is False
     assert report["invented_better"] is False
     assert report["issue_212_complete"] is False
     ids = [str(row["id"]) for row in report["outcomes"]]
-    assert set(ids) == set(cot_climb.DMS_180_IDS)
+    assert set(ids) == kept
 
 
 @pytest.mark.asyncio
@@ -880,7 +974,7 @@ async def test_improve_think_consumes_prior_sql_and_route(
 
 
 @pytest.mark.asyncio
-async def test_exact_scores_certified_gold_without_replacing_baseline(
+async def test_exact_scores_pinned_gold_without_replacing_baseline(
     crew_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _armed(monkeypatch)
@@ -889,8 +983,8 @@ async def test_exact_scores_certified_gold_without_replacing_baseline(
     hit = await cot_climb.measure_climb(
         [
             {
-                "id": "cq_sku_count",
-                "intent": "How many SKUs do we have in inventory?",
+                "id": "fixture_sku_count",
+                "intent": "how many skus",
                 "ranking": ranking,
                 "expected_sql": gold,
                 "complete": _script(gold),
@@ -918,8 +1012,8 @@ async def test_exact_scores_certified_gold_without_replacing_baseline(
     miss = await cot_climb.measure_climb(
         [
             {
-                "id": "cq_sku_count",
-                "intent": "How many SKUs do we have in inventory?",
+                "id": "fixture_sku_count",
+                "intent": "how many skus",
                 "ranking": ranking,
                 "expected_sql": gold,
                 "complete": _script("SELECT sku FROM inventory"),
@@ -942,9 +1036,11 @@ def test_public_map_leftover_stays_incomplete_covering() -> None:
     assert "exact" in body["leftover"].lower() or "G1" in body["leftover"]
     assert body["complete"] is False
     assert body["issue_212_complete"] is False
-    gold = cot_climb.certified_gold_sql()
-    assert "cq_sku_count" in gold
-    assert cot_climb.sql_exact("", gold["cq_sku_count"]) is False
-    assert cot_climb.sql_exact(gold["cq_sku_count"], gold["cq_sku_count"]) is True
+    gold = cot_climb.oracle_gold_sql()
+    assert "cq_sku_count" not in gold  # the L0 serve set is never gold (#343)
+    assert "spider_country_mean_lead_having" not in gold  # nor is frozen held-out
+    sql = "SELECT COUNT(DISTINCT sku) AS sku_count FROM inventory"
+    assert cot_climb.sql_exact("", sql) is False
+    assert cot_climb.sql_exact(sql, sql) is True
 
 

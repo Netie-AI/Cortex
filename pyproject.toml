@@ -9,7 +9,7 @@ description = "Cortex governed agentic engine — answer plane + optional agenti
 authors = [
     {name = "Open Source"}
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 # Base install: answer engine, execution primitives, ledger, F5/F7, semantic
 # layer, context assembly. Agentic (DAG/OSR/seeker/routines/commitments) and
 # RAG (embeddings/doc index) are optional extras.
@@ -31,7 +31,7 @@ dependencies = [
     "sqlglot>=25",
     "openpyxl>=3.1",
     "qrcode>=7.4",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "pytz>=2024.1",
     # API shell for answer + context assembly
     "fastapi>=0.141",
@@ -42,7 +42,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # DAG, OSR, seeker, routines, commitments (+ DBOS resume marker)
-agentic = ["dbos>=2.28.0,<3"]
+agentic = ["dbos>=3.0.0,<4"]
 # Embeddings + document index
 rag = [
     "sentence-transformers>=3",
@@ -51,7 +51,7 @@ rag = [
 ]
 # Both optional planes
 full = [
-    "dbos>=2.28.0,<3",
+    "dbos>=3.0.0,<4",
     "sentence-transformers>=3",
     "qdrant-client>=1.9",
     "tantivy>=0.22",
@@ -71,10 +71,10 @@ a2a = ["websockets>=12"]
 personality = ["redis>=5", "sqlalchemy>=2", "APScheduler>=3.10"]
 postgres = ["sqlalchemy[asyncio]>=2", "asyncpg>=0.29", "psycopg[binary]>=3.1"]
 # Backward-compat aliases
-agents = ["dbos>=2.28.0,<3"]
+agents = ["dbos>=3.0.0,<4"]
 tokens = ["tiktoken>=0.7"]
 api = ["fastapi>=0.141", "starlette>=1.3.1", "uvicorn[standard]>=0.30"]
-dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=12.3.0", "pytz>=2024.1"]
+dms = ["duckdb>=1.1", "sqlglot>=25", "openpyxl>=3.1", "qrcode>=7.4", "pillow>=13.0.0", "pytz>=2024.1"]
 
 [tool.poetry]
 name = "netie"
@@ -139,12 +139,13 @@ files = [
     "packages/cortex_contract",
     "scripts/check_versions.py",
     "scripts/export_openapi.py",
+    "scripts/export_semantics.py",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-p tests.api_key_isolation"
+addopts = "-p tests.api_key_isolation -p tests.dms.metric_choice_plugin"
 markers = [
     "corpus_expanded: full paraphrase expansion (slow; set CORPUS_EXPANDED=1)",
 ]

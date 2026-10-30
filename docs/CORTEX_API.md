@@ -33,6 +33,42 @@ this answer's SQL came from that generate path. Otherwise `other`. A request
 `mode=ontology_plan` is not copied onto the stamp. `query_sql` is set only
 alongside honest `ontology_plan`. This does not re-prove live DMS #231.
 
+Lane stamps (INSIGHTS-LANE-INVERSION-01, no new fields). A model wrote the
+SQL: `plan_source=ontology_plan`, `model_called=true`, `served_*` copy the
+vault RouteStamp of that call; this includes SQL that `l2_serve` executed
+after its gates (`query_sql` is then the SQL that ran). A certified query
+served as stored with no model call: `plan_source=other`,
+`model_called=false`, `served_model` null, `served_reason` and
+`generative.check` = `certified_query:<id>`; the SQL is in `sql_used` and
+`generative.sql`, not `query_sql`.
+
+Stale lake (#402, #410, no new fields). SQL that reads a table with a declared
+value domain (`packs/dms/ontology/object_types.yaml`, e.g. `transactions.txn_type`)
+is executed only when the lake stores the declared canonical values for every
+declared column of that table. The check is the table read, not a column token:
+`USING`, `NATURAL JOIN`, `COLUMNS(...)`, a subscript and a column list on a
+table alias are the same check as `txn_type = 'outbound'`. A lake built before
+the declaration, or by another loader, that still holds a source spelling
+(`OUT`) or a value the declaration does not list is an abstain named
+`lake_value_domain_stale:<table>.<column>` in `answer` and `assumptions`
+(`answer_step=value_domain` on the L2 serve path): no rows, no figure, and no
+stored value in the text. The drift scan reads the whole table and ignores the
+session's row predicates, so a session whose own rows are mapped still abstains
+when rows outside its grant are stale (fail closed; the reason names the column,
+not those rows). The check sits in the query seam, so
+`POST /v1/contract/submit` SQL that reads such a table on such a lake is
+`status=sql_gate_abstain` with the same reason. The plan+SQL ladder
+(`CORTEX_PLAN_SQL=1`, off by default) stops on it with the same reason
+(`badge=abstain`); it is not fed back to the model as a retryable gate error.
+A subscript or an alias column list that the column guardrail cannot resolve
+(`UNKNOWN_COLUMN`) never reaches that check on plan+SQL: the ladder reconfirms
+and does not serve a zero. `DMS_L2_ENABLED` stays off by default; this check
+does not change that. The check is kept per read-only warehouse instance, so a lake
+renamed over the path is checked by the first instance that reads it. Rebuild the lake (`load_inventory_csv` or the
+lakehouse silver sync) to clear it. On `generate=true`, SQL whose sales measure
+pins a value outside the declared values is a named retry,
+`measure_filter_undeclared`, and is never returned as validated.
+
 ## Key posture (local vs cloud)
 
 OpenVault is the only vault. Cortex does not store provider secrets. Callers

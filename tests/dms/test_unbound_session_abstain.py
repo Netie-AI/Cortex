@@ -84,7 +84,6 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     import netie.config
 
     netie.config._cached_config = None
@@ -121,7 +120,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _bind(WIDE_SESSION, {"transactions": "TRUE"})
     _bind(NARROW_SESSION, {"q3_sales_export": "TRUE"})
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 
@@ -147,15 +146,16 @@ def _assert_no_demo_warehouse_number(body: dict[str, Any]) -> None:
 # -- Cortex#14 step 1: the plan states the tables it will read ---------------
 def test_route_to_metric_states_the_tables_its_plan_will_read() -> None:
     """Do not recover tables only by re-parsing compiled SQL if the plan can state them."""
-    plan = route_to_metric("what is our total revenue")
+    plan = route_to_metric("total revenue")
     assert plan is not None
     assert plan.metric_id == "revenue_total"
     assert "transactions" in plan.tables
 
 
 def test_upload_phrasing_still_routes_to_revenue_total_with_stated_tables() -> None:
-    """Cortex#36 'total' abstain is not this fix. The plan still forms; unbound abstains later."""
-    plan = route_to_metric("total revenue in my uploaded file")
+    """The upload wording is not the declared revenue question, so it is not served."""
+    assert route_to_metric("total revenue in my uploaded file") is None
+    plan = route_to_metric("total revenue")
     assert plan is not None
     assert plan.metric_id == "revenue_total"
     assert plan.tables == ("transactions",)
@@ -209,7 +209,7 @@ def test_mcp_unbound_session_abstains(dms_http) -> None:
 
 # -- R-0005: a bound demo-table session still answers ------------------------
 def test_granted_session_still_answers_a_governed_metric(dms_http) -> None:
-    body = _ask(dms_http, "what is our total revenue", WIDE_SESSION)
+    body = _ask(dms_http, "total revenue", WIDE_SESSION)
 
     assert body["badge"] == "governed_metric"
     assert body["route"] == "sql"
@@ -230,7 +230,7 @@ def test_granted_session_still_answers_a_certified_query(dms_http) -> None:
 
 
 def test_bound_session_abstain_names_the_sources_it_can_answer_over(dms_http) -> None:
-    body = _ask(dms_http, "what is the total amount in the Q3 sales export", NARROW_SESSION)
+    body = _ask(dms_http, "total revenue", NARROW_SESSION)
 
     assert body["badge"] == "abstain"
     assert body["grant_kind"] == "session"

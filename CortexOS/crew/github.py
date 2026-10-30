@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.crew.board import snapshot as board_snapshot
+from CortexOS.integrations.harness import secrets as harness_secrets
 
 RunFn = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -19,7 +20,8 @@ _FETCH_CAP = 80
 
 
 def _run(argv: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    # ``gh`` gets the host env minus every provider secret; GH_TOKEN is not one, so it stays.
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=harness_secrets.scrub())
 
 
 def _gh_wait_s() -> float:

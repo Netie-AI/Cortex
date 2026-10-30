@@ -31,11 +31,14 @@ ranked by what it actually got. HTTP refusals are recorded but never scored.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -45,14 +48,19 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.integrations import freeroute_ov_local, openvault_client
+from CortexOS.integrations.harness import secrets as harness_secrets
 
 IMPL = "openvault-freeroute"
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
 MODELS_ENV = "CORTEX_FREEROUTE_MODELS"
+FALLBACK_MAX_TOKENS_ENV = "CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS"
 STORE_ENV = "CORTEX_FREEROUTE_SCOREBOARD"
 LEARN_ENV = "CORTEX_FREEROUTE_LEARN"
 SWITCH_ENV = "CORTEX_FREEROUTE"
 LOCAL_ONLY_ENV = "CORTEX_FREEROUTE_LOCAL_ONLY"
+# OpenVault #81: JSON ``strict: true`` pins ``model`` to that catalog id.
+# Default off. Off, the chat body is the same bytes as before this flag.
+STRICT_ENV = "CORTEX_OV_STRICT"
 
 ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
@@ -61,6 +69,17 @@ EXPLORE_REQUESTS = 2
 SCORE_WINDOW = 200
 MAX_CANDIDATES = 6
 PER_PROVIDER = 2
+# What main 886e119f sends when the caller omits max_tokens. Also the upper
+# bound of FALLBACK_MAX_TOKENS_ENV: a fallback must never spend more than a
+# healthy call. Healthy calls use this constant and do not read the env.
+HEALTHY_MAX_TOKENS = 600
+# Candidate bounds used when a scoreboard miss must not widen the walk.
+# max_tokens is not in this map. The cap is captured at import.
+DEFAULT_FALLBACK_CAPS = {
+    "max_candidates": MAX_CANDIDATES,
+    "per_provider": PER_PROVIDER,
+    "explore_requests": EXPLORE_REQUESTS,
+}
 
 _LOOPBACK_IDENTITIES = frozenset({"", "local", "127.0.0.1", "::1", "localhost", "testclient"})
 
@@ -83,7 +102,16 @@ _REDACT = re.compile(
     r"(ov_[A-Za-z0-9_\-]+|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]+|[A-Za-z0-9_\-]{32,})"
 )
 
+_log = logging.getLogger(__name__)
 _lock = threading.Lock()
+# Held only while complete() swaps urllib.request.build_opener to read
+# Retry-After. openvault_client.request_json does not return response headers,
+# and that module stays untouched. The swap is restored before the lock drops.
+_header_capture_lock = threading.Lock()
+_response_headers: ContextVar[dict[str, str] | None] = ContextVar(
+    "freeroute_ov_response_headers", default=None
+)
+_learn_failures = 0
 _arming_cache: dict[tuple[str, str], tuple[float, Arming]] = {}
 _vault_cache: dict[str, tuple[float, _Vault]] = {}
 _rejected: dict[tuple[str, str], tuple[float, str]] = {}
@@ -92,6 +120,7 @@ _last_arming: dict[tuple[str, str], Arming] = {}
 _store_error: dict[str, str] = {}
 
 _journal_var: ContextVar[list[RouteStamp] | None] = ContextVar("freeroute_journal", default=None)
+_precall_read_failed: ContextVar[bool] = ContextVar("freeroute_precall_read_failed", default=False)
 _shadow_var: ContextVar[bool] = ContextVar("freeroute_shadow", default=False)
 _split_var: ContextVar[str] = ContextVar("freeroute_split", default="product")
 _transport_var: ContextVar[tuple[Callable[..., Any], str] | None] = ContextVar(
@@ -131,14 +160,13 @@ def fingerprint(value: str) -> str:
 
 
 def _token() -> str:
-    return (os.environ.get(TOKEN_ENV) or "").strip()
+    """The OpenVault-issued key from ``CORTEX_FREEROUTE_TOKEN`` or a mounted ``..._FILE``."""
+    return harness_secrets.read_key((TOKEN_ENV,))[0]
 
 
 def child_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Copy of ``env`` without the Cortex OpenVault key, for any subprocess."""
-    out = dict(os.environ if env is None else env)
-    out.pop(TOKEN_ENV, None)
-    return out
+    """Copy of ``env`` without the Cortex OpenVault key or any provider secret, for any subprocess."""
+    return harness_secrets.scrub(os.environ if env is None else env)
 
 
 def auth_headers(bearer: str | None = None) -> dict[str, str]:
@@ -182,6 +210,8 @@ class _Vault:
     catalogue: tuple[tuple[str, tuple[str, ...]], ...] = ()
     local_spendable_hops: int = 0
     local_reason: str = ""
+    # Id from OpenVault status ``routes.stronger``. Empty when OV did not configure one.
+    stronger_route: str = ""
 
 
 @dataclass(frozen=True)
@@ -198,6 +228,8 @@ class Arming:
     probed: bool = True
     local_spendable_hops: int = 0
     local_reason: str = ""
+    # Copied from OpenVault status. Cortex does not choose this provider.
+    stronger_route: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -278,6 +310,8 @@ def _read_vault(url: str, timeout: float) -> _Vault:
     spendable = [h for h in hops if h["provider"] in catalogue]
     local_n = freeroute_ov_local.count_local_spendable(raw_hops, raw_specs, set(catalogue))
     local_reason = freeroute_ov_local.local_arming_reason(body)
+    routes = body.get("routes") if isinstance(body.get("routes"), dict) else {}
+    stronger = str(routes.get("stronger") or "").strip()
     pooled = body.get("pooled_key_count")
     pooled_keys = pooled if isinstance(pooled, int) and not isinstance(pooled, bool) else None
     pooled_ok = pooled_keys is not None and pooled_keys > 0
@@ -307,6 +341,7 @@ def _read_vault(url: str, timeout: float) -> _Vault:
         catalogue=tuple(sorted(catalogue.items())),
         local_spendable_hops=local_n,
         local_reason=local_reason,
+        stronger_route=stronger,
     )
 
 
@@ -405,6 +440,7 @@ def _armed_from(vault: _Vault, url: str, mode: str) -> Arming:
         checked_at=time.time(),
         local_spendable_hops=vault.local_spendable_hops,
         local_reason=vault.local_reason,
+        stronger_route=vault.stronger_route,
     )
 
 
@@ -554,6 +590,26 @@ def _note_store_error(exc: BaseException) -> None:
         _store_error["error"] = redact(f"route store unavailable: {type(exc).__name__}: {exc}")
 
 
+def learn_row_failures() -> int:
+    """Learning-row writes that failed since process start or ``reset()``."""
+    with _lock:
+        return _learn_failures
+
+
+def _record_learn_failure(where: str, exc: BaseException) -> None:
+    """One learning-only miss: note it, count it, warn. No prompt text."""
+    global _learn_failures
+    _note_store_error(exc)
+    with _lock:
+        _learn_failures += 1
+    _log.warning(
+        "learn_row_failed where=%s error=%s: %s",
+        where,
+        type(exc).__name__,
+        redact(str(exc)),
+    )
+
+
 def store_error() -> str:
     with _lock:
         return _store_error.get("error", "")
@@ -587,6 +643,12 @@ def _open_for_write(path: Path) -> sqlite3.Connection:
 
 @contextmanager
 def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
+    """Yield the route store once. Cleanup runs in ``finally``.
+
+    An open failure yields ``None`` once. A failure after the yield, including
+    ``commit``, is noted and re-raised. A second yield would replace that error
+    with ``RuntimeError: generator didn't stop after throw()``.
+    """
     path = store_path()
     con: sqlite3.Connection | None = None
     held = False
@@ -594,20 +656,24 @@ def _connect(*, write: bool) -> Iterator[sqlite3.Connection | None]:
         if write:
             _store_lock.acquire()
             held = True
-            con = _open_for_write(path)
-        else:
-            if not path.is_file():
-                yield None
-                return
-            with _store_lock:
-                _init_file(path)
-            con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
-        yield con
-        if write:
-            con.commit()
-    except (sqlite3.Error, OSError) as exc:
-        _note_store_error(exc)
-        yield None
+            try:
+                con = _open_for_write(path)
+            except (sqlite3.Error, OSError) as exc:
+                _note_store_error(exc)
+        elif path.is_file():
+            try:
+                with _store_lock:
+                    _init_file(path)
+                con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
+            except (sqlite3.Error, OSError) as exc:
+                _note_store_error(exc)
+        try:
+            yield con
+            if write and con is not None:
+                con.commit()
+        except (sqlite3.Error, OSError) as exc:
+            _note_store_error(exc)
+            raise
     finally:
         if con is not None:
             con.close()
@@ -642,58 +708,94 @@ def _write_row(
     scored: bool,
     usage: Mapping[str, Any] | None = None,
     split: str = SPLIT_PRODUCT,
-) -> None:
+) -> bool:
+    """Insert one learning row. False when that write fails. Never raises for it.
+
+    Spend, budget, grant, and ledger writes are not this function. A non-store
+    error still propagates.
+    """
     if not _learning():
-        return
+        return True
     prompt_tokens, completion_tokens, total_tokens = _usage_tokens(usage)
-    with _connect(write=True) as con:
-        if con is None:
-            return
-        con.execute(
-            "INSERT OR REPLACE INTO routes ("
-            "call_id, task, requested, served, status, usable, scored, verdict, "
-            "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
-            "total_tokens, split"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                stamp.call_id,
-                stamp.task,
-                stamp.requested,
-                stamp.served,
-                int(stamp.status),
-                1 if stamp.usable else 0,
-                1 if scored else 0,
-                None,
-                float(stamp.latency_ms),
-                stamp.impl,
-                1 if _shadow_var.get() else 0,
-                time.time(),
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                _normalize_split(split),
-            ),
-        )
+    missed = False
+
+    def _do() -> None:
+        nonlocal missed
+        with _connect(write=True) as con:
+            if con is None:
+                missed = True
+                return
+            con.execute(
+                "INSERT OR REPLACE INTO routes ("
+                "call_id, task, requested, served, status, usable, scored, verdict, "
+                "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
+                "total_tokens, split"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    stamp.call_id,
+                    stamp.task,
+                    stamp.requested,
+                    stamp.served,
+                    int(stamp.status),
+                    1 if stamp.usable else 0,
+                    1 if scored else 0,
+                    None,
+                    float(stamp.latency_ms),
+                    stamp.impl,
+                    1 if _shadow_var.get() else 0,
+                    time.time(),
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    _normalize_split(split),
+                ),
+            )
+
+    try:
+        _do()
+    except (sqlite3.Error, OSError) as exc:
+        _record_learn_failure("_write_row", exc)
+        return False
+    if missed:
+        _record_learn_failure("_write_row", OSError(store_error() or "route store unavailable"))
+        return False
+    return True
 
 
 def _rows(task: str) -> list[sqlite3.Row]:
-    """Learning rows only. Shadow / held-out / benchmark never train pick()."""
-    with _connect(write=False) as con:
-        if con is None:
-            return []
-        con.row_factory = sqlite3.Row
-        try:
-            return list(
-                con.execute(
-                    "SELECT * FROM routes WHERE task = ? AND "
-                    + _LEARNING_FILTER_SQL
-                    + " ORDER BY ts DESC LIMIT ?",
-                    (task, SCORE_WINDOW * MAX_CANDIDATES),
+    """Learning rows only. Shadow / held-out / benchmark never train pick().
+
+    A pre-call read failure sets ``_precall_read_failed`` and returns no rows.
+    That signal is not an empty table and not a missing file: both of those
+    leave the flag false so ``pick`` still walks the catalogue.
+    """
+    failed = False
+    try:
+        path = store_path()
+        with _connect(write=False) as con:
+            if con is None:
+                failed = path.is_file()
+                return []
+            con.row_factory = sqlite3.Row
+            try:
+                return list(
+                    con.execute(
+                        "SELECT * FROM routes WHERE task = ? AND "
+                        + _LEARNING_FILTER_SQL
+                        + " ORDER BY ts DESC LIMIT ?",
+                        (task, SCORE_WINDOW * DEFAULT_FALLBACK_CAPS["max_candidates"]),
+                    )
                 )
-            )
-        except sqlite3.Error as exc:
-            _note_store_error(exc)
-            return []
+            except (sqlite3.Error, OSError) as exc:
+                _note_store_error(exc)
+                failed = True
+                return []
+    except (sqlite3.Error, OSError) as exc:
+        _note_store_error(exc)
+        failed = True
+        return []
+    finally:
+        _precall_read_failed.set(failed)
 
 
 def _validity(row: Mapping[str, Any]) -> float:
@@ -709,6 +811,173 @@ def _same_model(requested: str, served: str) -> bool:
     if not requested or not served:
         return False
     return requested == served or requested.rsplit("/", 1)[-1] == served.rsplit("/", 1)[-1]
+
+
+# Named route refusals. Cortex does not substitute another provider and
+# does not keep a list of model ids. ``MODEL_NOT_ALLOWLISTED`` is raised
+# only when OpenVault's own response says the pin is outside its catalog.
+MODEL_NOT_ALLOWLISTED = "FREEROUTE_MODEL_NOT_ALLOWLISTED"
+MODEL_NOT_SERVED = "FREEROUTE_MODEL_NOT_SERVED"
+NO_STRONGER_ROUTE = "FREEROUTE_NO_STRONGER_ROUTE"
+# OpenVault vault/proxy.py (OpenVault #81): strict pin refusal. The gateway
+# returns 503 with this error type and does not swap models. A park puts
+# retry_after_s on the error object and Retry-After on the response.
+_OV_PIN_UNAVAILABLE = "pin_unavailable"
+_OV_NOT_IN_CATALOG = "not_in_catalog"
+_OV_RATE_LIMITED = "rate_limited"
+
+
+def strict_model_pin_enabled() -> bool:
+    """True only when ``CORTEX_OV_STRICT`` is 1, true, or yes. Default off."""
+    return (os.environ.get(STRICT_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _as_retry_seconds(value: Any) -> int | None:
+    """A non-negative whole number of seconds, or None when OV did not give one."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if value < 0 or value != value:
+            return None
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def note_response_headers(headers: Mapping[str, str] | None) -> None:
+    """Remember response headers for this task. Empty clears them.
+
+    The real urllib client fills these inside complete(). A test double that
+    replaces request_json can call this with the Retry-After it wants observed.
+    """
+    if not headers:
+        _response_headers.set({})
+        return
+    _response_headers.set({str(key): str(value) for key, value in headers.items()})
+
+
+def take_response_headers() -> dict[str, str]:
+    """Return headers noted since the last take, then clear them."""
+    found = _response_headers.get()
+    _response_headers.set(None)
+    return dict(found or {})
+
+
+def _header_map(headers: Any) -> dict[str, str]:
+    if headers is None:
+        return {}
+    try:
+        pairs = list(headers.items())
+    except (AttributeError, TypeError):
+        return {}
+    return {str(key): str(value) for key, value in pairs}
+
+
+def _call_noting_headers(send: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Call the chat transport and keep Retry-After from a real urllib response.
+
+    The JSON body is whatever the caller already built. A transport that never
+    builds an opener can note headers itself; those stay when urllib saw nothing.
+    """
+    box: dict[str, dict[str, str]] = {}
+    real_build = urllib.request.build_opener
+
+    def build_opener(*opener_args: Any, **opener_kwargs: Any) -> Any:
+        opener = real_build(*opener_args, **opener_kwargs)
+        real_open = opener.open
+
+        def open_and_note(req: Any, *open_args: Any, **open_kwargs: Any) -> Any:
+            try:
+                resp = real_open(req, *open_args, **open_kwargs)
+            except urllib.error.HTTPError as exc:
+                box["headers"] = _header_map(getattr(exc, "headers", None))
+                raise
+            box["headers"] = _header_map(getattr(resp, "headers", None))
+            return resp
+
+        opener.open = open_and_note
+        return opener
+
+    with _header_capture_lock:
+        urllib.request.build_opener = build_opener
+        try:
+            result = send(*args, **kwargs)
+        finally:
+            urllib.request.build_opener = real_build
+    if "headers" in box:
+        note_response_headers(box["headers"])
+    return result
+
+
+def _retry_after_s(data: Any, headers: Mapping[str, str]) -> int | None:
+    """Body ``error.retry_after_s`` when OV sent the key, else the Retry-After header.
+
+    A present null (circuit open) stays None and does not fall through to a header.
+    """
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict) and "retry_after_s" in err:
+            return _as_retry_seconds(err.get("retry_after_s"))
+    for key, value in headers.items():
+        if str(key).lower() == "retry-after":
+            return _as_retry_seconds(value)
+    return None
+
+
+def _strict_stop(status: int, data: Any) -> tuple[bool, str]:
+    """(stop, error type) when the flag is on and OV refused the pin or returned 429.
+
+    Anything else, including the flag off, is not a strict stop. The caller
+    keeps the existing Completion path.
+    """
+    if not strict_model_pin_enabled():
+        return False, ""
+    err_type, _reason = freeroute_ov_local.chat_error_fields(data)
+    if int(status) == 429:
+        return True, err_type or _OV_RATE_LIMITED
+    if err_type == _OV_PIN_UNAVAILABLE:
+        return True, err_type
+    return False, ""
+
+
+def openvault_policy_refusal(data: Any) -> str:
+    """Copy OpenVault's catalog refusal. Empty when OV did not say that.
+
+    The model id is the one OV put on ``error.model``. Nothing here is
+    compared to a list of names Cortex holds.
+    """
+    if not isinstance(data, dict):
+        return ""
+    err_type, err_reason = freeroute_ov_local.chat_error_fields(data)
+    if err_type != _OV_PIN_UNAVAILABLE or err_reason != _OV_NOT_IN_CATALOG:
+        return ""
+    err = data.get("error")
+    named = ""
+    if isinstance(err, dict) and isinstance(err.get("model"), str):
+        named = err["model"].strip()
+    text = f"{MODEL_NOT_ALLOWLISTED}: OpenVault policy {err_reason}"
+    if named:
+        text += f": {named}"
+    return text
+
+
+def configured_stronger_route(arm: Arming) -> str:
+    """Stronger route from OpenVault status. Empty when OV did not configure one."""
+    return (arm.stronger_route or "").strip()
+
+
+def request_was_served(requested: str, served: str) -> bool:
+    """True for ``auto`` and for a served id that matches the request.
+
+    A concrete id OpenVault did not serve is not a match. Callers must not
+    treat the substitute as the answer.
+    """
+    if not (requested or "").strip() or requested.strip() == "auto":
+        return True
+    return _same_model(requested.strip(), (served or "").strip())
 
 
 @dataclass
@@ -741,8 +1010,15 @@ def _row_cost(row: Mapping[str, Any]) -> float | None:
     return float(prompt or 0) + float(completion or 0)
 
 
-def _stats(task: str, models: list[str]) -> dict[str, ModelStats]:
-    rows = _rows(task)
+def _stats(
+    task: str,
+    models: list[str],
+    rows: list[sqlite3.Row] | None = None,
+) -> dict[str, ModelStats]:
+    # ``rows`` is the one snapshot for this call. Only a direct pick() that
+    # was not given one reads the store.
+    if rows is None:
+        rows = _rows(task)
     by_served: dict[str, list[Mapping[str, Any]]] = {}
     for row in rows:
         if row["scored"] and row["served"]:
@@ -804,7 +1080,16 @@ class Pick:
     measured_score: float | None = None
 
 
-def candidates(arm: Arming, *, pin: str = "", pin_source: str = "") -> tuple[tuple[str, ...], str]:
+def candidates(
+    arm: Arming,
+    *,
+    pin: str = "",
+    pin_source: str = "",
+    rows: list[sqlite3.Row] | None = None,
+) -> tuple[tuple[str, ...], str]:
+    # The snapshot is accepted so a call cannot score a different read than
+    # the one complete() already took. Catalogue selection does not query it.
+    del rows
     pinned = (pin or "").strip()
     if pinned:
         return (pinned,), f"operator pin {pin_source or 'pin'}"
@@ -824,12 +1109,19 @@ def candidates(arm: Arming, *, pin: str = "", pin_source: str = "") -> tuple[tup
     return ("auto",), "delegated to OpenVault (not measured by Cortex)"
 
 
-def pick(task: str, arm: Arming, *, pin: str = "", pin_source: str = "") -> Pick:
-    models, source = candidates(arm, pin=pin, pin_source=pin_source)
+def pick(
+    task: str,
+    arm: Arming,
+    *,
+    pin: str = "",
+    pin_source: str = "",
+    rows: list[sqlite3.Row] | None = None,
+) -> Pick:
+    models, source = candidates(arm, pin=pin, pin_source=pin_source, rows=rows)
     if len(models) == 1:
-        st = _stats(task, list(models))[models[0]]
+        st = _stats(task, list(models), rows)[models[0]]
         return Pick(models[0], source, source, models, st.scored_n, st.score)
-    stats = _stats(task, list(models))
+    stats = _stats(task, list(models), rows)
     eligible = [m for m in models if not stats[m].ineligible]
     if not eligible:
         first = models[0]
@@ -892,6 +1184,12 @@ class RouteStamp:
     served_model: str | None = None
     served_local: bool = False
     served_reason: str = ""
+    learn_row_failed: bool = False
+    route_source: str = ""
+    # Set only when CORTEX_OV_STRICT is on. Empty / None stay out of public()
+    # so a flag-off stamp dumps the same keys as before.
+    model_requested: str = ""
+    model_served: str | None = None
 
     def line(self) -> str:
         """Customer-safe: what was asked and what served. Never counts or scores."""
@@ -909,7 +1207,69 @@ class RouteStamp:
         body = asdict(self)
         body["candidates"] = list(self.candidates)
         body["line"] = self.line()
+        if not self.model_requested and self.model_served is None:
+            body.pop("model_requested", None)
+            body.pop("model_served", None)
         return body
+
+
+class FreeRouteStrictError(Exception):
+    """OpenVault refused a strict pin or returned HTTP 429. No other model is tried.
+
+    ``retry_after_s`` is the wait OV named (body ``error.retry_after_s``, else
+    the ``Retry-After`` header). None when OV did not name one (circuit open).
+    ``model_served`` is null when the pin was not served.
+    """
+
+    status: int
+    error_type: str
+    retry_after_s: int | None
+    model_requested: str
+    model_served: str | None
+    stamp: RouteStamp | None
+    ask_stamps: list[dict[str, Any]]
+
+    def __init__(
+        self,
+        *,
+        status: int,
+        error_type: str,
+        retry_after_s: int | None,
+        model_requested: str,
+        model_served: str | None,
+        stamp: RouteStamp | None,
+    ) -> None:
+        self.status = int(status)
+        self.error_type = error_type
+        self.retry_after_s = retry_after_s
+        self.model_requested = model_requested
+        self.model_served = model_served
+        self.stamp = stamp
+        self.ask_stamps = []
+        shown = model_served if model_served else "none"
+        wait = "none" if retry_after_s is None else str(retry_after_s)
+        super().__init__(
+            f"FreeRouteStrictError: HTTP {self.status} {error_type} "
+            f"model_requested={model_requested or 'none'} model_served={shown} "
+            f"retry_after_s={wait}"
+        )
+
+
+def strict_error_detail(exc: FreeRouteStrictError) -> dict[str, Any]:
+    """JSON detail for the /ask HTTP error. No secret, no second model."""
+    return {
+        "code": "FreeRouteStrictError",
+        "error_type": exc.error_type,
+        "retry_after_s": exc.retry_after_s,
+        "model_requested": exc.model_requested,
+        "model_served": exc.model_served,
+        "stamps": list(exc.ask_stamps),
+    }
+
+
+def strict_error_status(exc: FreeRouteStrictError) -> int:
+    """429 stays 429. Every other strict refusal is the OV pin status, 503."""
+    return 429 if exc.status == 429 else 503
 
 
 @dataclass
@@ -967,18 +1327,43 @@ def note_verdict(target: RouteStamp | str | list[RouteStamp] | None, verdict: st
         ids = [str(target)]
     if not ids:
         return
-    with _connect(write=True) as con:
-        if con is None:
-            return
-        for call_id in ids:
-            if verdict in _FINAL_VERDICTS:
-                con.execute("UPDATE routes SET verdict = ? WHERE call_id = ?", (verdict, call_id))
-            else:
-                con.execute(
-                    "UPDATE routes SET verdict = ? WHERE call_id = ? "
-                    "AND (verdict IS NULL OR verdict NOT IN ('plausible','implausible'))",
-                    (verdict, call_id),
-                )
+    missed = False
+
+    def _do() -> None:
+        nonlocal missed
+        with _connect(write=True) as con:
+            if con is None:
+                missed = True
+                return
+            for call_id in ids:
+                if verdict in _FINAL_VERDICTS:
+                    con.execute(
+                        "UPDATE routes SET verdict = ? WHERE call_id = ?",
+                        (verdict, call_id),
+                    )
+                else:
+                    con.execute(
+                        "UPDATE routes SET verdict = ? WHERE call_id = ? "
+                        "AND (verdict IS NULL OR verdict NOT IN ('plausible','implausible'))",
+                        (verdict, call_id),
+                    )
+
+    try:
+        _do()
+    except (sqlite3.Error, OSError) as exc:
+        _record_learn_failure("note_verdict", exc)
+        _mark_learn_failed(target)
+        return
+    if missed:
+        _record_learn_failure("note_verdict", OSError(store_error() or "route store unavailable"))
+        _mark_learn_failed(target)
+
+
+def _mark_learn_failed(target: RouteStamp | str | list[RouteStamp] | None) -> None:
+    items = target if isinstance(target, list) else [target]
+    for item in items:
+        if isinstance(item, RouteStamp):
+            item.learn_row_failed = True
 
 
 def last_line(stamps: list[RouteStamp] | None) -> str:
@@ -1007,11 +1392,61 @@ def _error_message(body: Any) -> str:
 # -- complete -------------------------------------------------------------------
 
 
+class FreeRouteFallbackCapInvalid(ValueError):
+    """``CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS`` is outside 1..600. Not clamped."""
+
+
+def check_fallback_cap() -> int:
+    """Startup read of ``FALLBACK_MAX_TOKENS_ENV``. Import calls this once.
+
+    Unset, ``''``, spaces, and a tab are ``HEALTHY_MAX_TOKENS`` (600). Any
+    other value must be an integer in 1..600. Otherwise this raises
+    ``FreeRouteFallbackCapInvalid`` (``FREEROUTE_FALLBACK_CAP_INVALID``)
+    and does not clamp. ``complete`` does not call this and does not
+    re-read the environment.
+    """
+    raw = os.environ.get(FALLBACK_MAX_TOKENS_ENV)
+    if raw is None or not str(raw).strip():
+        return HEALTHY_MAX_TOKENS
+    text = str(raw).strip()
+    try:
+        value = int(text)
+    except ValueError:
+        value = None
+    if value is None or value < 1 or value > HEALTHY_MAX_TOKENS:
+        raise FreeRouteFallbackCapInvalid(
+            f"FREEROUTE_FALLBACK_CAP_INVALID: {FALLBACK_MAX_TOKENS_ENV}={text!r} "
+            f"is not an integer in 1..{HEALTHY_MAX_TOKENS}"
+        )
+    return value
+
+
+# One read, at import. A later env change must not raise out of complete().
+_FALLBACK_CAP = check_fallback_cap()
+
+
+def fallback_max_tokens() -> int:
+    """Cap captured at import. Does not re-read ``FALLBACK_MAX_TOKENS_ENV``."""
+    return _FALLBACK_CAP
+
+
+def _operator_model(pin: str) -> str:
+    """Operator pin, else the first ``MODELS_ENV`` id. Empty means catalogue."""
+    pinned = (pin or "").strip()
+    if pinned:
+        return pinned
+    for part in (os.environ.get(MODELS_ENV) or "").split(","):
+        model = part.strip()
+        if model:
+            return model
+    return ""
+
+
 def complete(
     task: str,
     messages: list[dict[str, Any]],
     *,
-    max_tokens: int = 600,
+    max_tokens: int | None = None,
     temperature: float | None = None,
     timeout: float = 45.0,
     accept: Callable[[str], Any] | None = None,
@@ -1022,7 +1457,23 @@ def complete(
     bearer: str | None = None,
     split: str = "",
 ) -> Completion:
-    """One FreeRoute call. Never raises. Refusals are named and stamped."""
+    """One FreeRoute call. Refusals are named and stamped.
+
+    A learning-only store write that fails after the answer exists still
+    returns that answer and sets ``stamp.learn_row_failed``. Spend, budget,
+    grant, and ledger failures are not caught here.
+
+    A failed pre-call read is its own signal. The scoreboard is read once
+    and that snapshot is what ``pick`` scores. With no operator pin and no
+    ``MODELS_ENV`` bundle the body asks for ``auto`` and ``pick`` is not
+    called; a pin or bundle is sent instead. Either way ``max_tokens`` is
+    clamped to the cap captured at import (``fallback_max_tokens``) and
+    ``route_source`` is set on the stamp only (``default_fallback`` or
+    ``operator_pin``). This function does not re-read the fallback env.
+    An empty readable store is not that signal. A healthy call that omits
+    ``max_tokens`` sends ``HEALTHY_MAX_TOKENS``. The chat body never
+    carries ``route_source``.
+    """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
     credential = (
@@ -1063,11 +1514,39 @@ def complete(
             _journal_add(stamp)
             return Completion(ok=False, stamp=stamp, reason=reason)
 
-    chosen = pick(task, arm, pin=pin, pin_source=pin_source)
+    snapshot = _rows(task)
+    read_failed = _precall_read_failed.get()
+    operator = _operator_model(pin)
+    if read_failed and operator:
+        pin_reason = (
+            f"operator pin {pin_source or 'pin'}"
+            if (pin or "").strip()
+            else f"operator bundle {MODELS_ENV}"
+        )
+        chosen = Pick(operator, pin_reason, "operator_pin", (operator,))
+        route_source = "operator_pin"
+    elif read_failed:
+        chosen = Pick(
+            "auto",
+            "scoreboard unreadable; delegated to OpenVault",
+            "default_fallback",
+            ("auto",),
+        )
+        route_source = "default_fallback"
+    else:
+        chosen = pick(task, arm, pin=pin, pin_source=pin_source, rows=snapshot)
+        route_source = ""
+    # Omitted max_tokens on a healthy call is main's 600. The failed-read
+    # clamp uses the cap captured at import and does not re-read the env.
+    asked = HEALTHY_MAX_TOKENS if max_tokens is None else int(max_tokens)
+    if read_failed:
+        token_limit = min(asked, _FALLBACK_CAP)
+    else:
+        token_limit = asked
     body: dict[str, Any] = {
         "model": chosen.requested,
         "messages": messages,
-        "max_tokens": int(max_tokens),
+        "max_tokens": token_limit,
         "stream": False,
     }
     if temperature is not None:
@@ -1077,11 +1556,19 @@ def complete(
         body["tool_choice"] = "auto"
     if local_only_enabled():
         body.update(freeroute_ov_local.local_only_request_fields())
+    # OpenVault #81. JSON true only. Omitted when the flag is off so the
+    # dumped body matches the bytes this function sent before the flag existed.
+    if strict_model_pin_enabled():
+        body["strict"] = True
 
+    # Clear first so a transport that does not note headers cannot reuse an
+    # older response. A real urllib response replaces this inside the call.
+    note_response_headers({})
     send, impl = _transport()
     started = time.monotonic()
     try:
-        status, data = send(
+        status, data = _call_noting_headers(
+            send,
             "POST",
             "/v1/chat/completions",
             body=body,
@@ -1091,6 +1578,7 @@ def complete(
         )
     except Exception as exc:  # noqa: BLE001 - a transport must not crash the ask
         status, data = 0, {"error": {"message": f"transport error: {type(exc).__name__}"}}
+    response_headers = take_response_headers()
     latency_ms = round((time.monotonic() - started) * 1000.0, 1)
 
     stamp = RouteStamp(
@@ -1119,6 +1607,9 @@ def complete(
     stamp.served_model = served_model
     stamp.served_local = is_local
     stamp.served_reason = served_reason
+    if strict_model_pin_enabled():
+        stamp.model_requested = chosen.requested
+        stamp.model_served = served_model
     if status == 200 and isinstance(data, dict):
         stamp.served = str(data.get("model") or "")
         stamp.honored = _same_model(chosen.requested, stamp.served)
@@ -1191,14 +1682,39 @@ def complete(
             text = ""
             message = {}
             stamp.usable = False
+    if not local_only_enabled():
+        policy = openvault_policy_refusal(data if isinstance(data, dict) else None)
+        if policy:
+            reason = policy
+            text = ""
+            message = {}
+            stamp.usable = False
     stamp.error = reason
-    _write_row(
+    stamp.route_source = route_source
+    stop, err_type = _strict_stop(int(status), data)
+    strict_exc: FreeRouteStrictError | None = None
+    if stop:
+        wait = _retry_after_s(data if isinstance(data, dict) else None, response_headers)
+        strict_exc = FreeRouteStrictError(
+            status=int(status),
+            error_type=err_type,
+            retry_after_s=wait,
+            model_requested=stamp.model_requested or chosen.requested,
+            model_served=stamp.model_served,
+            stamp=stamp,
+        )
+        stamp.error = str(strict_exc)
+        reason = stamp.error
+    if not _write_row(
         stamp,
         scored=scored,
         usage=usage,
         split=split or _split_var.get(),
-    )
+    ):
+        stamp.learn_row_failed = True
     _journal_add(stamp)
+    if strict_exc is not None:
+        raise strict_exc
     return Completion(
         ok=status == 200 and stamp.usable,
         text=text,
@@ -1326,6 +1842,7 @@ def public_status(task: str | None = None) -> dict[str, Any]:
 
 def reset() -> None:
     """Drop in-process caches (arming, rejections, verification). The store stays."""
+    global _learn_failures
     with _lock:
         _arming_cache.clear()
         _vault_cache.clear()
@@ -1333,6 +1850,7 @@ def reset() -> None:
         _verified.clear()
         _last_arming.clear()
         _store_error.clear()
+        _learn_failures = 0
     with _store_lock:
         _initialized.clear()
 
@@ -1340,6 +1858,12 @@ def reset() -> None:
 __all__ = [
     "Arming",
     "Completion",
+    "DEFAULT_FALLBACK_CAPS",
+    "FALLBACK_MAX_TOKENS_ENV",
+    "FreeRouteFallbackCapInvalid",
+    "FreeRouteStrictError",
+    "STRICT_ENV",
+    "HEALTHY_MAX_TOKENS",
     "IMPL",
     "LEARN_ENV",
     "LOCAL_ONLY_ENV",
@@ -1355,17 +1879,26 @@ __all__ = [
     "arming",
     "auth_headers",
     "candidates",
+    "check_fallback_cap",
     "child_env",
+    "MODEL_NOT_ALLOWLISTED",
+    "MODEL_NOT_SERVED",
+    "NO_STRONGER_ROUTE",
     "complete",
+    "configured_stronger_route",
+    "openvault_policy_refusal",
+    "fallback_max_tokens",
     "fingerprint",
     "identity",
     "journal",
     "last_line",
+    "learn_row_failures",
     "learn_state",
     "leave_gate",
     "local_only_enabled",
     "note_rejected",
     "note_verdict",
+    "request_was_served",
     "peek",
     "pick",
     "public_status",
@@ -1374,6 +1907,9 @@ __all__ = [
     "router_fingerprint",
     "scoreboard",
     "stamp_router_fingerprint",
+    "strict_error_detail",
+    "strict_error_status",
+    "strict_model_pin_enabled",
     "store_error",
     "store_path",
     "store_state",

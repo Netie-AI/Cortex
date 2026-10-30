@@ -334,11 +334,14 @@ def test_collect_dev_questions_are_operator_phrases():
 
 
 def test_malay_berapa_banyak_sku_routes_to_sku_count():
-    from CortexOS.dms.answer_engine import route_to_metric
+    from CortexOS.dms.answer_engine import _route_to_metric_cascade, route_to_metric
 
-    plan = route_to_metric("boss, berapa banyak SKU kita ada sekarang?")
-    assert plan is not None
-    assert plan.metric_id == "sku_count"
+    question = "boss, berapa banyak SKU kita ada sekarang?"
+    neighbour = _route_to_metric_cascade(question)
+    assert neighbour is not None
+    assert neighbour.metric_id == "sku_count"
+    # #412: Malay wording is not the declared question, so it is not served.
+    assert route_to_metric(question) is None
 
 
 def test_replay_shadow_restores_l2_env(tmp_path: Path, monkeypatch):

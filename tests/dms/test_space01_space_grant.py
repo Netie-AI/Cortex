@@ -39,8 +39,8 @@ from CortexOS.execution.session_manifests import (
 
 SESSION = "space01-sess"
 SA = ["transactions"]
-REVENUE_Q = "what is our total revenue"
-OUTSIDE_SA_Q = "Which SKUs are below reorder level?"
+REVENUE_Q = "total revenue"
+OUTSIDE_SA_Q = "Which SKUs are below reorder level in warehouse A?"
 
 
 def _b64u(raw: bytes) -> str:
@@ -99,7 +99,6 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from packs.dms.semantic.loader import reload
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     import netie.config
 
     netie.config._cached_config = None
@@ -139,7 +138,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         get_session_registry().bind(verifier.verify(manifest))
         clear_session(session_id, space_id=space_id)
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 

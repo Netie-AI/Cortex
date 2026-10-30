@@ -31,7 +31,8 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from CortexOS.crew import certified_serve, cot_climb, insights
+from CortexOS.api.response_scrub import WITHHELD
+from CortexOS.crew import certified_serve, insights
 from CortexOS.insights.routes import InsightsAskIn
 from packs.dms.security.rate_limit import reset_limiter
 
@@ -150,7 +151,6 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     from CortexOS.crew import freeroute as fr
 
     monkeypatch.setenv("PACK", "dms")
-    monkeypatch.setenv("DMS_AUTH_DISABLED", "1")
     monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "ops.db"))
     monkeypatch.setattr(
         fr,
@@ -160,7 +160,7 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     reset_limiter(per_minute=240)
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), client=("127.0.0.1", 5555))
+    return TestClient(create_app(), client=("127.0.0.1", 5555), headers={"X-API-Key": "dms-demo-admin-key"})
 
 
 def _post(
@@ -264,13 +264,15 @@ def test_bare_reference_resolves_to_the_one_declared_qualified_table(
 @pytest.mark.parametrize(
     ("sql", "needle"),
     [
-        ("SELECT COUNT(*) AS n FROM inventory", "table inventory is not in the caller catalog"),
-        ("SELECT COUNT(*) AS n FROM bronze.frpm", "table bronze.frpm is not in the caller catalog"),
-        ("SELECT COUNT(*) AS n FROM silver.schools", "table silver.schools is not in the caller"),
-        ("SELECT COUNT(*) AS n FROM main.schools", "table main.schools is not in the caller"),
+        # NAME-ECHO-INSIGHTS-01: a name outside the caller catalog is withheld; the
+        # refusal still names its gate.
+        ("SELECT COUNT(*) AS n FROM inventory", f"table {WITHHELD} is not in the caller catalog"),
+        ("SELECT COUNT(*) AS n FROM bronze.frpm", f"table bronze.{WITHHELD} is not in the caller catalog"),
+        ("SELECT COUNT(*) AS n FROM silver.schools", f"table {WITHHELD}.schools is not in the caller"),
+        ("SELECT COUNT(*) AS n FROM main.schools", f"table {WITHHELD}.schools is not in the caller"),
         ("SELECT COUNT(*) FROM memory.bronze.schools", "cross-catalog table reference refused"),
         ("SELECT * FROM read_csv('/etc/passwd')", "refused"),
-        ("SELECT s.phone FROM bronze.schools AS s", "column bronze.schools.phone is not declared"),
+        ("SELECT s.phone FROM bronze.schools AS s", f"column bronze.schools.{WITHHELD} is not declared"),
     ],
 )
 def test_sql_outside_the_declared_catalog_is_a_named_refuse(
@@ -502,7 +504,7 @@ DEMO_BODIES = [
 def test_demo_certified_question_is_served_end_to_end_unchanged(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, ontology: Any
 ) -> None:
-    """Pin: RANK_Q is served as the stored certified query, rows equal the oracle."""
+    """Pin: RANK_Q is served as the stored certified query, rows equal the stored query."""
     res, prompts = _post(client, monkeypatch, dms_body(RANK_Q, ontology), sql="SELECT 1")
     assert res.status_code == 200, res.text
     body = res.json()
@@ -510,14 +512,20 @@ def test_demo_certified_question_is_served_end_to_end_unchanged(
     assert body["status"] == "ABSTAIN"
     assert body["badge"] == "abstain"
     assert body["values"] == []
-    assert body["plan_source"] == insights.PLAN_SOURCE_ONTOLOGY
+    # INSIGHTS-LANE-INVERSION-01: stored certified SQL, no model call: other.
+    assert body["plan_source"] == insights.PLAN_SOURCE_OTHER
+    assert "query_sql" not in body
+    assert body["model_called"] is False
     assert "Served certified query cq_supplier_ranking" in body["answer"]
     assert body["generative"]["check"] == "certified_query:cq_supplier_ranking"
     assert not _gen_prompts(prompts)  # the model is never asked for a certified measure
-    oracle = cot_climb.gold_sql_for("cq_supplier_ranking")
-    assert body["query_sql"] == oracle
-    rows = _lake_demo().execute(body["query_sql"]).fetchall()
-    assert rows and rows == _lake_demo().execute(oracle).fetchall()
+    # CERT-ORACLE-SPLIT (#345): the climb oracle no longer reads the serve set,
+    # so the oracle here is the stored certified SQL itself.
+    stored = str(certified_serve._certified_rows(None)["cq_supplier_ranking"]["sql"]).strip()
+    assert body["sql_used"] == stored
+    assert body["generative"]["sql"] == stored
+    rows = _lake_demo().execute(body["sql_used"]).fetchall()
+    assert rows and rows == _lake_demo().execute(stored).fetchall()
     assert {row["where"]["table"] for row in body["ontology"]["locations"]} <= DEMO_TABLES
 
 
@@ -659,7 +667,7 @@ def test_non_finite_schema_score_is_a_named_422_not_a_500(
     onto = json.dumps(space_ontology()).replace('"score": 4', f'"score": {raw_score}')
     assert raw_score in onto
     body = json.dumps(dms_body(Q)).rstrip("}") + ', "ontology": ' + onto + "}"
-    safe = TestClient(client.app, client=("127.0.0.1", 5555), raise_server_exceptions=False)
+    safe = TestClient(client.app, client=("127.0.0.1", 5555), raise_server_exceptions=False, headers={"X-API-Key": "dms-demo-admin-key"})
     res = safe.post("/v1/insights", content=body, headers={"content-type": "application/json"})
     assert res.status_code == 422, res.text
     out = res.json()
