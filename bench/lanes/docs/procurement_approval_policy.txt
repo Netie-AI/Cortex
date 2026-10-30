@@ -1,0 +1,21 @@
+Procurement Approval Policy
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Approval limits. Purchase orders up to RM 20,000 are approved by the
+Procurement Manager. Orders above RM 20,000 and up to RM 100,000 need the Head
+of Operations. Orders above RM 100,000 need the Chief Financial Officer.
+
+2. Quotes. Purchases above RM 50,000 need three written quotes.
+
+3. Supplier audits. Every active supplier is audited at least once every
+18 months.
+
+4. High-risk suppliers. A supplier with a risk score above 0.6 needs a
+quarterly business review.
+
+5. New suppliers. A new supplier is onboarded only after a credit check and a
+site visit.
+
+6. Single sourcing. A single-source purchase needs a written justification
+signed by the Head of Operations.

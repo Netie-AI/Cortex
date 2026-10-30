@@ -1,0 +1,26 @@
+Standard Operating Procedure - Hazardous Goods Storage
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Applies to. Every inventory item marked hazardous, including CHEMICALS and
+CLEANING stock.
+
+2. Segregation. Oxidisers are stored at least 5 metres away from flammable
+liquids.
+
+3. Stacking. Hazardous drums are stacked no more than 2 pallets high.
+
+4. Quantity limit. No single bin may hold more than 500 kg of flammable liquid.
+
+5. Protective equipment. Staff handling corrosives wear chemical goggles,
+nitrile gloves and an apron.
+
+6. Spills. A spill is contained within 10 minutes and reported to the Safety
+Officer on the same shift.
+
+7. Documents. A safety data sheet must be kept at the bin for every hazardous
+SKU.
+
+8. Training. Hazardous goods handlers repeat their training every 12 months.
+
+9. Approved site. Bulk chemicals are stored only at WH-P Kemaman Chemical Park.

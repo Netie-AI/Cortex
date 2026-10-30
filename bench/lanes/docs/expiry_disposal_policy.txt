@@ -1,0 +1,20 @@
+Expiry and Disposal Policy
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Picking rule. Stock is picked first-expiry-first-out.
+
+2. Near-expiry flag. An item is flagged as near expiry 60 days before its
+expiry date.
+
+3. Markdown. Near-expiry dry goods may be sold at a markdown of up to 40%.
+
+4. Disposal. Expired stock is disposed of within 7 days of its expiry date.
+
+5. Approval. Disposal of expired stock worth more than RM 5,000 needs approval
+from the Operations Manager.
+
+6. Scheduled waste. Expired chemicals are handed to a licensed scheduled-waste
+contractor, never put in general waste.
+
+7. Records. Disposal certificates are kept for 7 years.

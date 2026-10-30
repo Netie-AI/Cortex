@@ -1,0 +1,20 @@
+Standard Operating Procedure - Alert Escalation
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Acknowledgement. A CRITICAL alert is acknowledged within 15 minutes, a HIGH
+alert within 1 hour, a MEDIUM alert within 4 hours and a LOW alert by the next
+business day.
+
+2. Escalation. An unresolved CRITICAL alert is escalated to the Regional
+Operations Manager after 2 hours.
+
+3. Supplier risk alerts. A SUPPLIER_RISK alert opens a review with Procurement
+within 3 business days.
+
+4. Capacity warnings. A CAPACITY_WARNING is raised when a site passes 90% of
+its rated capacity.
+
+5. Closure. An alert is closed only after the root cause is recorded.
+
+6. Reporting. A weekly alert summary goes to the site managers every Monday.
