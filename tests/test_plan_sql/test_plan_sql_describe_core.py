@@ -44,10 +44,19 @@ from CortexOS.plan_sql import describe
 duckdb = pytest.importorskip("duckdb")
 
 MARK = describe.MARK
-GRANTED: dict[str, list[str]] = {
-    "t": ["k", "a", "b", "c", "d", "flag"],
-    "u": ["k", "a", "c", "flag"],
-    "s": ["k", "e"],
+# Each granted column with its payload type: describe reads a bare column as a
+# condition only when its type is BOOLEAN.
+GRANTED: dict[str, dict[str, str]] = {
+    "t": {
+        "k": "VARCHAR",
+        "a": "INTEGER",
+        "b": "INTEGER",
+        "c": "VARCHAR",
+        "d": "DATE",
+        "flag": "BOOLEAN",
+    },
+    "u": {"k": "VARCHAR", "a": "INTEGER", "c": "VARCHAR", "flag": "BOOLEAN"},
+    "s": {"k": "VARCHAR", "e": "INTEGER"},
 }
 T_ROWS = (
     "('x', 1, 60, 'SKU-1', DATE '2024-01-05', TRUE), "
@@ -680,18 +689,10 @@ CONSTRUCTS: dict[str, Construct] = {
         "SELECT CASE WHEN b >= 50 THEN 'hi' ELSE 'lo' END AS band, COUNT(*) AS n FROM t "
         "GROUP BY CASE WHEN b >= 50 THEN 'hi' ELSE 'lo' END",
     ),
-    "group_by_output_name": Construct(
-        "SELECT CASE WHEN b > 50 THEN 'hi' ELSE 'lo' END AS band, COUNT(*) FROM t GROUP BY band",
-        f"Returns computed value 1 (when b is more than {M} then {M}, otherwise {M}) and "
-        "number of rows for each computed value 1 from t",
-        "SELECT CASE WHEN b > 50 THEN 'hi' ELSE 'lo' END AS band, COUNT(b) FROM t GROUP BY band",
-    ),
-    "where_output_name": Construct(
-        "SELECT CASE WHEN b > 50 THEN 'hi' ELSE 'lo' END AS band FROM t WHERE band = 'hi'",
-        f"Returns computed value 1 (when b is more than {M} then {M}, otherwise {M}) from t "
-        f"where computed value 1 is {M}",
-        "SELECT CASE WHEN b > 50 THEN 'hi' ELSE 'lo' END AS band FROM t WHERE band <> 'hi'",
-    ),
+    # PICK-READING-01 round 4: "group_by_output_name" (GROUP BY band) and
+    # "where_output_name" (WHERE band = ...) were here. DuckDB binds a real
+    # column first in GROUP BY and WHERE, and a column the payload does not list
+    # can carry the alias's name, so both refuse now (OUTPUT_NAME_REFUSES below).
     "having": Construct(
         "SELECT k, COUNT(*) FROM t GROUP BY k HAVING COUNT(*) > 1",
         f"Returns k and number of rows for each k from t having number of rows is more than {M}",
@@ -703,10 +704,13 @@ CONSTRUCTS: dict[str, Construct] = {
         f"smallest a is at least {M}",
         "SELECT k, SUM(b) FROM t GROUP BY k HAVING k <> 'x' OR MIN(a) >= 2",
     ),
+    # PICK-READING-01 round 4: was ``SUM(b) AS b ... HAVING b > 60``. An output
+    # named like a column the statement reads refuses now (OUTPUT_NAME_REFUSES);
+    # an alias no other name could be keeps DuckDB's alias-first HAVING binding.
     "having_output_alias": Construct(
-        "SELECT k, SUM(b) AS b FROM t GROUP BY k HAVING b > 60",
+        "SELECT k, SUM(b) AS total FROM t GROUP BY k HAVING total > 60",
         f"Returns k and total of b for each k from t having total of b is more than {M}",
-        "SELECT k, SUM(b) AS total FROM t GROUP BY k HAVING b > 60",
+        "SELECT k, SUM(b) AS total FROM t GROUP BY k HAVING total <= 60",
     ),
     # sorting and limits (row order is the claim)
     "order_asc": Construct(
@@ -767,6 +771,12 @@ CONSTRUCTS: dict[str, Construct] = {
         "SELECT a FROM t ORDER BY a LIMIT 3",
         "Returns a from t, sorted by a, first 3 rows",
         "SELECT a FROM t ORDER BY a LIMIT 4",
+        ordered=True,
+    ),
+    "limit_leading_zeros": Construct(
+        "SELECT a FROM t ORDER BY a LIMIT 007",
+        "Returns a from t, sorted by a, first 7 rows",
+        "SELECT a FROM t ORDER BY a LIMIT 6",
         ordered=True,
     ),
     "limit_one": Construct(
@@ -902,6 +912,211 @@ def test_must_fail_a_parenthesized_ordinal_is_its_output(con: Any) -> None:
     order = "SELECT k, a FROM t ORDER BY ((2)) DESC NULLS FIRST"
     assert _say(order) == "Returns k and a from t, sorted by a descending with empty values first"
     assert _rows(con, order) == _rows(con, "SELECT k, a FROM t ORDER BY a DESC NULLS FIRST")
+
+
+# -- 2b. names describe cannot see (PICK-READING-01 round 4) -------------------------------
+
+# The payload lists a subset of a table's columns, and DuckDB binds a name
+# against all of them. Here the grant lists t without ``d`` and ``a``: both
+# are real columns DuckDB reads, and describe cannot know they exist. Each case
+# rendered on a8a0d2d as the reading in its third field; DuckDB returns the
+# rows of the fourth (the real binding), which differ.
+SUBSET: dict[str, dict[str, str]] = {
+    "t": {"k": "VARCHAR", "b": "INTEGER", "c": "VARCHAR", "flag": "BOOLEAN"},
+    "u": dict(GRANTED["u"]),
+}
+
+
+@dataclass(frozen=True)
+class Unseen:
+    sql: str
+    reason: str  # what describe says when it refuses
+    claimed: str  # SQL of the statement a8a0d2d showed
+    bound: str  # SQL of what DuckDB actually binds
+
+
+UNSEEN: dict[str, Unseen] = {
+    # "Returns c from t where c is empty": DuckDB tests the real column d.
+    "where_alias_names_an_unlisted_column": Unseen(
+        "SELECT c AS d FROM t WHERE d IS NULL",
+        "an output named like a column the statement reads",
+        "SELECT c FROM t WHERE c IS NULL",
+        "SELECT c FROM t WHERE t.d IS NULL",
+    ),
+    # "... for each largest c": DuckDB groups by the real column d.
+    "group_alias_names_an_unlisted_column": Unseen(
+        "SELECT MAX(c) AS d, COUNT(*) AS n FROM t GROUP BY d",
+        "an output named like a column the statement reads",
+        "SELECT MAX(c), COUNT(*) FROM t",
+        "SELECT MAX(c) AS d, COUNT(*) AS n FROM t GROUP BY t.d",
+    ),
+    # "..., keeping only rows with some match in u on t.k is u.k where a is more
+    # than ...": u is not visible after its SEMI JOIN, so DuckDB reads t.a.
+    "semi_join_where_reads_the_left_table": Unseen(
+        "SELECT t.k FROM t SEMI JOIN u ON t.k = u.k WHERE a > 2",
+        "a name that is not a granted column",
+        "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE t.k = u.k AND u.a > 2)",
+        "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE t.k = u.k) AND t.a > 2",
+    ),
+    "anti_join_where_reads_the_left_table": Unseen(
+        "SELECT t.k FROM t ANTI JOIN u ON t.k = u.k WHERE a > 2",
+        "a name that is not a granted column",
+        "SELECT k FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE t.k = u.k AND u.a > 2)",
+        "SELECT k FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE t.k = u.k) AND t.a > 2",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSEEN))
+def test_must_fail_a_name_describe_cannot_see_refuses(con: Any, case: str) -> None:
+    spec = UNSEEN[case]
+    rows = _rows(con, spec.sql)
+    assert isinstance(rows, list), rows
+    assert _bag(rows) == _bag(_rows(con, spec.bound)), "DuckDB binds the unlisted column"
+    assert _bag(rows) != _bag(_rows(con, spec.claimed)), "the old statement's reading differs"
+    with pytest.raises(describe.DescribeError, match=spec.reason):
+        describe.statement(spec.sql, keep_literal=_never, granted=SUBSET)
+
+
+# An output alias that is not a plain passthrough, named like any other name the
+# statement reads, refuses even when every column is listed: in a column-first
+# clause (WHERE, GROUP BY, ON, the SELECT list, an aggregate) DuckDB binds an
+# unlisted column of that name over the alias, and describe cannot rule one out.
+# Each rendered on a8a0d2d (true with every column listed, but not provably so).
+OUTPUT_NAME_REFUSES: dict[str, str] = {
+    "group_by_output_name": (
+        "SELECT CASE WHEN b > 50 THEN 'hi' ELSE 'lo' END AS band, COUNT(*) FROM t GROUP BY band"
+    ),
+    "where_output_name": (
+        "SELECT CASE WHEN b > 50 THEN 'hi' ELSE 'lo' END AS band FROM t WHERE band = 'hi'"
+    ),
+    "having_alias_of_its_own_column": "SELECT k, SUM(b) AS b FROM t GROUP BY k HAVING b > 60",
+    "order_alias_of_its_own_column": "SELECT k, SUM(b) AS b FROM t GROUP BY k ORDER BY b",
+    "group_by_column_an_output_is_named": ("SELECT SUM(b) AS k, COUNT(*) AS n FROM t GROUP BY k"),
+    "where_column_an_output_is_named": "SELECT a AS b FROM t WHERE b > 55",
+    "on_column_an_output_is_named": (
+        "SELECT t.k, COUNT(*) AS a FROM t JOIN u ON t.k = u.k AND u.a > 0 GROUP BY t.k"
+    ),
+    "output_named_like_its_table": "SELECT COUNT(*) AS t FROM t",
+    "output_named_like_a_qualifier": "SELECT x.k, COUNT(*) AS x FROM t AS x GROUP BY x.k",
+}
+
+
+@pytest.mark.parametrize("case", sorted(OUTPUT_NAME_REFUSES))
+def test_must_fail_an_output_named_like_another_name_refuses(con: Any, case: str) -> None:
+    sql = OUTPUT_NAME_REFUSES[case]
+    assert isinstance(_rows(con, sql), list), "a query DuckDB runs"
+    with pytest.raises(describe.DescribeError, match="an output named like"):
+        _say(sql)
+
+
+# Still described: a passthrough alias (``k AS k``) is the column either way, and
+# an alias no other name could be keeps DuckDB's alias-first ORDER BY and HAVING.
+def test_a_passthrough_or_unshared_alias_is_still_described(con: Any) -> None:
+    assert _say("SELECT k AS k FROM t WHERE k = 'x' ORDER BY k") == (
+        f"Returns k from t where k is {MARK}, sorted by k"
+    )
+    _check_claims(
+        con, "SELECT k AS k, COUNT(*) AS n FROM t GROUP BY k ORDER BY k NULLS FIRST", True
+    )
+    _check_claims(con, "SELECT k, COUNT(*) AS n FROM t GROUP BY k HAVING n > 1", False)
+
+
+# The non-blocking round-4 refusals, each of a statement a8a0d2d rendered.
+OTHER_REFUSES: dict[str, tuple[str, str]] = {
+    # "keeping rows of t with no match ... where u.a ...": the WHERE drops them.
+    "left_join_where_reads_the_joined_table": (
+        "SELECT t.k FROM t LEFT JOIN u ON t.k = u.k WHERE u.a > 0",
+        "a WHERE that reads the table of a LEFT JOIN",
+    ),
+    "left_join_where_bare_name_of_the_joined_table": (
+        "SELECT t.k FROM t LEFT JOIN s ON t.k = s.k WHERE e IS NULL",
+        "a WHERE that reads the table of a LEFT JOIN",
+    ),
+    # "where a": DuckDB keeps a <> 0, not a TRUE flag.
+    "integer_column_as_condition": ("SELECT k FROM t WHERE a", "not typed BOOLEAN"),
+    "integer_column_in_and": ("SELECT k FROM t WHERE flag AND (a)", "not typed BOOLEAN"),
+    "integer_column_in_on": ("SELECT t.k FROM t JOIN s ON t.k = s.k AND s.e", "not typed BOOLEAN"),
+    # "a value" would not say what two casts do to it.
+    "cast_of_a_cast": (
+        "SELECT k FROM t WHERE b = CAST(CAST(50.7 AS INTEGER) AS INTEGER)",
+        "a CAST of a CAST",
+    ),
+    # Bare name two tables of the clause list: DuckDB refuses it as ambiguous.
+    "ambiguous_bare_name": ("SELECT t.k FROM t JOIN u ON t.k = u.k WHERE a > 1", "more than one"),
+    # A SEMI join's table outside its ON: DuckDB says "table not found".
+    "semi_join_table_in_select": (
+        "SELECT u.c FROM t SEMI JOIN u ON t.k = u.k",
+        "a qualifier that is not a table this clause reads",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(OTHER_REFUSES))
+def test_must_fail_round_four_refusals(case: str) -> None:
+    sql, reason = OTHER_REFUSES[case]
+    with pytest.raises(describe.DescribeError, match=reason):
+        _say(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT t.k FROM t JOIN u ON t.k = s.k JOIN s ON u.k = s.k",
+        "SELECT t.k FROM t SEMI JOIN u ON t.k = u.k JOIN s ON u.k = s.k",
+    ],
+    ids=["later_table", "semi_table_in_a_later_on"],
+)
+def test_must_fail_on_scope_reads_only_earlier_tables(con: Any, sql: str) -> None:
+    """A join's ON reads the visible tables before it and its own table: DuckDB
+    refuses a later table, or a SEMI / ANTI join's table, in it."""
+    assert isinstance(_rows(con, sql), str), "DuckDB refuses it"
+    with pytest.raises(describe.DescribeError, match="a qualifier that is not a table"):
+        _say(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT k, COUNT(*) AS n FROM t GROUP BY k HAVING n",
+        "SELECT k, MIN(flag) AS ok FROM t GROUP BY k HAVING (ok)",
+    ],
+    ids=["count", "boolean_aggregate"],
+)
+def test_must_fail_an_output_read_as_a_condition_refuses(con: Any, sql: str) -> None:
+    """``HAVING n`` runs (DuckDB casts the count to a truth value), but "having
+    number of rows" says nothing true: an output alias is never a condition."""
+    assert isinstance(_rows(con, sql), list), "a query DuckDB runs"
+    with pytest.raises(describe.DescribeError, match="an output read as a condition"):
+        _say(sql)
+
+
+def test_a_boolean_column_untyped_by_the_payload_refuses() -> None:
+    """A bare column is a condition only when the payload says BOOLEAN: a grant
+    that lists names without types reads no bare column as a condition."""
+    untyped = {table: list(columns) for table, columns in GRANTED.items()}
+    with pytest.raises(describe.DescribeError, match="not typed BOOLEAN"):
+        describe.statement("SELECT k FROM t WHERE flag", keep_literal=_never, granted=untyped)
+    assert _say("SELECT k FROM t WHERE flag") == "Returns k from t where flag"
+
+
+def test_must_fail_a_bare_name_another_table_lists_refuses(con: Any) -> None:
+    """In a statement over two tables, a bare name both list refuses even where
+    DuckDB binds it (u is not visible after its SEMI JOIN, so ``a`` is t.a):
+    printed bare, "where a" after "some match in u" reads as u's a."""
+    sql = "SELECT k FROM t SEMI JOIN u ON t.k = u.k WHERE a > 2"
+    assert _bag(_rows(con, sql)) == _bag(
+        _rows(con, "SELECT k FROM t SEMI JOIN u ON t.k = u.k WHERE t.a > 2")
+    )
+    with pytest.raises(describe.DescribeError, match="another table of the statement lists"):
+        _say(sql)
+    # Qualified, it is stated with its table.
+    qualified = "SELECT t.k FROM t SEMI JOIN u ON t.k = u.k WHERE t.a > 2"
+    assert _say(qualified) == (
+        f"Returns t.k from t, keeping only rows with some match in u on t.k is u.k "
+        f"where t.a is more than {MARK}"
+    )
+    _check_claims(con, qualified, False)
 
 
 # -- 3. the property: random core queries render true statements or refuse --------------

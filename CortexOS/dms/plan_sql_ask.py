@@ -363,17 +363,22 @@ def _granted_names(grant: Any) -> set[str]:
 
 def _describe_catalog(
     request: plan_payload.PlanSqlRequest, granted: set[str]
-) -> dict[str, list[str]]:
-    """The names a reading's statement may print: granted payload tables and their columns.
+) -> dict[str, dict[str, str | None]]:
+    """The names a reading's statement may print: granted payload tables and their
+    columns, each with the payload's type for it (``None`` when it gives none).
 
     A model-written alias is free text that executes fine, so ``plan_sql.describe``
-    prints no name outside this (PICK-READING-01 review). ``request`` is the
-    narrowed request the prompt saw.
+    prints no name outside this (PICK-READING-01 review). The type lets it read a
+    bare column as a condition only when the payload says it is BOOLEAN.
+    ``request`` is the narrowed request the prompt saw.
     """
-    names: dict[str, list[str]] = {}
+    names: dict[str, dict[str, str | None]] = {}
     for table in request.payload.tables:
         if fold_identifier(table.name.strip()) in granted:
-            names.setdefault(table.name.strip(), [c.name for c in table.columns])
+            columns: dict[str, str | None] = {}
+            for column in table.columns:
+                columns.setdefault(column.name, column.type)
+            names.setdefault(table.name.strip(), columns)
     return names
 
 

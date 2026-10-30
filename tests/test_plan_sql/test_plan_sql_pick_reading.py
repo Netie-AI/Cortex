@@ -94,6 +94,39 @@ def _readings_on(monkeypatch: pytest.MonkeyPatch):
     plan_readings.reset_for_tests()
 
 
+# The sampler's probe, exactly as ``plan_sql_ask._sample_values`` writes it.
+_SAMPLE_PROBE = re.compile(
+    r'SELECT DISTINCT "(\w+)" AS v FROM "(\w+)" WHERE "\1" IS NOT NULL LIMIT \d+'
+)
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_sample(monkeypatch: pytest.MonkeyPatch):
+    """The sampler runs ``SELECT DISTINCT ... LIMIT n`` with no ORDER BY, so which
+    values it takes, and the byte count it stamps, differ by environment (round 4:
+    a sample size on the ``step sample:`` line matched a reading's cell on one
+    machine and not another). Here every probe runs with ``ORDER BY v``, so the
+    prompt, the stamp and the no-values scan see the same sample on every run."""
+    from CortexOS.execution import submit
+
+    real_sample = plan_sql_ask._sample_values
+
+    def sample(grant: Any, request: Any) -> Any:
+        current = submit.execute_sql  # the execute spy, when a test installed one
+
+        def ordered(verified: Any, sql: str, **kwargs: Any) -> Any:
+            assert _SAMPLE_PROBE.fullmatch(sql), sql  # only probes run in the sampler
+            return current(verified, sql.replace(" LIMIT ", " ORDER BY v LIMIT "), **kwargs)
+
+        submit.execute_sql = ordered
+        try:
+            return real_sample(grant, request)
+        finally:
+            submit.execute_sql = current
+
+    monkeypatch.setattr(plan_sql_ask, "_sample_values", sample)
+
+
 # -- helpers ---------------------------------------------------------------------
 
 
@@ -207,6 +240,19 @@ def _renderings(value: Any) -> set[str]:
     return {str(value)}
 
 
+# Count fields a step stamp prints (``rows=4``, ``bytes=447``, ``offered=3``):
+# sizes Cortex computes, never a cell. Stripped like ``call=`` before the scan,
+# so a count that happens to equal a cell is not read as a leaked value; every
+# other character of the stamp is still scanned.
+_STAMP_COUNTS = re.compile(
+    r"\b(?:columns|values|errors|masked|ungranted|bytes|budget|rows|offered)=\d+\b"
+)
+
+
+def _stamp_text(line: str) -> str:
+    return _STAMP_COUNTS.sub("", re.sub(r"call=\S+", "", line))
+
+
 def _free_text(body: dict[str, Any]) -> list[str]:
     """The fields the response scrub treats as text, plus every statement."""
     reconfirm = body.get("reconfirm") or {}
@@ -215,7 +261,7 @@ def _free_text(body: dict[str, Any]) -> list[str]:
         reconfirm.get("why") or "",
         reconfirm.get("closest_question") or "",
         *(r["statement"] for r in reconfirm.get("readings") or []),
-        *(re.sub(r"call=\S+", "", line) for line in body.get("assumptions") or []),
+        *(_stamp_text(line) for line in body.get("assumptions") or []),
         *(body.get("suggestions") or []),
         body.get("served_reason") or "",
         (body.get("provenance") or {}).get("assumptions") or "",
@@ -382,12 +428,6 @@ NAMED_BUCKETS: dict[str, tuple[str, str, str]] = {
         "heavy or light",
         'AS "heavy or light"',
     ),
-    "label_alias": (
-        "SELECT CASE WHEN quantity_kg > 100 THEN 'heavy' ELSE 'light' END AS heavy, "
-        "COUNT(*) AS n FROM transactions GROUP BY heavy ORDER BY heavy",
-        "heavy",
-        "GROUP BY heavy ORDER BY heavy",
-    ),
     "table_alias": (
         "SELECT CASE WHEN heavy.quantity_kg > 100 THEN 'heavy' ELSE 'light' END AS size, "
         "COUNT(*) AS n FROM transactions AS heavy "
@@ -396,6 +436,14 @@ NAMED_BUCKETS: dict[str, tuple[str, str, str]] = {
         "FROM transactions AS heavy",
     ),
 }
+# PICK-READING-01 round 4: this variant was in NAMED_BUCKETS ("label_alias").
+# DuckDB binds GROUP BY heavy to a real column first, and a column the payload
+# does not list could be called heavy, so describe refuses it and nothing is
+# offered (test below), which prints no name.
+LABEL_ALIAS_BUCKET = (
+    "SELECT CASE WHEN quantity_kg > 100 THEN 'heavy' ELSE 'light' END AS heavy, "
+    "COUNT(*) AS n FROM transactions GROUP BY heavy ORDER BY heavy"
+)
 # PICK-READING-01 core grammar: this variant was in NAMED_BUCKETS and was
 # offered through the nested-query fallback. A subquery is outside the core
 # grammar now, so the offer is suppressed (test below), which prints no name.
@@ -455,14 +503,18 @@ def test_split_offer_never_prints_a_model_chosen_name(
     assert picked["rows"][0][key] in {"heavy", "light"}
 
 
+@pytest.mark.parametrize(
+    "bucket", [SUBQUERY_BUCKET, LABEL_ALIAS_BUCKET], ids=["subquery", "label_alias"]
+)
 def test_subquery_named_reading_is_not_offered(
-    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, bucket: str
 ) -> None:
     """Was offered (as "computed value 1 ..., computed with 1 nested query"): a
     subquery is outside the core grammar, so no reading is offered and the
-    reconfirm is still returned, with no label anywhere in the envelope."""
-    sqls = (GOOD_SQL, SUBQUERY_BUCKET, KG_SQL)
-    assert sorted(tuple(r.values()) for r in _oracle(SUBQUERY_BUCKET)) == sorted(
+    reconfirm is still returned, with no label anywhere in the envelope. The
+    label_alias variant refuses on its GROUP BY name (round 4)."""
+    sqls = (GOOD_SQL, bucket, KG_SQL)
+    assert sorted(tuple(r.values()) for r in _oracle(bucket)) == sorted(
         tuple(r.values()) for r in _oracle(BUCKET_SQL)
     )
     _script_split(armed_openvault, monkeypatch, sqls)
@@ -504,11 +556,16 @@ def test_cte_named_reading_never_prints_its_name(
 # reading of the name the statement must not make, the clause that names it).
 # The picked reading is served with ``reading: <statement>`` as its first
 # assumption, so a wrong binding is a false description on a served answer.
-_TOTAL_ALIAS = (
-    "SELECT txn_type, SUM(quantity_kg) AS quantity_kg FROM transactions GROUP BY txn_type"
-)
-HAVING_ALIAS_SQL = f"{_TOTAL_ALIAS} HAVING quantity_kg > 100000"
-ORDER_ALIAS_SQL = f"{_TOTAL_ALIAS} ORDER BY quantity_kg DESC LIMIT 2"
+#
+# Round 4: the alias is ``sku``, a granted column the statement reads nowhere
+# else (was ``SUM(quantity_kg) AS quantity_kg``, which reads quantity_kg inside
+# the SUM: an output named like a column the statement reads refuses now, since
+# in a column-first clause DuckDB binds a column the payload need not list).
+# The group_column_control case (``SUM(quantity_kg) AS txn_type ... GROUP BY
+# txn_type``) refuses for the same reason and is in NOT_OFFERED below.
+_TOTAL_ALIAS = "SELECT txn_type, SUM(quantity_kg) AS sku FROM transactions GROUP BY txn_type"
+HAVING_ALIAS_SQL = f"{_TOTAL_ALIAS} HAVING sku > 100000"
+ORDER_ALIAS_SQL = f"{_TOTAL_ALIAS} ORDER BY sku DESC LIMIT 2"
 GROUP_COLUMN_SQL = (
     "SELECT SUM(quantity_kg) AS txn_type, COUNT(*) AS n FROM transactions GROUP BY txn_type"
 )
@@ -518,25 +575,16 @@ ALIAS_BINDING: dict[str, tuple[tuple[str, str, str], int, str, str, str]] = {
         2,
         "Returns txn_type and total of quantity_kg for each txn_type from transactions "
         f"having total of quantity_kg is more than {plan_describe.MARK}, first 1000 rows",
-        "having quantity_kg",
-        "HAVING quantity_kg > 100000",
+        "having sku",
+        "HAVING sku > 100000",
     ),
     "order_alias": (
         (GOOD_SQL, SKU_SQL, ORDER_ALIAS_SQL),
         3,
         "Returns txn_type and total of quantity_kg for each txn_type from transactions, "
         "sorted by total of quantity_kg descending, txn_type, first 2 rows",
-        "sorted by quantity_kg",
-        "ORDER BY quantity_kg DESC",
-    ),
-    # Control: GROUP BY binds the column, so the alias-first rule must stay out of it.
-    "group_column_control": (
-        (GOOD_SQL, GROUP_COLUMN_SQL, KG_SQL),
-        2,
-        "Returns total of quantity_kg and number of rows for each txn_type from transactions, "
-        "first 1000 rows",
-        "for each total of",
-        "GROUP BY txn_type",
+        "sorted by sku",
+        "ORDER BY sku DESC",
     ),
 }
 
@@ -572,15 +620,12 @@ def test_must_fail_reading_statement_binds_names_as_duckdb_does(
     _assert_served_pick(picked, sql, reading["reading_id"], expected, index, 3)
     assert picked["assumptions"][0] == f"reading: {expected}"
     oracle = _oracle(sql)
-    if case == "group_column_control":
-        assert len(picked["rows"]) == len(_oracle("SELECT DISTINCT txn_type FROM transactions"))
-        assert picked["rows"][0]["txn_type"] > 1000, picked["rows"]
-        return
+    # The "sku" output holds per-type kilogram totals, never a SKU.
     raw_max = _oracle("SELECT MAX(quantity_kg) AS m FROM transactions")[0]["m"]
-    assert all(row["quantity_kg"] > 100000 > raw_max for row in picked["rows"]), picked["rows"]
+    assert all(row["sku"] > 100000 > raw_max for row in picked["rows"]), picked["rows"]
     if case == "order_alias":
-        totals = [row["quantity_kg"] for row in picked["rows"]]
-        assert totals == sorted(totals, reverse=True) == [r["quantity_kg"] for r in oracle]
+        totals = [row["sku"] for row in picked["rows"]]
+        assert totals == sorted(totals, reverse=True) == [r["sku"] for r in oracle]
         assert len(picked["rows"]) == 2
 
 
@@ -743,6 +788,10 @@ NOT_OFFERED: dict[str, tuple[str, str, str]] = {
         QUESTION,
         "EXISTS",
     ),
+    # Round 4: was ALIAS_BINDING's group_column_control, offered as "... for each
+    # txn_type". True here, but GROUP BY binds a real column first and the
+    # payload may not list one called txn_type: describe cannot tell, so it refuses.
+    "group_by_name_an_output_is_called": (GROUP_COLUMN_SQL, QUESTION, "GROUP BY txn_type"),
 }
 
 
@@ -808,6 +857,140 @@ def test_must_fail_a_parenthesized_ordinal_is_stated_as_its_output(
     assert {row["sku"] for row in picked["rows"]} == {
         row["sku"] for row in _oracle("SELECT DISTINCT sku FROM transactions")
     }
+
+
+def test_must_fail_the_no_values_scan_strips_stamp_counts_only(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 4: the scan read a ``step sample:`` size (``bytes=N``) as a leaked
+    cell on a machine where N equalled a reading's cell. A count field is
+    stripped like ``call=``; the same number anywhere else is still a leak."""
+    sqls = (GOOD_SQL, PAREN_ORDINAL_SQL, KG_SQL)
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+    body = _offer(dms_http)
+    checked = _assert_no_values(body, sqls, QUESTION)
+    cell = next(text for text in checked if text.isdigit())
+    stamp = "step sample: served_by=cortex:column-values served_provider=none"
+
+    counted = {**body, "assumptions": [*body["assumptions"], f"{stamp} (bytes={cell} rows={cell})"]}
+    _assert_no_values(counted, sqls, QUESTION)
+
+    for leak in (f"{stamp} (note {cell})", f"{stamp} (bytes= {cell})", f"{stamp} (sku={cell})"):
+        leaked = {**body, "assumptions": [*body["assumptions"], leak]}
+        with pytest.raises(AssertionError):
+            _assert_no_values(leaked, sqls, QUESTION)
+
+
+# PICK-READING-01 round 4: names describe cannot see. The payload lists a subset
+# of a table's columns and DuckDB binds a name against all of them, so a8a0d2d
+# offered each of these under a false statement, and a pick would have served
+# it as ``reading: <statement>``:
+#
+# * ``sku AS reference_doc ... WHERE reference_doc IS NULL`` was "where sku is
+#   empty"; DuckDB tests the real, unlisted transactions.reference_doc;
+# * ``MAX(sku) AS location_id ... GROUP BY location_id`` was "for each largest
+#   sku"; DuckDB groups by the real, unlisted transactions.location_id;
+# * after ``SEMI JOIN inventory`` / ``ANTI JOIN inventory``, ``WHERE
+#   unit_cost_myr > 50`` was stated after "some / no match in inventory", and
+#   the payload lists unit_cost_myr only for inventory; inventory is not
+#   visible past its ON, so DuckDB reads transactions.unit_cost_myr.
+#
+# Each must not be offered now. ``claimed`` is the SQL of the a8a0d2d statement;
+# the rows show it is not what the reading returns.
+@dataclasses.dataclass(frozen=True)
+class UnseenName:
+    sql: str
+    claimed: str
+    bound: str  # the reading with DuckDB's binding spelled out
+    grant: dict[str, str]
+    payload: dict[str, Any]
+
+
+_INVENTORY_COST_PAYLOAD: dict[str, Any] = {
+    "tables": [
+        *PAYLOAD["tables"],
+        {
+            "name": "inventory",
+            "columns": [
+                {"name": "sku", "type": "VARCHAR", "masked": False},
+                {"name": "is_hazardous", "type": "BOOLEAN", "masked": False},
+                {"name": "unit_cost_myr", "type": "DOUBLE", "masked": False},
+            ],
+        },
+    ]
+}
+_TYPE_COUNT = "SELECT txn_type, COUNT(*) AS n FROM transactions"
+UNSEEN_NAMES: dict[str, UnseenName] = {
+    "where_alias_names_an_unlisted_column": UnseenName(
+        sql="SELECT sku AS reference_doc, COUNT(*) AS n FROM transactions "
+        "WHERE reference_doc IS NULL GROUP BY sku",
+        claimed="SELECT sku, COUNT(*) AS n FROM transactions WHERE sku IS NULL GROUP BY sku",
+        bound="SELECT sku AS reference_doc, COUNT(*) AS n FROM transactions "
+        "WHERE transactions.reference_doc IS NULL GROUP BY sku",
+        grant=GRANT,
+        payload=PAYLOAD,
+    ),
+    "group_alias_names_an_unlisted_column": UnseenName(
+        sql="SELECT MAX(sku) AS location_id, COUNT(*) AS n FROM transactions GROUP BY location_id",
+        claimed="SELECT MAX(sku) AS location_id, COUNT(*) AS n FROM transactions",
+        bound="SELECT MAX(sku) AS location_id, COUNT(*) AS n FROM transactions "
+        "GROUP BY transactions.location_id",
+        grant=GRANT,
+        payload=PAYLOAD,
+    ),
+    "semi_join_where_reads_the_left_table": UnseenName(
+        sql=f"{_TYPE_COUNT} SEMI JOIN inventory {_HAZARD_ON} WHERE unit_cost_myr > 50 "
+        "GROUP BY txn_type",
+        claimed=f"{_TYPE_COUNT} WHERE EXISTS (SELECT 1 FROM inventory WHERE "
+        "transactions.sku = inventory.sku AND inventory.is_hazardous "
+        "AND inventory.unit_cost_myr > 50) GROUP BY txn_type",
+        bound=f"{_TYPE_COUNT} SEMI JOIN inventory {_HAZARD_ON} "
+        "WHERE transactions.unit_cost_myr > 50 GROUP BY txn_type",
+        grant=INVENTORY_GRANT,
+        payload=_INVENTORY_COST_PAYLOAD,
+    ),
+    "anti_join_where_reads_the_left_table": UnseenName(
+        sql=f"{_TYPE_COUNT} ANTI JOIN inventory {_HAZARD_ON} WHERE unit_cost_myr > 50 "
+        "GROUP BY txn_type",
+        claimed=f"{_TYPE_COUNT} WHERE NOT EXISTS (SELECT 1 FROM inventory WHERE "
+        "transactions.sku = inventory.sku AND inventory.is_hazardous "
+        "AND inventory.unit_cost_myr > 50) GROUP BY txn_type",
+        bound=f"{_TYPE_COUNT} ANTI JOIN inventory {_HAZARD_ON} "
+        "WHERE transactions.unit_cost_myr > 50 GROUP BY txn_type",
+        grant=INVENTORY_GRANT,
+        payload=_INVENTORY_COST_PAYLOAD,
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSEEN_NAMES))
+def test_must_fail_a_reading_naming_what_describe_cannot_see_is_not_offered(
+    armed_openvault, dms_http, execute_spy: list[str], monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    spec = UNSEEN_NAMES[case]
+    sqls = (GOOD_SQL, spec.sql, KG_SQL)
+    keys = {plan_sql_vote.result_key(_oracle(s)) for s in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    # DuckDB binds the unseen name, and the old statement's reading differs.
+    assert _rowset(_oracle(spec.sql)) == _rowset(_oracle(spec.bound))
+    assert _rowset(_oracle(spec.sql)) != _rowset(_oracle(spec.claimed))
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, spec.grant)
+
+    body = _offer(dms_http, payload=spec.payload)
+
+    # The reading passed every gate and ran ...
+    assert plan_sql_vote.VOTE_SPLIT in _steps(body)
+    assert spec.sql in _ran(execute_spy) or any(
+        spec.sql.split(" GROUP BY ")[0] in ran for ran in _ran(execute_spy)
+    ), _ran(execute_spy)
+    # ... and nothing is offered: no statement, no reading id, no hold.
+    _assert_suppressed(body, "describe-failed (DescribeError)")
+    assert "plan_sql_reading_id" not in body
+    assert body["answer"] == plan_sql_ask.reconfirm_answer(WHY, CLOSEST)
+    assert "reading:" not in "\n".join(body["assumptions"])
+    assert body["rows"] in ([], None) and body["sql_used"] is None
 
 
 # -- 2, 3: byte identity -----------------------------------------------------------

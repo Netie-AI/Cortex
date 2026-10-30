@@ -27,7 +27,9 @@ anything else:
   JOIN`` and a single ``LEFT [OUTER] JOIN``, each with an ``ON`` that is an
   AND of comparisons or boolean columns. Every granted table at most once in
   the statement (no self-join); every relation name or alias distinct, and
-  none equal to another granted table or a column of a table it reads.
+  none equal to another granted table or a column of a table it reads. A SEMI
+  or ANTI join's table is read only in its own ON; no WHERE reads the table of
+  a LEFT JOIN (it would drop the unmatched rows "keeping rows" promises).
 * Outputs: a granted column, ``*`` or ``t.*`` with no modifier (and then no
   ordinal or output-name reference), ``COUNT(*)``, ``COUNT(1)``,
   ``COUNT(col)``, ``COUNT(DISTINCT col)``, ``SUM`` / ``AVG`` / ``MIN`` / ``MAX``
@@ -35,15 +37,16 @@ anything else:
   grammar and whose labels are values.
 * Conditions: ``AND`` / ``OR`` / ``NOT``, ``=``, ``<>``, ``<``, ``<=``, ``>``,
   ``>=``, ``[NOT] LIKE`` / ``ILIKE``, ``[NOT] IN`` (a list of values),
-  ``[NOT] BETWEEN`` two values, ``IS [NOT] NULL`` and a bare boolean column.
-  A value is a literal, a negative number or a ``CAST`` of a value to a built-in
-  type; ``NULL`` is never a value (only ``IS [NOT] NULL`` names it), and a
-  comparison of two values is refused. Aggregates only in HAVING and ORDER BY.
+  ``[NOT] BETWEEN`` two values, ``IS [NOT] NULL`` and a bare column the payload
+  types BOOLEAN. A value is a literal, a negative number or one ``CAST`` of a
+  value to a built-in type (not a CAST of a CAST); ``NULL`` is never a value
+  (only ``IS [NOT] NULL`` names it), and a comparison of two values is
+  refused. Aggregates only in HAVING and ORDER BY.
 * ``GROUP BY`` granted columns, output names, ordinals (parenthesized ones
   resolved) or a ``CASE`` identical to an output. ``HAVING`` with DuckDB's
   name binding. ``ORDER BY`` granted columns, aggregates, ordinals or output
   names, with ``DESC`` and ``NULLS FIRST`` stated (``NULLS LAST`` is DuckDB's
-  default, so it is the unstated case). ``LIMIT n``.
+  default, so it is the unstated case). ``LIMIT n``, said as ``int(n)``.
 
 Order, on a copy of the parsed tree, before anything is rendered:
 
@@ -69,9 +72,16 @@ Order, on a copy of the parsed tree, before anything is rendered:
    or column of the request payload (``granted``), and then it is printed in
    the payload's own spelling. A CASE output is named by its position
    (``computed value 2``); a reference to an output's alias is shown as what
-   that output is. A bare name that is both a granted column and an output's
-   alias is bound as DuckDB binds it: ORDER BY and HAVING take the alias first,
-   WHERE and GROUP BY the column; where the binding is not known it raises.
+   that output is. The payload may list a subset of a table's columns and
+   DuckDB binds against all of them, so an output alias that is not a plain
+   passthrough (``sku AS sku``) is accepted only when no other name of the
+   statement could be it: no relation or qualifier has its name, and every
+   column reference spelled like it is a whole ORDER BY key or a HAVING name,
+   where DuckDB takes the alias first (a bare name in WHERE, GROUP BY, ON, the
+   SELECT list or an aggregate equal to it refuses, listed or not). A bare
+   column must be a granted column of exactly one table its clause reads and
+   listed by no other table of the statement; where a binding is not known it
+   raises.
 7. Fail closed: every remaining leaf must be a kind this module knows, and no
    comment may survive.
 
@@ -214,16 +224,25 @@ class DescribeError(ValueError):
     """The SQL cannot be described exactly: offer nothing."""
 
 
-#: Granted table name -> its column names, as the request payload spells them.
-Granted = Mapping[str, Iterable[str]]
+#: Granted table name -> its column names, as the request payload spells them;
+#: or column name -> the payload's type for it (``None`` when the payload gives none).
+Granted = Mapping[str, Iterable[str] | Mapping[str, str | None]]
+#: Payload types a bare column may have to be read as a condition ("where flag").
+_BOOLEAN_TYPES = frozenset({"BOOLEAN", "BOOL", "LOGICAL"})
 
 
 class _Catalog:
-    """The granted tables and columns of the request payload, keyed by DuckDB fold."""
+    """The granted tables and columns of the request payload, keyed by DuckDB fold.
+
+    It lists what the request granted, not what the table holds: DuckDB sees
+    every column of a table, and the payload may list a subset. So a name the
+    catalog does not list may still be a real column (:func:`_check_output_names`).
+    """
 
     def __init__(self, granted: Granted) -> None:
         self.tables: dict[str, str] = {}
         self.columns: dict[str, dict[str, str]] = {}
+        self.types: dict[str, dict[str, str]] = {}
         for table, columns in granted.items():
             name = str(table)
             key = fold_identifier(name)
@@ -231,17 +250,18 @@ class _Catalog:
                 continue
             self.tables[key] = name
             pool = self.columns.setdefault(key, {})
+            types = self.types.setdefault(key, {})
+            typed = columns if isinstance(columns, Mapping) else None
             for column in columns:
                 text = str(column)
-                if text:
-                    pool.setdefault(fold_identifier(text), text)
-
-    def columns_of(self, keys: Iterable[str]) -> dict[str, str]:
-        merged: dict[str, str] = {}
-        for key in keys:
-            for folded, text in self.columns.get(key, {}).items():
-                merged.setdefault(folded, text)
-        return merged
+                if not text:
+                    continue
+                folded = fold_identifier(text)
+                if folded in pool:
+                    continue
+                pool[folded] = text
+                kind = typed.get(column) if typed is not None else None
+                types[folded] = str(kind or "").strip().upper()
 
 
 def cap_statement(text: str) -> str:
@@ -712,6 +732,10 @@ class _Grammar:
             to = node.args.get("to")
             if not isinstance(to, exp.DataType):
                 raise DescribeError("a CAST the statement does not describe")
+            if isinstance(_unparen(node.this), exp.Cast):
+                # Each CAST can change the value (a decimal cut to an integer,
+                # then to text): "a value" would not say which.
+                raise DescribeError("a CAST of a CAST")
             self.ok(node)
             self.ok(to)
             self.value(_unparen(node.this))
@@ -957,8 +981,9 @@ def _bare_order_key(column: exp.Column) -> bool:
     return isinstance(parent, exp.Ordered) and node.arg_key == "this"
 
 
-def _clause(column: exp.Column, select: exp.Select) -> tuple[str, bool]:
-    """The SELECT clause ``column`` sits in, and whether it is inside an aggregate."""
+def _clause(column: exp.Column, select: exp.Select) -> tuple[str, bool, exp.Expression]:
+    """The SELECT clause ``column`` sits in, whether it is inside an aggregate,
+    and the clause's top node (for a join: that :class:`exp.Join`)."""
     node: exp.Expression = column
     in_aggregate = False
     while node.parent is not None and node.parent is not select:
@@ -967,7 +992,70 @@ def _clause(column: exp.Column, select: exp.Select) -> tuple[str, bool]:
         node = cast(exp.Expression, node.parent)
     if node.parent is not select:  # pragma: no cover - every column is under the select
         raise DescribeError("a name outside the statement")
-    return str(node.arg_key or ""), in_aggregate
+    return str(node.arg_key or ""), in_aggregate, node
+
+
+def _alias_position(column: exp.Column, select: exp.Select) -> bool:
+    """Whether bare ``column`` sits where DuckDB binds an output's alias first.
+
+    Only two places: a whole ORDER BY key (parentheses aside), and a HAVING
+    name outside any aggregate (where :func:`_binds_to_alias` still applies
+    the GROUP BY rule). Everywhere else DuckDB binds a real column first, and
+    a real column the payload does not list is one describe cannot see.
+    """
+    if column.table:
+        return False
+    clause, in_aggregate, _top = _clause(column, select)
+    if in_aggregate:
+        return False
+    return clause == "having" or (clause == "order" and _bare_order_key(column))
+
+
+def _passthrough(projection: exp.Expression) -> bool:
+    """An output that is one column under its own name (``sku AS sku``)."""
+    if not isinstance(projection, exp.Alias):
+        return False
+    inner = projection.this
+    return (
+        isinstance(inner, exp.Column)
+        and not isinstance(inner.this, exp.Star)
+        and fold_identifier(inner.name) == fold_identifier(projection.alias)
+    )
+
+
+def _check_output_names(select: exp.Select, relation_names: set[str]) -> None:
+    """Refuse an output name a reader of the SQL could take for another name.
+
+    The catalog lists the payload's columns, but DuckDB binds against every
+    real column of a table, and the payload may list a subset (PICK-READING-01
+    review: ``SELECT sku AS reference_doc ... WHERE reference_doc IS NULL`` was
+    stated as "where sku is empty" while DuckDB tested the real, unlisted
+    ``reference_doc``; ``MAX(sku) AS location_id ... GROUP BY location_id`` was
+    "for each largest sku" while DuckDB grouped by the real ``location_id``).
+    describe cannot know an unlisted column, so an output alias that is not a
+    plain passthrough (:func:`_passthrough`) is accepted only when no other
+    name of the statement could be it: not a relation's name, not a
+    qualifier, and every column reference spelled like it sits where DuckDB
+    binds the alias first (:func:`_alias_position`). A bare name in WHERE,
+    GROUP BY, ON, the SELECT list or an aggregate that equals such an alias
+    therefore refuses, listed column or not.
+    """
+    names: dict[str, list[exp.Expression]] = {}
+    for projection in select.expressions:
+        if isinstance(projection, exp.Alias) and projection.alias:
+            names.setdefault(fold_identifier(projection.alias), []).append(projection)
+    for name, projections in names.items():
+        if all(_passthrough(p) for p in projections):
+            continue
+        if name in relation_names:
+            raise DescribeError("an output named like a table of the statement")
+        for column in select.find_all(exp.Column):
+            if column.table and fold_identifier(column.table) == name:
+                raise DescribeError("an output named like a qualifier of the statement")
+            if isinstance(column.this, exp.Star) or fold_identifier(column.name) != name:
+                continue
+            if not _alias_position(column, select):
+                raise DescribeError("an output named like a column the statement reads")
 
 
 def _binds_to_alias(
@@ -978,23 +1066,22 @@ def _binds_to_alias(
     DuckDB's rules (checked against DuckDB itself; pinned by
     ``tests/test_plan_sql/test_plan_sql_describe.py``):
 
-    * Inside an aggregate's arguments, the SELECT list and JOIN ON: the column
-      (ON never sees an output's alias; an alias there refuses).
-    * WHERE, GROUP BY: the column; the alias only when no column has the name.
-    * ORDER BY: the alias when the name is the whole key (parentheses aside);
-      the column when it is part of a larger expression.
+    * Inside an aggregate's arguments, the SELECT list, JOIN ON, WHERE and
+      GROUP BY: the column. (DuckDB takes the alias in WHERE and GROUP BY when
+      no column has the name, but a column the payload does not list can have
+      it, so a non-passthrough alias there refused in
+      :func:`_check_output_names`.)
+    * ORDER BY: the alias when the name is the whole key (parentheses aside).
     * HAVING: the column when GROUP BY lists it, otherwise the alias.
 
     Anything else (a HAVING over a grouping :func:`_grouped_names` does not
     resolve) raises :class:`DescribeError`.
     """
-    clause, in_aggregate = _clause(column, select)
-    if in_aggregate or clause in {"expressions", "joins"}:
-        return False  # an output name here is no column: :func:`_name` refuses it
-    if clause in {"where", "group"}:
-        return not is_column
+    clause, in_aggregate, _top = _clause(column, select)
+    if in_aggregate or clause in {"expressions", "joins", "where", "group"}:
+        return False
     if clause == "order":
-        return not is_column or _bare_order_key(column)
+        return _bare_order_key(column)
     if clause == "having":
         if not is_column:
             return True
@@ -1004,36 +1091,120 @@ def _binds_to_alias(
     raise DescribeError("a name whose binding is not known")
 
 
+def _bare_condition(column: exp.Column) -> bool:
+    """Whether ``column`` is a whole condition (``WHERE flag``), parentheses aside."""
+    node: exp.Expression = column
+    parent = node.parent
+    while isinstance(parent, exp.Paren):
+        node, parent = parent, parent.parent
+    key = node.arg_key
+    if isinstance(parent, (exp.Where, exp.Having, exp.Not)):
+        return key == "this"
+    if isinstance(parent, (exp.And, exp.Or)):
+        return True
+    if isinstance(parent, exp.If):
+        return key == "this"
+    if isinstance(parent, exp.Join):
+        return key == "on"
+    return False
+
+
+class _Relation:
+    """One table of the statement: its catalog key, the name it is read by, and
+    how it joins (``from``, or a :func:`_join_shape`), at position ``index``."""
+
+    def __init__(self, node: exp.Table, key: str, shape: str, index: int) -> None:
+        self.node = node
+        self.key = key
+        self.name = fold_identifier(node.alias_or_name)
+        self.shape = shape
+        self.index = index
+
+
+#: Relations whose columns the rest of the statement can read. A SEMI or ANTI
+#: join's table is visible only in that join's own ON (DuckDB: "Referenced
+#: table ... not found" anywhere else, and a bare name binds elsewhere).
+_VISIBLE_SHAPES = frozenset({"from", "inner", "left"})
+
+
+def _relations(select: exp.Select, catalog: _Catalog) -> list[_Relation]:
+    source = _arg(select, "from_", "from")
+    if not isinstance(source, exp.From) or not isinstance(source.this, exp.Table):
+        raise DescribeError("a statement with no table")  # pragma: no cover - grammar
+    entries: list[tuple[exp.Expression, str]] = [(source.this, "from")]
+    entries += [(join.this, _join_shape(join)) for join in select.args.get("joins") or []]
+    tables = list(select.find_all(exp.Table))
+    if len(tables) != len(entries):  # pragma: no cover - the grammar allows no other table
+        raise DescribeError("a table the statement does not describe")
+    relations: list[_Relation] = []
+    for index, (node, shape) in enumerate(entries):
+        if not isinstance(node, exp.Table):  # pragma: no cover - grammar
+            raise DescribeError("a source that is not a granted table")
+        key = fold_identifier(node.name)
+        if key not in catalog.tables:
+            raise DescribeError("a table that is not granted")
+        relations.append(_Relation(node, key, shape, index))
+    return relations
+
+
+def _scope(relations: list[_Relation], clause: str, top: exp.Expression) -> list[_Relation]:
+    """The relations a column in ``clause`` can read.
+
+    A join's ON reads the visible relations before it and its own table.
+    Every other clause reads FROM and the INNER and LEFT joins: never a SEMI or
+    ANTI join's table (PICK-READING-01 review: ``... SEMI JOIN inventory ON ...
+    WHERE unit_cost_myr > 50`` was stated against inventory's column while
+    DuckDB read the transactions column the payload does not list).
+    """
+    if clause == "joins":
+        select = top.parent
+        joins = select.args.get("joins") if isinstance(select, exp.Select) else None
+        position = next((i for i, j in enumerate(joins or []) if j is top), None)
+        if position is None:  # pragma: no cover - a join column is under its join
+            raise DescribeError("a join the statement does not describe")
+        own = position + 1
+        return [
+            r for r in relations if r.index == own or (r.index < own and r.shape in _VISIBLE_SHAPES)
+        ]
+    return [r for r in relations if r.shape in _VISIBLE_SHAPES]
+
+
 def _name(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> set[int]:
     """Rewrite every name in ``select`` to granted text. Returns the approved node ids.
 
     A table must be granted and read once; its alias is dropped and a column
     qualified by it is shown qualified by the granted table. A column must be a
-    granted column of a table in FROM, printed in the payload's spelling. A
-    bare name that is an output's alias, and an ordinal, is shown as what that
-    output is (:func:`_reference`). Every output alias is dropped. Anything
-    else raises.
+    granted column of exactly one table its clause can read (:func:`_scope`),
+    printed in the payload's spelling; a bare one must be a name no other table
+    of the statement lists, so it cannot be read as that table's. A bare name that is an
+    output's alias where DuckDB binds the alias, and an ordinal, is shown as
+    what that output is (:func:`_reference`). Every output alias is dropped.
+    Anything else raises, and so do: an output name another name could be
+    (:func:`_check_output_names`); a WHERE that reads the table of a LEFT JOIN
+    (it drops the unmatched rows the statement says are kept); and a bare
+    column read as a condition unless the payload types it BOOLEAN.
     """
     approved: set[int] = set()
-    sources: dict[str, str] = {}
-    tables = list(select.find_all(exp.Table))
-    keys = [fold_identifier(table.name) for table in tables]
-    for key in keys:
-        if key not in catalog.tables:
-            raise DescribeError("a table that is not granted")
+    relations = _relations(select, catalog)
+    keys = [r.key for r in relations]
     if len(set(keys)) != len(keys):
         raise DescribeError("a table read twice")
-    local = catalog.columns_of(keys)
-    for table, key in zip(tables, keys, strict=True):
-        name = fold_identifier(table.alias_or_name)
-        if name in sources:
+    listed = {folded for key in keys for folded in catalog.columns.get(key, {})}
+    names: set[str] = set()
+    for relation in relations:
+        if relation.name in names:
             raise DescribeError("two relations with one name")
-        if name != key and (name in catalog.tables or name in local):
+        if relation.name != relation.key and (
+            relation.name in catalog.tables or relation.name in listed
+        ):
             raise DescribeError("a relation alias that is another table's or a column's name")
-        sources[name] = key
-    for table, key in zip(tables, keys, strict=True):
-        table.set("this", _approve(approved, catalog.tables[key]))
-        table.set("alias", None)
+        names.add(relation.name)
+    _check_output_names(select, names | set(keys))
+    counts: dict[str, int] = {}
+    for key in keys:
+        for folded in catalog.columns.get(key, {}):
+            counts[folded] = counts.get(folded, 0) + 1
+    shared = {folded for folded, count in counts.items() if count > 1}
     aliases: dict[str, list[int]] = {}
     for position, projection in enumerate(select.expressions, 1):
         if isinstance(projection, exp.Alias) and projection.alias:
@@ -1042,26 +1213,58 @@ def _name(select: exp.Select, catalog: _Catalog, ordinals: dict[int, int]) -> se
 
     pending: dict[int, int] = dict(ordinals)
     for column in list(select.find_all(exp.Column)):
-        owner: str | None = None
+        clause, _in_aggregate, top = _clause(column, select)
+        scope = _scope(relations, clause, top)
+        qualified: list[_Relation] = []
         if column.table:
-            owner = sources.get(fold_identifier(column.table))
-            if owner is None:
-                raise DescribeError("a qualifier that is not a granted table")
-            column.set("table", _approve(approved, catalog.tables[owner]))
+            qualifier = fold_identifier(column.table)
+            qualified = [r for r in scope if r.name == qualifier]
+            if not qualified:
+                raise DescribeError("a qualifier that is not a table this clause reads")
         if isinstance(column.this, exp.Star):
+            if not qualified:  # pragma: no cover - a bare star is exp.Star, not a column
+                raise DescribeError("all columns of no table")
+            column.set("table", _approve(approved, catalog.tables[qualified[0].key]))
             continue
-        pool = catalog.columns.get(owner, {}) if owner else local
         folded = fold_identifier(column.name)
-        positions = aliases.get(folded, []) if owner is None else []
-        if positions and _binds_to_alias(column, select, grouped, folded in pool):
+        owners = [
+            r
+            for r in (qualified if column.table else scope)
+            if folded in catalog.columns.get(r.key, {})
+        ]
+        positions = aliases.get(folded, []) if not column.table else []
+        if positions and _binds_to_alias(column, select, grouped, bool(owners)):
             if len(positions) > 1:
                 # DuckDB takes one of the outputs that share the name; say none.
                 raise DescribeError("a name that more than one output is called")
+            if _bare_condition(column):
+                raise DescribeError("an output read as a condition")
             pending[id(column)] = positions[0]
-        elif folded in pool:
-            column.set("this", _approve(approved, pool[folded]))
-        else:
+            continue
+        if not owners:
             raise DescribeError("a name that is not a granted column")
+        if len(owners) > 1:
+            raise DescribeError("a name more than one table of the clause has")
+        owner = owners[0]
+        if clause == "where" and owner.shape == "left":
+            # "keeping rows of t with no match" is false once WHERE reads the
+            # joined table: an unmatched row's columns are empty there.
+            raise DescribeError("a WHERE that reads the table of a LEFT JOIN")
+        if _bare_condition(column) and catalog.types.get(owner.key, {}).get(folded) not in (
+            _BOOLEAN_TYPES
+        ):
+            # DuckDB casts any other type to a truth value ("where a" keeps a <> 0).
+            raise DescribeError("a column read as a condition that is not typed BOOLEAN")
+        if not column.table and folded in shared:
+            # "where a" after "... some match in u" reads as u's a: DuckDB binds
+            # t's. A bare name is printed bare, so it must be the only one.
+            raise DescribeError("a bare name another table of the statement lists")
+        column.set("this", _approve(approved, catalog.columns[owner.key][folded]))
+        if column.table:
+            column.set("table", _approve(approved, catalog.tables[owner.key]))
+    for relation in relations:
+        relation.node.set("this", _approve(approved, catalog.tables[relation.key]))
+        relation.node.set("alias", None)
 
     references = [node for node in select.walk() if id(node) in pending]
     if references and any(
@@ -1302,8 +1505,11 @@ def _render_select(select: exp.Select) -> str:
         tail.append("sorted by " + ", ".join(keys))
     limit = select.args.get("limit")
     if isinstance(limit, exp.Limit):
-        count = _operand(limit.expression)
-        tail.append(f"first {count} {'row' if count == '1' else 'rows'}")
+        literal = limit.expression
+        if not isinstance(literal, exp.Literal) or literal.is_string or not literal.is_int:
+            raise DescribeError("a LIMIT that is not a row count")  # pragma: no cover - grammar
+        count = int(literal.name)  # "LIMIT 007" is seven rows, said as "7"
+        tail.append(f"first {count} {'row' if count == 1 else 'rows'}")
     if tail:
         text += ", " + ", ".join(tail)
     return text

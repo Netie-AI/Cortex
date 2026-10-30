@@ -414,8 +414,13 @@ def test_a_model_chosen_name_never_reaches_the_statement(case: str) -> None:
 
 
 # PICK-READING-01 core grammar: these rendered before (a self-join, USING, a
-# CTE, a subquery and a UNION); each is outside the core grammar now.
+# CTE, a subquery and a UNION); each is outside the core grammar now. Round 4:
+# label_alias (GROUP BY zq_hi) and alias_in_where (WHERE zq_hi ...) name a CASE
+# output in a clause where DuckDB binds a real column first, and a column the
+# payload does not list could carry that name, so they refuse too.
 NAMED_REFUSED = {
+    "label_alias",
+    "alias_in_where",
     "self_join_aliases",
     "using_join",
     "cte_name_mixed_case",
@@ -439,10 +444,8 @@ def test_named_cases_render_without_their_names() -> None:
         f"Returns computed value 1 (when quantity_kg is more than {describe.MARK} then "
     )
     assert "for each computed value 1" in rendered["quoted_alias"]
-    assert "for each computed value 1" in rendered["label_alias"]
-    assert "sorted by number of rows descending" in rendered["label_alias"]
-    assert "where computed value 1 is not empty" in rendered["alias_in_where"]
     assert "having total of quantity_kg is more than" in rendered["aggregate_alias"]
+    assert "sorted by total of quantity_kg" in rendered["aggregate_alias"]
     assert rendered["renamed_column"] == "Returns sku from transactions, sorted by sku"
     assert "transactions.quantity_kg" in rendered["table_alias"]
     assert "for each computed value 1" in rendered["table_alias"]
@@ -631,15 +634,51 @@ def _duckdb_rows(sql: str) -> list[tuple[Any, ...]] | str:
         con.close()
 
 
-@pytest.mark.parametrize("case", sorted(BINDING))
+# Round 4 (PICK-READING-01 review): an output alias that is not a plain
+# passthrough, named like another name the statement reads, refuses. With a
+# payload that lists every column these statements were true, but the payload
+# may list a subset, and in a column-first clause DuckDB binds an unlisted
+# column over the alias. So every BINDING case but these refuses now; DuckDB's
+# rules are still pinned below on all of them.
+BINDING_DESCRIBED = {"having_alias_not_grouped", "order_alias_unread", "having_alias_unread"}
+BINDING.update(
+    {
+        # b is a listed column the statement reads nowhere else.
+        "order_alias_unread": (
+            "SELECT a AS b FROM t ORDER BY b DESC",
+            "Returns a from t, sorted by a descending",
+            "SELECT a AS b FROM t ORDER BY t.a DESC",
+            "SELECT a AS b FROM t ORDER BY t.b DESC",
+        ),
+        "having_alias_unread": (
+            "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING b > 2",
+            f"Returns k and total of a for each k from t having total of a is more than "
+            f"{describe.MARK}",
+            "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING SUM(t.a) > 2",
+            "SELECT k, SUM(a) AS b FROM t GROUP BY k HAVING t.b > 2",
+        ),
+    }
+)
+
+
+@pytest.mark.parametrize("case", sorted(BINDING_DESCRIBED))
 def test_must_fail_a_shared_name_is_described_as_duckdb_binds_it(case: str) -> None:
     sql, expected, _claimed, _other = BINDING[case]
     assert _say(sql, BIND_GRANTED) == expected
 
 
+@pytest.mark.parametrize("case", sorted(set(BINDING) - BINDING_DESCRIBED))
+def test_must_fail_an_output_named_like_a_name_it_reads_refuses(case: str) -> None:
+    """Was the BINDING statement (true only when the payload lists every column)."""
+    sql, _expected, _claimed, _other = BINDING[case]
+    with pytest.raises(describe.DescribeError, match="an output named like"):
+        _say(sql, BIND_GRANTED)
+
+
 @pytest.mark.parametrize("case", sorted(BINDING))
 def test_duckdb_binds_as_the_statement_says(case: str) -> None:
-    """The binding each statement claims is the one DuckDB uses, on this data."""
+    """The binding each statement claims (or claimed, before round 4) is the one
+    DuckDB uses, on this data."""
     sql, _expected, claimed, other = BINDING[case]
     rows = _duckdb_rows(sql)
     assert isinstance(rows, list), rows
