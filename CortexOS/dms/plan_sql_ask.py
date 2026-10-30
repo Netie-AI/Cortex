@@ -39,7 +39,8 @@ Order, each step stamped (``StepStamp``):
    model.
 7. ``reconfirm``: why this would abstain, plus the closest answerable question.
    ``plan_sql_confirm=yes`` runs that question. ``no`` answers
-   ``not found in the database``.
+   ``not found in the database`` as an abstain (never a session badge) and
+   logs a pipeline-failure ticket on the F1 audit ledger (``CortexOS.audit``).
 
 With ``CORTEX_PLAN_SQL_VOTE=1`` a SQL that ran with rows is a candidate, not an
 answer: it is served only when a second, independent SQL returns the same rows
@@ -83,6 +84,8 @@ This path writes nothing to per-Space memory.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 import re
 import uuid
@@ -91,7 +94,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
 
-from cortex_contract.answer import AskRequest
+from cortex_contract.answer import AskRequest, Badge
 
 from CortexOS.dms import plan_sql_vote
 from CortexOS.identifier_fold import fold_identifier
@@ -104,6 +107,8 @@ from CortexOS.plan_sql.generator import (
     PlanSqlGenerator,
     StepStamp,
 )
+
+_LOG = logging.getLogger(__name__)
 
 ENABLED_ENV = "CORTEX_PLAN_SQL"
 #: Default off. On: the contract ask reads ``schema_context`` and step 3
@@ -128,6 +133,16 @@ NOT_FROM_TABLE = "PLAN_SQL_OUTPUT_NOT_FROM_TABLE"
 LITERAL_UNGROUNDED = "PLAN_SQL_LITERAL_UNGROUNDED"
 
 NOT_FOUND_ANSWER = "not found in the database"
+# Confirm-no is an abstain on the wire: the contract's ABSTAIN token, which
+# contract_routes._FLAT_BADGE maps to Badge.ABSTAIN. Never "session".
+ABSTAIN = Badge.ABSTAIN.value
+
+# CLAUDE.md section 9: No answers "not found in the database" and logs a
+# pipeline-failure ticket. The ticket is one entry on the F1 audit ledger
+# (the one ledger, reached through CortexOS.audit). There is no other store.
+PIPELINE_FAILURE_EVENT = "plan_sql.pipeline_failure"
+TICKET_ACTOR = "cortex.plan_sql"
+DECLINED_REASON = "user declined the closest question"
 
 # Same-model writes (the first, plus error-fed regenerations). The stronger
 # pass gets one write: the failures are already in its prompt.
@@ -362,22 +377,76 @@ def _not_answered(
 
 
 def _not_found(audit_id: str, steps: list[StepStamp]) -> dict[str, Any]:
+    """The confirm-no answer: an abstain with no rows and no SQL.
+
+    The text is not an answer from data, so it never carries a session badge
+    (CLAUDE.md section 8: a green badge on abstention prose is a P0).
+    """
     note = "user answered no to the closest question"
     return {
         "answer": NOT_FOUND_ANSWER,
         "sql_used": None,
         "audit_id": audit_id,
-        "route": LAYER,
-        "layer": LAYER,
-        "badge": "session",
+        "route": ABSTAIN,
+        "layer": ABSTAIN,
+        "badge": ABSTAIN,
         "row_count": 0,
         "rows": [],
         "assumptions": [note, *(s.line() for s in steps)],
         "reconfirm": None,
         "plan_sql_rung": None,
-        "provenance": {"layer": LAYER, "badge": "session", "assumptions": note},
+        "provenance": {"layer": ABSTAIN, "badge": ABSTAIN, "assumptions": note},
         **_served(None, note),
     }
+
+
+def _pipeline_failure_ticket(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+    session_id: str | None,
+    space_id: str | None,
+    tables: Sequence[str],
+) -> StepStamp:
+    """Append a pipeline-failure ticket to the F1 audit ledger. Never raises.
+
+    The ledger is immutable, so the ticket follows the ``goal_audit`` privacy
+    policy: identifiers and verdicts, never content (PDPA). The question is
+    carried as the SHA-256 of its UTF-8 bytes and its length, never as text;
+    the ``audit_id`` joins the ticket to the ask for anyone allowed to see it.
+
+    The returned step says whether the ticket was recorded or that it was not.
+    It never shows the global ledger ``seq``. An audit outage does not turn the
+    No into a 500, and a ticket that was not written is visible on the
+    envelope, not swallowed.
+    """
+    payload = {
+        "audit_id": audit_id,
+        "question_sha256": hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        "question_chars": len(question),
+        "reason": reason,
+        "session_id": session_id,
+        "space_id": space_id,
+        "tables": list(tables),
+    }
+    try:
+        from CortexOS.audit import resolve_ledger
+
+        resolve_ledger().append(TICKET_ACTOR, PIPELINE_FAILURE_EVENT, payload)
+    except Exception as exc:  # noqa: BLE001 - reported on the step and the log
+        _LOG.warning(
+            "plan_sql pipeline-failure ticket not recorded audit_id=%s: %s: %s",
+            audit_id,
+            type(exc).__name__,
+            exc,
+        )
+        return StepStamp.cortex(
+            "ticket", "cortex:pipeline-failure-ticket", f"not recorded: {type(exc).__name__}"
+        )
+    return StepStamp.cortex(
+        "ticket", "cortex:pipeline-failure-ticket", f"{PIPELINE_FAILURE_EVENT} recorded"
+    )
 
 
 def reconfirm_answer(why: str, closest: str) -> str:
@@ -886,6 +955,16 @@ def plan_sql_answer(
 
     if confirm == "no":
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "no"))
+        steps.append(
+            _pipeline_failure_ticket(
+                question,
+                audit_id,
+                reason=DECLINED_REASON,
+                session_id=session_id,
+                space_id=space_id,
+                tables=sorted(selected),
+            )
+        )
         return _with_calls(_not_found(audit_id, steps))
 
     gen = generator or default_generator()
@@ -1333,7 +1412,9 @@ def plan_sql_answer(
 
 
 __all__ = [
+    "ABSTAIN",
     "CATALOG_ENV",
+    "DECLINED_REASON",
     "EMPTY_RESULT",
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
@@ -1341,11 +1422,13 @@ __all__ = [
     "LITERAL_UNGROUNDED",
     "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
+    "PIPELINE_FAILURE_EVENT",
     "RECONFIRM",
     "RUNG_PLAN",
     "RUNG_RECONFIRM",
     "RUNG_STRONG",
     "SQL_ATTEMPTS",
+    "TICKET_ACTOR",
     "model_calls_stamp",
     "reconfirm_answer",
     "rung_retry",

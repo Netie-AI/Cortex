@@ -8,6 +8,7 @@ OpenVault (tests/freeroute_fake.py) or the recorded C-STAMP capture
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import itertools
 import json
@@ -52,8 +53,12 @@ CAPTURE_BODY_SHA256 = "1e3e7cb43f91f816079cfd66befc9f73761ec6e8d3fca3fbae3e667f6
 
 
 @pytest.fixture(autouse=True)
-def _plan_sql_on(monkeypatch: pytest.MonkeyPatch):
+def _plan_sql_on(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
+    # A confirm-no writes a pipeline-failure ticket to the F1 ledger: keep it
+    # off the repo's data/dms_ops.db and off any configured Postgres ledger.
+    monkeypatch.setenv("DMS_OPS_DB", str(tmp_path / "dms_ops.db"))
+    monkeypatch.delenv("DMS_LEDGER_DSN", raising=False)
     # Value sampling is behind CORTEX_GRANTED_CATALOG (#386, default off;
     # tests/test_plan_sql/test_granted_catalog.py locks the default). The
     # assertions here on the COLUMN VALUES block run with it on.
@@ -999,21 +1004,138 @@ def test_confirm_yes_runs_the_closest_question(
     assert "confirm" in next(line for line in body["assumptions"] if line.startswith("step confirm:"))
 
 
+@pytest.fixture
+def ticket_ledger(monkeypatch: pytest.MonkeyPatch):
+    """The DMS pack's F1 ledger on the per-test DMS_OPS_DB, registered on the engine seam.
+
+    Registered explicitly: an earlier test may have cleared the seam, and
+    ``packs.dms`` only registers on its first import.
+    """
+    from CortexOS.audit import ledger_registry
+    from packs.dms.audit import ledger
+
+    monkeypatch.setattr(ledger_registry, "_ledger", ledger)
+    return ledger
+
+
+# The ledger event operators query for confirm-no tickets. Literal on purpose:
+# renaming it in the module silently orphans every ticket already written.
+TICKET_EVENT = "plan_sql.pipeline_failure"
+
+
+def _tickets(ledger) -> list[Any]:  # noqa: ANN001
+    return list(ledger.list_entries(event_type=TICKET_EVENT))
+
+
+def _assert_not_found_abstain(body: dict[str, Any]) -> None:
+    """The customer envelope of a confirm-no: abstention prose under an abstain badge."""
+    assert body["answer"] == "not found in the database"
+    assert _badge(body).lower() == "abstain", body
+    assert body["provenance"]["badge"] == "abstain"
+    assert body["provenance"]["badge"] != "session"
+    assert body["route"] == "abstain"
+    assert body["rows"] in ([], None) and body["row_count"] in (0, None)
+    assert body["sql_used"] is None
+    assert body["drillthrough_token"] is None
+    assert body["contributing_sources"] == []
+    assert body["reconfirm"] is None
+    assert body["plan_sql_rung"] is None
+    assert body["served_provider"] is None and body["served_model"] is None
+
+
 def test_confirm_no_answers_not_found_in_the_database(
-    armed_openvault, dms_http, execute_spy: list[str]  # noqa: F811
+    armed_openvault, dms_http, execute_spy: list[str], ticket_ledger  # noqa: F811
 ) -> None:
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
 
     body = _json(_ask(dms_http, plan_sql_confirm="no"))
 
-    assert body["answer"] == "not found in the database"
-    assert body["provenance"]["badge"] == "session"
-    assert body["rows"] in ([], None) and body["sql_used"] is None
-    assert body["reconfirm"] is None
-    assert body["plan_sql_rung"] is None
+    _assert_not_found_abstain(body)
     assert armed_openvault.chat_calls == []
     assert execute_spy == []
+    assert body["model_calls"] is None
+
+
+def test_confirm_no_is_an_abstain_envelope_and_logs_a_pipeline_failure_ticket(
+    armed_openvault, dms_http, execute_spy: list[str], ticket_ledger  # noqa: F811
+) -> None:
+    """CLAUDE.md sections 8 and 9: No answers 'not found in the database' and logs a ticket.
+
+    The envelope DMS receives from POST /v1/contract/ask carries an abstain
+    badge, never session, and no rows. The ticket is on the F1 ledger, keyed
+    by the envelope's audit_id, and the chain still verifies. The ledger is
+    immutable, so the ticket carries identifiers and verdicts, never content
+    (goal_audit policy, PDPA): the question is a SHA-256 and a length, and its
+    text is nowhere in the entry. The step line does not expose the global seq.
+    """
+    dms_http.bind_session(SESSION, GRANT)
+    assert _tickets(ticket_ledger) == []
+
+    body = _json(_ask(dms_http, plan_sql_confirm="no"))
+
+    _assert_not_found_abstain(body)
+    assert armed_openvault.chat_calls == []
+    assert execute_spy == []
+    tickets = _tickets(ticket_ledger)
+    assert len(tickets) == 1, tickets
+    ticket = tickets[0]
+    assert ticket.actor == "cortex.plan_sql"
+    assert ticket.payload == {
+        "audit_id": body["audit_id"],
+        "question_sha256": hashlib.sha256(QUESTION.encode("utf-8")).hexdigest(),
+        "question_chars": len(QUESTION),
+        "reason": "user declined the closest question",
+        "session_id": SESSION,
+        "space_id": None,
+        "tables": ["transactions"],
+    }
+    assert "question" not in ticket.payload
+    entry_text = json.dumps(dataclasses.asdict(ticket), sort_keys=True, default=str)
+    assert QUESTION not in entry_text
+    assert QUESTION.lower() not in entry_text.lower()
+    step = next(line for line in body["assumptions"] if line.startswith("step ticket:"))
+    assert step.startswith("step ticket:")
+    assert step.endswith(f"({TICKET_EVENT} recorded)"), step
+    assert "seq" not in step, step
+    assert ticket_ledger.verify().ok
+
+
+def test_confirm_no_stays_an_abstain_when_the_ticket_cannot_be_written(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """A ledger outage does not become a 500 or a session badge; the miss is on the envelope."""
+    from CortexOS.audit import ledger_registry
+
+    class _Down:
+        def append(self, *args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("ledger offline")
+
+    monkeypatch.setattr(ledger_registry, "_ledger", _Down())
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http, plan_sql_confirm="no"))
+
+    _assert_not_found_abstain(body)
+    step = next(line for line in body["assumptions"] if line.startswith("step ticket:"))
+    assert "not recorded: RuntimeError" in step
+    assert "ledger offline" not in " ".join(body["assumptions"])
+    assert armed_openvault.chat_calls == []
+
+
+def test_refused_confirm_no_logs_no_ticket(
+    armed_openvault, dms_http, ticket_ledger  # noqa: F811
+) -> None:
+    """A payload that widens the grant is refused before the confirm: no ticket, no answer text."""
+    dms_http.bind_session(SESSION, GRANT)
+    wide = {"tables": [*PAYLOAD["tables"], {"name": "inventory", "columns": []}]}
+
+    body = _json(_ask(dms_http, payload=wide, plan_sql_confirm="no"))
+
+    _assert_not_answered(body, "PLAN_SQL_PAYLOAD_WIDENS_GRANT")
+    assert body["answer"] != "not found in the database"
+    assert _tickets(ticket_ledger) == []
+    assert armed_openvault.chat_calls == []
 
 
 def test_pii_wording_is_not_an_abstain_and_is_not_masked(

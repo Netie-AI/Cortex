@@ -28,6 +28,7 @@ A retrieval answer with no relevance gate is a keyword rule. One shared word dec
 - The model answers only from the numbered passages through FreeRoute and must cite them, or reply NOT_IN_DOCUMENTS.
 - With no model available, the best sentences are quoted with their citation, and the answer says why no model summarised them. A quote also needs the passage to cover at least half of the question's terms.
 - After the fix, all five bench questions abstain. The other 158 golden answers are byte-identical to main.
+- Later change (wave1/a2-rag-cited-or-nothing): the quote fallback is removed. It was served under badge=document when the model failed or cited nothing, and only word overlap chose the quote, which is the same root-cause class. A failed or unarmed model, an unaccepted reply, NOT_IN_DOCUMENTS, or a reply without a valid citation now serves nothing. The answer engine abstains; the `/dms/query` legacy bridge returns its existing miss shape (empty answer, `route=rag`, no badge). All 163 golden 340 answers are unchanged, because none of them was a document answer.
 
 ## Follow-up (not done)
 - The contract route's `contributing_sources` for a `layer=rag` answer should name the documents, not the warehouse grant.

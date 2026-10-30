@@ -876,7 +876,8 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
 
     RAG-01: passages are ranked by BM25 and gated on relevance; the model
     answers only from them through OpenVault FreeRoute, citing each passage.
-    Without a model the answer quotes the best sentences and says so.
+    A failed or unarmed model, a NOT_IN_DOCUMENTS reply or a reply without a
+    valid citation serves nothing: ``("", [])``.
     """
     from CortexOS.rag import documents
 

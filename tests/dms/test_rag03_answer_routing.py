@@ -183,16 +183,21 @@ def test_blocked_ddl_still_blocked_before_rag(dms_http) -> None:
     assert "acme_agreement.txt" not in _sources(body)
 
 
-def test_space_scoped_doc_rag_after_l1_miss_on_token_hit(dms_http) -> None:
+def test_space_scoped_doc_rag_after_l1_miss_on_token_hit(armed_openvault, dms_http) -> None:
+    """After the L1 miss the document answer is the model's cited reply (RAG-01)."""
     if not CONTRACTS_DIR.is_dir() or not any(CONTRACTS_DIR.glob("*.txt")):
         pytest.skip("CONTRACTS_DIR missing")
+    armed_openvault.reply("Acme invoices are payable Net 30 from the invoice date [1].")
     dms_http.bind_session(SESSION, {"transactions": "TRUE"}, space_id="alpha")
     body = _ask_dms(dms_http, DOC_HIT_Q, SESSION, "alpha")
     assert _badge(body) == "document", body
     assert body.get("layer") == "rag"
     assert body.get("route") == "rag"
     text = body.get("answer") or ""
-    assert text.strip()
-    assert "acme" in text.lower() or "payment" in text.lower() or "net 30" in text.lower()
-    assert "acme_agreement.txt" in _sources(body)
+    assert text == (
+        "Acme invoices are payable Net 30 from the invoice date [1].\n"
+        "Sources: [1] acme_agreement.txt"
+    ), text
+    assert _sources(body) == ["acme_agreement.txt"]
     assert body.get("rows") in ([], None)
+    assert len(armed_openvault.chat_calls) == 1

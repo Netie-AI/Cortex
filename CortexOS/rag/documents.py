@@ -5,8 +5,10 @@ Retrieve-then-read, as in Meta's RAG and its CRAG benchmark: rank passages
 numbered passages and cite them, and let it say the passages do not answer.
 A missing answer costs less than an invented one, so a miss serves nothing.
 
-With no model available the answer quotes the best-matching sentences and says
-it is a quote. The answer always names its sources and how it was produced.
+Only the model judges whether the passages answer the question. With no model,
+a failed call, a NOT_IN_DOCUMENTS reply or a reply that cites no passage it was
+given, nothing is served and the caller abstains. A served answer always names
+its sources.
 """
 
 from __future__ import annotations
@@ -21,7 +23,6 @@ from pathlib import Path
 NOT_IN_DOCUMENTS = "NOT_IN_DOCUMENTS"
 TASK_DOC_ANSWER = "doc-answer"
 _TOKEN = re.compile(r"[a-z0-9][a-z0-9_-]*")
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _CITE = re.compile(r"\[(\d+)\]")
 # Function words carry no evidence that a passage answers the question.
 _STOP = frozenset(
@@ -33,7 +34,6 @@ _STOP = frozenset(
 _MAX_PASSAGE = 600
 _TOP_K = 4
 _MIN_TERMS = 2
-_QUOTE_COVERAGE = 0.5
 
 Complete = Callable[[list[dict[str, str]]], "ModelReply"]
 
@@ -114,11 +114,6 @@ def matched_terms(query: str, text: str) -> set[str]:
     return set(terms(query)) & set(terms(text))
 
 
-def coverage(query: str, text: str) -> float:
-    wanted = set(terms(query))
-    return len(matched_terms(query, text)) / len(wanted) if wanted else 0.0
-
-
 def is_relevant(query: str, text: str) -> bool:
     """At least two of the question's content terms (one if it has only one)."""
     wanted = set(terms(query))
@@ -182,48 +177,21 @@ def cited_answer(text: str, n_passages: int) -> str | None:
     return body
 
 
-def _best_sentences(
-    question: str, passages: list[Passage], *, limit: int = 2
-) -> list[tuple[int, str]]:
-    ranked: list[tuple[int, int, int, str]] = []
-    for i, p in enumerate(passages, 1):
-        for j, sentence in enumerate(s.strip() for s in _SENTENCE.split(p.text)):
-            hits = len(matched_terms(question, sentence))
-            if sentence and hits:
-                ranked.append((-hits, i, j, sentence))
-    ranked.sort()
-    return [(i, s) for _, i, _, s in ranked[:limit]]
-
-
-def extractive(question: str, passages: list[Passage], reason: str) -> DocAnswer | None:
-    """Quote the best sentences. No reader judges answerability here, so the
-    passages must cover at least half of the question's terms."""
-    passages = [p for p in passages if coverage(question, p.text) >= _QUOTE_COVERAGE]
-    picked = _best_sentences(question, passages)
-    if not picked:
-        return None
-    quote = " ".join(f'"{s}" [{i}]' for i, s in picked)
-    note = f"Quoted from the documents; no model summarised them ({reason})."
-    return DocAnswer(
-        answer=f"{quote}\n{_source_line(passages)}\n{note}",
-        sources=_sources(passages),
-        method="extractive",
-    )
-
-
 def answer(question: str, passages: list[Passage], complete: Complete | None) -> DocAnswer | None:
-    """A cited answer from ``passages``, or None when they do not answer it."""
+    """A cited answer from ``passages``, or None so the caller abstains.
+
+    None when no passage clears the relevance gate, when no model is
+    configured, when the model call fails or its reply is not accepted, when
+    the model replies NOT_IN_DOCUMENTS, and when the reply cites no passage it
+    was given.
+    """
     top = retrieve(question, passages)
-    if not top:
+    if not top or complete is None:
         return None
-    if complete is None:
-        return extractive(question, top, "no model configured")
     reply = complete(messages(question, top))
-    if not reply.ok:
-        return extractive(question, top, reply.reason or "model unavailable")
-    if NOT_IN_DOCUMENTS in reply.text:
+    if not reply.ok or NOT_IN_DOCUMENTS in reply.text:
         return None
     body = cited_answer(reply.text, len(top))
     if body is None:
-        return extractive(question, top, "model answer cited no given passage")
+        return None
     return DocAnswer(answer=f"{body}\n{_source_line(top)}", sources=_sources(top), method="model")
