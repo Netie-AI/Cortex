@@ -1,0 +1,23 @@
+Supplier Schedule - Malaysia Supplier 012 Sdn Bhd (SUP-012)
+
+Fictional measurement document for the LANES-V1 benchmark. Figures differ from
+the suppliers table on purpose.
+
+Schedule to the Master Supply Agreement for SUP-012.
+
+A. Lead time. SUP-012 delivers within 12 calendar days of purchase order
+acceptance.
+
+B. Payment terms. Invoices from SUP-012 are payable Net 30 from receipt of a
+complete delivery.
+
+C. Contracted SKUs. SUP-012 is the contracted source for SKU-00307 and SKU-00412.
+
+D. Delivery location. SUP-012 delivers only to WH-B Penang Distribution.
+
+E. Volume rebate. SUP-012 grants a 3% rebate once annual purchases exceed
+RM 250,000.
+
+F. Quality. A delivery with more than 2% damaged units may be rejected in full.
+
+G. Review. This schedule is reviewed every 6 months.

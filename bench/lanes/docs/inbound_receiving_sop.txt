@@ -1,0 +1,20 @@
+Standard Operating Procedure - Inbound Receiving
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Booking. Suppliers book a dock slot at least 24 hours before arrival.
+
+2. Unloading. A booked truck is unloaded within 45 minutes of docking.
+
+3. Inspection. Every delivery is inspected and counted within 4 hours of
+unloading.
+
+4. Discrepancy tolerance. A quantity difference of up to 1% against the
+delivery note is accepted; a larger difference is raised as a discrepancy.
+
+5. Quarantine. Damaged or unlabelled goods go to the quarantine bay for a
+maximum of 5 working days while the supplier responds.
+
+6. Put-away. Accepted stock is put away within 8 hours of inspection.
+
+7. Records. The goods received note is posted on the same day as receipt.

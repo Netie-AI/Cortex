@@ -1,0 +1,19 @@
+Warehouse Safety Policy
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Forklifts. Forklifts travel at no more than 8 km/h inside the warehouse and
+3 km/h in pedestrian zones.
+
+2. Licences. Only staff holding a valid forklift licence may operate a forklift,
+and licences are refreshed every 2 years.
+
+3. Racking. Racking is inspected every 6 months by a qualified inspector.
+
+4. Incidents. Every incident or near miss is reported within 24 hours.
+
+5. Fire drills. A fire evacuation drill is held every 3 months.
+
+6. Footwear. Safety shoes are compulsory on the warehouse floor.
+
+7. Working at height. Work above 2 metres needs a harness and a permit.

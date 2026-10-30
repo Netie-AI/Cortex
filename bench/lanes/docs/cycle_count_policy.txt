@@ -1,0 +1,20 @@
+Inventory Cycle Count Policy
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. A-class SKUs are counted every month, B-class SKUs every quarter and C-class
+SKUs twice a year.
+
+2. Variance tolerance. A count variance within 2% of the system quantity is
+accepted without a recount.
+
+3. Recount. A variance above 2% triggers a blind recount by a second counter
+within 48 hours.
+
+4. Write-off approval. Inventory adjustments above RM 10,000 need the
+approval of the Finance Controller.
+
+5. Freeze. Stock movements in a bin are frozen for the duration of its count.
+
+6. Year-end. A full wall-to-wall count takes place in the first week of
+December.

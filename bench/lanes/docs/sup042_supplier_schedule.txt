@@ -1,0 +1,24 @@
+Supplier Schedule - Malaysia Supplier 042 Sdn Bhd (SUP-042)
+
+Fictional measurement document for the LANES-V1 benchmark. Figures differ from
+the suppliers table on purpose.
+
+Schedule to the Master Supply Agreement for SUP-042.
+
+A. Lead time. SUP-042 delivers within 9 calendar days of purchase order
+acceptance.
+
+B. Payment terms. Invoices from SUP-042 are payable Net 60 from receipt of a
+complete delivery.
+
+C. Contracted category. SUP-042 supplies PPE items: gloves, face shields and
+coveralls.
+
+D. Consignment stock. SUP-042 keeps a consignment buffer of 400 kg at WH-A
+Shah Alam Central.
+
+E. Exclusivity. For nitrile gloves SUP-042 is the exclusive supplier until
+31 December 2027.
+
+F. Penalty variation. The late delivery penalty for SUP-042 is 1% of the order
+value per day, capped at 15%.
