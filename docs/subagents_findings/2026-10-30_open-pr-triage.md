@@ -31,6 +31,27 @@ This triage closes and merges nothing.
   as `supported` and 1.10 as `current`. `answer.py` and the VQ tests now say 1.10.0. The
   flag-off test now pins the 1.9.0 Answer, the previous published spec, where it pinned 1.7.0.
   The requirement is the same: flag off, the wire is the last published Answer.
+- Three semantic breaks surfaced in the full suite after the merge (8 failures)
+  and are fixed:
+  1. **Copy rule vs #435 page tiebreak.** Main now appends the table key to the
+     ORDER BY of a page its LIMIT cuts. A verbatim copy of an example then no
+     longer matched the example's copy key, so `example_echo` passed it and only
+     the backstop `result_echo` refused it, under the wrong reason. Still an
+     abstain (WRONG=0 held), but the named rule was dead. Fix:
+     `_without_page_tiebreak()` drops only a suffix `apply_page_tiebreak` itself
+     would append, and the copy rule compares that. `result_echo` still runs the
+     SQL that executes. Seen failing first: both copy must-fails and the
+     `example_echo` guard proof were red before the fix.
+  2. **#424 declared wording.** The flag-off byte-identity test served
+     "what is our total revenue" through the old cascade. #424 serves only a
+     declared wording, so the test now asks "what was total revenue" (declared
+     for `revenue_total`). It still requires a served answer in the comparison.
+  3. **#424 unarmed reconfirm.** An unarmed ask now carries main's metric
+     reconfirm. The wire-shape test asserted `reconfirm is None`. It now asserts
+     the reconfirm has main's shape. The lane-specific checks are unchanged.
+  - Expected rows in the VQ tests are read in the serve path's total order
+    (`apply_page_tiebreak` with the real page count). 12 inventory rows tie at
+    500 kg, so a bare `LIMIT 5` read was nondeterministic.
 - If a 1.10.0 PR (e.g. pick-your-reading) merges first, #321 moves to 1.11.0 the same way.
 - The tip commit carries `INVARIANT-CHANGE:` because the PR diff still touches
   `.importlinter` (protected-paths reads only the tip body).
@@ -57,6 +78,14 @@ This triage closes and merges nothing.
      swap the PR already made in 5 other tests. Same 501 assertion.
 - The three test-file conflicts took the PR side (explicit per-test admin key and
   `DMS_AUTH_DISABLED` deleted).
+- The full suite then showed 74 failures with one cause. The PR's suite plugin
+  sets `DMS_API_KEYS` for every test, and 20 test files that main added since
+  then send the published `dms-demo-*` keys, so they got 401. Each file's client
+  now sends the `pytest-*` key of the same role, the swap the PR already made in
+  5 files. No assertion changed. Not a product change: main already refuses
+  demo keys on `api_auth` routes once `DMS_API_KEYS` is set; the suite now
+  always sets it. PR Bot item 3 (which DMS callers still send demo keys) stays
+  open.
 - Still owed (PR Bot HOLD 6009656444): body rewrite to match the diff, DMS caller
   route list, Lead OK on the `addopts` plugin vs the #215 conftest freeze, then CI
   5/5, CLEAR, different-family AGREE, Check, Lead Formal.
