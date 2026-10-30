@@ -37,7 +37,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, profile: str) -> TestClient:
     # Fresh app — packaging reads CORTEX_PROFILE at call time.
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    return TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
 
 @pytest.mark.parametrize("profile", ["core", "full"])
@@ -55,7 +55,7 @@ def test_core_returns_501_for_agentic_and_rag(monkeypatch: pytest.MonkeyPatch) -
     r_run = client.post(
         "/run",
         json={"dag": {"nodes": []}},
-        headers={"X-API-Key": "dms-demo-steward-key"},
+        headers={"X-API-Key": "pytest-steward-key"},
     )
     assert r_run.status_code == 501
     assert r_run.json()["detail"]["extra"] == "agentic"

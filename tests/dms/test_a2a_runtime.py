@@ -31,7 +31,7 @@ def test_a2a_message_endpoint(monkeypatch, tmp_path):
 
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     response = client.post(
         "/a2a/messages",
         json={
