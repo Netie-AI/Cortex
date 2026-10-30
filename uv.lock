@@ -2085,7 +2085,6 @@ version = "2.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
-    { name = "diskcache" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -2181,7 +2180,6 @@ requires-dist = [
     { name = "dbos", marker = "extra == 'agentic'", specifier = ">=3.0.0,<4" },
     { name = "dbos", marker = "extra == 'agents'", specifier = ">=3.0.0,<4" },
     { name = "dbos", marker = "extra == 'full'", specifier = ">=3.0.0,<4" },
-    { name = "diskcache", specifier = ">=5" },
     { name = "duckdb", specifier = ">=1.1,<2" },
     { name = "duckdb", marker = "extra == 'dms'", specifier = ">=1.1,<2" },
     { name = "fastapi", specifier = ">=0.141" },
