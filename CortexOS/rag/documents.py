@@ -122,15 +122,25 @@ def is_relevant(query: str, text: str) -> bool:
     return len(matched_terms(query, text)) >= min(_MIN_TERMS, len(wanted))
 
 
-def retrieve(query: str, passages: list[Passage], *, top_k: int = _TOP_K) -> list[Passage]:
-    """Relevant passages, best first. Empty when nothing clears the gate."""
+def gated_ranking(query: str, passages: list[Passage]) -> list[int]:
+    """Indices of every passage that clears the relevance gate, best BM25 first.
+
+    The gate (a positive BM25 score and ``is_relevant``) runs over every
+    passage before any cut, so a later ranking can only reorder passages that
+    already pass it. Ties keep passage order.
+    """
     scored = [
-        (score, i, p)
+        (score, i)
         for i, (score, p) in enumerate(zip(bm25(query, passages), passages, strict=True))
         if score > 0 and is_relevant(query, p.text)
     ]
     scored.sort(key=lambda row: (-row[0], row[1]))
-    return [p for _, _, p in scored[:top_k]]
+    return [i for _, i in scored]
+
+
+def retrieve(query: str, passages: list[Passage], *, top_k: int = _TOP_K) -> list[Passage]:
+    """Relevant passages, best first. Empty when nothing clears the gate."""
+    return [passages[i] for i in gated_ranking(query, passages)[:top_k]]
 
 
 def load_passages(paths: Iterable[Path]) -> list[Passage]:
@@ -185,7 +195,15 @@ def answer(question: str, passages: list[Passage], complete: Complete | None) ->
     the model replies NOT_IN_DOCUMENTS, and when the reply cites no passage it
     was given.
     """
-    top = retrieve(question, passages)
+    return read(question, retrieve(question, passages), complete)
+
+
+def read(question: str, top: list[Passage], complete: Complete | None) -> DocAnswer | None:
+    """The model's cited answer from the passages it is shown, or None.
+
+    ``top`` is already gated and ordered; it is shown to the model as-is,
+    numbered from [1]. The None cases are those of ``answer``.
+    """
     if not top or complete is None:
         return None
     reply = complete(messages(question, top))
