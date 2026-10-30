@@ -206,7 +206,9 @@ def test_l2_table_derived_candidate_is_served_first_time(armed_openvault, sql: s
     env = _ask()
 
     assert env["badge"] == "L2_VALIDATED", env
-    assert _rowset(env["rows"]) == _rowset(oracle)
+    # A cut page appends the lot key, so the served rows are the oracle of
+    # sql_used, not of the model's non-total ORDER BY.
+    assert sql.split(" ORDER BY ")[0] in (env.get("sql_used") or "")
+    assert _rowset(env["rows"]) == _rowset(_oracle(env["sql_used"]))
     _assert_rendered(env)
-    assert _rowset(_oracle(env["sql_used"])) == _rowset(oracle)
     assert len(armed_openvault.chat_calls) == 1

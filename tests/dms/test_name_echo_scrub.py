@@ -33,7 +33,6 @@ from tests.dms.test_l2_freeroute_envelope import (  # noqa: F401
 from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
     GOOD_SQL,
     GRANT,
-    PLAN_TEXT,
     SESSION,
     _ask,
     _assert_rung,
@@ -80,6 +79,18 @@ def _oracle(sql: str) -> list[dict[str, Any]]:
         con.close()
 
 
+def _assert_no_plan_prose(body: dict[str, Any]) -> None:
+    """GEN-GRANTED-CATALOG-01: one model call per attempt, so no plan lines."""
+    assert not any(a.startswith("plan:") for a in body["assumptions"]), body["assumptions"]
+
+
+def _assert_granted_table_in_step_prose(body: dict[str, Any], table: str) -> None:
+    """A granted name in Cortex's step prose is kept, not withheld."""
+    for step in ("step grant:", "step payload:"):
+        line = next(a for a in body["assumptions"] if a.startswith(step))
+        assert f"tables=['{table}']" in line, line
+
+
 def _assert_no_invented(payload: Any) -> None:
     text = payload if isinstance(payload, str) else json.dumps(payload)
     for name in INVENTED:
@@ -93,7 +104,6 @@ def _assert_no_invented(payload: Any) -> None:
 def test_direct_abstain_on_an_invented_table_names_neither_table_nor_column(
     armed_openvault, dms_http
 ) -> None:
-    _reply(armed_openvault, f"1. Read {VAULT}.\n2. Sum {BAND}.")
     _reply(armed_openvault, f"SELECT {BAND} FROM {VAULT}")
     dms_http.bind_session(SESSION, GRANT)
 
@@ -115,7 +125,6 @@ def test_direct_abstain_on_an_invented_table_names_neither_table_nor_column(
 def test_reconfirm_after_invented_columns_withholds_them(armed_openvault, dms_http) -> None:
     """No stronger route: the step lines name each refused write's column."""
     bad = f"SELECT {GHOST}, COUNT(*) AS n FROM transactions GROUP BY {GHOST}"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     dms_http.bind_session(SESSION, GRANT)
@@ -140,10 +149,8 @@ def test_reconfirm_text_from_the_stronger_model_withholds_invented_names(
     configured = "openai/gpt-oss-20b"
     _stronger_route(armed_openvault, configured, monkeypatch)
     bad = f"SELECT {GHOST} FROM transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, f"SELECT {BAND} FROM transactions", model=configured)
     _reply(
         armed_openvault,
@@ -169,8 +176,6 @@ def test_reconfirm_text_from_the_stronger_model_withholds_invented_names(
 def test_served_answer_after_an_invented_column_keeps_rows_sql_and_granted_names(
     armed_openvault, dms_http
 ) -> None:
-    plan = f"1. Read transactions.\n2. Group by txn_type, not {GHOST}, and count rows."
-    _reply(armed_openvault, plan)
     _reply(armed_openvault, f"SELECT {GHOST}, COUNT(*) AS n FROM transactions GROUP BY 1")
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -188,11 +193,10 @@ def test_served_answer_after_an_invented_column_keeps_rows_sql_and_granted_names
         assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
     assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
     assert body["drillthrough_token"]
-    # Granted names stay in the prose around the withheld one.
-    assert "plan: 1. Read transactions." in body["assumptions"]
-    plan_line = next(a for a in body["assumptions"] if a.startswith("plan: 2."))
-    assert plan_line.startswith("plan: 2. Group by txn_type, not "), plan_line
-    assert plan_line.endswith(", and count rows."), plan_line
+    # One model call per attempt (GEN-GRANTED-CATALOG-01) writes no plan prose.
+    # Granted names stay in the step prose around the withheld one.
+    _assert_no_plan_prose(body)
+    _assert_granted_table_in_step_prose(body, "transactions")
     gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
     assert any("UNKNOWN_COLUMN:" in line for line in gate), gate
     _assert_rung(body, plan_sql_ask.rung_retry(1))
@@ -358,7 +362,6 @@ def test_drillthrough_success_is_unchanged(
 
 def test_granted_plan_sql_answer_passes_the_boundary_untouched(armed_openvault, dms_http) -> None:
     """Positive control: no invented name, so nothing is withheld."""
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
     oracle = _oracle(GOOD_SQL)
@@ -370,8 +373,8 @@ def test_granted_plan_sql_answer_passes_the_boundary_untouched(armed_openvault, 
     for row in oracle:
         assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
     assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
-    for line in PLAN_TEXT.splitlines():
-        assert f"plan: {line}" in body["assumptions"]
+    _assert_no_plan_prose(body)
+    _assert_granted_table_in_step_prose(body, "transactions")
     assert "[name withheld]" not in json.dumps(body)
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
 
@@ -388,10 +391,8 @@ def test_withheld_word_in_closest_question_is_replaced_by_a_question_built_from_
     Yes on it runs and returns the oracle rows."""
     configured = "openai/gpt-oss-20b"
     _stronger_route(armed_openvault, configured, monkeypatch)
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, "SELECT txn_type, total FROM transactions")
     _reply(armed_openvault, "SELECT txn_type, total FROM transactions")
-    _reply(armed_openvault, PLAN_TEXT, model=configured)
     _reply(armed_openvault, "SELECT txn_type, date FROM transactions", model=configured)
     _reply(
         armed_openvault,
@@ -418,7 +419,6 @@ def test_withheld_word_in_closest_question_is_replaced_by_a_question_built_from_
 
     # Yes: the closest question is resent as the question and answered from the lake.
     yes_sql = "SELECT DISTINCT txn_type FROM transactions ORDER BY txn_type"
-    _reply(armed_openvault, "1. Read transactions.\n2. List the distinct txn_type values.")
     _reply(armed_openvault, yes_sql)
     oracle = _oracle(yes_sql)
     assert oracle
@@ -441,7 +441,6 @@ def test_reconfirm_answer_keeps_cortex_wording_when_a_template_word_is_withheld(
     """Refused attempts invent the columns ``question`` and ``found``. Those words in
     Cortex's own reconfirm sentence are not names from the SQL and stay as written."""
     bad = "SELECT question, found FROM transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     dms_http.bind_session(SESSION, GRANT)
@@ -511,7 +510,6 @@ def _assert_none_of(payload: Any, names: tuple[str, ...]) -> None:
 @pytest.mark.parametrize("form", sorted(NAME_FORMS))
 def test_plan_sql_exit_withholds_every_name_form(form: str, armed_openvault, dms_http) -> None:
     bad = _form_sql(form, "transactions", "txn_type")
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     dms_http.bind_session(SESSION, GRANT)
@@ -556,15 +554,14 @@ def test_served_answer_keeps_engine_function_and_default_schema_names(
     A refused attempt invents a column, so the scrub runs on the served answer.
     The served SQL calls a built-in sqlglot does not know (``strip_accents``)
     and reads the granted table through DuckDB's default schema
-    (``main.transactions``). Neither name is outside the grant: the plan text
-    keeps them, and the rows are the oracle rows.
+    (``main.transactions``). Neither name is outside the grant: ``sql_used``
+    keeps both, the step prose keeps the granted table, and the rows are the
+    oracle rows. One model call per attempt writes no plan prose.
     """
     good = (
         "SELECT strip_accents(txn_type) AS kind, COUNT(*) AS n "
         "FROM main.transactions GROUP BY 1 ORDER BY n DESC"
     )
-    plan = "1. Read main.transactions.\n2. Group by strip_accents(txn_type) and count rows."
-    _reply(armed_openvault, plan)
     _reply(armed_openvault, f"SELECT {GHOST}, COUNT(*) AS n FROM transactions GROUP BY 1")
     _reply(armed_openvault, good)
     dms_http.bind_session(SESSION, GRANT)
@@ -581,10 +578,11 @@ def test_served_answer_keeps_engine_function_and_default_schema_names(
     for row in oracle:
         assert f"kind={row['kind']}, n={row['n']}" in body["answer"], body["answer"]
     assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
-    assert "plan: 1. Read main.transactions." in body["assumptions"], body["assumptions"]
-    assert "plan: 2. Group by strip_accents(txn_type) and count rows." in body["assumptions"], body[
-        "assumptions"
-    ]
+    assert "main.transactions" in body["sql_used"], body["sql_used"]
+    assert "STRIP_ACCENTS(txn_type)" in body["sql_used"], body["sql_used"]
+    assert "[name withheld]" not in body["answer"], body["answer"]
+    _assert_no_plan_prose(body)
+    _assert_granted_table_in_step_prose(body, "transactions")
     gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
     assert any("UNKNOWN_COLUMN:[name withheld]" in line for line in gate), gate
 
@@ -636,7 +634,6 @@ def test_plan_sql_exit_withholds_a_column_of_a_same_named_ungranted_table(
     schema: str, armed_openvault, dms_http, hr_lake
 ) -> None:
     bad = f"SELECT {HR_SECRET} FROM {schema}transactions"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     dms_http.bind_session(SESSION, GRANT)
@@ -677,8 +674,6 @@ def test_served_answer_with_a_same_named_table_elsewhere_keeps_granted_names(
 ) -> None:
     """Positive control on the lake with ``hr.transactions``: the granted columns
     of ``main.transactions`` stay in the prose, rows are the oracle rows."""
-    plan = f"1. Read transactions.\n2. Group by txn_type, not {HR_SECRET}, and count rows."
-    _reply(armed_openvault, plan)
     _reply(armed_openvault, f"SELECT {HR_SECRET}, COUNT(*) AS n FROM transactions GROUP BY 1")
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -694,11 +689,10 @@ def test_served_answer_with_a_same_named_table_elsewhere_keeps_granted_names(
     for row in oracle:
         assert f"txn_type={row['txn_type']}, n={row['n']}" in body["answer"]
     assert [s["ref_id"] for s in body["contributing_sources"]] == ["transactions"]
-    assert "plan: 1. Read transactions." in body["assumptions"]
-    plan_line = next(a for a in body["assumptions"] if a.startswith("plan: 2."))
-    assert plan_line == "plan: 2. Group by txn_type, not [name withheld], and count rows.", (
-        plan_line
-    )
+    _assert_no_plan_prose(body)
+    _assert_granted_table_in_step_prose(body, "transactions")
+    gate = [a for a in body["assumptions"] if a.startswith("step gate:")]
+    assert any("UNKNOWN_COLUMN:[name withheld]" in line for line in gate), gate
 
 
 LONG_VAULT = "zz_payroll_vault_" + "x" * 120
@@ -718,7 +712,6 @@ def test_plan_sql_exit_withholds_a_name_longer_than_128_characters(
     template: str, armed_openvault, dms_http
 ) -> None:
     bad = template.replace("{T}", "transactions").replace("{C}", "txn_type")
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, bad)
     _reply(armed_openvault, bad)
     dms_http.bind_session(SESSION, GRANT)

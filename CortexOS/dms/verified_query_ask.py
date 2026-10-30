@@ -358,6 +358,34 @@ def _ranks(tree: exp.Expression) -> bool:
     return tree.args.get("order") is not None
 
 
+def _without_page_tiebreak(sql: str) -> str:
+    """``sql`` before the guardrail appended its page tiebreak (#435), else ``sql``.
+
+    The serve path totals the order of a page its LIMIT cuts. A copy of an
+    example still has to read as that copy, so the copy rule compares the
+    statement the model wrote. Only a suffix the guardrail itself would append
+    is dropped.
+    """
+    from CortexOS.dms.sql_guardrail import apply_page_tiebreak
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+
+    try:
+        tree = sqlglot.parse_one(sql, read="duckdb")
+    except Exception:  # noqa: BLE001 - unparseable SQL is compared as written
+        return sql
+    order = tree.args.get("order") if isinstance(tree, exp.Select) else None
+    if order is None or tree.args.get("limit") is None:
+        return sql
+    semantic = load_semantic_layer()
+    for keep in range(1, len(order.expressions)):
+        shorter = tree.copy()
+        shorter.args["order"].set("expressions", list(shorter.args["order"].expressions[:keep]))
+        text = shorter.sql(dialect="duckdb")
+        if apply_page_tiebreak(text, semantic, None) == sql:
+            return text
+    return sql
+
+
 def _query_key(tree: exp.Expression, *, window: bool = False) -> str | None:
     """Canonical text of a query, or ``None`` if it cannot be made.
 
@@ -1255,7 +1283,7 @@ class _ExamplePort:
             prompt = list(meta.get("prompt") or [])
             echo = example_echo(
                 question,
-                sql,
+                _without_page_tiebreak(sql),
                 prompt,
                 schema=meta.get("schema"),
                 granted_tables=meta.get("granted_tables"),

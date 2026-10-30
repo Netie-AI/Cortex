@@ -10,23 +10,49 @@ Order, each step stamped (``StepStamp``):
    grants are refused.
 2. ``payload``: every selected table and both ends of every join must be in the
    grant. A payload that widens the grant is refused before any model call.
-3. ``sample``: distinct values from the granted payload columns, so filters can
-   be grounded in what the tables actually hold. No model call.
-4. ``plan`` / ``sql``: model calls through the injected ``PlanSqlGenerator``
-   (default: OpenVault FreeRoute). A step whose route stamp FreeRoute did not
-   journal, or whose response omitted ``served_provider`` / ``served_model``,
-   is refused.
+3. ``sample``: distinct values from the granted payload columns DMS marked
+   ``masked: false`` (contract 1.9.0), so filters can be grounded in what the
+   tables actually hold. A column marked masked, or with no mask state, keeps
+   its name and type in the prompt and is never probed. Off unless
+   ``CORTEX_GRANTED_CATALOG`` is on (see below). At most 8 distinct values a
+   column, each stripped of control and bidi characters, cut to 64
+   characters and quoted as a SQL string literal; the block counts inside
+   #351's 8192-byte schema cap. Values go only to the OpenVault FreeRoute
+   generator, and steps record counts, never a value. No model call.
+4. ``sql``: one model call per attempt through the injected ``PlanSqlGenerator``
+   (default: OpenVault FreeRoute). The #329 planner call is folded into this
+   call: there is no serial planner or classifier before generation. A step
+   whose route stamp FreeRoute did not journal, or whose response omitted
+   ``served_provider`` / ``served_model``, is refused. The prompt is the
+   granted catalog intersected with ``schema_context`` when DMS sent one.
 5. On a SQL, execution, empty, or implausible result that is not an ungranted
    table and not destructive SQL: feed the error back and regenerate, up to
    ``SQL_ATTEMPTS`` writes on the same model. SQL with an output column that
    does not derive from a granted table column (a literal, a VALUES list) is
-   such an error: it is fed back and never executed (``sql_lineage``).
-6. ``escalate``: one more plan+SQL pass on the stronger route OpenVault
-   configured (``routes.stronger``). Cortex does not pick a provider. If OV
-   did not configure one, the ladder reconfirms and does not invent a model.
+   such an error: it is fed back and never executed (``sql_lineage``). An
+   unknown-column error also carries a did-you-mean hint when a granted
+   catalog column is a typo of the unknown name (one edit). A column that is
+   not close is never offered, so an absent column gets no hint.
+6. ``escalate``: one more SQL pass (still one call) on the stronger route
+   OpenVault configured (``routes.stronger``). Cortex does not pick a provider.
+   If OV did not configure one, the ladder reconfirms and does not invent a
+   model.
 7. ``reconfirm``: why this would abstain, plus the closest answerable question.
    ``plan_sql_confirm=yes`` runs that question. ``no`` answers
-   ``not found in the database``.
+   ``not found in the database`` as an abstain (never a session badge) and
+   logs a pipeline-failure ticket on the F1 audit ledger (``CortexOS.audit``).
+
+With ``CORTEX_PLAN_SQL_VOTE=1`` a SQL that ran with rows is a candidate, not an
+answer: it is served only when a second, independent SQL returns the same rows
+(``plan_sql_vote``). A split serves nothing and goes straight to step 7. Vote
+calls count under the rung that ran them, the stronger route's under
+``stronger-model``. With the plan folded (step 4) neither reading carries a
+plan, so the second reading has its own framing
+(``payload.SECOND_READING``): a different prompt from the same granted
+catalog and question. It runs only because its prompt differs: a second
+reading whose prompt would hash (``payload.prompt_sha256``) to one the first
+reading sent, or that cannot be shown to differ, is skipped and the vote
+relies on the stronger route.
 
 The answer that leaves this path stamps the rung that produced it
 (``plan``, ``error-fed-retry-<N>``, ``stronger-model``, ``reconfirm``) on
@@ -39,9 +65,17 @@ proxy retry under that call (an upstream 429 retried by the cap proxy or the
 FreeRoute client) is not a step. DMS reads the per-step counts only from that
 object.
 
+``CORTEX_GRANTED_CATALOG`` (default off, separate from ``CORTEX_PLAN_SQL``)
+switches on both ``AskRequest.schema_context`` on this path and step 3. Off,
+the contract ask ignores ``schema_context`` past its declared type and probes
+no value: the answer is the one the same ask gets without that field. It
+stays off until DMS sends ``masked: false`` (dms#456).
+
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
-route-stamp failure, which never reaches a model result). PII is not an abstain
-case and this path does not mask it.
+route-stamp failure, which never reaches a model result). PII wording in a
+question is not an abstain case and this path does not mask answer rows. What
+it masks is the prompt: no sampled value of a column DMS did not mark unmasked
+reaches a model (step 3).
 
 Scored rounds (``scored_pack_id`` / ``CORTEX_SCORED_ROUND``, the #290 guard) run
 FreeRoute on the benchmark split so the route store never learns from them.
@@ -50,17 +84,22 @@ This path writes nothing to per-Space memory.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
 
-from cortex_contract.answer import AskRequest
+from cortex_contract.answer import AskRequest, Badge
 
+from CortexOS.dms import plan_sql_vote
 from CortexOS.identifier_fold import fold_identifier
 from CortexOS.integrations import freeroute
+from CortexOS.plan_sql import catalog as plan_catalog
 from CortexOS.plan_sql import payload as plan_payload
 from CortexOS.plan_sql.generator import (
     FreeRoutePlanSqlGenerator,
@@ -69,7 +108,13 @@ from CortexOS.plan_sql.generator import (
     StepStamp,
 )
 
+_LOG = logging.getLogger(__name__)
+
 ENABLED_ENV = "CORTEX_PLAN_SQL"
+#: Default off. On: the contract ask reads ``schema_context`` and step 3
+#: samples ``masked: false`` columns. Lead / Security ruling on #386: off
+#: until dms#456. Not implied by ``CORTEX_PLAN_SQL``.
+CATALOG_ENV = "CORTEX_GRANTED_CATALOG"
 LAYER = "plan_sql"
 RECONFIRM = "reconfirm"
 
@@ -88,18 +133,32 @@ NOT_FROM_TABLE = "PLAN_SQL_OUTPUT_NOT_FROM_TABLE"
 LITERAL_UNGROUNDED = "PLAN_SQL_LITERAL_UNGROUNDED"
 
 NOT_FOUND_ANSWER = "not found in the database"
+# Confirm-no is an abstain on the wire: the contract's ABSTAIN token, which
+# contract_routes._FLAT_BADGE maps to Badge.ABSTAIN. Never "session".
+ABSTAIN = Badge.ABSTAIN.value
+
+# CLAUDE.md section 9: No answers "not found in the database" and logs a
+# pipeline-failure ticket. The ticket is one entry on the F1 audit ledger
+# (the one ledger, reached through CortexOS.audit). There is no other store.
+PIPELINE_FAILURE_EVENT = "plan_sql.pipeline_failure"
+TICKET_ACTOR = "cortex.plan_sql"
+DECLINED_REASON = "user declined the closest question"
 
 # Same-model writes (the first, plus error-fed regenerations). The stronger
 # pass gets one write: the failures are already in its prompt.
+# Each write is one FreeRoute complete(). The planner is not a second call.
 SQL_ATTEMPTS = 2
+MODEL_CALLS_PER_ATTEMPT = 1
 STRONG_SQL_ATTEMPTS = 1
 RUNG_PLAN = "plan"
 RUNG_STRONG = "stronger-model"
 RUNG_RECONFIRM = "reconfirm"
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_SAMPLE_ROWS = 8
+_SAMPLE_ROWS = plan_payload.SAMPLE_VALUES_PER_COLUMN
 _MAX_SAMPLE_COLUMNS = 12
+SAMPLE_OFF = "off"
+SAMPLE_NOT_OPENVAULT = "not sampled: the generator is not OpenVault FreeRoute"
 # Statement class from the extractor or the gate. Not a scan of the question.
 _DESTRUCTIVE_KINDS = (
     "INSERT",
@@ -113,6 +172,11 @@ _DESTRUCTIVE_KINDS = (
     "COPY",
 )
 
+# The vote's readings carry no plan; the second one also has its own framing.
+_NO_PLAN = ModelStep("plan", True, "", "", StepStamp.cortex("plan", "cortex:plan-sql-vote", ""))
+# A SQL that ran with rows: the model step that wrote it, the gated SQL, the rows.
+_Reading = tuple[ModelStep, str, list[dict[str, Any]]]
+
 CAVEAT = (
     "Plan and SQL are model-generated through OpenVault FreeRoute; the SQL passed "
     "the Cortex SQL gate and ran under this session's grant. Not validated for accuracy."
@@ -123,16 +187,38 @@ def plan_sql_enabled() -> bool:
     return (os.environ.get(ENABLED_ENV) or "").strip().lower() in {"1", "true", "yes"}
 
 
+def granted_catalog_enabled() -> bool:
+    """``CORTEX_GRANTED_CATALOG``: schema_context on the ask, and value sampling. Default off."""
+    return (os.environ.get(CATALOG_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _openvault_routed(generator: object) -> bool:
+    """True only for the stock FreeRoute generator, whose one egress is OpenVault.
+
+    Exact class: an injected generator, or a subclass that could override
+    the call, never receives a sampled value.
+    """
+    return type(generator) is FreeRoutePlanSqlGenerator
+
+
 def default_generator() -> PlanSqlGenerator:
     return FreeRoutePlanSqlGenerator()
 
 
 def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
-    """Flat answer for the contract ask, or ``None`` when this path is off."""
+    """Flat answer for the contract ask, or ``None`` when this path is off.
+
+    ``body.schema_context`` (contract 1.9.0) narrows the prompt to the grant
+    intersected with that string. Absent or blank, the payload is the prompt.
+    With ``CORTEX_GRANTED_CATALOG`` off it is not read.
+    """
     if body.dms_payload is None or not plan_sql_enabled():
         return None
+    schema_context = body.schema_context if granted_catalog_enabled() else None
     return plan_sql_answer(
-        plan_payload.PlanSqlRequest(body.question, body.dms_payload),
+        plan_payload.PlanSqlRequest(
+            body.question, body.dms_payload, schema_context=schema_context
+        ),
         session_id=body.session_id,
         space_id=body.space_id,
         verified=verified,
@@ -154,6 +240,16 @@ def _gate(sql: str, grant: Any) -> Any:
     from CortexOS.dms.warehouse_db import load_semantic_layer
 
     return run_gate(sql, load_semantic_layer(), verified=grant)
+
+
+def _tie_ordered_page(sql: str, grant: Any) -> str:
+    """Generated SQL uses the same page tie as a governed metric."""
+    from CortexOS.dms.sql_guardrail import apply_page_tiebreak
+    from CortexOS.dms.warehouse_db import load_semantic_layer
+    from CortexOS.execution.submit import execute_count
+
+    semantic = load_semantic_layer()
+    return apply_page_tiebreak(sql, semantic, execute_count(grant, sql))
 
 
 def _sql_tables(sql: str) -> set[str]:
@@ -281,22 +377,76 @@ def _not_answered(
 
 
 def _not_found(audit_id: str, steps: list[StepStamp]) -> dict[str, Any]:
+    """The confirm-no answer: an abstain with no rows and no SQL.
+
+    The text is not an answer from data, so it never carries a session badge
+    (CLAUDE.md section 8: a green badge on abstention prose is a P0).
+    """
     note = "user answered no to the closest question"
     return {
         "answer": NOT_FOUND_ANSWER,
         "sql_used": None,
         "audit_id": audit_id,
-        "route": LAYER,
-        "layer": LAYER,
-        "badge": "session",
+        "route": ABSTAIN,
+        "layer": ABSTAIN,
+        "badge": ABSTAIN,
         "row_count": 0,
         "rows": [],
         "assumptions": [note, *(s.line() for s in steps)],
         "reconfirm": None,
         "plan_sql_rung": None,
-        "provenance": {"layer": LAYER, "badge": "session", "assumptions": note},
+        "provenance": {"layer": ABSTAIN, "badge": ABSTAIN, "assumptions": note},
         **_served(None, note),
     }
+
+
+def _pipeline_failure_ticket(
+    question: str,
+    audit_id: str,
+    *,
+    reason: str,
+    session_id: str | None,
+    space_id: str | None,
+    tables: Sequence[str],
+) -> StepStamp:
+    """Append a pipeline-failure ticket to the F1 audit ledger. Never raises.
+
+    The ledger is immutable, so the ticket follows the ``goal_audit`` privacy
+    policy: identifiers and verdicts, never content (PDPA). The question is
+    carried as the SHA-256 of its UTF-8 bytes and its length, never as text;
+    the ``audit_id`` joins the ticket to the ask for anyone allowed to see it.
+
+    The returned step says whether the ticket was recorded or that it was not.
+    It never shows the global ledger ``seq``. An audit outage does not turn the
+    No into a 500, and a ticket that was not written is visible on the
+    envelope, not swallowed.
+    """
+    payload = {
+        "audit_id": audit_id,
+        "question_sha256": hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        "question_chars": len(question),
+        "reason": reason,
+        "session_id": session_id,
+        "space_id": space_id,
+        "tables": list(tables),
+    }
+    try:
+        from CortexOS.audit import resolve_ledger
+
+        resolve_ledger().append(TICKET_ACTOR, PIPELINE_FAILURE_EVENT, payload)
+    except Exception as exc:  # noqa: BLE001 - reported on the step and the log
+        _LOG.warning(
+            "plan_sql pipeline-failure ticket not recorded audit_id=%s: %s: %s",
+            audit_id,
+            type(exc).__name__,
+            exc,
+        )
+        return StepStamp.cortex(
+            "ticket", "cortex:pipeline-failure-ticket", f"not recorded: {type(exc).__name__}"
+        )
+    return StepStamp.cortex(
+        "ticket", "cortex:pipeline-failure-ticket", f"{PIPELINE_FAILURE_EVENT} recorded"
+    )
 
 
 def reconfirm_answer(why: str, closest: str) -> str:
@@ -499,17 +649,44 @@ def _audit_raw(sql: str, exc: Any) -> None:
 def _sample_values(
     grant: Any, request: plan_payload.PlanSqlRequest
 ) -> tuple[dict[str, dict[str, tuple[str, ...]]], str]:
-    """Distinct values for payload columns the grant already allows. Never raises."""
+    """Distinct values for payload columns the grant already allows. Never raises.
+
+    Nothing is probed while ``CORTEX_GRANTED_CATALOG`` is off. A table the
+    grant does not name is never probed, whatever the request carries. Only a
+    column DMS marked ``masked: false`` (contract 1.9.0) is probed. A column
+    marked masked, or one with no mask state (an older consumer, or a
+    ``schema_context`` column the payload does not list), is never read here:
+    its values do not reach a prompt, only its name and type do.
+
+    At most ``SAMPLE_VALUES_PER_COLUMN`` distinct values a column, each passed
+    through :func:`plan_payload.sample_text`, and the rendered block fits in
+    :func:`plan_catalog.sample_budget`. The returned reason holds counts and
+    sizes only, never a value.
+    """
+    if not granted_catalog_enabled():
+        return {}, SAMPLE_OFF
     from CortexOS.execution.submit import execute_sql
 
     found: dict[str, dict[str, tuple[str, ...]]] = {}
     taken = 0
     errors = 0
+    masked = 0
+    ungranted = 0
+    granted = _granted_names(grant)
+    unmasked = plan_catalog.unmasked_columns(request.payload)
+    budget = plan_catalog.sample_budget(request)
     for table in request.payload.tables:
+        folded = fold_identifier(table.name.strip())
+        if folded not in granted:
+            ungranted += 1
+            continue
         if not _IDENT.fullmatch(table.name):
             continue
         cols: dict[str, tuple[str, ...]] = {}
         for column in table.columns:
+            if (folded, fold_identifier(column.name)) not in unmasked:
+                masked += 1
+                continue
             if taken >= _MAX_SAMPLE_COLUMNS or not _IDENT.fullmatch(column.name):
                 continue
             taken += 1
@@ -527,15 +704,23 @@ def _sample_values(
                 value = row.get("v")
                 if value is None:
                     continue
-                vals.append(str(value)[:80])
+                text = plan_payload.sample_text(value)
+                if not text or text in vals:
+                    continue
+                vals.append(text)
                 if len(vals) >= _SAMPLE_ROWS:
                     break
             if vals:
                 cols[column.name] = tuple(vals)
         if cols:
             found[table.name] = cols
-    nvals = sum(len(v) for cols in found.values() for v in cols.values())
-    return found, f"columns={taken} values={nvals} errors={errors}"
+    fitted = plan_payload.fit_values(found, budget)
+    nvals = sum(len(v) for cols in fitted.values() for v in cols.values())
+    nbytes = len(plan_payload.render_values(fitted).encode("utf-8"))
+    return fitted, (
+        f"columns={taken} values={nvals} errors={errors} masked={masked} "
+        f"ungranted={ungranted} bytes={nbytes} budget={budget}"
+    )
 
 
 class _RouteRefusal:
@@ -559,8 +744,9 @@ class _RouteRefusal:
         plan: ModelStep,
         *,
         prior_violations: Sequence[str] = (),
+        reading: str = plan_payload.FIRST_READING,
     ) -> ModelStep:
-        del request, plan, prior_violations
+        del request, plan, prior_violations, reading
         return self._no("sql-strong")
 
     def reconfirm(
@@ -671,6 +857,22 @@ def _direct_gate(sql: str, gate: Any, granted: set[str]) -> str | None:
     return None
 
 
+@contextmanager
+def _stop_on_strict(steps: list[StepStamp]) -> Iterator[None]:
+    """A strict pin refusal or 429 stops the ladder and keeps the served stamp.
+
+    The exception already names retry_after_s. This records model_requested
+    and model_served on the ask step list, then lets the error surface.
+    """
+    try:
+        yield
+    except freeroute.FreeRouteStrictError as exc:
+        if exc.stamp is not None:
+            steps.append(StepStamp.from_route("strict", exc.stamp, str(exc)))
+        exc.ask_stamps = [step.public() for step in steps]
+        raise
+
+
 def plan_sql_answer(
     request: plan_payload.PlanSqlRequest,
     *,
@@ -690,6 +892,12 @@ def plan_sql_answer(
     failed_models: set[str] = set()
     failures: list[str] = []
     call_counts: dict[str, int] = {}
+    vote_on = plan_sql_vote.vote_enabled()
+    # Set when the vote split: no more writes, the ladder reconfirms.
+    vote_split: list[str] = []
+    # payload.prompt_sha256 of every first-reading SQL prompt this ask sent.
+    # The vote's second reading is never one of these prompts.
+    first_prompts: set[str] = set()
 
     def _note_call(active: object, bucket: str) -> None:
         # A route refusal does not call complete(). Every other generator
@@ -725,6 +933,21 @@ def plan_sql_answer(
     if widened:
         steps.append(StepStamp.cortex("payload", "cortex:payload-check", "refused"))
         return stop(widened[0].split(":", 1)[0], ", ".join(widened))
+    if not granted_catalog_enabled():
+        # Off: the string is not read, here or by the sampler's byte budget.
+        request = replace(request, schema_context=None)
+    request, unusable = plan_catalog.narrow(request, granted)
+    if unusable:
+        steps.append(
+            StepStamp.cortex("payload", "cortex:payload-check", f"refused: {unusable}")
+        )
+        # A string that declares no table is DMS's over-budget fallback: an
+        # abstain, as on POST /v1/insights. Every other code is a refusal.
+        return stop(
+            unusable,
+            plan_catalog.refusal_detail(unusable),
+            refused=unusable != plan_catalog.SCHEMA_CONTEXT_EMPTY,
+        )
     selected = set(request.table_names())
     steps.append(
         StepStamp.cortex("payload", "cortex:payload-check", f"tables={sorted(selected)}")
@@ -732,39 +955,55 @@ def plan_sql_answer(
 
     if confirm == "no":
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "no"))
+        steps.append(
+            _pipeline_failure_ticket(
+                question,
+                audit_id,
+                reason=DECLINED_REASON,
+                session_id=session_id,
+                space_id=space_id,
+                tables=sorted(selected),
+            )
+        )
         return _with_calls(_not_found(audit_id, steps))
 
-    sampled, sample_reason = _sample_values(grant, request)
+    gen = generator or default_generator()
+    # A sampled value goes only to OpenVault FreeRoute. Any other generator
+    # gets the names and types and no probe runs for it.
+    sampled: dict[str, dict[str, tuple[str, ...]]] = {}
+    if granted_catalog_enabled() and not _openvault_routed(gen):
+        sample_reason = SAMPLE_NOT_OPENVAULT
+    else:
+        sampled, sample_reason = _sample_values(grant, request)
     steps.append(StepStamp.cortex("sample", "cortex:column-values", sample_reason))
     request = replace(request, column_values=sampled)
     if confirm == "yes":
         steps.append(StepStamp.cortex("confirm", "cortex:plan-sql-confirm", "yes"))
 
-    gen = generator or default_generator()
+    def _hint(detail: str) -> str:
+        # The database's own candidate lists are dropped; only a typo of an
+        # unknown column from the granted catalog is offered.
+        return plan_catalog.retry_detail(detail, plan_catalog.column_names(request, granted))
 
     def _round(
         active: PlanSqlGenerator,
         attempts: int,
         rung_of,
-        plan_bucket: str,
     ) -> dict[str, Any] | None:
-        plan = active.plan(request)
-        _note_call(active, plan_bucket)
-        steps.append(plan.stamp)
-        _remember(plan, failed_models)
-        security = _security_stop(plan, journal)
-        if security:
-            return stop(security[0], security[1], refused=security[0] != MODEL_UNAVAILABLE)
-        if not plan.ok:
-            failures.append(f"{MODEL_UNAVAILABLE}: {plan.kind} step: {plan.reason}")
-            return None
-        missed = _not_served(plan)
-        if missed:
-            failures.append(f"{freeroute.MODEL_NOT_SERVED}: {missed}")
-            return None
+        # One freeroute.complete per attempt, inside sql(). plan() is not called,
+        # so the first attempt's single call is the ``plan`` rung's only count.
+        folded = ModelStep(
+            "plan",
+            True,
+            "",
+            "folded into the sql call",
+            StepStamp.cortex("plan", "cortex:plan-folded", "folded into the sql call"),
+        )
         priors = list(failures)
         for attempt in range(attempts):
-            sql_step = active.sql(request, plan, prior_violations=priors)
+            sql_step = active.sql(request, folded, prior_violations=priors)
+            if sql_step.prompt_sha256:
+                first_prompts.add(sql_step.prompt_sha256)
             _note_call(active, rung_of(attempt))
             steps.append(sql_step.stamp)
             _remember(sql_step, failed_models)
@@ -782,15 +1021,24 @@ def plan_sql_answer(
                 priors.append(detail)
                 failures.append(detail)
                 continue
-            outcome = _use_sql(sql_step, plan, priors, rung_of(attempt))
+            outcome = _use_sql(sql_step, folded, priors, rung_of(attempt))
             if outcome is not None:
                 return outcome
+            if vote_split:
+                return None
         return None
 
     def _use_sql(
-        sql_step: ModelStep, plan: ModelStep, priors: list[str], rung: str
+        sql_step: ModelStep,
+        plan: ModelStep,
+        priors: list[str],
+        rung: str,
+        collect: list[_Reading] | None = None,
     ) -> dict[str, Any] | None:
-        """A final envelope, or None when ``priors`` gained a retryable error."""
+        """A final envelope, or None when ``priors`` gained a retryable error.
+
+        With ``collect``, SQL that ran with rows is appended there instead of served.
+        """
         from CortexOS.dms.sql_extract import extract_statement
 
         extracted = extract_statement(sql_step.text)
@@ -816,7 +1064,7 @@ def plan_sql_answer(
             freeroute.note_verdict(sql_step.route, "gate_fail")
             if code:
                 return stop(code, violations)
-            detail = f"{GATE_REFUSED}: {violations}"
+            detail = _hint(f"{GATE_REFUSED}: {violations}")
             priors.append(detail)
             failures.append(detail)
             return None
@@ -869,7 +1117,7 @@ def plan_sql_answer(
             return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
-        return _execute(sql_step, plan, served_sql, priors, rung)
+        return _execute(sql_step, plan, served_sql, priors, rung, collect)
 
     def _execute(
         sql_step: ModelStep,
@@ -877,11 +1125,19 @@ def plan_sql_answer(
         served_sql: str,
         priors: list[str],
         rung: str,
+        collect: list[_Reading] | None = None,
     ) -> dict[str, Any] | None:
-        from CortexOS.dms.sql_validate_gate import LakeValueDomainStale, SqlGateAbstain
+        from CortexOS.dms.sql_validate_gate import (
+            LakeValueDomainStale,
+            SqlGateAbstain,
+            redact_db_error,
+        )
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.submit import execute_sql
 
+        # Every refusal above has already returned. Tie the page here, then
+        # run that one statement. The count is not a second served execute.
+        served_sql = _tie_ordered_page(served_sql, grant)
         try:
             rows, _, _ = execute_sql(grant, served_sql)
         except LakeValueDomainStale as exc:
@@ -905,7 +1161,7 @@ def plan_sql_answer(
             ):
                 code = MANIFEST_REFUSED
                 return stop(code, f"{type(exc).__name__}:{exc.code}")
-            detail = f"{EXECUTE_FAILED}: {type(exc).__name__}:{exc.code}"
+            detail = _hint(f"{EXECUTE_FAILED}: {type(exc).__name__}:{exc.code}")
             priors.append(detail)
             failures.append(detail)
             return None
@@ -913,13 +1169,22 @@ def plan_sql_answer(
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", "refused: EXPLAIN"))
             _audit_raw(served_sql, exc)
             # Redacted at the source: no caret context, no literal, no post-enforce SQL.
-            detail = f"{GATE_REFUSED}: {exc}"
+            detail = _hint(f"{GATE_REFUSED}: {exc}")
             priors.append(detail)
             failures.append(detail)
             return None
         except Exception as exc:  # noqa: BLE001 - an executor fault is retried, never a 500
             steps.append(StepStamp.cortex("execute", "cortex:execute_sql", type(exc).__name__))
+            # Scanned for an unknown column only after DB-ERROR-TEXT redaction:
+            # no LINE context, no quoted literal. The database text itself is
+            # not fed back: only an unknown name the SQL wrote, with a typo
+            # match from the granted catalog. Otherwise the class name alone.
             detail = f"{EXECUTE_FAILED}: {type(exc).__name__}"
+            hint = plan_catalog.unknown_column_hint(
+                redact_db_error(exc), served_sql, plan_catalog.column_names(request, granted)
+            )
+            if hint:
+                detail = f"{detail}: {hint}"
             priors.append(detail)
             failures.append(detail)
             return None
@@ -940,6 +1205,16 @@ def plan_sql_answer(
             failures.append(detail)
             return None
         steps.append(StepStamp.cortex("execute", "cortex:execute_sql", f"rows={len(rows)}"))
+        if collect is not None:
+            collect.append((sql_step, served_sql, rows))
+            return None
+        if vote_on:
+            picked = _vote((sql_step, served_sql, rows), rung)
+            if picked is None or isinstance(picked, dict):
+                return picked
+            if picked[0] is not sql_step:
+                plan = _NO_PLAN
+            sql_step, served_sql, rows = picked
         _mark_rung(steps, rung)
         return _with_calls(
             _success(
@@ -954,28 +1229,144 @@ def plan_sql_answer(
             )
         )
 
+    def _note_vote(reason: str) -> None:
+        steps.append(StepStamp.cortex("vote", "cortex:plan-sql-vote", reason))
+
+    def _same_prompt(active: Any, first: ModelStep, priors: list[str]) -> str:
+        """Why the second reading's next prompt is not provably new, or ``""``.
+
+        Computed from the exact messages ``active.sql`` would send, before it
+        sends them. A generator that cannot show its prompt, or a first reading
+        with no recorded prompt hash, is not provably distinct.
+        """
+        build = getattr(active, "sql_prompt", None)
+        if not first.prompt_sha256 or build is None:
+            return "its prompt cannot be shown to differ from the first reading's"
+        would = plan_payload.prompt_sha256(
+            build(
+                request,
+                _NO_PLAN,
+                prior_violations=priors,
+                reading=plan_payload.SECOND_READING,
+            )
+        )
+        if would in first_prompts:
+            return "its prompt would be the first reading's prompt"
+        return ""
+
+    def _check(
+        active: Any,
+        bucket: str,
+        rung: str,
+        attempts: int = 1,
+        *,
+        first: ModelStep | None = None,
+    ) -> _Reading | dict[str, Any] | None:
+        """One more SQL in the second reading's framing, gated and run like the first.
+
+        The reading, a stop envelope on a trust failure, or None when it gave no
+        rows. A SQL that fails a gate, errors or returns no rows is fed back for
+        up to ``attempts`` writes, as the ladder does for the first. Any other
+        refusal of this SQL (an ungranted table included) only loses its vote:
+        the candidate it checks already passed every gate.
+
+        With ``first`` (the same-model second reading), a write is sent only when
+        its prompt differs from every first-reading prompt this ask sent, and a
+        write whose sent prompt hash is not shown to differ is not counted.
+        Either way the reading is skipped (None) and a vote line says why.
+        """
+        priors: list[str] = []
+        for n in range(attempts):
+            if first is not None:
+                why = _same_prompt(active, first, priors)
+                if why:
+                    _note_vote(f"no second reading: {why}")
+                    return None
+            step = active.sql(
+                request,
+                _NO_PLAN,
+                prior_violations=priors,
+                reading=plan_payload.SECOND_READING,
+            )
+            _note_call(active, bucket if n == 0 else rung_retry(n))
+            step = replace(step, stamp=replace(step.stamp, served_step=f"vote-{step.kind}"))
+            steps.append(step.stamp)
+            _remember(step, failed_models)
+            security = _security_stop(step, journal)
+            if security and security[0] != MODEL_UNAVAILABLE:
+                return stop(security[0], security[1])
+            if security or not step.ok or _not_served(step):
+                return None
+            if first is not None:
+                sent = step.prompt_sha256
+                if not sent or sent in first_prompts:
+                    _note_vote(
+                        "no second reading: the prompt it sent is not shown to differ "
+                        "from the first reading's"
+                    )
+                    return None
+                _note_vote(
+                    f"second reading prompt sha256={sent[:12]} differs from "
+                    f"the first reading's sha256={first.prompt_sha256[:12]}"
+                )
+            got: list[_Reading] = []
+            _use_sql(step, _NO_PLAN, priors, rung, collect=got)
+            if got:
+                return got[0]
+        return None
+
+    def _vote(first: _Reading, rung: str) -> _Reading | dict[str, Any] | None:
+        """The reading to serve, a stop envelope, or None when no two readings agree.
+
+        #386 folds the plan into the SQL call, so neither reading carries one.
+        The second reading is written in its own framing and runs because its
+        prompt differs from the first's. When it would not, or that cannot be
+        shown, it is skipped and only the stronger route's reading can agree.
+        """
+        second = _check(gen, rung, rung, SQL_ATTEMPTS, first=first[0])
+        if isinstance(second, dict):
+            return second
+        if second is not None and plan_sql_vote.agree(first[2], second[2]):
+            how = "the same SQL" if plan_sql_vote.same_sql(first[1], second[1]) else "a second SQL"
+            _note_vote(f"agreed: {how} written from a different prompt returned the same rows")
+            return first
+        third = _check(_stronger_generator(failed_models), RUNG_STRONG, rung)
+        if isinstance(third, dict):
+            return third
+        if third is not None:
+            for name, reading in (("first", first), ("second", second)):
+                if reading is not None and plan_sql_vote.agree(reading[2], third[2]):
+                    _note_vote(f"agreed: the stronger route's SQL returned the {name} SQL's rows")
+                    return reading
+        detail = f"{plan_sql_vote.VOTE_SPLIT}: {plan_sql_vote.SPLIT_DETAIL}"
+        _note_vote(detail)
+        failures.append(detail)
+        vote_split.append(rung)
+        return None
+
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
-    with freeroute.journal(split=split) as journal:
+    with freeroute.journal(split=split) as journal, _stop_on_strict(steps):
         answered = _round(
             gen,
             SQL_ATTEMPTS,
             lambda n: RUNG_PLAN if n == 0 else rung_retry(n),
-            RUNG_PLAN,
         )
         if answered is not None:
             return answered
         strong = _stronger_generator(failed_models)
-        steps.append(
-            StepStamp.cortex(
-                "escalate",
-                "openvault-freeroute",
-                f"stronger route={strong.pin or 'unset'}",
+        if not vote_split:
+            # A split already asked the stronger route; another write is voted again.
+            steps.append(
+                StepStamp.cortex(
+                    "escalate",
+                    "openvault-freeroute",
+                    f"stronger route={strong.pin or 'unset'}",
+                )
             )
-        )
-        request = replace(request, prior_failures=tuple(failures)[:8])
-        answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG, RUNG_STRONG)
-        if answered is not None:
-            return answered
+            request = replace(request, prior_failures=tuple(failures)[:8])
+            answered = _round(strong, STRONG_SQL_ATTEMPTS, lambda _n: RUNG_STRONG)
+            if answered is not None:
+                return answered
         policy = next(
             (item for item in reversed(failures) if freeroute.MODEL_NOT_ALLOWLISTED in item),
             "",
@@ -1021,6 +1412,9 @@ def plan_sql_answer(
 
 
 __all__ = [
+    "ABSTAIN",
+    "CATALOG_ENV",
+    "DECLINED_REASON",
     "EMPTY_RESULT",
     "ENABLED_ENV",
     "IMPLAUSIBLE_RESULT",
@@ -1028,16 +1422,19 @@ __all__ = [
     "LITERAL_UNGROUNDED",
     "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
+    "PIPELINE_FAILURE_EVENT",
     "RECONFIRM",
     "RUNG_PLAN",
     "RUNG_RECONFIRM",
     "RUNG_STRONG",
     "SQL_ATTEMPTS",
+    "TICKET_ACTOR",
     "model_calls_stamp",
     "reconfirm_answer",
     "rung_retry",
     "default_generator",
     "grant_closest_question",
+    "granted_catalog_enabled",
     "plan_sql_answer",
     "plan_sql_enabled",
     "try_plan_sql",

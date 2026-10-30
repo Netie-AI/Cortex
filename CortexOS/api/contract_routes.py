@@ -229,7 +229,11 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = [assumptions.strip()]
     elif not isinstance(assumptions, list):
         data["assumptions"] = []
-    if _is_abstain_signal(data) or _badge_withheld(data["provenance"]):
+    if (
+        _is_abstain_signal(data)
+        or str(data.get("badge") or "").lower() == "reconfirm"
+        or _badge_withheld(data["provenance"])
+    ):
         # A layer the contract has no badge for (document, catalog, unknown)
         # falls closed to ABSTAIN; no table card may then claim it was read.
         data["contributing_sources"] = []
@@ -265,6 +269,7 @@ async def contract_ask(body: AskRequest) -> Answer:
 
     def _ask() -> Answer:
         from CortexOS.dms.answer_engine import answer as answer_engine
+        from CortexOS.dms.plan_sql_ask import granted_catalog_enabled
         from CortexOS.execution.manifest import ManifestError
         from CortexOS.execution.session_manifests import (
             SessionExpired,
@@ -272,6 +277,23 @@ async def contract_ask(body: AskRequest) -> Answer:
             SpaceUnbound,
             get_session_registry,
         )
+        from CortexOS.insights import schema_context as schema_ctx
+
+        # Contract 1.9.0 (GEN-GRANTED-CATALOG-01): the same rule and status as
+        # POST /v1/insights, before any model call. A string that parses and
+        # declares no table is not malformed (problem_status 200): it reaches
+        # the plan+SQL path, which abstains by that name. With
+        # CORTEX_GRANTED_CATALOG off (the default until dms#456) the field is
+        # not read past its declared type: the answer is the one main gives.
+        schema_problem = (
+            schema_ctx.problem(body.schema_context) if granted_catalog_enabled() else None
+        )
+        if schema_problem is not None and schema_ctx.problem_status(schema_problem[0]) != 200:
+            code, message = schema_problem
+            raise HTTPException(
+                status_code=schema_ctx.problem_status(code),
+                detail={"code": code, "message": message},
+            )
 
         try:
             verified = get_session_registry().resolve(
@@ -300,6 +322,11 @@ async def contract_ask(body: AskRequest) -> Answer:
             stamp_verified_examples,
             take_verified_examples,
         )
+        from CortexOS.integrations.freeroute import (
+            FreeRouteStrictError,
+            strict_error_detail,
+            strict_error_status,
+        )
 
         reused, memory_fields = try_solution_reuse(
             body.question,
@@ -321,8 +348,17 @@ async def contract_ask(body: AskRequest) -> Answer:
             if served is None and body.dms_payload is not None:
                 from CortexOS.dms.plan_sql_ask import try_plan_sql
 
-                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
-                served = try_plan_sql(body, verified=verified)
+                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303). The prompt is
+                # the grant intersected with body.schema_context when sent and
+                # CORTEX_GRANTED_CATALOG is on.
+                # A strict pin refusal is not an answer and not a second model.
+                try:
+                    served = try_plan_sql(body, verified=verified)
+                except FreeRouteStrictError as exc:
+                    raise HTTPException(
+                        status_code=strict_error_status(exc),
+                        detail=strict_error_detail(exc),
+                    ) from exc
             # VERIFIED-QUERY (#309): examples are bound only for the generator the
             # answer engine runs, and only when the flag is on. A reused C-MEM
             # solution or a plan+SQL answer never carries them. Only examples
@@ -346,7 +382,13 @@ async def contract_ask(body: AskRequest) -> Answer:
                     verified=verified,
                     require_grounding=True,
                     stamp_l2_route=True,
+                    confirm=body.plan_sql_confirm,
                 )
+            except FreeRouteStrictError as exc:
+                raise HTTPException(
+                    status_code=strict_error_status(exc),
+                    detail=strict_error_detail(exc),
+                ) from exc
             except ManifestError as exc:
                 code = getattr(exc, "code", "manifest_error")
                 raise HTTPException(

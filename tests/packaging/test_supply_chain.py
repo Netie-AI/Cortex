@@ -211,6 +211,51 @@ def test_dockerfile_python_version_has_no_uv_resolution_entry(tree: Path) -> Non
     assert problems == ["uv.lock has no resolution entry for Python 3.99"]
 
 
+_TOP_MARKERS = re.compile(r"^resolution-markers = \[.*?\]", re.M | re.S)
+
+
+def _replace_top_markers(lock: Path, markers: list[str]) -> None:
+    body = "resolution-markers = [\n" + "".join(f'    "{marker}",\n' for marker in markers) + "]"
+    text = lock.read_text(encoding="utf-8")
+    new, count = _TOP_MARKERS.subn(body, text, count=1)
+    assert count == 1, "uv.lock has no top-level resolution-markers"
+    assert new != text or markers == []
+    lock.write_text(new, encoding="utf-8")
+
+
+def _write_resolution_lock(root: Path, requires_python: str, markers: list[str]) -> None:
+    lines = [
+        "version = 1",
+        f'requires-python = "{requires_python}"',
+        "resolution-markers = [",
+        *(f'    "{marker}",' for marker in markers),
+        "]",
+        "",
+    ]
+    (root / "uv.lock").write_text("\n".join(lines), encoding="utf-8")
+
+
+def test_lt_3_12_marker_covers_3_11_when_that_is_the_floor(tmp_path: Path) -> None:
+    """uv writes the oldest fork as ``< '3.12'`` once requires-python is >=3.11."""
+    _write_resolution_lock(tmp_path, ">=3.11", ["python_full_version < '3.12'"])
+    assert sc.lock_has_resolution_entry(tmp_path, "3.11") is True
+
+
+def test_exact_3_11_wildcard_is_still_an_entry(tmp_path: Path) -> None:
+    _write_resolution_lock(tmp_path, ">=3.10", ["python_full_version == '3.11.*'"])
+    assert sc.lock_has_resolution_entry(tmp_path, "3.11") is True
+
+
+def test_must_fail_when_no_resolution_entry_covers_3_11(tree: Path) -> None:
+    _replace_top_markers(tree / "uv.lock", [])
+    assert "uv.lock has no resolution entry for Python 3.11" in sc.run(tree)
+
+
+def test_must_fail_when_only_resolution_entry_is_3_12(tree: Path) -> None:
+    _replace_top_markers(tree / "uv.lock", ["python_full_version == '3.12.*'"])
+    assert "uv.lock has no resolution entry for Python 3.11" in sc.run(tree)
+
+
 def test_skew_line_does_not_hide_a_mismatch(tree: Path) -> None:
     """A lock_skew line does not excuse a shared-package mismatch.
 

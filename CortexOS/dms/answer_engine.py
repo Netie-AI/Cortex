@@ -834,7 +834,7 @@ def _plan_from_declared_synonyms(q: str, q_raw: str) -> MetricPlan | None:
 
 
 # ── L1 metric router (ordered; specific rules before generic) ────────────────
-def route_to_metric(question: str) -> MetricPlan | None:
+def _route_to_metric_cascade(question: str) -> MetricPlan | None:
     """Pick a governed metric + its slots.
 
     Two views of the question, deliberately kept apart:
@@ -1072,6 +1072,164 @@ def route_to_metric(question: str) -> MetricPlan | None:
         return _metric_plan("revenue_last_month", {}, "revenue in the previous calendar month")
 
     return _plan_from_declared_synonyms(q, q_raw)
+
+
+def _exactness_guard_enabled() -> bool:
+    """Tests replace this to prove the must-fails need the guard."""
+    return True
+
+
+def _declared_question_keys(metric_id: str) -> set[str]:
+    """Normalized synonyms the metric declares as its questions.
+
+    The whole question has to equal one of these. A question that only
+    contains the words is a different question.
+    """
+    from packs.dms.semantic.loader import load_all
+
+    metric = load_all().metric(metric_id)
+    return {_normalize(phrase) for phrase in (metric.synonyms or []) if _normalize(phrase)}
+
+
+def _exact_declared_plan(question: str) -> MetricPlan | None:
+    """The metric whose declared question is this question, or None."""
+    key = _normalize(question)
+    if not key:
+        return None
+    from packs.dms.semantic.loader import load_all
+
+    matched = [
+        metric.id
+        for metric in load_all().metrics.values()
+        if key in _declared_question_keys(metric.id)
+    ]
+    if len(matched) != 1:
+        return None
+    metric_id = matched[0]
+    plan = _route_to_metric_cascade(question)
+    if plan is not None and plan.metric_id == metric_id:
+        return plan
+    return _metric_plan(metric_id, {}, f"declared question → {metric_id}")
+
+
+def _closest_declared_question(question: str, metric_id: str) -> str:
+    """The declared question sharing the most words with what was asked."""
+    from packs.dms.semantic.loader import load_all
+
+    asked = set(_normalize(question).split())
+    best: tuple[tuple[int, int, str], str] | None = None
+    for phrase in load_all().metric(metric_id).synonyms or []:
+        text = " ".join(str(phrase).split())
+        if not text:
+            continue
+        overlap = len(asked & set(_normalize(text).split()))
+        rank = (overlap, len(text), text)
+        if best is None or rank > best[0]:
+            best = (rank, text)
+    if best is not None:
+        return best[1]
+    return metric_id.replace("_", " ")
+
+
+def route_to_metric(question: str) -> MetricPlan | None:
+    """Governed metric only when the question is that metric's declared question.
+
+    The keyword cascade still names a neighbour. It does not serve one.
+    With the guard off, the cascade answer stands so the must-fails can go red.
+    """
+    if not _exactness_guard_enabled():
+        return _route_to_metric_cascade(question)
+    return _exact_declared_plan(question)
+
+
+def cascade_match_is_non_exact(question: str) -> bool:
+    """True when the keyword cascade names a metric the question does not declare.
+
+    That question is not served. The legacy delayed template must not pick it
+    up either. With the guard off, this is false and the cascade answer stands.
+    """
+    if not _exactness_guard_enabled():
+        return False
+    plan = _route_to_metric_cascade(question)
+    if plan is None:
+        return False
+    return _normalize(question) not in _declared_question_keys(plan.metric_id)
+
+
+def _choice_refused(decision: Any) -> bool:
+    """A metric was chosen and the check rejected it. Do not serve a skill instead."""
+    if decision is None or getattr(decision, "serve", False):
+        return False
+    metric_id = str(getattr(getattr(decision, "selection", None), "metric_id", "") or "")
+    return metric_id.strip().lower() not in ("", "none")
+
+
+def _documents_allowed(decision: Any) -> bool:
+    """Keyword documents do not replace a rejected metric or a cascade neighbour."""
+    if _choice_refused(decision):
+        return False
+    selection = getattr(decision, "selection", None)
+    return bool(getattr(selection, "allow_documents", True))
+
+
+def _metric_reconfirm(
+    question: str,
+    audit_id: str,
+    *,
+    why: str,
+    closest: str,
+) -> dict[str, Any]:
+    """Why this question cannot be served, and the closest question the model named."""
+    from CortexOS.dms.metric_choice import UNARMED_CLOSEST
+    from CortexOS.dms.plan_sql_ask import reconfirm_answer
+
+    if not str(closest or "").strip():
+        closest = UNARMED_CLOSEST
+    return {
+        "answer": reconfirm_answer(why, closest),
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "reconfirm",
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "reconfirm",
+        "badge": "reconfirm",
+        "metric_id": None,
+        "assumptions": why,
+        "total_count": 0,
+        "suggestions": [closest] if closest else [],
+        "reconfirm": {"why": why, "closest_question": closest},
+        "metric_choice": "refused",
+        # The plan is built so the NL choke-point still redacts the question.
+        "query_plan": _honest_plan(question, None, layer="reconfirm", assumptions=why),
+    }
+
+
+def _metric_not_found(audit_id: str) -> dict[str, Any]:
+    """No on the closest question. No SQL and no rows."""
+    from CortexOS.dms.plan_sql_ask import NOT_FOUND_ANSWER
+
+    return {
+        "answer": NOT_FOUND_ANSWER,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": ABSTAIN,
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "abstain",
+        "badge": "abstain",
+        "assumptions": "user answered no to the closest question",
+        "total_count": 0,
+        "suggestions": [],
+        "reconfirm": None,
+        "metric_choice": "refused",
+    }
 
 
 # ── truncation-honest total ──────────────────────────────────────────────────
@@ -1659,6 +1817,7 @@ def answer(
     verified: VerifiedManifest | None = None,
     require_grounding: bool = False,
     stamp_l2_route: bool = False,
+    confirm: str | None = None,
 ) -> dict[str, Any]:
     from CortexOS.dms.query_service import (
         _infer_source_table,
@@ -1715,6 +1874,13 @@ def answer(
 
         return stamp_l2_envelope(result, attempt, sql_served=sql_served)
 
+    # No on a reconfirm runs nothing. A metric the check accepted is a new ask.
+    if confirm == "no" and match_certified(question) is None:
+        from CortexOS.dms.metric_choice import decide_metric
+
+        if not decide_metric(question).serve:
+            return _done(_metric_not_found(audit_id))
+
     route = route_question(question)
 
     if route == "blocked":
@@ -1752,6 +1918,7 @@ def answer(
     l2_route_call = ""
     l2_out: Any = None
     l2_serve_plan: Any = None
+    metric_decision: Any = None
 
     q_low = question.lower()
     prior = _SESSION.get(_session_key(session_id, space_id))
@@ -1785,18 +1952,15 @@ def answer(
             sql = None
             session_rows = None
 
-    # L0 certified → L1 metric → L-skill → L3 abstain
+    # L0 certified → model choose-and-check → L-skill → L3 abstain.
     # Skills run after governed routes so golden/certified paths stay authoritative.
-    # Catalog browse is not a named warehouse subject — check it before
-    # undefined_subject, or "data" / "catalog" abstain as unknown nouns.
+    # A noun the ontology does not define, and a shape no metric can express,
+    # are the model's decision. They are not a regex that refuses first.
     if sql is None:
         from packs.dms.semantic.catalog_answer import is_catalog_intent
 
         if is_catalog_intent(question):
             return _done(_catalog_response(question, audit_id))
-        refused = _shape_refusal(question)
-        if refused:
-            return _abs(refused)
         cq = match_certified(question)
         if cq is not None:
             sql, layer, badge = cq.sql, "certified", "certified"
@@ -1809,34 +1973,33 @@ def answer(
             if violations:
                 return _abs(f"certified query {cq.id} unresolved literal {violations}")
         if sql is None:
-            unknown = undefined_subject(question)
-            if unknown:
-                named = ", ".join(_answerable_entities())
-                return _abs(
-                    f"the question names '{unknown}', which the semantic layer does "
-                    f"not define; it can answer about {named}"
-                )
-            plan = route_to_metric(question)
-            if plan is not None:
+            from CortexOS.dms.metric_choice import decide_metric
+
+            # The cascade does not choose. A model does, and a second model
+            # checks the choice. Unarmed fails closed.
+            metric_decision = decide_metric(question)
+            if metric_decision.serve:
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
-                mismatch = _metric_subject_mismatch(question, plan)
-                if mismatch:
-                    return _abs(
-                        f"question subject '{mismatch}' does not match "
-                        f"metric '{plan.metric_id}' subject"
-                    )
+                plan_id = metric_decision.selection.metric_id
+                plan_slots = dict(metric_decision.selection.slots)
                 try:
-                    sql = compile_metric(load_all(), plan.metric_id, plan.slots)
+                    sql = compile_metric(load_all(), plan_id, plan_slots)
                     layer, badge = "governed_metric", "governed_metric"
-                    assumptions = plan.reason
-                    metric_id = plan.metric_id
-                    metric_slots = dict(plan.slots)
-                    planned_tables = plan.tables
-                except SemanticError as exc:
-                    return _abs(f"could not resolve inputs: {exc}")
+                    stated = str(metric_decision.selection.why or "").strip()
+                    assumptions = stated or f"metric choice {plan_id}"
+                    metric_id = plan_id
+                    metric_slots = plan_slots
+                    planned_tables = _tables_stated_by_metric(plan_id)
+                except SemanticError:
+                    metric_decision = type(metric_decision)(
+                        False,
+                        metric_decision.selection,
+                        f"could not compile {plan_id}, so it cannot be served directly",
+                    )
+                    sql = None
 
-    if sql is None:
+    if sql is None and not _choice_refused(metric_decision):
         hit = query_skills.find(question)
         if hit is not None:
             skill_score = float(hit["score"])
@@ -1930,7 +2093,7 @@ def answer(
                     refused["violations_blocked"] = list(l2_out.violations or [])
                     refused = _stamp_l2(refused, l2_out, sql_served=False)
                     return _done(refused)
-            doc = _space_doc_rag()
+            doc = None if not _documents_allowed(metric_decision) else _space_doc_rag()
             if doc is not None:
                 if l2_out is not None and l2_out.reason:
                     # The document still answers (R-0005); why L2 did not is visible (R-0011).
@@ -1938,6 +2101,16 @@ def answer(
                 return _done(doc)
             if l2_out is not None and not l2_out.sql:
                 return _abs(l2_out.reason)
+            if metric_decision is not None and not metric_decision.serve:
+                # No SQL step. The cascade does not get a turn.
+                return _done(
+                    _metric_reconfirm(
+                        question,
+                        audit_id,
+                        why=metric_decision.why,
+                        closest=metric_decision.selection.closest_question,
+                    )
+                )
             return _abs("no governed metric or certified query matched")
 
     if sql is None:

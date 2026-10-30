@@ -294,11 +294,14 @@ def _assert_echo_abstain(body: dict[str, Any], *needles: str) -> None:
 
 
 def _warehouse_rows(sql: str) -> list[dict[str, Any]]:
-    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection
+    """Rows of ``sql`` in the serve path's order: a cut page gets the #435 tiebreak."""
+    from CortexOS.dms.sql_guardrail import _unlimited, apply_page_tiebreak
+    from CortexOS.dms.warehouse_db import DEFAULT_DB, get_connection, load_semantic_layer
 
     con = get_connection(DEFAULT_DB, read_only=True)
     try:
-        cur = con.execute(sql)
+        total = con.execute(f"SELECT COUNT(*) FROM ({_unlimited(sql)}) _page").fetchone()[0]
+        cur = con.execute(apply_page_tiebreak(sql, load_semantic_layer(), int(total)))
         names = [d[0] for d in cur.description]
         return [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
     finally:
@@ -398,12 +401,14 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     body = resp.json()
     spec = json.loads((ROOT / "contract" / "openapi-1.4.0.json").read_text(encoding="utf-8"))
     base = set(spec["components"]["schemas"]["Answer"]["properties"])
-    prior = json.loads((ROOT / "contract" / "openapi-1.7.0.json").read_text(encoding="utf-8"))
-    # 1.5.0 fields (#329) are present and null. verified_query_ids (1.8.0)
-    # stays omitted, so the flag-off body is exactly the 1.7.0 Answer.
+    prior = json.loads((ROOT / "contract" / "openapi-1.9.0.json").read_text(encoding="utf-8"))
+    # 1.5.0 fields (#329) are present and null. verified_query_ids (1.10.0)
+    # stays omitted, so the flag-off body is exactly the 1.9.0 Answer.
     assert set(body) - base == {"reconfirm", "plan_sql_rung", "model_calls"}
     assert set(body) == set(prior["components"]["schemas"]["Answer"]["properties"])
-    assert body["reconfirm"] is None and body["plan_sql_rung"] is None
+    # Unarmed, main's metric choice (#424) reconfirms; this lane adds nothing to it.
+    assert set(body["reconfirm"]) == {"why", "closest_question"}
+    assert body["plan_sql_rung"] is None
     assert body["model_calls"] is None
     assert list(body) == [f for f in Answer.model_fields if f != "verified_query_ids"]
     _assert_not_verified(body)
@@ -548,7 +553,8 @@ def test_flag_off_ask_is_byte_identical_to_the_ask_without_this_lane(
         monkeypatch.setenv(vqa.ENABLED_ENV, value)
     ask_http.bind_session("alpha")
     _confirm("alpha")
-    questions = ("what is our total revenue", VQ_Q, ASK)
+    # A declared wording, so main (#424) serves it with the model unarmed.
+    questions = ("what was total revenue", VQ_Q, ASK)
 
     def ask_bytes(question: str) -> bytes:
         clear_session(SESSION, space_id="alpha")
@@ -581,7 +587,7 @@ def test_answer_serialization_omits_empty_verified_query_ids() -> None:
     got = Answer.model_validate({**base, "verified_query_ids": ["vq_1", "vq_2"]})
     assert got.model_dump()["verified_query_ids"] == ["vq_1", "vq_2"]
     assert Answer.model_validate_json(got.model_dump_json()).verified_query_ids == ["vq_1", "vq_2"]
-    spec = json.loads((ROOT / "contract" / "openapi-1.8.0.json").read_text(encoding="utf-8"))
+    spec = json.loads((ROOT / "contract" / "openapi-1.10.0.json").read_text(encoding="utf-8"))
     field = spec["components"]["schemas"]["Answer"]["properties"]["verified_query_ids"]
     assert field["type"] == "array" and field["items"] == {"type": "string"}
     assert "verified_query_id" not in spec["components"]["schemas"]["Answer"]["properties"]

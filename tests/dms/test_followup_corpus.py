@@ -17,9 +17,14 @@ def _assert_sql_envelope(result: dict) -> None:
     assert "answer" in result
     assert "rows" in result
     assert "route" in result
-    if result["route"] == ABSTAIN:
+    if result["route"] == "reconfirm":
+        assert result["badge"] == "reconfirm"
+        assert result["rows"] == []
+        assert result.get("sql_used") is None
+    elif result["route"] == ABSTAIN:
         assert result["badge"] == "abstain"
         assert result["rows"] == []
+        assert result.get("sql_used") is None
     else:
         assert result["badge"] in (
             "certified",
@@ -102,8 +107,9 @@ def test_followup_corpus_computes_or_abstains_honestly(
 def test_followup_without_prior_abstains(session: str, follow_up: str) -> None:
     result = answer(follow_up, session_id=session)
     _assert_sql_envelope(result)
-    assert result["route"] == ABSTAIN
-    assert result["badge"] == "abstain"
+    assert result["route"] in (ABSTAIN, "reconfirm")
+    assert result["rows"] == []
+    assert result.get("sql_used") is None
 
 
 def test_sum_phrasing_never_returns_a_count(session: str) -> None:

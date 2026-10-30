@@ -29,20 +29,20 @@ GRANT = {"transactions": "TRUE"}
 WAREHOUSE_GRANT = {
     t: "TRUE" for t in ("inventory", "suppliers", "locations", "shipments", "transactions", "alerts")
 }
-REVENUE_Q = "what is our total revenue"
+REVENUE_Q = "total revenue"
 # All four land on certified / governed_metric under GRANT, so each one is a
 # capture candidate. Order matches the 87ee2c60 probe shape: 4 scored asks.
 SCORED_QS = (
-    "what is our total revenue",
+    "total revenue",
     "Top 5 selling SKUs by revenue",
-    "excluding BETA, top 5 sku by revenue",
     "last month sales",
+    "top selling",
 )
 BETA_QS = SCORED_QS + (
-    "total revenue",
-    "top 5 sku by revenue",
-    "what were sales last month",
-    "Top 5 selling SKUs by volume",
+    "how many skus",
+    "show expired",
+    "high risk suppliers",
+    "delayed shipments",
 )
 
 
@@ -164,11 +164,22 @@ def _governed_answer(body: dict[str, Any]) -> None:
 
 
 def _only_skills_can_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Take L0/L1 out so a stored skill is the only path to rows."""
+    """Take certified and metric choice out so a stored skill is the only path."""
     from CortexOS.dms import answer_engine as ae
+    from CortexOS.dms.metric_choice import UNARMED_CLOSEST, MetricDecision, MetricSelection
 
     monkeypatch.setattr(ae, "match_certified", lambda _q: None)
     monkeypatch.setattr(ae, "route_to_metric", lambda _q: None)
+
+    def _none(question: str) -> MetricDecision:
+        del question
+        selection = MetricSelection(
+            closest_question=UNARMED_CLOSEST,
+            why="no declared metric was chosen, so it cannot be served directly",
+        )
+        return MetricDecision(False, selection, selection.why)
+
+    monkeypatch.setattr("CortexOS.dms.metric_choice.decide_metric", _none)
 
 
 def _skill_answer(body: dict[str, Any]) -> None:
@@ -383,7 +394,7 @@ def test_legacy_unscoped_rows_survive_and_are_never_read(
     _legacy_table(
         skills_db,
         "INSERT INTO dms_query_skills (id, trigger_text, metric_id, created_at) VALUES "
-        "('legacy-1', 'what is our total revenue', 'revenue_total', '2026-10-01T00:00:00+00:00');",
+        "('legacy-1', 'total revenue', 'revenue_total', '2026-10-01T00:00:00+00:00');",
     )
     monkeypatch.setenv(FLAG, "1")
     assert query_skills.find(REVENUE_Q, space_id="alpha") is None

@@ -571,7 +571,7 @@ async def test_c7_04_corpus_real_insights_path_has_no_new_wrong(monkeypatch) -> 
     assert on["l2_named_steps"] > 0
     assert (
         off["envelopes_sha256"]
-        == "f5b041bd6df0ef16852d9175a8a4567713f48b48579903a261f04f25d434d845"
+        == "60b469d3d55dd155e229ef2496d0474cf2bbd41995659bf4011ccf85d10c7ea9"
     )
     assert off_envelopes["ma_workday_payroll_cube"]["values"] == []
     assert on_envelopes["ma_workday_payroll_cube"]["values"] == []
@@ -596,5 +596,12 @@ def test_c7_04_subject_misroute_now_abstains(
     assert scored.outcome == "abstained"
     assert envelope["rows"] == []
     assert envelope["sql_used"] is None
-    assert envelope["badge"] == "abstain"
-    assert "subject 'overtime'" in envelope["answer"]
+    assert envelope["badge"] in {"abstain", "reconfirm"}
+    text = (envelope["answer"] or "").lower()
+    assert (
+        "subject 'overtime'" in text
+        or "not the declared question" in text
+        or "not that metric's declared question" in text
+        or "can't answer" in text
+        or "cannot be served" in text
+    )

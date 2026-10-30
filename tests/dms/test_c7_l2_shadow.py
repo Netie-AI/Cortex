@@ -60,7 +60,7 @@ def _dump(envelope: dict) -> bytes:
 def _ask():
     from CortexOS.dms.answer_engine import answer
 
-    return answer("Which suppliers have a risk score above 0.7?")
+    return answer("high risk suppliers")
 
 
 def test_shadow_off_vs_on_envelope_identical(monkeypatch, tmp_path: Path):
@@ -93,7 +93,7 @@ def test_shadow_writes_one_jsonl_record(monkeypatch, tmp_path: Path):
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
     rec = json.loads(lines[0])
-    assert rec["question"].startswith("Which suppliers")
+    assert rec["question"].startswith("high risk")
     assert rec["served_layer"] == "governed_metric"
     assert rec["served_badge"] == "governed_metric"
     assert rec["served_row_count"] == 8

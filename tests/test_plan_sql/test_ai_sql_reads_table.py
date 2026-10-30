@@ -23,7 +23,6 @@ from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
     GOOD_SQL,
     GRANT,
     PAYLOAD,
-    PLAN_TEXT,
     SESSION,
     _ask,
     _assert_rung,
@@ -112,7 +111,6 @@ def test_literal_output_is_fed_back_then_the_table_answer_is_served(
     literal_sql: str,
     column: str,
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, literal_sql)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -131,10 +129,10 @@ def test_literal_output_is_fed_back_then_the_table_answer_is_served(
     # The literal SQL never ran; only the table answer did.
     assert _ran(execute_spy) == [body["sql_used"]]
     assert all(LITERAL not in sql for sql in execute_spy)
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert NOT_FROM_TABLE in retry
     assert f"OUTPUT_NOT_FROM_TABLE:{column}" in retry
-    assert len(armed_openvault.chat_calls) == 3
+    assert len(armed_openvault.chat_calls) == 2
     _assert_rung(body, plan_sql_ask.rung_retry(1))
     gate_lines = [line for line in body["assumptions"] if line.startswith("step gate:")]
     assert any(NOT_FROM_TABLE in line for line in gate_lines)
@@ -147,7 +145,6 @@ def test_literal_output_on_every_write_reconfirms_and_serves_nothing(
 ) -> None:
     """No stronger route configured: the ladder reconfirms, it does not serve the literal."""
     literal_sql = f"SELECT {LITERAL} AS n FROM transactions LIMIT 1"
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, literal_sql)
     _reply(armed_openvault, literal_sql)
     dms_http.bind_session(SESSION, GRANT)
@@ -218,7 +215,6 @@ def test_table_derived_sql_is_still_served_first_time(
     sql: str,
     payload: dict[str, Any],
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, sql)
     grant = {t["name"]: "TRUE" for t in payload["tables"]}
     dms_http.bind_session(SESSION, grant)
@@ -230,7 +226,7 @@ def test_table_derived_sql_is_still_served_first_time(
     assert _rowset(body["rows"]) == _rowset(oracle), body["answer"]
     assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
     _assert_rendered(body)
-    assert len(armed_openvault.chat_calls) == 2
+    assert len(armed_openvault.chat_calls) == 1
     assert _ran(execute_spy) == [body["sql_used"]]
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
 
@@ -257,7 +253,6 @@ def test_row_count_over_a_values_list_is_fed_back_then_the_table_answer_is_serve
     count_sql: str,
     typed_count: int,
 ) -> None:
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, count_sql)
     _reply(armed_openvault, GOOD_SQL)
     dms_http.bind_session(SESSION, GRANT)
@@ -279,8 +274,8 @@ def test_row_count_over_a_values_list_is_fed_back_then_the_table_answer_is_serve
     assert _rowset(_oracle(body["sql_used"])) == _rowset(oracle)
     assert _ran(execute_spy) == [body["sql_used"]]
     assert all("VALUES" not in sql.upper() for sql in execute_spy)
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert NOT_FROM_TABLE in retry
     assert "OUTPUT_NOT_FROM_TABLE:n" in retry
-    assert len(armed_openvault.chat_calls) == 3
+    assert len(armed_openvault.chat_calls) == 2
     _assert_rung(body, plan_sql_ask.rung_retry(1))

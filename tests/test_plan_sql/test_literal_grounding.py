@@ -20,7 +20,7 @@ from tests.dms.test_c7_02_manifest_before_explain import dms_http  # noqa: F401
 from tests.test_plan_sql.test_ai_sql_reads_table import _oracle, _rowset
 from tests.test_plan_sql.test_c_loop_a_plan_sql import (  # noqa: F401
     GRANT,
-    PLAN_TEXT,
+    PAYLOAD,
     SESSION,
     _ask,
     _assert_rung,
@@ -52,7 +52,6 @@ def test_a_substituted_identifier_is_fed_back_and_never_served(
     armed_openvault, dms_http, execute_spy: list[str]
 ) -> None:
     named, other = _real_skus()
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, _kg_sql(other))
     _reply(armed_openvault, _kg_sql(named))
     dms_http.bind_session(SESSION, GRANT)
@@ -65,7 +64,9 @@ def test_a_substituted_identifier_is_fed_back_and_never_served(
     assert body["sql_used"].startswith(_kg_sql(named))
     # The substituted SQL never ran; only the one on the named SKU did.
     assert _ran(execute_spy) == [body["sql_used"]]
-    retry = armed_openvault.chat_calls[2]["body"]["messages"][1]["content"]
+    # One complete() per attempt (#386 folds the planner into the SQL call), so
+    # the error-fed retry is the second call.
+    retry = armed_openvault.chat_calls[1]["body"]["messages"][1]["content"]
     assert LITERAL_UNGROUNDED in retry
     assert f"LITERAL_NOT_IN_QUESTION:{other}" in retry
     _assert_rung(body, plan_sql_ask.rung_retry(1))
@@ -76,7 +77,6 @@ def test_an_entity_the_data_lacks_reconfirms_instead_of_answering_for_another(
 ) -> None:
     """The heldout case: the model keeps substituting; nothing is served."""
     named, _ = _real_skus()
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, _kg_sql(named))
     _reply(armed_openvault, _kg_sql(named))
     dms_http.bind_session(SESSION, GRANT)
@@ -98,7 +98,6 @@ def test_the_named_identifier_is_served_on_the_first_write(
 ) -> None:
     """Positive control: a grounded identifier is not delayed by the check."""
     named, _ = _real_skus()
-    _reply(armed_openvault, PLAN_TEXT)
     _reply(armed_openvault, _kg_sql(named))
     dms_http.bind_session(SESSION, GRANT)
     oracle = _oracle(_kg_sql(named))
@@ -107,7 +106,8 @@ def test_the_named_identifier_is_served_on_the_first_write(
 
     assert _rowset(body["rows"]) == _rowset(oracle)
     assert body["sql_used"].startswith(_kg_sql(named))
-    assert len(armed_openvault.chat_calls) == 2
+    # One call: the first write, with the planner folded into it (#386).
+    assert len(armed_openvault.chat_calls) == 1
     _assert_rung(body, plan_sql_ask.RUNG_PLAN)
 
 
@@ -169,3 +169,51 @@ def test_an_identifier_the_question_never_named_is_flagged(
     question: str, sql: str, flagged: list[str]
 ) -> None:
     assert ungrounded_literals(question, sql) == flagged
+
+
+def test_prompts_take_filter_values_from_the_question_not_the_samples() -> None:
+    """The instruction "filter literals must come from the sampled values" made the
+    model swap a value the question named for one the samples held. Measured on
+    BIRD Mini-Dev split B through this path, removing it and adding an output
+    contract raised EX from 41.7% to 47.7% (paired +38/-17, n=348)."""
+    from CortexOS.plan_sql import payload as plan_payload
+    from CortexOS.plan_sql.generator import FreeRoutePlanSqlGenerator, ModelStep, StepStamp
+
+    request = plan_payload.PlanSqlRequest(
+        "kg of SKU-ZZZZZ",
+        plan_payload.AskPayload.model_validate(PAYLOAD),
+        column_values={"transactions": {"sku": ("SKU-00001",)}},
+    )
+    # #386 folds the planner into the one sql() call, so plan_messages() is not
+    # sent. Guard the prompts the default generator does send: the folded first
+    # reading (sql_messages, no plan) and the vote's second reading
+    # (second_reading_messages), each built through sql_prompt(), which is the
+    # exact message list sql() hands to FreeRoute.
+    folded = ModelStep(
+        "plan", True, "", "folded", StepStamp.cortex("plan", "cortex:plan-folded", "folded")
+    )
+    generator = FreeRoutePlanSqlGenerator()
+    sent = {
+        reading: " ".join(
+            m["content"] for m in generator.sql_prompt(request, folded, reading=reading)
+        )
+        for reading in (plan_payload.FIRST_READING, plan_payload.SECOND_READING)
+    }
+    assert sent[plan_payload.FIRST_READING] == " ".join(
+        m["content"] for m in plan_payload.sql_messages(request, ())
+    )
+    assert sent[plan_payload.SECOND_READING] == " ".join(
+        m["content"] for m in plan_payload.second_reading_messages(request)
+    )
+    for reading, text in sent.items():
+        assert "SKU-00001" in text, reading  # the samples do reach the prompt
+        assert "must come from them" not in text, reading
+        assert "Ground every filter in the sampled column values" not in text, reading
+        assert "Never replace a value the question names" in text, reading
+        assert "Take filter values from the question" in text, reading
+        assert "Return the columns the question asks for" in text, reading
+    # plan_messages() stays for a generator that plans in its own call.
+    planned = " ".join(m["content"] for m in plan_payload.plan_messages(request))
+    assert "must come from them" not in planned
+    assert "Ground every filter in the sampled column values" not in planned
+    assert "Take every filter value from the question" in planned
