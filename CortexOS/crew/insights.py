@@ -30,6 +30,7 @@ from CortexOS.crew.engine_bridge import EngineBridge
 from CortexOS.crew.shell import CF_COMPUTER_SOURCE
 from CortexOS.insights.caller_ontology import SOURCE_CALLER, CallerCatalog
 from CortexOS.ontology.registry import load_link_types, load_object_types, pack_dir_for
+from CortexOS.ontology.value_domain import LAKE_STALE
 
 # Calls to freeroute.complete() during run_insights. None outside that call.
 _model_calls: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
@@ -82,7 +83,7 @@ _CERTIFY_BADGES = frozenset(
     }
 )
 _ABSTAIN_BADGES = frozenset(
-    {"abstain", "needs_clarification", "l3", "abstained"}
+    {"abstain", "needs_clarification", "l3", "abstained", "reconfirm"}
 )
 
 _STOP = frozenset(
@@ -1592,10 +1593,29 @@ async def _run_insights(
                 schema_context=supplied,
             )
         except Exception as exc:  # noqa: BLE001 - a generate miss abstains, never a 5xx
-            # The caller sees a named abstain; operators still see the bug.
-            _log.exception("generative_ask raised; answering a named ABSTAIN")
-            reason = f"generative_error:{type(exc).__name__}"
-            gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
+            from CortexOS.integrations.freeroute import FreeRouteStrictError
+
+            if isinstance(exc, FreeRouteStrictError):
+                # The pin was refused. Do not relabel it and do not try another model.
+                reason = (
+                    f"FreeRouteStrictError: HTTP {exc.status} {exc.error_type} "
+                    f"retry_after_s={exc.retry_after_s}"
+                )
+                gen = {
+                    "ok": False,
+                    "status": "ABSTAIN",
+                    "refuse_reason": reason,
+                    "retry_after_s": exc.retry_after_s,
+                    "model_requested": exc.model_requested,
+                    "model_served": exc.model_served,
+                }
+                if exc.stamp is not None:
+                    gen["stamp"] = exc.stamp.public()
+            else:
+                # The caller sees a named abstain; operators still see the bug.
+                _log.exception("generative_ask raised; answering a named ABSTAIN")
+                reason = f"generative_error:{type(exc).__name__}"
+                gen = {"ok": False, "status": "ABSTAIN", "refuse_reason": reason}
         if not gen.get("ok") and gen.get("status") == "ABSTAIN":
             return _attach_generative(
                 _generative_abstain(
@@ -1792,6 +1812,11 @@ async def _run_insights(
                 shell_public=shell_public,
                 attempted=attempted,
             )
+            if f"{LAKE_STALE}:" in str(envelope.get("assumptions") or ""):
+                # #402: the lake does not hold the declared values the ranked
+                # trial filters on. That is the answer; a lower-ranked trial
+                # would answer a different question on the same lake.
+                return _attach_generative(last_abstain, gen)
             continue
         # REFUSE this trial; try the next constrained question unless the engine is gone.
         badge = str(envelope.get("badge") or "")

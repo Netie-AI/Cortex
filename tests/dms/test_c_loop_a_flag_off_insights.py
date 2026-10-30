@@ -9,6 +9,7 @@ which has no such rewrite.
 
 from __future__ import annotations
 
+import types
 import uuid
 from pathlib import Path
 
@@ -32,8 +33,17 @@ def _install_clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         clock["n"] += 1
         return uuid.UUID(int=clock["n"])
 
-    monkeypatch.setattr(freeroute.uuid, "uuid4", _uuid4)
-    monkeypatch.setattr(freeroute.time, "time", lambda: 1_700_000_000.0)
+    # Patch only freeroute's own uuid reference. Patching uuid.uuid4 on the
+    # shared module let any other caller in the process (another thread, a
+    # lazily initialised import) consume the counter and shift call_id.
+    monkeypatch.setattr(freeroute, "uuid", types.SimpleNamespace(uuid4=_uuid4))
+    # Same for the clock: freeroute reads time.time and time.monotonic only.
+    # A fixed monotonic keeps the stamp's latency_ms at 0.0 on both calls.
+    monkeypatch.setattr(
+        freeroute,
+        "time",
+        types.SimpleNamespace(time=lambda: 1_700_000_000.0, monotonic=lambda: 0.0),
+    )
     return clock
 
 

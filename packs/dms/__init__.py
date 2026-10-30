@@ -23,11 +23,14 @@ def register_engine_seams() -> None:
     """
     from CortexOS.audit import register_ledger
     from CortexOS.dms.l2_generation import register_l2_generation
+    from CortexOS.dms.metric_choice import register_default_metric_choice
     from packs.dms.audit import ledger
     from packs.dms.generative.l2_adapter import DmsL2Generation
+    from packs.dms.metric_choice import OpenVaultMetricChoice
 
     register_ledger(ledger)
     register_l2_generation(DmsL2Generation())
+    register_default_metric_choice(OpenVaultMetricChoice())
 
 
 register_engine_seams()

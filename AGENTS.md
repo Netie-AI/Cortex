@@ -25,6 +25,11 @@ Parked work is `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
    with `--match-head-commit <head>` -> Check (R-0003: a different run verifies; the
    writer never verifies itself) -> Lead Formal. CLEAR and AGREE use the comment
    templates below, or the CI `auto-merge` job will not count them.
+   Founder ruling 2026-10-29: Claude may review and merge any lane's PR, including
+   one whose writer chain includes Claude, once CI is 5/5 on the exact head. It still
+   squashes with `--match-head-commit <head>`. Its review names the head and the
+   Claude model, so the record stays auditable. `decide()` still auto-merges only
+   different-family AGREEs.
 2. **Any head move voids CLEAR and AGREE.** A new commit, rebase or force-push means
    CI, CLEAR and AGREE are redone on the new head. The CI `auto-merge` job
    (`scripts/auto_merge_if_perfect.py`, `decide()`) squash-merges only a non-draft
@@ -40,6 +45,12 @@ Parked work is `PARKING_LOT.md` (do not build from it). Live work is GitHub issu
 5. **OpenVault FreeRoute is the only model path** (`CortexOS/integrations/freeroute.py`).
    No provider keys from env or files, no direct provider calls; unarmed fails closed.
    Remaining env/file key paths are debt tracked in #267.
+   Founder ruling 2026-10-29: the document lane may run a local embedding model and
+   a local cross-encoder reranker in-process, outside FreeRoute, under these limits:
+   - weights already installed on the host; nothing is downloaded while serving;
+   - behind a default-off flag;
+   - missing weights keep the BM25 order, and the response says so.
+   Any text an answer is made of is still generated only through FreeRoute.
 6. **Keep handoff files out of PR diffs** (`CLAUDE_HANDOFF.md`, `CURSOR_HANDOFF.md`,
    output of `scripts/handoff.py --write`).
 7. **AI-first answer path** is `CLAUDE.md` section 9. The text lives there once.

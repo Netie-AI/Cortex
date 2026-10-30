@@ -47,8 +47,11 @@ def _sensitive() -> set[str]:
         return set()
 
 
-@lru_cache(maxsize=1)
-def _dictionaries() -> dict[str, list[str]]:
+class _DictionariesNotReady(Exception):
+    """The lake had no values yet. lru_cache does not store a raised call."""
+
+
+def _scan_dictionaries() -> dict[str, list[str]]:
     from CortexOS.dms.warehouse_db import (
         DEFAULT_DB,
         get_connection,
@@ -75,16 +78,32 @@ def _dictionaries() -> dict[str, list[str]]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _dictionaries() -> dict[str, list[str]]:
+    scanned = _scan_dictionaries()
+    # A scan before the lake exists must not stick. The next ask scans again.
+    if not any(scanned.values()):
+        raise _DictionariesNotReady
+    return scanned
+
+
+def _ready_dictionaries() -> dict[str, list[str]]:
+    try:
+        return _dictionaries()
+    except _DictionariesNotReady:
+        return {}
+
+
 def refresh() -> None:
     _dictionaries.cache_clear()
 
 
 def values_for(column: str) -> list[str]:
-    return list(_dictionaries().get(column, []))
+    return list(_ready_dictionaries().get(column, []))
 
 
 def all_dictionaries() -> dict[str, list[str]]:
-    return {k: list(v) for k, v in _dictionaries().items()}
+    return {k: list(v) for k, v in _ready_dictionaries().items()}
 
 
 _WH_LETTER = re.compile(r"\b(?:wh[-\s]?|warehouse\s+)([a-t])\b", re.I)

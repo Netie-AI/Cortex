@@ -105,6 +105,7 @@ _FLAT_BADGE: dict[str, Badge] = {
     "refused": Badge.ABSTAIN,  # F40 — contract has no REFUSED badge; never SESSION
     "blocked": Badge.BLOCKED,
     "reconfirm": Badge.RECONFIRM,  # C-LOOP-A: asking, not an abstain and not SESSION
+    "document": Badge.DOCUMENT,  # 1.7.0 RAG-01: cited from the documents, never SESSION
 }
 
 
@@ -167,6 +168,13 @@ def _contributing_sources(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Sources panel cards from granted tables. Never invent on abstain."""
     if _is_abstain_signal(data):
         return []
+    if str(data.get("badge") or "").lower() == Badge.DOCUMENT.value:
+        # A document answer read no table: its cards are the documents it cites.
+        docs = [str(s) for s in data.get("sources") or [] if s]
+        return [
+            {"ref_id": doc, "container": "documents", "member": doc, "kind": "document"}
+            for doc in dict.fromkeys(docs)
+        ]
     names: list[str] = []
     granted = data.get("granted_sources")
     if isinstance(granted, list):
@@ -192,6 +200,12 @@ def _contributing_sources(data: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _badge_withheld(provenance: Any) -> bool:
+    """True when the badge the caller receives is ABSTAIN or BLOCKED."""
+    badge = provenance.get("badge") if isinstance(provenance, dict) else getattr(provenance, "badge", None)
+    return str(getattr(badge, "value", badge) or "") in {Badge.ABSTAIN.value, Badge.BLOCKED.value}
+
+
 def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> dict[str, Any]:
     """Attach T7 answer_id + drillthrough_token when SQL is present.
 
@@ -215,7 +229,13 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
         data["assumptions"] = [assumptions.strip()]
     elif not isinstance(assumptions, list):
         data["assumptions"] = []
-    if _is_abstain_signal(data):
+    if (
+        _is_abstain_signal(data)
+        or str(data.get("badge") or "").lower() == "reconfirm"
+        or _badge_withheld(data["provenance"])
+    ):
+        # A layer the contract has no badge for (document, catalog, unknown)
+        # falls closed to ABSTAIN; no table card may then claim it was read.
         data["contributing_sources"] = []
     elif not data.get("contributing_sources"):
         data["contributing_sources"] = _contributing_sources(data)
@@ -240,91 +260,196 @@ def _enrich_answer(data: dict[str, Any], *, session_id: str, verified: Any) -> d
 @router.post("/ask", response_model=Answer, operation_id="ask")
 async def contract_ask(body: AskRequest) -> Answer:
     """Answer a governed question (DMS ask plane). Requires a prior submit bind."""
-    from CortexOS.dms.answer_engine import answer as answer_engine
-    from CortexOS.execution.manifest import ManifestError
-    from CortexOS.execution.session_manifests import (
-        SessionExpired,
-        SessionUnbound,
-        SpaceUnbound,
-        get_session_registry,
-    )
+    # NAME-ECHO-CX-01: every exit (the answer and each HTTP error) passes the
+    # response scrub, which withholds names outside the session's grant.
+    from CortexOS.api.response_scrub import ask_caller_context, scrub_answer, scrub_http_detail
+    from CortexOS.sql_attempts import recording
 
-    try:
-        verified = get_session_registry().resolve(
-            body.session_id, space_id=body.space_id
+    grant: list[Any] = []
+
+    def _ask() -> Answer:
+        from CortexOS.dms.answer_engine import answer as answer_engine
+        from CortexOS.dms.plan_sql_ask import granted_catalog_enabled
+        from CortexOS.execution.manifest import ManifestError
+        from CortexOS.execution.session_manifests import (
+            SessionExpired,
+            SessionUnbound,
+            SpaceUnbound,
+            get_session_registry,
         )
-    except SpaceUnbound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except SessionUnbound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
-    except SessionExpired as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
+        from CortexOS.insights import schema_context as schema_ctx
 
-    from CortexOS.dms.space_memory_ask import try_solution_reuse
+        # Contract 1.9.0 (GEN-GRANTED-CATALOG-01): the same rule and status as
+        # POST /v1/insights, before any model call. A string that parses and
+        # declares no table is not malformed (problem_status 200): it reaches
+        # the plan+SQL path, which abstains by that name. With
+        # CORTEX_GRANTED_CATALOG off (the default until dms#456) the field is
+        # not read past its declared type: the answer is the one main gives.
+        schema_problem = (
+            schema_ctx.problem(body.schema_context) if granted_catalog_enabled() else None
+        )
+        if schema_problem is not None and schema_ctx.problem_status(schema_problem[0]) != 200:
+            code, message = schema_problem
+            raise HTTPException(
+                status_code=schema_ctx.problem_status(code),
+                detail={"code": code, "message": message},
+            )
 
-    reused, memory_fields = try_solution_reuse(
-        body.question,
-        session_id=body.session_id,
-        space_id=body.space_id,
-        verified=verified,
-        scored_pack_id=body.scored_pack_id,
-    )
-    served = reused
-    if served is None and body.dms_payload is not None:
-        from CortexOS.dms.plan_sql_ask import try_plan_sql
+        try:
+            verified = get_session_registry().resolve(
+                body.session_id, space_id=body.space_id
+            )
+        except SpaceUnbound as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except SessionUnbound as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except SessionExpired as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        grant.append(verified)
 
-        # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303).
-        served = try_plan_sql(body, verified=verified)
-    try:
-        result = served if served is not None else answer_engine(
+        from CortexOS.dms.space_memory_ask import try_solution_reuse
+        from CortexOS.integrations.freeroute import (
+            FreeRouteStrictError,
+            strict_error_detail,
+            strict_error_status,
+        )
+
+        reused, memory_fields = try_solution_reuse(
             body.question,
             session_id=body.session_id,
             space_id=body.space_id,
             verified=verified,
-            require_grounding=True,
-            stamp_l2_route=True,
+            scored_pack_id=body.scored_pack_id,
         )
-    except ManifestError as exc:
-        code = getattr(exc, "code", "manifest_error")
-        raise HTTPException(
-            status_code=_http_for_submit_status(code),
-            detail={"code": code, "message": str(exc)},
-        ) from exc
+        from CortexOS.dms.ask_scope import ask_scope
 
-    if isinstance(result, Answer):
-        data = result.model_dump()
-    else:
-        data = dict(result)
-    data.update(memory_fields)
-    data = _enrich_answer(data, session_id=body.session_id, verified=verified)
-    return Answer.model_validate(data)
+        # The signed Space and scored pack reach the legacy query_skill store
+        # through this scope, not through answer_engine (QUERY-SKILL #340).
+        with ask_scope(
+            space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
+        ):
+            served = reused
+            if served is None and body.dms_payload is not None:
+                from CortexOS.dms.plan_sql_ask import try_plan_sql
+
+                # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303). The prompt is
+                # the grant intersected with body.schema_context when sent and
+                # CORTEX_GRANTED_CATALOG is on.
+                # A strict pin refusal is not an answer and not a second model.
+                try:
+                    served = try_plan_sql(body, verified=verified)
+                except FreeRouteStrictError as exc:
+                    raise HTTPException(
+                        status_code=strict_error_status(exc),
+                        detail=strict_error_detail(exc),
+                    ) from exc
+            try:
+                result = served if served is not None else answer_engine(
+                    body.question,
+                    session_id=body.session_id,
+                    space_id=body.space_id,
+                    verified=verified,
+                    require_grounding=True,
+                    stamp_l2_route=True,
+                    confirm=body.plan_sql_confirm,
+                )
+            except FreeRouteStrictError as exc:
+                raise HTTPException(
+                    status_code=strict_error_status(exc),
+                    detail=strict_error_detail(exc),
+                ) from exc
+            except ManifestError as exc:
+                code = getattr(exc, "code", "manifest_error")
+                raise HTTPException(
+                    status_code=_http_for_submit_status(code),
+                    detail={"code": code, "message": str(exc)},
+                ) from exc
+            except Exception as exc:  # noqa: BLE001 - a failed model step is an answer, not a 500
+                from CortexOS.dms.query_service import engine_failure_abstain
+
+                # AI-ERROR-NO-500-01: the same named abstain as POST /dms/query.
+                result = engine_failure_abstain(exc)
+
+        if isinstance(result, Answer):
+            data = result.model_dump()
+        else:
+            data = dict(result)
+        data.update(memory_fields)
+        data = _enrich_answer(data, session_id=body.session_id, verified=verified)
+        return Answer.model_validate(data)
+
+    texts, names = ask_caller_context(body)
+    with recording() as attempts:
+        try:
+            result = _ask()
+        except HTTPException as exc:
+            exc.detail = scrub_http_detail(
+                exc.detail,
+                attempts,
+                verified=grant[0] if grant else None,
+                caller_texts=texts,
+                caller_names=names,
+            )
+            raise
+        from CortexOS.dms.plan_sql_ask import grant_closest_question, reconfirm_answer
+
+        return scrub_answer(
+            result,
+            attempts,
+            verified=grant[0],
+            caller_texts=texts,
+            caller_names=names,
+            closest_fallback=lambda: grant_closest_question(body, verified=grant[0]),
+            reconfirm_text=reconfirm_answer,
+        )
 
 
 @router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")
 async def contract_drillthrough(body: DrillthroughRequest) -> DrillthroughResponse:
     """Re-derive contributing rows under the same session manifest (T7)."""
+    from CortexOS.api.response_scrub import scrub_http_detail
     from CortexOS.execution.drillthrough import (
         DrillthroughError,
         execute_drillthrough,
     )
+    from CortexOS.sql_attempts import recording
+
+    with recording() as attempts:
+        try:
+            result = execute_drillthrough(body.token)
+        except DrillthroughError as exc:
+            # NAME-ECHO-CX-01: the error detail passes the response scrub.
+            code = getattr(exc, "code", "drillthrough_error")
+            raise HTTPException(
+                status_code=_http_for_submit_status(code),
+                detail=scrub_http_detail(
+                    {"code": code, "message": str(exc)},
+                    attempts,
+                    verified=_drill_grant(body.token),
+                ),
+            ) from exc
+    # The drill response carries rows, SQL, ids and counts only: no free text to scrub.
+    return DrillthroughResponse.model_validate(result)
+
+
+def _drill_grant(token: str) -> Any:
+    """The session grant a drill token names, or None when it cannot be resolved."""
+    from CortexOS.execution.drillthrough import verify_token
+    from CortexOS.execution.session_manifests import get_session_registry
 
     try:
-        result = execute_drillthrough(body.token)
-    except DrillthroughError as exc:
-        raise HTTPException(
-            status_code=_http_for_submit_status(getattr(exc, "code", "drillthrough_error")),
-            detail={"code": getattr(exc, "code", "drillthrough_error"), "message": str(exc)},
-        ) from exc
-    return DrillthroughResponse.model_validate(result)
+        return get_session_registry().resolve(str(verify_token(token)["session_id"]))
+    except Exception:  # noqa: BLE001 - no grant resolved: no name counts as granted
+        return None
 
 
 @router.post("/submit", response_model=QueryResult, operation_id="submit")

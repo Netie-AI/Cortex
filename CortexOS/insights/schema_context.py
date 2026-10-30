@@ -8,6 +8,13 @@ table. A full table read is refused from the parsed AST. Row results are
 capped. None of this runs when the field is absent, so the pack path stays
 as it was.
 
+The string is parsed by line shape (:func:`parse_schema_context`). The
+shapes are the ones the DMS renderer writes (``dms_executor.schema_context``
+``_render``; a recorded render is ``tests/dms/fixtures/dms_schema_context_crm.txt``).
+A line outside them is a 422 that names the line number, never an empty or
+guessed catalog. A string that parses and declares no table is a named 200
+abstain.
+
 The raw string is never logged. Length and sha256 only.
 """
 
@@ -20,11 +27,14 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
+
+from CortexOS.identifier_fold import fold_identifier
 
 _log = logging.getLogger(__name__)
 
@@ -35,6 +45,11 @@ SCHEMA_CONTEXT_MAX_CHARS = SCHEMA_CONTEXT_MAX_BYTES
 SCHEMA_CONTEXT_TOO_LARGE = "schema_context_too_large"
 SCHEMA_CONTEXT_INVALID = "schema_context_invalid"
 SCHEMA_CONTEXT_UNPARSED = "schema_context_unparsed"
+#: The string parses and declares no table (the DMS over-budget fallback).
+SCHEMA_CONTEXT_EMPTY = "schema_context_empty"
+#: ``ungranted_reason`` for a string that does not parse. The route refuses
+#: such a string before any model call, so only a direct caller sees this.
+UNPARSED_REASON = "schema_context:unparsed"
 SCHEMA_CONTEXT_FORBIDDEN_CHAR = "schema_context_forbidden_char"
 BRUTE_FORCE_SCAN = "brute_force_scan"
 #: ask=true without generate: engine-pack trials do not answer a caller schema.
@@ -109,22 +124,29 @@ def problem(value: Any) -> tuple[str, str] | None:
             SCHEMA_CONTEXT_FORBIDDEN_CHAR,
             f"schema_context contains a control or format character ({bad})",
         )
-    if value.strip() and not _catalog_ready(value):
+    if not value.strip():
+        return None
+    try:
+        catalog = parse_schema_context(value)
+    except SchemaContextParseError as exc:
+        return (SCHEMA_CONTEXT_UNPARSED, f"schema_context {exc}")
+    if not catalog.tables:
         return (
-            SCHEMA_CONTEXT_UNPARSED,
-            "schema_context did not parse into a table and column catalog",
+            SCHEMA_CONTEXT_EMPTY,
+            "schema_context declares no table; nothing to generate against",
         )
     return None
 
 
-def _catalog_ready(text: str) -> bool:
-    """True when every declared table has at least one column.
+def problem_status(code: str) -> int:
+    """HTTP status for a :func:`problem` code.
 
-    Free text is not a catalog. There is no fallback to identifiers in the
-    string.
+    A schema that parses and declares no table is not malformed: DMS sends
+    ``DIALECT: x`` plus ``SCHEMA`` when its shortlist does not fit the token
+    budget. That is a named 200 abstain, like ``caller_ontology_empty``.
+    Everything else is a 422.
     """
-    catalog = parsed_catalog(text)
-    return bool(catalog) and all(cols for cols in catalog.values())
+    return 200 if code == SCHEMA_CONTEXT_EMPTY else 422
 
 
 def accepted_text(value: Any) -> str | None:
@@ -201,66 +223,297 @@ def public_sql_reason(reason: str) -> str:
     return text
 
 
-_TABLE_LINE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)"
-    r"(?:\s+reason=score:\S+)?\Z"
+#: Section labels the DMS renderer writes (``dms_executor.schema_context._render``),
+#: in the order it writes them. Each appears at most once, in this order.
+SECTION_ORDER = ("SCHEMA", "JOINS", "FILTER HINTS", "MEASURES")
+_PREAMBLE = "preamble"
+#: DMS ``_ident`` caps a name at 128 characters.
+_IDENT_MAX = 128
+_ENTRY = re.compile(r"-\s+(\S.*)")
+#: Table head tail after the name: ``reason=score:<score>``, then
+#: ``description=<free text>`` to the end of the line. Both optional.
+_HEAD_TAIL = re.compile(r"(?:\s+reason=\S+)?(?:\s+description=.*)?")
+_HEAD_KEYS = ("reason=", "description=")
+#: ``reason=`` directly followed by ``description=`` is a table head's tail. A
+#: column line writes ``description=`` before ``reason=``. Seen after more than
+#: one leading token, it is a table name with whitespace in it.
+_SPACED_HEAD = re.compile(r"\sreason=\S+\s+description=")
+#: ``- t.c = t.c (label) reason=path:...``. The label is free text.
+_JOIN = re.compile(r"(\S+)\s+=\s+(\S+)((?:\s+\(.*\))?(?:\s+reason=\S+)?)")
+#: ``- t.c = value`` (exact) or ``- t.c ~ value`` (fuzzy). The value is free text.
+_HINT = re.compile(r"(\S+)\s+[=~]\s+\S.*")
+#: ``- name grain=<grain> expression=<expression>[ aliases=..][ -- text]``.
+_MEASURE = re.compile(r"\S.*?\s+grain=.*?\s+expression=.*")
+#: The type token DMS writes after a column name (``bigint``, ``varchar(20)``,
+#: ``decimal(12,2)``): a word from ``_SQL_TYPES``, optionally with a length or
+#: a precision and scale. Any other second token records no type, so a table
+#: or column name written where a type goes (``- qty passport_no``) never
+#: reaches a prompt as one.
+_COLUMN_TYPE = re.compile(r"([A-Za-z][A-Za-z0-9]*)(?:\(\d+(?:,\d+)?\))?")
+#: SQL type words across the dialects DMS renders (DuckDB, MySQL, SQL Server,
+#: Postgres, generic). A fixed list, not a pattern: the token that reaches the
+#: prompt is always one of these words.
+_SQL_TYPES = frozenset(
+    {
+        # integers
+        "bigint", "int", "integer", "smallint", "tinyint", "mediumint", "hugeint",
+        "int1", "int2", "int4", "int8", "ubigint", "uinteger", "usmallint", "utinyint",
+        "uhugeint", "serial", "bigserial", "smallserial",
+        # exact and approximate numerics
+        "decimal", "numeric", "number", "money", "smallmoney", "real", "float",
+        "float4", "float8", "double",
+        # text
+        "varchar", "char", "character", "nchar", "nvarchar", "text", "ntext",
+        "tinytext", "mediumtext", "longtext", "string", "bpchar", "clob", "uuid",
+        "uniqueidentifier",
+        # binary and boolean
+        "blob", "bytea", "binary", "varbinary", "bit", "boolean", "bool",
+        # date and time
+        "date", "time", "timetz", "timestamp", "timestamptz", "datetime", "datetime2",
+        "smalldatetime", "datetimeoffset", "interval",
+        # semi-structured
+        "json", "jsonb", "xml",
+    }
 )
-_DOTTED = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)")
-_FIRST_IDENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)")
 
 
-def parsed_catalog(text: str) -> dict[str, list[str]]:
-    """Tables and columns declared by line shape, not every identifier.
+class SchemaContextParseError(ValueError):
+    """A ``schema_context`` line outside the shapes :func:`parse_schema_context` accepts.
 
-    A table line is one name, or ``schema.table``, optionally followed by
-    ``reason=score:``. A following line whose first token is a name is a
-    column of that table. A join line (``table.column = table.column``) adds
-    those columns to tables already declared. Type words, ``samples=`` values
-    and section labels are not tables.
+    The message names the 1-based line number, its section and the expected
+    shape. It never quotes the line: the string is caller data and is not
+    echoed into a response or a log.
+    """
+
+    def __init__(self, line: int, section: str, why: str) -> None:
+        self.line = line
+        self.section = section
+        self.why = why
+        super().__init__(f"line {line} ({section}): {why}")
+
+
+@dataclass(frozen=True)
+class SchemaCatalog:
+    """What a ``schema_context`` string declares.
+
+    ``tables`` maps each declared table to its declared columns, in line
+    order. ``joins`` holds each JOINS-section table pair once, sorted. Names
+    are folded with :func:`CortexOS.identifier_fold.fold_identifier`, the
+    rule ``validate_caller_sql`` and DuckDB compare by.
+    """
+
+    tables: dict[str, list[str]]
+    joins: frozenset[tuple[str, str]]
+    #: The same JOINS lines column by column, ``(left_table, left_column,
+    #: right_table, right_column)``, folded, in line order, once each. Only
+    #: lines between two different tables, as in ``joins``.
+    join_keys: tuple[tuple[str, str, str, str], ...] = ()
+    #: Per table, the type token written after a column name, when it is a
+    #: word from ``_SQL_TYPES`` (with an optional length or precision).
+    #: Declares nothing: ``tables`` is the catalog.
+    column_types: dict[str, dict[str, str]] = field(default_factory=dict)
+
+
+def _is_ident(name: str) -> bool:
+    """Same rule as DMS ``_ident``: a letter or ``_``, then letters, digits, ``_``."""
+    if not name or len(name) > _IDENT_MAX:
+        return False
+    if not (name[0].isalpha() or name[0] == "_"):
+        return False
+    return all(ch.isalnum() or ch == "_" for ch in name[1:])
+
+
+def _table_name(token: str) -> str | None:
+    """Folded ``table`` or ``schema.table``. Anything else is None."""
+    parts = token.split(".")
+    if len(parts) > 2 or not all(_is_ident(part) for part in parts):
+        return None
+    return fold_identifier(token)
+
+
+def parse_schema_context(text: str) -> SchemaCatalog:
+    """Tables, columns and joins declared by line shape. Fail closed.
+
+    Accepts exactly the lines the DMS renderer writes, plus a bare table head:
+
+    * preamble, before any section: ``DIALECT: <name>``, at most once;
+    * section labels ``SCHEMA``, ``JOINS``, ``FILTER HINTS``, ``MEASURES``,
+      each at most once and in that order;
+    * ``SCHEMA``: a table head ``- <table>`` (``table`` or ``schema.table``),
+      optionally followed by ``reason=<why>`` and then ``description=<text>``
+      (a line whose second token starts with ``reason=`` or ``description=``
+      is a head); or a column line ``- <column> <type> ...`` under the last
+      table head. A head whose name has whitespace in it is refused, not
+      read as a column of the previous table.
+      Only the column name is read. ``primary_key``, ``foreign_key=``,
+      ``description=``, ``samples=``, ``distinct=`` and ``reason=`` after it
+      never declare anything, so a dotted name inside a description or a
+      foreign key target is not a column;
+    * ``JOINS``: ``- <t>.<c> = <t>.<c> [(<label>)] [reason=<why>]``. Both
+      tables must already be declared. Their columns are added to them, and
+      the pair is a declared join;
+    * ``FILTER HINTS``: ``- <t>.<c> = <value>`` or ``~ <value>`` on a declared
+      column. A hint declares nothing;
+    * ``MEASURES``: ``- <name> grain=<g> expression=<e> ...``. Declares nothing.
+
+    Blank lines are skipped. Any other line raises
+    :class:`SchemaContextParseError` naming its line number; so does a
+    declared table with no column, since an empty column list would skip the
+    column check. A string with no table head returns an empty catalog: the
+    route names that ``schema_context_empty``. The section order is what
+    keeps text DMS copies from the question (a hint value) from opening a
+    second ``SCHEMA`` or ``JOINS`` section and declaring a table.
     """
     tables: dict[str, list[str]] = {}
+    head_line: dict[str, int] = {}
+    joins: set[tuple[str, str]] = set()
+    join_keys: list[tuple[str, str, str, str]] = []
+    column_types: dict[str, dict[str, str]] = {}
+    section = _PREAMBLE
+    seen: list[str] = []
+    dialect_seen = False
     current: str | None = None
 
-    def add_table(name: str) -> str:
-        key = name.lower()
-        tables.setdefault(key, [])
-        return key
-
     def add_col(table: str, col: str) -> None:
-        key = table.lower()
-        if key not in tables:
-            return
-        name = col.lower()
-        if name not in tables[key]:
-            tables[key].append(name)
+        cols = tables[table]
+        if col not in cols:
+            cols.append(col)
 
-    for raw in text.splitlines():
+    def column_ref(token: str) -> tuple[str, str] | None:
+        """``table.column`` on a declared table, else None."""
+        table_part, dot, col = token.rpartition(".")
+        if not dot or not _is_ident(col):
+            return None
+        table = _table_name(table_part)
+        if table is None or table not in tables:
+            return None
+        return table, fold_identifier(col)
+
+    # Lines are split on LF only, as DMS joins them. CR is refused before
+    # this runs, and U+2028/U+2029 stay inside the line they appear in.
+    for number, raw in enumerate(text.split("\n"), start=1):
         line = raw.strip()
         if not line:
             continue
-        if re.fullmatch(r"[A-Z][A-Z0-9_]*", line):
+        if line in SECTION_ORDER:
+            if seen and SECTION_ORDER.index(line) <= SECTION_ORDER.index(seen[-1]):
+                raise SchemaContextParseError(
+                    number, section, "section label repeated or out of order"
+                )
+            seen.append(line)
+            section = line
             current = None
             continue
-        if not line.startswith("-"):
+        if section == _PREAMBLE:
+            if line.startswith("DIALECT:") and not dialect_seen:
+                dialect_seen = True
+                continue
+            raise SchemaContextParseError(
+                number, section, "expected one DIALECT: line or a section label"
+            )
+        entry = _ENTRY.fullmatch(line)
+        if entry is None:
+            raise SchemaContextParseError(
+                number, section, "expected a '- ' entry or a section label"
+            )
+        body = entry.group(1)
+
+        if section == "SCHEMA":
+            first = body.split(None, 1)[0]
+            rest = body[len(first) :]
+            if not rest or rest.split(None, 1)[0].startswith(_HEAD_KEYS):
+                if _HEAD_TAIL.fullmatch(rest) is None:
+                    raise SchemaContextParseError(
+                        number,
+                        section,
+                        "table head: expected reason=<why> then description=<text>",
+                    )
+                table = _table_name(first)
+                if table is None:
+                    raise SchemaContextParseError(
+                        number, section, "table name is not an identifier or schema.table"
+                    )
+                tables.setdefault(table, [])
+                head_line.setdefault(table, number)
+                current = table
+                continue
+            if _SPACED_HEAD.search(rest):
+                raise SchemaContextParseError(
+                    number, section, "table name is not an identifier or schema.table"
+                )
+            if current is None:
+                raise SchemaContextParseError(
+                    number, section, "column line before any table head"
+                )
+            if not _is_ident(first):
+                raise SchemaContextParseError(
+                    number, section, "column name is not an identifier"
+                )
+            add_col(current, fold_identifier(first))
+            kind = rest.split(None, 1)[0]
+            typed = _COLUMN_TYPE.fullmatch(kind)
+            if typed and typed.group(1).lower() in _SQL_TYPES:
+                column_types.setdefault(current, {}).setdefault(fold_identifier(first), kind)
             continue
-        body = line[1:].strip()
-        dotted = _DOTTED.findall(body)
-        if "=" in body and dotted:
-            for table, col in dotted:
-                add_col(table, col)
+
+        if section == "JOINS":
+            join = _JOIN.fullmatch(body)
+            left = column_ref(join.group(1)) if join else None
+            right = column_ref(join.group(2)) if join else None
+            if left is None or right is None:
+                raise SchemaContextParseError(
+                    number,
+                    section,
+                    "join: expected declared table.column = declared table.column",
+                )
+            add_col(*left)
+            add_col(*right)
+            if left[0] != right[0]:
+                joins.add((min(left[0], right[0]), max(left[0], right[0])))
+                key = (left[0], left[1], right[0], right[1])
+                if key not in join_keys:
+                    join_keys.append(key)
             continue
-        table_line = _TABLE_LINE.fullmatch(body)
-        if table_line:
-            current = add_table(table_line.group(1))
+
+        if section == "FILTER HINTS":
+            hint = _HINT.fullmatch(body)
+            ref = column_ref(hint.group(1)) if hint else None
+            if ref is None or ref[1] not in tables[ref[0]]:
+                raise SchemaContextParseError(
+                    number,
+                    section,
+                    "filter hint: expected declared table.column = value or ~ value",
+                )
             continue
-        qualified = _DOTTED.match(body)
-        if qualified:
-            add_col(qualified.group(1), qualified.group(2))
-            continue
-        first = _FIRST_IDENT.match(body)
-        if first and current:
-            add_col(current, first.group(1))
-    return tables
+
+        # MEASURES, the last section.
+        if _MEASURE.fullmatch(body) is None:
+            raise SchemaContextParseError(
+                number, section, "measure: expected name grain=<grain> expression=<expression>"
+            )
+
+    for table, cols in tables.items():
+        if not cols:
+            raise SchemaContextParseError(head_line[table], "SCHEMA", "table declares no column")
+    return SchemaCatalog(
+        tables=tables,
+        joins=frozenset(joins),
+        join_keys=tuple(join_keys),
+        column_types=column_types,
+    )
+
+
+def parsed_catalog(text: str) -> dict[str, list[str]]:
+    """Declared tables and columns, or ``{}`` when the string does not parse.
+
+    The route has already refused a string that does not parse
+    (:func:`problem`), by line number. ``{}`` here is the fail-closed answer
+    for a direct caller: no table is allowed, so nothing is generated.
+    """
+    try:
+        return parse_schema_context(text).tables
+    except SchemaContextParseError:
+        return {}
 
 
 def grant_catalog(ranking: Mapping[str, Any]) -> dict[str, list[str]]:
@@ -272,12 +525,12 @@ def grant_catalog(ranking: Mapping[str, Any]) -> dict[str, list[str]]:
         where = row.get("where") or {}
         if not isinstance(where, Mapping):
             where = {}
-        table = str(where.get("table") or row.get("id") or "").lower()
+        table = fold_identifier(str(where.get("table") or row.get("id") or ""))
         if not table:
             continue
         seen = out.setdefault(table, [])
         for col in where.get("columns") or []:
-            name = str(col).strip().lower()
+            name = fold_identifier(str(col).strip())
             if name and name not in seen:
                 seen.append(name)
     return out
@@ -295,11 +548,11 @@ def narrow_catalog(
     """
     out: dict[str, list[str]] = {}
     for table, cols in parsed.items():
-        key = str(table).lower()
+        key = fold_identifier(str(table))
         if key not in grant:
             continue
-        gcols = [str(c).lower() for c in grant[key] if str(c).strip()]
-        pcols = [str(c).lower() for c in cols if str(c).strip()]
+        gcols = [fold_identifier(str(c)) for c in grant[key] if str(c).strip()]
+        pcols = [fold_identifier(str(c)) for c in cols if str(c).strip()]
         if not gcols:
             out[key] = list(pcols)
             continue
@@ -418,7 +671,7 @@ def _statements(sql: str) -> list[exp.Expression] | None:
 
 
 def _cte_names(tree: exp.Expression) -> set[str]:
-    return {str(cte.alias_or_name or "").lower() for cte in tree.find_all(exp.CTE)} - {""}
+    return {fold_identifier(str(cte.alias_or_name or "")) for cte in tree.find_all(exp.CTE)} - {""}
 
 
 def _iter_child_exprs(node: exp.Expression) -> list[exp.Expression]:
@@ -439,7 +692,7 @@ def _local_tables(node: exp.Expression, ctes: set[str]) -> list[str]:
         if isinstance(current, exp.Select):
             return
         if isinstance(current, exp.Table):
-            name = (current.name or "").lower()
+            name = fold_identifier(current.name or "")
             if name and name not in ctes:
                 found.append(name)
             return
@@ -450,9 +703,23 @@ def _local_tables(node: exp.Expression, ctes: set[str]) -> list[str]:
     return found
 
 
+def _from_clause(sel: exp.Select) -> exp.Expression | None:
+    """The FROM clause on any sqlglot the ``sqlglot>=25`` floor allows.
+
+    sqlglot 25 keys it ``from``; later releases key it ``from_``. Reading only
+    one key makes the brute-force and join checks skip the FROM table on the
+    other release.
+    """
+    for key in ("from_", "from"):
+        node = sel.args.get(key)
+        if isinstance(node, exp.Expression):
+            return node
+    return None
+
+
 def _own_tables(sel: exp.Select, ctes: set[str]) -> list[str]:
     found: list[str] = []
-    frm = sel.args.get("from_")
+    frm = _from_clause(sel)
     if isinstance(frm, exp.Expression):
         found.extend(_local_tables(frm, ctes))
     for join in sel.args.get("joins") or []:
@@ -488,7 +755,7 @@ def _select_bounded(sel: exp.Select) -> bool:
 
 def _rel_name(node: exp.Expression | None) -> str:
     if isinstance(node, exp.Table):
-        return (node.name or "").lower()
+        return fold_identifier(node.name or "")
     if isinstance(node, exp.Alias) and isinstance(node.this, exp.Expression):
         return _rel_name(node.this)
     return ""
@@ -498,7 +765,7 @@ def _physical_tables(tree: exp.Expression) -> list[str]:
     ctes = _cte_names(tree)
     names: list[str] = []
     for table in tree.find_all(exp.Table):
-        name = (table.name or "").lower()
+        name = fold_identifier(table.name or "")
         if name and name not in ctes:
             names.append(name)
     return names
@@ -508,8 +775,8 @@ def _join_pairs(tree: exp.Expression) -> list[tuple[str, str]]:
     ctes = _cte_names(tree)
     pairs: list[tuple[str, str]] = []
     for sel in tree.find_all(exp.Select):
-        frm = sel.args.get("from_")
-        left = _rel_name(frm.this) if isinstance(frm, exp.Expression) else ""
+        frm = _from_clause(sel)
+        left = _rel_name(frm.this) if frm is not None else ""
         for join in sel.args.get("joins") or []:
             if not isinstance(join, exp.Expression):
                 continue
@@ -522,24 +789,34 @@ def _join_pairs(tree: exp.Expression) -> list[tuple[str, str]]:
     return pairs
 
 
-def _join_granted(left: str, right: str, schema: str) -> bool:
-    need = {left, right}
-    for line in schema.splitlines():
-        if need <= schema_idents(line):
-            return True
-    return False
+def _bare(name: str) -> str:
+    return name.rsplit(".", 1)[-1]
 
 
 def ungranted_reason(sql: str, schema: str) -> str | None:
     """Named refusal when SQL names a table or join the schema did not grant.
 
-    Parse failure returns None so the existing SQL check can name it. The
-    reason names the table or the join pair and does not include the SQL.
+    Tables: a name that appears nowhere in the string is refused here, by
+    name and before any retry. A word that appears in the string but is not
+    a table head (a type word, a description word) passes this pre-check and
+    is refused by ``validate_caller_sql`` on the parsed catalog.
+
+    Joins have no second gate, so a join is granted only by a parsed JOINS
+    line: a description that mentions two tables grants no join. Pairs
+    compare by bare name, folded the DuckDB way. SQL parse failure returns
+    None so the existing SQL check can name it. A schema that does not parse
+    is refused by name. The reason names the table or the join pair and does
+    not include the SQL.
     """
     trees = _statements(sql)
     if trees is None:
         return None
+    try:
+        catalog = parse_schema_context(schema)
+    except SchemaContextParseError:
+        return UNPARSED_REASON
     granted = schema_idents(schema)
+    joined = {tuple(sorted((_bare(a), _bare(b)))) for a, b in catalog.joins}
     tables: list[str] = []
     pairs: list[tuple[str, str]] = []
     for tree in trees:
@@ -549,7 +826,7 @@ def ungranted_reason(sql: str, schema: str) -> str | None:
         if name not in granted:
             return f"schema_context:ungranted_table:{name}"
     for left, right in sorted(set(pairs)):
-        if not _join_granted(left, right, schema):
+        if (left, right) not in joined:
             return f"schema_context:ungranted_join:{left}+{right}"
     return None
 

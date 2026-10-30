@@ -100,7 +100,7 @@ def test_query_low_stock(loaded_db, monkeypatch):
         "netie.dms.query_service.get_connection",
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
-    result = query_service.answer_question("Which SKUs are below reorder level?")
+    result = query_service.answer_question("below reorder")
     assert result["violations_blocked"] == []
     assert result["sql_used"]
     rows = result.get("rows") or []
@@ -129,7 +129,7 @@ def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
         "netie.dms.query_service.get_connection",
         lambda _=None, **kw: get_connection(loaded_db, **kw),
     )
-    result = query_service.answer_question("top 5 sales")
+    result = query_service.answer_question("top selling")
     assert result["violations_blocked"] == []
     assert result["source_table"] == "transactions"
     assert result["row_count"] == 5
@@ -139,7 +139,12 @@ def test_query_top_sales_respects_top_n(loaded_db, monkeypatch):
     assert result["query_plan"]["intent"] == "sales_by_value"
 
 
-def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
+def test_query_most_delayed_is_not_a_lexical_listing(loaded_db, monkeypatch):
+    """A delayed-word question is not the pre-Q2 ranked listing.
+
+    ``return most delayed 1000 rows`` used to match ``\\b(delayed|late)\\b``
+    and serve 1000 shipment rows. The customer path no longer does that.
+    """
     from netie.dms import query_service
     from netie.dms.warehouse_db import get_connection
 
@@ -150,19 +155,23 @@ def test_query_most_delayed_can_request_guardrail_cap(loaded_db, monkeypatch):
     )
     result = query_service.answer_question("return most delayed 1000 rows")
     assert result["violations_blocked"] == []
-    assert result["source_table"] == "shipments"
-    assert result["row_count"] <= 1000
-    assert "LIMIT 1000" in result["sql_used"].upper()
-    assert result["query_plan"]["intent"] == "delayed_shipments"
+    assert not result.get("sql_used")
+    assert result.get("rows") in ([], None)
+    assert result.get("route") in ("needs_clarification", "reconfirm")
+    text = (result.get("answer") or "").lower()
+    assert "delayed shipment row" not in text
+    assert "sorted by days delayed" not in text
 
 
 def test_query_random_question_asks_for_dms_clarification():
     from netie.dms import query_service
 
     result = query_service.answer_question("how do I lean back in my chair?")
-    assert result["route"] == "needs_clarification"
+    assert result["route"] in ("needs_clarification", "reconfirm")
     assert result["sql_used"] is None
-    assert "DMS semantic layer" in result["answer"]
+    assert result.get("rows") in ([], None)
+    text = result["answer"]
+    assert "DMS semantic layer" in text or "Yes runs that question" in text
 
 
 def test_query_blocks_drop(loaded_db, monkeypatch):

@@ -2,6 +2,158 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## GEN-GRANTED-CATALOG-01 (#386) -- 2026-10-17
+
+Contract 1.9.0 (renumbered from 1.7.0 by the founder's 2026-10-18 ruling:
+main's 1.7.0 is #417's ``Badge.document`` and #321 takes 1.8.0; the frozen
+specs through 1.7.0 are unchanged): ``AskRequest`` gains optional
+``schema_context``, the same
+string and rule as the 1.6 field on ``POST /v1/insights``. On the plan+SQL
+path the SQL prompt is the signed grant intersected with the tables, columns
+and joins that string declares; a table outside the grant is dropped.
+``CortexOS.insights.schema_context`` is the only parser (#404's, which reads
+the DMS render), so a DMS table head with ``description=`` text is a table,
+not a column of the table above it. The ask route refuses a value by that
+module's ``problem`` and ``problem_status``: 422 with the code before any
+model call, and ``schema_context_empty`` (no table) is a named 200 abstain,
+as on insights; ``schema_context_ungranted`` (no granted table) is a named
+refusal. An unknown-column retry adds a did-you-mean name only when a
+granted catalog column is a typo of the unknown one (one edit, ratio 0.8);
+a column that is not close is never offered and there is no fallback, so an
+absent measure gets no hint. An executor error is scanned only after
+``redact_db_error`` and its text is not fed back. ``AskPayloadColumn`` gains
+optional ``masked`` (Security ruling): only a column marked ``masked: false``
+is sampled into the prompt; masked or absent keeps the name and type and
+never the values, for 1.7 and older clients too. A schema type token reaches the
+prompt only from a fixed list of SQL type words. Each attempt is one
+FreeRoute ``complete``; the planner call is folded into it, so
+``model_calls`` counts one call per rung attempt. Not a CI claim. 52 effect
+not measured.
+
+Round 4 (Lead data-policy ruling, Security NO 5559955242): ``schema_context``
+on the ask and value sampling sit behind ``CORTEX_GRANTED_CATALOG``, default
+off and separate from ``CORTEX_PLAN_SQL``, until dms#456. Off, the ask reads
+the field only for its declared type and answers as without it; no value is
+probed. On, a sampled column gives at most 8 distinct values, each stripped
+of control and bidi characters, cut to 64 characters and written as a quoted
+SQL string literal; the block fits inside the 8192-byte schema cap with the
+string; an ungranted table is never probed; only the stock OpenVault
+FreeRoute generator is handed values; steps carry counts and sizes only. A
+did-you-mean hint is not offered when the edit changes a digit or falls in a
+``_``-separated token shorter than 4 characters (``quantity_g`` gets no
+``quantity_kg``), and DuckDB's qualified ``Candidate bindings: :`` list is
+dropped from retry text.
+
+Round 5 (review of bb9ada4): the contract line is 1.9.0 (``openapi-1.9.0.json``
+regenerated; compat 1.7 is supported, 1.9 current, and 1.7 -> 1.9 is checked
+additive because 1.8 is not on main yet). compat 1.9 states the one wire
+change for older clients: a ``schema_context`` that is not a string, or is
+over 8192 characters, is now a request-validation 422 whatever the switches,
+where through 1.7 the unknown key was ignored. Did-you-mean words also split
+at a lower-to-upper case change and at any non-alphanumeric character, and a
+case change in either spelling counts for both: ``TempC`` gets no ``TempF``,
+``WeightG`` and ``weightg`` no ``WeightKg``, ``qty-g`` no ``qty-kg``; a typo
+inside a longer word (``CustomerNmae``) is still named.
+
+Round 6 (Lead option (a), after #421/#422 merged): the fold stays, and with
+``CORTEX_PLAN_SQL_VOTE=1`` the vote's second reading gets its own framing
+(``payload.SECOND_READING``: its own system prompt, and the question before
+the granted catalog), built only from the catalog, sampled values and the
+question. #422's rule "a first SQL written without a plan has no second
+reading" would have switched the vote off under the fold, so it is replaced
+by a prompt-hash rule: the second reading runs because its prompt differs.
+A write whose prompt would hash (sha256 of the exact messages, canonical
+JSON) to one the first reading sent, or that cannot be shown to differ, is
+skipped (``no second reading: ...``) and only the stronger route can agree;
+a sent prompt that matches is not counted. The vote line names both 12-char
+hash prefixes. #422's identical-SQL agreement and the second reading's
+error-fed retry are kept. Each folded vote ask makes one call fewer
+(``model_calls`` ``plan`` counts the first SQL and the second reading). Not
+a CI claim; the vote's BIRD numbers were measured before the fold and are not
+re-measured here.
+
+## LOW-STOCK-GOLDEN-01 (#434) -- 2026-10-28
+
+A LIMIT that drops rows now orders by each outer table's `row_key`
+(inventory is the lot key `sku, location_id, storage_bin`; `sku` alone
+repeats). DuckDB does not stable-sort, so `ORDER BY quantity_kg LIMIT 1000`
+kept a different 1000 of the 1218 low-stock lots on 1.5.6 and on 2.0.0.
+The lot key is unique (0 duplicate lots). The served page is the first
+1000 of `quantity_kg, sku, location_id, storage_bin`. The cut is SKU-00423
+in, SKU-00471 out, both at 20 kg, on both engines. The joined `locations`
+key is appended after the lot key and does not move that cut. The four
+low-stock golden answers are re-recorded to that page. A result that
+already fits in its LIMIT is unchanged. The count runs only after every
+refusal, on the fetch itself: a statement the ladder will not serve is
+not counted. `answer_engine` and `l2_generation` stay seat-locked; their
+existing `execute_sql` is that fetch, and the gate reports the tied SQL.
+The `<2` pin is gone. The must-fail is
+`test_low_stock_must_fail_if_clock_or_tie_drift_returns`.
+
+## CX-STRICT-01 -- 2026-10-28
+
+`CORTEX_OV_STRICT` defaults off. Off, every FreeRoute chat body is the same
+bytes as before. On, each completion sends JSON `strict: true` (OpenVault #81,
+also accepted as header `X-OpenVault-Strict`). A `pin_unavailable` or HTTP 429
+raises `FreeRouteStrictError` with `retry_after_s` and the `/ask` path records
+`model_requested` and `model_served` on the served step instead of walking
+another model.
+
+## METRIC-MATCH-AI-01 (#412, folds #425) -- 2026-10-19
+
+The keyword cascade and synonym equality no longer decide what is served.
+An OpenVault step reads the question plus the metric definitions and returns
+one declared metric and its filters, or none. It is told that negation and
+complements are not the positive metric. A second model call checks that the
+chosen metric means the question. Disagreement or uncertainty does not serve:
+the question reconfirms (closest question, Yes runs it, No is "not found in
+the database") or, when `DMS_L2_ENABLED` is on, goes to the AI SQL path.
+Unarmed OpenVault fails closed. No word list and no synonym-equality gate sit
+in that decision. `metrics.yaml` is unchanged from main, so no eval question
+is copied in as a synonym. "How many shipments are not delayed?" is not
+`delayed_count` 1031 (the warehouse has 10969 that are not delayed). The
+suite's declared-wording double is not the customer path. `POST /dms/query`
+does not search for delayed or late and then run the pre-Q2 ranked listing:
+that path served "Exclude delayed shipments and tell me how many remain" as
+100 delayed rows after the engine had already abstained. A noun the
+ontology does not define (`remain`, `outbound`, `forklift`) is no longer a
+regex that refuses before the model: the choose step is told which subjects
+exist, and a subject that is not among them reconfirms or abstains because
+the model said so. An empty value
+dictionary scanned before the lake exists is not cached, so certified
+questions with string literals (warehouse WH-A, outbound, CHEMICALS, PENDING)
+still serve once the lake is loaded.
+
+## STALE-LAKE-JOIN-FORMS-01 (#410) -- 2026-10-18
+
+A query that reads a table with a declared value domain is checked for every
+declared column of that table, not only for an `exp.Column` of that name.
+`USING`, `NATURAL JOIN`, `COLUMNS(...)`, a subscript and a column list on a
+table alias abstain on a stale lake (`lake_value_domain_stale:<table>.<column>`)
+instead of returning 0.0. Parse or scope failure fails closed. The drift scan
+still reads the whole table and ignores row predicates; that is now written
+in the docstring and `docs/CORTEX_API.md`. `execute_sql` attempts
+`SET statement_timeout` before EXPLAIN and that scan; on DuckDB 2.x the SET is a
+no-op (no such setting, the error is swallowed), so neither is bounded by it. `DMS_L2_ENABLED` and
+`CORTEX_PLAN_SQL` stay off. No contract change.
+
+## PLAN-SQL-VOTE-01 -- 2026-10-18
+
+Off unless `CORTEX_PLAN_SQL_VOTE=1` (with `CORTEX_PLAN_SQL=1`). On the
+`/v1/contract/ask` plan+SQL path, a SQL that ran with rows is served only when
+a second SQL reading returns the same rows: the same model without the plan,
+then the stronger route OpenVault configured. With no two agreeing, DMS gets a
+reconfirm envelope (`badge=reconfirm`, `rows=[]`) whose assumptions carry
+`PLAN_SQL_VOTE_SPLIT`. A served answer's assumptions carry `step vote-sql`
+lines and a `step vote` line saying which readings agreed. `model_calls` keeps its
+keys: the same-model reading counts under the rung that ran it, the stronger
+route's under `stronger-model`. No contract change. On BIRD Mini-Dev held-out
+(n=348) it cut wrong answers 120 to 34 and correct ones 166 to 99. Follow-up: the
+same SQL text written with and without the plan now counts as agreement, and the
+second reading gets the ladder's error-fed retry; the held-out run keeps 145
+correct answers at 77% precision. A first SQL written without a plan has no
+second reading. See `docs/subagents_findings/2026-10-18_plan-sql-vote-measured.md`.
+
 ## DBOS-3X (#331) -- 2026-10-16
 
 The `agentic`, `agents` and `full` extras take `dbos>=3.0.0,<4`. `uv.lock`

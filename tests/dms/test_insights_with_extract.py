@@ -24,6 +24,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from CortexOS.api.response_scrub import WITHHELD
 from CortexOS.dms.sql_extract import extract_select, extract_statement
 from CortexOS.insights.caller_sql import validate_caller_sql
 from tests.dms import test_insights_caller_ontology as _base
@@ -109,7 +110,9 @@ def test_with_hiding_an_undeclared_table_is_a_named_refuse(
     assert res.status_code == 200, res.text
     body = res.json()
     assert _gen_prompts(prompts)
-    _assert_refused(body, "table secrets is not in the caller catalog")
+    # NAME-ECHO-INSIGHTS-01: the undeclared table is withheld from the refusal text.
+    _assert_refused(body, f"table {WITHHELD} is not in the caller catalog")
+    assert "secrets" not in body["answer"]
     assert "parse error" not in body["answer"]
     assert str(SECRET) not in json.dumps(body)
 

@@ -323,7 +323,9 @@ async def execute_insights(
     schema_problem = schema_mod.problem(raw_schema)
     if schema_problem is not None:
         code, detail = schema_problem
-        return _invalid_request(code, detail, intent=intent)
+        return _invalid_request(
+            code, detail, intent=intent, status_code=schema_mod.problem_status(code)
+        )
     schema_text = schema_mod.accepted_text(raw_schema)
     extras = sorted((wire.model_extra or {}).keys())
     if extras:
@@ -368,16 +370,21 @@ async def execute_insights(
             )
             if bearer is None:
                 return _caller_refused("generative_ask")
-    result = await insights_mod.run_insights(
-        intent,
-        bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
-        ask=wire.ask,
-        generate=wire.generate,
-        bearer=bearer,
-        query_plan=query_plan,
-        caller=caller,
-        schema_context=schema_text,
-    )
+    from CortexOS.sql_attempts import recording
+
+    # NAME-ECHO-INSIGHTS-01: the statements this ask tried are recorded so the
+    # response scrub can withhold names outside the caller's grant.
+    with recording() as attempts:
+        result = await insights_mod.run_insights(
+            intent,
+            bridge=LocalEngineBridge(session_id=wire.session_id, space_id=wire.space_id),
+            ask=wire.ask,
+            generate=wire.generate,
+            bearer=bearer,
+            query_plan=query_plan,
+            caller=caller,
+            schema_context=schema_text,
+        )
     # A plain demo body (no request-extension field) gets exactly the envelope
     # it got before INSIGHTS-ONTO; #287 pins that digest. The extension echo is
     # only for callers that sent an extension field.
@@ -392,7 +399,80 @@ async def execute_insights(
     usage = schema_mod.reported_usage(schema_text)
     if usage is not None:
         out["usage"] = usage
-    return out
+    return _scrub_names(
+        out, attempts, wire=wire, intent=intent, caller=caller, schema_text=schema_text
+    )
+
+
+def _ranking_names(ranking: Any) -> set[str]:
+    """Tables and columns the served ranking lists (it is returned as ``ontology``)."""
+    names: set[str] = set()
+    if not isinstance(ranking, dict):
+        return names
+    for key in ("locations", "metrics", "certified"):
+        for row in ranking.get(key) or []:
+            if not isinstance(row, dict):
+                continue
+            raw_where = row.get("where")
+            where: dict[str, Any] = raw_where if isinstance(raw_where, dict) else {}
+            for value in (where.get("table"), where.get("primary_key")):
+                if isinstance(value, str):
+                    names.add(value)
+            for field in ("tables", "columns"):
+                names.update(str(v) for v in where.get(field) or [] if isinstance(v, str))
+            names.update(str(v) for v in row.get("exclude_columns") or [] if isinstance(v, str))
+    return names
+
+
+def _session_grant(wire: InsightsWireIn) -> Any:
+    """The session grant this ask names, or None (then no name counts as granted)."""
+    from CortexOS.execution.session_manifests import get_session_registry
+
+    try:
+        return get_session_registry().resolve(wire.session_id, space_id=wire.space_id)
+    except Exception:  # noqa: BLE001 - unresolved grant: nothing is granted
+        return None
+
+
+def _scrub_names(
+    out: dict[str, Any],
+    attempts: Any,
+    *,
+    wire: InsightsWireIn,
+    intent: str,
+    caller: caller_onto.CallerCatalog | None,
+    schema_text: str | None,
+) -> Any:
+    """NAME-ECHO-INSIGHTS-01: withhold names outside the grant from the free text.
+
+    Kept: names in the caller's question and ids, the tables and columns of a
+    caller schema_context or caller ontology (the caller's own), the ranking
+    the response returns as ``ontology``, and the session grant. Rows, values
+    and SQL are never changed (:func:`CortexOS.api.response_scrub.scrub_envelope`).
+    """
+    from CortexOS.api.response_scrub import scrub_envelope, split_names
+
+    if not attempts.sql and not attempts.errors:
+        return out
+    declared: set[str] = set()
+    if schema_text:
+        for table, columns in schema_mod.parsed_catalog(schema_text).items():
+            declared.add(table)
+            declared.update(columns)
+    if caller is not None:
+        for table, columns in caller.tables.items():
+            declared.add(table)
+            declared.update(columns)
+        declared.update(caller.measures)
+    declared |= _ranking_names(out.get("ontology"))
+    texts = [str(v) for v in (intent, wire.question, wire.session_id, wire.space_id) if v]
+    return scrub_envelope(
+        out,
+        attempts,
+        verified=_session_grant(wire),
+        caller_texts=texts,
+        caller_names=split_names(declared),
+    )
 
 
 @router.get("", operation_id="insights.law")

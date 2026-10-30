@@ -20,9 +20,12 @@ Two uses, one declaration:
   ``CASE``); or the aggregate must be grouped (``GROUP BY`` / ``PARTITION BY``)
   by the filter column, which keeps one value per kind. An unpinned aggregate is ``measure_filter_missing``; one that only
   excludes the required value is ``measure_filter_inverted``. A positive pin to
-  other literal values is the SQL's explicit choice and passes (inbound totals
-  are legitimate); whether a literal is spelled as the lake stores it is the
-  value domain's concern, not this check's. The check never reads question text.
+  other declared values is the SQL's explicit choice and passes (inbound totals
+  are legitimate). A positive pin to a literal outside the column's declared
+  canonical values (a source spelling such as ``OUT``, another case, a word the
+  declaration does not list) is ``measure_filter_undeclared``: the lake stores
+  only canonical values, so that filter sums no rows. The check never reads
+  question text.
 
 A column the check cannot trace to a table (an outer reference, a set
 operation it cannot line up) is not treated as a measure column; the static
@@ -45,6 +48,7 @@ from CortexOS.ontology.registry import load_object_types
 
 MISSING = "measure_filter_missing"
 INVERTED = "measure_filter_inverted"
+UNDECLARED = "measure_filter_undeclared"
 _MAX_LITERAL = 40
 
 
@@ -167,6 +171,13 @@ class Violation:
             )
         cols = ", ".join(f"{m.table}.{c}" for c in m.columns)
         declared = ", ".join(_quote(v) for v in m.domain)
+        if self.kind == UNDECLARED:
+            return (
+                head + f"an aggregate over {cols} pins {m.table}.{m.filter_column} to a "
+                f"value outside its declared values ({declared}); the lake stores only "
+                f"those, so that filter counts no rows. The declared measure {m.key} "
+                f"({m.expression}) counts rows where {target}"
+            )
         return (
             head + f"an aggregate over {cols} is the declared measure {m.key} "
             f"({m.expression}), which counts only rows where {target}; add that filter, "
@@ -402,6 +413,10 @@ class _Checker:
                     continue
                 add(sc, pred)
 
+        # A pin the declaration cannot hold (exact text, no case folding) sums no
+        # rows on a lake that stores the declared values: never a choice to keep.
+        if m.domain and any(v not in m.domain for pos, vals in pins if pos for v in vals):
+            return Violation(UNDECLARED, m)
         if any(pos for pos, _ in pins) or self._grouped_by(scope, agg, ref, m.filter_column):
             return None
         if any(m.filter_value in vals for pos, vals in pins if not pos):

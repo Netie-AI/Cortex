@@ -214,8 +214,13 @@ def _declared_measures(
     return tuple(out)
 
 
+def object_types_path(pack_dir: Path | str | None = None) -> Path:
+    """The YAML file ``load_object_types`` reads for this pack."""
+    return _ontology_dir(pack_dir) / "object_types.yaml"
+
+
 def load_object_types(pack_dir: Path | str | None = None) -> list[ObjectType]:
-    data = _read_yaml(_ontology_dir(pack_dir) / "object_types.yaml")
+    data = _read_yaml(object_types_path(pack_dir))
     out: list[ObjectType] = []
     for row in data.get("object_types") or []:
         props = tuple(

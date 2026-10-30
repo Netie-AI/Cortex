@@ -39,6 +39,14 @@ class ValidateGateResult:
     manifest_refused: bool = False
     source_sql: str | None = None
 
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name != "safe_sql" or not isinstance(value, str):
+            return value
+        from CortexOS.dms.sql_guardrail import served_page_sql
+
+        return served_page_sql(value)
+
 
 class SqlGateAbstain(Exception):
     """Raised when validation/EXPLAIN retries are exhausted — caller must abstain."""
@@ -65,6 +73,23 @@ class SqlGateAbstain(Exception):
         if not self.violations:
             return base
         return f"{base}: {', '.join(self.violations)}"
+
+
+class LakeValueDomainStale(SqlGateAbstain):
+    """The lake stores values of a declared column that its pack's declaration does not.
+
+    Raised by ``execute_sql(..., value_domains=...)`` before any row is fetched.
+    A subclass of ``SqlGateAbstain`` so a caller that only knows the gate still
+    abstains; callers that serve an answer name it (``reason``). Retrying other
+    SQL cannot fix it: the lake has to be rebuilt through the declaration.
+    """
+
+    def __init__(self, reason: str, *, codes: Sequence[str] = ()) -> None:
+        super().__init__(reason, violations=list(codes))
+        self.reason = reason
+
+    def __str__(self) -> str:
+        return self.reason
 
 
 def redact_db_error(detail: object) -> str:
@@ -113,7 +138,29 @@ def run_gate(
     EXPLAIN sees only post-enforce SQL. ``source_sql`` is the pre-enforce
     candidate so ``execute_sql`` can enforce once. A ManifestError fails the
     candidate without EXPLAIN.
+
+    The candidate and a failure's violations are noted on the request's
+    attempt record (:mod:`CortexOS.sql_attempts`) for the response boundary.
     """
+    from CortexOS.sql_attempts import note_error, note_sql
+
+    note_sql(sql)
+    result = _run_gate(sql, semantic, con=con, verified=verified)
+    if not result.passed:
+        for violation in result.violations:
+            note_error(violation)
+        if result.explain_error:
+            note_error(result.explain_error)
+    return result
+
+
+def _run_gate(
+    sql: str,
+    semantic: dict[str, Any],
+    *,
+    con: Any | None = None,
+    verified: VerifiedManifest | None = None,
+) -> ValidateGateResult:
     guard = validate_sql(sql, semantic)
     if not guard.passed or not guard.safe_sql:
         return ValidateGateResult(
