@@ -462,6 +462,112 @@ def test_reconfirm_answer_keeps_cortex_wording_when_a_template_word_is_withheld(
     _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
 
 
+# -- PICK-READING-01: the statements of offered readings ---------------------------
+
+
+def _split_after_invented(fake, monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    """A refused attempt names an invented column, then three readings disagree."""
+    from CortexOS.dms import plan_sql_vote
+    from CortexOS.plan_sql import readings as plan_readings
+    from tests.test_plan_sql.test_plan_sql_vote import KG_SQL, SKU_SQL
+
+    monkeypatch.setenv(plan_sql_vote.ENABLED_ENV, "1")
+    monkeypatch.setenv(plan_readings.READINGS_ENV, "1")
+    plan_readings.reset_for_tests()
+    configured = "openai/gpt-oss-20b"
+    _stronger_route(fake, configured, monkeypatch)
+    _reply(fake, bad)
+    _reply(fake, GOOD_SQL)
+    _reply(fake, SKU_SQL)
+    _reply(fake, KG_SQL, model=configured)
+    _reply(
+        fake,
+        "WHY: the count is unclear\nCLOSEST: how many transactions of each txn_type",
+        model=configured,
+    )
+
+
+def _held_readings(body: dict[str, Any]) -> list[Any]:
+    from CortexOS.plan_sql import readings as plan_readings
+
+    return [plan_readings.store().get(r["reading_id"]) for r in body["reconfirm"]["readings"]]
+
+
+def test_reading_statements_withhold_invented_names(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A statement naming an invented column is scrubbed like any free text, and the
+    reconfirm answer is rendered again from the scrubbed statements."""
+    from cortex_contract.answer import PlanSqlReading
+
+    from CortexOS.plan_sql import describe
+
+    _split_after_invented(armed_openvault, monkeypatch, f"SELECT {GHOST} FROM transactions")
+    counter = iter(range(1, 10))
+    monkeypatch.setattr(
+        describe,
+        "statement",
+        lambda sql, *, keep_literal: f"Returns {GHOST} reading {next(counter)}",
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    body = _json(_ask(dms_http))
+
+    _assert_no_invented(body)
+    readings = body["reconfirm"]["readings"]
+    assert [r["statement"] for r in readings] == [
+        f"Returns [name withheld] reading {i}" for i in (1, 2, 3)
+    ]
+    held = _held_readings(body)
+    assert [r["reading_id"] for r in readings] == [h.reading_id for h in held]
+    assert [r["row_count"] for r in readings] == [h.row_count for h in held]
+    for reading in readings:
+        PlanSqlReading.model_validate(reading)
+    assert body["answer"] == plan_sql_ask.reconfirm_answer(
+        body["reconfirm"]["why"],
+        body["reconfirm"]["closest_question"],
+        [(r["statement"], r["row_count"]) for r in readings],
+    )
+    assert body["rows"] in ([], None) and body["sql_used"] is None
+    _assert_rung(body, plan_sql_ask.RUNG_RECONFIRM)
+
+
+def test_a_scrubbed_statement_still_fits_the_published_length(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``[name withheld]`` is longer than a one-character name: a statement full of
+    them is capped again, so the wire never breaks the published maxLength 320."""
+    from cortex_contract.answer import PlanSqlReading
+
+    from CortexOS.plan_sql import describe
+
+    _split_after_invented(armed_openvault, monkeypatch, "SELECT q FROM transactions")
+    counter = iter(range(1, 10))
+    monkeypatch.setattr(
+        describe,
+        "statement",
+        lambda sql, *, keep_literal: f"r{next(counter)} " + " ".join(["q"] * 148),
+    )
+    dms_http.bind_session(SESSION, GRANT)
+
+    resp = _ask(dms_http)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    readings = body["reconfirm"]["readings"]
+    assert len(readings) == 3
+    for i, reading in enumerate(readings, 1):
+        assert len(reading["statement"]) <= 320
+        assert reading["statement"].startswith(f"r{i} [name withheld]")
+        assert reading["statement"].endswith(describe.SHORTENED)
+        PlanSqlReading.model_validate(reading)
+    assert body["answer"] == plan_sql_ask.reconfirm_answer(
+        body["reconfirm"]["why"],
+        body["reconfirm"]["closest_question"],
+        [(r["statement"], r["row_count"]) for r in readings],
+    )
+
+
 # -- every form a name can take in model SQL --------------------------------------
 #
 # The review of 13fa80f found invented names that the scrub did not collect

@@ -71,6 +71,19 @@ the contract ask ignores ``schema_context`` past its declared type and probes
 no value: the answer is the one the same ask gets without that field. It
 stays off until DMS sends ``masked: false`` (dms#456).
 
+``CORTEX_PLAN_SQL_READINGS`` (default off, needs the vote on; contract 1.10.0,
+founder ruling 2026-10-29 on split readings): a split's reconfirm may offer up
+to three of the disagreeing readings (``reconfirm.readings``), each a
+statement Cortex writes from the gated SQL with every literal and comment
+removed (``plan_sql.describe``) and a row count, never a value. Only readings
+whose step passed the FreeRoute check in this ask are held
+(``plan_sql.readings``), without rows. ``AskRequest.plan_sql_reading_id``
+picks one: the held model text runs again through extract, the SQL gate under
+the current grant, the payload scope, lineage, literal grounding, the
+manifest-enforcing execute and the empty and implausible checks, with no
+model call and no sampling. A pick that no longer runs reconfirms; it is never
+served unless every gate passes. Every 200 response to a pick echoes the id.
+
 Direct abstain is only an ungranted table or destructive SQL (and a grant or
 route-stamp failure, which never reaches a model result). PII wording in a
 question is not an abstain case and this path does not mask answer rows. What
@@ -88,8 +101,9 @@ import hashlib
 import logging
 import os
 import re
+import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
@@ -100,7 +114,9 @@ from CortexOS.dms import plan_sql_vote
 from CortexOS.identifier_fold import fold_identifier
 from CortexOS.integrations import freeroute
 from CortexOS.plan_sql import catalog as plan_catalog
+from CortexOS.plan_sql import describe as plan_describe
 from CortexOS.plan_sql import payload as plan_payload
+from CortexOS.plan_sql import readings as plan_readings
 from CortexOS.plan_sql.generator import (
     FreeRoutePlanSqlGenerator,
     ModelStep,
@@ -177,6 +193,25 @@ _NO_PLAN = ModelStep("plan", True, "", "", StepStamp.cortex("plan", "cortex:plan
 # A SQL that ran with rows: the model step that wrote it, the gated SQL, the rows.
 _Reading = tuple[ModelStep, str, list[dict[str, Any]]]
 
+# PICK-READING-01: a pick replays a held reading; no model plans it.
+RUNG_PICK_PLAN = ModelStep(
+    "plan", True, "", "", StepStamp.cortex("plan", "cortex:plan-sql-pick", "held reading; no model call")
+)
+READING_UNAVAILABLE = "plan_sql_reading_unavailable"
+READING_UNAVAILABLE_MESSAGE = (
+    "picking a reading is not available on this engine; ask the question again"
+)
+
+
+class ReadingUnbound(Exception):
+    """A pick names no reading this ask may run. One message, whatever failed."""
+
+    code = "plan_sql_reading_unbound"
+
+    def __init__(self) -> None:
+        super().__init__("this reading is no longer available; ask the question again")
+
+
 CAVEAT = (
     "Plan and SQL are model-generated through OpenVault FreeRoute; the SQL passed "
     "the Cortex SQL gate and ran under this session's grant. Not validated for accuracy."
@@ -190,6 +225,26 @@ def plan_sql_enabled() -> bool:
 def granted_catalog_enabled() -> bool:
     """``CORTEX_GRANTED_CATALOG``: schema_context on the ask, and value sampling. Default off."""
     return (os.environ.get(CATALOG_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def readings_on() -> bool:
+    """Split readings are offered and picks accepted: plan+SQL, vote and readings all on."""
+    return (
+        plan_sql_enabled()
+        and plan_sql_vote.vote_enabled()
+        and plan_readings.readings_enabled()
+    )
+
+
+def _display_literal(question: str) -> Callable[[str], bool]:
+    """Which literals of the gated SQL a statement may print. Display only.
+
+    Default (no founder ruling on question-named filter literals): none. The
+    statement then shows no literal but the LIMIT row cap. This never writes,
+    picks, gates or routes SQL, and never changes what a pick runs.
+    """
+    del question
+    return lambda _text: False
 
 
 def _openvault_routed(generator: object) -> bool:
@@ -215,7 +270,8 @@ def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
     if body.dms_payload is None or not plan_sql_enabled():
         return None
     schema_context = body.schema_context if granted_catalog_enabled() else None
-    return plan_sql_answer(
+    reading_id = body.plan_sql_reading_id
+    env = plan_sql_answer(
         plan_payload.PlanSqlRequest(
             body.question, body.dms_payload, schema_context=schema_context
         ),
@@ -224,7 +280,13 @@ def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
         verified=verified,
         scored_pack_id=body.scored_pack_id,
         confirm=body.plan_sql_confirm,
+        reading_id=reading_id,
     )
+    if reading_id is not None:
+        # Contract 1.10.0: every 200 response to a pick carries the id it ran,
+        # served, re-gated into a reconfirm, or abstained. Absent otherwise.
+        env["plan_sql_reading_id"] = reading_id
+    return env
 
 
 # -- guards (module level so the guard-removed proofs can switch one off) -------
@@ -233,6 +295,27 @@ def try_plan_sql(body: AskRequest, *, verified: Any) -> dict[str, Any] | None:
 def _journaled(step: ModelStep, journal: list[freeroute.RouteStamp]) -> bool:
     """True only for a stamp FreeRoute itself appended during this ask."""
     return step.route is not None and any(step.route is seen for seen in journal)
+
+
+def _reading_bound(
+    held: plan_readings.HeldReading,
+    *,
+    session_id: str | None,
+    space_id: str | None,
+    manifest_hash: str,
+    request_digest: str,
+    scored_pack_id: str | None,
+    now: float,
+) -> bool:
+    """True only for a hold made for this session, Space, manifest, request and pack, unexpired."""
+    return (
+        held.session_id == session_id
+        and held.space_id == space_id
+        and held.manifest_hash == manifest_hash
+        and held.request_digest == request_digest
+        and held.scored_pack_id == scored_pack_id
+        and now < held.expires_at
+    )
 
 
 def _gate(sql: str, grant: Any) -> Any:
@@ -449,12 +532,25 @@ def _pipeline_failure_ticket(
     )
 
 
-def reconfirm_answer(why: str, closest: str) -> str:
-    """The answer text of a reconfirm envelope."""
-    return (
+def reconfirm_answer(
+    why: str, closest: str, readings: Sequence[tuple[str, int]] = ()
+) -> str:
+    """The answer text of a reconfirm envelope.
+
+    With no readings the text is the 1.9 text byte for byte. With readings,
+    each statement and its row count follow; never a value.
+    """
+    text = (
         f"Reconfirm: {why} Closest question: {closest} "
         f"Yes runs that question. No answers '{NOT_FOUND_ANSWER}'."
     )
+    if not readings:
+        return text
+    offered = " ".join(
+        f"({i}) {statement}, {count} {'row' if count == 1 else 'rows'}."
+        for i, (statement, count) in enumerate(readings, 1)
+    )
+    return f"{text} Or pick a reading: {offered} Picking one runs it again under your grant."
 
 
 def _reconfirm_envelope(
@@ -465,9 +561,15 @@ def _reconfirm_envelope(
     closest: str,
     stamp: StepStamp | None,
     rung: str,
+    readings: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
-    answer = reconfirm_answer(why, closest)
+    answer = reconfirm_answer(
+        why, closest, [(item["statement"], item["row_count"]) for item in readings]
+    )
     call = stamp.served_call_id if stamp is not None else ""
+    reconfirm: dict[str, Any] = {"why": why, "closest_question": closest}
+    if readings:
+        reconfirm["readings"] = [dict(item) for item in readings]
     return {
         "answer": answer,
         "sql_used": None,
@@ -478,7 +580,7 @@ def _reconfirm_envelope(
         "row_count": 0,
         "rows": [],
         "assumptions": [why, *(s.line() for s in steps), f"rung: {rung}"],
-        "reconfirm": {"why": why, "closest_question": closest},
+        "reconfirm": reconfirm,
         "plan_sql_rung": rung,
         "provenance": {
             "layer": RECONFIRM,
@@ -531,6 +633,12 @@ def _success(
         },
         **_served(sql_step.stamp, ""),
     }
+
+
+def _picked(env: dict[str, Any], held: plan_readings.HeldReading) -> dict[str, Any]:
+    """A served pick says which reading the user chose, first among its assumptions."""
+    env["assumptions"] = [f"reading: {held.statement}", *env["assumptions"]]
+    return env
 
 
 def _model_refusal(step: ModelStep, journal: list[freeroute.RouteStamp]) -> tuple[str, str, bool]:
@@ -882,11 +990,27 @@ def plan_sql_answer(
     scored_pack_id: str | None = None,
     generator: PlanSqlGenerator | None = None,
     confirm: str | None = None,
+    reading_id: str | None = None,
 ) -> dict[str, Any]:
-    """Plan, then SQL, with grounded retries. Never widens past the signed grant."""
+    """Plan, then SQL, with grounded retries. Never widens past the signed grant.
+
+    ``reading_id`` (contract 1.10.0) re-runs one held reading of an earlier
+    split through every gate, with no model call; :class:`ReadingUnbound` when
+    no reading with that id was held for this session, Space, manifest,
+    request and scored pack, or it expired.
+    """
     from CortexOS.dms.answer_engine import UngroundedSession, resolve_product_grant
 
     question = request.question
+    offering = readings_on()
+    # The request a hold is bound to, taken before any narrowing.
+    digest = (
+        plan_readings.request_digest(
+            request.question, request.payload.model_dump(mode="json"), request.schema_context
+        )
+        if offering or reading_id is not None
+        else ""
+    )
     audit_id = str(uuid.uuid4())
     steps: list[StepStamp] = []
     failed_models: set[str] = set()
@@ -898,6 +1022,9 @@ def plan_sql_answer(
     # payload.prompt_sha256 of every first-reading SQL prompt this ask sent.
     # The vote's second reading is never one of these prompts.
     first_prompts: set[str] = set()
+    # PICK-READING-01: each reading of a split vote with the rung of the model
+    # that wrote it. Set only when the vote splits.
+    split_readings: list[tuple[_Reading, str]] = []
 
     def _note_call(active: object, bucket: str) -> None:
         # A route refusal does not call complete(). Every other generator
@@ -967,11 +1094,35 @@ def plan_sql_answer(
         )
         return _with_calls(_not_found(audit_id, steps))
 
+    held: plan_readings.HeldReading | None = None
+    if reading_id is not None:
+        from CortexOS.execution.drillthrough import manifest_content_hash
+
+        held = plan_readings.store().get(reading_id)
+        if held is None or not _reading_bound(
+            held,
+            session_id=session_id,
+            space_id=verified.manifest.space_id,
+            manifest_hash=manifest_content_hash(verified.manifest),
+            request_digest=digest,
+            scored_pack_id=scored_pack_id,
+            now=time.time(),
+        ):
+            raise ReadingUnbound()
+        steps.append(
+            StepStamp.cortex(
+                "pick", "cortex:plan-sql-pick", f"reading {held.index} of {held.of}"
+            )
+        )
+
     gen = generator or default_generator()
     # A sampled value goes only to OpenVault FreeRoute. Any other generator
     # gets the names and types and no probe runs for it.
     sampled: dict[str, dict[str, tuple[str, ...]]] = {}
-    if granted_catalog_enabled() and not _openvault_routed(gen):
+    if held is not None:
+        # A pick re-runs held SQL: no model is prompted, so nothing is sampled.
+        sample_reason = "skipped: a pick re-runs held SQL"
+    elif granted_catalog_enabled() and not _openvault_routed(gen):
         sample_reason = SAMPLE_NOT_OPENVAULT
     else:
         sampled, sample_reason = _sample_values(grant, request)
@@ -1034,10 +1185,12 @@ def plan_sql_answer(
         priors: list[str],
         rung: str,
         collect: list[_Reading] | None = None,
+        held: plan_readings.HeldReading | None = None,
     ) -> dict[str, Any] | None:
         """A final envelope, or None when ``priors`` gained a retryable error.
 
         With ``collect``, SQL that ran with rows is appended there instead of served.
+        With ``held`` (a pick), SQL that ran with rows is served as that reading.
         """
         from CortexOS.dms.sql_extract import extract_statement
 
@@ -1117,7 +1270,7 @@ def plan_sql_answer(
             return None
         steps.append(StepStamp.cortex("gate", "cortex:sql-gate", "passed run_gate under the grant"))
         freeroute.note_verdict(sql_step.route, "gate_pass")
-        return _execute(sql_step, plan, served_sql, priors, rung, collect)
+        return _execute(sql_step, plan, served_sql, priors, rung, collect, held)
 
     def _execute(
         sql_step: ModelStep,
@@ -1126,6 +1279,7 @@ def plan_sql_answer(
         priors: list[str],
         rung: str,
         collect: list[_Reading] | None = None,
+        held: plan_readings.HeldReading | None = None,
     ) -> dict[str, Any] | None:
         from CortexOS.dms.sql_validate_gate import (
             LakeValueDomainStale,
@@ -1208,6 +1362,29 @@ def plan_sql_answer(
         if collect is not None:
             collect.append((sql_step, served_sql, rows))
             return None
+        if held is not None:
+            # The user chose this reading between disagreeing ones: served, but
+            # never as confirmed by a second reading.
+            _note_vote(
+                f"{plan_sql_vote.VOTE_SPLIT}: picked reading {held.index} of {held.of}; "
+                "not confirmed by a second reading"
+            )
+            _mark_rung(steps, held.rung)
+            return _with_calls(
+                _picked(
+                    _success(
+                        question,
+                        audit_id,
+                        steps,
+                        plan=RUNG_PICK_PLAN,
+                        sql_step=sql_step,
+                        rows=rows,
+                        served_sql=served_sql,
+                        rung=held.rung,
+                    ),
+                    held,
+                )
+            )
         if vote_on:
             picked = _vote((sql_step, served_sql, rows), rung)
             if picked is None or isinstance(picked, dict):
@@ -1261,6 +1438,7 @@ def plan_sql_answer(
         attempts: int = 1,
         *,
         first: ModelStep | None = None,
+        written: list[int] | None = None,
     ) -> _Reading | dict[str, Any] | None:
         """One more SQL in the second reading's framing, gated and run like the first.
 
@@ -1274,6 +1452,9 @@ def plan_sql_answer(
         its prompt differs from every first-reading prompt this ask sent, and a
         write whose sent prompt hash is not shown to differ is not counted.
         Either way the reading is skipped (None) and a vote line says why.
+
+        ``written`` receives the attempt index of the write that gave the
+        reading (0 for the first write, N for error-fed rewrite N).
         """
         priors: list[str] = []
         for n in range(attempts):
@@ -1312,6 +1493,8 @@ def plan_sql_answer(
             got: list[_Reading] = []
             _use_sql(step, _NO_PLAN, priors, rung, collect=got)
             if got:
+                if written is not None:
+                    written.append(n)
                 return got[0]
         return None
 
@@ -1323,7 +1506,8 @@ def plan_sql_answer(
         prompt differs from the first's. When it would not, or that cannot be
         shown, it is skipped and only the stronger route's reading can agree.
         """
-        second = _check(gen, rung, rung, SQL_ATTEMPTS, first=first[0])
+        second_write: list[int] = []
+        second = _check(gen, rung, rung, SQL_ATTEMPTS, first=first[0], written=second_write)
         if isinstance(second, dict):
             return second
         if second is not None and plan_sql_vote.agree(first[2], second[2]):
@@ -1342,10 +1526,118 @@ def plan_sql_answer(
         _note_vote(detail)
         failures.append(detail)
         vote_split.append(rung)
+        # Each reading with the rung of the model that wrote it. The second is
+        # always written by the first model, whichever round ran the vote.
+        second_rung = (
+            RUNG_PLAN if not second_write or second_write[0] == 0 else rung_retry(second_write[0])
+        )
+        split_readings[:] = [
+            (reading, writer)
+            for reading, writer in ((first, rung), (second, second_rung), (third, RUNG_STRONG))
+            if reading is not None
+        ]
         return None
+
+    def _note_readings(reason: str) -> None:
+        steps.append(StepStamp.cortex("readings", "cortex:plan-sql-readings", reason))
+
+    def _offer() -> list[dict[str, Any]]:
+        """The readings a split reconfirm offers, held for a pick. ``[]`` offers none.
+
+        Any failure offers none and stamps why; the reconfirm is still returned.
+        """
+        if not offering or len(split_readings) < plan_readings.MIN_READINGS:
+            return []
+        chosen = split_readings[: plan_readings.MAX_READINGS]
+        # Only a reading whose step passed the FreeRoute check in this ask is held.
+        for (step, _sql, _rows), _writer in chosen:
+            if _security_stop(step, journal) is not None or _not_served(step) or not step.ok:
+                _note_readings("offered=0 reason=provenance")
+                return []
+        try:
+            keep = _display_literal(question)
+            statements = [
+                plan_describe.statement(sql, keep_literal=keep) for (_s, sql, _r), _w in chosen
+            ]
+        except Exception as exc:  # noqa: BLE001 - nothing offered is safe; a 500 is not
+            _note_readings(f"offered=0 reason=describe-failed ({type(exc).__name__})")
+            return []
+        if len(set(statements)) != len(statements):
+            _note_readings("offered=0 reason=statement-collision")
+            return []
+        from CortexOS.execution.drillthrough import manifest_content_hash
+
+        offers: list[dict[str, Any]] = []
+        try:
+            manifest_hash = manifest_content_hash(verified.manifest)
+            expires = plan_readings.expiry(verified.manifest.expires_at)
+            for index, (((step, sql, rows), writer), text) in enumerate(
+                zip(chosen, statements, strict=True), 1
+            ):
+                held_reading = plan_readings.HeldReading(
+                    reading_id=plan_readings.new_reading_id(),
+                    model_text=step.text,
+                    served_sql=sql,
+                    statement=text,
+                    row_count=len(rows),
+                    rung=writer,
+                    stamp=step.stamp,
+                    index=index,
+                    of=len(chosen),
+                    session_id=str(session_id),
+                    space_id=verified.manifest.space_id,
+                    manifest_hash=manifest_hash,
+                    request_digest=digest,
+                    scored_pack_id=scored_pack_id,
+                    expires_at=expires,
+                )
+                plan_readings.store().hold(held_reading)
+                offers.append(
+                    {
+                        "reading_id": held_reading.reading_id,
+                        "statement": text,
+                        "row_count": len(rows),
+                        "expires_at": held_reading.expires_iso(),
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 - nothing offered is safe; a 500 is not
+            _note_readings(f"offered=0 reason=hold-failed ({type(exc).__name__})")
+            return []
+        _note_readings(f"offered={len(offers)}")
+        return offers
+
+    def _pick(held_reading: plan_readings.HeldReading) -> dict[str, Any]:
+        """Re-run a held reading through every gate. Never a model call.
+
+        Served only when every gate passes and it returns rows. A direct
+        abstain only for destructive SQL, an ungranted table or a stale lake.
+        Anything else reconfirms with no readings.
+
+        No FreeRoute re-check here: no model is called in this ask, and the
+        reading's provenance was checked in the offering ask, when written and
+        again before it was held; the hold is bound to that ask.
+        """
+        held_step = ModelStep("sql", True, held_reading.model_text, "", held_reading.stamp, None)
+        outcome = _use_sql(held_step, RUNG_PICK_PLAN, [], held_reading.rung, held=held_reading)
+        if outcome is not None:
+            return outcome
+        why, closest = _parse_reconfirm("", failures, request)
+        _mark_rung(steps, RUNG_RECONFIRM)
+        return _with_calls(
+            _reconfirm_envelope(
+                audit_id,
+                steps,
+                why=why,
+                closest=closest,
+                stamp=None,
+                rung=RUNG_RECONFIRM,
+            )
+        )
 
     split = freeroute.SPLIT_BENCHMARK if _is_scored_round(scored_pack_id) else None
     with freeroute.journal(split=split) as journal, _stop_on_strict(steps):
+        if held is not None:
+            return _pick(held)
         answered = _round(
             gen,
             SQL_ATTEMPTS,
@@ -1374,6 +1666,7 @@ def plan_sql_answer(
         if policy:
             why, closest = _parse_reconfirm("", failures, request)
             served = _last_served_stamp(steps)
+            offered = _offer()
             _mark_rung(steps, RUNG_RECONFIRM)
             return _with_calls(
                 _reconfirm_envelope(
@@ -1383,6 +1676,7 @@ def plan_sql_answer(
                     closest=closest,
                     stamp=served,
                     rung=RUNG_RECONFIRM,
+                    readings=offered,
                 )
             )
         rec = strong.reconfirm(request, tuple(failures)[:8])
@@ -1398,6 +1692,7 @@ def plan_sql_answer(
         why, closest = _parse_reconfirm(
             rec.text if rec.ok and not missed else "", failures, request
         )
+        offered = _offer()
         _mark_rung(steps, RUNG_RECONFIRM)
         return _with_calls(
             _reconfirm_envelope(
@@ -1407,6 +1702,7 @@ def plan_sql_answer(
                 closest=closest,
                 stamp=rec.stamp if rec.ok else None,
                 rung=RUNG_RECONFIRM,
+                readings=offered,
             )
         )
 
@@ -1423,12 +1719,15 @@ __all__ = [
     "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
     "PIPELINE_FAILURE_EVENT",
+    "READING_UNAVAILABLE",
     "RECONFIRM",
+    "RUNG_PICK_PLAN",
     "RUNG_PLAN",
     "RUNG_RECONFIRM",
     "RUNG_STRONG",
     "SQL_ATTEMPTS",
     "TICKET_ACTOR",
+    "ReadingUnbound",
     "model_calls_stamp",
     "reconfirm_answer",
     "rung_retry",
@@ -1437,5 +1736,6 @@ __all__ = [
     "granted_catalog_enabled",
     "plan_sql_answer",
     "plan_sql_enabled",
+    "readings_on",
     "try_plan_sql",
 ]

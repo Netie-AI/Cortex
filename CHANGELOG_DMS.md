@@ -2,6 +2,54 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## PICK-READING-01 (contract 1.10.0) -- 2026-10-30
+
+Founder ruling 2026-10-29 (CLAUDE.md section 9, split readings). With
+``CORTEX_PLAN_SQL``, ``CORTEX_PLAN_SQL_VOTE`` and the new
+``CORTEX_PLAN_SQL_READINGS`` (default off) all on, a vote split's reconfirm
+offers up to three of the disagreeing readings in
+``reconfirm.readings``: ``{reading_id, statement, row_count, expires_at}``.
+The statement is written by Cortex (``CortexOS/plan_sql/describe.py``) from
+the gated SQL's syntax tree after every SQL comment is stripped and every
+literal is replaced with ``<a value>``; the only literal it shows is the LIMIT
+row cap. No value, preview, column list, SQL, rung or model is on the wire.
+Yes and No keep their meaning. ``AskRequest.plan_sql_reading_id`` is the
+pick: it re-runs the held reading's SQL through every gate under the current
+session grant, with no model call, and every 200 response to a pick echoes
+the id in ``Answer.plan_sql_reading_id``. Flags off, or no split, the
+response bytes are unchanged.
+
+DMS steps before any customer flag-on (not needed to merge the engine side):
+
+1. Vendor ``contract/openapi-1.10.0.json`` and its ``.sha256``, regenerate the
+   client, pin ``cortex-contract>=1.10,<2``, and sort specs by version
+   (``1.10`` sorts before ``1.2`` as text).
+2. client.py: also drop ``plan_sql_reading_id`` when it is None.
+3. ``apply_reconfirm``: copy readings into the reconfirm block as
+   ``{index, statement, row_count}`` only. Keep ``reading_id``, the question,
+   payload, schema_context and session on the server-side pending entry, never
+   in the browser.
+4. ``ConfirmBody.reading: int | None`` (1-3).
+5. ``/ask/confirm`` and ``confirm_reconfirm``: re-ask with the same question,
+   payload, schema_context, session and Space plus ``plan_sql_reading_id``,
+   and no ``plan_sql_confirm``. On every 200, a missing echo or a different id
+   is engine skew: do not show the answer. With the echo, a served answer is
+   the pick; a reconfirm or abstain carrying the echo is shown as a fresh
+   reconfirm or abstain, never as the pick. A 409
+   ``plan_sql_reading_unbound`` or ``plan_sql_reading_unavailable`` says the
+   reading expired and offers a new ask with its own badge.
+6. "None of these" is the existing No path (``decline_envelope`` plus
+   ``record_decline``).
+7. Badge: a served answer carrying the echo maps to ``L2_ANOMALOUS`` with the
+   label "you chose this reading; not confirmed by a second reading", never
+   ``L2_VALIDATED``.
+8. DMS CI gates on ``POST /v1/chat/ask`` and ``/v1/chat/ask/confirm`` with
+   ``assert_envelope_valid``, including Cortex test 1b's CASE-label split: the
+   offer envelope is abstained with empty values, sources and token, each
+   block item is exactly ``{index, statement, row_count}``, and no reading's
+   result value appears anywhere; a pick's values equal the Cortex rows under
+   ``L2_ANOMALOUS`` with ``audit_id`` and ``drillthrough_token``.
+
 ## GEN-GRANTED-CATALOG-01 (#386) -- 2026-10-17
 
 Contract 1.9.0 (renumbered from 1.7.0 by the founder's 2026-10-18 ruling:
