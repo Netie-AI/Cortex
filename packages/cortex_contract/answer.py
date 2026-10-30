@@ -3,7 +3,14 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
@@ -74,17 +81,75 @@ class AskPayloadJoin(BaseModel):
     relation: str | None = None
 
 
+class PlanSqlReading(BaseModel):
+    """1.10.0: one reading a split reconfirm offers. No values, no SQL, no rows.
+
+    When two SQL readings of the question disagree, the reconfirm may offer up
+    to three of them. Send ``AskRequest.plan_sql_reading_id`` = ``reading_id``
+    (with the same question, ``dms_payload``, ``schema_context``, session and
+    Space) to run that reading again through every gate under the session
+    grant.
+    """
+
+    reading_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="1.10.0 opaque id the engine holds; read only by exact id.",
+    )
+    statement: str = Field(
+        min_length=1,
+        max_length=320,
+        description=(
+            "1.10.0 plain-language description Cortex wrote from the gated SQL's "
+            "syntax tree after replacing every literal in it with '<a value>'. It "
+            "contains no returned value and no SQL comment; the only literal it "
+            "shows is the LIMIT row cap. The bound holds after the response scrub."
+        ),
+    )
+    row_count: int = Field(
+        ge=1,
+        description="1.10.0 rows this reading returned in the offering ask, after its LIMIT.",
+    )
+    expires_at: str = Field(
+        description=(
+            "1.10.0 ISO-8601 UTC. The hold lives at most 600 s and never past the "
+            "session manifest's expiry. A pick after it is HTTP 409 "
+            "plan_sql_reading_unbound."
+        ),
+    )
+
+
 class PlanSqlReconfirm(BaseModel):
     """1.5.0: why the plan+SQL loop would abstain, and the closest question it can run.
 
     Present only when the loop could not ground an answer. Yes
     (``AskRequest.plan_sql_confirm`` = ``yes``, with ``question`` set to
-    ``closest_question``) runs that question. No answers
-    ``not found in the database``. Older clients ignore the object.
+    ``closest_question``) runs closest_question, No answers not found in the
+    database, or send ``AskRequest.plan_sql_reading_id`` to run one reading
+    (1.10.0). Older clients ignore the object.
     """
 
     why: str = Field(min_length=1)
     closest_question: str = Field(min_length=1)
+    # 1.10.0: the disagreeing readings a split offers. Omitted when empty, so a
+    # reconfirm without readings serializes exactly as on 1.9.
+    readings: list[PlanSqlReading] = Field(
+        default_factory=list,
+        max_length=3,
+        description=(
+            "1.10.0 up to three disagreeing readings of the question, each a "
+            "description with a row count and no values. Present only when the "
+            "engine's readings switch is on and the vote split; omitted when empty."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_readings(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
+        # No return annotation: the JSON schema stays the model's own.
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("readings"):
+            data.pop("readings", None)
+        return data
 
 
 class AskPayload(BaseModel):
@@ -172,6 +237,42 @@ class AskRequest(BaseModel):
             "UTF-8 bytes."
         ),
     )
+    # 1.10.0: pick one reading a split reconfirm offered. Needs dms_payload and
+    # cannot be sent with plan_sql_confirm (422).
+    plan_sql_reading_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description=(
+            "1.10.0 a PlanSqlReading.reading_id from a prior reconfirm. Send it "
+            "with the same question, dms_payload, schema_context, session and "
+            "Space as the ask that offered it, and without plan_sql_confirm. The "
+            "engine re-runs that reading's SQL through every gate under the "
+            "current session grant, with no model call. Without dms_payload, or "
+            "together with plan_sql_confirm, it is HTTP 422. An id the engine does "
+            "not hold for this session, Space, manifest, request and scored pack, "
+            "or one past its expiry, is HTTP 409 plan_sql_reading_unbound; an "
+            "engine with readings switched off answers HTTP 409 "
+            "plan_sql_reading_unavailable. Through 1.9 this key was ignored: check "
+            "Answer.plan_sql_reading_id."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _reading_is_a_pick(self) -> AskRequest:
+        if self.plan_sql_reading_id is None:
+            return self
+        if self.dms_payload is None:
+            raise PydanticCustomError(
+                "reading_needs_payload",
+                "plan_sql_reading_id needs dms_payload",
+            )
+        if self.plan_sql_confirm is not None:
+            raise PydanticCustomError(
+                "reading_excludes_confirm",
+                "plan_sql_reading_id cannot be sent with plan_sql_confirm",
+            )
+        return self
 
 
 class MemoryRead(BaseModel):
@@ -246,6 +347,34 @@ class Answer(BaseModel):
             "ignore it."
         ),
     )
+    # 1.10.0: echo of AskRequest.plan_sql_reading_id. Omitted when null.
+    plan_sql_reading_id: str | None = Field(
+        default=None,
+        description=(
+            "1.10.0 the plan_sql_reading_id this ask sent, on every 200 response "
+            "to a pick: a served answer, a reconfirm the pick re-gated into, or a "
+            "direct abstain. Omitted on every other answer. A served pick "
+            "(sql_used set) is an answer the user chose between disagreeing "
+            "readings: a second reading did not confirm it, and it must not be "
+            "presented as validated. On it plan_sql_rung is the rung whose model "
+            "wrote the reading in the offering ask, served_* name that model, "
+            "provenance.query_source carries that earlier call id, and "
+            "model_calls is null. A reconfirm or abstain carrying the echo is "
+            "presented as what it is, never as the pick. A 200 to a pick without "
+            "this echo, or with another id, came from an engine that ignored the "
+            "field."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_optional(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
+        # No return annotation: the JSON schema stays the model's own. A null
+        # echo is omitted, so an answer to an ask without a pick serializes
+        # exactly as on 1.9.
+        data = handler(self)
+        if isinstance(data, dict) and data.get("plan_sql_reading_id") is None:
+            data.pop("plan_sql_reading_id", None)
+        return data
 
 
 class DrillthroughRequest(BaseModel):

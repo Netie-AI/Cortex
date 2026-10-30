@@ -140,7 +140,7 @@ supported:
 
   - version: "1.9"
     spec: openapi-1.9.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive GEN-GRANTED-CATALOG-01 (#386). Numbered 1.9 by the founder's
@@ -175,6 +175,55 @@ supported:
       so their plan+SQL asks get no sampled values. 1.7 clients omit
       schema_context and get the 1.7 prompt schema.
       canonical_manifest_bytes unchanged.
+
+  - version: "1.10"
+    spec: openapi-1.10.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive PICK-READING-01 (founder ruling 2026-10-29, CLAUDE.md section
+      9: split readings). Numbered 1.10 after 1.9 (#386); 1.8 stays reserved
+      for #321, so this step is checked additive against 1.9. Sort specs by
+      version, not lexically: "1.10" sorts before "1.2" as text.
+      PlanSqlReconfirm gains optional readings (at most 3 PlanSqlReading
+      items: reading_id, statement, row_count, expires_at), omitted when
+      empty, so a reconfirm without readings serializes as on 1.9. Readings
+      are offered only with the engine's CORTEX_PLAN_SQL_READINGS switch on
+      (off by default) and only when two SQL readings of the question
+      disagree. A statement is written by Cortex from the gated SQL's syntax
+      tree after every literal in it is replaced with "<a value>" and every
+      SQL comment is stripped: it carries no returned value, and the only
+      literal it shows is the LIMIT row cap. No preview, columns, SQL, rung or
+      model is on the wire. statement maxLength 320 holds after the response
+      scrub.
+      AskRequest gains optional plan_sql_reading_id (1-64 characters): a pick.
+      Without dms_payload, or together with plan_sql_confirm, it is HTTP 422
+      (reading_needs_payload, reading_excludes_confirm), so Yes still runs the
+      closest question and No still answers not found in the database. A
+      pick runs the held reading's SQL again through every gate under the
+      current session grant (SQL gate, payload scope, lineage, literal
+      grounding, the manifest-enforcing execute, empty and implausible
+      checks) with no model call; it never reads per-Space memory. An id the
+      engine does not hold for this session, Space, manifest hash, request
+      (question, dms_payload, schema_context) and scored_pack_id, or past its
+      expiry, is HTTP 409 plan_sql_reading_unbound; with the switch off it is
+      HTTP 409 plan_sql_reading_unavailable.
+      Answer gains optional plan_sql_reading_id, omitted when null: the echo
+      of the id sent, on every 200 response to a pick (served, a reconfirm
+      the pick re-gated into, or a direct abstain). A served pick is an
+      answer the user chose between disagreeing readings, not confirmed by a
+      second reading, and must not be presented as validated; its
+      plan_sql_rung and served_* name the reading's writer in the offering
+      ask, provenance.query_source carries that call id, and model_calls is
+      null. A reconfirm or abstain with the echo is shown as what it is,
+      never as the pick. Through 1.9 an unknown plan_sql_reading_id key was
+      ignored, so a 1.10 consumer must check the echo: a 200 to a pick
+      without it, or with another id, came from an engine that ignored the
+      field.
+      Holds are not per-Space memory under the 1.4.0 rule: read only by exact
+      id, no rows, process-local, at most 600 s and never past the manifest
+      expiry, bound as above. 1.9 clients send no pick and get the 1.9
+      envelope byte for byte. canonical_manifest_bytes unchanged.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

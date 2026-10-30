@@ -19,6 +19,17 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 HTTP = "tests/test_plan_sql/test_c_loop_a_plan_sql.py"
+PICK = "tests/test_plan_sql/test_plan_sql_pick_reading.py"
+# PICK-READING-01: every binding case but an unknown id, which no guard can pass.
+_BOUND_CASES = (
+    "expired",
+    "other_payload",
+    "other_question",
+    "other_schema_context",
+    "other_scored_pack",
+    "other_session",
+    "rebound_manifest",
+)
 
 CASES = {
     "freeroute_only": (
@@ -29,11 +40,13 @@ CASES = {
         [
             f"{HTTP}::test_must_fail_gate_violating_sql_is_refused_not_executed",
             f"{HTTP}::test_must_fail_unknown_column_retries_and_does_not_execute_it",
+            f"{PICK}::test_must_fail_pick_regates_held_sql",
         ],
         [
             "test_must_fail_gate_violating_sql_is_refused_not_executed[file_read_function]",
             "test_must_fail_gate_violating_sql_is_refused_not_executed[table_outside_grant]",
             "test_must_fail_unknown_column_retries_and_does_not_execute_it",
+            "test_must_fail_pick_regates_held_sql",
         ],
     ),
     "payload_grant": (
@@ -45,8 +58,18 @@ CASES = {
         ],
     ),
     "payload_scope": (
-        [f"{HTTP}::test_must_fail_sql_outside_payload_is_refused_even_inside_grant"],
-        ["test_must_fail_sql_outside_payload_is_refused_even_inside_grant"],
+        [
+            f"{HTTP}::test_must_fail_sql_outside_payload_is_refused_even_inside_grant",
+            f"{PICK}::test_must_fail_pick_outside_payload_is_not_executed",
+        ],
+        [
+            "test_must_fail_sql_outside_payload_is_refused_even_inside_grant",
+            "test_must_fail_pick_outside_payload_is_not_executed",
+        ],
+    ),
+    "reading_binding": (
+        [f"{PICK}::test_must_fail_reading_binding"],
+        [f"test_must_fail_reading_binding[{case}]" for case in _BOUND_CASES],
     ),
 }
 
