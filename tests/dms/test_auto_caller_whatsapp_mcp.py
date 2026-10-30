@@ -28,7 +28,7 @@ def client(monkeypatch):
     reset_limiter(per_minute=120)
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    return TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
 
 def test_whatsapp_source_is_draft_not_a_sender():

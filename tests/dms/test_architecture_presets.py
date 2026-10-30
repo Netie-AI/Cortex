@@ -14,7 +14,7 @@ def engine_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PACK", "dms")
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    return TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
 
 def test_normalize_preset_defaults():

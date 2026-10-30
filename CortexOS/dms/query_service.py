@@ -997,7 +997,6 @@ def engine_failure_abstain(exc: BaseException) -> dict[str, Any]:
 
 
 def _answer_question_legacy(question: str, *, session_id: str | None = None) -> dict[str, Any]:
-    del session_id
     audit_id = str(uuid.uuid4())
     route = route_question(question)
     semantic = load_semantic_layer()
@@ -1021,6 +1020,10 @@ def _answer_question_legacy(question: str, *, session_id: str | None = None) -> 
 
     if route == "rag":
         answer, sources = rag_answer(question)
+        if not answer or not sources:
+            # CLAUDE.md section 9: a document miss falls through to the
+            # ladder. A blank, unbadged envelope is not an answer.
+            return answer_question(question, session_id=session_id)
         return {
             "answer": answer,
             "sql_used": None,

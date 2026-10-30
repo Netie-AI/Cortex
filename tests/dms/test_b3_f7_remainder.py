@@ -44,7 +44,7 @@ def test_brain_requires_api_key(monkeypatch):
     ok = client.post(
         "/dms/brain/chart",
         json={"query": "stock"},
-        headers={"X-API-Key": "dms-demo-viewer-key"},
+        headers={"X-API-Key": "pytest-viewer-key"},
     )
     assert ok.status_code == 200
 
@@ -62,5 +62,5 @@ def test_memory_requires_api_key(monkeypatch):
     assert client.get("/api/memory/stats").status_code == 401
     assert client.get(
         "/api/memory/stats",
-        headers={"X-API-Key": "dms-demo-viewer-key"},
+        headers={"X-API-Key": "pytest-viewer-key"},
     ).status_code == 200

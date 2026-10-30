@@ -159,6 +159,7 @@ ABSTAIN = Badge.ABSTAIN.value
 PIPELINE_FAILURE_EVENT = "plan_sql.pipeline_failure"
 TICKET_ACTOR = "cortex.plan_sql"
 DECLINED_REASON = "user declined the closest question"
+NO_CLOSEST_REASON = "no closest question could be confirmed answerable"
 
 # Same-model writes (the first, plus error-fed regenerations). The stronger
 # pass gets one write: the failures are already in its prompt.
@@ -558,13 +559,23 @@ def reconfirm_answer(
 ) -> str:
     """The answer text of a reconfirm envelope.
 
+    With no answerable closest question it says so: Yes has nothing to run.
     With no readings the text is the 1.9 text byte for byte. With readings,
     each statement and its row count follow; never a value.
     """
-    text = (
-        f"Reconfirm: {why} Closest question: {closest} "
-        f"Yes runs that question. No answers '{NOT_FOUND_ANSWER}'."
-    )
+    from CortexOS.dms.metric_choice import is_no_closest
+
+    if is_no_closest(closest):
+        text = (
+            f"Reconfirm: {why} Closest question: none. {closest} "
+            f"Yes runs that question, which has nothing to run and answers "
+            f"'{NOT_FOUND_ANSWER}'. No answers '{NOT_FOUND_ANSWER}'."
+        )
+    else:
+        text = (
+            f"Reconfirm: {why} Closest question: {closest} "
+            f"Yes runs that question. No answers '{NOT_FOUND_ANSWER}'."
+        )
     if not readings:
         return text
     offered = " ".join(
@@ -572,6 +583,31 @@ def reconfirm_answer(
         for i, (statement, count) in enumerate(readings, 1)
     )
     return f"{text} Or pick a reading: {offered} Picking one runs it again under your grant."
+
+
+def ticket_metric_decline(
+    result: dict[str, Any], body: AskRequest, *, accepted_none: bool
+) -> dict[str, Any]:
+    """Log the pipeline-failure ticket for a No on the engine's metric reconfirm.
+
+    ``result`` is the engine's envelope for ``body``. Only its not-found answer
+    (CLAUDE.md section 9: No answers not found and logs a ticket) gets one.
+    ``accepted_none`` is a Yes on a reconfirm that offered no closest question.
+    The ticket line is added to the assumptions; nothing else changes.
+    """
+    if result.get("answer") != NOT_FOUND_ANSWER or result.get("metric_choice") != "refused":
+        return result
+    stamp = _pipeline_failure_ticket(
+        body.question,
+        str(result.get("audit_id") or ""),
+        reason=NO_CLOSEST_REASON if accepted_none else DECLINED_REASON,
+        session_id=body.session_id,
+        space_id=body.space_id,
+        tables=(),
+    )
+    raw = result.get("assumptions")
+    lines = [raw] if isinstance(raw, str) and raw.strip() else list(raw or [])
+    return {**result, "assumptions": [*lines, stamp.line()]}
 
 
 def _reconfirm_envelope(
@@ -1739,6 +1775,7 @@ __all__ = [
     "IMPLAUSIBLE_RESULT",
     "LAYER",
     "LITERAL_UNGROUNDED",
+    "NO_CLOSEST_REASON",
     "NOT_FROM_TABLE",
     "NOT_FOUND_ANSWER",
     "PIPELINE_FAILURE_EVENT",
@@ -1753,6 +1790,7 @@ __all__ = [
     "ReadingUnbound",
     "model_calls_stamp",
     "reconfirm_answer",
+    "ticket_metric_decline",
     "rung_retry",
     "default_generator",
     "grant_closest_question",

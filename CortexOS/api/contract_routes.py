@@ -351,14 +351,19 @@ async def contract_ask(body: AskRequest) -> Answer:
             )
         )
         from CortexOS.dms.ask_scope import ask_scope
+        from CortexOS.dms.metric_choice import is_no_closest
 
+        # Yes on a reconfirm that offered no closest question has nothing to
+        # run. It is answered as a No: not found, and a ticket.
+        accepted_none = body.plan_sql_confirm == "yes" and is_no_closest(body.question)
+        ask = body.model_copy(update={"plan_sql_confirm": "no"}) if accepted_none else body
         # The signed Space and scored pack reach the legacy query_skill store
         # through this scope, not through answer_engine (QUERY-SKILL #340).
         with ask_scope(
             space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
         ):
             served = reused
-            if served is None and body.dms_payload is not None:
+            if served is None and ask.dms_payload is not None:
                 from CortexOS.dms.plan_sql_ask import try_plan_sql
 
                 # None unless CORTEX_PLAN_SQL=1 (C-LOOP-A #303). The prompt is
@@ -366,7 +371,7 @@ async def contract_ask(body: AskRequest) -> Answer:
                 # CORTEX_GRANTED_CATALOG is on.
                 # A strict pin refusal is not an answer and not a second model.
                 try:
-                    served = try_plan_sql(body, verified=verified)
+                    served = try_plan_sql(ask, verified=verified)
                 except FreeRouteStrictError as exc:
                     raise HTTPException(
                         status_code=strict_error_status(exc),
@@ -390,8 +395,12 @@ async def contract_ask(body: AskRequest) -> Answer:
                     verified=verified,
                     require_grounding=True,
                     stamp_l2_route=True,
-                    confirm=body.plan_sql_confirm,
+                    confirm=ask.plan_sql_confirm,
                 )
+                if served is None and ask.plan_sql_confirm == "no":
+                    from CortexOS.dms.plan_sql_ask import ticket_metric_decline
+
+                    result = ticket_metric_decline(result, ask, accepted_none=accepted_none)
             except FreeRouteStrictError as exc:
                 raise HTTPException(
                     status_code=strict_error_status(exc),
