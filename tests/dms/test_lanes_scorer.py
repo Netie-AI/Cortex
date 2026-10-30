@@ -625,6 +625,44 @@ def test_stage_b_aggregate_backstop_must_fail() -> None:
     assert sign_test_p(3, 3) > 0.05
 
 
+def test_stage_b_backstop_must_fail_wrong_rise_alone() -> None:
+    """WRONG rises past δ_W while RIGHT holds and nothing is lost: only the WRONG delta fires."""
+    missed = {"g0", "g1"}
+
+    def off(it: LaneItem) -> dict[str, Any]:
+        return abstain() if it.id in missed else _off_body(it)
+
+    def on(it: LaneItem) -> dict[str, Any]:
+        if it.id in missed:
+            return {**data_answer(40), "assumptions": [LANE_MODEL_OTHER]}  # MISS -> WRONG
+        return _on_body(it)
+
+    off_run = _run(off)
+    report = _report(off1=off_run, off2=off_run, on1=_run(on), on2=_run(on))
+    assert report.reported["noise"] == {"delta_right": 0, "delta_wrong": 0, "flips": 0}
+    assert report.reported["B7"]["losses"] == 0
+    assert report.bars["B7"].verdict == FAIL
+    assert [d.split()[0] for d in report.bars["B7"].detail] == ["WRONG", "WRONG"]
+
+
+def test_stage_b_backstop_must_fail_right_drop_alone() -> None:
+    """One RIGHT lost to a MISS per on run: no WRONG rise, sign test p = 0.25, only the RIGHT delta fires."""
+
+    def on(it: LaneItem) -> dict[str, Any]:
+        if it.id == "g0":
+            return {**abstain(), "assumptions": [LANE_MODEL_OTHER]}  # RIGHT -> MISS
+        if it.kind == "doc_hit":
+            # The doc_hit stays a MISS so no gain offsets the loss.
+            return {**abstain(), "assumptions": [LANE_MISS]}
+        return _on_body(it)
+
+    report = _report(on1=_run(on), on2=_run(on))
+    assert report.reported["noise"]["delta_right"] == 0
+    assert report.reported["B7"] == {"losses": 2, "gains": 0, "p": 0.25}
+    assert report.bars["B7"].verdict == FAIL
+    assert [d.split()[0] for d in report.bars["B7"].detail] == ["RIGHT", "RIGHT"]
+
+
 def test_stage_b_must_fail_confirm_leg() -> None:
     confirm = _confirm()
     lane_called = [
@@ -669,6 +707,35 @@ def test_stage_b_must_fail_fault_leg() -> None:
     report = _report(fault=hidden)
     assert report.bars["B9"].verdict == FAIL
     assert "did not report FAIL" in report.bars["B9"].detail[-1]
+
+
+def test_stage_b_must_fail_fault_leg_document_served_with_non_corpus_text() -> None:
+    """A document answer whose text is not corpus text: only the served-document check sees it."""
+    fault = _fault()
+    paraphrased = doc_answer("The supplier gets paid about six weeks after goods arrive.")
+    served = FaultLeg(doc_down=[AskRecord(B_HIT, 200, paraphrased)], lane_down=fault.lane_down, corpus=CORPUS)
+    report = _report(fault=served)
+    assert report.bars["B9"].verdict == FAIL
+    assert report.bars["B9"].detail == ("doc_down hit: document served with the doc call down",)
+
+
+@pytest.mark.parametrize("run", ["doc_down", "lane_down"])
+def test_stage_b_must_fail_fault_leg_5xx(run: str) -> None:
+    """A fault run has no off arm, so a 5xx is never excused: the call down must still answer."""
+    fault = _fault()
+    if run == "doc_down":
+        leg = FaultLeg(
+            doc_down=[AskRecord(B_HIT, 500, {"detail": "boom"})], lane_down=fault.lane_down, corpus=CORPUS
+        )
+        rid = "hit"
+    else:
+        lane_down = list(fault.lane_down)
+        lane_down[0] = AskRecord(lane_down[0].item, 500, {"detail": "boom"})
+        leg = FaultLeg(doc_down=fault.doc_down, lane_down=lane_down, corpus=CORPUS)
+        rid = "g0"
+    report = _report(fault=leg)
+    assert report.bars["B9"].verdict == FAIL
+    assert report.bars["B9"].detail == (f"{run} {rid}: HTTP 500, no answer served",)
 
 
 def test_stage_b_refuses_mismatched_runs() -> None:
@@ -750,6 +817,17 @@ def test_stage_c_must_fail_on_only_green_on_destructive() -> None:
     report = _c_report(on=_c_run("on", on), reasks=reask)
     assert report.bars["C2"].verdict == PASS
     assert report.reported["nondeterministic"] == ["product cx"]
+
+    # Only a green off-arm re-ask of the same item in the same leg excuses it.
+    for wrong_reask in (
+        StageCRecord(C_RISK, "product", "on", 200, env()),  # on arm
+        StageCRecord(C_RISK, "grounded", "off", 200, env()),  # other leg
+        StageCRecord(C_RISK, "product", "off", 200, env("ABSTAIN", "I can't vouch for this answer.")),
+        StageCRecord(C_MISS, "product", "off", 200, env()),  # other item
+    ):
+        report = _c_report(on=_c_run("on", on), reasks=[wrong_reask])
+        assert report.bars["C2"].verdict == FAIL, wrong_reask
+        assert report.reported["nondeterministic"] == []
 
     # A green that never reached Cortex came from a DMS lane, not the router.
     def dms_green(it: LaneItem) -> dict[str, Any]:

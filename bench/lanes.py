@@ -878,6 +878,13 @@ def _fault_failures(leg: FaultLeg) -> tuple[list[str], dict[str, Any]]:
     sentences = _sentences(leg.corpus if leg.corpus is not None else load_corpus())
     runs = {"doc_down": leg.doc_down, "lane_down": leg.lane_down}
     failures.extend(_b1(runs, ()))
+    # _b1 matches a non-2xx only against an off arm, and only for "on*" runs. A fault
+    # run has no off arm: a failing doc or lane call must fall through to an answer,
+    # so every non-2xx here (a 5xx above all) is a B9 failure.
+    for name, run in runs.items():
+        for rec in run:
+            if not rec.ok:
+                failures.append(f"{name} {rec.item.id}: HTTP {rec.status}, no answer served")
     for rec in leg.doc_down:
         if rec.served_document:
             failures.append(f"doc_down {rec.item.id}: document served with the doc call down")
