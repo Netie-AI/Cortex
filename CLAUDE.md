@@ -133,5 +133,6 @@ Direct abstain only for ungranted tables or destructive SQL. A wrong answer is
 never served (WRONG=0).
 
 Keyword cascades and word rules stay out of the answer path. Leave
-`route_to_metric` unextended; #313 retires it as the serve chooser. Merge order
-for the open chain is `TASK.md`.
+`route_to_metric` unextended: it serves only a metric's exact declared
+question, and otherwise a model chooses the governed metric (#424). Merge
+order for the open chain is `TASK.md`.
