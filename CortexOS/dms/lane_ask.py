@@ -181,11 +181,7 @@ def _try_document_lane(
     confirm: str | None,
 ) -> tuple[dict[str, Any] | None, LaneDecision]:
     from CortexOS.dms import query_service
-    from CortexOS.dms.answer_engine import (
-        UngroundedSession,
-        document_envelope,
-        resolve_product_grant,
-    )
+    from CortexOS.dms.answer_engine import UngroundedSession, resolve_product_grant
 
     if confirm:
         return None, _skipped("confirm")
@@ -216,7 +212,24 @@ def _try_document_lane(
     if not text or not sources:
         source = "fallback:doc-call" if model.failed else "model:documents-miss"
         return None, LaneDecision("other", source, decision.calls)
-    served = document_envelope(
-        question, str(uuid.uuid4()), text, sources, grant=(grant_kind, granted)
-    )
-    return served, decision
+    return document_envelope(question, text, sources, grant=(grant_kind, granted)), decision
+
+
+def document_envelope(
+    question: str, text: str, sources: list[str], *, grant: tuple[str, list[str]]
+) -> dict[str, Any]:
+    """The dict ``answer_engine._space_doc_rag`` serves, stamped as its ``_done`` does.
+
+    Built here because answer_engine.py is #215-frozen;
+    ``test_router_served_document_is_the_engine_document_answer`` pins the two equal.
+    """
+    from CortexOS.dms.answer_engine import _honest_plan, _stamp_grant
+
+    result: dict[str, Any] = {
+        "answer": text, "sql_used": None, "chart_spec": None, "audit_id": str(uuid.uuid4()),
+        "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
+        "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
+        "total_count": 0,
+        "query_plan": _honest_plan(question, None, layer="rag"),
+    }
+    return _stamp_grant(result, kind=grant[0], sources=grant[1])
