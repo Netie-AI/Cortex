@@ -23,7 +23,17 @@ GROUP BY does not list) take the output, so ``SUM(quantity_kg) AS quantity_kg
 ... HAVING quantity_kg > ...`` reads "having total of quantity_kg"; WHERE,
 GROUP BY, the SELECT list and an aggregate's arguments take the column. Two
 outputs sharing the name, a HAVING over ROLLUP or a grouping expression,
-QUALIFY and DISTINCT ON suppress the offer. No value, preview, column list, SQL, rung or model is on
+QUALIFY and DISTINCT ON suppress the offer. Every attribute of every node the
+statement reads is stated or suppresses the offer: ``NOT LIKE`` / ``NOT ILIKE``
+read "does not match", SEMI and ANTI joins "that have a match in" / "that have
+no match in", a single LEFT JOIN "keeping rows of <table> with no match",
+``NULLS FIRST`` "with empty values first", EXCEPT and INTERSECT (DISTINCT) the
+rows they keep, ``t.*`` "all columns of t"; RIGHT, FULL, ASOF and NATURAL
+joins, ``* EXCLUDE``, ``LIMIT n%``, FETCH, ROLLUP, CUBE, GROUPING SETS,
+GROUP BY ALL, a schema-qualified or sampled table, ``MAX(x, n)``, an ordinal or
+output reference over a star, and EXCEPT/INTERSECT ALL suppress it. A nested
+query's output keeps a granted name only when it passes that column on
+unrenamed. No value, preview, column list, SQL, rung or model is on
 the wire.
 Yes and No keep their meaning. ``AskRequest.plan_sql_reading_id`` is the
 pick: it re-runs the held reading's SQL through every gate under the current

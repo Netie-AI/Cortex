@@ -248,7 +248,14 @@ def _assert_no_values(body: dict[str, Any], sqls: tuple[str, ...], question: str
 
 
 def _assert_served_pick(
-    body: dict[str, Any], sql: str, reading_id: str, statement: str, index: int, of: int
+    body: dict[str, Any],
+    sql: str,
+    reading_id: str,
+    statement: str,
+    index: int,
+    of: int,
+    *,
+    tables: int = 1,
 ) -> None:
     oracle = _oracle(sql)
     assert body["provenance"]["badge"] == "session"
@@ -261,7 +268,7 @@ def _assert_served_pick(
     assert not body["answer"].startswith(("Reconfirm:", "Not answered", "No rows"))
     assert body["drillthrough_token"]
     assert body["audit_id"]
-    assert [s["kind"] for s in body["contributing_sources"]] == ["table"]
+    assert [s["kind"] for s in body["contributing_sources"]] == ["table"] * tables
     assert body["reconfirm"] is None
     assert body["plan_sql_reading_id"] == reading_id
     assert body["model_calls"] is None
@@ -555,6 +562,113 @@ def test_must_fail_reading_statement_binds_names_as_duckdb_does(
         totals = [row["quantity_kg"] for row in picked["rows"]]
         assert totals == sorted(totals, reverse=True) == [r["quantity_kg"] for r in oracle]
         assert len(picked["rows"]) == 2
+
+
+# PICK-READING-01 attribute audit: a statement says what each node's attributes
+# make the query do, not only what kind of node it is. sqlglot parses
+# ``x NOT LIKE p`` as Like(negate=True) and ``ANTI JOIN`` as Join(kind=ANTI);
+# eba6941's describe read neither, so these readings were offered as "sku
+# matches" and "matched to inventory": the inverse of what each returns, and a
+# picked reading is served with ``reading: <statement>`` as its first
+# assumption. Each case's reading is the second of three.
+@dataclasses.dataclass(frozen=True)
+class AttributeReading:
+    sql: str
+    question: str
+    grant: dict[str, str]
+    payload: dict[str, Any]
+    statement: str  # exact, before the executor's "first 1000 rows"
+    inverse: str  # the wording of the other reading, which must not appear
+    clause: str  # the attribute's clause, as the served SQL keeps it
+    claimed: str  # the statement's reading spelled out without the attribute
+    other: str  # the inverse reading, which the data tells apart
+
+
+# The pattern is in the question, or literal grounding refuses the filter; the
+# statement still shows it only as the mark.
+NOT_LIKE_PATTERN = "SKU-000%"
+NOT_LIKE_QUESTION = f"how many transactions of each type have a sku not like {NOT_LIKE_PATTERN}"
+_COUNT_BY_TYPE = "SELECT txn_type, COUNT(*) AS n FROM transactions"
+_HAZARD_ON = "ON transactions.sku = inventory.sku AND inventory.is_hazardous"
+INVENTORY_GRANT = {**GRANT, "inventory": "TRUE"}
+INVENTORY_PAYLOAD: dict[str, Any] = {
+    "tables": [
+        *PAYLOAD["tables"],
+        {
+            "name": "inventory",
+            "columns": [
+                {"name": "sku", "type": "VARCHAR", "masked": False},
+                {"name": "is_hazardous", "type": "BOOLEAN", "masked": False},
+            ],
+        },
+    ]
+}
+ATTRIBUTE_READINGS: dict[str, AttributeReading] = {
+    "not_like": AttributeReading(
+        sql=f"{_COUNT_BY_TYPE} WHERE sku NOT LIKE '{NOT_LIKE_PATTERN}' GROUP BY txn_type",
+        question=NOT_LIKE_QUESTION,
+        grant=GRANT,
+        payload=PAYLOAD,
+        statement="Returns txn_type and number of rows for each txn_type from transactions "
+        f"where sku does not match {plan_describe.MARK}",
+        inverse="sku matches",
+        clause=f"sku NOT LIKE '{NOT_LIKE_PATTERN}'",
+        claimed=f"{_COUNT_BY_TYPE} WHERE NOT (sku LIKE '{NOT_LIKE_PATTERN}') GROUP BY txn_type",
+        other=f"{_COUNT_BY_TYPE} WHERE sku LIKE '{NOT_LIKE_PATTERN}' GROUP BY txn_type",
+    ),
+    "anti_join": AttributeReading(
+        sql=f"{_COUNT_BY_TYPE} ANTI JOIN inventory {_HAZARD_ON} GROUP BY txn_type",
+        question=QUESTION,
+        grant=INVENTORY_GRANT,
+        payload=INVENTORY_PAYLOAD,
+        statement="Returns txn_type and number of rows for each txn_type from transactions "
+        "that have no match in inventory on transactions.sku is inventory.sku "
+        "and inventory.is_hazardous",
+        inverse="matched to inventory",
+        clause=f"ANTI JOIN inventory {_HAZARD_ON}",
+        claimed=f"{_COUNT_BY_TYPE} WHERE NOT EXISTS (SELECT 1 FROM inventory "
+        "WHERE transactions.sku = inventory.sku AND inventory.is_hazardous) GROUP BY txn_type",
+        other=f"{_COUNT_BY_TYPE} JOIN inventory {_HAZARD_ON} GROUP BY txn_type",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(ATTRIBUTE_READINGS))
+def test_must_fail_reading_statement_states_node_attributes(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    spec = ATTRIBUTE_READINGS[case]
+    sqls = (GOOD_SQL, spec.sql, KG_SQL)
+    keys = {plan_sql_vote.result_key(_oracle(s)) for s in sqls}
+    assert len(keys) == 3, "the three readings must return different rows"
+    # The data tells the statement's reading from its inverse.
+    assert _rowset(_oracle(spec.sql)) == _rowset(_oracle(spec.claimed))
+    assert _rowset(_oracle(spec.sql)) != _rowset(_oracle(spec.other))
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, spec.grant)
+
+    body = _offer(dms_http, payload=spec.payload, question=spec.question)
+
+    _assert_readings_offered(body, sqls)
+    _assert_no_values(body, sqls, spec.question)
+    reading = _readings(body)[1]
+    expected = f"{spec.statement}, first 1000 rows"
+    assert reading["statement"] == expected, reading["statement"]
+    assert spec.inverse not in reading["statement"]
+    assert f"(2) {expected}, {reading['row_count']} rows." in body["answer"], body["answer"]
+    served = _held(reading["reading_id"]).served_sql
+    assert spec.clause in served, served
+
+    # Picked, the reading is served under that statement, with the rows the
+    # statement describes and not the rows of its inverse.
+    picked = _json(
+        _pick(dms_http, reading["reading_id"], payload=spec.payload, question=spec.question)
+    )
+    tables = len(spec.grant)
+    _assert_served_pick(picked, spec.sql, reading["reading_id"], expected, 2, 3, tables=tables)
+    assert picked["assumptions"][0] == f"reading: {expected}"
+    assert _rowset(picked["rows"]) == _rowset(_oracle(spec.claimed))
+    assert _rowset(picked["rows"]) != _rowset(_oracle(spec.other))
 
 
 # -- 2, 3: byte identity -----------------------------------------------------------
