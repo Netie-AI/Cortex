@@ -20,6 +20,16 @@ CI "4/5" means `base-install`, `protected-paths`, `rls-proof`, `secrets-scan` gr
 `lint-type-test` red; `auto-merge` skipped. All 7 heads merge into main without conflict
 (`git merge-tree`); the pip heads are 30-44 commits behind.
 
+## Update, 04:32 UTC same day
+- #442 and #441 were merged by `jian-hong` (03:59, 04:14) after their heads moved to
+  `6bea630` and `f76c4ab`. Dependabot did not rebase them: the posted rebase comments
+  arrived with the mention broken by interpunct characters (`·@·d·ependabot r·ebase`),
+  so no command reached it. A bot command has to be posted by a person.
+- #396 was merged as `95664c8` with an added commit, "uv.lock: python-dotenv 1.2.4 to
+  match the image locks". `check_supply_chain.py` on main `9be6645` prints
+  `supply chain OK`, so the needs-fix row is resolved.
+- #394, #393, #390, #389 are unchanged.
+
 ## Expected vs actual
 - **Expected:** a dependabot pip PR moves one pin and stays green, because the image locks
   are generated from `uv.lock` by `scripts/lock_images.py` and must agree with it
