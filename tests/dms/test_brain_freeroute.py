@@ -257,7 +257,7 @@ def brain_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
     reset_limiter(10_000)
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    return TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
 
 @pytest.mark.parametrize("spec", HANDLERS, ids=[h["name"] for h in HANDLERS])
