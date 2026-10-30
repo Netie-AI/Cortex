@@ -266,6 +266,7 @@ async def contract_ask(body: AskRequest) -> Answer:
     from CortexOS.sql_attempts import recording
 
     grant: list[Any] = []
+    lane: list[Any] = []
 
     def _ask() -> Answer:
         from CortexOS.dms.answer_engine import answer as answer_engine
@@ -370,6 +371,27 @@ async def contract_ask(body: AskRequest) -> Answer:
             space_id=verified.manifest.space_id, scored_pack_id=body.scored_pack_id
         ):
             served = reused
+            from CortexOS.dms.lane_ask import lane_router_enabled
+
+            if lane_router_enabled():
+                from CortexOS.dms.lane_ask import LaneDecision, try_document_lane
+
+                # LANE-ROUTER-01 (CLAUDE.md section 9): only a cited document
+                # answer is served here; everything else falls through below.
+                # A pick runs its held reading (contract 1.10.0), never a lane.
+                if picking:
+                    decision = LaneDecision("skipped", "skipped:pick", 0)
+                elif served is None:
+                    served, decision = try_document_lane(
+                        body.question,
+                        session_id=body.session_id,
+                        space_id=body.space_id,
+                        verified=verified,
+                        confirm=ask.plan_sql_confirm,
+                    )
+                else:
+                    decision = LaneDecision("skipped", "skipped:reuse", 0)
+                lane.append(decision)
             if served is None and ask.dms_payload is not None:
                 from CortexOS.dms.plan_sql_ask import try_plan_sql
 
@@ -478,7 +500,7 @@ async def contract_ask(body: AskRequest) -> Answer:
             raise
         from CortexOS.dms.plan_sql_ask import grant_closest_question, reconfirm_answer
 
-        return scrub_answer(
+        scrubbed = scrub_answer(
             result,
             attempts,
             verified=grant[0],
@@ -487,6 +509,11 @@ async def contract_ask(body: AskRequest) -> Answer:
             closest_fallback=lambda: grant_closest_question(body, verified=grant[0]),
             reconfirm_text=reconfirm_answer,
         )
+        if lane:
+            scrubbed = scrubbed.model_copy(
+                update={"assumptions": [lane[0].line, *scrubbed.assumptions]}
+            )
+        return scrubbed
 
 
 @router.post("/drillthrough", response_model=DrillthroughResponse, operation_id="drillthrough")

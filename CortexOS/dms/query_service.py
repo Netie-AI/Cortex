@@ -871,7 +871,7 @@ def get_alerts_summary(db_path: Path | None = None) -> dict[str, int]:
         con.close()
 
 
-def rag_answer(question: str) -> tuple[str, list[str]]:
+def rag_answer(question: str, *, model: Any = None) -> tuple[str, list[str]]:
     """A cited answer from the supplier documents, or ``("", [])`` so the caller abstains.
 
     RAG-01: passages are ranked by BM25 and gated on relevance; the model
@@ -883,17 +883,21 @@ def rag_answer(question: str) -> tuple[str, list[str]]:
     passages that clear the same gate before the reader model sees them. A
     requested stage that did not run adds one fixed engine line to a served
     answer. Unset, this path is unchanged.
+
+    ``model`` replaces the reader call (the lane router records its failure).
     """
     from CortexOS.rag import doc_rank, documents
+
+    complete = model if model is not None else _doc_model
 
     paths = CONTRACTS_DIR.glob("*.txt") if CONTRACTS_DIR.is_dir() else ()
     passages = documents.load_passages(paths)
     stages = doc_rank.stages_from_env()
     if not stages:
-        found = documents.answer(question, passages, _doc_model)
+        found = documents.answer(question, passages, complete)
     else:
         sel = doc_rank.select(question, passages, stages)
-        found = documents.read(question, sel.top, _doc_model)
+        found = documents.read(question, sel.top, complete)
         if found is not None and sel.note:
             return f"{found.answer}\n{sel.note}", found.sources
     if found is None:
