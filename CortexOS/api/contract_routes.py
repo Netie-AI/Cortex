@@ -378,7 +378,10 @@ async def contract_ask(body: AskRequest) -> Answer:
 
                 # LANE-ROUTER-01 (CLAUDE.md section 9): only a cited document
                 # answer is served here; everything else falls through below.
-                if served is None:
+                # A pick runs its held reading (contract 1.10.0), never a lane.
+                if picking:
+                    decision = LaneDecision("skipped", "skipped:pick", 0)
+                elif served is None:
                     served, decision = try_document_lane(
                         body.question,
                         session_id=body.session_id,
