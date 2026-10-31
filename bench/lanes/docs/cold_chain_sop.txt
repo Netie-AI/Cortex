@@ -1,0 +1,26 @@
+Standard Operating Procedure - Cold Chain Handling
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Applies to. FOOD_COLD and MEDICAL stock held at the cold-storage sites.
+
+2. Temperature range. Chilled stock is held between 2 and 8 degrees Celsius.
+Frozen stock is held at minus 18 degrees Celsius or colder.
+
+3. Monitoring. Cold room temperature is logged every 15 minutes by the data
+logger and checked by a supervisor twice per shift.
+
+4. Excursions. A temperature excursion lasting more than 30 minutes must be
+reported to the Quality Lead within 1 hour, and the affected stock is placed on
+quality hold.
+
+5. Dock time. Chilled pallets may stay on the receiving dock for no more than
+20 minutes before they enter the cold room.
+
+6. Door discipline. Cold room doors must not be left open for longer than
+90 seconds.
+
+7. Cold room capacity. The WH-B cold room is rated for 9,500 kg of chilled
+stock.
+
+8. Calibration. Temperature probes are calibrated every 6 months.

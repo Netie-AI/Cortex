@@ -1,0 +1,21 @@
+Customer Returns Policy
+
+Fictional measurement document for the LANES-V1 benchmark.
+
+1. Return window. Customers may return unopened goods within 30 days of
+delivery.
+
+2. Restocking fee. A restocking fee of 15% applies to returns of non-defective
+goods.
+
+3. Defective goods. Defective goods are replaced or refunded in full, with no
+restocking fee, if reported within 90 days.
+
+4. Excluded items. FOOD_COLD and MEDICAL items cannot be returned once they
+have left the cold chain.
+
+5. Authorisation. Every return needs a return merchandise authorisation number
+issued by Customer Service.
+
+6. Refund timing. Refunds are paid within 14 days of the returned goods being
+inspected.

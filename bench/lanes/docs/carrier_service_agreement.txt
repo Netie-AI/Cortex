@@ -1,0 +1,22 @@
+Carrier Service Agreement - Kestrel Freight Sdn Bhd
+
+Fictional measurement document for the LANES-V1 benchmark. Kestrel Freight is
+an invented carrier.
+
+1. Service. Kestrel Freight carries outbound and inter-warehouse loads across
+Peninsular Malaysia, Sabah and Sarawak.
+
+2. Delivery standard. Peninsular deliveries are made within 2 business days and
+deliveries to Sabah and Sarawak within 5 business days.
+
+3. On-time target. Kestrel Freight commits to an on-time delivery rate of 96%
+each month.
+
+4. Service credit. If the monthly on-time rate falls below target, Kestrel
+Freight issues a service credit of 5% of that month's freight charges.
+
+5. Liability. Liability for loss or damage is capped at RM 20 per kilogram.
+
+6. Claims. Damage claims must be lodged within 7 days of delivery.
+
+7. Fuel surcharge. The fuel surcharge is reviewed every quarter.

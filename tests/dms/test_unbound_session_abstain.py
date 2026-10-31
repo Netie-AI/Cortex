@@ -120,7 +120,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _bind(WIDE_SESSION, {"transactions": "TRUE"})
     _bind(NARROW_SESSION, {"q3_sales_export": "TRUE"})
 
-    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     client.bind_session = _bind  # type: ignore[attr-defined]
     yield client
 

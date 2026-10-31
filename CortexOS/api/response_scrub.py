@@ -43,7 +43,10 @@ On an answer that serves SQL, ``answer`` is text built from the rows and is
 left as it is. ``reconfirm.closest_question`` is never returned scrubbed:
 Yes resends it as the question, so when the scrub would change it, Cortex's
 own closest question from the grant replaces it, and a reconfirm answer is
-rendered again from its scrubbed ``why`` and that question.
+rendered again from its scrubbed ``why`` and that question. Each statement of
+an offered reading (contract 1.10.0, ``reconfirm.readings``) is scrubbed as
+free text and capped again to the published length, and the reconfirm answer
+is rendered from those statements; ``reading_id`` and ``row_count`` are kept.
 Decisions come from parsed SQL, error text and the grant; no
 rule reads the question for words. No pack import and no database driver
 here: the catalog reads go through :mod:`CortexOS.execution.submit`.
@@ -440,7 +443,7 @@ def scrub_answer(
     caller_texts: Iterable[str] = (),
     caller_names: Iterable[str] = (),
     closest_fallback: Callable[[], str] | None = None,
-    reconfirm_text: Callable[[str, str], str] | None = None,
+    reconfirm_text: Callable[..., str] | None = None,
 ) -> Any:
     """``answer`` (a contract ``Answer``) with withheld names replaced in its free text.
 
@@ -448,7 +451,10 @@ def scrub_answer(
     it replaces a model closest question the scrub would change.
     ``reconfirm_text(why, closest)`` renders a reconfirm answer: when the answer
     is that rendering, it is rendered again from the scrubbed ``why`` and the
-    final closest question, so Cortex's own wording is never scrubbed.
+    final closest question, so Cortex's own wording is never scrubbed. With
+    offered readings it is called as ``reconfirm_text(why, closest,
+    readings=[(statement, row_count), ...])``; without them, with two
+    arguments as before.
     """
     scrub = build_scrub(
         attempts,
@@ -473,14 +479,40 @@ def scrub_answer(
     if answer.reconfirm is not None:
         why = scrub.text(answer.reconfirm.why)
         closest = _closest_question(scrub, answer.reconfirm.closest_question, closest_fallback)
+        offered = list(getattr(answer.reconfirm, "readings", None) or [])
+        if not offered:
+            update["reconfirm"] = answer.reconfirm.model_copy(
+                update={"why": why, "closest_question": closest}
+            )
+            rendered = reconfirm_text is not None and answer.answer == reconfirm_text(
+                answer.reconfirm.why, answer.reconfirm.closest_question
+            )
+            if rendered and reconfirm_text is not None:
+                update["answer"] = reconfirm_text(why, closest)
+            return answer.model_copy(update=update)
+        # A withheld marker is longer than many names, so a scrubbed statement
+        # is capped again: model_copy does not validate, and the published
+        # maxLength must hold on the wire.
+        from CortexOS.plan_sql.describe import cap_statement
+
+        scrubbed = [
+            item.model_copy(update={"statement": cap_statement(scrub.text(item.statement))})
+            for item in offered
+        ]
         update["reconfirm"] = answer.reconfirm.model_copy(
-            update={"why": why, "closest_question": closest}
+            update={"why": why, "closest_question": closest, "readings": scrubbed}
         )
         rendered = reconfirm_text is not None and answer.answer == reconfirm_text(
-            answer.reconfirm.why, answer.reconfirm.closest_question
+            answer.reconfirm.why,
+            answer.reconfirm.closest_question,
+            readings=[(item.statement, item.row_count) for item in offered],
         )
         if rendered and reconfirm_text is not None:
-            update["answer"] = reconfirm_text(why, closest)
+            update["answer"] = reconfirm_text(
+                why,
+                closest,
+                readings=[(item.statement, item.row_count) for item in scrubbed],
+            )
     return answer.model_copy(update=update)
 
 

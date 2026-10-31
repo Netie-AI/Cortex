@@ -1,0 +1,33 @@
+Master Supply Agreement - Warehouse Network Suppliers
+
+Fictional measurement document for the LANES-V1 benchmark. Every name and figure
+here is invented and deliberately differs from the warehouse tables.
+
+1. Scope. This agreement governs every supplier that delivers stock into the
+warehouse network. A Supplier Schedule may vary a clause for one supplier; where
+it does not, this agreement applies.
+
+2. Standard lead time. The standard lead time is 14 calendar days from purchase
+order acceptance to delivery at the receiving dock.
+
+3. Payment terms. Invoices are payable Net 45 from the date a complete delivery is
+received, not from the invoice date.
+
+4. Late delivery penalty. For each day a delivery is late the supplier pays a
+penalty of 0.5% of the order value, capped at 10% of the order value.
+
+5. Freight. Freight is paid by the supplier for orders above RM 5,000. Below that
+value freight is paid by the buyer.
+
+6. Minimum order. The minimum order value is RM 1,200 per purchase order.
+
+7. Price changes. The supplier must give 60 days written notice of any price
+increase.
+
+8. Warranty. Goods carry a warranty of 12 months from the date of delivery.
+
+9. Termination. Either party may terminate this agreement with 90 days written
+notice.
+
+10. Governing law. This agreement is governed by the laws of Malaysia and disputes
+go to arbitration in Kuala Lumpur.

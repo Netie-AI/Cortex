@@ -22,10 +22,14 @@ Cortex never infers that from a model name. Anything else is a named refusal
 
 Measured route. OpenVault treats the requested model as a preference: it walks
 hops in its own order and a hop that does not carry the requested id serves its
-own first catalogued model. So every call records requested AND served, validity
-is scored against the served model from validator verdicts (SQL gate,
-plausibility, static guardrail), and a requested id OpenVault does not honour is
-ranked by what it actually got. HTTP refusals are recorded but never scored.
+own first catalogued model. So every call records requested AND served, and
+validity is scored against the served model from validator verdicts (SQL gate,
+plausibility, static guardrail). A requested id is ranked only by the calls
+where OpenVault actually served it: a substitute's verdict credits the
+substitute, never the id that was asked for (FREEROUTE-HONOR-01). An id that
+was never honored over ``EXPLORE_REQUESTS`` outcomes is not picked, and an
+OpenVault ``pin_unavailable`` refusal is one of those outcomes. Other HTTP
+refusals are recorded but never scored.
 """
 
 from __future__ import annotations
@@ -562,7 +566,8 @@ CREATE TABLE IF NOT EXISTS routes (
     prompt_tokens INTEGER,
     completion_tokens INTEGER,
     total_tokens INTEGER,
-    split TEXT NOT NULL DEFAULT 'product'
+    split TEXT NOT NULL DEFAULT 'product',
+    error_type TEXT
 );
 CREATE INDEX IF NOT EXISTS routes_task_requested ON routes(task, requested, ts);
 CREATE INDEX IF NOT EXISTS routes_task_served ON routes(task, served, ts);
@@ -573,6 +578,8 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("completion_tokens", "INTEGER"),
     ("total_tokens", "INTEGER"),
     ("split", "TEXT NOT NULL DEFAULT 'product'"),
+    # OpenVault ``error.type`` on a refusal. NULL on 200 and on older rows.
+    ("error_type", "TEXT"),
 )
 
 
@@ -708,6 +715,7 @@ def _write_row(
     scored: bool,
     usage: Mapping[str, Any] | None = None,
     split: str = SPLIT_PRODUCT,
+    error_type: str = "",
 ) -> bool:
     """Insert one learning row. False when that write fails. Never raises for it.
 
@@ -729,8 +737,8 @@ def _write_row(
                 "INSERT OR REPLACE INTO routes ("
                 "call_id, task, requested, served, status, usable, scored, verdict, "
                 "latency_ms, impl, shadow, ts, prompt_tokens, completion_tokens, "
-                "total_tokens, split"
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "total_tokens, split, error_type"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     stamp.call_id,
                     stamp.task,
@@ -748,6 +756,7 @@ def _write_row(
                     completion_tokens,
                     total_tokens,
                     _normalize_split(split),
+                    error_type or None,
                 ),
             )
 
@@ -805,6 +814,16 @@ def _validity(row: Mapping[str, Any]) -> float:
     if verdict in BAD_VERDICTS or not row["usable"]:
         return 0.0
     return 0.5
+
+
+def _pin_refused(row: sqlite3.Row | Mapping[str, Any]) -> bool:
+    """OpenVault refused to serve the requested id (``error.type`` pin_unavailable).
+
+    Keyed on the error type OpenVault wrote, not on the HTTP status: a 503
+    without that type (no hop, circuit) says nothing about the id.
+    """
+    keys = row.keys() if hasattr(row, "keys") else ()
+    return "error_type" in keys and row["error_type"] == _OV_PIN_UNAVAILABLE
 
 
 def _same_model(requested: str, served: str) -> bool:
@@ -1019,19 +1038,18 @@ def _stats(
     # was not given one reads the store.
     if rows is None:
         rows = _rows(task)
-    by_served: dict[str, list[Mapping[str, Any]]] = {}
-    for row in rows:
-        if row["scored"] and row["served"]:
-            by_served.setdefault(row["served"], []).append(row)
     out: dict[str, ModelStats] = {}
     now = time.time()
     for model in models:
         mine = [r for r in rows if r["requested"] == model]
         st = ModelStats(requested=model, requests=len(mine))
         answered = [r for r in mine if r["status"] == 200 and r["served"]]
+        # A pin OpenVault refused is an outcome where the id was not honored.
+        outcomes = len(answered) + sum(1 for r in mine if _pin_refused(r))
+        honored = sum(1 for r in answered if _same_model(model, r["served"]))
+        if outcomes:
+            st.honored_rate = round(honored / outcomes, 3)
         if answered:
-            honored = sum(1 for r in answered if _same_model(model, r["served"]))
-            st.honored_rate = round(honored / len(answered), 3)
             counts: dict[str, int] = {}
             for r in answered:
                 counts[r["served"]] = counts.get(r["served"], 0) + 1
@@ -1047,11 +1065,14 @@ def _stats(
                     costs.append(cost)
             if costs:
                 st.mean_cost = round(sum(costs) / len(costs), 1)
-        # Validity belongs to the model that answered. OpenVault may serve a
-        # different one than was asked for, and two requested ids can share a
-        # served model, so scoring by request would grade the wrong subject.
-        served_key = st.served_most or model
-        window = (by_served.get(served_key) or [])[:SCORE_WINDOW]
+        # Validity belongs to the model that answered. An id is scored only on
+        # calls where OpenVault actually served it, whoever asked for it. A
+        # substitute's verdict credits the substitute and never the id that was
+        # asked for; otherwise that id is picked on a model it does not get
+        # (FREEROUTE-HONOR-01: inkling inherited gpt-oss-120b's validity).
+        window: list[Any] = [
+            r for r in rows if r["scored"] and r["served"] and _same_model(model, r["served"])
+        ][:SCORE_WINDOW]
         if window and st.scored:
             total = sum(_validity(r) for r in window)
             st.score = round((total + 1.0) / (len(window) + 2.0), 4)
@@ -1063,6 +1084,12 @@ def _stats(
             and now - float(last3[0]["ts"]) < INELIGIBLE_S
         ):
             st.ineligible = f"last 3 calls refused (HTTP {last3[0]['status']})"
+        elif outcomes >= EXPLORE_REQUESTS and honored == 0:
+            # Same n as exploration: once explored, an id OpenVault never served
+            # is not picked. It is explored again only after its rows leave the
+            # task's read window.
+            got = f"served {st.served_most}" if st.served_most else "pin refused"
+            st.ineligible = f"never honored (0 of {outcomes}; {got})"
         out[model] = st
     return out
 
@@ -1154,6 +1181,9 @@ def pick(
     )
     st = stats[best]
     reason = f"measured best validity {st.score} over n={st.scored_n} among {len(ranked)} scored"
+    skipped = [m for m in models if stats[m].ineligible]
+    if skipped:
+        reason += f"; ineligible: {', '.join(f'{m} ({stats[m].ineligible})' for m in skipped)}"
     if st.served_most and not _same_model(best, st.served_most) and (st.honored_rate or 0.0) < 0.5:
         reason += f"; not honored (served {st.served_most})"
     return Pick(best, reason, source, models, st.scored_n, st.score)
@@ -1599,6 +1629,7 @@ def complete(
     message: dict[str, Any] = {}
     usage: dict[str, Any] = {}
     scored = False
+    error_type = ""
     reason = ""
     provider, served_model, is_local, served_reason = freeroute_ov_local.served_from_response(
         data if isinstance(data, dict) else None
@@ -1635,8 +1666,13 @@ def complete(
         detail = _error_message(data)
         reason = f"{base}: {detail}" if detail else base
         # Refusals about custody, budget or the hop pool say nothing about the
-        # model asked for; only other failures (500, 504, ...) count against it.
+        # model asked for; only other failures (500, 504, ...) are scored. A
+        # pin_unavailable refusal is not scored either, but its error type is
+        # stored and counts against the id's honored rate (_pin_refused).
         scored = int(status) not in _STATUS_REASONS
+        error_type, _ = freeroute_ov_local.chat_error_fields(
+            data if isinstance(data, dict) else None
+        )
         if int(status) in (401, 403):
             if int(status) == 401:
                 note_rejected(_credential_fp(bearer), reason, url=arm.url)
@@ -1710,6 +1746,7 @@ def complete(
         scored=scored,
         usage=usage,
         split=split or _split_var.get(),
+        error_type=error_type,
     ):
         stamp.learn_row_failed = True
     _journal_add(stamp)

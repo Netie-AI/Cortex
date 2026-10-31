@@ -7,8 +7,13 @@ Each shipped image installs ``requirements/image-<variant>.lock.txt`` with
 --generate-hashes`` and never edited by hand; ``scripts/check_supply_chain.py``
 fails the build when one goes stale.
 
-Target: CPython 3.11 on x86_64 Linux (``python:3.11-slim``), wheels only, so no
-sdist build can fetch an unhashed build backend. ``requirements/build.in`` adds
+Target: the CPython minor every shipped Dockerfile names in ``ARG
+PYTHON_VERSION`` (#375), on x86_64 Linux, wheels only, so no sdist build can
+fetch an unhashed build backend. When the Dockerfiles disagree, or one has no
+such arg, nothing is compiled. uv's header stays on each lock, so the
+``--python-version`` it was compiled for is recorded and
+``scripts/check_supply_chain.py`` can fail a lock whose target no longer
+matches the Dockerfiles. ``requirements/build.in`` adds
 the project's build backend so the ``--no-deps --no-build-isolation`` install of
 the project uses a hashed ``poetry-core`` too. An existing output file keeps
 its pins. To move one package, pass ``--upgrade-package <name>`` (repeatable).
@@ -56,14 +61,15 @@ def compile_command(
     variant: str,
     upgrade_packages: tuple[str, ...] = (),
     constraints: Path | None = None,
+    *,
+    python_version: str,
 ) -> list[str]:
     cmd = [
         "uv", "pip", "compile", "pyproject.toml", "requirements/build.in",
         "--generate-hashes",
         "--only-binary", ":all:",
-        "--python-version", "3.11",
+        "--python-version", python_version,
         "--python-platform", "x86_64-unknown-linux-gnu",
-        "--no-header",
         "--quiet",
         "--output-file", str(lock_path(variant).relative_to(ROOT)),
     ]
@@ -111,6 +117,22 @@ def _resolver():
     )
 
     return parse_lock, resolve_image_target, uv_resolution_for_image
+
+
+def image_python(root: Path = ROOT) -> str:
+    """The one ``ARG PYTHON_VERSION`` the shipped Dockerfiles agree on.
+
+    Fails closed: a missing arg or a disagreement stops before any compile.
+    """
+    root_s = str(ROOT)
+    if root_s not in sys.path:
+        sys.path.insert(0, root_s)
+    from scripts.check_supply_chain import agreed_image_python
+
+    version, problems = agreed_image_python(root)
+    if version is None or problems:
+        raise SystemExit("\n".join(problems) or "image Python version is unset")
+    return version
 
 
 def uv_lock_constraint_pins(root: Path = ROOT) -> dict[str, str]:
@@ -162,6 +184,7 @@ def main(argv: list[str]) -> int:
     if unknown:
         print(f"unknown variant(s): {', '.join(unknown)}; known: {', '.join(VARIANTS)}")
         return 2
+    python_version = image_python(ROOT)
     constraints_path: Path | None = None
     constraint_pins: dict[str, str] = {}
     if align:
@@ -176,7 +199,12 @@ def main(argv: list[str]) -> int:
             upgrades = list(upgrade_packages)
             if align:
                 upgrades.extend(packages_to_realign(variant, constraint_pins))
-            cmd = compile_command(variant, tuple(dict.fromkeys(upgrades)), constraints_path)
+            cmd = compile_command(
+                variant,
+                tuple(dict.fromkeys(upgrades)),
+                constraints_path,
+                python_version=python_version,
+            )
             print("+", " ".join(cmd))
             rc = subprocess.run(cmd, cwd=ROOT).returncode
             if rc != 0:
@@ -184,7 +212,7 @@ def main(argv: list[str]) -> int:
             if align:
                 # The constraints file is a temp path. A second compile keeps
                 # those pins and rewrites the via comments without it.
-                cmd = compile_command(variant)
+                cmd = compile_command(variant, python_version=python_version)
                 print("+", " ".join(cmd))
                 rc = subprocess.run(cmd, cwd=ROOT).returncode
                 if rc != 0:

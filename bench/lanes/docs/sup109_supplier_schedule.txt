@@ -1,0 +1,22 @@
+Supplier Schedule - China Supplier 109 Sdn Bhd (SUP-109)
+
+Fictional measurement document for the LANES-V1 benchmark. Figures differ from
+the suppliers table on purpose.
+
+Schedule to the Master Supply Agreement for SUP-109.
+
+A. Lead time. SUP-109 ships by sea; the agreed lead time is 45 calendar days
+from purchase order acceptance.
+
+B. Incoterms. Deliveries are made on CIF Port Klang terms.
+
+C. Payment terms. 30% of the order value is paid as a deposit and the balance
+is payable Net 30 after arrival at Port Klang.
+
+D. Currency. SUP-109 invoices in US dollars.
+
+E. Inspection. A pre-shipment inspection by an independent inspector is
+required for every container.
+
+F. Contracted category. SUP-109 supplies MACHINERY_PARTS, mainly bearings and
+hydraulic seals.
