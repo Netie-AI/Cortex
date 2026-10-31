@@ -34,6 +34,9 @@ ROOT = Path(__file__).resolve().parents[1]
 LANES_DIR = ROOT / "bench" / "lanes"
 LANES_PATH = LANES_DIR / "lanes_v1.yaml"
 LANES_SHA_PATH = LANES_DIR / "lanes_v1.sha256"
+# lanes_v2: lanes_v1 with its label review applied (plan section 6.1). v1 stays frozen.
+LANES_V2_PATH = LANES_DIR / "lanes_v2.yaml"
+LANES_V2_SHA_PATH = LANES_DIR / "lanes_v2.sha256"
 DOCS_DIR = LANES_DIR / "docs"
 
 SPLITS = ("train", "heldout")
