@@ -160,6 +160,23 @@ _METRIC_EXACT_412_EXACT_DIFF = {
         ),
     ),
 }
+# FREEROUTE-HONOR-01 (#211): a substitute's validity no longer credits the
+# requested id, so the three tests in tests/test_freeroute_core.py that pinned
+# the old crediting change with it. Writer-added, pending a Lead license. Any
+# other edit to tests/test_freeroute_core.py needs its own exception.
+_HONOR_01_BASE = "2deb09c66346df23cf0e97200955da2c9c4e8975"
+_HONOR_01_BRANCH_EXCEPTIONS = {
+    "fix/freeroute-honor-01": frozenset({"tests/test_freeroute_core.py"})
+}
+_HONOR_01_EXACT_DIFF = {
+    "tests/test_freeroute_core.py": (
+        "830f53260b52965382b0768c2014fd20d10347381e420c503bf8ae5a5c251de8",
+        (
+            "FREEROUTE-HONOR-01",
+            "test_never_honoured_id_is_skipped_and_named_in_pick_reason",
+        ),
+    ),
+}
 
 
 def _ranking() -> dict[str, Any]:
@@ -494,6 +511,35 @@ def _is_exact_metric_exact_412_seam(path: str) -> bool:
     return True
 
 
+def _is_exact_honor_01_seam(path: str) -> bool:
+    """Allow only FREEROUTE-HONOR-01's frozen test update on its branch."""
+    if path not in _HONOR_01_BRANCH_EXCEPTIONS.get(_branch_name(), frozenset()):
+        return False
+    expected_digest, symbols = _HONOR_01_EXACT_DIFF[path]
+    if _git("cat-file", "-e", f"{_HONOR_01_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _HONOR_01_BASE)  # shallow CI clone
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_HONOR_01_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    for symbol in symbols:
+        assert symbol in diff.stdout, f"HONOR-01 exception missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"HONOR-01 exception covers only its three honored-rate tests in {path}; "
+        "any other edit needs its own exception"
+    )
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
     return sorted(
         path
@@ -505,6 +551,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_extract_pin_277(path)
             or _is_exact_c7_05_104p2_seam(path)
             or _is_exact_metric_exact_412_seam(path)
+            or _is_exact_honor_01_seam(path)
         )
     )
 
@@ -568,6 +615,18 @@ def test_other_branch_editing_metric_exact_412_still_trips_guard(
     monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/not-delayed-exact-metric-unlicensed")
     path = "CortexOS/dms/answer_engine.py"
     assert _is_exact_metric_exact_412_seam(path) is False
+
+
+def test_other_branch_editing_honor_01_seam_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/freeroute-honor-unlicensed")
+    path = "tests/test_freeroute_core.py"
+    assert _is_exact_honor_01_seam(path) is False
+    assert _held_freeroute_paths({path}) == [path]
+    # The exception does not stretch to any other banned file.
+    monkeypatch.setenv("GITHUB_HEAD_REF", "fix/freeroute-honor-01")
+    assert _held_freeroute_paths({"tests/freeroute_fake.py"}) == ["tests/freeroute_fake.py"]
 
 
 def test_other_branch_editing_conftest_still_trips_guard(

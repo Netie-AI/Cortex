@@ -279,17 +279,20 @@ def test_validity_lands_on_served_model_when_not_honoured(armed_openvault) -> No
     monkeypatch_bundle = fr._stats("t", ["deepseek-v4-pro"])["deepseek-v4-pro"]
     assert monkeypatch_bundle.honored_rate == 0.0
     assert monkeypatch_bundle.served_most == "openai/gpt-oss-120b"
-    assert monkeypatch_bundle.score is not None
+    # FREEROUTE-HONOR-01: the substitute's verdicts are gpt-oss's, not deepseek's.
+    assert monkeypatch_bundle.score is None and monkeypatch_bundle.scored_n == 0
+    assert monkeypatch_bundle.ineligible.startswith("never honored (0 of 2")
     assert arm.armed
 
 
 def test_validity_follows_the_served_model_across_requested_ids(
     armed_openvault, monkeypatch
 ) -> None:
-    """Two requested ids served by one model share that model's record.
+    """Every answer counts for the model that served it, whoever asked for it.
 
-    Scoring by requested id would grade a subject OpenVault never ran: the hop
-    serves its own first model whenever the requested one is not in its pool.
+    The hop serves its own first model whenever the requested one is not in its
+    pool. Those verdicts belong to the served model; the id that was asked for
+    gets no score from them (FREEROUTE-HONOR-01).
     """
     armed_openvault.hops = [armed_openvault.hop("groq", 10)]
     armed_openvault.catalogue = {"groq": ["openai/gpt-oss-120b"]}
@@ -304,11 +307,15 @@ def test_validity_follows_the_served_model_across_requested_ids(
     assert stats["alpha"].served_most == "openai/gpt-oss-120b"
     assert stats["alpha"].honored_rate == 0.0
     # One served model, one record: 2 passes and 2 fails -> (2 + 1) / (4 + 2).
-    assert stats["alpha"].score == stats["openai/gpt-oss-120b"].score == 0.5
-    assert stats["alpha"].scored_n == 4
+    assert stats["openai/gpt-oss-120b"].score == 0.5
+    assert stats["openai/gpt-oss-120b"].scored_n == 4
+    assert stats["alpha"].score is None and stats["alpha"].scored_n == 0
 
 
-def test_not_honoured_is_named_in_pick_reason(armed_openvault, monkeypatch) -> None:
+def test_never_honoured_id_is_skipped_and_named_in_pick_reason(
+    armed_openvault, monkeypatch
+) -> None:
+    """FREEROUTE-HONOR-01: before, deepseek won on gpt-oss's passes and was picked."""
     armed_openvault.hops = [HOP("groq", 10)]
     monkeypatch.setenv("CORTEX_FREEROUTE_MODELS", "deepseek-v4-pro,qwen/qwen3.6-27b")
     msgs = [{"role": "user", "content": "q"}]
@@ -316,8 +323,11 @@ def test_not_honoured_is_named_in_pick_reason(armed_openvault, monkeypatch) -> N
         out = fr.complete("t", msgs, accept=_sql_ok)
         fr.note_verdict(out.stamp, "gate_pass" if out.stamp.requested == "deepseek-v4-pro" else "gate_fail")
     picked = fr.pick("t", fr.arming(fresh=True))
-    assert picked.requested == "deepseek-v4-pro"
-    assert "not honored (served openai/gpt-oss-120b)" in picked.reason
+    assert picked.requested == "qwen/qwen3.6-27b"
+    assert (
+        "ineligible: deepseek-v4-pro (never honored (0 of 2; served openai/gpt-oss-120b))"
+        in picked.reason
+    )
 
 
 @pytest.mark.parametrize("status", [400, 402, 429, 502, 503])
