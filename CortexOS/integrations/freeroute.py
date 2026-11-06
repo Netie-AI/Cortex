@@ -266,8 +266,19 @@ def local_only_enabled() -> bool:
     return (os.environ.get(LOCAL_ONLY_ENV) or "").strip() == "1"
 
 
+# OpenVault vault/fallback.py FallbackManager.status: once a provider's daily
+# token quota is spent, every hop of that provider reports this health with the
+# circuit closed and no park_until. OpenVault skips those hops on every walk.
+_OV_QUOTA_EXHAUSTED = "quota_exhausted"
+
+
 def _hop_parked(hop: Mapping[str, Any]) -> bool:
-    return str(hop.get("circuit") or "").lower() == "open" or bool(hop.get("park_until"))
+    """True when OpenVault will not walk this hop: circuit open, parked, or quota spent."""
+    return (
+        str(hop.get("circuit") or "").lower() == "open"
+        or bool(hop.get("park_until"))
+        or str(hop.get("health") or "").lower() == _OV_QUOTA_EXHAUSTED
+    )
 
 
 def _read_vault(url: str, timeout: float) -> _Vault:
