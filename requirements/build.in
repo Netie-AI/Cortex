@@ -6,5 +6,5 @@ poetry-core
 # slim defaults. setuptools matches uv.lock (full already resolves 83.0.0
 # via torch). wheel is not in uv.lock; the image locks pin it
 # (scripts/lock_images.py --upgrade-package wheel).
-setuptools==83.0.0
+setuptools==84.2.1
 wheel==0.48.0
