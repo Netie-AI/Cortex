@@ -40,3 +40,11 @@ Real iOS Safari, VoiceOver, soft-keyboard behaviour on iPadOS (a focus blur ther
 ## Agent shape
 
 Orchestrator on the session model. Fan-out on Sonnet, isolated context with written briefs: one builder (single writer, no git), one checker that did not write the change (hash-verified restores, 27 mutations, 3 sampler mutations). Opus was not needed for any step.
+
+## Addendum 2026-11-16: the focus fix for the same crossing enumerated owners
+
+Round 9 handed focus to an equivalent control when a crossing of lg destroyed the focused one (`useFocusHandoff`: a module-level listener plus per-component resolvers for the nav, the Sources dock and the sidebar toggle). The independent check (25 mutations, matrix over every focusable control in 12 states) found the same cause class one level up: **a repair that lists the cases it knows instead of covering the class**. Still on `body` after a crossing: the phone tab-bar links and the More button when widening, the top-bar Role select when narrowing, and every answer control (confidence badge, SQL, downloads, Share answer, chart bars, the details summary), because AnswerMessage, SimpleChart and AnswerRowsTable swap on `useIsLg` and none registers a resolver. A third crossing of a repeated round trip also lost focus.
+
+Root-cause class: **swapping a subtree on a breakpoint destroys whatever held focus; handing focus back per owner leaves every unlisted owner broken.** The general fix is either to stop destroying the node (render once, restyle by width, as round 6 did for answer order) or to give the crossing one generic fallback (equivalent control by role and accessible name, else the nearest surviving ancestor landmark). Invariant: fix the root-cause class, not the symptom in front of you.
+
+Test-gap lesson: the specs listed the controls the builder thought of; the checker's matrix over every focusable control found the rest. A gate over a class should enumerate the class from the DOM, not from the author's memory.
