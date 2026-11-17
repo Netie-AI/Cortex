@@ -48,3 +48,13 @@ Round 9 handed focus to an equivalent control when a crossing of lg destroyed th
 Root-cause class: **swapping a subtree on a breakpoint destroys whatever held focus; handing focus back per owner leaves every unlisted owner broken.** The general fix is either to stop destroying the node (render once, restyle by width, as round 6 did for answer order) or to give the crossing one generic fallback (equivalent control by role and accessible name, else the nearest surviving ancestor landmark). Invariant: fix the root-cause class, not the symptom in front of you.
 
 Test-gap lesson: the specs listed the controls the builder thought of; the checker's matrix over every focusable control found the rest. A gate over a class should enumerate the class from the DOM, not from the author's memory.
+
+## Addendum 2026-11-17: the generic fallback, and a platform API the first version assumed
+
+Expected: after the generic hand-off, no focusable control ends on `body` across a crossing of lg. Actual: a DOM-enumerated matrix (11 states, 5 crossings) found 266 failing control-crossings (106 distinct) on the per-owner version and 0 after the fallback (DMS PR #510, `useFocusHandoff.ts`; Playwright 347 of 347). Repro: `iphone-focus-matrix.spec.ts` on commit `bf0bb1f`.
+
+Second root-cause class, found by the independent checker: **a browser API assumed on every target.** The first fallback called `Element.checkVisibility` unguarded; Safari before 17.4 lacks it, so on those iPhones the call threw inside the rAF hand-off and focus stayed on `body`, owners included. Chromium (the only engine in the suite) could not show it. The reproduction deletes the method with an init script. Invariant: a gate that runs on one engine must simulate the missing API of the engines it cannot run ("assert the artifact the user receives"; "silent fallback is a lie", here a silent failure inside a frame callback).
+
+Third: four of nine checker mutations were uncaught because the matrix oracle accepts any equivalent control and the decoy sat first in document order, so a "pick the last hit" mutant passed by accident. Lesson: place the decoy after the real control, and assert tier priority with a case where two tiers disagree. Pinned in `iphone-focus-hardening.spec.ts` (6 tests, each RED under its mutation).
+
+Still open: the drawer Role select has a twin in the lg top bar but focus goes to the first nav link; only Chat-page states are enumerated; no WebKit run.
