@@ -1310,6 +1310,9 @@ class Completion:
     stamp: RouteStamp | None = None
     reason: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
+    # The provider's ``finish_reason`` for the first choice, as sent ("" when
+    # absent). ``length`` means the reply was cut off at ``max_tokens``.
+    finish_reason: str = ""
 
 
 @contextmanager
@@ -1627,6 +1630,7 @@ def complete(
     )
     text = ""
     message: dict[str, Any] = {}
+    finish_reason = ""
     usage: dict[str, Any] = {}
     scored = False
     error_type = ""
@@ -1647,6 +1651,7 @@ def complete(
         try:
             choice = (data.get("choices") or [{}])[0] or {}
             message = dict(choice.get("message") or {})
+            finish_reason = str(choice.get("finish_reason") or "")
         except (IndexError, TypeError, AttributeError):
             message = {}
         text = str(message.get("content") or "")
@@ -1758,6 +1763,7 @@ def complete(
         message=message,
         stamp=stamp,
         reason=reason,
+        finish_reason=finish_reason,
         usage=usage,
     )
 

@@ -918,7 +918,9 @@ def _doc_model(messages: list[dict[str, str]]) -> Any:
         accept=lambda text: bool((text or "").strip()),
         egress="leave",
     )
-    return documents.ModelReply(ok=out.ok, text=out.text, reason=out.reason)
+    return documents.ModelReply(
+        ok=out.ok, text=out.text, reason=out.reason, finish_reason=out.finish_reason
+    )
 
 
 def answer_question(
