@@ -10,6 +10,8 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
+from CortexOS.sql_codepoints import hidden_codepoint
+
 FORBIDDEN = (
     exp.Insert,
     exp.Update,
@@ -362,6 +364,11 @@ def apply_page_tiebreak(sql: str, semantic: dict[str, Any], total_count: int | N
 
 def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
     violations: list[str] = []
+    hidden = hidden_codepoint(sql or "")
+    if hidden:
+        # JOIN-GRANT-ZW: a character sqlglot keeps in a name and DuckDB reads
+        # as whitespace hides a relation from every check below.
+        return GuardrailResult(False, [f"HIDDEN_CODEPOINT:{hidden}"], None)
     try:
         statements = sqlglot.parse(sql, read="duckdb")
     except Exception as exc:

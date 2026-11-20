@@ -137,39 +137,70 @@ def test_guard_removed_caller_gate_passes_the_hidden_table(monkeypatch: pytest.M
         "SELECT amount\nFROM orders\tWHERE amount > 0\r\n",
         "SELECT amount FROM orders WHERE tenant_id = 'café'",
         'SELECT amount AS "Äpfel" FROM orders',
-        "SELECT amount FROM orders",
-        "SELECT　amount FROM orders",
+        "SELECT\u00a0amount FROM orders",
+        "SELECT\u3000amount FROM orders",
         "SELECT amount FROM orders WHERE tenant_id = '\U0001f4e6'",
+        # Real data values: a ZWJ emoji sequence, Persian with ZWNJ, a soft
+        # hyphen, a right-to-left mark, a Unicode 15 emoji, a private-use glyph.
+        "SELECT amount FROM orders WHERE tenant_id = '\U0001f469\u200d\U0001f4bb'",
+        "SELECT amount FROM orders WHERE tenant_id = 'می\u200cخواهم'",
+        "SELECT amount FROM orders WHERE tenant_id = 'Lager\u00adbestand'",
+        "SELECT amount FROM orders WHERE tenant_id = '\u200fשלום'",
+        "SELECT amount FROM orders WHERE tenant_id = '\U0001fae8'",
+        "SELECT amount FROM orders WHERE tenant_id = '\uf8ff'",
     ],
-    ids=["tab-lf-cr", "accent-in-literal", "non-ascii-alias", "nbsp", "ideographic-space", "emoji"],
+    ids=[
+        "tab-lf-cr", "accent-in-literal", "non-ascii-alias", "nbsp", "ideographic-space",
+        "emoji", "zwj-emoji", "zwnj-persian", "soft-hyphen", "rlm-hebrew", "unicode15-emoji",
+        "private-use",
+    ],
 )
 def test_must_pass_ordinary_sql_is_not_refused(sql: str, verified: VerifiedManifest) -> None:
     assert sql_codepoints.hidden_codepoint(sql) is None
     enforce_manifest(sql, verified)
+    assert caller_sql.validate_caller_sql(sql, {"orders": ["tenant_id", "amount"]})["ok"] is True
 
 
-@pytest.mark.parametrize(
-    "ch", ["\x00", "\x01", "\x1b", "\x7f", "​", "‎", "‮", "⁠", " ", "﻿", "", "\U000e0001"]
-)
-def test_refused_class_includes_controls_format_and_separators(ch: str) -> None:
+@pytest.mark.parametrize("ch", ["\x00", "\x01", "\x0c", "\x1b", "\x7f", "\u200b", "\u2060", "\ufeff"])
+def test_refused_set_is_controls_and_the_measured_split(ch: str) -> None:
     assert sql_codepoints.hidden_codepoint(f"SELECT 1 AS a{ch}b") == f"U+{ord(ch):04X}"
 
 
 # -- the sweep -------------------------------------------------------------------
 
 
-def _duckdb_splits(texts: list[str]) -> list[str]:
-    """The ``a<ch>b`` texts DuckDB does not read back as one identifier."""
-    con = duckdb.connect(":memory:")
+def _duckdb_aliases(con: duckdb.DuckDBPyConnection, statements: list[str]) -> list[list[str] | None]:
+    """Each statement's select-list aliases as DuckDB's parser reads them (None: no parse)."""
     rows = con.execute(
-        "SELECT x, json_serialize_sql('SELECT 1 AS ' || x) FROM unnest(?) t(x)", [texts]
+        "SELECT i, json_serialize_sql(s) FROM "
+        "(SELECT unnest(range(len(?))) AS i, unnest(?) AS s) ORDER BY i",
+        [statements, statements],
     ).fetchall()
-    split: list[str] = []
-    for text, serialized in rows:
+    out: list[list[str] | None] = []
+    for _i, serialized in rows:
         parsed = json.loads(serialized)
-        node = None if parsed.get("error") else parsed["statements"][0]["node"]
-        if node is None or node["select_list"][0]["alias"] != text:
-            split.append(text)
+        if parsed.get("error"):
+            out.append(None)
+        else:
+            out.append([c.get("alias") for c in parsed["statements"][0]["node"]["select_list"]])
+    return out
+
+
+def _duckdb_splits(texts: list[str]) -> list[str]:
+    """The ``a<ch>b`` texts DuckDB does not read back as one identifier.
+
+    Parsed as ``SELECT 1 AS t1, 1 AS t2, ...`` 512 at a time; a chunk that does
+    not come back as exactly its own aliases is decided one text at a time.
+    """
+    con = duckdb.connect(":memory:")
+    chunks = [texts[i : i + 512] for i in range(0, len(texts), 512)]
+    statements = ["SELECT " + ", ".join(f"1 AS {t}" for t in chunk) for chunk in chunks]
+    split: list[str] = []
+    for chunk, aliases in zip(chunks, _duckdb_aliases(con, statements), strict=True):
+        if aliases == chunk:
+            continue
+        singles = _duckdb_aliases(con, [f"SELECT 1 AS {t}" for t in chunk])
+        split.extend(t for t, got in zip(chunk, singles, strict=True) if got != [t])
     return split
 
 
@@ -179,6 +210,27 @@ def _sqlglot_keeps(ch: str, tokenizer: object) -> bool:
     except Exception:  # noqa: BLE001 - sqlglot refusing it is not a hidden split
         return False
     return len(tokens) == 1 and tokens[0].text == f"a{ch}b"
+
+
+def _sqlglot_kept(chars: list[str], tokenizer: object) -> list[str]:
+    """The ``chars`` sqlglot keeps inside ``a<ch>b``, tokenized 512 at a time.
+
+    A chunk whose tokens are exactly ``a<ch>b , a<ch>b , ...`` keeps all of
+    them; any other chunk is decided one character at a time.
+    """
+    kept: list[str] = []
+    for start in range(0, len(chars), 512):
+        chunk = chars[start : start + 512]
+        texts = [f"a{ch}b" for ch in chunk]
+        try:
+            tokens = tokenizer.tokenize(" , ".join(texts))  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - decided one by one below
+            tokens = []
+        if [t.text for t in tokens[::2]] == texts and len(tokens) == 2 * len(texts) - 1:
+            kept.extend(chunk)
+        else:
+            kept.extend(ch for ch in chunk if _sqlglot_keeps(ch, tokenizer))
+    return kept
 
 
 def test_the_sweep_sees_the_known_split() -> None:
@@ -198,14 +250,13 @@ def test_no_allowed_code_point_is_split_differently_by_the_two_tokenizers() -> N
     U+FEFF), all refused. An upgrade that adds one fails here.
     """
     tokenizer = DuckDB().tokenizer_class()
-    kept = [
-        f"a{chr(cp)}b"
+    allowed = [
+        chr(cp)
         for cp in range(0x110000)
-        if not 0xD800 <= cp <= 0xDFFF
-        and sql_codepoints.hidden_codepoint(chr(cp)) is None
-        and _sqlglot_keeps(chr(cp), tokenizer)
+        if not 0xD800 <= cp <= 0xDFFF and sql_codepoints.hidden_codepoint(chr(cp)) is None
     ]
-    assert len(kept) > 100_000, "the sweep must cover the identifier alphabet"
+    kept = [f"a{ch}b" for ch in _sqlglot_kept(allowed, tokenizer)]
+    assert len(kept) > 1_000_000, "the sweep must cover the identifier alphabet"
     split = [
         f"U+{ord(text[1]):04X} {unicodedata.category(text[1])}" for text in _duckdb_splits(kept)
     ]
