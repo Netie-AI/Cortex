@@ -1,0 +1,529 @@
+{
+  "_readme": "Hostile SQL for the schema_context join grant (JOIN-GRANT-SUBQUERY-01, #408). Each case relates two tables the caller declared. Replayed by tests/dms/test_join_grant_subquery_408.py against CortexOS.insights.schema_context.ungranted_reason and against POST /v1/insights. Cases may be added. A case never moves from a refusal to 'decided_granted'.",
+  "_expected_values": {
+    "refuse_ungranted_join": "refused by name (schema_context:ungranted_join:<left>+<right>) under 'schema'; the same SQL passes the join decision under 'control_schema', where the JOINS line exists",
+    "envelope=refused_before_the_gate": "the route's statement extractor does not accept the statement, so the gate never sees it; the envelope is still a REFUSE with no SQL",
+    "refuse_unanalysable": "refused as schema_context:unanalysable_join under every schema: the statement reads a relation the join decision cannot name",
+    "envelope_reason": "what the consumer reads when it differs from the gate's reason: for refuse_unanalysable, the SQL gate's own name for the statement when it has one; for a pair that carries an undeclared qualifier, the reason after the response scrub withheld that qualifier"
+  },
+  "schemas": {
+    "pair_no_join": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer",
+    "pair_joined": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)",
+    "chain": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\n- gamma_note\n- entry_ref integer\n- note text\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)\n- beta_entry.ref_code = gamma_note.entry_ref (entry_note)",
+    "chain_all": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\n- gamma_note\n- entry_ref integer\n- note text\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)\n- beta_entry.ref_code = gamma_note.entry_ref (entry_note)\n- alpha_ledger.id = gamma_note.entry_ref (ledger_note)",
+    "two_orders": "SCHEMA\n- sales.orders\n- id integer\n- ops.orders\n- id integer\n- cust\n- oid integer\nJOINS\n- sales.orders.id = cust.oid (sales_customer)",
+    "two_orders_both": "SCHEMA\n- sales.orders\n- id integer\n- ops.orders\n- id integer\n- cust\n- oid integer\nJOINS\n- sales.orders.id = cust.oid (sales_customer)\n- ops.orders.id = cust.oid (ops_customer)"
+  },
+  "cases": [
+    {
+      "name": "cte_join",
+      "shape": "cte",
+      "sql": "WITH x AS (SELECT id, qty FROM alpha_ledger WHERE qty > 1) SELECT x.qty, b.amt FROM x JOIN beta_entry b ON x.id = b.ref_code WHERE b.amt > 0",
+      "why_it_might_slip": "The JOIN's left operand is a CTE name, so a check that pairs named tables sees one table and no pair.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "cte_both_sides",
+      "shape": "cte",
+      "sql": "WITH x AS (SELECT id, qty FROM alpha_ledger WHERE qty > 1), y AS (SELECT ref_code, amt FROM beta_entry WHERE amt > 0) SELECT x.qty, y.amt FROM x JOIN y ON x.id = y.ref_code WHERE x.qty > 2",
+      "why_it_might_slip": "Both operands are CTE names. No named table appears in any JOIN.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "cte_named_like_the_table_it_wraps",
+      "shape": "unanalysable",
+      "sql": "WITH beta_entry AS (SELECT ref_code, amt FROM beta_entry WHERE amt > 0) SELECT a.qty, beta_entry.amt FROM alpha_ledger a JOIN beta_entry ON a.id = beta_entry.ref_code WHERE a.qty > 1",
+      "why_it_might_slip": "The CTE carries the table's own name. A check that exempts every name found in a WITH list exempts the joined table.",
+      "expected": "refuse_unanalysable"
+    },
+    {
+      "name": "cte_in_other_scope_exempts_a_direct_join",
+      "shape": "unanalysable",
+      "sql": "SELECT a.qty, b.amt FROM alpha_ledger a JOIN beta_entry b ON a.id = b.ref_code WHERE a.qty > (WITH beta_entry AS (SELECT 1 AS x) SELECT x FROM beta_entry)",
+      "why_it_might_slip": "A CTE declared inside a scalar subquery is invisible to the outer JOIN, which reads the real table. WITH names collected from the whole tree exempt it anyway.",
+      "expected": "refuse_unanalysable"
+    },
+    {
+      "name": "cte_chain_three_deep",
+      "shape": "cte",
+      "sql": "WITH x AS (SELECT id, qty FROM alpha_ledger WHERE qty > 1), y AS (SELECT id, qty FROM x WHERE qty > 2), z AS (SELECT y.qty, b.amt FROM y JOIN beta_entry b ON y.id = b.ref_code WHERE b.amt > 0) SELECT qty, amt FROM z WHERE qty > 3",
+      "why_it_might_slip": "The table is two CTE hops away from the JOIN that relates it.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "derived_table_join",
+      "shape": "derived_table",
+      "sql": "SELECT d.qty, b.amt FROM (SELECT id, qty FROM alpha_ledger WHERE qty > 1) d JOIN beta_entry b ON d.id = b.ref_code WHERE b.amt > 0",
+      "why_it_might_slip": "The FROM operand is a subquery, which has no table name to pair.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "derived_table_on_the_join_side",
+      "shape": "derived_table",
+      "sql": "SELECT a.qty, d.amt FROM alpha_ledger a JOIN (SELECT ref_code, amt FROM beta_entry WHERE amt > 0) d ON a.id = d.ref_code WHERE a.qty > 1",
+      "why_it_might_slip": "The JOIN operand is a subquery.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "derived_table_nested_three_deep",
+      "shape": "derived_table",
+      "sql": "SELECT d3.qty, b.amt FROM (SELECT id, qty FROM (SELECT id, qty FROM (SELECT id, qty FROM alpha_ledger WHERE qty > 1) d1 WHERE qty > 2) d2 WHERE qty > 3) d3 JOIN beta_entry b ON d3.id = b.ref_code WHERE b.amt > 0",
+      "why_it_might_slip": "Nesting depth: the table sits three subqueries below the JOIN.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "comma_join_with_derived_table",
+      "shape": "derived_table",
+      "sql": "SELECT a.qty, d.amt FROM alpha_ledger a, (SELECT ref_code, amt FROM beta_entry WHERE amt > 0) d WHERE a.id = d.ref_code",
+      "why_it_might_slip": "A comma join has no JOIN keyword and its right operand is a subquery.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "parenthesised_join_operand",
+      "shape": "derived_table",
+      "sql": "SELECT a.qty, b.amt FROM (alpha_ledger a JOIN beta_entry b ON a.id = b.ref_code) WHERE a.qty > 1",
+      "why_it_might_slip": "The whole join sits inside parentheses, so the outer FROM holds one unnamed operand.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "semi_join_on_derived_table",
+      "shape": "derived_table",
+      "sql": "SELECT a.qty FROM alpha_ledger a SEMI JOIN (SELECT ref_code FROM beta_entry WHERE amt > 0) d ON a.id = d.ref_code WHERE a.qty > 1",
+      "why_it_might_slip": "DuckDB SEMI JOIN against a subquery: an existence probe with no named right table.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "natural_join_on_derived_table",
+      "shape": "derived_table",
+      "sql": "SELECT qty FROM alpha_ledger NATURAL JOIN (SELECT ref_code AS id FROM beta_entry WHERE amt > 0) d WHERE qty > 1",
+      "why_it_might_slip": "NATURAL JOIN has no ON clause and the operand is a subquery that renames the key.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "in_subquery",
+      "shape": "in_subquery",
+      "sql": "SELECT qty FROM alpha_ledger WHERE id IN (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "IN is a semi-join written in WHERE. No JOIN clause exists.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "not_in_subquery",
+      "shape": "in_subquery",
+      "sql": "SELECT qty FROM alpha_ledger WHERE id NOT IN (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "The anti-join form of the same probe.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "any_subquery",
+      "shape": "in_subquery",
+      "sql": "SELECT qty FROM alpha_ledger WHERE id = ANY (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "= ANY is IN under another spelling.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "in_subquery_inside_join_on",
+      "shape": "in_subquery",
+      "sql": "SELECT l.qty FROM alpha_ledger l JOIN alpha_ledger r ON l.id = r.id AND l.id IN (SELECT ref_code FROM beta_entry WHERE amt > 0) WHERE l.qty > 1",
+      "why_it_might_slip": "The JOIN is a granted self-join. The other table hides in its ON condition.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "exists_correlated",
+      "shape": "exists",
+      "sql": "SELECT a.qty FROM alpha_ledger a WHERE EXISTS (SELECT 1 FROM beta_entry b WHERE b.ref_code = a.id)",
+      "why_it_might_slip": "A correlated EXISTS joins row by row with no JOIN clause.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "not_exists_correlated",
+      "shape": "exists",
+      "sql": "SELECT a.qty FROM alpha_ledger a WHERE NOT EXISTS (SELECT 1 FROM beta_entry b WHERE b.ref_code = a.id)",
+      "why_it_might_slip": "The anti-join form.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "scalar_subquery_correlated_in_select",
+      "shape": "correlated_subquery",
+      "sql": "SELECT a.qty, (SELECT max(b.amt) FROM beta_entry b WHERE b.ref_code = a.id) AS top_amt FROM alpha_ledger a WHERE a.qty > 1",
+      "why_it_might_slip": "The second table is read from the SELECT list.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "scalar_subquery_uncorrelated_in_where",
+      "shape": "correlated_subquery",
+      "sql": "SELECT qty FROM alpha_ledger WHERE qty > (SELECT avg(amt) FROM beta_entry)",
+      "why_it_might_slip": "No correlation and no JOIN, yet each row is compared with a value computed from the other table.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "subquery_in_having",
+      "shape": "correlated_subquery",
+      "sql": "SELECT id, sum(qty) AS total FROM alpha_ledger GROUP BY id HAVING sum(qty) > (SELECT max(amt) FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "HAVING is walked less often than WHERE.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "subquery_in_order_by",
+      "shape": "correlated_subquery",
+      "sql": "SELECT a.qty FROM alpha_ledger a WHERE a.qty > 1 ORDER BY (SELECT max(b.amt) FROM beta_entry b WHERE b.ref_code = a.id)",
+      "why_it_might_slip": "The sort key leaks the other table's ordering.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "subquery_in_aggregate_filter",
+      "shape": "correlated_subquery",
+      "sql": "SELECT count(*) FILTER (WHERE id IN (SELECT ref_code FROM beta_entry WHERE amt > 0)) AS n FROM alpha_ledger",
+      "why_it_might_slip": "The probe sits in an aggregate FILTER clause.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "subquery_in_case_expression",
+      "shape": "correlated_subquery",
+      "sql": "SELECT a.qty, CASE WHEN EXISTS (SELECT 1 FROM beta_entry b WHERE b.ref_code = a.id) THEN 1 ELSE 0 END AS has_entry FROM alpha_ledger a WHERE a.qty > 1",
+      "why_it_might_slip": "The existence probe is a CASE branch in the SELECT list.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "subquery_in_qualify",
+      "shape": "correlated_subquery",
+      "sql": "SELECT a.qty FROM alpha_ledger a WHERE a.qty > 1 QUALIFY row_number() OVER (ORDER BY a.qty) <= (SELECT count(*) FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "QUALIFY is a DuckDB clause a walker of WHERE and HAVING never visits.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "subquery_in_limit",
+      "shape": "correlated_subquery",
+      "sql": "SELECT qty FROM alpha_ledger WHERE qty > 1 LIMIT (SELECT count(*) FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "The row count of the answer becomes the other table's count.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "union_top_level",
+      "shape": "set_operation",
+      "sql": "SELECT qty FROM alpha_ledger WHERE qty > 1 UNION ALL SELECT amt FROM beta_entry WHERE amt > 0",
+      "why_it_might_slip": "A set operation stacks two tables in one result with no JOIN anywhere.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "intersect_top_level",
+      "shape": "set_operation",
+      "sql": "SELECT id FROM alpha_ledger WHERE qty > 1 INTERSECT SELECT ref_code FROM beta_entry WHERE amt > 0",
+      "why_it_might_slip": "INTERSECT is an equi-join on the whole row.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "except_top_level",
+      "shape": "set_operation",
+      "sql": "SELECT id FROM alpha_ledger WHERE qty > 1 EXCEPT SELECT ref_code FROM beta_entry WHERE amt > 0",
+      "why_it_might_slip": "EXCEPT is an anti-join on the whole row.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "union_inside_derived_table",
+      "shape": "set_operation",
+      "sql": "SELECT u.v FROM (SELECT qty AS v FROM alpha_ledger WHERE qty > 1 UNION ALL SELECT amt AS v FROM beta_entry WHERE amt > 0) u WHERE u.v > 0",
+      "why_it_might_slip": "The statement is a SELECT, so a check for a top-level set operation passes it.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "union_inside_cte",
+      "shape": "set_operation",
+      "sql": "WITH u AS (SELECT qty AS v FROM alpha_ledger WHERE qty > 1 UNION SELECT amt AS v FROM beta_entry WHERE amt > 0) SELECT v FROM u WHERE v > 0",
+      "why_it_might_slip": "The set operation is a CTE body.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "union_by_name",
+      "shape": "set_operation",
+      "sql": "SELECT qty AS v FROM alpha_ledger WHERE qty > 1 UNION ALL BY NAME SELECT amt AS v FROM beta_entry WHERE amt > 0",
+      "why_it_might_slip": "DuckDB UNION BY NAME.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "lateral_correlated_subquery",
+      "shape": "lateral",
+      "sql": "SELECT a.qty, x.total FROM alpha_ledger a, LATERAL (SELECT sum(b.amt) AS total FROM beta_entry b WHERE b.ref_code = a.id) x WHERE a.qty > 1",
+      "why_it_might_slip": "LATERAL is a correlated join whose operand is a subquery.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "left_join_lateral",
+      "shape": "lateral",
+      "sql": "SELECT a.qty, x.amt FROM alpha_ledger a LEFT JOIN LATERAL (SELECT b.amt FROM beta_entry b WHERE b.ref_code = a.id LIMIT 1) x ON true WHERE a.qty > 1",
+      "why_it_might_slip": "JOIN LATERAL ... ON true: the ON clause says nothing and the correlation is inside.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "from_first_derived_table",
+      "shape": "duckdb_form",
+      "sql": "FROM (FROM alpha_ledger SELECT id, qty WHERE qty > 1) d JOIN beta_entry b ON d.id = b.ref_code SELECT d.qty, b.amt WHERE b.amt > 0",
+      "why_it_might_slip": "DuckDB FROM-first syntax around a derived table.",
+      "envelope": "refused_before_the_gate",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "pivot_operand_joined",
+      "shape": "duckdb_form",
+      "sql": "SELECT b.amt FROM (PIVOT alpha_ledger ON qty USING count(*) GROUP BY id) p JOIN beta_entry b ON p.id = b.ref_code WHERE b.amt > 0",
+      "why_it_might_slip": "The FROM operand is a PIVOT statement in parentheses.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "columns_expression_over_cte",
+      "shape": "duckdb_form",
+      "sql": "WITH x AS (SELECT id, qty FROM alpha_ledger WHERE qty > 1) SELECT COLUMNS('.*') FROM x JOIN beta_entry b ON x.id = b.ref_code WHERE b.amt > 0",
+      "why_it_might_slip": "COLUMNS() names no column, and the JOIN's left operand is a CTE.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "quoted_mixed_case_through_cte",
+      "shape": "identifier_spelling",
+      "sql": "WITH x AS (SELECT id, qty FROM \"ALPHA_LEDGER\" WHERE qty > 1) SELECT x.qty, b.amt FROM x JOIN \"Beta_Entry\" b ON x.id = b.ref_code WHERE b.amt > 0",
+      "why_it_might_slip": "DuckDB folds quoted ASCII names to the same table. A pair compared without the fold never matches a refusal.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "schema_qualified_in_subquery",
+      "shape": "identifier_spelling",
+      "sql": "SELECT qty FROM main.alpha_ledger WHERE id IN (SELECT ref_code FROM main.beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "The caller declared the bare names. A qualified reference is not the declared table (the SQL gate refuses it too), so it matches no JOINS line under any schema.",
+      "schema": "pair_no_join",
+      "pair": "main.alpha_ledger+main.beta_entry",
+      "expected": "refuse_ungranted_join",
+      "envelope_reason": "schema_context:ungranted_join:[name withheld].alpha_ledger+[name withheld].beta_entry"
+    },
+    {
+      "name": "cte_name_differs_only_by_case",
+      "shape": "unanalysable",
+      "sql": "WITH Beta_Entry AS (SELECT 1 AS ref_code) SELECT a.qty FROM alpha_ledger a WHERE a.id IN (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "A CTE spelled like the table in another case. DuckDB folds the two names together; an exact-match scope resolver does not.",
+      "expected": "refuse_unanalysable"
+    },
+    {
+      "name": "chain_skips_the_bridge_table",
+      "shape": "cte",
+      "sql": "WITH x AS (SELECT id, qty FROM alpha_ledger WHERE qty > 1) SELECT x.qty, g.note FROM x JOIN gamma_note g ON x.id = g.entry_ref WHERE g.note IS NOT NULL",
+      "why_it_might_slip": "alpha-beta and beta-gamma are granted. alpha-gamma is not, and beta is not in the statement.",
+      "schema": "chain",
+      "control_schema": "chain_all",
+      "pair": "alpha_ledger+gamma_note",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "chain_skips_the_bridge_table_in_subquery",
+      "shape": "in_subquery",
+      "sql": "SELECT note FROM gamma_note WHERE entry_ref IN (SELECT id FROM alpha_ledger WHERE qty > 1)",
+      "why_it_might_slip": "The same ungranted pair, as an IN probe.",
+      "schema": "chain",
+      "control_schema": "chain_all",
+      "pair": "alpha_ledger+gamma_note",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "table_function_reads_a_table_by_string",
+      "shape": "unanalysable",
+      "sql": "SELECT a.qty, b.amt FROM alpha_ledger a JOIN query_table('beta_entry') b ON a.id = b.ref_code WHERE a.qty > 1",
+      "why_it_might_slip": "query_table() takes the table name as a string, so no table reference exists to pair.",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "table function refused"
+    },
+    {
+      "name": "table_function_inside_in_subquery",
+      "shape": "unanalysable",
+      "sql": "SELECT qty FROM alpha_ledger WHERE id IN (SELECT ref_code FROM query_table('beta_entry') WHERE amt > 0)",
+      "why_it_might_slip": "The same string-named read, one scope down.",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "table function refused"
+    },
+    {
+      "name": "lateral_table_function",
+      "shape": "unanalysable",
+      "sql": "SELECT a.qty FROM alpha_ledger a, LATERAL query_table('beta_entry') b WHERE a.id = b.ref_code",
+      "why_it_might_slip": "LATERAL f() hangs the call off a Lateral node, not a Table node.",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "lateral join refused"
+    },
+    {
+      "name": "query_function_runs_sql_from_a_string",
+      "shape": "unanalysable",
+      "sql": "SELECT a.qty FROM alpha_ledger a JOIN query('SELECT ref_code FROM beta_entry') b ON a.id = b.ref_code WHERE a.qty > 1",
+      "why_it_might_slip": "query() runs a whole statement held in a string literal.",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "table function refused"
+    },
+    {
+      "name": "recursive_cte",
+      "shape": "unanalysable",
+      "sql": "WITH RECURSIVE r AS (SELECT id, qty FROM alpha_ledger WHERE qty > 1 UNION ALL SELECT b.ref_code, b.amt FROM beta_entry b JOIN r ON b.ref_code = r.id + 1) SELECT qty FROM r WHERE qty > 0",
+      "why_it_might_slip": "A recursive CTE's own name binds differently in its anchor and recursive arms.",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "recursive CTE refused: WITH RECURSIVE is not analysed here"
+    },
+    {
+      "name": "cte_named_like_a_declared_table_is_a_fake_bridge",
+      "shape": "unanalysable",
+      "sql": "WITH beta_entry AS (SELECT 1 AS ref_code, 1 AS amt) SELECT a.id, g.note FROM alpha_ledger a, beta_entry b, gamma_note g WHERE a.id = g.entry_ref",
+      "why_it_might_slip": "Adversary round, lens 2. alpha-beta and beta-gamma are granted. The CTE is a one-row constant named like the bridge table, so a check that counts the name as the table sees a chain the statement never reads.",
+      "schema": "chain",
+      "expected": "refuse_unanalysable"
+    },
+    {
+      "name": "same_bare_name_in_another_schema",
+      "shape": "identifier_spelling",
+      "sql": "SELECT c.oid FROM ops.orders o JOIN cust c ON o.id = c.oid WHERE c.oid > 0",
+      "why_it_might_slip": "Adversary round, lens 4. The JOINS line grants sales.orders. A pair compared by bare name also grants ops.orders.",
+      "schema": "two_orders",
+      "control_schema": "two_orders_both",
+      "pair": "cust+ops.orders",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "same_bare_name_two_schemas_joined_to_each_other",
+      "shape": "identifier_spelling",
+      "sql": "SELECT o.id FROM ops.orders o JOIN sales.orders s ON o.id = s.id WHERE o.id > 0",
+      "why_it_might_slip": "Adversary round, lens 4. Two tables that share a bare name look like a self-join.",
+      "schema": "two_orders_both",
+      "pair": "ops.orders+sales.orders",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "trailing_empty_statement",
+      "shape": "statement_boundary",
+      "sql": "SELECT qty FROM alpha_ledger WHERE id IN (SELECT ref_code FROM beta_entry WHERE amt > 0);;",
+      "why_it_might_slip": "Adversary round, lens 1. sqlglot returns [Select, None] for the empty trailing statement. A check that reads any None as a parse failure switches itself off, and DuckDB runs the statement.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "leading_empty_statement",
+      "shape": "statement_boundary",
+      "sql": ";SELECT qty FROM alpha_ledger WHERE id IN (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "The same None, in front.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "two_statements_one_table_each",
+      "shape": "statement_boundary",
+      "sql": "SELECT id FROM alpha_ledger WHERE qty > 1; SELECT ref_code FROM beta_entry WHERE amt > 0",
+      "why_it_might_slip": "Adversary round, lenses 2 and 3. Each statement reads one table, so a per-statement decision passes both. SET VARIABLE in the first statement would carry a value into the second.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join",
+      "envelope": "refused_before_the_gate"
+    }
+  ]
+}
