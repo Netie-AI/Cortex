@@ -1362,6 +1362,21 @@ def _abstain_refused(
     }
 
 
+def _catalog_word_rule(question: str) -> bool:
+    """Main's catalog regex. It decides only while ``CORTEX_CATALOG_BY_MODEL`` is off.
+
+    On, the model that chooses the metric chooses the catalog (#426) and this
+    returns False without reading the question.
+    """
+    from CortexOS.dms.metric_choice import catalog_by_model_enabled
+
+    if catalog_by_model_enabled():
+        return False
+    from packs.dms.semantic.catalog_answer import is_catalog_intent
+
+    return bool(is_catalog_intent(question))
+
+
 def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
     """META-01 — browse what the semantic layer can answer (no SQL)."""
     from packs.dms.semantic.catalog_answer import build_catalog_answer
@@ -1957,9 +1972,7 @@ def answer(
     # A noun the ontology does not define, and a shape no metric can express,
     # are the model's decision. They are not a regex that refuses first.
     if sql is None:
-        from packs.dms.semantic.catalog_answer import is_catalog_intent
-
-        if is_catalog_intent(question):
+        if _catalog_word_rule(question):
             return _done(_catalog_response(question, audit_id))
         cq = match_certified(question)
         if cq is not None:
@@ -1978,6 +1991,8 @@ def answer(
             # The cascade does not choose. A model does, and a second model
             # checks the choice. Unarmed fails closed.
             metric_decision = decide_metric(question)
+            if metric_decision.catalog:
+                return _done(_catalog_response(question, audit_id))
             if metric_decision.serve:
                 from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 

@@ -14,6 +14,7 @@ becomes ``NO_CLOSEST``: Yes and No then both answer not found.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -55,6 +56,40 @@ CHECK_INSTRUCTIONS = (
 )
 
 
+# #426: with this on, the chooser may answer ``catalog`` (the person asks what
+# exists or what can be asked) and the check confirms it. The catalog word
+# rule is then not consulted. Off by default: no live model run has measured it.
+CATALOG_BY_MODEL_ENV = "CORTEX_CATALOG_BY_MODEL"
+CATALOG_CHOICE = "catalog"
+
+CHOOSE_CATALOG_INSTRUCTIONS = (
+    " One more value is allowed: metric_id is catalog when the person asks "
+    "what data, tables, columns, metrics or questions exist or can be asked, "
+    "in any language, and does not ask for a value, a count or records. A "
+    "question that asks for a metric's result is never catalog, even when it "
+    "uses words such as metrics, tables, columns, list or metadata."
+)
+
+CHECK_CATALOG_INSTRUCTIONS = (
+    "Is the person asking what data, tables, columns, metrics or questions "
+    "exist or can be asked, and not asking for a value, a count or records? "
+    "Return JSON and nothing else, with keys agrees and unsure, both booleans. "
+    "agrees is true only when a list of what can be asked is the answer they "
+    "want. unsure is true when you cannot tell. If unsure, agrees is false."
+)
+
+
+def catalog_by_model_enabled() -> bool:
+    return (os.environ.get(CATALOG_BY_MODEL_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def choose_instructions() -> str:
+    """The chooser's system prompt. Flag off, it is ``CHOOSE_INSTRUCTIONS`` unchanged."""
+    if catalog_by_model_enabled():
+        return CHOOSE_INSTRUCTIONS + CHOOSE_CATALOG_INSTRUCTIONS
+    return CHOOSE_INSTRUCTIONS
+
+
 @dataclass(slots=True)
 class MetricSelection:
     metric_id: str = "none"
@@ -77,6 +112,9 @@ class MetricDecision:
     serve: bool
     selection: MetricSelection
     why: str
+    # The model chose the catalog and the check agreed. ``serve`` stays False:
+    # no metric runs, and the selection reads as none to every other caller.
+    catalog: bool = False
 
 
 class MetricChoicePort(Protocol):
@@ -143,6 +181,18 @@ def _choose_and_check(question: str) -> MetricDecision:
     port = resolve_metric_choice()
     selection = port.choose(question)
     metric_id = (selection.metric_id or "none").strip()
+    if metric_id.lower() == CATALOG_CHOICE:
+        agreed = False
+        if catalog_by_model_enabled():
+            if metric_check_enabled():
+                verdict = port.check(question, selection)
+                agreed = verdict.agrees is True and verdict.unsure is False
+            else:
+                agreed = True
+        # Not agreed is not a refusal: the question goes on to the ladder.
+        selection.metric_id = metric_id = "none"
+        if agreed:
+            return MetricDecision(False, selection, "", catalog=True)
     if metric_id.lower() == "none" or not metric_id:
         why = selection.why or (
             "no declared metric was chosen, so it cannot be served directly"
@@ -188,7 +238,7 @@ def decide_metric(question: str) -> MetricDecision:
     Not served, the selection carries the closest answerable question.
     """
     decision = _choose_and_check(question)
-    if not decision.serve:
+    if not decision.serve and not decision.catalog:
         selection = decision.selection
         selection.closest_question = answerable_closest(
             question, selection.closest_question
