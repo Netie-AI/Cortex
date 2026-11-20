@@ -1,6 +1,6 @@
 # JOIN-GRANT-ZW: an invisible character hides a table from every SQL gate (2026-11-20)
 
-Found by the #408 adversary round 3 (Opus, identifier lens). P0, gate bypass.
+Found by the #408 adversary round 3 (identifier lens). P0, gate bypass.
 Fixed on `claude/track-cortex-accuracy`.
 
 ## Expected vs actual (main `304bf84` and #408 head `d4a62b6`)
@@ -85,8 +85,8 @@ the same rows before and after.
 
 ## Invariants that applied
 
-- Adversary is not the verifier: the writer's 53 cases and two Sonnet rounds
-  passed; an Opus attacker found it in one lens.
+- Adversary is not the verifier: the writer's 53 cases and two earlier rounds
+  passed; an attacker on the judge tier found it in one lens.
 - Fix the root-cause class: every SQL gate refuses before parsing, and the
   sweep proves no allowed code point splits differently, so the rule is
   measured, not guessed. Dropping one character from the set fails it by name.

@@ -64,7 +64,7 @@ table each reference reaches. What cannot be named is
   refuses it (scope-resolved). Safety there rests on the second gate.
 - SQL the parser rejects (`$$beta_entry$$`) returns None here by design and
   is refused by `validate_caller_sql`.
-- Round 3 (Opus, three lenses, 193 probes plus 4,660 generated variants)
+- Round 3 (judge tier, three lenses, 193 probes plus 4,660 generated variants)
   finished the unicode sweep and found a served bypass the first two rounds
   missed: zero-width characters inside an alias hide a second table from every
   gate, the manifest enforcer included. Fixed; see
