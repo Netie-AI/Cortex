@@ -5,13 +5,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter
-_NRIC = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
+from CortexOS.security import redact_port
 
-# Email (RFC5322 simplified)
-_EMAIL = re.compile(
-    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
-)
+# #241: the engine owns the person-data patterns; this pack reuses them.
+_MYKAD = redact_port.MYKAD
+_NRIC = redact_port.NRIC
+_EMAIL = redact_port.EMAIL
 
 # Credit card: 13–19 digits with optional separators
 _CREDIT_CARD = re.compile(
@@ -24,6 +23,7 @@ _PHONE = re.compile(
 )
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("mykad", _MYKAD),
     ("nric", _NRIC),
     ("credit_card", _CREDIT_CARD),
     ("email", _EMAIL),
@@ -75,3 +75,33 @@ def redact_for_prompt(text: str) -> str:
         cursor = span.end
     parts.append(text[cursor:])
     return "".join(parts)
+
+
+def _phone_is_unambiguous(value: str) -> bool:
+    """A phone form no measured figure takes: ``+60 12-345 6789`` or ``012-345 6789``.
+
+    A bare digit run or ``1200-3400`` can be a quantity or a range, and a figure's
+    digits are never altered (DMS #508), so those stay.
+    """
+    if value.startswith("+"):
+        return True
+    return value.startswith("0") and any(sep in value for sep in "-. ")
+
+
+def redact_for_model(text: str) -> str:
+    """The redactor this pack registers on the engine port for routed completions.
+
+    The engine patterns (MyKad, NRIC/FIN, email, Luhn-valid card), plus phone
+    numbers in a form no measured figure takes. Look-alike and zero-width
+    characters are seen through; text outside a match passes through unchanged.
+    """
+    view, index = redact_port.normalized_view(text)
+    spans = redact_port.engine_spans(view)
+    for match in _PHONE.finditer(view):
+        value = match.group(0)
+        if _phone_is_unambiguous(value):
+            spans.append((match.start(), match.end(), "phone"))
+    return redact_port.apply_spans(text, view, index, spans)
+
+
+redact_port.register_redactor(redact_for_model)

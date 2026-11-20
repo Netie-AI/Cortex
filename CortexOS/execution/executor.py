@@ -9,6 +9,8 @@ from netie.routing.cost_ledger import CostLedger, NodeExecutionRecord, now_utc
 from netie.routing.tiers import Tier
 from netie.routing.token_estimate import estimate_prompt_tokens
 
+from CortexOS.security.redact_port import RedactionRefused, redact_for_model
+
 
 @dataclass(slots=True)
 class RoutedCompletionOutcome:
@@ -88,6 +90,38 @@ async def invoke_routed_completion(
             model=routed.model,
             cost_myr=0.0,
         )
+
+    # #241: person data never reaches a model adapter. The system and prompt
+    # text pass through the redactor in use before the cost estimate and the
+    # adapter call. A redactor that raises or returns nothing refuses the call:
+    # an error row with the reason name only, and no adapter call.
+    try:
+        adapter_req = replace(
+            adapter_req,
+            system=redact_for_model(adapter_req.system),
+            prompt=redact_for_model(adapter_req.prompt),
+        )
+    except RedactionRefused as exc:
+        refused_at = now_utc()
+        await ledger.add(
+            NodeExecutionRecord(
+                run_id=run_id,
+                node_id=node_id,
+                tier=routed.tier.value,
+                model=routed.model,
+                latency_ms=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_myr=0.0,
+                cache_hit=False,
+                started_at=refused_at,
+                ended_at=refused_at,
+                status="error",
+                ceiling_myr=ceiling,
+                error=exc.reason,
+            )
+        )
+        raise
 
     prompt_blob = f"{adapter_req.system}\n{adapter_req.prompt}"
     est_prompt_tokens = estimate_prompt_tokens(
