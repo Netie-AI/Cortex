@@ -524,6 +524,42 @@
       "pair": "alpha_ledger+beta_entry",
       "expected": "refuse_ungranted_join",
       "envelope": "refused_before_the_gate"
+    },
+    {
+      "name": "zero_width_space_hides_a_cross_join",
+      "shape": "invisible_codepoint",
+      "sql": "SELECT * FROM alpha_ledger a​CROSS​JOIN​beta_entry WHERE qty > 1",
+      "why_it_might_slip": "JOIN-GRANT-ZW, Opus adversary round 3. sqlglot keeps U+200B (zero width space) inside the alias and writes it back unquoted; DuckDB reads it as whitespace, so the hidden words are a cross join of the second table. Every gate saw one table.",
+      "schema": "pair_no_join",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "SQL carries U+200B, an invisible or control character the SQL gate and DuckDB may split differently; refused"
+    },
+    {
+      "name": "word_joiner_hides_a_cross_join",
+      "shape": "invisible_codepoint",
+      "sql": "SELECT * FROM alpha_ledger AS a⁠CROSS⁠JOIN⁠beta_entry WHERE qty > 1",
+      "why_it_might_slip": "JOIN-GRANT-ZW, Opus adversary round 3. sqlglot keeps U+2060 (word joiner) inside the alias and writes it back unquoted; DuckDB reads it as whitespace, so the hidden words are a cross join of the second table. Every gate saw one table.",
+      "schema": "pair_no_join",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "SQL carries U+2060, an invisible or control character the SQL gate and DuckDB may split differently; refused"
+    },
+    {
+      "name": "bom_hides_a_union",
+      "shape": "invisible_codepoint",
+      "sql": "SELECT qty FROM alpha_ledger AS a﻿UNION﻿ALL﻿SELECT﻿amt﻿FROM﻿beta_entry LIMIT 5",
+      "why_it_might_slip": "JOIN-GRANT-ZW, Opus adversary round 3. sqlglot keeps U+FEFF (byte order mark) inside the alias and writes it back unquoted; DuckDB reads it as whitespace, so the hidden words are a UNION ALL read of the second table. Every gate saw one table.",
+      "schema": "pair_no_join",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "SQL carries U+FEFF, an invisible or control character the SQL gate and DuckDB may split differently; refused"
+    },
+    {
+      "name": "bom_hides_a_positional_join",
+      "shape": "invisible_codepoint",
+      "sql": "SELECT * FROM alpha_ledger a﻿POSITIONAL﻿JOIN﻿beta_entry WHERE qty > 0",
+      "why_it_might_slip": "JOIN-GRANT-ZW, Opus adversary round 3. sqlglot keeps U+FEFF (byte order mark) inside the alias and writes it back unquoted; DuckDB reads it as whitespace, so the hidden words are a positional join of the second table. Every gate saw one table.",
+      "schema": "pair_no_join",
+      "expected": "refuse_unanalysable",
+      "envelope_reason": "SQL carries U+FEFF, an invisible or control character the SQL gate and DuckDB may split differently; refused"
     }
   ]
 }

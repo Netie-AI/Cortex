@@ -793,6 +793,30 @@
       "technique": "set_operation_inside_derived_table",
       "why_it_might_slip": "JOIN-GRANT-SUBQUERY-01 (#408): the statement is a SELECT, so a check for a top-level set operation passes it. Each leg reads a governed table and each needs its own predicate.",
       "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "zero_width_space_hides_users",
+      "sql": "SELECT * FROM orders AS o\u200bCROSS\u200bJOIN\u200busers WHERE amount > 0",
+      "technique": "invisible_codepoint_token_split",
+      "why_it_might_slip": "sqlglot keeps U+200B inside the alias o and writes it back unquoted; DuckDB reads it as whitespace. Every check sees only orders, so users is read with no predicate and no path check (JOIN-GRANT-ZW, found by the #408 adversary round).",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Refused before the parse by CortexOS.sql_codepoints: a control, format or separator character is a place the two tokenizers may disagree."
+    },
+    {
+      "name": "word_joiner_hides_users",
+      "sql": "SELECT * FROM orders AS o\u2060CROSS\u2060JOIN\u2060users",
+      "technique": "invisible_codepoint_token_split",
+      "why_it_might_slip": "sqlglot keeps U+2060 inside the alias o and writes it back unquoted; DuckDB reads it as whitespace. Every check sees only orders, so users is read with no predicate and no path check (JOIN-GRANT-ZW, found by the #408 adversary round).",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Refused before the parse by CortexOS.sql_codepoints: a control, format or separator character is a place the two tokenizers may disagree."
+    },
+    {
+      "name": "bom_hides_users_in_a_union",
+      "sql": "SELECT amount FROM orders AS o\ufeffUNION\ufeffALL\ufeffSELECT\ufefftenant_id\ufeffFROM\ufeffusers",
+      "technique": "invisible_codepoint_token_split",
+      "why_it_might_slip": "sqlglot keeps U+FEFF inside the alias o and writes it back unquoted; DuckDB reads it as whitespace. Every check sees only orders, so users is read with no predicate and no path check (JOIN-GRANT-ZW, found by the #408 adversary round).",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Refused before the parse by CortexOS.sql_codepoints: a control, format or separator character is a place the two tokenizers may disagree."
     }
   ],
   "_expected_values": {
