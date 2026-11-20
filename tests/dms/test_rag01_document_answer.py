@@ -22,7 +22,7 @@ import pytest
 
 from CortexOS.dms.query_service import CONTRACTS_DIR
 from CortexOS.rag import documents
-from tests.dms.reader_reply import reader_reply
+from tests.dms.reader_reply import confirm_doc_checks, is_doc_check, reader_reply  # noqa: F401
 from tests.dms.test_rag03_answer_routing import (  # noqa: F401
     DOC_HIT_Q,
     SESSION,
@@ -112,7 +112,9 @@ def test_model_answer_is_served_with_its_citation_and_source(armed_openvault, dm
 
     assert text.startswith(CITED), text
     assert "Quoted from the documents" not in text
-    [call] = armed_openvault.chat_calls
+    # The reader call, then the #465 check that it is the fact asked.
+    call, check = armed_openvault.chat_calls
+    assert is_doc_check(check["body"]) and not is_doc_check(call["body"])
     shown = "\n".join(m["content"] for m in call["body"]["messages"])
     assert PAYMENT in shown and DOC_HIT_Q in shown
     assert documents.NOT_IN_DOCUMENTS in shown
@@ -135,7 +137,7 @@ def test_contract_ask_model_citation_is_badged_document(armed_openvault, dms_htt
     assert body.get("rows") in ([], None) and body.get("sql_used") is None
     assert body.get("drillthrough_token") is None
     assert body.get("audit_id")
-    assert len(armed_openvault.chat_calls) == 1
+    assert len(armed_openvault.chat_calls) == 2  # reader, then the #465 check
 
 
 # -- anything short of a model citation serves nothing --------------------------
@@ -267,6 +269,11 @@ _ACME = documents.chunk(
 _MOQ_Q = "minimum order quantity per SKU"
 
 
+def _confirm(_msgs: list[dict[str, str]]) -> documents.ModelReply:
+    """The #465 check, confirming."""
+    return documents.ModelReply(ok=True, text='{"answers":true}', finish_reason="stop")
+
+
 def _model(reply: documents.ModelReply) -> tuple[documents.Complete, list[Any]]:
     seen: list[Any] = []
 
@@ -282,7 +289,7 @@ def test_answer_serves_the_cited_model_reply_with_its_sources() -> None:
         documents.ModelReply(ok=True, text=reader_reply("50 units per SKU [1]."))
     )
 
-    found = documents.answer(_MOQ_Q, _ACME, complete)
+    found = documents.answer(_MOQ_Q, _ACME, complete, _confirm)
 
     assert found == documents.DocAnswer(
         answer="50 units per SKU [1].\nSources: [1] acme.txt", sources=["acme.txt"], method="model"
@@ -311,18 +318,18 @@ def test_answer_serves_nothing_without_a_valid_model_citation(reply: documents.M
     assert documents.retrieve(_MOQ_Q, _ACME)
     complete, seen = _model(reply)
 
-    assert documents.answer(_MOQ_Q, _ACME, complete) is None
+    assert documents.answer(_MOQ_Q, _ACME, complete, _confirm) is None
     assert len(seen) == 1
 
 
 def test_answer_with_no_model_serves_nothing() -> None:
     assert documents.retrieve(_MOQ_Q, _ACME)
 
-    assert documents.answer(_MOQ_Q, _ACME, None) is None
+    assert documents.answer(_MOQ_Q, _ACME, None, _confirm) is None
 
 
 def test_answer_asks_no_model_when_no_passage_is_relevant() -> None:
     complete, seen = _model(documents.ModelReply(ok=True, text="Net 30 [1]."))
 
-    assert documents.answer("warehouse opening hours on holidays", _ACME, complete) is None
+    assert documents.answer("warehouse opening hours on holidays", _ACME, complete, _confirm) is None
     assert seen == []

@@ -26,7 +26,7 @@ import pytest
 from bench.lanes import assert_contract_answer, lane_line, reach_class
 from CortexOS.dms import lane_ask, plan_sql_ask
 from CortexOS.dms.query_service import CONTRACTS_DIR
-from tests.dms.reader_reply import reader_reply
+from tests.dms.reader_reply import confirm_doc_checks, reader_reply  # noqa: F401
 from tests.dms.test_ask_flag_off_golden_340 import VOLATILE_KEYS
 from tests.dms.test_rag03_answer_routing import (  # noqa: F401
     BLOCKED_Q,
@@ -152,12 +152,12 @@ def test_documents_decision_with_a_cited_answer_is_served(
     _assert_document(body)
     assert _line(body) == "lane: documents (model; calls=1)"
     assert reach_class(body) == "router-model"
-    # One router call, one reader call, one answer check, and nothing else: the
-    # ladder did not run.
+    # One router call, one reader call, the reader's #465 check, one lane
+    # answer check, and nothing else: the ladder did not run.
     assert len(_router_prompts(armed_openvault)) == 1
     assert len(_doc_prompts(armed_openvault)) == 1
     assert len(_check_prompts(armed_openvault)) == 1
-    assert len(armed_openvault.chat_calls) == 3
+    assert len(armed_openvault.chat_calls) == 4
     check = _check_prompts(armed_openvault)[0]["body"]["messages"]
     assert check[1]["content"] == f"Question: {DOC_HIT_Q}\n\nAnswer: {DOC_TEXT}"
     assert armed_openvault.non_openvault_calls == []

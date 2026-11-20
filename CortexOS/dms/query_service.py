@@ -876,8 +876,9 @@ def rag_answer(question: str, *, model: Any = None) -> tuple[str, list[str]]:
 
     RAG-01: passages are ranked by BM25 and gated on relevance; the model
     answers only from them through OpenVault FreeRoute, citing each passage.
-    A failed or unarmed model, a NOT_IN_DOCUMENTS reply or a reply without a
-    valid citation serves nothing: ``("", [])``.
+    A failed or unarmed model, a NOT_IN_DOCUMENTS reply, a reply that is not a
+    finished cited answer, or one a second call does not confirm against the
+    passages serves nothing: ``("", [])`` (#465).
 
     RAG-RANK-01: with ``CORTEX_DOC_RANK`` set, local models reorder the
     passages that clear the same gate before the reader model sees them. A
@@ -889,15 +890,18 @@ def rag_answer(question: str, *, model: Any = None) -> tuple[str, list[str]]:
     from CortexOS.rag import doc_rank, documents
 
     complete = model if model is not None else _doc_model
+    # #465: every caller's answer is checked by a second call that sees the
+    # passages, the lane router's included (it re-reads after a fall-through).
+    check = _doc_check_model
 
     paths = CONTRACTS_DIR.glob("*.txt") if CONTRACTS_DIR.is_dir() else ()
     passages = documents.load_passages(paths)
     stages = doc_rank.stages_from_env()
     if not stages:
-        found = documents.answer(question, passages, complete)
+        found = documents.answer(question, passages, complete, check)
     else:
         sel = doc_rank.select(question, passages, stages)
-        found = documents.read(question, sel.top, complete)
+        found = documents.read(question, sel.top, complete, check)
         if found is not None and sel.note:
             return f"{found.answer}\n{sel.note}", found.sources
     if found is None:
@@ -915,6 +919,25 @@ def _doc_model(messages: list[dict[str, str]]) -> Any:
         messages,
         temperature=0.0,
         max_tokens=400,
+        accept=lambda text: bool((text or "").strip()),
+        egress="leave",
+    )
+    return documents.ModelReply(
+        ok=out.ok, text=out.text, reason=out.reason, finish_reason=out.finish_reason
+    )
+
+
+def _doc_check_model(messages: list[dict[str, str]]) -> Any:
+    """The #465 answer check: one FreeRoute call that sees the passages."""
+    from CortexOS.integrations import freeroute
+    from CortexOS.rag import documents
+
+    # The passages leave the box again: the leave-machine gate runs first.
+    out = freeroute.complete(
+        documents.TASK_DOC_CHECK,
+        messages,
+        temperature=0.0,
+        max_tokens=64,
         accept=lambda text: bool((text or "").strip()),
         egress="leave",
     )
