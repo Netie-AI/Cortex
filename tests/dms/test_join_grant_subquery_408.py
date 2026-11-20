@@ -41,6 +41,7 @@ REQUIRED_SHAPES = {
     "lateral",
     "duckdb_form",
     "identifier_spelling",
+    "statement_boundary",
     "unanalysable",
 }
 
@@ -67,20 +68,20 @@ def _ask(api: TestClient, monkeypatch: pytest.MonkeyPatch, schema: str, sql: str
 
 
 def test_corpus_covers_every_shape_and_names_each_case_once() -> None:
-    assert len(CASES) >= 40, f"only {len(CASES)} cases"
+    assert len(CASES) >= 50, f"only {len(CASES)} cases"
     assert len({c["name"] for c in CASES}) == len(CASES), "duplicate case names"
     assert {c["expected"] for c in CASES} <= {UNGRANTED, UNANALYSABLE}
     assert {c["shape"] for c in CASES} >= REQUIRED_SHAPES
     for case in CASES:
         if case["expected"] == UNGRANTED:
-            assert case["schema"] in SCHEMAS and case["control_schema"] in SCHEMAS
             left, right = case["pair"].split("+")
             granted = schema_mod.parse_schema_context(SCHEMAS[case["schema"]]).joins
-            control = schema_mod.parse_schema_context(SCHEMAS[case["control_schema"]]).joins
-            # The case is hostile only because the pair is missing, and its
-            # control differs only by granting it.
             assert (left, right) not in granted
-            assert (left, right) in control
+            if "control_schema" in case:
+                # The case is hostile only because the pair is missing, and
+                # its control differs only by granting it.
+                control = schema_mod.parse_schema_context(SCHEMAS[case["control_schema"]]).joins
+                assert (left, right) in control
 
 
 @pytest.mark.parametrize("case", _cases(UNGRANTED, UNANALYSABLE))
@@ -88,7 +89,9 @@ def test_must_fail_gate_names_the_refusal(case: dict[str, Any]) -> None:
     assert schema_mod.ungranted_reason(case["sql"], _schema(case)) == _reason(case)
 
 
-@pytest.mark.parametrize("case", _cases(UNGRANTED))
+@pytest.mark.parametrize(
+    "case", [p for p in _cases(UNGRANTED) if "control_schema" in p.values[0]]
+)
 def test_must_pass_same_sql_is_decided_once_the_join_is_granted(case: dict[str, Any]) -> None:
     """The refusal comes from the missing JOINS line, not from the shape."""
     assert schema_mod.ungranted_reason(case["sql"], SCHEMAS[case["control_schema"]]) is None
@@ -97,8 +100,12 @@ def test_must_pass_same_sql_is_decided_once_the_join_is_granted(case: dict[str, 
 @pytest.mark.parametrize("case", _cases(UNANALYSABLE))
 def test_must_fail_unanalysable_is_refused_under_every_schema(case: dict[str, Any]) -> None:
     for name, schema in SCHEMAS.items():
+        # Named unanalysable wherever its tables are declared; a refusal everywhere.
+        assert schema_mod.ungranted_reason(case["sql"], schema) is not None, name
+    for name in ("chain", "chain_all"):
         assert (
-            schema_mod.ungranted_reason(case["sql"], schema) == schema_mod.UNANALYSABLE_JOIN
+            schema_mod.ungranted_reason(case["sql"], SCHEMAS[name])
+            == schema_mod.UNANALYSABLE_JOIN
         ), name
 
 
@@ -254,3 +261,26 @@ def test_existing_decisions_are_unchanged(sql: str, schema: str, expected: str |
 
 def test_unparsable_sql_is_left_to_the_sql_gate() -> None:
     assert schema_mod.ungranted_reason("SELECT FROM WHERE (", CHAIN) is None
+
+
+@pytest.mark.parametrize("depth", [50, 200, 2000])
+def test_must_fail_deep_nesting_is_refused_and_never_raises(depth: int) -> None:
+    """Adversary round, lens 5: RecursionError escaped the gate as a crash."""
+    from CortexOS.insights.caller_sql import validate_caller_sql
+
+    sql = (
+        "SELECT qty FROM alpha_ledger WHERE "
+        + "(" * depth
+        + "1 = 1"
+        + ")" * depth
+        + " AND id IN (SELECT ref_code FROM beta_entry)"
+    )
+    schema = SCHEMAS["pair_no_join"]
+    reason = schema_mod.ungranted_reason(sql, schema)
+    assert schema_mod.brute_force_reason(sql) in (None, schema_mod.BRUTE_FORCE_SCAN)
+    if reason is None:
+        # Unparsed here, so the SQL gate must be the one that refuses it.
+        checked = validate_caller_sql(sql, schema_mod.parse_schema_context(schema).tables)
+        assert checked["ok"] is False and checked["sql"] is None
+    else:
+        assert reason == "schema_context:ungranted_join:alpha_ledger+beta_entry"

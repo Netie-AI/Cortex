@@ -51,7 +51,8 @@ SCHEMA_CONTEXT_EMPTY = "schema_context_empty"
 #: such a string before any model call, so only a direct caller sees this.
 UNPARSED_REASON = "schema_context:unparsed"
 #: ``ungranted_reason`` for SQL whose relations the join decision cannot name
-#: (a table function, ``VALUES``, a recursive CTE). A read
+#: (a table function, ``VALUES``, a recursive CTE, a CTE named like a declared
+#: table). A read
 #: that cannot be named cannot be proven granted, so it is refused.
 UNANALYSABLE_JOIN = "schema_context:unanalysable_join"
 SCHEMA_CONTEXT_FORBIDDEN_CHAR = "schema_context_forbidden_char"
@@ -667,11 +668,14 @@ def reported_usage(schema_context: str | None) -> dict[str, int | None] | None:
 def _statements(sql: str) -> list[exp.Expression] | None:
     try:
         trees = sqlglot.parse(sql or "", read="duckdb")
-    except SqlglotError:
+    except (SqlglotError, RecursionError):
+        # Too deep to parse is not parsed: the SQL gate refuses it by name.
         return None
-    if not trees or any(tree is None for tree in trees):
-        return None
-    return [tree for tree in trees if tree is not None]
+    # An empty statement (``;;``, a leading ``;``) parses to None and DuckDB
+    # skips it. It is dropped, never read as a parse failure: that would
+    # switch every AST check off for a statement that still runs.
+    real = [tree for tree in trees if tree is not None]
+    return real or None
 
 
 def _cte_names(tree: exp.Expression) -> set[str]:
@@ -797,18 +801,19 @@ def _bare(name: str) -> str:
     return name.rsplit(".", 1)[-1]
 
 
-def _read_tables(tree: exp.Expression, declared: set[str]) -> list[str] | None:
-    """Folded bare name of every real table ``tree`` reads. None: cannot be named.
+def _read_tables(tree: exp.Expression, declared: set[str]) -> list[tuple[str, str]] | None:
+    """Folded ``(qualifier, name)`` of every real table ``tree`` reads. None: cannot be named.
 
     Every ``exp.Table`` anywhere in the statement counts, whatever clause or
-    nesting depth holds it. A reference is taken for a CTE only when it is
-    unqualified, some WITH list carries its name, and no ``declared`` table
-    has that name. No scope is resolved: a CTE named like a declared table
-    may leave the real table reachable from another scope, so that name is
-    always counted as the table. This can only add a table to the decision.
+    nesting depth holds it. A reference is a CTE only when it is unqualified
+    and some WITH list carries its name. No scope is resolved, so a WITH name
+    that is also a ``declared`` table name cannot be told apart from the
+    table: counted as the CTE it hides a real read from another scope,
+    counted as the table it is a bridge the statement never reads. Such a
+    statement is refused.
 
-    Not analysed, so refused: a recursive CTE, and a relation operand that is
-    not a named table or a subquery (a table function, ``VALUES``,
+    Also not analysed, so refused: a recursive CTE, and a relation operand
+    that is not a named table or a subquery (a table function, ``VALUES``,
     ``unnest``). ``query_table('t')`` reads ``t`` with no table reference at
     all. The operand list is the allowlist, so a new spelling is refused,
     not ignored.
@@ -820,16 +825,36 @@ def _read_tables(tree: exp.Expression, declared: set[str]) -> list[str] | None:
     for node in tree.find_all(exp.From, exp.Join, exp.Lateral):
         if not isinstance(node.this, exp.Table | exp.Subquery | exp.Lateral):
             return None
-    ctes = _cte_names(tree) - declared
-    names: list[str] = []
+    ctes = _cte_names(tree)
+    if ctes & declared:
+        return None
+    names: list[tuple[str, str]] = []
     for table in tree.find_all(exp.Table):
         if not isinstance(table.this, exp.Identifier):
             return None
         name = fold_identifier(table.name or "")
-        qualified = bool(table.text("db") or table.text("catalog"))
-        if qualified or name not in ctes:
-            names.append(name)
+        parts = [table.text("catalog"), table.text("db")]
+        qualifier = fold_identifier(".".join(part for part in parts if part))
+        if qualifier or name not in ctes:
+            names.append((qualifier, name))
     return names
+
+
+def _declared_name(qualifier: str, name: str, declared: Sequence[str]) -> str:
+    """The declared table a reference reaches, by the rule ``validate_caller_sql`` uses.
+
+    ``schema.table`` must be declared exactly. A bare name is itself when
+    declared, or the one declared table with that bare name. Anything else
+    (an undeclared qualifier, an ambiguous bare name) keeps its own spelling:
+    it matches no JOINS line, so it connects to nothing. Two tables that
+    share a bare name in different schemas are never one table here.
+    """
+    if qualifier:
+        return f"{qualifier}.{name}"
+    if name in declared:
+        return name
+    matches = [t for t in declared if "." in t and _bare(t) == name]
+    return matches[0] if len(matches) == 1 else name
 
 
 def _unconnected_pair(
@@ -875,10 +900,12 @@ def ungranted_reason(sql: str, schema: str) -> str | None:
 
     * adjacent named tables in one FROM / JOIN list must be a granted pair
       (:func:`_join_pairs`);
-    * all the real tables one statement reads, in any clause and at any
-      depth, must be connected by granted pairs (:func:`_unconnected_pair`).
-      This is the rule for a CTE, a derived table, a subquery, a set
-      operation and LATERAL.
+    * all the real tables the SQL reads, in any clause, at any depth and in
+      any statement of the string, must be connected by granted pairs
+      (:func:`_unconnected_pair`). This is the rule for a CTE, a derived
+      table, a subquery, a set operation and LATERAL. Here a reference is
+      the declared table it reaches (:func:`_declared_name`), so a JOINS
+      line for ``sales.orders`` grants nothing for ``ops.orders``.
 
     SQL whose relations cannot be named is ``UNANALYSABLE_JOIN``. SQL parse
     failure returns None so the existing SQL check can name it. A schema
@@ -902,23 +929,26 @@ def ungranted_reason(sql: str, schema: str) -> str | None:
     for name in sorted(set(tables)):
         if name not in granted:
             return f"schema_context:ungranted_table:{name}"
-    declared = {_bare(name) for name in catalog.tables}
-    read: list[set[str]] = []
+    declared = list(catalog.tables)
+    read: set[tuple[str, str]] = set()
     for tree in trees:
-        found = _read_tables(tree, declared)
+        found = _read_tables(tree, {_bare(name) for name in declared})
         if found is None:
             return UNANALYSABLE_JOIN
-        read.append(set(found))
-    for name in sorted(set().union(*read)):
+        read.update(found)
+    for name in sorted({name for _qualifier, name in read}):
         if name not in granted:
             return f"schema_context:ungranted_table:{name}"
     for left, right in sorted(set(pairs)):
         if (left, right) not in joined:
             return f"schema_context:ungranted_join:{left}+{right}"
-    for found in read:
-        gap = _unconnected_pair(found, joined)
-        if gap is not None:
-            return f"schema_context:ungranted_join:{gap[0]}+{gap[1]}"
+    exact = {
+        tuple(sorted((_declared_name("", a, declared), _declared_name("", b, declared))))
+        for a, b in catalog.joins
+    }
+    gap = _unconnected_pair({_declared_name(q, n, declared) for q, n in read}, exact)
+    if gap is not None:
+        return f"schema_context:ungranted_join:{gap[0]}+{gap[1]}"
     return None
 
 
