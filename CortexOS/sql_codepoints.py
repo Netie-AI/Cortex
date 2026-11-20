@@ -10,16 +10,24 @@ an odd alias to every gate and a cross join to DuckDB, so the second table is
 read with no grant, no join line and no row predicate (JOIN-GRANT-ZW, found by
 the #408 adversary round).
 
-The class is refused, not the three characters: any control character other
-than tab, LF and CR, any format character (Cf: zero-width marks, joiners, bidi
-controls, tags), line and paragraph separators, surrogates, private-use and
-unassigned code points. None of them belongs in generated SQL, inside a string
-literal or out, and each is a place where two tokenizers may disagree.
-``tests/test_execution/test_sql_codepoints_zw.py`` sweeps every code point
-through both parsers so a new disagreement fails CI instead of serving.
+What is refused is what the two tokenizers are measured to split differently,
+plus what no SQL text needs:
+
+* control characters other than tab, LF and CR (DuckDB truncates a statement
+  at NUL and refuses the rest; sqlglot keeps them in an identifier);
+* lone surrogates (no valid UTF-8 encodes one);
+* the format characters DuckDB reads as whitespace: U+200B, U+2060, U+FEFF.
+
+Other format characters (U+200C, U+200D in Persian, Indic and emoji text, the
+soft hyphen, bidi marks) and unassigned or private-use code points are read
+the same way by both tokenizers and occur in real data, so a literal holding
+one is not refused: a control that refuses an answerable question is a
+failure too. ``tests/test_execution/test_sql_codepoints_zw.py`` sweeps every
+allowed code point through both tokenizers, so a sqlglot or DuckDB upgrade
+that adds a disagreement fails CI instead of serving.
 
 This module imports only the standard library: the plan+SQL package, the
-insights gates and the manifest enforcer all use it.
+insights gates, the SQL guardrail and the manifest enforcer all use it.
 """
 
 from __future__ import annotations
@@ -27,7 +35,9 @@ from __future__ import annotations
 import unicodedata
 
 #: Unicode general categories refused anywhere in generated SQL.
-REFUSED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
+REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
+#: Format characters DuckDB reads as whitespace and sqlglot keeps in a name.
+SPLIT_FORMAT = frozenset({"\u200b", "\u2060", "\ufeff"})
 #: Control characters both parsers read as plain whitespace.
 _ALLOWED_CONTROLS = frozenset("\t\n\r")
 
@@ -37,7 +47,7 @@ def hidden_codepoint(sql: str) -> str | None:
     for ch in sql or "":
         if ch in _ALLOWED_CONTROLS:
             continue
-        if unicodedata.category(ch) in REFUSED_CATEGORIES:
+        if ch in SPLIT_FORMAT or unicodedata.category(ch) in REFUSED_CATEGORIES:
             return f"U+{ord(ch):04X}"
     return None
 
@@ -53,4 +63,4 @@ def hidden_codepoint_reason(sql: str) -> str | None:
     )
 
 
-__all__ = ["REFUSED_CATEGORIES", "hidden_codepoint", "hidden_codepoint_reason"]
+__all__ = ["REFUSED_CATEGORIES", "SPLIT_FORMAT", "hidden_codepoint", "hidden_codepoint_reason"]
