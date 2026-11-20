@@ -283,11 +283,6 @@ def validate_sql(
     text = (sql or "").strip()
     if not text:
         return refuse("empty sql")
-    from CortexOS.sql_codepoints import hidden_codepoint_reason
-
-    hidden = hidden_codepoint_reason(text)
-    if hidden:
-        return refuse(hidden)
     try:
         statements = sqlglot.parse(text, read="duckdb")
     except Exception as exc:  # noqa: BLE001 - any parse failure is a refusal

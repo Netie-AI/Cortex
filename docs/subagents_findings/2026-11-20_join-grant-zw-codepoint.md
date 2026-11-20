@@ -48,18 +48,40 @@ Called first in all five SQL gates:
   round found this one still open: `POST /dms/lakehouse/query` runs the
   caller's SQL behind it with no manifest, and
   `i<ZW>CROSS<ZW>JOIN<ZW>read_csv('<file>')` returned the file;
-- `crew.freeroute.validate_sql`.
+- the insights pack path, `crew.cot_climb._check_sql`, ahead of the frozen
+  `crew.freeroute.validate_sql` (that file belongs to the #215 lane and
+  `test_branch_does_not_dual_write_freeroute_layer` holds it; a first version
+  edited it and that guard went red).
 
 The first version refused every Cf, Zl, Zp, Co and Cn code point. The verifier
 showed that refuses real data values both parsers read the same way (ZWJ emoji,
 Persian ZWNJ, soft hyphen, bidi marks, emoji newer than Python's Unicode table),
 so the rule was narrowed to what is measured to split plus controls. The CI
 test sweeps every allowed code point (about 1.11M) through both tokenizers in
-12 s; dropping U+2060 from the set fails it by name. The verifier's 16-position
-sweep (alias, after a number, decimal, string, paren, quoted name, column,
-dotted name, operator, function name, comments, keyword prefix, star) found 0
-differentials over the allowed set of the first rule, and 0 over the 10,145
-newly allowed Cf/Zl/Zp code points plus a 1-in-97 sample of Cn/Co.
+12 s; dropping U+2060 from the set fails it by name.
+
+Sweep record, corrected: commit 8a3a0e7 says the verifier's 16-position sweep
+covered 10,145 newly allowed code points. That run was the writer's, with the
+verifier's script, over the 162 newly allowed Cf/Zl/Zp code points plus a
+1-in-97 sample of Cn/Co (10,145 in all): 0 differentials. The verifier then ran
+its own sweep over every Cf, Zl, Zp and Co code point plus 40,000 Cn (177,630
+code points, 16 positions, about 2.84M probes): 0, with U+200B, U+2060, U+FEFF
+still found as a self-check. Verdict at 8a3a0e7: HOLDS.
+
+## Part 2: a comment changed a literal (WRONG=0)
+
+DuckDB strips Unicode spaces outside quotes before parsing, and its quote
+tracking does not skip `/* */` comments. sqlglot renders every comment as
+`/* */`, so `-- customer's filter` flips the pass and an NBSP inside a later
+literal becomes a plain space: `WHERE v = 'a<NBSP>b'` returned the `'a b'` row.
+Only U+00A0, U+2000-U+200A, U+202F, U+205F and U+3000 are rewritten (verifier
+sweep of all allowed code points in four contexts). E-strings and dollar quotes
+also flip the pass in raw SQL, but sqlglot re-renders them as plain strings, so
+in served SQL a comment is the only flipper. The gates now render served SQL
+with `comments=False` (manifest `_served`, caller gate, guardrail and its two
+page helpers). Comments kept in all four: 12 tests red; in the manifest alone: 4.
+Five must-pass statements with comments, `--` and `/*` inside literals return
+the same rows before and after.
 
 ## Invariants that applied
 
@@ -76,13 +98,11 @@ newly allowed Cf/Zl/Zp code points plus a 1-in-97 sample of Cn/Co.
 
 ## Open, by name
 
-- DUCKDB-UNICODE-SPACE-LITERAL (verifier, WRONG=0, not a grant bypass):
-  DuckDB strips Unicode spaces outside quotes before parsing, and its quote
-  tracking does not skip block comments. sqlglot renders `-- customer's` as
-  `/* customer's */`, the apostrophe flips the state, and an NBSP inside a
-  later literal becomes a plain space: `WHERE tenant_id = 'a<NBSP>b'` matches
-  `'a b'`, a wrong row served. NBSP is allowed (both tokenizers agree on it as
-  whitespace). Not fixed here; for routing.
+- GUARDRAIL-STAR-REWRITE-INVENTORY (verifier, pre-existing, for routing): with
+  sensitive columns declared, `validate_sql` rewrites any `SELECT *` to the
+  inventory table's columns, whatever table is read, so a star query on
+  `POST /dms/lakehouse/query` can return 500. The server log names the bound
+  relation; the body does not.
 - Other sqlglot parse sites (`sql_lineage`, `plan_sql/describe`,
   `verified_query_ask`, `l2_plan_gates`, `drillthrough`) are decision helpers
   ahead of `execute_sql`, which runs `enforce_manifest`. Not audited one by one.
