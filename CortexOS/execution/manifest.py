@@ -52,6 +52,7 @@ from sqlglot.errors import SqlglotError
 from CortexOS.execution.sql_scope import ScopeError, cte_reference_ids, dotted_part
 from CortexOS.identifier_fold import fold_identifier
 from CortexOS.paths import data_path
+from CortexOS.sql_codepoints import hidden_codepoint_reason
 
 __all__ = [
     "ManifestError",
@@ -857,6 +858,12 @@ def _wrap_with_predicate(table: exp.Table, predicate: str) -> exp.Subquery:
 def _parse_single_statement(sql: str) -> exp.Expression:
     if len(sql) > MAX_SQL_CHARS:
         raise SqlNotAnalyzable(f"SQL exceeds {MAX_SQL_CHARS} characters; refusing to parse")
+    hidden = hidden_codepoint_reason(sql)
+    if hidden:
+        # JOIN-GRANT-ZW: a zero-width mark is part of an identifier to sqlglot
+        # and whitespace to DuckDB, so a table DuckDB reads would be missing
+        # from every check below. Refused before the parse.
+        raise SqlNotAnalyzable(hidden)
     try:
         statements = sqlglot.parse(sql, read="duckdb")
     except SqlglotError as exc:

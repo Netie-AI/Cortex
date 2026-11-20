@@ -62,9 +62,17 @@ table each reference reaches. What cannot be named is
 - TABLE-PRECHECK-CTE-BLIND: a CTE named like an undeclared real table hides
   that table from this function's table pre-check. `validate_caller_sql`
   refuses it (scope-resolved). Safety there rests on the second gate.
-- SQL the parser rejects (`$$beta_entry$$`, zero-width characters) returns
-  None here by design and is refused by `validate_caller_sql`. The unicode
-  whitespace sweep was not finished.
+- SQL the parser rejects (`$$beta_entry$$`) returns None here by design and
+  is refused by `validate_caller_sql`.
+- Round 3 (Opus, three lenses, 193 probes plus 4,660 generated variants)
+  finished the unicode sweep and found a served bypass the first two rounds
+  missed: zero-width characters inside an alias hide a second table from every
+  gate, the manifest enforcer included. Fixed; see
+  `2026-11-20_join-grant-zw-codepoint.md`.
+- JOIN-GRANT-ADJACENT-OVERREFUSE (round 3, pre-existing): `_join_pairs` pairs
+  each JOIN operand with the previous named table, not with its ON target, so
+  a granted star join (`FROM beta b JOIN alpha a ON .. JOIN gamma g ON ..` in
+  `chain`) is refused as `alpha+gamma`. Table order decides. Not changed here.
 
 ## Subagent shape
 

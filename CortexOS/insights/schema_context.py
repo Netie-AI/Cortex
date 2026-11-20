@@ -35,6 +35,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from CortexOS.identifier_fold import fold_identifier
+from CortexOS.sql_codepoints import hidden_codepoint
 
 _log = logging.getLogger(__name__)
 
@@ -907,11 +908,18 @@ def ungranted_reason(sql: str, schema: str) -> str | None:
       the declared table it reaches (:func:`_declared_name`), so a JOINS
       line for ``sales.orders`` grants nothing for ``ops.orders``.
 
-    SQL whose relations cannot be named is ``UNANALYSABLE_JOIN``. SQL parse
+    SQL whose relations cannot be named is ``UNANALYSABLE_JOIN``, and so is
+    SQL carrying a character the parsers split differently
+    (:mod:`CortexOS.sql_codepoints`). SQL parse
     failure returns None so the existing SQL check can name it. A schema
     that does not parse is refused by name. The reason names the table or
     the join pair and does not include the SQL.
     """
+    if hidden_codepoint(sql or ""):
+        # JOIN-GRANT-ZW: sqlglot keeps a zero-width mark inside an identifier
+        # that DuckDB reads as whitespace, so the tree below would not hold
+        # every table DuckDB reads. The SQL gate names the character.
+        return UNANALYSABLE_JOIN
     trees = _statements(sql)
     if trees is None:
         return None
