@@ -126,9 +126,14 @@ async def test_system_text_alone_is_redacted():
 
 FIGURES = (
     "Revenue RM 1,234,567.89, 1250000.50 kg, 12.345.678 units, range 1200-3400, qty 12, "
-    "total 900101145678.50 g, ratio 0.900101145678, "  # MyKad-shaped digits inside decimals stay
+    "ratio 0.900101145678, "  # digits after a decimal point are a fraction
     "batch 1234567890123456, "  # 16 digits, not Luhn-valid: not a card
-    "span 0123-4567.5 mm"  # a dashed range ending in a decimal is not a phone
+    "span 0123-4567.5 mm, "  # a dashed range ending in a decimal is not a phone
+    # adversary cases (#241 review): dates, ranges, amounts, timestamps, codes
+    "x 2026-09-15 2026-09-15 y, x 2023-09-27 3186149 y, x 523 690 285 465 148 y, "
+    "8576702543019, Total in sen: 250101000000, INV-240115-01-0001, "
+    "2024-01-15 1250000, price range 0-150000, Hours 0800-1700, values: 0 1200 3400, "
+    "range 0-100 000, delta +1 234 567, event ts 1731398400019"
 )
 
 
@@ -136,9 +141,9 @@ FIGURES = (
 def _restore_redactor():
     from CortexOS.security import redact_port
 
-    saved = (redact_port._redactor, redact_port._pack_loaded)
+    saved = (redact_port._redactor, redact_port._pack_loaded, redact_port._pack_error)
     yield
-    redact_port._redactor, redact_port._pack_loaded = saved
+    redact_port._redactor, redact_port._pack_loaded, redact_port._pack_error = saved
 
 
 def _engine_default_only(monkeypatch):
@@ -275,3 +280,142 @@ def test_redact_port_imports_no_pack():
         for a in (n.names if isinstance(n, ast.Import) else [n])
     ]
     assert not [m for m in names if m and (m == "packs" or m.startswith("packs."))]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "id,ic\n1,900101-14-5678",  # CSV cell after a number
+        "Ali,900101-14-5678,1250",
+        "Siti,850505105432.0",  # an IC read as a float
+        "id,card\n7,4111111111111111",
+        "4111111111111111,5555555555554444",
+        "IC 900101 14 5678",
+        "S 1234567 D",
+        "S-1234567-D",
+        "\u04051234567D",  # Cyrillic S
+        "\u0669\u0660\u0660\u0661\u0660\u0661-\u0661\u0664-\u0665\u0666\u0667\u0668",  # Arabic-Indic MyKad
+        "jane@ex\u00e4mple.com",
+        "j\u00e4ne@example.com",
+        "o'neil@example.com",
+        "4111\t1111\t1111\t1111",
+    ],
+)
+def test_review_forms_are_masked_by_both_redactors(text):
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    for redactor in (redact_port.default_redact, pii.redact_for_model):
+        out = redactor(text)
+        assert "[REDACTED:" in out, (redactor.__name__, out)
+        assert not any(ch.isdigit() and ch not in "0123456789" for ch in out.replace("[REDACTED:", ""))
+
+
+def test_figures_survive_both_redactors_byte_for_byte():
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    assert redact_port.default_redact(FIGURES) == FIGURES
+    assert pii.redact_for_model(FIGURES) == FIGURES
+
+
+@pytest.mark.asyncio
+async def test_an_identity_redactor_is_refused_by_the_canary():
+    from CortexOS.security import redact_port
+
+    redact_port.register_redactor(lambda text: text)
+    adapter = RecordingAdapter()
+    ledger = CostLedger()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="", prompt=f"Check {NRIC}", ledger=ledger)
+    assert exc.value.reason == "redactor_ineffective"
+    assert adapter.requests == []
+    assert [(r.status, r.error) for r in ledger.records_for_run("r1")] == [("error", "redactor_ineffective")]
+
+
+@pytest.mark.asyncio
+async def test_a_pack_masker_that_fails_to_load_refuses_and_is_retried(monkeypatch):
+    import importlib
+
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": "dms"}))
+    redact_port.clear_redactor()
+    real_import = importlib.import_module
+    broken = {"on": True}
+
+    def flaky(name, *a, **k):
+        if broken["on"] and name == "packs.dms.security.pii":
+            raise ImportError("half-imported")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(redact_port.importlib, "import_module", flaky)
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="Reach +60 12-345 6789", prompt="hi")
+    assert exc.value.reason == "pack_redactor_unavailable"
+    assert adapter.requests == []
+    broken["on"] = False  # the masker comes back: the next call loads it
+    await _call(adapter, system="Reach +60 12-345 6789", prompt="hi")
+    assert adapter.requests[0].system == "Reach [REDACTED:phone]"
+
+
+def test_importing_the_dms_masker_does_not_switch_another_packs_redactor(monkeypatch):
+    import importlib
+    import importlib.util
+    import sys
+
+    from CortexOS.security import redact_port
+
+    _engine_default_only(monkeypatch)
+    # Execute a separate copy of the module (no reload: other tests hold its classes).
+    real = importlib.import_module("packs.dms.security.pii")
+    spec = importlib.util.spec_from_file_location("pii_copy_t241", real.__file__)
+    assert spec is not None and spec.loader is not None
+    copy = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "pii_copy_t241", copy)
+    spec.loader.exec_module(copy)
+    assert redact_port.registered_redactor() is None
+    assert redact_port.active_redactor() is redact_port.default_redact
+
+
+@pytest.mark.asyncio
+async def test_a_masker_whose_dependency_is_missing_refuses(monkeypatch):
+    """ModuleNotFoundError for something the masker imports is a broken masker, not an absent one."""
+    import importlib
+
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": "dms"}))
+    redact_port.clear_redactor()
+    real_import = importlib.import_module
+
+    def missing_dep(name, *a, **k):
+        if name == "packs.dms.security.pii":
+            raise ModuleNotFoundError("No module named 'some_masker_dep'", name="some_masker_dep")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(redact_port.importlib, "import_module", missing_dep)
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="", prompt=f"Check {NRIC}")
+    assert exc.value.reason == "pack_redactor_unavailable"
+    assert adapter.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_pack_without_a_masker_uses_the_engine_default(monkeypatch):
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": "ruma"}))
+    redact_port.clear_redactor()
+    adapter = RecordingAdapter()
+    await _call(adapter, system="", prompt=f"Check {NRIC}")
+    assert adapter.requests[0].prompt == "Check [REDACTED:nric]"
+    assert redact_port.active_redactor() is redact_port.default_redact

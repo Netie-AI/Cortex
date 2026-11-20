@@ -7,10 +7,18 @@ from dataclasses import dataclass
 
 from CortexOS.security import redact_port
 
-# #241: the engine owns the person-data patterns; this pack reuses them.
+# #241: the engine owns the MyKad pattern. NRIC and email keep this module's
+# own patterns so detect() and redact_for_prompt() behave as before for their
+# existing callers; redact_for_model() below uses the engine patterns.
 _MYKAD = redact_port.MYKAD
-_NRIC = redact_port.NRIC
-_EMAIL = redact_port.EMAIL
+
+# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter
+_NRIC = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
+
+# Email (RFC5322 simplified)
+_EMAIL = re.compile(
+    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
+)
 
 # Credit card: 13–19 digits with optional separators
 _CREDIT_CARD = re.compile(
@@ -77,8 +85,10 @@ def redact_for_prompt(text: str) -> str:
     return "".join(parts)
 
 
-_FIGURE_JOINT_LEFT = re.compile(r"\d[.,]?$")
-_FIGURE_JOINT_RIGHT = re.compile(r"^[.,]?\d")
+_FIGURE_JOINT_LEFT = re.compile(r"\d[.,\-\s]?$")
+_FIGURE_JOINT_RIGHT = re.compile(r"^[.,\-\s]?\d")
+# 0-led local number: a 0 + 1-3 digit area group, a separator, then 6-8 digits.
+_LOCAL_PHONE = re.compile(r"0\d{1,3}[-\s]\d{3,4}[-\s]?\d{3,4}")
 
 
 def _phone_is_unambiguous(value: str) -> bool:
@@ -87,10 +97,12 @@ def _phone_is_unambiguous(value: str) -> bool:
     A bare digit run or ``1200-3400`` can be a quantity or a range, and a figure's
     digits are never altered (DMS #508), so those stay.
     """
+    digits = sum(c.isdigit() for c in value)
+    if digits < 9:
+        return False  # 0800-1700, 0-150000 and +1 234 567 are ranges or figures
     if value.startswith("+"):
         return True
-    # "." alone is not enough: 0.900101145678 is a figure.
-    return value.startswith("0") and any(sep in value for sep in "- ")
+    return _LOCAL_PHONE.fullmatch(value) is not None
 
 
 def redact_for_model(text: str) -> str:
@@ -113,8 +125,10 @@ def redact_for_model(text: str) -> str:
 
 
 def register_engine_redactor() -> None:
-    """Put :func:`redact_for_model` on the engine port (packs -> CortexOS)."""
+    """Put :func:`redact_for_model` on the engine port (packs -> CortexOS).
+
+    Called by the port when this is the active pack. Not called at import, so a
+    process whose pack is not dms keeps the engine default even if some code
+    path imports this module.
+    """
     redact_port.register_redactor(redact_for_model)
-
-
-register_engine_redactor()
