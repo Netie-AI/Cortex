@@ -26,7 +26,7 @@ is served by `POST /v1/contract/ask` with badge `document`.
 
 **A form check standing in for a meaning check.** A valid citation is
 necessary, not sufficient. The first fix (structured `{"answer","citations"}`
-reply plus `finish_reason`) narrowed the form, and three Opus attackers showed
+reply plus `finish_reason`) narrowed the form, and three independent attackers showed
 it only moved the trust boundary into the `answer` field: reasoning, a hedge
 ("does not state ... [1]") or a contradiction (`Net 60 [1]` against a Net 30
 passage) inside a well-formed object was served on every path. The lane
@@ -79,7 +79,7 @@ on the lane path.
 
 ## Subagent shape
 
-Three Opus attackers in parallel, isolated, read-only, function level (no
+Three attackers on the judge tier, in parallel, isolated, read-only, function level (no
 pytest, no TestClient): A reply form and parser, B finish_reason plumbing and
 coverage, C served content end to end with main-vs-branch replay. Then one
-Opus verifier on the reworked head. Build and fixes on the session model.
+verifier on the judge tier, on the reworked head. Build and fixes on the session model.
