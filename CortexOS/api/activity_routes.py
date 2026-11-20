@@ -26,8 +26,10 @@ def _section(fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
 
 
 def register_activity_routes(app: Any) -> None:
-    # #263: run history, routine and app state are not public.
-    @app.get("/api/engine/activity", dependencies=[Depends(require_role("viewer"))])
+    # #263: run history, routine and app state are not public. Steward, because
+    # the workflows section carries run ids and titles, and #368 puts workflow
+    # reads at steward; a viewer floor here would read them around that gate.
+    @app.get("/api/engine/activity", dependencies=[Depends(require_role("steward"))])
     async def engine_activity() -> dict[str, Any]:
         now = time.time()
 

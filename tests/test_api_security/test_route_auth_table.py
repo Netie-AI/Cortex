@@ -67,15 +67,6 @@ OUT_OF_SCOPE: dict[tuple[str, str], str] = {
             ("GET", "/v1/insights/ontology"),
         )
     },
-    **{
-        ("GET", p): "#368 workflow read routes (next ticket on this branch)"
-        for p in (
-            "/api/workflows",
-            "/api/workflows/tasks",
-            "/api/workflows/task/{task_id}",
-            "/api/workflows/task/{task_id}/events",
-        )
-    },
     ("POST", "/search"): "product decision: ruma listing search; whether anonymous shoppers may search",
     **{
         (m, p): "product decision: Clicks devices post without an API key; device auth is a protocol change"
@@ -166,7 +157,50 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Write-method routes that are gated below steward on purpose (Lead ruling on
 # #263, 2026-10-09: a write route under the steward floor must be listed here
 # with its reason). (method, path) -> reason.
-VIEWER_WRITES: dict[tuple[str, str], str] = {}
+VIEWER_WRITES: dict[tuple[str, str], str] = {
+    ("POST", "/api/engine/just-works"): "plans with no model call; apply=true is checked at admin in the handler",
+    ("POST", "/api/engine/coordination-patterns/recommend"): "local pattern recommendation, no store write",
+    ("POST", "/api/memory/query"): "memory store query only",
+    ("POST", "/api/memory/assemble"): "store query plus text joining",
+    ("POST", "/api/context/assemble"): "local token budgeting, no write",
+    ("POST", "/api/context/compact"): "truncates the posted text, no model, no write",
+    ("POST", "/api/discovery/tools/search"): "search over an in-memory catalog",
+    ("POST", "/api/discovery/tools/inject"): "mutates a per-request catalog object only",
+    ("POST", "/api/discovery/find-mcp"): "evolve is hard-coded off",
+    ("POST", "/api/discovery/find-subagents"): "evolve is hard-coded off",
+    ("POST", "/api/engine/osr"): "classify-only; local hash embedding",
+    ("POST", "/dms/analyse-entry"): "parses and validates the posted text",
+    ("POST", "/dms/secure"): "scam, injection and PII checks with no I/O",
+    ("POST", "/dms/classify"): "local intent classifier",
+    ("POST", "/dms/audit/verify"): "reads the ledger chain",
+    ("POST", "/dms/sidecar/query-objects"): "agent-visible columns under a bound session grant",
+    ("POST", "/dms/lakehouse/query"): "validated SQL on a read-only DuckDB connection",
+    ("POST", "/cortex/constructor/fetch"): "read-only preview, at most 100 rows (column scope: see open item)",
+    ("POST", "/cortex/constructor/ghost"): "compiles a graph, no write",
+    ("POST", "/cortex/constructor/recommend"): "local pattern catalog",
+    ("POST", "/cortex/constructor/generate"): "deterministic template match, no model, no write",
+    ("POST", "/a2a/messages"): "in-process delivery to canned echo and seller handlers",
+}
+
+# Write-method routes already on the viewer floor before #263 that spend a model
+# credential or write a store. Not accepted: each is an open role decision,
+# routed from the #263 PR. Counted here so none is silently passed, and a new
+# one still fails the walker.
+VIEWER_WRITE_DEBT: dict[tuple[str, str], str] = {
+    ("POST", "/dms/query"): "spends Cortex's credential via L2 at viewer; kept at viewer because DMS calls it with the demo viewer key (#265 item 3)",
+    ("POST", "/dms/brain/chart"): "model call on Cortex's credential at viewer",
+    ("POST", "/dms/brain/analyze"): "model call on Cortex's credential at viewer",
+    ("POST", "/dms/brain/auto-analysis"): "model call on Cortex's credential at viewer",
+    ("POST", "/dms/brain/report"): "model call on Cortex's credential at viewer",
+    ("POST", "/dms/brain/suggest"): "model call when use_llm=true, at viewer",
+    ("POST", "/dms/brain/ponytail"): "ledger append per uncached request, body-chosen user_id, at viewer",
+    ("POST", "/dms/sidecar/call-action"): "ledger append on every denial, at viewer",
+    ("POST", "/dms/sidecar/insights"): "generate=true spends (caller ov_ key or loopback), at viewer",
+    ("POST", "/mcp/call"): "answer_engine.answer spends; find_skills evolve writes skill files",
+    ("POST", "/api/discovery/find"): "evolve=true writes skill files, at viewer",
+    ("POST", "/api/discovery/find-skills"): "evolve=true writes skill files, at viewer",
+    ("POST", "/api/engine/bakeoff"): "outbound HTTP probes; write_report writes bench files, at viewer",
+}
 
 
 def _closure_floors(fn: Any, depth: int = 0) -> list[str]:
@@ -187,7 +221,7 @@ def _closure_floors(fn: Any, depth: int = 0) -> list[str]:
 
 
 def _route_floor(route: Any) -> str | None:
-    """Lowest role any auth dependency on ``route`` admits; None when there is none."""
+    """Effective floor: every dependency must pass, so the strictest role wins."""
     floors: list[str] = []
 
     def visit(dependant: Any) -> None:
@@ -201,7 +235,7 @@ def _route_floor(route: Any) -> str | None:
     visit(route.dependant)
     if not floors:
         return None
-    return min(floors, key=_ROLES.index)
+    return max(floors, key=_ROLES.index)
 
 
 def _iter_api_routes(app: Any) -> Iterator[tuple[str, str, Any]]:
@@ -241,10 +275,15 @@ def _write_floor_problems(app: Any) -> list[str]:
         floor = _route_floor(route)
         if floor is None:
             problems.append(f"unlisted write route with no auth floor: {method} {path}")
-        elif floor == "viewer" and key not in VIEWER_WRITES:
+        elif floor == "viewer" and key not in VIEWER_WRITES and key not in VIEWER_WRITE_DEBT:
             problems.append(f"write route on viewer floor: {method} {path}")
-    problems += [f"stale viewer-write entry {k}" for k in VIEWER_WRITES if k not in seen]
-    problems += [f"no reason for {k}" for k, why in VIEWER_WRITES.items() if not str(why).strip()]
+    for table in (VIEWER_WRITES, VIEWER_WRITE_DEBT):
+        problems += [f"stale viewer-write entry {k}" for k in table if k not in seen]
+        problems += [f"no reason for {k}" for k, why in table.items() if not str(why).strip()]
+    for method, path, route in _iter_api_routes(app):
+        key = (method, path)
+        if (key in VIEWER_WRITES or key in VIEWER_WRITE_DEBT) and _route_floor(route) != "viewer":
+            problems.append(f"viewer-write entry no longer on viewer floor: {method} {path}")
     return problems
 
 
@@ -510,3 +549,51 @@ def test_write_floor_walker_fails_on_a_viewer_floor_write_route(app):
 
     problems = _write_floor_problems(app)
     assert "write route on viewer floor: POST /planted/t263/viewer" in problems
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/api/routines/pause-all"),
+        ("POST", "/api/routines/resume-all"),
+        ("POST", "/api/routines/tick"),
+        ("POST", "/api/engine/telemetry/compact"),
+    ],
+)
+def test_high_impact_routes_refuse_a_steward(app, spies, method, path):
+    with TestClient(app, raise_server_exceptions=False) as client:
+        res = client.request(method, path, json={}, headers={"X-API-Key": TEST_STEWARD_KEY})
+    assert res.status_code == 403, res.text
+    assert spies == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/api/engine/auto"),
+        ("POST", "/api/routines/x263/run"),
+        ("POST", "/api/routines/x263/fire"),
+        ("GET", "/api/engine/activity"),
+    ],
+)
+def test_spend_and_activity_routes_refuse_a_viewer(app, spies, method, path):
+    with TestClient(app, raise_server_exceptions=False) as client:
+        res = client.request(method, path, json={}, headers={"X-API-Key": TEST_VIEWER_KEY})
+    assert res.status_code == 403, res.text
+    assert spies == []
+
+
+def test_demo_viewer_key_reaches_dms_query_and_nothing_else_under_dms(monkeypatch, app, spies):
+    """DMS's default credential still reaches /dms/query; the engine port refuses it elsewhere."""
+    monkeypatch.delenv("DMS_API_KEYS", raising=False)
+    monkeypatch.delenv("DMS_REFUSE_DEMO_KEYS", raising=False)
+    demo = {"X-API-Key": "dms-demo-viewer-key", "Authorization": "Bearer dms-demo-viewer-key"}
+    with TestClient(app, raise_server_exceptions=False) as client:
+        query = client.post("/dms/query", json={"question": "total stock"}, headers=demo)
+        preview = client.get("/dms/table-preview?table=inventory", headers=demo)
+        audit = client.get("/dms/audit", headers=demo)
+    # Past the gate: the answer_question spy raised inside the handler.
+    assert query.status_code == 500
+    assert "CortexOS.dms.query_service.answer_question" in spies
+    assert preview.status_code == 401 and audit.status_code == 401
+    assert "CortexOS.dms.warehouse_db.preview_table" not in spies

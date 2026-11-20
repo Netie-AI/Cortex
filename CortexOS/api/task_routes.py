@@ -10,7 +10,7 @@ from CortexOS.security.auth_port import Principal, require_role
 router = APIRouter(prefix="/dms/tasks", tags=["tasks"])
 
 # #263: each route writes a task event or verdict under an actor. The actor is
-# the authenticated caller; a body that still sends ``actor`` is ignored.
+# the authenticated caller; the ``actor`` body field stays on the wire, unread.
 _steward = require_role("steward")
 
 
@@ -18,6 +18,7 @@ class GateCheckRequest(BaseModel):
     event_id: str
     task_id: str
     filled_template: dict[str, Any] = {}
+    actor: str = "user"  # wire only (#263): ignored; the actor is the authenticated caller
 
 
 class ChooseTaskRequest(BaseModel):
@@ -26,11 +27,13 @@ class ChooseTaskRequest(BaseModel):
     task_id: str
     filled_template: dict[str, Any] = {}
     intent: str | None = None
+    actor: str = "user"  # wire only (#263): ignored; the actor is the authenticated caller
     accepted: bool = True
 
 
 class AcknowledgeRequest(BaseModel):
     event_id: str
+    actor: str = "steward"  # wire only (#263): ignored; the actor is the authenticated caller
 
 
 def _verdict_dict(verdict) -> dict[str, Any]:

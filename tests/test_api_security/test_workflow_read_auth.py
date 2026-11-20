@@ -184,3 +184,29 @@ def test_registration_without_auth_dependency_fails_closed():
         for _label, path in ROUTES:
             res = c.get(path)
             assert res.status_code == 401, (path, res.status_code)
+
+
+def test_refusal_happens_before_the_store_is_read(client, monkeypatch):
+    """No store or runner read runs for a refused caller (ported from the duplicate file)."""
+    touched: list[str] = []
+
+    def _trap(name):
+        def _call(*_args, **_kwargs):
+            touched.append(name)
+            raise AssertionError(f"{name} reached without a steward key")
+
+        return _call
+
+    for mod, name in (
+        (workflow_runner, "list_workflows"),
+        (workflow_runner, "snapshot"),
+        (workflow_runner, "get_task"),
+        (workflow_store, "get_run"),
+        (workflow_store, "list_runs"),
+    ):
+        monkeypatch.setattr(mod, name, _trap(f"{mod.__name__.rsplit('.', 1)[-1]}.{name}"))
+    for _label, path in ROUTES:
+        for headers in ({}, _hdr("viewer")):
+            res = client.get(path, headers=headers)
+            assert res.status_code in (401, 403), f"GET {path} status={res.status_code}"
+    assert touched == []

@@ -2,7 +2,7 @@
 
 #263: every route needs a credential. Reads are viewer; writes and the
 dimension estimate are steward. The ``actor`` written to the store is the
-authenticated caller; a body that still sends ``actor`` is ignored.
+authenticated caller; the ``actor`` body field stays on the wire, unread.
 """
 
 from typing import Any
@@ -23,12 +23,14 @@ class IntakeRequest(BaseModel):
     label: str
     location_code: str
     photo: str = Field(description="base64-encoded image")
+    actor: str = "demo_operator"  # wire only (#263): ignored; the actor is the authenticated caller
     tenant_id: str = "default"
 
 
 class ScanMoveRequest(BaseModel):
     item_qr_or_id: str
     to_location_qr: str
+    actor: str = "demo_operator"  # wire only (#263): ignored; the actor is the authenticated caller
     tenant_id: str = "default"
 
 
@@ -39,6 +41,7 @@ class ConfirmDimsRequest(BaseModel):
     w: float
     h: float
     unit: str = "m"
+    actor: str = "demo_operator"  # wire only (#263): ignored; the actor is the authenticated caller
     tenant_id: str = "default"
     gate_approved: bool = False
 

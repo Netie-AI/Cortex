@@ -52,15 +52,17 @@ class AnalyseEntryRequest(BaseModel):
     raw_text: str
 
 
-# #263: who approved a write is the authenticated caller. A body that still
-# sends ``approved_by`` is accepted and the value is ignored (pydantic drops
-# unknown fields), so an old client keeps working and cannot name the approver.
+# #263: who approved a write is the authenticated caller. ``approved_by`` stays
+# on the wire unchanged (it is in the frozen contract spec's components, so
+# removing it is a contract major) and its value is never read.
 class AddEntryRequest(BaseModel):
     proposed: dict[str, Any]
+    approved_by: str = "demo_steward"  # wire only (#263): ignored; the actor is the authenticated caller
 
 
 class ProposeEditRequest(BaseModel):
     changes: list[dict[str, Any]]
+    approved_by: str = "demo_steward"  # wire only (#263): ignored; the actor is the authenticated caller
 
 
 def _read_csv_rows(path: Path, limit: int) -> tuple[list[dict[str, str]], int]:

@@ -70,7 +70,7 @@ def test_chat_api_routes(ops_db):
     os.environ["PACK"] = "dms"
     netie.config._cached_config = None
     app = create_app()
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-API-Key": "pytest-steward-key"})
 
     res = client.post(
         "/dms/threads",

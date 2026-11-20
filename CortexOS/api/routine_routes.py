@@ -15,11 +15,13 @@ from CortexOS.execution import humanize, routine_scheduler
 from CortexOS.security.auth_port import require_role, require_spend_auth
 
 # #263: every route needs a credential. Reads are viewer, store writes are
-# steward, and anything that runs a routine (run, fire, tick) is the spend gate.
-# resume-all is steward: it only re-enables schedules; the run is the tick.
+# steward, and running one routine (run, fire) is the spend gate. Acting on
+# every routine at once (pause-all, resume-all, tick) is high impact: admin.
 _VIEWER = [Depends(require_role("viewer"))]
 _STEWARD = [Depends(require_role("steward"))]
+_ADMIN = [Depends(require_role("admin"))]
 _SPEND = [Depends(require_spend_auth("steward"))]
+_SPEND_ADMIN = [Depends(require_spend_auth("admin"))]
 
 
 class RoutineBody(BaseModel):
@@ -108,16 +110,16 @@ def register_routine_routes(app: Any) -> None:
             routine = routine_scheduler.update_routine(routine["id"], vars=body.vars)
         return {"ok": True, "routine": routine}
 
-    @app.post("/api/routines/tick", dependencies=_SPEND)
+    @app.post("/api/routines/tick", dependencies=_SPEND_ADMIN)
     async def tick_now() -> dict[str, Any]:
         return {"ok": True, "ran": await routine_scheduler.tick()}
 
-    @app.post("/api/routines/pause-all", dependencies=_STEWARD)
+    @app.post("/api/routines/pause-all", dependencies=_ADMIN)
     async def pause_all_routines() -> dict[str, Any]:
         routine_scheduler.init()
         return {"ok": True, "paused": routine_scheduler.pause_all()}
 
-    @app.post("/api/routines/resume-all", dependencies=_STEWARD)
+    @app.post("/api/routines/resume-all", dependencies=_ADMIN)
     async def resume_all_routines() -> dict[str, Any]:
         """Resumes user-paused routines; governor pauses stay parked by design."""
         routine_scheduler.init()

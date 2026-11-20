@@ -5,11 +5,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-# #263: ``actor`` is the authenticated caller. A body that still sends it is
-# accepted and the value is ignored.
+# #263: ``actor`` is the authenticated caller. The field stays on the wire
+# unchanged (frozen contract spec components) and its value is never read.
 class CreateThreadRequest(BaseModel):
     external_ref: str | None = None
     customer_label: str | None = None
+    actor: str = "demo_operator"  # wire only (#263): ignored; the actor is the authenticated caller
     tenant_id: str = "default"
 
 
@@ -18,13 +19,13 @@ class AppendMessageRequest(BaseModel):
     body: str
     direction: str = Field(default="inbound", description="inbound | outbound")
     lang: str | None = None
+    actor: str = "demo_operator"  # wire only (#263): ignored; the actor is the authenticated caller
 
 
 def register_chat_routes(app: Any) -> None:
     from fastapi import Depends, HTTPException
 
     from CortexOS.security.auth_port import Principal, require_role
-
     from packs.dms.chat import threads as chat_threads
 
     @app.post("/dms/threads")

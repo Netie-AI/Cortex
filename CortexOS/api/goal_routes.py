@@ -19,6 +19,8 @@ from CortexOS.security.auth_port import require_role
 # store writes and seek (which records proposals; it never runs them) are steward.
 _VIEWER = [Depends(require_role("viewer"))]
 _STEWARD = [Depends(require_role("steward"))]
+# Compacting run history rewrites it for every goal: admin.
+_ADMIN = [Depends(require_role("admin"))]
 
 
 class GoalBody(BaseModel):
@@ -167,7 +169,7 @@ def register_goal_routes(app: Any) -> None:
             "daily": action_event.daily(family or None),
         }
 
-    @app.post("/api/engine/telemetry/compact", dependencies=_STEWARD)
+    @app.post("/api/engine/telemetry/compact", dependencies=_ADMIN)
     async def engine_telemetry_compact() -> dict[str, Any]:
         from CortexOS.execution import action_event
 
