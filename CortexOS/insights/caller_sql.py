@@ -384,7 +384,8 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
         return {**_refuse(refusal, tables), "code": UNDECLARED_COLUMN}
 
     _cap_limit(stmt)
-    out_sql = stmt.sql(dialect="duckdb")
+    # No comments in served SQL: see execution.manifest._served (JOIN-GRANT-ZW part 2).
+    out_sql = stmt.sql(dialect="duckdb", comments=False)
     if checked_any:
         check = "caller catalog: tables and declared columns"
     else:

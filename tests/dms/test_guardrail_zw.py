@@ -15,7 +15,6 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from CortexOS.crew import freeroute as crew_freeroute
 from CortexOS.dms import sql_guardrail
 from CortexOS.dms.sql_guardrail import guard_and_execute, validate_sql
 from tests.dms.test_guardrail_table_functions import (  # noqa: F401
@@ -108,12 +107,17 @@ def test_must_pass_lakehouse_query_with_a_zwj_literal_is_served(lake_client) -> 
     assert [r["sku"] for r in res.json()["rows"]] == ["SKU-A", "SKU-B"]
 
 
-def test_must_fail_crew_sql_check_refuses_a_hidden_table() -> None:
-    out = crew_freeroute.validate_sql(
-        f"SELECT * FROM inventory AS i{ZW}CROSS{ZW}JOIN{ZW}secrets", {"inventory"}
-    )
+def test_must_fail_pack_sql_check_refuses_a_hidden_table() -> None:
+    """The insights pack path checks before the frozen crew FreeRoute validator."""
+    from CortexOS.crew import cot_climb
+    from CortexOS.crew import freeroute as crew_freeroute
+
+    sql = f"SELECT * FROM inventory AS i{ZW}CROSS{ZW}JOIN{ZW}secrets"
+    out = cot_climb._check_sql(crew_freeroute, sql, {}, {"inventory"}, {})
     assert out["ok"] is False and out["sql"] is None
     assert out["reason"].startswith("SQL carries U+200B")
+    # Without the check, the frozen validator passes it as one table.
+    assert crew_freeroute.validate_sql(sql, {"inventory"})["ok"] is True
 
 
 def test_duckdb_reads_the_lake_hidden_table_twice() -> None:

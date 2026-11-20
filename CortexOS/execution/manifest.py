@@ -1130,7 +1130,7 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
     _refuse_ungranted_tables(root, granted, _cte_reference_ids(root))
     _refuse_schema_qualified_columns(root, granted)
     if not predicates:
-        return root.sql(dialect="duckdb")
+        return _served(root)
 
     # Materialise before mutating. Replacing a Table never detaches another
     # Table, so a lazy walk would also be sound here — but the list makes that
@@ -1148,4 +1148,14 @@ def enforce_manifest(sql: str, verified: VerifiedManifest) -> str:
             ) from exc
         table.replace(wrapped)
 
-    return root.sql(dialect="duckdb")
+    return _served(root)
+
+
+def _served(root: exp.Expression) -> str:
+    """The SQL DuckDB runs, rendered without comments (JOIN-GRANT-ZW part 2).
+
+    DuckDB's unicode-space pass tracks quotes but not ``/* */`` comments, so an
+    apostrophe in a comment made it rewrite an NBSP inside a later literal to a
+    plain space and match a different row. A comment carries no meaning.
+    """
+    return root.sql(dialect="duckdb", comments=False)

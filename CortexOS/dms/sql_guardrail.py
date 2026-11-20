@@ -329,7 +329,7 @@ def _unlimited(sql: str) -> str:
     tree = sqlglot.parse_one(sql, read="duckdb")
     tree.set("limit", None)
     tree.set("order", None)
-    return tree.sql(dialect="duckdb")
+    return tree.sql(dialect="duckdb", comments=False)
 
 
 def apply_page_tiebreak(sql: str, semantic: dict[str, Any], total_count: int | None) -> str:
@@ -359,7 +359,7 @@ def apply_page_tiebreak(sql: str, semantic: dict[str, Any], total_count: int | N
     _append_total_order(stmt, semantic)
     if len(order.expressions) == before:
         return sql
-    return stmt.sql(dialect="duckdb")
+    return stmt.sql(dialect="duckdb", comments=False)
 
 
 def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
@@ -460,7 +460,8 @@ def validate_sql(sql: str, semantic: dict[str, Any]) -> GuardrailResult:
         except (TypeError, ValueError, AttributeError):
             stmt.set("limit", exp.Limit(expression=exp.Literal.number(MAX_LIMIT)))
 
-    safe = stmt.sql(dialect="duckdb")
+    # No comments in served SQL: see execution.manifest._served (JOIN-GRANT-ZW part 2).
+    safe = stmt.sql(dialect="duckdb", comments=False)
 
     return GuardrailResult(True, [], safe)
 
