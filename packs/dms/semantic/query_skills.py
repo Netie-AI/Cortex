@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.dms.ask_scope import current_ask_scope, examples_bound
-from packs.dms.skills.capture import cosine_similarity, normalize_trigger, text_embedding
+from packs.dms.skills.capture import normalize_trigger, text_embedding
 
 # High bar: avoid false skill hits that would skip a better metric route.
 DEFAULT_THRESHOLD = 0.72
@@ -187,51 +187,37 @@ def find(
     text = normalize_trigger(question)
     if not text:
         return None
-    q_emb = text_embedding(text)
     con = _connect()
     try:
         ensure_schema(con)
-        rows = con.execute(
+        # #426: only the same question (case and spacing aside) replays a
+        # skill. Shared words used to serve a stored metric for a different
+        # question: "how many not delayed shipments" got the delayed count.
+        # A different wording is the model's to decide, so it is not a hit
+        # at any ``threshold``.
+        row = None
+        for candidate in con.execute(
             "SELECT * FROM dms_query_skills WHERE active = 1 AND space_id = ?",
             (space,),
-        ).fetchall()
-        best: dict[str, Any] | None = None
-        best_score = 0.0
-        for row in rows:
-            pat = normalize_trigger(row["trigger_text"] or "")
-            if not pat:
-                continue
-            # Exact normalized match only for a perfect score. Substring
-            # containment used to replay a longer stored question (with
-            # exclusions / windows) onto a shorter unrelated top-N ask.
-            if pat == text:
-                score = 1.0
-            else:
-                try:
-                    emb = json.loads(row["embedding"] or "[]")
-                except (json.JSONDecodeError, TypeError):
-                    emb = []
-                cos = cosine_similarity(q_emb, emb) if emb else 0.0
-                pt, tt = set(pat.split()), set(text.split())
-                jaccard = len(pt & tt) / len(pt | tt) if pt | tt else 0.0
-                score = max(cos, jaccard)
-            if score > best_score:
-                best_score = score
-                try:
-                    params = json.loads(row["params_json"] or "{}")
-                except (json.JSONDecodeError, TypeError):
-                    params = {}
-                best = {
-                    "id": row["id"],
-                    "trigger_text": row["trigger_text"],
-                    "metric_id": row["metric_id"],
-                    "params": params if isinstance(params, dict) else {},
-                    "sql_template": row["sql_template"],
-                    "layer": row["layer"] or "query_skill",
-                    "score": score,
-                }
-        if best is None or best_score < threshold:
+        ):
+            if normalize_trigger(candidate["trigger_text"] or "") == text:
+                row = candidate
+                break
+        if row is None:
             return None
+        try:
+            params = json.loads(row["params_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            params = {}
+        best = {
+            "id": row["id"],
+            "trigger_text": row["trigger_text"],
+            "metric_id": row["metric_id"],
+            "params": params if isinstance(params, dict) else {},
+            "sql_template": row["sql_template"],
+            "layer": row["layer"] or "query_skill",
+            "score": 1.0,
+        }
         con.execute(
             "UPDATE dms_query_skills SET support_count = support_count + 1, "
             "last_used_at = ? WHERE id = ? AND space_id = ?",
