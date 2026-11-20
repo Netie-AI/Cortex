@@ -416,7 +416,33 @@ def test_table_preview_without_a_key_returns_no_rows(app):
         res = client.get("/dms/table-preview?table=inventory")
     assert res.status_code == 401
     assert "rows" not in res.json()
-    assert res.json() == {"detail": "Valid API key required (X-API-Key or Bearer): missing_key"}
+    assert res.json() == {"detail": "Valid API key required (X-API-Key or Bearer)"}
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"X-API-Key": "ov_probe_t263"},
+        {"X-API-Key": "dms-demo-viewer-key"},
+        {"X-API-Key": "not-a-key"},
+    ],
+    ids=["none", "ov_unverifiable", "published_demo", "unknown"],
+)
+def test_engine_port_401_body_is_fixed(app, headers):
+    """No OpenVault deny reason, and a published key reads like any unknown key."""
+    with TestClient(app) as client:
+        res = client.get("/dms/audit", headers=headers)
+    assert res.status_code == 401
+    assert res.json() == {"detail": "Valid API key required (X-API-Key or Bearer)"}
+
+
+def test_engine_port_403_body_names_the_floor_not_the_caller(app):
+    with TestClient(app) as client:
+        res = client.post("/api/goals", json={}, headers={"X-API-Key": TEST_VIEWER_KEY})
+    assert res.status_code == 403
+    assert res.json() == {"detail": "Requires role 'steward' or higher"}
+    assert "api_viewer" not in res.text
 
 
 @pytest.mark.parametrize(

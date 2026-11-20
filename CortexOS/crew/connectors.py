@@ -16,7 +16,7 @@ from typing import Any
 # Rakazo emulator slugs plus GROK_SYNC inherit map.
 _ROWS: tuple[dict[str, str], ...] = (
     {"slug": "openvault", "name": "OpenVault", "layer": "keys / FreeRoute", "probe": "http://127.0.0.1:5000/api/healthz"},
-    {"slug": "cortex", "name": "Cortex engine", "layer": "governed ask", "probe": "http://127.0.0.1:8010/api/engine/activity"},
+    {"slug": "cortex", "name": "Cortex engine", "layer": "governed ask", "probe": "http://127.0.0.1:8010/health"},
     {"slug": "plane", "name": "Plane board", "layer": "tickets / holds", "probe": "http://127.0.0.1:8099/netie/"},
     {"slug": "uacc", "name": "UACC laptop", "layer": "mouse/keyboard, human confirm", "probe": ""},
     {"slug": "gmail", "name": "Gmail", "layer": "IMAP headers or drop .eml; Crew never sends", "probe": ""},
