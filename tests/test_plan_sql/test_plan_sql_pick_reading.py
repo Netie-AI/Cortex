@@ -402,8 +402,11 @@ def test_split_offer_never_prints_case_labels(
         assert "/*" not in statement and "--" not in statement
     held = _held(bucket_reading["reading_id"])
     if bucket is BUCKET_SQL_COMMENTED:
-        # The comment reached the SQL describe was given: the channel is real.
-        assert "heavy or light" in held.served_sql
+        # The model wrote the comment. Since JOIN-GRANT-ZW part 2 (#408) the SQL
+        # gate serves SQL without comments, so the SQL describe is given no
+        # longer carries it; the labels above are still never printed.
+        assert "heavy or light" in held.model_text
+        assert "heavy or light" not in held.served_sql
 
     # Picked, the bucket reading is served, and only then do its values appear.
     picked = _json(_pick(dms_http, bucket_reading["reading_id"]))
