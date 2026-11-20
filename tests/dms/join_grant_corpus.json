@@ -4,13 +4,15 @@
     "refuse_ungranted_join": "refused by name (schema_context:ungranted_join:<left>+<right>) under 'schema'; the same SQL passes the join decision under 'control_schema', where the JOINS line exists",
     "envelope=refused_before_the_gate": "the route's statement extractor does not accept the statement, so the gate never sees it; the envelope is still a REFUSE with no SQL",
     "refuse_unanalysable": "refused as schema_context:unanalysable_join under every schema: the statement reads a relation the join decision cannot name",
-    "envelope_reason": "what the consumer reads for a refuse_unanalysable case: the SQL gate's own name for the statement. If the SQL gate has no name for it the consumer reads schema_context:unanalysable_join"
+    "envelope_reason": "what the consumer reads when it differs from the gate's reason: for refuse_unanalysable, the SQL gate's own name for the statement when it has one; for a pair that carries an undeclared qualifier, the reason after the response scrub withheld that qualifier"
   },
   "schemas": {
     "pair_no_join": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer",
     "pair_joined": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)",
     "chain": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\n- gamma_note\n- entry_ref integer\n- note text\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)\n- beta_entry.ref_code = gamma_note.entry_ref (entry_note)",
-    "chain_all": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\n- gamma_note\n- entry_ref integer\n- note text\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)\n- beta_entry.ref_code = gamma_note.entry_ref (entry_note)\n- alpha_ledger.id = gamma_note.entry_ref (ledger_note)"
+    "chain_all": "SCHEMA\n- alpha_ledger\n- id integer\n- qty integer\n- beta_entry\n- ref_code integer\n- amt integer\n- gamma_note\n- entry_ref integer\n- note text\nJOINS\n- alpha_ledger.id = beta_entry.ref_code (ledger_entry)\n- beta_entry.ref_code = gamma_note.entry_ref (entry_note)\n- alpha_ledger.id = gamma_note.entry_ref (ledger_note)",
+    "two_orders": "SCHEMA\n- sales.orders\n- id integer\n- ops.orders\n- id integer\n- cust\n- oid integer\nJOINS\n- sales.orders.id = cust.oid (sales_customer)",
+    "two_orders_both": "SCHEMA\n- sales.orders\n- id integer\n- ops.orders\n- id integer\n- cust\n- oid integer\nJOINS\n- sales.orders.id = cust.oid (sales_customer)\n- ops.orders.id = cust.oid (ops_customer)"
   },
   "cases": [
     {
@@ -35,23 +37,17 @@
     },
     {
       "name": "cte_named_like_the_table_it_wraps",
-      "shape": "cte",
+      "shape": "unanalysable",
       "sql": "WITH beta_entry AS (SELECT ref_code, amt FROM beta_entry WHERE amt > 0) SELECT a.qty, beta_entry.amt FROM alpha_ledger a JOIN beta_entry ON a.id = beta_entry.ref_code WHERE a.qty > 1",
       "why_it_might_slip": "The CTE carries the table's own name. A check that exempts every name found in a WITH list exempts the joined table.",
-      "schema": "pair_no_join",
-      "control_schema": "pair_joined",
-      "pair": "alpha_ledger+beta_entry",
-      "expected": "refuse_ungranted_join"
+      "expected": "refuse_unanalysable"
     },
     {
       "name": "cte_in_other_scope_exempts_a_direct_join",
-      "shape": "cte",
+      "shape": "unanalysable",
       "sql": "SELECT a.qty, b.amt FROM alpha_ledger a JOIN beta_entry b ON a.id = b.ref_code WHERE a.qty > (WITH beta_entry AS (SELECT 1 AS x) SELECT x FROM beta_entry)",
       "why_it_might_slip": "A CTE declared inside a scalar subquery is invisible to the outer JOIN, which reads the real table. WITH names collected from the whole tree exempt it anyway.",
-      "schema": "pair_no_join",
-      "control_schema": "pair_joined",
-      "pair": "alpha_ledger+beta_entry",
-      "expected": "refuse_ungranted_join"
+      "expected": "refuse_unanalysable"
     },
     {
       "name": "cte_chain_three_deep",
@@ -398,21 +394,18 @@
       "name": "schema_qualified_in_subquery",
       "shape": "identifier_spelling",
       "sql": "SELECT qty FROM main.alpha_ledger WHERE id IN (SELECT ref_code FROM main.beta_entry WHERE amt > 0)",
-      "why_it_might_slip": "Qualified names compare by bare name; the pair must still be found.",
+      "why_it_might_slip": "The caller declared the bare names. A qualified reference is not the declared table (the SQL gate refuses it too), so it matches no JOINS line under any schema.",
       "schema": "pair_no_join",
-      "control_schema": "pair_joined",
-      "pair": "alpha_ledger+beta_entry",
-      "expected": "refuse_ungranted_join"
+      "pair": "main.alpha_ledger+main.beta_entry",
+      "expected": "refuse_ungranted_join",
+      "envelope_reason": "schema_context:ungranted_join:[name withheld].alpha_ledger+[name withheld].beta_entry"
     },
     {
       "name": "cte_name_differs_only_by_case",
-      "shape": "identifier_spelling",
-      "sql": "WITH Beta_Entry AS (SELECT 1 AS ref_code) SELECT a.qty FROM alpha_ledger a WHERE a.id IN (SELECT ref_code FROM main.beta_entry WHERE amt > 0)",
-      "why_it_might_slip": "A CTE spelled like the table. The qualified reference reaches the real table, never the CTE.",
-      "schema": "pair_no_join",
-      "control_schema": "pair_joined",
-      "pair": "alpha_ledger+beta_entry",
-      "expected": "refuse_ungranted_join"
+      "shape": "unanalysable",
+      "sql": "WITH Beta_Entry AS (SELECT 1 AS ref_code) SELECT a.qty FROM alpha_ledger a WHERE a.id IN (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "A CTE spelled like the table in another case. DuckDB folds the two names together; an exact-match scope resolver does not.",
+      "expected": "refuse_unanalysable"
     },
     {
       "name": "chain_skips_the_bridge_table",
@@ -473,6 +466,64 @@
       "why_it_might_slip": "A recursive CTE's own name binds differently in its anchor and recursive arms.",
       "expected": "refuse_unanalysable",
       "envelope_reason": "recursive CTE refused: WITH RECURSIVE is not analysed here"
+    },
+    {
+      "name": "cte_named_like_a_declared_table_is_a_fake_bridge",
+      "shape": "unanalysable",
+      "sql": "WITH beta_entry AS (SELECT 1 AS ref_code, 1 AS amt) SELECT a.id, g.note FROM alpha_ledger a, beta_entry b, gamma_note g WHERE a.id = g.entry_ref",
+      "why_it_might_slip": "Adversary round, lens 2. alpha-beta and beta-gamma are granted. The CTE is a one-row constant named like the bridge table, so a check that counts the name as the table sees a chain the statement never reads.",
+      "schema": "chain",
+      "expected": "refuse_unanalysable"
+    },
+    {
+      "name": "same_bare_name_in_another_schema",
+      "shape": "identifier_spelling",
+      "sql": "SELECT c.oid FROM ops.orders o JOIN cust c ON o.id = c.oid WHERE c.oid > 0",
+      "why_it_might_slip": "Adversary round, lens 4. The JOINS line grants sales.orders. A pair compared by bare name also grants ops.orders.",
+      "schema": "two_orders",
+      "control_schema": "two_orders_both",
+      "pair": "cust+ops.orders",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "same_bare_name_two_schemas_joined_to_each_other",
+      "shape": "identifier_spelling",
+      "sql": "SELECT o.id FROM ops.orders o JOIN sales.orders s ON o.id = s.id WHERE o.id > 0",
+      "why_it_might_slip": "Adversary round, lens 4. Two tables that share a bare name look like a self-join.",
+      "schema": "two_orders_both",
+      "pair": "ops.orders+sales.orders",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "trailing_empty_statement",
+      "shape": "statement_boundary",
+      "sql": "SELECT qty FROM alpha_ledger WHERE id IN (SELECT ref_code FROM beta_entry WHERE amt > 0);;",
+      "why_it_might_slip": "Adversary round, lens 1. sqlglot returns [Select, None] for the empty trailing statement. A check that reads any None as a parse failure switches itself off, and DuckDB runs the statement.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "leading_empty_statement",
+      "shape": "statement_boundary",
+      "sql": ";SELECT qty FROM alpha_ledger WHERE id IN (SELECT ref_code FROM beta_entry WHERE amt > 0)",
+      "why_it_might_slip": "The same None, in front.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join"
+    },
+    {
+      "name": "two_statements_one_table_each",
+      "shape": "statement_boundary",
+      "sql": "SELECT id FROM alpha_ledger WHERE qty > 1; SELECT ref_code FROM beta_entry WHERE amt > 0",
+      "why_it_might_slip": "Adversary round, lenses 2 and 3. Each statement reads one table, so a per-statement decision passes both. SET VARIABLE in the first statement would carry a value into the second.",
+      "schema": "pair_no_join",
+      "control_schema": "pair_joined",
+      "pair": "alpha_ledger+beta_entry",
+      "expected": "refuse_ungranted_join",
+      "envelope": "refused_before_the_gate"
     }
   ]
 }
