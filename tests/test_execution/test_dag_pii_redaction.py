@@ -124,7 +124,12 @@ async def test_system_text_alone_is_redacted():
 
 # --- #241 fix: port, fail-closed call, measured figures, look-alikes ----------
 
-FIGURES = "Revenue RM 1,234,567.89, 1250000.50 kg, 12.345.678 units, range 1200-3400, qty 12"
+FIGURES = (
+    "Revenue RM 1,234,567.89, 1250000.50 kg, 12.345.678 units, range 1200-3400, qty 12, "
+    "total 900101145678.50 g, ratio 0.900101145678, "  # MyKad-shaped digits inside decimals stay
+    "batch 1234567890123456, "  # 16 digits, not Luhn-valid: not a card
+    "span 0123-4567.5 mm"  # a dashed range ending in a decimal is not a phone
+)
 
 
 @pytest.fixture(autouse=True)
@@ -158,12 +163,14 @@ async def test_default_redactor_masks_when_no_pack_registered(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dms_pack_registers_its_masker_and_it_is_used():
+async def test_dms_pack_registers_its_masker_and_it_is_used(monkeypatch):
+    import CortexOS.config as cfg
     from CortexOS.security import redact_port
     from packs.dms.security import pii
 
-    redact_port.clear_redactor()
-    pii.redact_port.register_redactor(pii.redact_for_model)
+    real = cfg.get_config()
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": "dms"}))
+    redact_port.clear_redactor()  # registration must come back through the port's pack load
     adapter = RecordingAdapter()
     await _call(adapter, system="Reach the buyer on +60 12-345 6789", prompt=f"{EMAIL} {FIGURES}")
     sent = adapter.requests[0]

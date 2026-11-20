@@ -165,7 +165,7 @@ def registered_redactor() -> Redactor | None:
 
 
 def _load_active_pack() -> None:
-    """Import the active pack's masker once so it can register.
+    """Import the active pack's masker once and call its ``register_engine_redactor``.
 
     Resolved by name on purpose: a static ``import packs.`` here would cross the
     C2 boundary. A pack without ``security.pii`` registers nothing and the engine
@@ -178,7 +178,10 @@ def _load_active_pack() -> None:
     try:
         from CortexOS.config import get_config
 
-        importlib.import_module(f"packs.{get_config().pack}.security.pii")
+        module = importlib.import_module(f"packs.{get_config().pack}.security.pii")
+        hook = getattr(module, "register_engine_redactor", None)
+        if callable(hook):
+            hook()
     except Exception:  # noqa: BLE001 - no pack masker means the engine default
         return
 

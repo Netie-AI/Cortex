@@ -77,6 +77,10 @@ def redact_for_prompt(text: str) -> str:
     return "".join(parts)
 
 
+_FIGURE_JOINT_LEFT = re.compile(r"\d[.,]?$")
+_FIGURE_JOINT_RIGHT = re.compile(r"^[.,]?\d")
+
+
 def _phone_is_unambiguous(value: str) -> bool:
     """A phone form no measured figure takes: ``+60 12-345 6789`` or ``012-345 6789``.
 
@@ -85,7 +89,8 @@ def _phone_is_unambiguous(value: str) -> bool:
     """
     if value.startswith("+"):
         return True
-    return value.startswith("0") and any(sep in value for sep in "-. ")
+    # "." alone is not enough: 0.900101145678 is a figure.
+    return value.startswith("0") and any(sep in value for sep in "- ")
 
 
 def redact_for_model(text: str) -> str:
@@ -99,9 +104,17 @@ def redact_for_model(text: str) -> str:
     spans = redact_port.engine_spans(view)
     for match in _PHONE.finditer(view):
         value = match.group(0)
-        if _phone_is_unambiguous(value):
+        touches_figure = _FIGURE_JOINT_LEFT.search(view[max(0, match.start() - 2) : match.start()]) or (
+            _FIGURE_JOINT_RIGHT.search(view[match.end() : match.end() + 2])
+        )
+        if not touches_figure and _phone_is_unambiguous(value):
             spans.append((match.start(), match.end(), "phone"))
     return redact_port.apply_spans(text, view, index, spans)
 
 
-redact_port.register_redactor(redact_for_model)
+def register_engine_redactor() -> None:
+    """Put :func:`redact_for_model` on the engine port (packs -> CortexOS)."""
+    redact_port.register_redactor(redact_for_model)
+
+
+register_engine_redactor()
