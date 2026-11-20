@@ -8,6 +8,7 @@ from netie.result import Ok
 from pydantic import BaseModel, Field
 
 from CortexOS.packaging import FeatureNotInstalled, require_extra
+from CortexOS.security.auth_port import require_role
 
 
 class RunDAGRequest(BaseModel):
@@ -111,7 +112,8 @@ def register_dag_run_routes(app: Any, spend_auth: Any = None) -> None:
             "total_myr": ledger.total_cost(body.run_id),
         }
 
-    @app.get("/api/engine/runs/{run_id}/cost")
+    # #263: per-run cost records are not public. Viewer on the engine port.
+    @app.get("/api/engine/runs/{run_id}/cost", dependencies=[Depends(require_role("viewer"))])
     async def get_run_cost(request: Request, run_id: str) -> dict[str, Any]:
         try:
             require_extra("agentic", feature="dag_run")

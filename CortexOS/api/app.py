@@ -123,7 +123,12 @@ def create_app() -> Any:
         from netie.api.stream_routes import register_stream_routes
         from netie.api.task_routes import register_task_routes
 
-        register_dms_routes(app)
+        # #263: /dms/query is gated with the pack's viewer dependency, which
+        # still accepts the published demo viewer key DMS sends by default.
+        # The engine port refuses that key, so it would break the DMS consumer.
+        from packs.dms.security.api_auth import require_role as dms_caller_role
+
+        register_dms_routes(app, query_auth=dms_caller_role("viewer"))
         register_brain_routes(app)
         register_task_routes(app)
         register_skill_routes(app)

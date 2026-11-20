@@ -13,6 +13,10 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from fastapi import Depends
+
+from CortexOS.security.auth_port import require_role
+
 
 def _section(fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     try:
@@ -22,7 +26,8 @@ def _section(fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
 
 
 def register_activity_routes(app: Any) -> None:
-    @app.get("/api/engine/activity")
+    # #263: run history, routine and app state are not public.
+    @app.get("/api/engine/activity", dependencies=[Depends(require_role("viewer"))])
     async def engine_activity() -> dict[str, Any]:
         now = time.time()
 

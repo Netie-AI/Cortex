@@ -52,14 +52,15 @@ class AnalyseEntryRequest(BaseModel):
     raw_text: str
 
 
+# #263: who approved a write is the authenticated caller. A body that still
+# sends ``approved_by`` is accepted and the value is ignored (pydantic drops
+# unknown fields), so an old client keeps working and cannot name the approver.
 class AddEntryRequest(BaseModel):
     proposed: dict[str, Any]
-    approved_by: str = "demo_steward"
 
 
 class ProposeEditRequest(BaseModel):
     changes: list[dict[str, Any]]
-    approved_by: str = "demo_steward"
 
 
 def _read_csv_rows(path: Path, limit: int) -> tuple[list[dict[str, str]], int]:
@@ -87,10 +88,24 @@ def _missing_dataset_response() -> dict[str, Any]:
     return {"error": "Run demo setup first", "rows": []}
 
 
-def register_dms_routes(app: Any) -> None:
-    from fastapi import HTTPException, Query
+def register_dms_routes(app: Any, *, query_auth: Any = None) -> None:
+    """Register the DMS brain routes. Every route needs a credential (#263).
 
-    @app.post("/dms/query", response_model=DMSQueryResponse)
+    ``query_auth`` gates ``POST /dms/query`` only. ``create_app`` passes the
+    DMS pack's viewer dependency, which still accepts the published demo
+    viewer key that DMS sends by default. Without it the route uses the engine
+    port, which refuses that key: the fallback is the stricter gate, never an
+    open one. Every other route here is on the engine port.
+    """
+    from fastapi import Depends, HTTPException, Query
+
+    from CortexOS.security.auth_port import Principal, require_role
+
+    viewer = [Depends(require_role("viewer"))]
+    query_gate = [Depends(query_auth if query_auth is not None else require_role("viewer"))]
+    steward = require_role("steward")
+
+    @app.post("/dms/query", response_model=DMSQueryResponse, dependencies=query_gate)
     async def dms_query(body: DMSQueryRequest) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -110,7 +125,7 @@ def register_dms_routes(app: Any) -> None:
             )
         return out
 
-    @app.get("/dms/audit")
+    @app.get("/dms/audit", dependencies=viewer)
     async def dms_audit() -> list[dict[str, Any]]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -119,7 +134,7 @@ def register_dms_routes(app: Any) -> None:
 
         return list_audit_entries()
 
-    @app.get("/dms/tables")
+    @app.get("/dms/tables", dependencies=viewer)
     async def dms_tables() -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -145,7 +160,7 @@ def register_dms_routes(app: Any) -> None:
             )
         return {"tables": tables, "total_rows": sum(counts.values())}
 
-    @app.get("/dms/table-preview")
+    @app.get("/dms/table-preview", dependencies=viewer)
     async def dms_table_preview(
         table: str = Query(...),
         from_row: int = Query(0, alias="from"),
@@ -172,15 +187,17 @@ def register_dms_routes(app: Any) -> None:
         }
 
     @app.post("/dms/propose-edit")
-    async def dms_propose_edit(body: ProposeEditRequest) -> dict[str, Any]:
+    async def dms_propose_edit(
+        body: ProposeEditRequest, caller: Principal = Depends(steward)
+    ) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         from CortexOS.dms.query_service import propose_edits
 
-        return propose_edits(body.changes, approved_by=body.approved_by)
+        return propose_edits(body.changes, approved_by=caller.actor)
 
-    @app.get("/dms/data/{variant}")
+    @app.get("/dms/data/{variant}", dependencies=viewer)
     async def dms_data(variant: str, limit: int = 50) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -213,14 +230,14 @@ def register_dms_routes(app: Any) -> None:
 
         return payload
 
-    @app.get("/dms/changelog")
+    @app.get("/dms/changelog", dependencies=viewer)
     async def dms_changelog(limit: int = 100) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             return {"entries": []}
         return {"entries": _load_changelog(limit)}
 
-    @app.post("/dms/analyse-entry")
+    @app.post("/dms/analyse-entry", dependencies=viewer)
     async def dms_analyse_entry(body: AnalyseEntryRequest) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
@@ -230,13 +247,15 @@ def register_dms_routes(app: Any) -> None:
         return analyse_raw_entry(body.raw_text)
 
     @app.post("/dms/add-entry")
-    async def dms_add_entry(body: AddEntryRequest) -> dict[str, Any]:
+    async def dms_add_entry(
+        body: AddEntryRequest, caller: Principal = Depends(steward)
+    ) -> dict[str, Any]:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
         from CortexOS.dms.entry_analyser import add_inventory_entry
 
-        return add_inventory_entry(body.proposed, approved_by=body.approved_by)
+        return add_inventory_entry(body.proposed, approved_by=caller.actor)
 
     from CortexOS.api.chat_routes import register_chat_routes
     from CortexOS.api.warehouse_routes import register_warehouse_routes
