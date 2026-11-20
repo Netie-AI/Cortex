@@ -56,7 +56,7 @@ def register_warehouse_routes(app: Any) -> None:
     from fastapi import Depends, HTTPException, Query
     from fastapi.responses import Response
 
-    from CortexOS.security.auth_port import Principal, require_role
+    from CortexOS.security.auth_port import Principal, require_role, role_at_least
 
     viewer = [Depends(require_role("viewer"))]
     steward_only = [Depends(require_role("steward"))]
@@ -206,6 +206,10 @@ def register_warehouse_routes(app: Any) -> None:
         pack = getattr(app.state, "pack", None)
         if pack is None or pack.name != "dms":
             raise HTTPException(status_code=404, detail="DMS routes require PACK=dms")
+        # #263: approving an oversize item past the compliance gate is a second
+        # person's call, not the steward recording the dimensions. Admin only.
+        if body.gate_approved and not role_at_least(caller.role, "admin"):
+            raise HTTPException(status_code=403, detail="Compliance gate approval requires role 'admin'")
         try:
             return intake.confirm_item_dims(
                 item_id=item_id,

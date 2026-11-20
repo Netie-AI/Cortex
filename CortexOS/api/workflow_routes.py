@@ -25,7 +25,7 @@ class RunBody(BaseModel):
     target: str = ""
     breadth: int = 3
     session_id: str = ""
-    actor: str = ""
+    actor: str = ""  # wire only (#263): ignored; the actor is the authenticated caller
     origin: str = "api"
     cost_ceiling_myr: float | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
@@ -84,8 +84,10 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
             raise HTTPException(status_code=404, detail="unknown task")
         return {"ok": True, "task": task}
 
-    @app.post("/api/workflows/run", dependencies=[Depends(auth)])
-    async def run_workflow(request: Request, body: RunBody) -> dict[str, Any]:
+    @app.post("/api/workflows/run")
+    async def run_workflow(
+        request: Request, body: RunBody, caller: Any = Depends(auth)
+    ) -> dict[str, Any]:
         ledger = getattr(request.app.state, "ledger", None)
         router = getattr(request.app.state, "model_router", None)
         tid = body.template_id or body.workflow_id
@@ -98,7 +100,7 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
             variables=body.variables,
             origin=body.origin or "api",
             session_id=body.session_id,
-            actor=body.actor,
+            actor=str(getattr(caller, "actor", "") or ""),
             cost_ceiling_myr=body.cost_ceiling_myr,
             router=router,
             ledger=ledger,

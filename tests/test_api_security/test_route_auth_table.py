@@ -142,7 +142,11 @@ def _iter_routes(app: Any) -> Iterator[tuple[str, str]]:
             elif isinstance(route, Mount):
                 yield "MOUNT", path
             elif isinstance(route, (APIRoute, Route)):
-                for method in sorted(route.methods or ()):
+                if not route.methods:
+                    # HTTPEndpoint class or raw ASGI endpoint: every method, no list.
+                    yield "ANY", path
+                    continue
+                for method in sorted(route.methods):
                     if method != "HEAD":
                         yield method, path
             else:
@@ -349,7 +353,7 @@ def test_every_route_is_in_one_bucket_and_the_tables_are_not_stale(app):
     for key in _iter_routes(app):
         seen[key] = seen.get(key, 0) + 1
     problems = [f"{m} {p} registered {n} times" for (m, p), n in seen.items() if n > 1]
-    problems += [f"{m} {p}" for (m, p) in seen if m in ("MOUNT", "WS", "UNKNOWN")]
+    problems += [f"{m} {p}" for (m, p) in seen if m in ("MOUNT", "WS", "UNKNOWN", "ANY")]
     for table in (PUBLIC, OUT_OF_SCOPE):
         problems += [f"stale entry {k}" for k in table if k not in seen]
         problems += [f"no reason for {k}" for k, why in table.items() if not str(why).strip()]
@@ -528,6 +532,13 @@ def _capture(monkeypatch, module: str, attr: str, result: Any) -> list[dict[str,
             "confirm_item_dims",
             "actor",
         ),
+        (
+            "/api/workflows/run",
+            {"template_id": "document_qa", "actor": "ceo"},
+            "CortexOS.execution.workflow_runner",
+            "start",
+            "actor",
+        ),
     ],
 )
 def test_actor_is_the_authenticated_caller_never_the_body(
@@ -623,3 +634,40 @@ def test_demo_viewer_key_reaches_dms_query_and_nothing_else_under_dms(monkeypatc
     assert "CortexOS.dms.query_service.answer_question" in spies
     assert preview.status_code == 401 and audit.status_code == 401
     assert "CortexOS.dms.warehouse_db.preview_table" not in spies
+
+
+def test_bucket_walker_fails_on_a_route_with_no_method_list(app):
+    """Planted must-fail: a Starlette HTTPEndpoint route has methods=None and must not be skipped."""
+    from starlette.endpoints import HTTPEndpoint
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    class Leak(HTTPEndpoint):
+        async def get(self, request):
+            return JSONResponse({"secret": "rows"})
+
+    app.router.routes.append(Route("/planted/t263/cls", Leak))
+    assert ("ANY", "/planted/t263/cls") in set(_iter_routes(app))
+    with pytest.raises(AssertionError, match="ANY /planted/t263/cls"):
+        test_every_route_is_in_one_bucket_and_the_tables_are_not_stale(app)
+
+
+def test_steward_cannot_approve_the_compliance_gate(app, spies):
+    body = {"l": 5, "w": 5, "h": 5, "gate_approved": True}
+    with TestClient(app, raise_server_exceptions=False) as client:
+        res = client.post("/dms/items/i1/confirm-dims", json=body, headers={"X-API-Key": TEST_STEWARD_KEY})
+    assert res.status_code == 403
+    assert res.json() == {"detail": "Compliance gate approval requires role 'admin'"}
+    # The check is in the handler; the store write never runs.
+    assert spies == ["endpoint:warehouse_confirm_dims"]
+
+
+def test_admin_gate_approval_reaches_the_store_under_the_admin_actor(app, monkeypatch):
+    from tests.api_key_isolation import TEST_ADMIN_KEY
+
+    seen = _capture(monkeypatch, "packs.dms.vision.intake", "confirm_item_dims", {"ok": True})
+    body = {"l": 5, "w": 5, "h": 5, "gate_approved": True, "actor": "ceo"}
+    with TestClient(app) as client:
+        res = client.post("/dms/items/i1/confirm-dims", json=body, headers={"X-API-Key": TEST_ADMIN_KEY})
+    assert res.status_code == 200, res.text
+    assert seen[0]["gate_approved"] is True and seen[0]["actor"] == "api_admin"
