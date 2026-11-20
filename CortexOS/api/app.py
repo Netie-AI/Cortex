@@ -131,7 +131,9 @@ def create_app() -> Any:
         # The engine port refuses that key, so it would break the DMS consumer.
         register_dms_routes(app, query_auth=dms_caller_role("viewer"))
         register_brain_routes(app)
-        register_task_routes(app)
+        # DMS's F5 compliance gate calls gate/check and gate/acknowledge with its
+        # configured key (by default the demo viewer key), as for /dms/query.
+        register_task_routes(app, gate_auth=dms_caller_role("viewer"))
         register_skill_routes(app)
         register_sidecar_routes(app)
         register_lakehouse_routes(app)

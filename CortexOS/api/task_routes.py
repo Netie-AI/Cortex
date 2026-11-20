@@ -7,11 +7,8 @@ from pydantic import BaseModel
 
 from CortexOS.security.auth_port import Principal, require_role
 
-router = APIRouter(prefix="/dms/tasks", tags=["tasks"])
-
 # #263: each route writes a task event or verdict under an actor. The actor is
 # the authenticated caller; the ``actor`` body field stays on the wire, unread.
-_steward = require_role("steward")
 
 
 class GateCheckRequest(BaseModel):
@@ -45,56 +42,67 @@ def _verdict_dict(verdict) -> dict[str, Any]:
     }
 
 
-@router.post("/gate/check")
-def gate_check(req: GateCheckRequest, caller: Principal = Depends(_steward)):
-    from packs.dms.tasks.gate import check_task
+def register_task_routes(app: Any, *, gate_auth: Any = None) -> None:
+    """Register the F5 task routes. Every route needs a credential (#263).
 
-    try:
+    ``gate_auth`` gates ``gate/check`` and ``gate/acknowledge``: DMS calls them
+    on every mutation (its F5 compliance gate, docs/dms/packets/CORTEX_TO_DMS_C4_SUBMIT.md
+    section 5) with the key it is configured with, by default the published demo
+    viewer key. ``create_app`` passes the DMS pack's viewer dependency, as for
+    ``/dms/query``. Without it both routes use the engine port at steward, which
+    refuses that key: the fallback is the stricter gate. ``choose`` is not a DMS
+    call and stays on the engine port at steward.
+    """
+    gate = gate_auth if gate_auth is not None else require_role("steward")
+    steward = require_role("steward")
+    router = APIRouter(prefix="/dms/tasks", tags=["tasks"])
+
+    @router.post("/gate/check")
+    def gate_check(req: GateCheckRequest, caller: Principal = Depends(gate)):
+        from packs.dms.tasks.gate import check_task
+
+        try:
+            verdict = check_task(
+                req.event_id,
+                req.task_id,
+                req.filled_template,
+                actor=caller.actor,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _verdict_dict(verdict)
+
+    @router.post("/choose")
+    def choose_task(req: ChooseTaskRequest, caller: Principal = Depends(steward)):
+        from packs.dms.tasks.gate import check_task, create_task_event
+        from packs.dms.tasks.suggest import record_choice
+
+        if req.accepted:
+            record_choice(req.task_id, True, caller.actor)
+        event_id = create_task_event(
+            message_id=req.message_id,
+            thread_id=req.thread_id,
+            task_id=req.task_id,
+            intent=req.intent,
+            filled_template=req.filled_template,
+            actor=caller.actor,
+        )
         verdict = check_task(
-            req.event_id,
+            event_id,
             req.task_id,
             req.filled_template,
             actor=caller.actor,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _verdict_dict(verdict)
+        return {"ok": True, "event_id": event_id, "verdict": _verdict_dict(verdict)}
 
+    @router.post("/gate/acknowledge")
+    def gate_acknowledge(req: AcknowledgeRequest, caller: Principal = Depends(gate)):
+        from packs.dms.tasks.gate import acknowledge_event
 
-@router.post("/choose")
-def choose_task(req: ChooseTaskRequest, caller: Principal = Depends(_steward)):
-    from packs.dms.tasks.gate import check_task, create_task_event
-    from packs.dms.tasks.suggest import record_choice
+        try:
+            verdict = acknowledge_event(req.event_id, actor=caller.actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"ok": True, "verdict": _verdict_dict(verdict)}
 
-    if req.accepted:
-        record_choice(req.task_id, True, caller.actor)
-    event_id = create_task_event(
-        message_id=req.message_id,
-        thread_id=req.thread_id,
-        task_id=req.task_id,
-        intent=req.intent,
-        filled_template=req.filled_template,
-        actor=caller.actor,
-    )
-    verdict = check_task(
-        event_id,
-        req.task_id,
-        req.filled_template,
-        actor=caller.actor,
-    )
-    return {"ok": True, "event_id": event_id, "verdict": _verdict_dict(verdict)}
-
-
-@router.post("/gate/acknowledge")
-def gate_acknowledge(req: AcknowledgeRequest, caller: Principal = Depends(_steward)):
-    from packs.dms.tasks.gate import acknowledge_event
-
-    try:
-        verdict = acknowledge_event(req.event_id, actor=caller.actor)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"ok": True, "verdict": _verdict_dict(verdict)}
-
-
-def register_task_routes(app) -> None:
     app.include_router(router)
