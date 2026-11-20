@@ -82,6 +82,7 @@ class FakeOpenVault:
         tool_calls: list[dict[str, Any]] | None = None,
         error_type: str = "",
         message: str = "",
+        finish_reason: str | None = None,
     ) -> FakeOpenVault:
         if status != 200:
             self.replies.append((status, {"error": {"message": message or error_type, "type": error_type}}))
@@ -91,6 +92,8 @@ class FakeOpenVault:
             body["choices"][0]["message"]["tool_calls"] = tool_calls
         if model is not None:
             body["model"] = model
+        if finish_reason is not None:
+            body["choices"][0]["finish_reason"] = finish_reason
         self.replies.append((200, body))
         return self
 

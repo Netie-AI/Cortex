@@ -26,6 +26,7 @@ import pytest
 from bench.lanes import assert_contract_answer, lane_line, reach_class
 from CortexOS.dms import lane_ask, plan_sql_ask
 from CortexOS.dms.query_service import CONTRACTS_DIR
+from tests.dms.reader_reply import reader_reply
 from tests.dms.test_ask_flag_off_golden_340 import VOLATILE_KEYS
 from tests.dms.test_rag03_answer_routing import (  # noqa: F401
     BLOCKED_Q,
@@ -146,7 +147,7 @@ def test_documents_decision_with_a_cited_answer_is_served(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     _on(monkeypatch)
-    armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY).reply(ANSWERS)
+    armed_openvault.reply(DOCUMENTS).reply(reader_reply(DOC_REPLY)).reply(ANSWERS)
     body = _ok(dms_http, DOC_HIT_Q)
     _assert_document(body)
     assert _line(body) == "lane: documents (model; calls=1)"
@@ -166,11 +167,11 @@ def test_router_served_document_is_the_engine_document_answer(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     """Flag off, the same question reaches the same document answer after the ladder."""
-    armed_openvault.default_content = DOC_REPLY
+    armed_openvault.default_content = reader_reply(DOC_REPLY)
     off = _off_body(dms_http, monkeypatch, DOC_HIT_Q)
     _assert_document(off)
     _on(monkeypatch)
-    armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY).reply(ANSWERS)
+    armed_openvault.reply(DOCUMENTS).reply(reader_reply(DOC_REPLY)).reply(ANSWERS)
     on = _ok(dms_http, DOC_HIT_Q)
     # Served by the router, not by the ladder after a fall-through.
     assert _line(on) == "lane: documents (model; calls=1)"
@@ -187,7 +188,7 @@ def test_documents_decision_in_payload_mode_runs_before_plan_sql(
     monkeypatch.setenv(plan_sql_ask.ENABLED_ENV, "1")
     called: list[str] = []
     monkeypatch.setattr(plan_sql_ask, "try_plan_sql", lambda body, **kw: called.append(body.question))
-    armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY).reply(ANSWERS)
+    armed_openvault.reply(DOCUMENTS).reply(reader_reply(DOC_REPLY)).reply(ANSWERS)
     body = _ok(dms_http, DOC_HIT_Q, dms_payload={"tables": [{"name": "transactions", "columns": []}]})
     _assert_document(body)
     assert called == []
@@ -219,11 +220,11 @@ def test_other_decision_in_payload_mode_reaches_plan_sql(
         (INJECTION_Q, [DOCUMENTS, "NOT_IN_DOCUMENTS"], "lane: other (model:documents-miss; calls=1)"),
         (DATA_Q, ["documents, I think"], "lane: other (fallback:lane-unparsed; calls=1)"),
         (DATA_Q, ['{"lane":"documents","why":"x"}'], "lane: other (fallback:lane-unparsed; calls=1)"),
-        (STOCK_Q, [DOCUMENTS, HEDGE, NOT_ANSWERS], "lane: other (model:documents-unanswered; calls=1)"),
-        (DOC_HIT_Q, [DOCUMENTS, DOC_REPLY, NOT_ANSWERS], "lane: other (model:documents-unanswered; calls=1)"),
-        (STOCK_Q, [DOCUMENTS, HEDGE, '{"answers":"true"}'], "lane: other (model:documents-unanswered; calls=1)"),
-        (STOCK_Q, [DOCUMENTS, HEDGE, '{"answers":true,"why":"x"}'], "lane: other (model:documents-unanswered; calls=1)"),
-        (STOCK_Q, [DOCUMENTS, HEDGE, "yes"], "lane: other (model:documents-unanswered; calls=1)"),
+        (STOCK_Q, [DOCUMENTS, reader_reply(HEDGE), NOT_ANSWERS], "lane: other (model:documents-unanswered; calls=1)"),
+        (DOC_HIT_Q, [DOCUMENTS, reader_reply(DOC_REPLY), NOT_ANSWERS], "lane: other (model:documents-unanswered; calls=1)"),
+        (STOCK_Q, [DOCUMENTS, reader_reply(HEDGE), '{"answers":"true"}'], "lane: other (model:documents-unanswered; calls=1)"),
+        (STOCK_Q, [DOCUMENTS, reader_reply(HEDGE), '{"answers":true,"why":"x"}'], "lane: other (model:documents-unanswered; calls=1)"),
+        (STOCK_Q, [DOCUMENTS, reader_reply(HEDGE), "yes"], "lane: other (model:documents-unanswered; calls=1)"),
     ],
     ids=[
         "other", "doc-miss", "doc-uncited", "injection-miss", "unparsed", "extra-keys",
@@ -268,7 +269,7 @@ def test_check_call_failure_falls_through_with_200(
     failed = _fail_calls(monkeypatch, status, _is_check_prompt)
     off = _off_body(dms_http, monkeypatch, STOCK_Q)
     _on(monkeypatch)
-    armed_openvault.reply(DOCUMENTS).reply(HEDGE)
+    armed_openvault.reply(DOCUMENTS).reply(reader_reply(HEDGE))
     code, on = _post(dms_http, STOCK_Q)
     assert code == 200, on
     assert_contract_answer(on)
@@ -367,7 +368,7 @@ def test_router_exception_falls_through_never_500(
         )
         expected = "lane: other (fallback:doc-error; calls=1)"
     elif where == "check":
-        armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY)
+        armed_openvault.reply(DOCUMENTS).reply(reader_reply(DOC_REPLY))
         real_check = freeroute.complete
 
         def complete_check(task: str, *a: Any, **k: Any) -> Any:
@@ -396,7 +397,7 @@ def test_destructive_question_is_never_routed(
     off = _off_body(dms_http, monkeypatch, BLOCKED_Q)
     assert off["provenance"]["badge"] == "blocked"
     _on(monkeypatch)
-    armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY)
+    armed_openvault.reply(DOCUMENTS).reply(reader_reply(DOC_REPLY))
     on = _ok(dms_http, BLOCKED_Q)
     assert _line(on) == "lane: skipped (skipped:destructive; calls=0)"
     assert on["provenance"]["badge"] == "blocked"
@@ -448,7 +449,7 @@ def test_ungrounded_grant_makes_no_router_call(
     off = _off_body(dms_http, monkeypatch, DOC_HIT_Q)
     assert off["provenance"]["badge"] == "abstain", off
     _on(monkeypatch)
-    armed_openvault.reply(DOCUMENTS).reply(DOC_REPLY)
+    armed_openvault.reply(DOCUMENTS).reply(reader_reply(DOC_REPLY))
     on = _ok(dms_http, DOC_HIT_Q)
     assert _line(on) == "lane: skipped (skipped:ungrounded; calls=0)"
     assert _strip(on) == _strip(off)
@@ -463,7 +464,7 @@ def test_flag_off_makes_no_router_call_and_no_lane_line(
     armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch, value: str  # noqa: F811
 ) -> None:
     monkeypatch.setenv(lane_ask.ENABLED_ENV, value)
-    armed_openvault.default_content = DOC_REPLY
+    armed_openvault.default_content = reader_reply(DOC_REPLY)
     body = _ok(dms_http, DOC_HIT_Q)
     assert lane_line(body) is None
     assert not any(a.startswith("lane: ") for a in body["assumptions"])

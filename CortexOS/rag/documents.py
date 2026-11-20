@@ -9,10 +9,18 @@ Only the model judges whether the passages answer the question. With no model,
 a failed call, a NOT_IN_DOCUMENTS reply or a reply that cites no passage it was
 given, nothing is served and the caller abstains. A served answer always names
 its sources.
+
+#465: the reader states its answer as one JSON object, ``{"answer", "citations"}``,
+and only that field is served. A citation is necessary, not sufficient: reasoning
+aloud, text around the object, or a reply cut off at the token cap
+(``finish_reason`` ``length``, or an object that never closes) is not an answer
+and serves nothing. No phrase list decides this; the reply's form and the
+provider's own finish reason do.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
@@ -49,6 +57,9 @@ class ModelReply:
     ok: bool
     text: str = ""
     reason: str = ""
+    # The provider's finish reason ("" when it sent none). Only a reply that
+    # finished on its own (``stop``, or unreported) can be served.
+    finish_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -170,21 +181,56 @@ def messages(question: str, passages: list[Passage]) -> list[dict[str, str]]:
             "content": (
                 "Answer the question using only the numbered passages. Cite every "
                 "claim with its passage number, like [1]. Do not use outside "
-                "knowledge. If the passages do not answer the question, reply "
-                f"exactly {NOT_IN_DOCUMENTS}."
+                "knowledge. Reply with one JSON object and nothing else: "
+                '{"answer": "<the final answer, citing passages like [1]>", '
+                '"citations": [<the passage numbers cited>]}. Put only the final '
+                'answer in "answer", never your reasoning. If the passages do not '
+                f"answer the question, reply exactly {NOT_IN_DOCUMENTS}."
             ),
         },
         {"role": "user", "content": f"Passages:\n{numbered}\n\nQuestion: {question}"},
     ]
 
 
-def cited_answer(text: str, n_passages: int) -> str | None:
-    """The model text if it cites only passages it was given, else None."""
+def _json_body(text: str) -> str:
     body = (text or "").strip()
-    cites = {int(c) for c in _CITE.findall(body)}
-    if not body or not cites or not cites <= set(range(1, n_passages + 1)):
-        return None
+    if body.startswith("```"):
+        body = body.strip("`").removeprefix("json").strip()
     return body
+
+
+def cited_answer(text: str, n_passages: int) -> str | None:
+    """The ``answer`` of a strict ``{"answer", "citations"}`` reply, else None.
+
+    The reply must be that one JSON object and nothing else. ``answer`` is a
+    non-empty string that cites at least one passage inline as ``[n]``; every
+    inline citation is listed in ``citations``; every listed number is a
+    passage the model was given. Anything else is not an answer (#465).
+    """
+    try:
+        data = json.loads(_json_body(text))
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) != {"answer", "citations"}:
+        return None
+    body, listed = data["answer"], data["citations"]
+    if not isinstance(body, str) or not body.strip() or NOT_IN_DOCUMENTS in body:
+        return None
+    if not isinstance(listed, list) or not listed:
+        return None
+    if any(type(n) is not int for n in listed):
+        return None
+    inline = {int(c) for c in _CITE.findall(body)}
+    if not inline or not inline <= set(listed) <= set(range(1, n_passages + 1)):
+        return None
+    return body.strip()
+
+
+def finished(reply: ModelReply) -> bool:
+    """False for a reply the provider reports as cut off or stopped for any
+    reason other than ending on its own (#465). ``""`` is a provider that sent
+    no finish reason; an unclosed JSON object still fails ``cited_answer``."""
+    return reply.finish_reason in ("", "stop")
 
 
 def answer(question: str, passages: list[Passage], complete: Complete | None) -> DocAnswer | None:
@@ -192,8 +238,8 @@ def answer(question: str, passages: list[Passage], complete: Complete | None) ->
 
     None when no passage clears the relevance gate, when no model is
     configured, when the model call fails or its reply is not accepted, when
-    the model replies NOT_IN_DOCUMENTS, and when the reply cites no passage it
-    was given.
+    the model replies NOT_IN_DOCUMENTS, when the reply did not finish on its
+    own, and when it is not a strict cited answer (``cited_answer``).
     """
     return read(question, retrieve(question, passages), complete)
 
@@ -207,7 +253,7 @@ def read(question: str, top: list[Passage], complete: Complete | None) -> DocAns
     if not top or complete is None:
         return None
     reply = complete(messages(question, top))
-    if not reply.ok or NOT_IN_DOCUMENTS in reply.text:
+    if not reply.ok or not finished(reply) or NOT_IN_DOCUMENTS in reply.text:
         return None
     body = cited_answer(reply.text, len(top))
     if body is None:
