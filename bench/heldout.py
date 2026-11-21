@@ -6,6 +6,16 @@ never on generated SQL alone. Classes: correct / abstained / incorrect.
 Empty rows on an answerable item are always incorrect (SKU-BETA / G4 class),
 even if gold SQL also returned nothing.
 
+HELDOUT-PREDICATE (#344): a match on the one demo database cannot tell a
+dropped filter from a correct one (``spider_country_mean_lead_having`` scored
+correct with no HAVING because every country happened to pass it). An item
+with gold SQL is correct only if the served SQL also returns the gold rows on
+every seeded variant of the tables it reads (``VARIANTS``: row samples and
+numeric jitter, deterministic by seed, reported by id). A mismatch is
+``variant_mismatch:<variant id>``; a served answer with no ``sql_used`` cannot be
+checked and is ``variant_unverifiable:no_sql_used``. Abstain scoring is
+unchanged, and items scored by ``expected_rows`` have no gold SQL to vary.
+
 The frozen split is ``bench/heldout/c7_heldout_v1.yaml``. CI invokes
 ``score_fixture`` on a tiny canned envelope set so the gate can go red
 without serving L2 or calling the answer engine. ``score_engine`` is the
@@ -62,6 +72,31 @@ class HeldoutItem:
     @property
     def answerable(self) -> bool:
         return self.expect == "correct_rows"
+
+
+@dataclass(frozen=True, slots=True)
+class Variant:
+    """One seeded copy of the tables an item reads.
+
+    ``keep``: each row stays when its seeded hash falls under ``rate``.
+    ``jitter``: every numeric value is scaled by a seeded factor in
+    ``[1 - rate, 1 + rate]``. Both are pure functions of the base rows and the
+    seed, so a variant id names the same data on every run.
+    """
+
+    id: str
+    kind: str
+    rate: float
+    seed: int
+
+
+VARIANTS: tuple[Variant, ...] = tuple(
+    Variant(f"{kind}{rate:g}-s{seed}", kind, rate, seed)
+    for kind, rate in (("keep", 0.05), ("keep", 0.2), ("keep", 0.5), ("jitter", 0.5))
+    for seed in (1, 2)
+)
+_NUMERIC = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "FLOAT", "DOUBLE", "DECIMAL",
+            "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "REAL")
 
 
 @dataclass(slots=True)
@@ -268,6 +303,99 @@ def _gold_rows(item: HeldoutItem) -> list[dict[str, Any]] | str:
         return f"canonical SQL failed: {exc!r}"
 
 
+def _read_tables(*sqls: str) -> list[str]:
+    """Bare names of the real tables these statements read (CTE names left out)."""
+    import sqlglot
+    from sqlglot import exp
+
+    names: set[str] = set()
+    for sql in sqls:
+        for tree in sqlglot.parse(sql, read="duckdb"):
+            if tree is None:
+                continue
+            ctes = {str(c.alias_or_name).lower() for c in tree.find_all(exp.CTE)}
+            names |= {
+                t.name for t in tree.find_all(exp.Table) if t.name and t.name.lower() not in ctes
+            }
+    return sorted(names)
+
+
+def _variant_connection(variant: Variant, tables: list[str], base: Path) -> Any:
+    """An in-memory DuckDB holding ``variant`` of ``tables`` from ``base`` (read only)."""
+    import duckdb
+
+    con = duckdb.connect(":memory:")
+    con.execute(f"ATTACH '{base.as_posix()}' AS base (READ_ONLY)")
+    for table in tables:
+        cols = con.execute(
+            "SELECT column_name, data_type FROM duckdb_columns() "
+            "WHERE database_name = 'base' AND schema_name = 'main' AND table_name = ? "
+            "ORDER BY column_index",
+            [table],
+        ).fetchall()
+        if not cols:
+            continue
+        if variant.kind == "keep":
+            select = "*"
+            cut = int(variant.rate * 1_000_000)
+            where = f"WHERE (hash(rowid, {variant.seed}) % 1000000) < {cut}"
+        else:
+            parts = []
+            for name, dtype in cols:
+                q = '"' + str(name).replace('"', '""') + '"'
+                if str(dtype).split("(")[0].upper() in _NUMERIC:
+                    factor = (
+                        f"(1 - {variant.rate} + 2 * {variant.rate} * "
+                        f"((hash(rowid, {variant.seed}, '{name}') % 1000) / 1000.0))"
+                    )
+                    parts.append(f"CAST({q} * {factor} AS {dtype}) AS {q}")
+                else:
+                    parts.append(q)
+            select, where = ", ".join(parts), ""
+        qt = '"' + table.replace('"', '""') + '"'
+        con.execute(f"CREATE TABLE {qt} AS SELECT {select} FROM base.main.{qt} {where}")
+    con.execute("DETACH base")
+    return con
+
+
+def _rows(con: Any, sql: str) -> list[dict[str, Any]]:
+    rel = con.execute(sql)
+    cols = [d[0] for d in rel.description] if rel.description else []
+    return [dict(zip(cols, row, strict=False)) for row in rel.fetchall()]
+
+
+def variant_mismatch(
+    item: HeldoutItem,
+    served_sql: str,
+    *,
+    base: Path | None = None,
+    variants: tuple[Variant, ...] = VARIANTS,
+) -> str | None:
+    """The first variant on which the served SQL and the gold SQL disagree, named; else None."""
+    from bench.accuracy import _multiset_equal, _project
+    from CortexOS.dms.warehouse_db import DEFAULT_DB, DMS_PACK
+    from CortexOS.ontology.value_domain import canonical_gold_sql
+
+    gold_sql = canonical_gold_sql(str(item.canonical_sql), DMS_PACK)
+    tables = _read_tables(gold_sql, served_sql)
+    keys = list(item.key_columns)
+    for variant in variants:
+        con = _variant_connection(variant, tables, Path(base or DEFAULT_DB))
+        try:
+            truth = _project(_rows(con, gold_sql), keys, item.round)
+            try:
+                got = _project(_rows(con, served_sql), keys, item.round)
+            except Exception:  # noqa: BLE001 - served SQL that fails on a variant is wrong there
+                return f"variant_error:{variant.id}"
+        finally:
+            con.close()
+        if isinstance(truth, str):
+            return f"variant_gold_defect:{variant.id}"
+        if isinstance(got, str) or not _multiset_equal(got, truth):
+            return f"variant_mismatch:{variant.id}"
+    return None
+
+
 def score_envelope(item: HeldoutItem, env: Any) -> HeldoutResult:
     """Score one served envelope. Does not inspect sql_used as a pass condition."""
     if not isinstance(env, dict):
@@ -374,6 +502,19 @@ def score_envelope(item: HeldoutItem, env: Any) -> HeldoutResult:
                 item.id, item.split, "incorrect",
                 detail=f"scalar {needle!r} missing from answer text",
                 badge=badge, route=route,
+            )
+    if item.canonical_sql and item.expected_rows is None:
+        # #344: the base match can be luck. The served SQL must hold on every variant.
+        served_sql = str(env.get("sql_used") or "").strip()
+        if not served_sql:
+            return HeldoutResult(
+                item.id, item.split, "incorrect",
+                detail="variant_unverifiable:no_sql_used", badge=badge, route=route,
+            )
+        reason = variant_mismatch(item, served_sql)
+        if reason:
+            return HeldoutResult(
+                item.id, item.split, "incorrect", detail=reason, badge=badge, route=route,
             )
     return HeldoutResult(
         item.id, item.split, "correct", badge=badge, route=route,
