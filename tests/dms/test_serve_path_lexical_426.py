@@ -257,10 +257,11 @@ def test_flag_on_unarmed_says_so_and_serves_no_listing(
 
 @pytest.mark.parametrize("path", PATHS)
 def test_flag_off_keeps_main_behaviour(
-    dms_http: Any, scripted: Any, path: str  # noqa: F811
+    dms_http: Any, scripted: Any, monkeypatch: pytest.MonkeyPatch, path: str  # noqa: F811
 ) -> None:
-    """Default off: the listing main serves, and a model's catalog choice is ignored."""
+    """``CORTEX_CATALOG_BY_MODEL=0``: the listing main serves, and a model's catalog choice is ignored."""
     port = scripted({CATALOG_UNKNOWN_WORDING: {"metric_id": "catalog"}})
+    monkeypatch.setenv(CATALOG_FLAG, "0")
     _assert_catalog(_ask(dms_http, path, CATALOG_REGEX_WORDING))
     assert CATALOG_REGEX_WORDING not in port.chose
     body = _ask(dms_http, path, CATALOG_UNKNOWN_WORDING)
@@ -341,11 +342,12 @@ def test_adapter_catalog_needs_a_real_agreement(
 
 
 def test_adapter_flag_off_prompt_is_mains_and_catalog_is_none(
-    dms_http: Any, adapter: Any  # noqa: F811
+    dms_http: Any, adapter: Any, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     """Off, the model is sent main's prompt and a ``catalog`` reply is not a choice."""
     from CortexOS.dms.metric_choice import CHOOSE_INSTRUCTIONS, CHOOSE_TASK
 
+    monkeypatch.setenv(CATALOG_FLAG, "0")
     fake = adapter({"metric_id": "catalog", "slots": {}}, AGREES)
     body = _ask(dms_http, "/v1/contract/ask", CATALOG_UNKNOWN_WORDING)
     assert fake.system[CHOOSE_TASK] == CHOOSE_INSTRUCTIONS
@@ -487,3 +489,65 @@ def test_answer_names_no_lexical_decider() -> None:
     find_body = find_src.split("\ndef find(", 1)[1].split("\ndef ", 1)[0]
     for word in ("cosine", "jaccard", "embedding"):
         assert word not in find_body, word
+
+
+# ── default on, one choice per ask ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_default_on_catalog_question_gets_the_catalog_without_the_flag(
+    dms_http: Any, scripted: Any, path: str  # noqa: F811
+) -> None:
+    """No env set: the model decides. A wording the regex never knew gets the catalog."""
+    scripted({CATALOG_UNKNOWN_WORDING: {"metric_id": "catalog"}})
+    _assert_catalog(_ask(dms_http, path, CATALOG_UNKNOWN_WORDING))
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_default_on_metric_question_is_chosen_once_per_ask(
+    dms_http: Any, scripted: Any, path: str  # noqa: F811
+) -> None:
+    """The catalog decision and the metric decision are one choose-and-check."""
+    port = scripted({REVENUE_WITH_CATALOG_WORDS: {"metric_id": "total_revenue"}})
+    body = _ask(dms_http, path, REVENUE_WITH_CATALOG_WORDS)
+    _assert_not_a_listing(body)
+    assert port.chose.count(REVENUE_WITH_CATALOG_WORDS) == 1, port.chose
+    assert [q for q, _ in port.checked].count(REVENUE_WITH_CATALOG_WORDS) == 1, port.checked
+
+
+def test_handoff_is_used_once_and_only_for_the_same_question_and_port(scripted: Any) -> None:
+    from CortexOS.dms import metric_choice as mc
+
+    port = scripted({"q one": {"metric_id": "total_revenue"}, "q two": {"metric_id": "total_revenue"}})
+    assert mc.catalog_decision("q one") is False
+    mc.decide_metric("q one")
+    assert port.chose.count("q one") == 1
+    mc.decide_metric("q one")  # read once: a second call asks again
+    assert port.chose.count("q one") == 2
+    assert mc.catalog_decision("q two") is False
+    mc.decide_metric("q one")  # another question: not handed over, and cleared
+    mc.decide_metric("q two")
+    assert port.chose.count("q two") == 2
+    assert mc.catalog_decision("q two") is False
+    other = scripted({"q two": {"metric_id": "total_revenue"}})  # a new port
+    mc.decide_metric("q two")
+    assert other.chose == ["q two"]
+
+
+def test_guard_handoff_removed_the_ask_chooses_twice(
+    dms_http: Any, scripted: Any, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Without the handoff the same ask pays for two rounds of model calls."""
+    from CortexOS.dms import metric_choice as mc
+
+    class _NoHandoff:
+        def get(self) -> None:
+            return None
+
+        def set(self, value: Any) -> None:
+            return None
+
+    monkeypatch.setattr(mc, "_HANDOFF", _NoHandoff())
+    port = scripted({REVENUE_WITH_CATALOG_WORDS: {"metric_id": "total_revenue"}})
+    _ask(dms_http, "/v1/contract/ask", REVENUE_WITH_CATALOG_WORDS)
+    assert port.chose.count(REVENUE_WITH_CATALOG_WORDS) == 2

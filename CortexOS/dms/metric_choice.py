@@ -15,6 +15,7 @@ becomes ``NO_CLOSEST``: Yes and No then both answer not found.
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -56,9 +57,9 @@ CHECK_INSTRUCTIONS = (
 )
 
 
-# #426: with this on, the chooser may answer ``catalog`` (the person asks what
-# exists or what can be asked) and the check confirms it. The catalog word
-# rule is then not consulted. Off by default: no live model run has measured it.
+# #426: the chooser may answer ``catalog`` (the person asks what exists or what
+# can be asked) and the check confirms it; the catalog word rule is not
+# consulted. On by default. ``CORTEX_CATALOG_BY_MODEL=0`` restores main's rule.
 CATALOG_BY_MODEL_ENV = "CORTEX_CATALOG_BY_MODEL"
 CATALOG_CHOICE = "catalog"
 
@@ -80,7 +81,8 @@ CHECK_CATALOG_INSTRUCTIONS = (
 
 
 def catalog_by_model_enabled() -> bool:
-    return (os.environ.get(CATALOG_BY_MODEL_ENV) or "").strip().lower() in {"1", "true", "yes"}
+    value = (os.environ.get(CATALOG_BY_MODEL_ENV) or "").strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 def choose_instructions() -> str:
@@ -143,12 +145,19 @@ class _UnarmedChoice:
 
 
 _port: MetricChoicePort | None = None
+# #426: ``catalog_decision`` runs the choose-and-check first in an ask; the
+# ``decide_metric`` call that follows for the same question and port takes that
+# decision instead of asking the model again. Read once, then cleared.
+_HANDOFF: ContextVar[tuple[str, object, MetricDecision] | None] = ContextVar(
+    "cortex_metric_handoff", default=None
+)
 
 
 def register_metric_choice(port: MetricChoicePort) -> None:
     """Install the port. A later call replaces it."""
     global _port
     _port = port
+    _HANDOFF.set(None)
 
 
 def register_default_metric_choice(port: MetricChoicePort) -> None:
@@ -161,6 +170,7 @@ def register_default_metric_choice(port: MetricChoicePort) -> None:
 def clear_metric_choice() -> None:
     global _port
     _port = None
+    _HANDOFF.set(None)
 
 
 def resolve_metric_choice() -> MetricChoicePort:
@@ -235,8 +245,16 @@ def answerable_closest(question: str, closest: str) -> str:
 def decide_metric(question: str) -> MetricDecision:
     """The serve decision: a chosen metric the check accepts, or do not serve.
 
-    Not served, the selection carries the closest answerable question.
+    Not served, the selection carries the closest answerable question. A
+    decision ``catalog_decision`` just made for this question and port is
+    used once instead of a second round of model calls.
     """
+    held = _HANDOFF.get()
+    if held is not None:
+        _HANDOFF.set(None)
+        asked, port, decision = held
+        if asked == question and port is _port:
+            return decision
     decision = _choose_and_check(question)
     if not decision.serve and not decision.catalog:
         selection = decision.selection
@@ -244,3 +262,15 @@ def decide_metric(question: str) -> MetricDecision:
             question, selection.closest_question
         )
     return decision
+
+
+def catalog_decision(question: str) -> bool:
+    """True when the model chose the catalog and the check agreed (#426).
+
+    Any other decision is handed to the next ``decide_metric`` call for the
+    same question, so the ask makes one choose-and-check, not two.
+    """
+    decision = decide_metric(question)
+    if not decision.catalog:
+        _HANDOFF.set((question, _port, decision))
+    return decision.catalog
