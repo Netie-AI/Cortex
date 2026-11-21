@@ -33,6 +33,11 @@ SLOW = "SELECT count(*) AS n FROM nums a, nums b, nums c WHERE (a.i * b.i + c.i)
 # A big fetch: millions of rows, no aggregate.
 BIG_FETCH = "SELECT a.i, b.i AS j FROM nums a, nums b"
 FAST = "SELECT count(*) AS n FROM nums"
+# Longer than LIMIT_S, short enough to run to the end in the guard test.
+MEDIUM = (
+    "SELECT count(*) AS n FROM nums a, nums b, (SELECT i FROM nums WHERE i < 15) c "
+    "WHERE (a.i * b.i + c.i) % 7 = 3"
+)
 
 
 @pytest.fixture()
@@ -136,12 +141,12 @@ def test_the_deadline_covers_explain_and_the_page_count(granted, lake, monkeypat
 def test_guard_deadline_removed_the_long_statement_runs_unbounded(
     granted, lake, monkeypatch
 ) -> None:
-    """With the deadline gone (main), the same statement runs past the limit and serves."""
+    """With the deadline gone (main), a statement longer than the limit runs to
+    the end and serves: nothing bounds it."""
     monkeypatch.setattr(submit, "StatementDeadline", _Never)
-    rows, elapsed = _run(granted, "SELECT count(*) AS n FROM nums a, nums b WHERE (a.i * b.i) % 7 = 3", lake)
-    assert rows and elapsed > 0  # served: nothing bounded it
-    with pytest.raises(AssertionError):
-        test_must_fail_a_long_statement_is_stopped_and_refused_by_name.__wrapped__  # type: ignore[attr-defined]
+    rows, elapsed = _run(granted, MEDIUM, lake)
+    assert rows and rows[0]["n"] > 0
+    assert elapsed > LIMIT_S * 1.5, elapsed
 
 
 class _Never:

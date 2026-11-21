@@ -1307,11 +1307,12 @@ def test_http_l2_join_form_abstains_and_must_fail_serves_zero(
 def test_statement_timeout_is_set_before_the_drift_scan(
     lake: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The statement-timeout SET is attempted before EXPLAIN and the value-domain scan.
+    """The statement deadline is armed before EXPLAIN and the value-domain scan.
 
-    On DuckDB 2.x the SET is a no-op (no ``statement_timeout`` setting; the
-    CatalogException is swallowed), so this asserts the order of the attempt,
-    not that the scan is bounded.
+    #440: DuckDB has no ``statement_timeout`` setting, so the SET this test used
+    to look for bounded nothing. The deadline that replaced it is armed on the
+    cursor before the first statement; this asserts that order. That it bounds
+    the scan is ``tests/test_execution/test_statement_deadline_440.py``.
     """
     from CortexOS.execution import submit, warehouse
 
@@ -1337,6 +1338,13 @@ def test_statement_timeout_is_set_before_the_drift_scan(
 
     monkeypatch.setattr(warehouse, "get_connection", wrapped)
     monkeypatch.setattr(submit, "get_connection", wrapped)
+    real_deadline = submit.StatementDeadline
+
+    def armed(con: Any, timeout_s: float) -> Any:
+        calls.append("DEADLINE armed")
+        return real_deadline(con, timeout_s)
+
+    monkeypatch.setattr(submit, "StatementDeadline", armed)
     monkeypatch.setattr(submit, "DEFAULT_DB", lake)
     vd.clear_lake_cache()
     _bind()
@@ -1346,6 +1354,7 @@ def test_statement_timeout_is_set_before_the_drift_scan(
     finally:
         warehouse.close_cached_connections()
         reset_session_registry_for_tests()
-    timeout_at = next(i for i, sql in enumerate(calls) if sql.startswith("SET statement_timeout"))
+    timeout_at = calls.index("DEADLINE armed")
+    assert not any(sql.startswith("SET statement_timeout") for sql in calls), calls
     scan_at = next(i for i, sql in enumerate(calls) if "FILTER (WHERE" in sql)
     assert timeout_at < scan_at, calls
