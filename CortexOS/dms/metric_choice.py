@@ -267,10 +267,31 @@ def decide_metric(question: str) -> MetricDecision:
 def catalog_decision(question: str) -> bool:
     """True when the model chose the catalog and the check agreed (#426).
 
-    Any other decision is handed to the next ``decide_metric`` call for the
-    same question, so the ask makes one choose-and-check, not two.
+    ``answer()`` (frozen) asks this before its certified match, so a question
+    a certified query answers is not put to the model here: it keeps its
+    certified serve and costs no model call. A failed decision (a strict
+    FreeRoute refusal, any error) is not the catalog and hands nothing on;
+    the error surfaces where it did before, at the metric choice. Any other
+    decision is handed to the next ``decide_metric`` call for the same
+    question, so the ask makes one choose-and-check, not two. This never
+    reads a held decision: each ask's first call asks the model.
     """
-    decision = decide_metric(question)
+    _HANDOFF.set(None)
+    if _certified(question):
+        return False
+    try:
+        decision = decide_metric(question)
+    except Exception:  # noqa: BLE001 - not the catalog; decide_metric raises it again
+        return False
     if not decision.catalog:
         _HANDOFF.set((question, _port, decision))
     return decision.catalog
+
+
+def _certified(question: str) -> bool:
+    from CortexOS.dms.answer_engine import match_certified
+
+    try:
+        return match_certified(question) is not None
+    except Exception:  # noqa: BLE001 - an unreadable registry certifies nothing
+        return False

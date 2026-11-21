@@ -184,8 +184,19 @@ class OpenVaultMetricChoice:
             )
         metric_id = str(body.get("metric_id") or "none").strip()
         if metric_id.lower() == CATALOG_CHOICE and catalog_by_model_enabled():
-            # The engine has this checked before the catalog is served.
-            return MetricSelection(metric_id=CATALOG_CHOICE)
+            # The engine has this checked before the catalog is served. The
+            # closest question rides along for the reconfirm a rejected
+            # catalog choice falls to.
+            stated = _customer_text(body.get("why"))
+            return MetricSelection(
+                metric_id=CATALOG_CHOICE,
+                closest_question=_customer_text(body.get("closest_question")) or UNARMED_CLOSEST,
+                why=(
+                    f"{stated.rstrip('.')}, so it cannot be served directly"
+                    if stated
+                    else "the metric chooser did not accept a declared metric"
+                ),
+            )
         if metric_id.lower() == "none":
             metric_id = "none"
         else:
