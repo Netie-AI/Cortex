@@ -43,7 +43,7 @@ def _envelope(sql: str) -> dict[str, Any]:
 
     rows = _run_canonical(sql)
     return {
-        "answer": "Countries: " + ", ".join(str(r.get("country")) for r in rows),
+        "answer": "Rows: " + "; ".join(", ".join(str(v) for v in r.values()) for r in rows),
         "rows": rows,
         "badge": "governed_metric",
         "route": "governed_metric",
@@ -87,9 +87,7 @@ def test_guard_variants_removed_the_dropped_having_scores_correct(
 ) -> None:
     """Without the variants, main's rule is back and the luck passes."""
     monkeypatch.setattr(heldout, "VARIANTS", ())
-    monkeypatch.setattr(
-        heldout, "variant_mismatch", lambda item, sql, **kw: None
-    )
+    monkeypatch.setattr(heldout, "variant_mismatch", lambda item, sql, **kw: None)
     assert score_envelope(_item(), _envelope(NO_HAVING)).outcome == "correct"
 
 
@@ -123,9 +121,7 @@ def test_variants_are_deterministic_and_differ_from_the_base() -> None:
             assert len(first) < base, variant.id
 
 
-@pytest.mark.parametrize(
-    "item", [i for i in load_heldout() if i.canonical_sql], ids=lambda i: i.id
-)
+@pytest.mark.parametrize("item", [i for i in load_heldout() if i.canonical_sql], ids=lambda i: i.id)
 def test_must_pass_every_gold_sql_scores_correct_against_itself(item: HeldoutItem) -> None:
     """No false incorrect: the gold SQL agrees with itself on every variant."""
     assert heldout.variant_mismatch(item, _gold(item)) is None
@@ -168,3 +164,191 @@ def test_dropped_predicates_are_caught_across_the_held_out_set() -> None:
             missed.append(item.id)
     assert ITEM_ID in caught_by_variant
     assert missed == [], f"dropped predicates no variant tells apart: {missed}"
+
+
+# ── attacker round on 1a2fd87 ───────────────────────────────────────────────
+# Wrong SQLs that matched gold on the base and on every keep / jitter / skew
+# variant: those only drop rows and scale numbers, so a string, date or sign
+# the base never holds never appears.
+WRONG_ON_NO_SAMPLED_VARIANT = {
+    "cutoff_two_days_late": (
+        "bird_stale_audit_with_delayed_inbound",
+        "SELECT COUNT(*) AS supplier_count FROM suppliers s "
+        "WHERE CAST(s.last_audit_date AS DATE) < DATE '2024-01-03' AND EXISTS "
+        "(SELECT 1 FROM shipments sh WHERE sh.supplier_id = s.supplier_id "
+        "AND sh.status = 'DELAYED')",
+    ),
+    "cutoff_inside_an_empty_gap": (
+        "bird_stale_audit_with_delayed_inbound",
+        "SELECT COUNT(*) AS supplier_count FROM suppliers s "
+        "WHERE CAST(s.last_audit_date AS DATE) <= DATE '2023-12-28' AND EXISTS "
+        "(SELECT 1 FROM shipments sh WHERE sh.supplier_id = s.supplier_id "
+        "AND sh.status = 'DELAYED')",
+    ),
+    "dropped_positive_reorder_level": (
+        "bird_cold_bin_below_reorder",
+        "SELECT COUNT(*) AS bin_count FROM inventory i JOIN locations l "
+        "ON l.location_id = i.location_id "
+        "WHERE l.is_cold_storage = true AND i.quantity_kg < i.reorder_level_kg",
+    ),
+    "status_by_excluding_the_others": (
+        "bird_delayed_hazardous_to_cold",
+        "SELECT COUNT(*) AS delayed_count FROM shipments sh JOIN (SELECT sku, "
+        "MAX(CASE WHEN is_hazardous THEN 1 ELSE 0 END) AS haz FROM inventory GROUP BY sku) i "
+        "ON i.sku = sh.sku AND i.haz = 1 JOIN locations l "
+        "ON l.location_id = sh.destination_location_id WHERE sh.status NOT IN "
+        "('PENDING','IN_TRANSIT','CANCELLED','DELIVERED') AND l.is_cold_storage = true",
+    ),
+    "severity_by_excluding_the_others": (
+        "spider_unresolved_critical_slow_supplier",
+        "SELECT COUNT(*) AS alert_count FROM alerts a JOIN suppliers s "
+        "ON s.supplier_id = a.related_supplier WHERE a.resolved = false "
+        "AND a.severity NOT IN ('HIGH','MEDIUM','LOW') AND s.lead_time_days > 30",
+    ),
+}
+
+# Different SQL, same meaning: must stay correct.
+RIGHT_IN_ANOTHER_FORM = {
+    "avg_form": (
+        "bird_carrier_delay_rate_above_global",
+        "SELECT c.carrier FROM (SELECT carrier, AVG(CASE WHEN status='DELAYED' THEN 1.0 "
+        "ELSE 0.0 END) r FROM shipments GROUP BY carrier) c WHERE c.r > (SELECT "
+        "AVG(CASE WHEN status='DELAYED' THEN 1.0 ELSE 0.0 END) FROM shipments) ORDER BY 1",
+    ),
+    "sum_over_count": (
+        "spider_avg_cost_delayed_hazardous",
+        "SELECT ROUND(SUM(sh.cost_myr)/COUNT(*), 2) AS avg_cost_myr FROM shipments sh "
+        "WHERE sh.status = 'DELAYED' AND sh.sku IN (SELECT sku FROM inventory WHERE is_hazardous)",
+    ),
+    "cte_shadows_the_table": (
+        "spider_country_mean_lead_having",
+        "WITH suppliers AS (SELECT * FROM main.suppliers) SELECT country FROM suppliers "
+        "GROUP BY country HAVING AVG(lead_time_days) > 20 AND COUNT(*) >= 3 ORDER BY country",
+    ),
+    "in_subqueries": (
+        "bird_delayed_hazardous_to_cold",
+        "SELECT COUNT(*) AS delayed_count FROM shipments sh WHERE sh.status = 'DELAYED' "
+        "AND sh.sku IN (SELECT sku FROM inventory WHERE is_hazardous) "
+        "AND sh.destination_location_id IN (SELECT location_id FROM locations "
+        "WHERE is_cold_storage)",
+    ),
+    "join_to_a_dimension_the_gold_does_not_read": (
+        "spider_avg_cost_delayed_hazardous",
+        "SELECT ROUND(AVG(sh.cost_myr), 2) AS avg_cost_myr FROM shipments sh "
+        "JOIN locations l ON l.location_id = sh.destination_location_id "
+        "WHERE sh.status = 'DELAYED' AND EXISTS (SELECT 1 FROM inventory i "
+        "WHERE i.sku = sh.sku AND i.is_hazardous = true)",
+    ),
+}
+
+
+def _base_match(item: HeldoutItem, sql: str) -> bool:
+    from bench.accuracy import _multiset_equal, _project, _run_canonical
+
+    keys = list(item.key_columns)
+    return _multiset_equal(
+        _project(_run_canonical(sql), keys, item.round),
+        _project(_run_canonical(_gold(item)), keys, item.round),
+    )
+
+
+@pytest.mark.parametrize("case", sorted(WRONG_ON_NO_SAMPLED_VARIANT))
+def test_must_fail_a_wrong_sql_no_sampled_variant_moves_is_caught(case: str) -> None:
+    item_id, sql = WRONG_ON_NO_SAMPLED_VARIANT[case]
+    item = _item(item_id)
+    assert _base_match(item, sql), "precondition: the base database cannot tell"
+    sampled = tuple(v for v in heldout.VARIANTS if v.kind in ("keep", "jitter", "skew"))
+    assert heldout.variant_mismatch(item, sql, variants=sampled) is None, "precondition"
+    result = score_envelope(item, _envelope(sql))
+    assert result.outcome == "incorrect", (case, result)
+    assert result.detail.split(":", 1)[1].split("-")[0] in {"novel0.3", "edge0.3"}, result
+
+
+@pytest.mark.parametrize("case", sorted(RIGHT_IN_ANOTHER_FORM))
+def test_must_pass_a_right_sql_in_another_form_scores_correct(case: str) -> None:
+    item_id, sql = RIGHT_IN_ANOTHER_FORM[case]
+    item = _item(item_id)
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is None, case
+
+
+def _where_dropped(item_id: str) -> str:
+    tree = sqlglot.parse_one(_gold(_item(item_id)), read="duckdb")
+    for node in list(tree.find_all(exp.Where)):
+        node.pop()
+    return tree.sql(dialect="duckdb")
+
+
+CROSS_TABLE = "bird_inbound_shipments_gt_sku_distinct"
+
+
+@pytest.mark.parametrize(
+    "spell",
+    [
+        lambda sql: sql,
+        lambda sql: sql.replace("FROM shipments", "FROM SHIPMENTS"),
+        lambda sql: (
+            sqlglot.parse_one(sql, read="duckdb")
+            .join("(SELECT COUNT(*) AS zc FROM alerts) AS z", on="TRUE", join_type="LEFT")
+            .sql(dialect="duckdb")
+        ),
+    ],
+    ids=["as_is", "table_in_capitals", "extra_table_sorted_first"],
+)
+def test_must_fail_how_the_served_sql_spells_tables_cannot_move_the_skew(spell) -> None:  # noqa: ANN001
+    """The skew bit index ran over the served SQL's tables too, so an extra
+    table or a capitalised name moved the thinned table and the dropped WHERE
+    scored correct."""
+    item = _item(CROSS_TABLE)
+    sql = spell(_where_dropped(CROSS_TABLE))
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is not None
+
+
+def test_lanes_grading_passes_the_served_sql_to_the_scorer() -> None:
+    """``bench.lanes`` built the view without ``sql_used``: every data item it
+    graded was ``variant_unverifiable``, a correct answer graded WRONG."""
+    from bench import lanes
+
+    item = _item()
+    lane_item = lanes.LaneItem(
+        id=item.id,
+        split="sql",
+        kind="data",
+        lane="sql",
+        accept=("rows",),
+        question=item.question,
+        canonical_sql=item.canonical_sql,
+        key_columns=tuple(item.key_columns),
+        round=item.round,
+        match=item.match,
+    )
+
+    def body(sql: str) -> dict[str, Any]:
+        env = _envelope(sql)
+        return {
+            "answer": env["answer"],
+            "rows": env["rows"],
+            "provenance": {"badge": "governed_metric"},
+            "sql_used": sql,
+        }
+
+    right = lanes._grade_data(lane_item, body(_gold(item)))
+    wrong = lanes._grade_data(lane_item, body(NO_HAVING))
+    assert right.outcome == lanes.RIGHT, right
+    assert wrong.outcome == lanes.WRONG, wrong
+
+
+def test_shadow_l2_line_carries_its_sql() -> None:
+    env = heldout._shadow_l2_env({"l2_sql": "SELECT 1", "l2_values": [{"a": 1}]})
+    assert env["sql_used"] == "SELECT 1"
+
+
+def test_one_item_that_raises_while_scoring_is_named_not_fatal(monkeypatch) -> None:  # noqa: ANN001
+    def boom(item, sql, **kw):  # noqa: ANN001
+        raise RuntimeError("variant build failed")
+
+    monkeypatch.setattr(heldout, "variant_mismatch", boom)
+    result = heldout._score_or_error(_item(), _envelope(NO_HAVING))
+    assert result.outcome == "incorrect"
+    assert result.detail == "score raised RuntimeError: variant build failed"

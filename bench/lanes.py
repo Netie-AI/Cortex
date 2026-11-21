@@ -552,6 +552,7 @@ def _grade_data(item: LaneItem, body: dict[str, Any]) -> Grade:
         "rows": _rows(body),
         "badge": _contract_badge(body),
         "route": str(body.get("route") or ""),
+        "sql_used": body.get("sql_used"),
     }
     result = score_envelope(held, view)
     if result.outcome == "correct":
