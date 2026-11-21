@@ -80,8 +80,14 @@ class Variant:
 
     ``keep``: each row stays when its seeded hash falls under ``rate``.
     ``jitter``: every numeric value is scaled by a seeded factor in
-    ``[1 - rate, 1 + rate]``. Both are pure functions of the base rows and the
-    seed, so a variant id names the same data on every run.
+    ``[1 - rate, 1 + rate]``.
+    ``skew``: of the tables read, sorted by name, table ``i`` is sampled at
+    ``rate`` when bit ``i`` of ``seed`` is set and kept whole otherwise (seeds
+    1 to 6 cover every split of up to three tables), so a predicate that
+    compares one table's counts with another's can change. Uniform sampling
+    keeps their ratio.
+    All are pure functions of the base rows and the seed, so a variant id names
+    the same data on every run.
     """
 
     id: str
@@ -94,7 +100,7 @@ VARIANTS: tuple[Variant, ...] = tuple(
     Variant(f"{kind}{rate:g}-s{seed}", kind, rate, seed)
     for kind, rate in (("keep", 0.05), ("keep", 0.2), ("keep", 0.5), ("jitter", 0.5))
     for seed in (1, 2)
-)
+) + tuple(Variant(f"skew0.05-m{mask}", "skew", 0.05, mask) for mask in range(1, 7))
 _NUMERIC = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "FLOAT", "DOUBLE", "DECIMAL",
             "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "REAL")
 
@@ -326,7 +332,7 @@ def _variant_connection(variant: Variant, tables: list[str], base: Path) -> Any:
 
     con = duckdb.connect(":memory:")
     con.execute(f"ATTACH '{base.as_posix()}' AS base (READ_ONLY)")
-    for table in tables:
+    for index, table in enumerate(sorted(tables)):
         cols = con.execute(
             "SELECT column_name, data_type FROM duckdb_columns() "
             "WHERE database_name = 'base' AND schema_name = 'main' AND table_name = ? "
@@ -335,10 +341,12 @@ def _variant_connection(variant: Variant, tables: list[str], base: Path) -> Any:
         ).fetchall()
         if not cols:
             continue
-        if variant.kind == "keep":
+        if variant.kind in ("keep", "skew"):
             select = "*"
             cut = int(variant.rate * 1_000_000)
             where = f"WHERE (hash(rowid, {variant.seed}) % 1000000) < {cut}"
+            if variant.kind == "skew" and not (variant.seed >> index) & 1:
+                where = ""
         else:
             parts = []
             for name, dtype in cols:
