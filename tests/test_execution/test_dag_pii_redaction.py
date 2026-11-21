@@ -812,3 +812,57 @@ async def test_a_refusal_carries_no_trace_of_the_input():
         await _call(RecordingAdapter(), system="", prompt=f"Check {NRIC}")
     assert exc.value.__cause__ is None and exc.value.__context__ is None
     assert NRIC not in str(exc.value)
+
+
+# --- final verifier pass (#241) ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Contact 1250 leads, 3400 won",
+        "phone 2,500 units, 3,400 sold",
+        "Mobile: 2024-01-15",
+        "tel 1500.50 RM 2300.75",
+        "Contact: 12 of 1500000",
+    ],
+)
+def test_a_figure_after_a_phone_label_is_unchanged(text):
+    from packs.dms.security import pii
+
+    assert pii.redact_for_model(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "HP:0123456789,0198765432",
+        "HP: 0123456789 or 0198765432",
+        "Tel 0312345678 / 0387654321",
+        "hp-0123456789",
+    ],
+)
+def test_every_number_in_a_labelled_phone_list_is_masked(text):
+    from packs.dms.security import pii
+
+    out = pii.redact_for_model(text)
+    assert not any(ch.isdigit() for ch in out.replace("[REDACTED:phone]", "")), out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ali\u200bS1234567D",
+        "Ali\u2060900101145678",
+        "Ali\u00adS1234567D",
+        "Ali\ufeffS1234567D",
+        "Ali&#8203;S1234567D",
+        '{"n": "Ali\\u200bS1234567D"}',
+    ],
+)
+def test_a_format_character_does_not_glue_an_id_to_a_word(text):
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    for redactor in (redact_port.default_redact, pii.redact_for_model):
+        assert "[REDACTED:" in redactor(text), (redactor.__name__, text)

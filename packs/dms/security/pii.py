@@ -89,7 +89,9 @@ def redact_for_prompt(text: str) -> str:
 # run, 0800-1700 and +1.234.567; an international number starts with "+" and
 # has at least 9 digits. A figure's digits are never altered (DMS #508).
 _AREA = r"(?:01\d|0[3-79]|08[2-9])"
-_DASH = "-\u2010-\u2015\u2212"
+# The hyphen is escaped: unescaped after ")" it would open a range ")"..U+2010
+# that takes in letters, "," and "." and turns figures after a label into phones.
+_DASH = "\\-\u2010-\u2015\u2212"
 _LOCAL_PHONE = re.compile(
     r"(?<!\d)(?<!\d\.)(?:\(" + _AREA + r"\) ?|" + _AREA + r" ?[" + _DASH + r"] ?)"
     r"(?:\d{3,4} ?\d{4}|\d{6}|\d{3} \d{3})(?!\d)(?![-.]\d)"
@@ -105,9 +107,18 @@ _INTL_PHONE = re.compile(
 # 60/65 without the "+". The label is what makes these phones and not figures.
 _LABELLED_PHONE = re.compile(
     r"(?i)(?:\b(?:hp|h/p|tel|telephone|phone|mobile|mob|handphone|whatsapp|contact|fax)\b\.?"
-    r"\s*(?:no\.?|number)?\s*[:=#.]?\s*|wa\.me/)"
+    r"\s*(?:no\.?|number)?\s*[:=#.\-]?\s*|wa\.me/)"
     r"(\(?\+?\d[\d ()" + _DASH + r"]{6,18}\d)"
 )
+
+
+# More numbers in the same labelled list: "HP: 012-345 6789 or 019-876 5432".
+_NEXT_PHONE = re.compile(r"\s*(?:,|/|;|\bor\b|\band\b)\s*(\(?\+?\d[\d ()" + _DASH + r"]{6,18}\d)")
+_DATE_SHAPE = re.compile(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}")
+
+
+def _labelled_number_ok(value: str) -> bool:
+    return 8 <= sum(c.isdigit() for c in value) <= 13 and _DATE_SHAPE.fullmatch(value.strip()) is None
 
 
 def _phone_spans(view: str) -> list[tuple[int, int, str]]:
@@ -117,8 +128,13 @@ def _phone_spans(view: str) -> list[tuple[int, int, str]]:
             if sum(c.isdigit() for c in match.group(0)) >= 9:
                 spans.append((start, end, "phone"))
     for match in _LABELLED_PHONE.finditer(view):
-        if 8 <= sum(c.isdigit() for c in match.group(1)) <= 13:
-            spans.append((match.start(1), match.end(1), "phone"))
+        if not _labelled_number_ok(match.group(1)):
+            continue
+        spans.append((match.start(1), match.end(1), "phone"))
+        pos = match.end(1)
+        while (nxt := _NEXT_PHONE.match(view, pos)) is not None and _labelled_number_ok(nxt.group(1)):
+            spans.append((nxt.start(1), nxt.end(1), "phone"))
+            pos = nxt.end(1)
     return spans
 
 
@@ -129,9 +145,7 @@ def redact_for_model(text: str) -> str:
     above, on the engine's detection view; overlapping matches are masked as
     their union. Text outside a match passes through unchanged.
     """
-    view, index = redact_port.normalized_view(text)
-    spans = redact_port.engine_spans(view) + _phone_spans(view)
-    return redact_port.apply_spans(text, view, index, spans)
+    return redact_port.redact_with(text, lambda view: redact_port.engine_spans(view) + _phone_spans(view))
 
 
 def register_engine_redactor() -> None:

@@ -239,14 +239,17 @@ def _decode_at(text: str, pos: int) -> tuple[str, int] | None:
     return None
 
 
-def normalized_view(text: str) -> tuple[str, list[Span]]:
+def normalized_view(text: str, *, format_as_space: bool = False) -> tuple[str, list[Span]]:
     """Detection view; ``index[i]`` is the source ``(start, end)`` behind view character ``i``.
 
     Percent escapes, HTML numeric entities and JSON/Python string escapes are
     decoded; then, for every character, format, combining and enclosing marks
     and blank fillers are dropped, NFKC is applied, any decimal digit becomes
     its ASCII digit, and confusable letters are folded. Source text is never
-    changed.
+    changed. With ``format_as_space`` a format character (zero-width space,
+    word joiner, soft hyphen, BOM) reads as a space instead of being dropped:
+    dropped it can no longer split a value, read as a space it can no longer
+    glue a value to the word before it. Redaction runs on both views.
     """
     out: list[str] = []
     index: list[Span] = []
@@ -260,6 +263,10 @@ def normalized_view(text: str) -> tuple[str, list[Span]]:
             ch, width = decoded
         span = (pos, pos + width)
         pos += width
+        if format_as_space and unicodedata.category(ch) == "Cf":
+            out.append(" ")
+            index.append(span)
+            continue
         if ch in _FILLERS or unicodedata.category(ch) in ("Cf", "Mn", "Me"):
             continue
         for norm in unicodedata.normalize("NFKC", ch):
@@ -385,10 +392,29 @@ def mykad_matches(text: str) -> list[tuple[int, int]]:
     )
 
 
+def redact_with(text: str, finder: Callable[[str], list[tuple[int, int, str]]]) -> str:
+    """Mask what ``finder`` finds on both detection views, as one union in the source."""
+    source: list[tuple[int, int, str]] = []
+    for format_as_space in (False, True):
+        view, index = normalized_view(text, format_as_space=format_as_space)
+        source.extend((index[s][0], index[e - 1][1], k) for s, e, k in finder(view))
+        if not any(unicodedata.category(ch) == "Cf" for ch in text) and "&#" not in text and "\\" not in text:
+            break  # no format characters: the second view is the same as the first
+    if not source:
+        return text
+    parts: list[str] = []
+    src = 0
+    for start, end, kind in merge_spans(source):
+        parts.append(text[src:start])
+        parts.append(f"[REDACTED:{kind}]")
+        src = end
+    parts.append(text[src:])
+    return "".join(parts)
+
+
 def default_redact(text: str) -> str:
     """The engine default redactor: MyKad, NRIC/FIN, email, payment card."""
-    view, index = normalized_view(text)
-    return apply_spans(text, view, index, engine_spans(view))
+    return redact_with(text, engine_spans)
 
 
 # --- registration ------------------------------------------------------------
@@ -571,6 +597,7 @@ __all__ = [
     "nric_ok",
     "normalized_view",
     "redact_for_model",
+    "redact_with",
     "scan",
     "register_redactor",
     "registered_redactor",
