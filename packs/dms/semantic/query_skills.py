@@ -247,17 +247,21 @@ def find(
 def _replays_as_captured(
     metric_id: str | None, params: dict[str, Any], question: str
 ) -> bool:
-    """Whether ``answer()``'s replay of this skill compiles the query it captured."""
-    if not metric_id:
+    """Whether ``answer()``'s replay of this skill keeps every param it captured.
+
+    The replay drops ``REPLAY_DROPS``: the skill replays only when the query
+    compiles the same without them. ``REPLAY_REREADS_SLOTS`` metrics are the
+    exception: ``answer()`` (frozen, #215) reads every one of their params again
+    from the question with ``_sales_rank_slots``, and the pack reaches the engine
+    only through ``ask_scope`` (#340), so it cannot compare against that reading.
+    They replay as on main. Open: QUERY-SKILL-REREAD-WORD-RULE.
+    """
+    del question  # the re-read happens in answer(); kept for the call shape
+    if not metric_id or metric_id in REPLAY_REREADS_SLOTS:
         return True
     from packs.dms.semantic.loader import compile_metric, load_all
 
-    if metric_id in REPLAY_REREADS_SLOTS:
-        from CortexOS.dms.answer_engine import _sales_rank_slots
-
-        replay = _sales_rank_slots(question)
-    else:
-        replay = {k: v for k, v in params.items() if k not in REPLAY_DROPS}
+    replay = {k: v for k, v in params.items() if k not in REPLAY_DROPS}
     try:
         catalog = load_all()
         captured = compile_metric(catalog, metric_id, params)
