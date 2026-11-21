@@ -615,29 +615,50 @@ def test_adapter_catalog_choice_keeps_the_closest_question(adapter: Any) -> None
 
 
 @pytest.mark.parametrize(
-    "params",
-    [{"limit": 3, "direction": "ASC"}, {"days": 60}, {"limit": 1}, {"exclude_skus": ["SKU-A"]}],
-    ids=["bottom-3", "60-days", "limit-1", "exclusions"],
+    ("metric_id", "params"),
+    [
+        ("supplier_ranking", {"limit": 3, "direction": "ASC"}),
+        ("stale_restock", {"days": 60}),
+        ("free_capacity", {"limit": 1, "direction": "ASC"}),
+        ("sales_by_value", {"limit": 5, "direction": "DESC", "offset_clause": 0,
+                            "exclude_skus": ["SKU-ALPHA"]}),
+    ],
+    ids=["bottom-3", "60-days", "least-free", "exclusions"],
 )
 def test_must_fail_a_skill_whose_params_replay_drops_is_not_replayed(
-    skills_db: Path, monkeypatch: pytest.MonkeyPatch, params: dict[str, Any]  # noqa: F811
+    skills_db: Path, monkeypatch: pytest.MonkeyPatch, metric_id: str, params: dict[str, Any]  # noqa: F811
 ) -> None:
     """``answer()`` replays a skill with these params dropped: "bottom 3 suppliers"
-    would serve the top 10. Such a skill is not a hit."""
+    would serve the top 10. A replay that compiles different SQL is not a hit."""
     from packs.dms.semantic import query_skills
 
     monkeypatch.setenv(SKILL_FLAG, "1")
-    query_skills.capture("bottom 3 suppliers by score", metric_id="supplier_ranking",
-                         params=params, space_id="alpha")
-    assert query_skills.find("bottom 3 suppliers by score", space_id="alpha") is None
+    query_skills.capture("the stored question", metric_id=metric_id, params=params, space_id="alpha")
+    assert query_skills.find("the stored question", space_id="alpha") is None
 
 
 def test_must_fail_a_sales_rank_skill_is_not_replayed(
     skills_db: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
-    """Sales-rank slots are read again from the question by a word rule on replay."""
+    """Sales-rank slots are read again from the question by a word rule on replay:
+    the model captured limit 3 and ascending, the replay would read limit 5."""
     from packs.dms.semantic import query_skills
 
     monkeypatch.setenv(SKILL_FLAG, "1")
-    query_skills.capture("the 3 least sold products", metric_id="sales_by_volume", space_id="alpha")
+    query_skills.capture("the 3 least sold products", metric_id="sales_by_volume",
+                         params={"limit": 3, "direction": "ASC", "offset_clause": 0},
+                         space_id="alpha")
     assert query_skills.find("the 3 least sold products", space_id="alpha") is None
+
+
+def test_must_pass_a_skill_whose_replay_compiles_the_same_query_is_replayed(
+    skills_db: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv(SKILL_FLAG, "1")
+    query_skills.capture("top 5 products by sales volume", metric_id="sales_by_volume",
+                         params={"limit": 5, "direction": "DESC", "offset_clause": 0},
+                         space_id="alpha")
+    hit = query_skills.find("top 5 products by sales volume", space_id="alpha")
+    assert hit is not None and hit["metric_id"] == "sales_by_volume"
