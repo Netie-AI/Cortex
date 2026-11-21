@@ -491,6 +491,14 @@ def log_audit(entry: AuditEntry) -> None:
     _AUDIT_LOG.append(entry)
 
 
+def _timed_out(entry: AuditEntry, timeout_s: float) -> tuple[GuardrailResult, list[dict], AuditEntry]:
+    entry.safe_sql = None
+    entry.violations = ["STATEMENT_TIMEOUT"]
+    entry.passed = False
+    log_audit(entry)
+    return GuardrailResult(passed=False, violations=["STATEMENT_TIMEOUT"], safe_sql=None), [], entry
+
+
 def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[GuardrailResult, list[dict], AuditEntry]:
     result = validate_sql(sql, semantic)
     entry = AuditEntry(
@@ -504,40 +512,64 @@ def guard_and_execute(sql: str, semantic: dict[str, Any], con) -> tuple[Guardrai
         log_audit(entry)
         return result, [], entry
 
-    # #402: the same declared-value check execute_sql applies. On a lake that
-    # does not store the declared values, a filter on them matches nothing.
-    # A stale lake is a refusal: do not count it and do not fetch it.
-    from CortexOS.dms.warehouse_db import connection_instance, serving_value_domains
-    from CortexOS.ontology.value_domain import stale_columns, stale_reason
+    # #440: the same per-stage time limit execute_sql applies. Past it the
+    # cursor is interrupted and the result is a named refusal, no rows.
+    from CortexOS.execution.pool import get_read_pool
+    from CortexOS.execution.submit import StatementDeadline
 
-    drift = stale_columns(
-        con, result.safe_sql, serving_value_domains(), instance=connection_instance(con)
-    )
-    if drift:
-        stale = GuardrailResult(passed=False, violations=[stale_reason(drift)], safe_sql=None)
-        entry.safe_sql = None
-        entry.violations = [item.code for item in drift]
-        entry.passed = False
-        log_audit(entry)
-        return stale, [], entry
-
-    # The statement is about to run. Count first so a result that already
-    # fits in the LIMIT keeps its SQL bytes.
+    timeout_s = get_read_pool().config.statement_timeout_s
+    deadline = StatementDeadline(con, timeout_s) if timeout_s > 0 else None
     try:
-        counted = con.execute(
-            "SELECT COUNT(*) FROM (" + _unlimited(result.safe_sql) + ") _page"
-        ).fetchone()
-        total = int(counted[0]) if counted else None
-    except Exception:  # noqa: BLE001
-        total = None
-    tied = apply_page_tiebreak(result.safe_sql, semantic, total)
-    if tied != result.safe_sql:
-        result = GuardrailResult(True, [], tied)
-        entry.safe_sql = tied
+        try:
+            # #402: the same declared-value check execute_sql applies. On a lake that
+            # does not store the declared values, a filter on them matches nothing.
+            # A stale lake is a refusal: do not count it and do not fetch it.
+            from CortexOS.dms.warehouse_db import connection_instance, serving_value_domains
+            from CortexOS.ontology.value_domain import stale_columns, stale_reason
 
-    rel = con.execute(result.safe_sql)
-    rows_raw = rel.fetchall()
-    columns = [d[0] for d in rel.description] if rel.description else []
+            drift = stale_columns(
+                con, result.safe_sql, serving_value_domains(), instance=connection_instance(con)
+            )
+            if drift:
+                stale = GuardrailResult(passed=False, violations=[stale_reason(drift)], safe_sql=None)
+                entry.safe_sql = None
+                entry.violations = [item.code for item in drift]
+                entry.passed = False
+                log_audit(entry)
+                return stale, [], entry
+
+            # The statement is about to run. Count first so a result that already
+            # fits in the LIMIT keeps its SQL bytes.
+            if deadline is not None:
+                deadline.restart()
+            try:
+                counted = con.execute(
+                    "SELECT COUNT(*) FROM (" + _unlimited(result.safe_sql) + ") _page"
+                ).fetchone()
+                total = int(counted[0]) if counted else None
+            except Exception:  # noqa: BLE001
+                total = None
+            if deadline is not None:
+                deadline.restart()
+            tied = apply_page_tiebreak(result.safe_sql, semantic, total)
+            if tied != result.safe_sql:
+                result = GuardrailResult(True, [], tied)
+                entry.safe_sql = tied
+
+            if deadline is not None:
+                deadline.restart()
+            rel = con.execute(result.safe_sql)
+            rows_raw = rel.fetchall()
+            columns = [d[0] for d in rel.description] if rel.description else []
+        except Exception:
+            if deadline is not None and deadline.fired:
+                return _timed_out(entry, timeout_s)
+            raise
+        if deadline is not None and deadline.fired:
+            return _timed_out(entry, timeout_s)
+    finally:
+        if deadline is not None:
+            deadline.stop()
     rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
     entry.row_count = len(rows)
     log_audit(entry)

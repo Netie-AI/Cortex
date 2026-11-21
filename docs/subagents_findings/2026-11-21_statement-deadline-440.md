@@ -45,6 +45,35 @@ while idle does not carry into the next statement.
 - Prove a gate can fail: main's code DID NOT RAISE; with the deadline removed
   a statement longer than the limit runs to the end and serves.
 
+## Attacker round on `1a2fd87` (three attackers)
+
+- BYPASS (P0 class, found by two attackers): an interrupt landing on
+  `value_domain._has_column`'s `LIMIT 0` probe was read as "no such column".
+  `lake_drift` cached that per read-only instance, which switched the stale-lake
+  check (#402) off for every later ask: 7 of 300 trials then served from a stale
+  lake. Fixed: only `BinderException` and `CatalogException` mean absent; any
+  other error propagates and nothing is cached.
+- GAP: one deadline covered the optional page count and the served statement,
+  so a slow count refused a fast page. Fixed: `restart()` gives each stage its
+  own window, under the same lock the interrupt loop takes.
+- GAP: `sql_guardrail.guard_and_execute` (the legacy serve path) had no limit.
+  Fixed, same deadline and the same named refusal.
+- GAP: the L2 and plan-SQL steps labelled a timeout as EXPLAIN. Fixed.
+- Holds: no wrong or partial rows in 144 concurrent calls and 400 runs that
+  finish right at the deadline; siblings never interrupted; no leaked threads.
+
+Root-cause class of the round: **an error read as an answer.** A broad
+`except` turned "the probe was stopped" into "the column is absent", and the
+answer was cached.
+
 ## Open, by name
 
-- Pending: the three-attacker round on `1a2fd87` was running when this was written; its results go in PR #481 and in a follow-up to this file.
+- DEADLINE-COUNT-SWALLOWED: `execute_count` swallows its own timeout and the
+  frozen `answer_engine` then reports `total_count` as `len(rows)`.
+- DEADLINE-NO-ASK-BUDGET: each stage has its own limit; an ask has no total.
+- DEADLINE-SCALAR-OVERRUN: a CPU-bound scalar in one row is not interruptible;
+  it is refused, but holds a pool slot up to about 37x the limit.
+- DEADLINE-STOP-JOIN: `stop()` joins with no timeout; a blocking `interrupt()`
+  (never seen on real DuckDB) would hold the pool slot.
+- QueryResult carries no machine code for the timeout beyond
+  `sql_gate_abstain` plus the message (a contract minor, not taken here).

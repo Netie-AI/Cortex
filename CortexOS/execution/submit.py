@@ -345,12 +345,16 @@ class StatementDeadline:
     """Interrupts a DuckDB cursor once ``timeout_s`` has passed (#440).
 
     DuckDB 1.x and 2.x have no ``statement_timeout`` setting. A daemon thread
-    waits for the deadline and then calls ``interrupt()`` every
-    ``POLL_S`` until ``stop()``: one interrupt sent between two statements is
-    dropped by DuckDB, so a single one would let the next statement run
-    unbounded. ``interrupt()`` reaches only this cursor, not its siblings on
-    the shared read-only instance. ``stop()`` joins the thread before the
-    cursor is closed, so no interrupt outlives the call that armed it.
+    waits for the deadline and then calls ``interrupt()`` every ``POLL_S``
+    until the window is restarted or ``stop()`` is called: one interrupt sent
+    between two statements is dropped by DuckDB, so a single one would let
+    the next statement run unbounded. ``restart()`` gives the next statement
+    its own window (an optional page count that runs out does not use up the
+    served statement's time). Interrupts are sent under a lock that
+    ``restart()`` also takes, so none lands after a restart. ``interrupt()``
+    reaches only this cursor, not its siblings on the shared read-only
+    instance. ``stop()`` joins the thread before the cursor is closed, so no
+    interrupt outlives the call that armed it.
     """
 
     POLL_S = 0.05
@@ -360,7 +364,10 @@ class StatementDeadline:
 
         self._con = con
         self._timeout_s = float(timeout_s)
+        self._lock = threading.Lock()
+        self._until = time.monotonic() + self._timeout_s
         self._done = threading.Event()
+        self._wake = threading.Event()
         self.fired = False
         self._thread = threading.Thread(
             target=self._run, name="cortex-statement-deadline", daemon=True
@@ -368,18 +375,28 @@ class StatementDeadline:
         self._thread.start()
 
     def _run(self) -> None:
-        if self._done.wait(self._timeout_s):
-            return
-        self.fired = True
         while not self._done.is_set():
-            try:
-                self._con.interrupt()
-            except Exception:  # noqa: BLE001 - a closed cursor has nothing to stop
-                pass
-            self._done.wait(self.POLL_S)
+            with self._lock:
+                remaining = self._until - time.monotonic()
+                if remaining <= 0:
+                    self.fired = True
+                    try:
+                        self._con.interrupt()
+                    except Exception:  # noqa: BLE001 - a closed cursor has nothing to stop
+                        pass
+            self._wake.wait(remaining if remaining > 0 else self.POLL_S)
+            self._wake.clear()
+
+    def restart(self) -> None:
+        """A fresh window for the next statement; ``fired`` is cleared."""
+        with self._lock:
+            self._until = time.monotonic() + self._timeout_s
+            self.fired = False
+        self._wake.set()
 
     def stop(self) -> None:
         self._done.set()
+        self._wake.set()
         self._thread.join()
 
 
@@ -425,10 +442,11 @@ def _execute_sql(
         started = time.perf_counter()
         path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
-        # #440: DuckDB has no statement_timeout setting. One deadline covers every
-        # statement this call runs (EXPLAIN, the value-domain scan, the page count
-        # and the served statement); past it, the cursor is interrupted until it
-        # stops, and the call is refused by name.
+        # #440: DuckDB has no statement_timeout setting. A deadline bounds each
+        # stage of this call: EXPLAIN and the value-domain scan, the page count,
+        # and the served statement each get the pool's limit. Past it the cursor
+        # is interrupted until it stops; a timed-out stage that is not optional
+        # refuses the call by name.
         timeout_s = pool.config.statement_timeout_s
         deadline = StatementDeadline(con, timeout_s) if timeout_s > 0 else None
         try:
@@ -471,6 +489,9 @@ def _execute_sql(
                 )
                 from CortexOS.dms.warehouse_db import load_semantic_layer
 
+                if deadline is not None:
+                    # The optional page count has its own window (#440).
+                    deadline.restart()
                 try:
                     counted = con.execute(
                         "SELECT COUNT(*) FROM (" + _unlimited(safe_sql) + ") _page"
@@ -478,6 +499,9 @@ def _execute_sql(
                     total = int(counted[0]) if counted else None
                 except Exception:  # noqa: BLE001
                     total = None
+                if deadline is not None:
+                    # A count that ran out is optional; what follows is not.
+                    deadline.restart()
                 tied = apply_page_tiebreak(sql, load_semantic_layer(), total)
                 remember_served_page(sql, tied)
                 if tied != sql:
@@ -499,6 +523,9 @@ def _execute_sql(
                             raise LakeValueDomainStale(
                                 stale_reason(drift), codes=[item.code for item in drift]
                             )
+                if deadline is not None:
+                    # The served statement has its own window too.
+                    deadline.restart()
                 try:
                     rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
                     rows_raw = rel.fetchall()
