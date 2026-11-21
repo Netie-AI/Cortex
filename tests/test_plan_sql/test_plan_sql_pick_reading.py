@@ -1689,3 +1689,31 @@ def test_must_pass_a_minted_id_that_happens_to_hold_a_table_word(
     body = _offer(dms_http)
     _assert_readings_offered(body, sqls)
     assert {r["reading_id"] for r in _readings(body)} <= set(_MINTED)
+
+
+_REAL_MINTER = plan_readings.new_reading_id
+
+
+def test_the_real_minter_serves_its_own_tokens_one_per_reading(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The counter stands in for the minter elsewhere; this runs the real one.
+
+    Every served id is exactly a ``secrets.token_urlsafe(16)`` output, one call
+    per reading, all distinct: nothing about the SQL reaches the id."""
+    calls: list[int] = []
+    tokens = iter(["tok-a-" + "x" * 16, "tok-b-" + "y" * 16, "tok-c-" + "z" * 16])
+
+    def token_urlsafe(nbytes: int) -> str:
+        calls.append(nbytes)
+        return next(tokens)
+
+    monkeypatch.setattr(plan_readings, "new_reading_id", _REAL_MINTER)
+    monkeypatch.setattr(plan_readings.secrets, "token_urlsafe", token_urlsafe)
+    sqls = (GOOD_SQL, SKU_SQL, KG_SQL)
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+    ids = [r["reading_id"] for r in _readings(_offer(dms_http))]
+    assert len(ids) == len(sqls) == len(set(ids))
+    assert set(ids) <= {"tok-a-" + "x" * 16, "tok-b-" + "y" * 16, "tok-c-" + "z" * 16}
+    assert calls == [16] * len(ids)
