@@ -68,6 +68,14 @@ items are unchanged.
 - Minor: a scoring exception aborted the whole report. Each item is now
   scored under `_score_or_error` and named.
 
+- Verifier on `0a99832`: REJECTED. `novel` scored two equivalent rewrites
+  incorrect: `MAX(category)` for `MIN(category)` (each SKU has one category;
+  a per-row change broke that), and `txn_type NOT IN (<the other declared
+  values>)` for `= 'outbound'` (a declared value domain; the engine refuses a
+  lake holding any other value, #402). Fixed: `novel` and `edge` change a
+  value as a function of the value, never of the row, and `novel` leaves
+  declared columns alone. The five wrong SQLs are still caught.
+
 Root-cause class of the round: **sampling only re-weights values the oracle
 already has.** A variant family that only drops rows or scales numbers cannot
 separate predicates that agree on every subset of the existing values.
@@ -77,6 +85,9 @@ separate predicates that agree on every subset of the existing values.
 - HELDOUT-FK-SAMPLE: when the gold joins a parent table and a served SQL
   relies on foreign-key integrity instead, a sample of the parent can score a
   correct answer incorrect. Not seen on the held-out set; low confidence.
+- HELDOUT-ROW-LEVEL-JITTER: `keep` and `jitter` still act per row, so a
+  rewrite that relies on a dependency between numeric columns of one table
+  could score incorrect. Not seen on the held-out set.
 - HELDOUT-SHADOW-NO-SERVED-SQL: shadow lines cannot be variant-checked until
   the frozen producer logs the served SQL.
 - Not run: held-out totals on a live engine (needs OpenVault).

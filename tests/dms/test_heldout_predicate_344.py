@@ -352,3 +352,34 @@ def test_one_item_that_raises_while_scoring_is_named_not_fatal(monkeypatch) -> N
     result = heldout._score_or_error(_item(), _envelope(NO_HAVING))
     assert result.outcome == "incorrect"
     assert result.detail == "score raised RuntimeError: variant build failed"
+
+
+# Verifier on 0a99832: equal on every lake the engine serves, so never incorrect.
+GOLD_REWRITES = {
+    # Each SKU has one category on the base: a per-row change broke that.
+    "any_value_for_min_under_a_dependency": (
+        "bird_out_kg_above_category_mean",
+        ("MIN(category)", "ANY_VALUE(category)"),
+    ),
+    "max_for_min_under_a_dependency": (
+        "bird_out_kg_above_category_mean",
+        ("MIN(category)", "MAX(category)"),
+    ),
+    # txn_type has a declared value domain: a lake holding any other value is
+    # refused (#402), so excluding the other declared values is the same filter.
+    "excluding_the_other_declared_values": (
+        "spider_delayed_sku_never_sold",
+        ("t.txn_type = 'outbound'", "t.txn_type NOT IN ('inbound', 'ADJUST', 'WRITE_OFF')"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(GOLD_REWRITES))
+def test_must_pass_a_rewrite_equal_on_every_served_lake_scores_correct(case: str) -> None:
+    item_id, (old, new) = GOLD_REWRITES[case]
+    item = _item(item_id)
+    gold = _gold(item)
+    assert old in gold, "precondition: the rewrite applies"
+    sql = gold.replace(old, new)
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is None, case

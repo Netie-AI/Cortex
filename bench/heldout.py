@@ -86,16 +86,20 @@ class Variant:
     1 to 6 cover every split of up to three tables), so a predicate that
     compares one table's counts with another's can change. Uniform sampling
     keeps their ratio.
-    ``novel``: values the base never holds. On rows whose seeded hash falls
-    under ``rate`` (per column): an enum-like string (at most
+    ``novel``: values the base never holds. For each value whose seeded hash
+    falls under ``rate`` (per column): an enum-like string (at most
     ``NOVEL_MAX_DISTINCT`` distinct values) becomes a token no SQL names, a
     date or timestamp moves by up to ``NOVEL_DAYS`` days, and a signed number
-    changes sign. Sampling and scaling only keep or scale values that exist, so
+    changes sign. The change is a function of the value, never of the row, so
+    a dependency the base holds (each SKU has one category) still holds, and a
+    column with a declared value domain (#402) is left alone: the engine
+    refuses to serve a lake holding an undeclared value, so a rewrite that is
+    equal on every lake it serves must not score incorrect. Sampling and scaling only keep or scale values that exist, so
     ``status NOT IN (<every other status>)`` for ``status = 'DELAYED'``, a date
     cutoff moved inside an empty gap, or a dropped ``x > 0`` matched gold on
     every one of them.
-    ``edge``: on rows whose seeded hash falls under ``rate`` (per column), a
-    date or timestamp becomes one of the gold SQL's date literals moved by -1,
+    ``edge``: for each value whose seeded hash falls under ``rate`` (per
+    column, a function of the value as for ``novel``), a date or timestamp becomes one of the gold SQL's date literals moved by -1,
     0 or +1 day, and a signed number becomes one of its numeric literals plus
     -1, 0 or +1. A cutoff moved by two days, or ``> 31`` for ``> 30``, then
     has rows between the two. The literals come from the gold only, so how the
@@ -456,32 +460,43 @@ def _edge_select(
         if not pool:
             parts.append(q)
             continue
-        hit = f"(hash(rowid, {variant.seed}, {lit}) % 1000000) < {cut}"
-        pick = f"(hash(rowid, {variant.seed}, {lit}, 'e') % {len(pool)})"
+        hit = f"{q} IS NOT NULL AND (hash({q}, {variant.seed}, {lit}) % 1000000) < {cut}"
+        pick = f"(hash({q}, {variant.seed}, {lit}, 'e') % {len(pool)})"
         cases = " ".join(f"WHEN {i} THEN CAST({v} AS {dtype})" for i, v in enumerate(pool))
         parts.append(f"CASE WHEN {hit} THEN CASE {pick} {cases} END ELSE {q} END AS {q}")
     return ", ".join(parts)
+
+
+def _declared_columns() -> frozenset[str]:
+    """``table.column`` of every declared value domain, lower case (#402)."""
+    from CortexOS.dms.warehouse_db import serving_value_domains
+
+    return frozenset(f"{d.table}.{d.column}".lower() for d in serving_value_domains())
 
 
 def _novel_select(con: Any, table: str, cols: list[tuple[Any, Any]], variant: Variant) -> str:
     """The ``novel`` projection of one base table (see ``Variant``)."""
     qt = '"' + table.replace('"', '""') + '"'
     cut = int(variant.rate * 1_000_000)
+    declared = _declared_columns()
     parts = []
     for name, dtype in cols:
         q = '"' + str(name).replace('"', '""') + '"'
         lit = "'" + str(name).replace("'", "''") + "'"
         base_type = str(dtype).split("(")[0].upper()
-        hit = f"(hash(rowid, {variant.seed}, {lit}) % 1000000) < {cut}"
+        hit = f"{q} IS NOT NULL AND (hash({q}, {variant.seed}, {lit}) % 1000000) < {cut}"
+        if f"{table}.{name}".lower() in declared:
+            parts.append(q)
+            continue
         if base_type == "VARCHAR":
             distinct = con.execute(f"SELECT count(DISTINCT {q}) FROM base.main.{qt}").fetchone()[0]
             if distinct <= NOVEL_MAX_DISTINCT:
-                token = f"'~novel-{variant.seed}'"
+                token = f"'~novel-{variant.seed}-' || substr(md5({q}), 1, 8)"
                 parts.append(f"CASE WHEN {hit} THEN {token} ELSE {q} END AS {q}")
                 continue
         elif base_type in _TEMPORAL:
             days = (
-                f"CAST((hash(rowid, {variant.seed}, {lit}, 'd') % {2 * NOVEL_DAYS + 1}) "
+                f"CAST((hash({q}, {variant.seed}, {lit}, 'd') % {2 * NOVEL_DAYS + 1}) "
                 f"AS INTEGER) - {NOVEL_DAYS}"
             )
             parts.append(
