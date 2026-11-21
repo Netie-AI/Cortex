@@ -341,6 +341,58 @@ def engine_builtin_names() -> frozenset[str]:
     return _ENGINE_BUILTINS
 
 
+class StatementDeadline:
+    """Interrupts a DuckDB cursor once ``timeout_s`` has passed (#440).
+
+    DuckDB 1.x and 2.x have no ``statement_timeout`` setting. A daemon thread
+    waits for the deadline and then calls ``interrupt()`` every
+    ``POLL_S`` until ``stop()``: one interrupt sent between two statements is
+    dropped by DuckDB, so a single one would let the next statement run
+    unbounded. ``interrupt()`` reaches only this cursor, not its siblings on
+    the shared read-only instance. ``stop()`` joins the thread before the
+    cursor is closed, so no interrupt outlives the call that armed it.
+    """
+
+    POLL_S = 0.05
+
+    def __init__(self, con: Any, timeout_s: float) -> None:
+        import threading
+
+        self._con = con
+        self._timeout_s = float(timeout_s)
+        self._done = threading.Event()
+        self.fired = False
+        self._thread = threading.Thread(
+            target=self._run, name="cortex-statement-deadline", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        if self._done.wait(self._timeout_s):
+            return
+        self.fired = True
+        while not self._done.is_set():
+            try:
+                self._con.interrupt()
+            except Exception:  # noqa: BLE001 - a closed cursor has nothing to stop
+                pass
+            self._done.wait(self.POLL_S)
+
+    def stop(self) -> None:
+        self._done.set()
+        self._thread.join()
+
+
+def statement_timeout(timeout_s: float) -> Exception:
+    """The named refusal for a statement that ran past the pool's limit."""
+    from CortexOS.dms.sql_validate_gate import SqlGateAbstain
+
+    return SqlGateAbstain(
+        f"statement exceeded the {timeout_s:g} s limit and was stopped",
+        violations=["STATEMENT_TIMEOUT"],
+    )
+
+
 def _execute_sql(
     verified: VerifiedManifest,
     sql: str,
@@ -373,76 +425,35 @@ def _execute_sql(
         started = time.perf_counter()
         path = warehouse_path(db_path) if db_path is not None else DEFAULT_DB
         con = get_connection(path, read_only=read_only_queries_enabled() or True)
+        # #440: DuckDB has no statement_timeout setting. One deadline covers every
+        # statement this call runs (EXPLAIN, the value-domain scan, the page count
+        # and the served statement); past it, the cursor is interrupted until it
+        # stops, and the call is refused by name.
+        timeout_s = pool.config.statement_timeout_s
+        deadline = StatementDeadline(con, timeout_s) if timeout_s > 0 else None
         try:
-            # The SET is attempted before EXPLAIN, the value-domain scan and the page count.
-            # On DuckDB 2.x it is a no-op: DuckDB has no statement_timeout setting, the SET
-            # raises CatalogException and it is swallowed here, so nothing is bounded.
-            # A failure here is not a refusal.
-            timeout_s = pool.config.statement_timeout_s
-            if timeout_s > 0:
-                try:
-                    con.execute(f"SET statement_timeout='{int(timeout_s * 1000)}ms'")
-                except Exception:  # noqa: BLE001
-                    pass
-            if use_explain:
-                ok, detail = explain_dry_run(con, safe_sql, params=params)
-                if not ok:
-                    # The raw text quotes post-enforce SQL. It rides on raw_detail for the audit sink.
-                    reason = redact_db_error(detail)
-                    raise SqlGateAbstain(
-                        f"EXPLAIN rejected SQL: {reason}",
-                        violations=[f"EXPLAIN_FAILED:{reason}"],
-                        raw_detail=detail,
-                    )
-            if value_domains is None:
-                from CortexOS.dms.warehouse_db import serving_value_domains
-
-                value_domains = serving_value_domains()
-            if value_domains:
-                from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
-                from CortexOS.ontology.value_domain import stale_columns, stale_reason
-
-                # Kept per read-only instance this cursor reads, never per path:
-                # a file renamed over the path is a later instance's to check.
-                # The scan ignores row predicates; see value_domain._drift_counts.
-                drift = stale_columns(
-                    con, safe_sql, value_domains, instance=connection_instance(con)
-                )
-                if drift:
-                    raise LakeValueDomainStale(
-                        stale_reason(drift), codes=[item.code for item in drift]
-                    )
-            # Refusals above have returned. Tie a cut page, then fetch that
-            # statement. The count stays on this connection: it is not a second
-            # served ``execute_sql``.
-            from CortexOS.dms.sql_guardrail import (
-                _unlimited,
-                apply_page_tiebreak,
-                remember_served_page,
-            )
-            from CortexOS.dms.warehouse_db import load_semantic_layer
-
             try:
-                counted = con.execute(
-                    "SELECT COUNT(*) FROM (" + _unlimited(safe_sql) + ") _page"
-                ).fetchone()
-                total = int(counted[0]) if counted else None
-            except Exception:  # noqa: BLE001
-                total = None
-            tied = apply_page_tiebreak(sql, load_semantic_layer(), total)
-            remember_served_page(sql, tied)
-            if tied != sql:
-                safe_sql = enforce_manifest(tied, verified)
                 if use_explain:
                     ok, detail = explain_dry_run(con, safe_sql, params=params)
                     if not ok:
+                        # The raw text quotes post-enforce SQL. It rides on raw_detail for the audit sink.
                         reason = redact_db_error(detail)
                         raise SqlGateAbstain(
                             f"EXPLAIN rejected SQL: {reason}",
                             violations=[f"EXPLAIN_FAILED:{reason}"],
                             raw_detail=detail,
                         )
+                if value_domains is None:
+                    from CortexOS.dms.warehouse_db import serving_value_domains
+
+                    value_domains = serving_value_domains()
                 if value_domains:
+                    from CortexOS.dms.sql_validate_gate import LakeValueDomainStale
+                    from CortexOS.ontology.value_domain import stale_columns, stale_reason
+
+                    # Kept per read-only instance this cursor reads, never per path:
+                    # a file renamed over the path is a later instance's to check.
+                    # The scan ignores row predicates; see value_domain._drift_counts.
                     drift = stale_columns(
                         con, safe_sql, value_domains, instance=connection_instance(con)
                     )
@@ -450,17 +461,64 @@ def _execute_sql(
                         raise LakeValueDomainStale(
                             stale_reason(drift), codes=[item.code for item in drift]
                         )
-            try:
-                rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
-                rows_raw = rel.fetchall()
-            except duckdb.Error as exc:
-                # Same class, redacted text: a run-time error quotes post-enforce SQL
-                # too. The raw text rides on raw_detail (and __cause__) for the
-                # audit/journal sink only.
-                raise _redacted_db_error(exc, redact_db_error(exc)) from exc
-            columns = [d[0] for d in rel.description] if rel.description else []
-            rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
+                # Refusals above have returned. Tie a cut page, then fetch that
+                # statement. The count stays on this connection: it is not a second
+                # served ``execute_sql``.
+                from CortexOS.dms.sql_guardrail import (
+                    _unlimited,
+                    apply_page_tiebreak,
+                    remember_served_page,
+                )
+                from CortexOS.dms.warehouse_db import load_semantic_layer
+
+                try:
+                    counted = con.execute(
+                        "SELECT COUNT(*) FROM (" + _unlimited(safe_sql) + ") _page"
+                    ).fetchone()
+                    total = int(counted[0]) if counted else None
+                except Exception:  # noqa: BLE001
+                    total = None
+                tied = apply_page_tiebreak(sql, load_semantic_layer(), total)
+                remember_served_page(sql, tied)
+                if tied != sql:
+                    safe_sql = enforce_manifest(tied, verified)
+                    if use_explain:
+                        ok, detail = explain_dry_run(con, safe_sql, params=params)
+                        if not ok:
+                            reason = redact_db_error(detail)
+                            raise SqlGateAbstain(
+                                f"EXPLAIN rejected SQL: {reason}",
+                                violations=[f"EXPLAIN_FAILED:{reason}"],
+                                raw_detail=detail,
+                            )
+                    if value_domains:
+                        drift = stale_columns(
+                            con, safe_sql, value_domains, instance=connection_instance(con)
+                        )
+                        if drift:
+                            raise LakeValueDomainStale(
+                                stale_reason(drift), codes=[item.code for item in drift]
+                            )
+                try:
+                    rel = con.execute(safe_sql, params) if params is not None else con.execute(safe_sql)
+                    rows_raw = rel.fetchall()
+                except duckdb.Error as exc:
+                    # Same class, redacted text: a run-time error quotes post-enforce SQL
+                    # too. The raw text rides on raw_detail (and __cause__) for the
+                    # audit/journal sink only.
+                    raise _redacted_db_error(exc, redact_db_error(exc)) from exc
+                columns = [d[0] for d in rel.description] if rel.description else []
+                rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
+            except Exception as exc:
+                if deadline is not None and deadline.fired:
+                    raise statement_timeout(timeout_s) from exc
+                raise
+            if deadline is not None and deadline.fired:
+                # Finished between two interrupts: still past the limit, still refused.
+                raise statement_timeout(timeout_s)
         finally:
+            if deadline is not None:
+                deadline.stop()
             con.close()
         exec_ms = (time.perf_counter() - started) * 1000.0
     return rows, float(queue_ms), exec_ms
