@@ -25,7 +25,7 @@ class RunBody(BaseModel):
     target: str = ""
     breadth: int = 3
     session_id: str = ""
-    actor: str = ""
+    actor: str = ""  # wire only (#263): ignored; the actor is the authenticated caller
     origin: str = "api"
     cost_ceiling_myr: float | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
@@ -57,33 +57,37 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
     """``spend_auth`` is the pack ``require_spend_key`` dependency. This module
     must not import ``packs`` (C2).
 
-    Header key only (``X-API-Key`` or ``Bearer``), steward or above, on run,
-    resume, cancel, clear, recognize, and hardware. The dependency does not
-    read the cookie and does not honor ``DMS_AUTH_DISABLED``. These routes had
-    no auth on parent, so the flag must not start opening them. The session
-    cookie path is ``/cortex``, so a browser does not send it here.
+    Header key only (``X-API-Key`` or ``Bearer``), steward or above, on every
+    route here: run, resume, cancel, clear, recognize, hardware, and the GETs
+    for list, tasks, task, and events (#368). The dependency does not read the
+    cookie and does not honor ``DMS_AUTH_DISABLED``. These routes had no auth
+    on parent, so the flag must not start opening them. The session cookie
+    path is ``/cortex``, so a browser does not send it here.
 
-    GET list, tasks, task, and events are unchanged.
+    The dependency runs before the handler, so a refused caller gets the same
+    401 or 403 for a known task id and an unknown one.
     """
     auth = spend_auth if spend_auth is not None else _spend_not_configured
 
-    @app.get("/api/workflows")
+    @app.get("/api/workflows", dependencies=[Depends(auth)])
     async def list_workflows() -> dict[str, Any]:
         return {"ok": True, "workflows": workflow_runner.list_workflows()}
 
-    @app.get("/api/workflows/tasks")
+    @app.get("/api/workflows/tasks", dependencies=[Depends(auth)])
     async def list_tasks() -> dict[str, Any]:
         return workflow_runner.snapshot()
 
-    @app.get("/api/workflows/task/{task_id}")
+    @app.get("/api/workflows/task/{task_id}", dependencies=[Depends(auth)])
     async def get_task(task_id: str) -> dict[str, Any]:
         task = workflow_runner.get_task(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="unknown task")
         return {"ok": True, "task": task}
 
-    @app.post("/api/workflows/run", dependencies=[Depends(auth)])
-    async def run_workflow(request: Request, body: RunBody) -> dict[str, Any]:
+    @app.post("/api/workflows/run")
+    async def run_workflow(
+        request: Request, body: RunBody, caller: Any = Depends(auth)
+    ) -> dict[str, Any]:
         ledger = getattr(request.app.state, "ledger", None)
         router = getattr(request.app.state, "model_router", None)
         tid = body.template_id or body.workflow_id
@@ -96,7 +100,7 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
             variables=body.variables,
             origin=body.origin or "api",
             session_id=body.session_id,
-            actor=body.actor,
+            actor=str(getattr(caller, "actor", "") or ""),
             cost_ceiling_myr=body.cost_ceiling_myr,
             router=router,
             ledger=ledger,
@@ -149,7 +153,11 @@ def register_workflow_routes(app: Any, spend_auth: Any = None) -> None:
     # ForwardRef("StreamingResponse") which pydantic cannot resolve from module
     # globals. It raised only while generating the OpenAPI schema, so the route
     # served fine and scripts/export_openapi.py was the thing that broke.
-    @app.get("/api/workflows/task/{task_id}/events", response_model=None)
+    @app.get(
+        "/api/workflows/task/{task_id}/events",
+        response_model=None,
+        dependencies=[Depends(auth)],
+    )
     async def task_events(task_id: str) -> StreamingResponse:
         if not workflow_store.get_run(task_id):
             raise HTTPException(status_code=404, detail="unknown task")

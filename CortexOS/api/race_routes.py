@@ -9,10 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from CortexOS.execution import race_router, scoreboard
+from CortexOS.security.auth_port import require_role, require_spend_auth
+
+# #263: auto starts a run that can reach a model, so it needs the spend gate.
+_SPEND = [Depends(require_spend_auth("steward"))]
+_VIEWER = [Depends(require_role("viewer"))]
 
 
 class AutoRouteBody(BaseModel):
@@ -27,7 +32,7 @@ class AutoRouteBody(BaseModel):
 
 
 def register_race_routes(app: Any) -> None:
-    @app.post("/api/engine/auto")
+    @app.post("/api/engine/auto", dependencies=_SPEND)
     async def engine_auto(body: AutoRouteBody) -> dict[str, Any]:
         goal = (body.goal or body.prompt).strip()
         if not goal:
@@ -44,12 +49,12 @@ def register_race_routes(app: Any) -> None:
             scale=body.scale,
         )
 
-    @app.get("/api/engine/scoreboard")
+    @app.get("/api/engine/scoreboard", dependencies=_VIEWER)
     async def scoreboard_families() -> dict[str, Any]:
         scoreboard.init()
         return {"ok": True, "families": scoreboard.list_families()}
 
-    @app.get("/api/engine/scoreboard/{family}")
+    @app.get("/api/engine/scoreboard/{family}", dependencies=_VIEWER)
     async def scoreboard_family(family: str) -> dict[str, Any]:
         scoreboard.init()
         return {

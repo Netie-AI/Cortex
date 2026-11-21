@@ -111,7 +111,9 @@ class EngineBridge:
     async def health(self) -> dict[str, Any]:
         try:
             async with self._client(5.0) as client:
-                resp = await client.get(f"{self.base_url}/api/engine/activity")
+                # Liveness only. /api/engine/activity is steward since #263; /health
+                # is public by design and answers the same "is it up" question.
+                resp = await client.get(f"{self.base_url}/health")
             return {"ok": resp.status_code == 200, "url": self.base_url}
         except httpx.HTTPError as exc:
             return {"ok": False, "url": self.base_url, "detail": str(exc)}
