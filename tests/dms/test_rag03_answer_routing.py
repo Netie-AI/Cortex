@@ -22,6 +22,7 @@ from CortexOS.execution.manifest import (
     ManifestVerifier,
     canonical_manifest_bytes,
 )
+from tests.dms.reader_reply import confirm_doc_checks, reader_reply  # noqa: F401
 
 SESSION = "rag03-sess"
 SOP_MISS_Q = (
@@ -189,7 +190,7 @@ def test_space_scoped_doc_rag_after_l1_miss_on_token_hit(armed_openvault, dms_ht
     """After the L1 miss the document answer is the model's cited reply (RAG-01)."""
     if not CONTRACTS_DIR.is_dir() or not any(CONTRACTS_DIR.glob("*.txt")):
         pytest.skip("CONTRACTS_DIR missing")
-    armed_openvault.reply("Acme invoices are payable Net 30 from the invoice date [1].")
+    armed_openvault.reply(reader_reply("Acme invoices are payable Net 30 from the invoice date [1]."))
     dms_http.bind_session(SESSION, {"transactions": "TRUE"}, space_id="alpha")
     body = _ask_dms(dms_http, DOC_HIT_Q, SESSION, "alpha")
     assert _badge(body) == "document", body
@@ -202,4 +203,4 @@ def test_space_scoped_doc_rag_after_l1_miss_on_token_hit(armed_openvault, dms_ht
     ), text
     assert _sources(body) == ["acme_agreement.txt"]
     assert body.get("rows") in ([], None)
-    assert len(armed_openvault.chat_calls) == 1
+    assert len(armed_openvault.chat_calls) == 2  # the reader, then the #465 check

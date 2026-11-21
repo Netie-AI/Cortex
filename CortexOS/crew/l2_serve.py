@@ -112,9 +112,9 @@ def serve_on_miss(
     except LakeValueDomainStale as exc:
         return _step_abstain("value_domain", exc.reason, model_called=model_called)
     except SqlGateAbstain as exc:
-        return _step_abstain(
-            "explain", f"{type(exc).__name__}: {exc}", model_called=model_called
-        )
+        # #440: a stage that ran past the limit is named for that, not EXPLAIN.
+        step = "statement_timeout" if "STATEMENT_TIMEOUT" in exc.violations else "explain"
+        return _step_abstain(step, f"{type(exc).__name__}: {exc}", model_called=model_called)
     except Exception as exc:  # noqa: BLE001 - execution errors are named abstentions
         return _step_abstain(
             "execute", f"{type(exc).__name__}: {exc}", model_called=model_called

@@ -8,6 +8,14 @@ from packs.dms.semantic.catalog_answer import is_catalog_intent
 from packs.dms.semantic.loader import load_all
 
 
+@pytest.fixture(autouse=True)
+def _regex_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """META-01 pins main's catalog patterns, which now run only with
+    ``CORTEX_CATALOG_BY_MODEL=0``. The default, a model's choose-and-check, is
+    covered by ``tests/dms/test_serve_path_lexical_426.py`` (#426)."""
+    monkeypatch.setenv("CORTEX_CATALOG_BY_MODEL", "0")
+
+
 @pytest.fixture(scope="module", autouse=True)
 def ensure_db():
     from bench.accuracy import _ensure_db_loaded
