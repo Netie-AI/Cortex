@@ -75,6 +75,12 @@ items are unchanged.
   lake holding any other value, #402). Fixed: `novel` and `edge` change a
   value as a function of the value, never of the row, and `novel` leaves
   declared columns alone. The five wrong SQLs are still caught.
+- Re-verify on `138df5c`: REJECTED. Renaming a whole value can take the
+  gold's own filter literal (every `CHEMICALS` row): the gold then returns
+  `[(None,)]` and an equal rewrite returns no rows. Fixed: a variant where gold
+  and served both come back empty (no rows, or only NULL and zero) agrees; a
+  served answer with rows where the gold is empty is still a mismatch. 24 of
+  24 equal rewrites score correct.
 
 Root-cause class of the round: **sampling only re-weights values the oracle
 already has.** A variant family that only drops rows or scales numbers cannot
@@ -88,6 +94,13 @@ separate predicates that agree on every subset of the existing values.
 - HELDOUT-ROW-LEVEL-JITTER: `keep` and `jitter` still act per row, so a
   rewrite that relies on a dependency between numeric columns of one table
   could score incorrect. Not seen on the held-out set.
+- HELDOUT-TIE-BOUNDARY (false correct, on main and on every cut here):
+  wrong SQLs that differ from gold only on a tie the data never holds still
+  score correct: `AVG(lead_time_days) >= 20` for `> 20`,
+  `current_load_kg >= capacity_kg`, `delayed_kg >= on_hand_kg`,
+  `inbound_n >= sku_n`, `COUNT(sku)` for `COUNT(DISTINCT sku)`, and the
+  second-highest value without `DISTINCT`. `edge` moves row values to the
+  gold's literals; an aggregate or a column-to-column tie needs a tie variant.
 - HELDOUT-SHADOW-NO-SERVED-SQL: shadow lines cannot be variant-checked until
   the frozen producer logs the served SQL.
 - Not run: held-out totals on a live engine (needs OpenVault).

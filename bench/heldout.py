@@ -545,9 +545,20 @@ def variant_mismatch(
             con.close()
         if isinstance(truth, str):
             return f"variant_gold_defect:{variant.id}"
-        if isinstance(got, str) or not _multiset_equal(got, truth):
+        if isinstance(got, str):
+            return f"variant_mismatch:{variant.id}"
+        if _empty_answer(truth) and _empty_answer(got):
+            # Both say "nothing" (a novel value took the gold's own filter
+            # literal): no rows, a NULL and a zero are the same non-answer here.
+            continue
+        if not _multiset_equal(got, truth):
             return f"variant_mismatch:{variant.id}"
     return None
+
+
+def _empty_answer(rows: list[Any]) -> bool:
+    """No rows, or projected rows holding only NULL and zero."""
+    return all(v is None or v == 0 for row in rows for v in row)
 
 
 UNVERIFIABLE = "variant_unverifiable:no_sql_used"
