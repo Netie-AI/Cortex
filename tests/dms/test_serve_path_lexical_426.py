@@ -9,7 +9,7 @@ text and rows.
    listing, and a catalog question in a wording the regex did not know never
    got the catalog. With ``CORTEX_CATALOG_BY_MODEL`` on, the model that
    chooses the metric may choose the catalog instead and a second call checks
-   it. The regex is not consulted. Off (the default), main's behaviour stands.
+   it. The regex is not consulted. With ``CORTEX_CATALOG_BY_MODEL=0`` main's behaviour stands.
 2. ``query_skills.find``. With ``CORTEX_QUERY_SKILL`` on, a stored trigger that
    shared enough words with the question served its metric: after "how many
    delayed shipments" was stored, "how many not delayed shipments" served 1031
@@ -551,3 +551,93 @@ def test_guard_handoff_removed_the_ask_chooses_twice(
     port = scripted({REVENUE_WITH_CATALOG_WORDS: {"metric_id": "total_revenue"}})
     _ask(dms_http, "/v1/contract/ask", REVENUE_WITH_CATALOG_WORDS)
     assert port.chose.count(REVENUE_WITH_CATALOG_WORDS) == 2
+
+
+# ── adversary round on d4d7af0 ───────────────────────────────────────────────
+
+CERTIFIED_Q = "How many SKUs do we have in inventory?"  # cq_sku_count
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_must_fail_certified_question_is_not_put_to_the_model_first(
+    dms_http: Any, scripted: Any, path: str  # noqa: F811
+) -> None:
+    """``answer()`` asks about the catalog before its certified match. A model
+    that calls a certified question the catalog must not turn it into the listing."""
+    port = scripted({CERTIFIED_Q: {"metric_id": "catalog"}})
+    body = _ask(dms_http, path, CERTIFIED_Q)
+    _assert_not_a_listing(body)
+    assert _field(body, "layer") == "certified", body
+    assert CERTIFIED_Q not in port.chose
+
+
+def test_must_fail_a_failing_model_does_not_take_down_a_certified_serve(
+    dms_http: Any, scripted: Any, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    from CortexOS.dms import metric_choice as mc
+
+    port = scripted({})
+
+    def boom(question: str) -> Any:
+        raise RuntimeError("OpenVault 429")
+
+    monkeypatch.setattr(port, "choose", boom)
+    for path in PATHS:
+        assert _field(_ask(dms_http, path, CERTIFIED_Q), "layer") == "certified"
+    # Not certified: no listing, nothing handed on; the error is the metric choice's.
+    assert mc.catalog_decision("what can I ask") is False
+    assert mc._HANDOFF.get() is None
+    with pytest.raises(RuntimeError):
+        mc.decide_metric("what can I ask")
+
+
+def test_must_fail_catalog_decision_never_reads_a_held_decision(scripted: Any) -> None:
+    """A long-lived context (a loop calling answer()) must not reuse the last ask's choice."""
+    from CortexOS.dms import metric_choice as mc
+
+    port = scripted({"q held": {"metric_id": "total_revenue"}})
+    assert mc.catalog_decision("q held") is False  # held, then never consumed
+    port.choices["q held"] = {"metric_id": "catalog"}
+    assert mc.catalog_decision("q held") is True
+    assert port.chose.count("q held") == 2
+
+
+def test_adapter_catalog_choice_keeps_the_closest_question(adapter: Any) -> None:
+    from CortexOS.dms.metric_choice import CATALOG_CHOICE, resolve_metric_choice
+
+    adapter(
+        {"metric_id": "catalog", "slots": {}, "closest_question": "How many SKUs do we have in inventory?"},
+        {"agrees": False, "unsure": False},
+    )
+    selection = resolve_metric_choice().choose("list what you hold")
+    assert selection.metric_id == CATALOG_CHOICE
+    assert selection.closest_question == "How many SKUs do we have in inventory?"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"limit": 3, "direction": "ASC"}, {"days": 60}, {"limit": 1}, {"exclude_skus": ["SKU-A"]}],
+    ids=["bottom-3", "60-days", "limit-1", "exclusions"],
+)
+def test_must_fail_a_skill_whose_params_replay_drops_is_not_replayed(
+    skills_db: Path, monkeypatch: pytest.MonkeyPatch, params: dict[str, Any]  # noqa: F811
+) -> None:
+    """``answer()`` replays a skill with these params dropped: "bottom 3 suppliers"
+    would serve the top 10. Such a skill is not a hit."""
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv(SKILL_FLAG, "1")
+    query_skills.capture("bottom 3 suppliers by score", metric_id="supplier_ranking",
+                         params=params, space_id="alpha")
+    assert query_skills.find("bottom 3 suppliers by score", space_id="alpha") is None
+
+
+def test_must_fail_a_sales_rank_skill_is_not_replayed(
+    skills_db: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Sales-rank slots are read again from the question by a word rule on replay."""
+    from packs.dms.semantic import query_skills
+
+    monkeypatch.setenv(SKILL_FLAG, "1")
+    query_skills.capture("the 3 least sold products", metric_id="sales_by_volume", space_id="alpha")
+    assert query_skills.find("the 3 least sold products", space_id="alpha") is None
