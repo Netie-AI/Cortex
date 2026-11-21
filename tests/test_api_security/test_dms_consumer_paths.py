@@ -65,12 +65,12 @@ def test_f5_gate_check_is_served_to_the_dms_key(client):
     assert set(res.json()) == {"status", "violations", "executable", "event_id"}
 
 
-def test_f5_gate_acknowledge_is_served_to_the_dms_key(client):
+def test_gate_acknowledge_is_not_a_dms_call_and_refuses_the_demo_key(client):
+    """DMS does not call acknowledge, so it stays steward on the engine port."""
     event_id = _event()
     res = client.post("/dms/tasks/gate/acknowledge", json={"event_id": event_id}, headers=DMS_HEADERS)
-    assert res.status_code == 200, res.text
-    assert res.json()["ok"] is True
-    assert res.json()["verdict"]["event_id"] == event_id
+    assert res.status_code == 401
+    assert res.json() == {"detail": "Valid API key required (X-API-Key or Bearer)"}
 
 
 def test_f5_gate_refuses_an_anonymous_caller(client):
@@ -120,3 +120,23 @@ def test_dms_query_is_served_to_the_dms_key(client):
     res = client.post("/dms/query", json={"question": "total stock on hand"}, headers=DMS_HEADERS)
     assert res.status_code == 200, res.text
     assert res.json()["audit_id"]
+
+
+# DMS's Trust page (apps/api/dms_api/routes/trust.py) and ontology proxy
+# (routes/ontology.py) read these. Cortex does not serve them today, so DMS
+# gets 404, as on main. A gate here would turn that into 401.
+@pytest.mark.parametrize(
+    "path",
+    ["/dms/eval/summary", "/dms/eval/runs/nightly", "/dms/ontology", "/dms/ontology/graph"],
+)
+def test_dms_proxied_reads_answer_404_not_401(client, path):
+    res = client.get(path, headers=DMS_HEADERS)
+    assert res.status_code == 404, res.text
+
+
+def test_contract_drillthrough_is_untouched_by_263(client):
+    """Out of scope (#265): the DMS key and an anonymous caller get the same answer as on main."""
+    with_key = client.post("/v1/contract/drillthrough", json={}, headers=DMS_HEADERS)
+    anonymous = client.post("/v1/contract/drillthrough", json={})
+    assert with_key.status_code == anonymous.status_code == 422
+    assert with_key.json() == anonymous.json()

@@ -192,7 +192,6 @@ VIEWER_WRITES: dict[tuple[str, str], str] = {
 # one still fails the walker.
 VIEWER_WRITE_DEBT: dict[tuple[str, str], str] = {
     ("POST", "/dms/tasks/gate/check"): "DMS F5 compliance gate on every mutation, called with DMS's viewer key; writes a verdict",
-    ("POST", "/dms/tasks/gate/acknowledge"): "DMS acknowledges a gate verdict with its viewer key; a steward-only acknowledge is a role decision",
     ("POST", "/dms/query"): "spends Cortex's credential via L2 at viewer; kept at viewer because DMS calls it with the demo viewer key (#265 item 3)",
     ("POST", "/dms/brain/chart"): "model call on Cortex's credential at viewer",
     ("POST", "/dms/brain/analyze"): "model call on Cortex's credential at viewer",
@@ -458,6 +457,7 @@ def test_engine_port_403_body_names_the_floor_not_the_caller(app):
         ("/dms/propose-edit", {"changes": [], "approved_by": "ceo"}),
         ("/dms/threads", {"actor": "ceo"}),
         ("/dms/tasks/choose", {"task_id": "t1", "actor": "ceo"}),
+        ("/dms/tasks/gate/acknowledge", {"event_id": "e1", "actor": "ceo"}),
         ("/dms/items/intake", {"sku": "S", "label": "L", "location_code": "A", "photo": "", "actor": "ceo"}),
     ],
 )

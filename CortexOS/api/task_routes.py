@@ -45,13 +45,13 @@ def _verdict_dict(verdict) -> dict[str, Any]:
 def register_task_routes(app: Any, *, gate_auth: Any = None) -> None:
     """Register the F5 task routes. Every route needs a credential (#263).
 
-    ``gate_auth`` gates ``gate/check`` and ``gate/acknowledge``: DMS calls them
-    on every mutation (its F5 compliance gate, docs/dms/packets/CORTEX_TO_DMS_C4_SUBMIT.md
-    section 5) with the key it is configured with, by default the published demo
-    viewer key. ``create_app`` passes the DMS pack's viewer dependency, as for
-    ``/dms/query``. Without it both routes use the engine port at steward, which
-    refuses that key: the fallback is the stricter gate. ``choose`` is not a DMS
-    call and stays on the engine port at steward.
+    ``gate_auth`` gates ``gate/check`` only: DMS calls it on every mutation (its
+    F5 compliance gate, docs/dms/packets/CORTEX_TO_DMS_C4_SUBMIT.md section 5)
+    with the key it is configured with, by default the published demo viewer
+    key. ``create_app`` passes the DMS pack's viewer dependency, as for
+    ``/dms/query``. Without it the route uses the engine port at steward, which
+    refuses that key: the fallback is the stricter gate. ``choose`` and
+    ``gate/acknowledge`` are not DMS calls and stay on the engine port at steward.
     """
     gate = gate_auth if gate_auth is not None else require_role("steward")
     steward = require_role("steward")
@@ -96,7 +96,7 @@ def register_task_routes(app: Any, *, gate_auth: Any = None) -> None:
         return {"ok": True, "event_id": event_id, "verdict": _verdict_dict(verdict)}
 
     @router.post("/gate/acknowledge")
-    def gate_acknowledge(req: AcknowledgeRequest, caller: Principal = Depends(gate)):
+    def gate_acknowledge(req: AcknowledgeRequest, caller: Principal = Depends(steward)):
         from packs.dms.tasks.gate import acknowledge_event
 
         try:
