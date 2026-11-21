@@ -386,8 +386,9 @@ def test_must_pass_a_rewrite_equal_on_every_served_lake_scores_correct(case: str
 
 
 # Re-verify on 138df5c: renaming a whole value can take the gold's own filter
-# literal, and the gold then says "nothing" ([(None,)]) where an equal rewrite
-# says it as no rows. Both empty is agreement; a served answer with rows is not.
+# literal, and the gold's aggregate then says "nothing" ([(None,)]) where an
+# equal rewrite says it as no rows. Only that pair agrees: a zero is a value
+# and a NULL row where the gold has none is a phantom (re-verify on d063c33).
 SECOND_HIGHEST = "spider_second_highest_chem_unit_cost"
 EMPTY_ON_A_VARIANT = {
     "dense_rank": (
@@ -431,3 +432,44 @@ def test_must_fail_a_wrong_sql_with_rows_where_gold_is_empty_is_caught(case: str
     sql = gold.replace(old, new)
     assert _base_match(item, sql), "precondition"
     assert heldout.variant_mismatch(item, sql) is not None, case
+
+
+NOT_THE_SAME_NOTHING = {
+    "made_up_zero_average": (
+        "spider_avg_cost_delayed_hazardous",
+        ("ROUND(AVG(sh.cost_myr), 2)", "COALESCE(ROUND(AVG(sh.cost_myr), 2), 0)"),
+    ),
+    "made_up_zero_second_highest": (
+        "spider_second_highest_chem_unit_cost",
+        (
+            "SELECT MAX(unit_cost_myr) AS unit_cost_myr",
+            "SELECT COALESCE(MAX(unit_cost_myr), 0) AS unit_cost_myr",
+        ),
+    ),
+    "no_row_for_a_zero_count": (
+        "bird_delayed_hazardous_to_cold",
+        ("l.is_cold_storage = true", "l.is_cold_storage = true HAVING COUNT(*) > 0"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(NOT_THE_SAME_NOTHING))
+def test_must_fail_a_zero_or_a_missing_count_is_not_the_gold_s_nothing(case: str) -> None:
+    item_id, (old, new) = NOT_THE_SAME_NOTHING[case]
+    item = _item(item_id)
+    gold = _gold(item)
+    assert old in gold, "precondition: the rewrite applies"
+    sql = gold.replace(old, new)
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is not None, case
+
+
+def test_must_fail_a_phantom_null_row_where_the_gold_has_none_is_caught() -> None:
+    item = _item("spider_country_mean_lead_having")
+    sql = (
+        "SELECT q.country FROM (SELECT 1) d LEFT JOIN ("
+        + _gold(item).replace("ORDER BY country", "")
+        + ") q ON true"
+    )
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is not None

@@ -547,18 +547,20 @@ def variant_mismatch(
             return f"variant_gold_defect:{variant.id}"
         if isinstance(got, str):
             return f"variant_mismatch:{variant.id}"
-        if _empty_answer(truth) and _empty_answer(got):
-            # Both say "nothing" (a novel value took the gold's own filter
-            # literal): no rows, a NULL and a zero are the same non-answer here.
+        if _aggregate_of_nothing(truth) and not got:
+            # A novel value took the gold's own filter literal: the gold's
+            # aggregate over no rows is one NULL row, and a served SQL that
+            # answers "nothing" with no rows says the same. Only that: a zero
+            # is a value, and a NULL row where the gold has none is a phantom.
             continue
         if not _multiset_equal(got, truth):
             return f"variant_mismatch:{variant.id}"
     return None
 
 
-def _empty_answer(rows: list[Any]) -> bool:
-    """No rows, or projected rows holding only NULL and zero."""
-    return all(v is None or v == 0 for row in rows for v in row)
+def _aggregate_of_nothing(rows: list[Any]) -> bool:
+    """Exactly one projected row, every value NULL."""
+    return len(rows) == 1 and all(v is None for v in rows[0])
 
 
 UNVERIFIABLE = "variant_unverifiable:no_sql_used"
