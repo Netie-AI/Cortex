@@ -434,22 +434,18 @@ ROUND2_LEAKS = [
     "Line 3 378282246310005",
     '{"note": "verified\\nS1234567D"}',  # escaped newline in JSON
     "NRIC%3A%20S1234567D",
-    "IDS1234567D",
     "2024S1234567D",
     "q=jane%40example.com",
     "e=jane%2Bx%40example.com",
-    "c=4111+1111+1111+1111",
     "4111%201111%201111%201111",
     "patient IC-900101-14-5678 admitted",
     "IC-900101145678",
     "card-4111111111111111",
-    "4111.1111.1111.1111",
     "4111−1111−1111−1111",
     "4111 - 1111 - 1111 - 1111",
     "6759649826438453",  # Maestro
     "2200000000000004",  # Mir
     "900101 - 14 - 5678",
-    "900101/14/5678",
     "900101-14-\n5678",
     "S123͏4567D",  # combining grapheme joiner
     "9️00101145678",  # variation selector
@@ -643,3 +639,176 @@ async def test_a_redactor_that_skips_mykad_and_cards_fails_the_canary():
         await _call(adapter, system="", prompt=f"IC {MYKAD}")
     assert exc.value.reason == "redactor_ineffective"
     assert adapter.requests == []
+
+
+# --- round 3 review (#241) ---------------------------------------------------
+# Reversed in round 3 to stop figure damage, so these are known gaps, not leaks
+# the tests pretend to cover: "IDS1234567D" (glued to a word, like ITEM1234567A),
+# "+"- or "."-joined cards (2250+1200+1200+1250 is a sum), "900101/14/5678"
+# (INV/240115/14/0001 and dated paths).
+
+ROUND3_LEAKS = [
+    '{"notes": "IC list:\\n900101145678"}',  # json.dumps escaped newline
+    "{'v': 'IC list:\\n900101145678'}",  # repr
+    '{"x": "900101\\u00a014\\u00a05678"}',  # NBSP escaped by json.dumps
+    "{'x': '900101\\xa014\\xa05678'}",
+    '{"c": "4111\\u00a01111\\u00a01111\\u00a01111"}',
+    '{"c": "x\\u00a04111111111111111"}',
+    '{"c": "x\\u00e9900101-14-5678"}',
+    '{"c": "900101\\u200b-14-5678"}',
+    '{"c": "\\uff33\\uff11\\uff12\\uff13\\uff14\\uff15\\uff16\\uff17\\uff24"}',
+    '{"c": "900101-14-\\n5678"}',
+    '{"c": "ali@ex\\u00e4mple.my"}',
+    "a%0A900101145678",
+    "a%09900101-14-5678",
+    "a%094111111111111111",
+    "\\u00531234567D",
+    "jane\\u0040example.com",
+    "my nric is s8812345z",
+    "nric=t0312345b",
+    "FIN:f1234567n",
+    "nric_s8812345z.pdf",
+    "IC_850505105432.pdf",
+    "MyKad_850505105432_front.jpg",
+    "IC_NO_850505105432",
+    "MyKad850505105432",
+    "ICNo850505105432",
+    "Kp850505105432",
+    "K/P850505105432",
+    "ID-850505-10-5432",
+    "3782 8224 6310 005",
+]
+
+ROUND3_FIGURES = [
+    "2250+1200+1200+1250",
+    "=SUM(2250+1200+1200+1250)",
+    "INV/240115/14/0001",
+    "s3://bkt/shipments/240115/10/0042.pdf",
+    "ITEM1234567A",
+    "SYSTEM1234567X",
+    "variance +125000000 vs plan",
+    "net change +125 000 000",
+    "delta +1 234 567 890",
+    "2024 03 1500 2300",
+    "07 1200 3400",
+    "topic240115143000",
+    "BKP240115143000.bak",
+    "f1234567a",
+]
+
+
+@pytest.mark.parametrize("text", ROUND3_LEAKS)
+def test_round3_leak_forms_are_masked_by_both_redactors(text):
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    for redactor in (redact_port.default_redact, pii.redact_for_model):
+        assert "[REDACTED:" in redactor(text), (redactor.__name__, text)
+
+
+@pytest.mark.parametrize("text", ROUND3_FIGURES)
+def test_round3_figures_and_codes_are_unchanged(text):
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    assert redact_port.default_redact(text) == text
+    assert pii.redact_for_model(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "HP: 9123-4567",
+        "Mobile 8765 4321",
+        "HP:0123456789",
+        "tel=0123456789",
+        "https://wa.me/60123456789",
+        "tel 012-345-6789",
+        "012\u2013345 6789",
+        "(+60) 12-345 6789",
+        "082-123456",
+    ],
+)
+def test_round3_dms_phone_forms_are_masked(text):
+    from packs.dms.security import pii
+
+    assert "[REDACTED:phone]" in pii.redact_for_model(text)
+
+
+def test_email_detection_is_linear_on_a_long_word_run():
+    import time
+
+    from CortexOS.security import redact_port
+
+    blob = "QUJD" * 12500  # 50 KB of base64-looking text with no "@"
+    started = time.perf_counter()
+    assert redact_port.default_redact(blob) == blob
+    assert time.perf_counter() - started < 2.0
+
+
+@pytest.mark.asyncio
+async def test_a_masker_whose_own_submodule_is_missing_refuses(monkeypatch):
+    """A missing module inside the pack is a broken masker, not an absent one."""
+    import importlib
+
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": "dms"}))
+    redact_port.clear_redactor()
+    real_import = importlib.import_module
+
+    def missing_inner(name, *a, **k):
+        if name == "packs.dms.security.pii":
+            raise ModuleNotFoundError("No module named 'packs.dms.security.patterns'", name="packs.dms.security.patterns")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(redact_port.importlib, "import_module", missing_inner)
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="Reach +60 12-345 6789", prompt=f"Check {NRIC}")
+    assert exc.value.reason == "pack_redactor_unavailable"
+    assert adapter.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_load_after_a_pack_change_keeps_refusing(monkeypatch):
+    import importlib
+
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    pack = {"name": "dms"}
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": pack["name"]}))
+    redact_port.clear_redactor()
+    await _call(RecordingAdapter(), system="", prompt="hi")  # dms loads
+    real_import = importlib.import_module
+
+    def broken(name, *a, **k):
+        if name == "packs.zzz.security.pii":
+            raise ImportError("broken masker")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(redact_port.importlib, "import_module", broken)
+    pack["name"] = "zzz"
+    for _ in range(3):
+        adapter = RecordingAdapter()
+        with pytest.raises(redact_port.RedactionRefused):
+            await _call(adapter, system="call 012-345 6789", prompt=f"Check {NRIC}")
+        assert adapter.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_carries_no_trace_of_the_input():
+    from CortexOS.security import redact_port
+
+    def leaky(text: str) -> str:
+        raise ValueError(f"bad input: {text}")
+
+    redact_port.register_redactor(leaky)
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(RecordingAdapter(), system="", prompt=f"Check {NRIC}")
+    assert exc.value.__cause__ is None and exc.value.__context__ is None
+    assert NRIC not in str(exc.value)

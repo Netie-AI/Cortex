@@ -69,33 +69,38 @@ _DATE: Final[str] = r"\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
 # JPN place-of-birth codes: 01-16, 21-59, 60-68, 71-72, 74-79, 82-93, 98-99.
 _PB: Final[str] = r"(?:0[1-9]|1[0-6]|2[1-9]|[3-5]\d|6[0-8]|7[124-9]|8[2-9]|9[0-3]|9[89])"
 # Between MyKad parts: a dash (variants included, optionally space-padded,
-# optionally wrapped after it), a slash, or one space. Never a dot: 120115.50
-# is a figure.
-_MK_SEP: Final[str] = r"(?:[ \t]?[-" + _DASHES + r"/][ \t]?\n?|[ ])"
-# A labelled number is a MyKad even when glued to its label.
-_MK_LABEL: Final[str] = r"(?:(?<=IC)|(?<=KP)|(?<=ic)|(?<=kp)|(?<=IC-)|(?<=KP-)|(?<=ic-)|(?<=kp-)|(?<=IC:)|(?<=KP:))"
+# optionally wrapped around it), or one space. Never a dot (120115.50 is a
+# figure) and never a slash (INV/240115/14/0001, dated paths).
+_MK_SEP: Final[str] = r"(?:\n?[ \t]?[-" + _DASHES + r"][ \t]?\n?|[ ])"
+# A MyKad glued to a word (PO240115120034, file_240115143000) or after
+# "<word>-" (INV-240115-01-0001) is taken only when that word is an ID label
+# (IC_850505105432.pdf, MyKad850505105432, ICNo..., KP-...): see _mykad_context_ok.
+_ID_LABELS: Final[frozenset[str]] = frozenset(
+    {"ic", "kp", "mykad", "nric", "icno", "nokp", "kpt", "k/p", "id", "ic_no", "no_kp", "nric_no"}
+)
+_LABEL_TOKEN: Final[re.Pattern[str]] = re.compile(r"([A-Za-z][A-Za-z_/]*)[-_:#=]?\Z")
 
-# Malaysian MyKad written with separators. "INV-240115-01-0001" (a code after
-# "<letter>-") is not one unless the letters are an IC/KP label.
+# Malaysian MyKad written with separators.
 MYKAD_SEPARATED: Final[re.Pattern[str]] = re.compile(
-    _NUM_LEFT + r"(?:" + _MK_LABEL + r"|(?<![A-Za-z]-))" + _DATE + _MK_SEP + _PB + _MK_SEP + r"\d{4}" + _NUM_RIGHT
+    _NUM_LEFT + _DATE + _MK_SEP + _PB + _MK_SEP + r"\d{4}" + _NUM_RIGHT
 )
-# Twelve plain digits. Not glued to a word (PO240115120034, file_240115143000)
-# unless the word is an IC/KP label.
-MYKAD_PLAIN: Final[re.Pattern[str]] = re.compile(
-    _NUM_LEFT + r"(?:" + _MK_LABEL + r"|(?<![A-Za-z_])(?<![A-Za-z]-))" + _DATE + _PB + r"\d{4}" + _NUM_RIGHT
-)
+# Twelve plain digits.
+MYKAD_PLAIN: Final[re.Pattern[str]] = re.compile(_NUM_LEFT + _DATE + _PB + r"\d{4}" + _NUM_RIGHT)
 MYKAD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (MYKAD_SEPARATED, MYKAD_PLAIN)
 # Kept for callers that want one pattern; it does not apply the label rule.
 MYKAD: Final[re.Pattern[str]] = re.compile(
     _NUM_LEFT + _DATE + r"(?:" + _MK_SEP + r")?" + _PB + r"(?:" + _MK_SEP + r")?" + r"\d{4}" + _NUM_RIGHT
 )
 
-# Singapore NRIC/FIN: uppercase S/T/F/G/M, 7 digits, checksum letter (checked
-# below), optional single inner space or dash. Anything may come before it
-# (an escaped "\n", "%20", "IDS1234567D", "2024S1234567D"): the uppercase
-# prefix and the checksum letter carry the precision.
-NRIC: Final[re.Pattern[str]] = re.compile(r"([STFGM])[ \-]?(\d{7})[ \-]?([A-Z])(?![A-Za-z0-9])")
+# Singapore NRIC/FIN: S/T/F/G/M in either case, 7 digits, checksum letter (checked
+# on the uppercased value; lowercase codes such as f1234567a fail it)
+# below), optional single inner space or dash. Not glued to a preceding letter
+# (ITEM1234567A, SYSTEM1234567X are codes); escapes such as "\n" and "%20" are
+# decoded in the view first, so they do not count as letters. A digit may come
+# before it (2024S1234567D).
+NRIC: Final[re.Pattern[str]] = re.compile(
+    r"(?<![A-Za-z])([STFGMstfgm])[ \-]?(\d{7})[ \-]?([A-Za-z])(?![A-Za-z0-9])"
+)
 
 # RFC 5322 atext local part, Unicode letters, IDN domains.
 EMAIL: Final[re.Pattern[str]] = re.compile(
@@ -103,14 +108,16 @@ EMAIL: Final[re.Pattern[str]] = re.compile(
 )
 
 # Payment card: a bounded run of 14-19 digits, or the printed group shapes
-# 4-4-4-4(-1..3), 4-6-5 and 4-6-4 with one consistent separator (space, "+",
-# ".", or a dash, optionally space-padded). Brand, length and Luhn are checked.
-_CARD_SEP: Final[str] = r"(?: ?[-" + _DASHES + r"] ?|[ +.])"
+# 4-4-4-4(-1..3), 4-6-5 and 4-6-4 with one consistent separator (a space, or a
+# dash optionally space-padded). Not "+" or ".": 2250+1200+1200+1250 is a sum.
+# Brand, length and Luhn are checked.
+_CARD_SEP: Final[str] = r"(?: ?[-" + _DASHES + r"] ?|[ ])"
 CARD: Final[re.Pattern[str]] = re.compile(
     _NUM_LEFT
     + r"(?:\d{14,19}"
     + r"|\d{4}(?P<s1>" + _CARD_SEP + r")\d{4}(?P=s1)\d{4}(?P=s1)\d{4}(?:(?P=s1)\d{1,3})?"
-    + r"|\d{4}(?P<s2>" + _CARD_SEP + r")\d{6}(?P=s2)\d{4,5})"
+    + r"|\d{4}(?P<s2>" + _CARD_SEP + r")\d{6}(?P=s2)\d{4,5}"
+    + r"|\d{4}(?P<s3>" + _CARD_SEP + r")\d{4}(?P=s3)\d{4}(?P=s3)\d{3})"
     + _NUM_RIGHT
 )
 
@@ -195,44 +202,64 @@ _CONFUSABLES: Final[dict[str, str]] = {
 _FILLERS: Final[frozenset[str]] = frozenset("ᅟᅠㅤﾠ⠀")
 _ENTITY: Final[re.Pattern[str]] = re.compile(r"&#(?:(\d{1,7})|[xX]([0-9a-fA-F]{1,6}));")
 _PERCENT: Final[re.Pattern[str]] = re.compile(r"%([0-9A-Fa-f]{2})")
+# JSON and Python string escapes: json.dumps (ensure_ascii) and repr() turn a
+# newline, NBSP, fullwidth digit or zero-width character into these before any
+# prompt is built, so the view reads them as the character they stand for.
+_BACKSLASH: Final[re.Pattern[str]] = re.compile(
+    r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2})|([ntr]))"
+)
+_SIMPLE_ESCAPES: Final[dict[str, str]] = {"n": "\n", "t": "\t", "r": "\r"}
 
 Span = tuple[int, int]
+
+
+def _decode_at(text: str, pos: int) -> tuple[str, int] | None:
+    """The character an escape at ``pos`` stands for, and the escape's width."""
+    ch = text[pos]
+    if ch == "%":
+        m = _PERCENT.match(text, pos)
+        if m:
+            code = int(m.group(1), 16)
+            if 0x20 <= code < 0x7F or code in (0x09, 0x0A, 0x0D):
+                return chr(code), 3
+    elif ch == "&":
+        m = _ENTITY.match(text, pos)
+        if m:
+            code = int(m.group(1)) if m.group(1) else int(m.group(2), 16)
+            if 0x09 <= code <= 0x10FFFF and not 0xD800 <= code <= 0xDFFF:
+                return chr(code), m.end() - pos
+    elif ch == "\\":
+        m = _BACKSLASH.match(text, pos)
+        if m:
+            if m.group(4):
+                return _SIMPLE_ESCAPES[m.group(4)], 2
+            code = int(m.group(1) or m.group(2) or m.group(3), 16)
+            if code <= 0x10FFFF and not 0xD800 <= code <= 0xDFFF:
+                return chr(code), m.end() - pos
+    return None
 
 
 def normalized_view(text: str) -> tuple[str, list[Span]]:
     """Detection view; ``index[i]`` is the source ``(start, end)`` behind view character ``i``.
 
-    Percent escapes and HTML numeric entities of printable ASCII are decoded;
-    format, combining and enclosing marks and blank fillers are dropped; each
-    remaining character is NFKC-normalized, any decimal digit becomes its ASCII
-    digit, and confusable letters are folded. Source text is never changed.
+    Percent escapes, HTML numeric entities and JSON/Python string escapes are
+    decoded; then, for every character, format, combining and enclosing marks
+    and blank fillers are dropped, NFKC is applied, any decimal digit becomes
+    its ASCII digit, and confusable letters are folded. Source text is never
+    changed.
     """
     out: list[str] = []
     index: list[Span] = []
     pos = 0
     n = len(text)
     while pos < n:
-        ch = text[pos]
-        decoded: str | None = None
-        width = 1
-        if ch == "%":
-            m = _PERCENT.match(text, pos)
-            if m:
-                code = int(m.group(1), 16)
-                if 0x20 <= code < 0x7F:
-                    decoded, width = chr(code), 3
-        elif ch == "&":
-            m = _ENTITY.match(text, pos)
-            if m:
-                code = int(m.group(1)) if m.group(1) else int(m.group(2), 16)
-                if 0x20 <= code < 0x7F:
-                    decoded, width = chr(code), m.end() - pos
+        decoded = _decode_at(text, pos) if text[pos] in "%&\\" else None
+        if decoded is None:
+            ch, width = text[pos], 1
+        else:
+            ch, width = decoded
         span = (pos, pos + width)
         pos += width
-        if decoded is not None:
-            out.append(decoded)
-            index.append(span)
-            continue
         if ch in _FILLERS or unicodedata.category(ch) in ("Cf", "Mn", "Me"):
             continue
         for norm in unicodedata.normalize("NFKC", ch):
@@ -258,18 +285,60 @@ def scan(pattern: re.Pattern[str], view: str) -> list[tuple[int, int, re.Match[s
     return found
 
 
+_EMAIL_LOCAL: Final[re.Pattern[str]] = re.compile(r"[\w.!#$%&'*+/=?^`{|}~\-]{1,64}\Z")
+_EMAIL_DOMAIN: Final[re.Pattern[str]] = re.compile(r"[\w\-]+(?:\.[\w\-]+)*\.[^\W\d_]{2,}")
+
+
+def email_spans(view: str) -> list[tuple[int, int, str]]:
+    """Emails anchored on each "@", with the local part (<=64) and domain (<=255) bounded.
+
+    Linear in the text: a pattern that starts on the local part would retry a
+    long run of word characters from every position (quadratic on a base64 blob).
+    """
+    spans: list[tuple[int, int, str]] = []
+    at = view.find("@")
+    while at != -1:
+        local = _EMAIL_LOCAL.search(view, max(0, at - 64), at)
+        domain = _EMAIL_DOMAIN.match(view, at + 1, min(len(view), at + 256))
+        if local and domain:
+            spans.append((local.start(), domain.end(), "email"))
+        at = view.find("@", at + 1)
+    return spans
+
+
+def _mykad_context_ok(view: str, start: int, plain: bool) -> bool:
+    """False for a MyKad shape glued to a word, or after ``<word>-``, unless the word is an ID label."""
+    prefix = view[max(0, start - 24) : start]
+    glued = re.search(r"[A-Za-z]-\Z", prefix) is not None
+    if plain:
+        glued = glued or re.search(r"[A-Za-z_]\Z", prefix) is not None
+    if not glued:
+        return True
+    m = _LABEL_TOKEN.search(prefix)
+    if m is None:
+        return False
+    token = m.group(1).lower().strip("_/")
+    parts = [p for p in re.split(r"[_]", token) if p]
+    return token in _ID_LABELS or any(p in _ID_LABELS for p in parts[-2:])
+
+
 def engine_spans(view: str) -> list[tuple[int, int, str]]:
     """``(start, end, kind)`` in ``view`` for every valid engine-pattern candidate."""
     spans: list[tuple[int, int, str]] = []
     for kind, pattern in ENGINE_PATTERNS:
+        if kind == "email":
+            spans.extend(email_spans(view))
+            continue
         for start, end, match in scan(pattern, view):
+            if kind == "mykad" and not _mykad_context_ok(view, start, pattern is MYKAD_PLAIN):
+                continue
             if kind == "credit_card" and not card_ok(match.group(0)):
                 # A 4-4-4-4 card followed by a CVV or another group: test the core.
                 core = _CARD_CORE.match(match.group(0))
                 if core is None or not card_ok(core.group(0)):
                     continue
                 end = start + core.end()
-            if kind == "nric" and not nric_ok(match.group(1), match.group(2), match.group(3)):
+            if kind == "nric" and not nric_ok(match.group(1).upper(), match.group(2), match.group(3).upper()):
                 continue
             spans.append((start, end, kind))
     return spans
@@ -306,7 +375,14 @@ def apply_spans(text: str, view: str, index: list[Span], spans: list[tuple[int, 
 
 def mykad_matches(text: str) -> list[tuple[int, int]]:
     """MyKad spans in ``text`` itself (no view), for the pack's ``detect()``."""
-    return sorted({(s, e) for p in MYKAD_PATTERNS for s, e, _ in scan(p, text)})
+    return sorted(
+        {
+            (s, e)
+            for p in MYKAD_PATTERNS
+            for s, e, _ in scan(p, text)
+            if _mykad_context_ok(text, s, p is MYKAD_PLAIN)
+        }
+    )
 
 
 def default_redact(text: str) -> str:
@@ -336,7 +412,7 @@ _pack_error = False
 # id -> the redactor itself. Holding the object keeps its id from being reused
 # by a new function that would then skip the canary.
 _trusted: dict[int, Redactor] = {}
-_load_lock = threading.Lock()
+_load_lock = threading.RLock()  # re-entered: the pack hook calls register_redactor
 
 
 def _current_pack() -> str:
@@ -352,11 +428,12 @@ def register_redactor(redactor: Redactor) -> None:
         pack: str | None = _current_pack()
     except Exception:  # noqa: BLE001 - unknown pack; the next call reloads
         pack = None
-    _redactor = redactor
-    _redactor_pack = pack
-    _pack_loaded = pack is not None
-    _pack_error = False
-    _trusted.clear()
+    with _load_lock:
+        _redactor = redactor
+        _redactor_pack = pack
+        _pack_loaded = pack is not None
+        _pack_error = False
+        _trusted.clear()
 
 
 def clear_redactor() -> None:
@@ -383,28 +460,26 @@ def _load_active_pack(pack: str) -> None:
     sent through a weaker redactor, and the load is retried on the next call.
     """
     global _redactor, _redactor_pack, _pack_loaded, _pack_error
-    with _load_lock:
-        if _pack_loaded and _redactor_pack == pack:
+    # Caller holds _load_lock.
+    _redactor, _redactor_pack, _pack_loaded, _pack_error = None, pack, False, True
+    _trusted.clear()
+    name = f"packs.{pack}.security.pii"
+    try:
+        module = importlib.import_module(name)
+        hook = getattr(module, "register_engine_redactor", None)
+        if callable(hook):
+            hook()
+    except ModuleNotFoundError as exc:
+        # Only the masker module (or its security package) being absent means
+        # "this pack has no masker". The pack itself, or anything the masker
+        # imports, being missing is a broken masker.
+        if exc.name not in (name, f"packs.{pack}.security"):
             return
-        _redactor, _redactor_pack = None, pack
-        _trusted.clear()
-        name = f"packs.{pack}.security.pii"
-        try:
-            module = importlib.import_module(name)
-            hook = getattr(module, "register_engine_redactor", None)
-            if callable(hook):
-                hook()
-        except ModuleNotFoundError as exc:
-            missing = exc.name or ""
-            if not missing.startswith(f"packs.{pack}."):
-                _pack_error = True  # the pack itself (or a masker dependency) is missing
-                return
-        except Exception:  # noqa: BLE001 - a masker that exists but breaks fails closed
-            _pack_error = True
-            return
-        _redactor_pack = pack
-        _pack_error = False
-        _pack_loaded = True
+    except Exception:  # noqa: BLE001 - a masker that exists but breaks fails closed
+        return
+    _redactor_pack = pack
+    _pack_error = False
+    _pack_loaded = True
 
 
 def active_redactor() -> Redactor:
@@ -412,12 +487,31 @@ def active_redactor() -> Redactor:
     try:
         pack = _current_pack()
     except Exception:  # noqa: BLE001
-        raise RedactionRefused(PACK_REDACTOR_UNAVAILABLE) from None
-    if not _pack_loaded or _redactor_pack != pack:
-        _load_active_pack(pack)
+        pack = None
+    if pack is None:
+        raise RedactionRefused(PACK_REDACTOR_UNAVAILABLE)
+    with _load_lock:
+        if not _pack_loaded or _redactor_pack != pack:
+            _load_active_pack(pack)
         if _pack_error:
             raise RedactionRefused(PACK_REDACTOR_UNAVAILABLE)
-    return _redactor if _redactor is not None else default_redact
+        return _redactor if _redactor is not None else default_redact
+
+
+def _call_redactor(redactor: Redactor, text: str) -> object:
+    """Call ``redactor``; on any error raise a refusal that carries no trace of it.
+
+    The raise happens outside the ``except`` block, so neither ``__cause__`` nor
+    ``__context__`` holds the redactor's exception (whose text may echo the input).
+    """
+    failed = False
+    try:
+        return redactor(text)
+    except Exception:  # noqa: BLE001 - fail closed
+        failed = True
+    if failed:
+        raise RedactionRefused(REDACTOR_RAISED)
+    return None  # pragma: no cover
 
 
 def _canary_left(out: str) -> bool:
@@ -431,10 +525,7 @@ def _check_trusted(redactor: Redactor) -> None:
     """Run the canary once per redactor object; one that leaves a canary value is refused."""
     if _trusted.get(id(redactor)) is redactor:
         return
-    try:
-        out = redactor(_CANARY)
-    except Exception:  # noqa: BLE001
-        raise RedactionRefused(REDACTOR_RAISED) from None
+    out = _call_redactor(redactor, _CANARY)
     if not isinstance(out, str) or not out.strip():
         raise RedactionRefused(REDACTOR_RETURNED_NOTHING)
     if _canary_left(out):
@@ -448,10 +539,7 @@ def redact_for_model(text: str) -> str:
         return text
     redactor = active_redactor()
     _check_trusted(redactor)
-    try:
-        out = redactor(text)
-    except Exception:  # noqa: BLE001 - fail closed; the error text may echo the input
-        raise RedactionRefused(REDACTOR_RAISED) from None
+    out = _call_redactor(redactor, text)
     if not isinstance(out, str) or (text.strip() and not out.strip()):
         raise RedactionRefused(REDACTOR_RETURNED_NOTHING)
     return out
@@ -475,6 +563,7 @@ __all__ = [
     "card_ok",
     "clear_redactor",
     "default_redact",
+    "email_spans",
     "engine_spans",
     "luhn_ok",
     "merge_spans",
