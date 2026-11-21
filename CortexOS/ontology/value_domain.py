@@ -146,13 +146,23 @@ def _ref(schema: str, table: str) -> str:
     return ".".join([*parts, table])
 
 
+#: DuckDB's error classes for a table or column that is not there.
+_ABSENT_ERRORS = frozenset({"BinderException", "CatalogException"})
+
+
 def _has_column(con: Any, ref: str, column: str) -> bool:
     if not _IDENT.match(column):
         raise ValueError(f"not a plain identifier: {column!r}")
     try:
         con.execute(f"SELECT {column} FROM {ref} LIMIT 0")
-    except Exception:  # noqa: BLE001 - absent table/column: nothing to map there
-        return False
+    except Exception as exc:  # noqa: BLE001 - classified below
+        # Only "no such table/column" means there is nothing to map. Any other
+        # error (an interrupt from the statement deadline, #440) is not an
+        # answer about the lake: read as absent it was cached per instance and
+        # switched the stale-lake check off for every later ask.
+        if type(exc).__name__ in _ABSENT_ERRORS:
+            return False
+        raise
     return True
 
 
