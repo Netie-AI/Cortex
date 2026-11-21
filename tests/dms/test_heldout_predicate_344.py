@@ -383,3 +383,51 @@ def test_must_pass_a_rewrite_equal_on_every_served_lake_scores_correct(case: str
     sql = gold.replace(old, new)
     assert _base_match(item, sql), "precondition"
     assert heldout.variant_mismatch(item, sql) is None, case
+
+
+# Re-verify on 138df5c: renaming a whole value can take the gold's own filter
+# literal, and the gold then says "nothing" ([(None,)]) where an equal rewrite
+# says it as no rows. Both empty is agreement; a served answer with rows is not.
+SECOND_HIGHEST = "spider_second_highest_chem_unit_cost"
+EMPTY_ON_A_VARIANT = {
+    "dense_rank": (
+        "SELECT unit_cost_myr FROM (SELECT DISTINCT ROUND(unit_cost_myr,2) unit_cost_myr "
+        "FROM inventory WHERE category='CHEMICALS') d "
+        "QUALIFY dense_rank() OVER (ORDER BY unit_cost_myr DESC)=2"
+    ),
+    "limit_offset": (
+        "SELECT DISTINCT ROUND(unit_cost_myr,2) AS unit_cost_myr FROM inventory "
+        "WHERE category='CHEMICALS' ORDER BY 1 DESC LIMIT 1 OFFSET 1"
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(EMPTY_ON_A_VARIANT))
+def test_must_pass_no_rows_and_a_null_are_the_same_empty_answer(case: str) -> None:
+    item = _item(SECOND_HIGHEST)
+    sql = EMPTY_ON_A_VARIANT[case]
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is None, case
+
+
+STILL_CAUGHT = {
+    "rate_ge_for_gt": (
+        "bird_carrier_delay_rate_above_global",
+        ("c.delay_rate > g.global_rate", "c.delay_rate >= g.global_rate"),
+    ),
+    "severity_in_for_eq": (
+        "bird_over_capacity_with_critical_alert",
+        ("a.severity = 'CRITICAL'", "a.severity IN ('CRITICAL','HIGH')"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(STILL_CAUGHT))
+def test_must_fail_a_wrong_sql_with_rows_where_gold_is_empty_is_caught(case: str) -> None:
+    item_id, (old, new) = STILL_CAUGHT[case]
+    item = _item(item_id)
+    gold = _gold(item)
+    assert old in gold, "precondition: the rewrite applies"
+    sql = gold.replace(old, new)
+    assert _base_match(item, sql), "precondition"
+    assert heldout.variant_mismatch(item, sql) is not None, case
