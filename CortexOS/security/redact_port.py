@@ -56,31 +56,69 @@ class RedactionRefused(RuntimeError):
 
 
 # --- engine patterns ---------------------------------------------------------
-# Not the tail of a longer digit run and not the fraction after "<digit>.";
-# not followed by another digit.
-_LEFT: Final[str] = r"(?<![\d])(?<!\d\.)(?<![A-Za-z]-)"
-_RIGHT: Final[str] = r"(?!\d)"
-# One separator between MyKad parts: dash, dash variants, space or dot.
-_SEP: Final[str] = r"[-\u2010-\u2015\u2212 .]?"
+# Every pattern is scanned at every start position (a lookahead scan), and each
+# candidate is validated on its own, so a rejected greedy match never hides a
+# valid value inside or after it. Overlapping valid spans are merged into one.
+
+_DASHES: Final[str] = "‐-―−"
+# Not the tail of a longer digit run and not the fraction after "<digit>.".
+_NUM_LEFT: Final[str] = r"(?<!\d)(?<!\d\.)"
+_NUM_RIGHT: Final[str] = r"(?!\d)"
+
+_DATE: Final[str] = r"\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
 # JPN place-of-birth codes: 01-16, 21-59, 60-68, 71-72, 74-79, 82-93, 98-99.
 _PB: Final[str] = r"(?:0[1-9]|1[0-6]|2[1-9]|[3-5]\d|6[0-8]|7[124-9]|8[2-9]|9[0-3]|9[89])"
+# Between MyKad parts: a dash (variants included, optionally space-padded,
+# optionally wrapped after it), a slash, or one space. Never a dot: 120115.50
+# is a figure.
+_MK_SEP: Final[str] = r"(?:[ \t]?[-" + _DASHES + r"/][ \t]?\n?|[ ])"
+# A labelled number is a MyKad even when glued to its label.
+_MK_LABEL: Final[str] = r"(?:(?<=IC)|(?<=KP)|(?<=ic)|(?<=kp)|(?<=IC-)|(?<=KP-)|(?<=ic-)|(?<=kp-)|(?<=IC:)|(?<=KP:))"
 
-# Malaysian MyKad: YYMMDD-PB-####, with or without separators.
+# Malaysian MyKad written with separators. "INV-240115-01-0001" (a code after
+# "<letter>-") is not one unless the letters are an IC/KP label.
+MYKAD_SEPARATED: Final[re.Pattern[str]] = re.compile(
+    _NUM_LEFT + r"(?:" + _MK_LABEL + r"|(?<![A-Za-z]-))" + _DATE + _MK_SEP + _PB + _MK_SEP + r"\d{4}" + _NUM_RIGHT
+)
+# Twelve plain digits. Not glued to a word (PO240115120034, file_240115143000)
+# unless the word is an IC/KP label.
+MYKAD_PLAIN: Final[re.Pattern[str]] = re.compile(
+    _NUM_LEFT + r"(?:" + _MK_LABEL + r"|(?<![A-Za-z_])(?<![A-Za-z]-))" + _DATE + _PB + r"\d{4}" + _NUM_RIGHT
+)
+MYKAD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (MYKAD_SEPARATED, MYKAD_PLAIN)
+# Kept for callers that want one pattern; it does not apply the label rule.
 MYKAD: Final[re.Pattern[str]] = re.compile(
-    _LEFT + r"\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])" + _SEP + _PB + _SEP + r"\d{4}" + _RIGHT
+    _NUM_LEFT + _DATE + r"(?:" + _MK_SEP + r")?" + _PB + r"(?:" + _MK_SEP + r")?" + r"\d{4}" + _NUM_RIGHT
 )
-# Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter, inner spaces allowed.
-NRIC: Final[re.Pattern[str]] = re.compile(
-    r"(?<![A-Za-z0-9])[STFGM][ \-]?\d{7}[ \-]?[A-Z](?![A-Za-z0-9])", re.IGNORECASE
+
+# Singapore NRIC/FIN: uppercase S/T/F/G/M, 7 digits, checksum letter (checked
+# below), optional single inner space or dash. Anything may come before it
+# (an escaped "\n", "%20", "IDS1234567D", "2024S1234567D"): the uppercase
+# prefix and the checksum letter carry the precision.
+NRIC: Final[re.Pattern[str]] = re.compile(r"([STFGM])[ \-]?(\d{7})[ \-]?([A-Z])(?![A-Za-z0-9])")
+
+# RFC 5322 atext local part, Unicode letters, IDN domains.
+EMAIL: Final[re.Pattern[str]] = re.compile(
+    r"[\w.!#$%&'*+/=?^`{|}~\-]+@[\w\-]+(?:\.[\w\-]+)*\.[^\W\d_]{2,}"
 )
-# Unicode local parts and IDN domains included (\w is Unicode on str patterns).
-EMAIL: Final[re.Pattern[str]] = re.compile(r"[\w.%+'\-]+@[\w\-]+(?:\.[\w\-]+)*\.[^\W\d_]{2,}")
-# Payment card: 13-19 digits, up to two spaces or dashes between digits;
-# brand prefix, length and Luhn checked below.
-CARD: Final[re.Pattern[str]] = re.compile(_LEFT + r"\d(?:[ \t\-\u2010-\u2015]{0,2}\d){12,18}" + _RIGHT)
+
+# Payment card: a bounded run of 14-19 digits, or the printed group shapes
+# 4-4-4-4(-1..3), 4-6-5 and 4-6-4 with one consistent separator (space, "+",
+# ".", or a dash, optionally space-padded). Brand, length and Luhn are checked.
+_CARD_SEP: Final[str] = r"(?: ?[-" + _DASHES + r"] ?|[ +.])"
+CARD: Final[re.Pattern[str]] = re.compile(
+    _NUM_LEFT
+    + r"(?:\d{14,19}"
+    + r"|\d{4}(?P<s1>" + _CARD_SEP + r")\d{4}(?P=s1)\d{4}(?P=s1)\d{4}(?:(?P=s1)\d{1,3})?"
+    + r"|\d{4}(?P<s2>" + _CARD_SEP + r")\d{6}(?P=s2)\d{4,5})"
+    + _NUM_RIGHT
+)
+
+_CARD_CORE: Final[re.Pattern[str]] = re.compile(r"\d{4}(\D{1,3})\d{4}\1\d{4}\1\d{4}")
 
 ENGINE_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
-    ("mykad", MYKAD),
+    ("mykad", MYKAD_SEPARATED),
+    ("mykad", MYKAD_PLAIN),
     ("nric", NRIC),
     ("email", EMAIL),
     ("credit_card", CARD),
@@ -89,13 +127,15 @@ ENGINE_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
 
 # (prefix regex, allowed lengths) for the networks a card number can belong to.
 _CARD_BRANDS: Final[tuple[tuple[re.Pattern[str], frozenset[int]], ...]] = (
-    (re.compile(r"4"), frozenset({13, 16, 19})),  # Visa
+    (re.compile(r"4"), frozenset({16, 19})),  # Visa (13-digit Visa is retired; EAN-13 looks like it)
     (re.compile(r"5[1-5]|2(?:2[2-9]|[3-6]\d|7[01]|720)"), frozenset({16})),  # Mastercard
+    (re.compile(r"220[0-4]"), frozenset({16, 17, 18, 19})),  # Mir
+    (re.compile(r"5018|5020|5038|5893|6304|6759|676[1-3]|50[0-9]{2}"), frozenset({16, 17, 18, 19})),  # Maestro
     (re.compile(r"3[47]"), frozenset({15})),  # Amex
     (re.compile(r"6(?:011|5|4[4-9])"), frozenset({16, 17, 18, 19})),  # Discover
     (re.compile(r"35"), frozenset({16, 17, 18, 19})),  # JCB
     (re.compile(r"62"), frozenset({16, 17, 18, 19})),  # UnionPay
-    (re.compile(r"3(?:0[0-5]|[68])"), frozenset({14, 15, 16, 17, 18, 19})),  # Diners
+    (re.compile(r"3(?:0[0-5]|[689])"), frozenset({14, 15, 16, 17, 18, 19})),  # Diners
 )
 
 
@@ -120,65 +160,153 @@ def luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
-# Letters NFKC leaves alone that read as the NRIC prefix letters.
-_CONFUSABLES: Final[dict[str, str]] = {
-    "\u0405": "S", "\u0455": "s", "\u0422": "T", "\u0442": "t", "\u041c": "M", "\u043c": "m",
-    "\u03a4": "T", "\u03c4": "t", "\u039c": "M", "\u0393": "G",
+_NRIC_WEIGHTS: Final[tuple[int, ...]] = (2, 7, 6, 5, 4, 3, 2)
+_NRIC_TABLES: Final[dict[str, tuple[int, str]]] = {
+    "S": (0, "JZIHGFEDCBA"),
+    "T": (4, "JZIHGFEDCBA"),
+    "F": (0, "XWUTRQPNMLK"),
+    "G": (4, "XWUTRQPNMLK"),
 }
 
 
-def normalized_view(text: str) -> tuple[str, list[int]]:
-    """Detection view; ``index[i]`` is the source offset of view character ``i``.
+def nric_ok(prefix: str, digits: str, letter: str) -> bool:
+    """Checksum letter for S/T/F/G. The M series is accepted on shape alone."""
+    table = _NRIC_TABLES.get(prefix)
+    if table is None:
+        return prefix == "M"
+    offset, letters = table
+    total = offset + sum(w * int(d) for w, d in zip(_NRIC_WEIGHTS, digits, strict=True))
+    return letters[total % 11] == letter
 
-    Per character: format characters dropped, NFKC, any decimal digit as its
-    ASCII digit, and a few confusable letters folded.
+
+# Letters NFKC leaves alone that read as Latin capitals or lowercase.
+_CONFUSABLES: Final[dict[str, str]] = {
+    # Cyrillic
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
+    "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X", "Ѕ": "S",
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y",
+    "х": "x", "ѕ": "s",
+    # Greek
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I",
+    "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T",
+    "Υ": "Y", "Χ": "X",
+}
+# Blank-looking letters that hide inside a value.
+_FILLERS: Final[frozenset[str]] = frozenset("ᅟᅠㅤﾠ⠀")
+_ENTITY: Final[re.Pattern[str]] = re.compile(r"&#(?:(\d{1,7})|[xX]([0-9a-fA-F]{1,6}));")
+_PERCENT: Final[re.Pattern[str]] = re.compile(r"%([0-9A-Fa-f]{2})")
+
+Span = tuple[int, int]
+
+
+def normalized_view(text: str) -> tuple[str, list[Span]]:
+    """Detection view; ``index[i]`` is the source ``(start, end)`` behind view character ``i``.
+
+    Percent escapes and HTML numeric entities of printable ASCII are decoded;
+    format, combining and enclosing marks and blank fillers are dropped; each
+    remaining character is NFKC-normalized, any decimal digit becomes its ASCII
+    digit, and confusable letters are folded. Source text is never changed.
     """
     out: list[str] = []
-    index: list[int] = []
-    for pos, ch in enumerate(text):
-        if unicodedata.category(ch) == "Cf":
+    index: list[Span] = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        ch = text[pos]
+        decoded: str | None = None
+        width = 1
+        if ch == "%":
+            m = _PERCENT.match(text, pos)
+            if m:
+                code = int(m.group(1), 16)
+                if 0x20 <= code < 0x7F:
+                    decoded, width = chr(code), 3
+        elif ch == "&":
+            m = _ENTITY.match(text, pos)
+            if m:
+                code = int(m.group(1)) if m.group(1) else int(m.group(2), 16)
+                if 0x20 <= code < 0x7F:
+                    decoded, width = chr(code), m.end() - pos
+        span = (pos, pos + width)
+        pos += width
+        if decoded is not None:
+            out.append(decoded)
+            index.append(span)
+            continue
+        if ch in _FILLERS or unicodedata.category(ch) in ("Cf", "Mn", "Me"):
             continue
         for norm in unicodedata.normalize("NFKC", ch):
+            if unicodedata.category(norm) in ("Mn", "Me"):
+                continue
             if unicodedata.category(norm) == "Nd":
                 norm = str(unicodedata.digit(norm))
             out.append(_CONFUSABLES.get(norm, norm))
-            index.append(pos)
+            index.append(span)
     return "".join(out), index
 
 
+def scan(pattern: re.Pattern[str], view: str) -> list[tuple[int, int, re.Match[str]]]:
+    """Every match of ``pattern`` starting at every position, longest first per start."""
+    found: list[tuple[int, int, re.Match[str]]] = []
+    pos = 0
+    while pos <= len(view):
+        m = pattern.search(view, pos)
+        if m is None:
+            break
+        found.append((m.start(), m.end(), m))
+        pos = m.start() + 1
+    return found
+
+
 def engine_spans(view: str) -> list[tuple[int, int, str]]:
-    """``(start, end, kind)`` in ``view`` for the engine patterns, earliest and longest first."""
+    """``(start, end, kind)`` in ``view`` for every valid engine-pattern candidate."""
     spans: list[tuple[int, int, str]] = []
     for kind, pattern in ENGINE_PATTERNS:
-        for match in pattern.finditer(view):
+        for start, end, match in scan(pattern, view):
             if kind == "credit_card" and not card_ok(match.group(0)):
+                # A 4-4-4-4 card followed by a CVV or another group: test the core.
+                core = _CARD_CORE.match(match.group(0))
+                if core is None or not card_ok(core.group(0)):
+                    continue
+                end = start + core.end()
+            if kind == "nric" and not nric_ok(match.group(1), match.group(2), match.group(3)):
                 continue
-            spans.append((match.start(), match.end(), kind))
+            spans.append((start, end, kind))
     return spans
 
 
-def apply_spans(text: str, view: str, index: list[int], spans: list[tuple[int, int, str]]) -> str:
-    """Replace the source text behind each non-overlapping view span with ``[REDACTED:<kind>]``."""
+def merge_spans(spans: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+    """Union of overlapping spans; the kind of the longest piece names the union."""
+    merged: list[tuple[int, int, str, int]] = []
+    for start, end, kind in sorted(spans):
+        if merged and start < merged[-1][1]:
+            m_start, m_end, m_kind, m_len = merged[-1]
+            if end - start > m_len:
+                m_kind, m_len = kind, end - start
+            merged[-1] = (m_start, max(m_end, end), m_kind, m_len)
+        else:
+            merged.append((start, end, kind, end - start))
+    return [(s, e, k) for s, e, k, _ in merged]
+
+
+def apply_spans(text: str, view: str, index: list[Span], spans: list[tuple[int, int, str]]) -> str:
+    """Replace the source text behind the union of ``spans`` with ``[REDACTED:<kind>]``."""
     if not spans:
         return text
-    chosen: list[tuple[int, int, str]] = []
-    cursor = -1
-    for start, end, kind in sorted(spans, key=lambda s: (s[0], -(s[1] - s[0]))):
-        if start >= cursor:
-            chosen.append((start, end, kind))
-            cursor = end
+    source = merge_spans([(index[s][0], index[e - 1][1], k) for s, e, k in spans])
     parts: list[str] = []
     src = 0
-    for start, end, kind in chosen:
-        src_start = index[start]
-        src_end = index[end - 1] + 1
-        if src_start < src:
-            continue
-        parts.append(text[src:src_start])
+    for start, end, kind in source:
+        parts.append(text[src:start])
         parts.append(f"[REDACTED:{kind}]")
-        src = src_end
+        src = end
     parts.append(text[src:])
     return "".join(parts)
+
+
+def mykad_matches(text: str) -> list[tuple[int, int]]:
+    """MyKad spans in ``text`` itself (no view), for the pack's ``detect()``."""
+    return sorted({(s, e) for p in MYKAD_PATTERNS for s, e, _ in scan(p, text)})
 
 
 def default_redact(text: str) -> str:
@@ -191,80 +319,117 @@ def default_redact(text: str) -> str:
 PACK_REDACTOR_UNAVAILABLE: Final[str] = "pack_redactor_unavailable"
 REDACTOR_INEFFECTIVE: Final[str] = "redactor_ineffective"
 
-# Synthetic values every redactor must remove before it is trusted.
-_CANARY_VALUES: Final[tuple[str, ...]] = ("S0000001I", "canary.241@example.invalid")
-_CANARY: Final[str] = "check " + " and ".join(_CANARY_VALUES)
+# Synthetic values every redactor must remove before it is trusted. The NRIC
+# appears twice so a redactor that stops after the first hit fails.
+_CANARY_VALUES: Final[tuple[str, ...]] = (
+    "S0000001I",
+    "canary.241@example.invalid",
+    "900101-14-5678",
+    "4111 1111 1111 1111",
+)
+_CANARY: Final[str] = "check " + " and ".join(_CANARY_VALUES) + " then S0000001I again"
 
 _redactor: Redactor | None = None
+_redactor_pack: str | None = None
 _pack_loaded = False
 _pack_error = False
-_trusted: set[int] = set()
+# id -> the redactor itself. Holding the object keeps its id from being reused
+# by a new function that would then skip the canary.
+_trusted: dict[int, Redactor] = {}
 _load_lock = threading.Lock()
 
 
+def _current_pack() -> str:
+    from CortexOS.config import get_config
+
+    return str(get_config().pack)
+
+
 def register_redactor(redactor: Redactor) -> None:
-    """Install the pack's redactor. Called by the owning pack, never by the engine."""
-    global _redactor
+    """Install the active pack's redactor. Called by the owning pack, never by the engine."""
+    global _redactor, _redactor_pack, _pack_loaded, _pack_error
+    try:
+        pack: str | None = _current_pack()
+    except Exception:  # noqa: BLE001 - unknown pack; the next call reloads
+        pack = None
     _redactor = redactor
+    _redactor_pack = pack
+    _pack_loaded = pack is not None
+    _pack_error = False
+    _trusted.clear()
 
 
 def clear_redactor() -> None:
     """Drop the registered redactor (pack swap / test teardown). The default stays."""
-    global _redactor, _pack_loaded, _pack_error
+    global _redactor, _redactor_pack, _pack_loaded, _pack_error
     _redactor = None
+    _redactor_pack = None
     _pack_loaded = False
     _pack_error = False
+    _trusted.clear()
 
 
 def registered_redactor() -> Redactor | None:
     return _redactor
 
 
-def _load_active_pack() -> None:
-    """Import the active pack's masker and call its ``register_engine_redactor``.
+def _load_active_pack(pack: str) -> None:
+    """Import ``packs.<pack>.security.pii`` and call its ``register_engine_redactor``.
 
     Resolved by name on purpose: a static ``import packs.`` here would cross the
-    C2 boundary. A pack with no ``security.pii`` module keeps the engine default.
-    A pack whose masker exists but fails to load sets ``_pack_error``: the call
-    is refused, never sent through a weaker redactor, and the load is retried
-    on the next call.
+    C2 boundary. A pack that exists but has no ``security.pii`` keeps the engine
+    default. Anything else (the pack itself missing, a masker that fails to
+    import, a hook that raises) sets ``_pack_error``: the call is refused, never
+    sent through a weaker redactor, and the load is retried on the next call.
     """
-    global _pack_loaded, _pack_error
+    global _redactor, _redactor_pack, _pack_loaded, _pack_error
     with _load_lock:
-        if _pack_loaded:
+        if _pack_loaded and _redactor_pack == pack:
             return
-        name = ""
+        _redactor, _redactor_pack = None, pack
+        _trusted.clear()
+        name = f"packs.{pack}.security.pii"
         try:
-            from CortexOS.config import get_config
-
-            name = f"packs.{get_config().pack}.security.pii"
             module = importlib.import_module(name)
             hook = getattr(module, "register_engine_redactor", None)
             if callable(hook):
                 hook()
         except ModuleNotFoundError as exc:
             missing = exc.name or ""
-            if not name or not name.startswith(missing + ".") and missing != name:
-                _pack_error = True
+            if not missing.startswith(f"packs.{pack}."):
+                _pack_error = True  # the pack itself (or a masker dependency) is missing
                 return
         except Exception:  # noqa: BLE001 - a masker that exists but breaks fails closed
             _pack_error = True
             return
+        _redactor_pack = pack
         _pack_error = False
         _pack_loaded = True
 
 
 def active_redactor() -> Redactor:
-    if _redactor is None:
-        _load_active_pack()
+    """The redactor for the active pack. A pack change reloads; a load failure refuses."""
+    try:
+        pack = _current_pack()
+    except Exception:  # noqa: BLE001
+        raise RedactionRefused(PACK_REDACTOR_UNAVAILABLE) from None
+    if not _pack_loaded or _redactor_pack != pack:
+        _load_active_pack(pack)
         if _pack_error:
             raise RedactionRefused(PACK_REDACTOR_UNAVAILABLE)
     return _redactor if _redactor is not None else default_redact
 
 
+def _canary_left(out: str) -> bool:
+    """True when a canary value survives, also through case, look-alike or invisible changes."""
+    view, _ = normalized_view(out)
+    folded = "".join(ch for ch in view.casefold() if not ch.isspace())
+    return any(v.casefold().replace(" ", "") in folded for v in _CANARY_VALUES)
+
+
 def _check_trusted(redactor: Redactor) -> None:
-    """Run the canary once per redactor; one that leaves a canary value is refused."""
-    if id(redactor) in _trusted:
+    """Run the canary once per redactor object; one that leaves a canary value is refused."""
+    if _trusted.get(id(redactor)) is redactor:
         return
     try:
         out = redactor(_CANARY)
@@ -272,9 +437,9 @@ def _check_trusted(redactor: Redactor) -> None:
         raise RedactionRefused(REDACTOR_RAISED) from None
     if not isinstance(out, str) or not out.strip():
         raise RedactionRefused(REDACTOR_RETURNED_NOTHING)
-    if any(v in out for v in _CANARY_VALUES):
+    if _canary_left(out):
         raise RedactionRefused(REDACTOR_INEFFECTIVE)
-    _trusted.add(id(redactor))
+    _trusted[id(redactor)] = redactor
 
 
 def redact_for_model(text: str) -> str:
@@ -297,6 +462,7 @@ __all__ = [
     "EMAIL",
     "ENGINE_PATTERNS",
     "MYKAD",
+    "MYKAD_PATTERNS",
     "NRIC",
     "PACK_REDACTOR_UNAVAILABLE",
     "REDACTOR_INEFFECTIVE",
@@ -311,8 +477,12 @@ __all__ = [
     "default_redact",
     "engine_spans",
     "luhn_ok",
+    "merge_spans",
+    "mykad_matches",
+    "nric_ok",
     "normalized_view",
     "redact_for_model",
+    "scan",
     "register_redactor",
     "registered_redactor",
 ]

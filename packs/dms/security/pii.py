@@ -7,9 +7,11 @@ from dataclasses import dataclass
 
 from CortexOS.security import redact_port
 
-# #241: the engine owns the MyKad pattern. NRIC and email keep this module's
-# own patterns so detect() and redact_for_prompt() behave as before for their
-# existing callers; redact_for_model() below uses the engine patterns.
+# #241: the engine owns the MyKad patterns. NRIC, email, card and phone keep
+# this module's own patterns so detect() and redact_for_prompt() keep their
+# coverage for existing callers; redact_for_model() below uses the engine
+# patterns. MyKad spans are merged with the old ones as a union, never by
+# dropping an overlapping span, so no value the old code masked is left raw.
 _MYKAD = redact_port.MYKAD
 
 # Singapore NRIC/FIN: S/T/F/G/M + 7 digits + checksum letter
@@ -31,7 +33,6 @@ _PHONE = re.compile(
 )
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("mykad", _MYKAD),
     ("nric", _NRIC),
     ("credit_card", _CREDIT_CARD),
     ("email", _EMAIL),
@@ -48,26 +49,20 @@ class PiiSpan:
 
 
 def detect(text: str) -> list[PiiSpan]:
-    """Return non-overlapping PII spans found in *text*."""
-    spans: list[PiiSpan] = []
+    """Return non-overlapping PII spans found in *text*.
+
+    Overlapping matches are merged into one span covering their union; the
+    longest match names it. Coverage is never smaller than any single match.
+    """
+    raw: list[tuple[int, int, str]] = []
     for kind, pattern in _PATTERNS:
         for match in pattern.finditer(text):
-            spans.append(
-                PiiSpan(
-                    start=match.start(),
-                    end=match.end(),
-                    kind=kind,
-                    text=match.group(0),
-                )
-            )
-    spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
-    merged: list[PiiSpan] = []
-    cursor = -1
-    for span in spans:
-        if span.start >= cursor:
-            merged.append(span)
-            cursor = span.end
-    return merged
+            raw.append((match.start(), match.end(), kind))
+    raw.extend((start, end, "mykad") for start, end in redact_port.mykad_matches(text))
+    return [
+        PiiSpan(start=start, end=end, kind=kind, text=text[start:end])
+        for start, end, kind in redact_port.merge_spans(raw)
+    ]
 
 
 def redact_for_prompt(text: str) -> str:
@@ -85,42 +80,37 @@ def redact_for_prompt(text: str) -> str:
     return "".join(parts)
 
 
-_FIGURE_JOINT_LEFT = re.compile(r"\d[.,\-\s]?$")
-_FIGURE_JOINT_RIGHT = re.compile(r"^[.,\-\s]?\d")
-# 0-led local number: a 0 + 1-3 digit area group, a separator, then 6-8 digits.
-_LOCAL_PHONE = re.compile(r"0\d{1,3}[-\s]\d{3,4}[-\s]?\d{3,4}")
+# Phone forms for the model path. A Malaysian local number needs a real area
+# code (01x mobile, 03-09 landline, 082-089 Sabah/Sarawak) and a separator
+# after it, then the subscriber number with at most one inner space (the
+# printed forms 012-345 6789 and 03-1234 5678). A second dash (03-4000-1000,
+# 012-3456-7890) reads as a GL or account code and stays, as do a bare digit
+# run, 0800-1700 and +1.234.567; an international number starts with "+" and
+# has at least 9 digits. A figure's digits are never altered (DMS #508).
+_LOCAL_PHONE = re.compile(
+    r"(?<!\d)(?<!\d\.)\(?(?:01\d|0[3-79]|08[2-9])\)?[-\s]\d{3,4} ?\d{4}(?!\d)(?![-.]\d)"
+)
+_INTL_PHONE = re.compile(r"(?<!\d)\+\d{1,3}(?:[-\s]?\d{1,4}){2,4}(?!\d)(?!\.\d)")
 
 
-def _phone_is_unambiguous(value: str) -> bool:
-    """A phone form no measured figure takes: ``+60 12-345 6789`` or ``012-345 6789``.
-
-    A bare digit run or ``1200-3400`` can be a quantity or a range, and a figure's
-    digits are never altered (DMS #508), so those stay.
-    """
-    digits = sum(c.isdigit() for c in value)
-    if digits < 9:
-        return False  # 0800-1700, 0-150000 and +1 234 567 are ranges or figures
-    if value.startswith("+"):
-        return True
-    return _LOCAL_PHONE.fullmatch(value) is not None
+def _phone_spans(view: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for pattern in (_LOCAL_PHONE, _INTL_PHONE):
+        for start, end, match in redact_port.scan(pattern, view):
+            if sum(c.isdigit() for c in match.group(0)) >= 9:
+                spans.append((start, end, "phone"))
+    return spans
 
 
 def redact_for_model(text: str) -> str:
     """The redactor this pack registers on the engine port for routed completions.
 
-    The engine patterns (MyKad, NRIC/FIN, email, Luhn-valid card), plus phone
-    numbers in a form no measured figure takes. Look-alike and zero-width
-    characters are seen through; text outside a match passes through unchanged.
+    The engine patterns (MyKad, NRIC/FIN, email, card) plus the phone forms
+    above, on the engine's detection view; overlapping matches are masked as
+    their union. Text outside a match passes through unchanged.
     """
     view, index = redact_port.normalized_view(text)
-    spans = redact_port.engine_spans(view)
-    for match in _PHONE.finditer(view):
-        value = match.group(0)
-        touches_figure = _FIGURE_JOINT_LEFT.search(view[max(0, match.start() - 2) : match.start()]) or (
-            _FIGURE_JOINT_RIGHT.search(view[match.end() : match.end() + 2])
-        )
-        if not touches_figure and _phone_is_unambiguous(value):
-            spans.append((match.start(), match.end(), "phone"))
+    spans = redact_port.engine_spans(view) + _phone_spans(view)
     return redact_port.apply_spans(text, view, index, spans)
 
 

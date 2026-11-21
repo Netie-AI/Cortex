@@ -6,6 +6,7 @@ All values below are synthetic.
 """
 
 import json
+import re
 
 import pytest
 from netie.execution.dag_runner import ExecutionContext, run_dag
@@ -150,7 +151,7 @@ def _engine_default_only(monkeypatch):
     from CortexOS.security import redact_port
 
     redact_port.clear_redactor()
-    monkeypatch.setattr(redact_port, "_load_active_pack", lambda: None)
+    monkeypatch.setattr(redact_port, "_load_active_pack", lambda _pack: None)
 
 
 @pytest.mark.asyncio
@@ -298,7 +299,7 @@ def test_redact_port_imports_no_pack():
         "jane@ex\u00e4mple.com",
         "j\u00e4ne@example.com",
         "o'neil@example.com",
-        "4111\t1111\t1111\t1111",
+        "0\t4111111111111111",  # pandas to_csv(sep="\t") cell after the index
     ],
 )
 def test_review_forms_are_masked_by_both_redactors(text):
@@ -419,3 +420,226 @@ async def test_a_pack_without_a_masker_uses_the_engine_default(monkeypatch):
     await _call(adapter, system="", prompt=f"Check {NRIC}")
     assert adapter.requests[0].prompt == "Check [REDACTED:nric]"
     assert redact_port.active_redactor() is redact_port.default_redact
+
+
+# --- round 2 review (#241): every case is a regression test -----------------
+
+ROUND2_LEAKS = [
+    "   card\n0  4111111111111111",  # pandas to_string
+    "4111111111111111\t12\t2027",
+    "4111 1111 1111 1111 123",  # card then CVV
+    "qty 25 4111111111111111",
+    "order 1234 4111 1111 1111 1111",  # a number before a grouped card
+    "Qty 2 5500 0000 0000 0004",
+    "Line 3 378282246310005",
+    '{"note": "verified\\nS1234567D"}',  # escaped newline in JSON
+    "NRIC%3A%20S1234567D",
+    "IDS1234567D",
+    "2024S1234567D",
+    "q=jane%40example.com",
+    "e=jane%2Bx%40example.com",
+    "c=4111+1111+1111+1111",
+    "4111%201111%201111%201111",
+    "patient IC-900101-14-5678 admitted",
+    "IC-900101145678",
+    "card-4111111111111111",
+    "4111.1111.1111.1111",
+    "4111−1111−1111−1111",
+    "4111 - 1111 - 1111 - 1111",
+    "6759649826438453",  # Maestro
+    "2200000000000004",  # Mir
+    "900101 - 14 - 5678",
+    "900101/14/5678",
+    "900101-14-\n5678",
+    "S123͏4567D",  # combining grapheme joiner
+    "9️00101145678",  # variation selector
+    "S123ㅤ4567D",  # Hangul filler
+    "S1234563А",  # valid NRIC, Cyrillic A as the checksum letter
+    "jane&#64;example.com",
+    "jane=doe@example.com",
+    "jane!doe@example.com",
+    "date 990101 850505-10-5432",
+    "4111 1111 1111 1111.ali@example.com",
+]
+
+ROUND2_FIGURES = [
+    "PO240115120034",
+    "file_240115143000.csv",
+    "SO-240115101234",
+    "INV-240115-01-0001",
+    "Revenue RM 120115.50 1500 units",
+    "120115.50 1500.00 2000.00",
+    "build 240115.14.3022",
+    "30-01-2024 15-02-2024",
+    "SKU S1234567A",  # checksum letter wrong for S1234567: not an NRIC
+    "lot T2024001X",
+    "f1234567a",
+    "g 1234567 h",
+    "1,234,567.89 1.234.567,89 1 234 567 12,34,567",
+    "2024-01-15T10:30:00Z ts 1731398400019",
+    "Mon-Fri 0800-1700 0900-1800",
+    "ean 5901234123457 4006381333931",
+    "1200\t3400\t5600\t7800",
+]
+
+
+@pytest.mark.parametrize("text", ROUND2_LEAKS)
+def test_round2_leak_forms_are_masked_by_both_redactors(text):
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    for redactor in (redact_port.default_redact, pii.redact_for_model):
+        assert "[REDACTED:" in redactor(text), (redactor.__name__, text)
+
+
+@pytest.mark.parametrize("text", ROUND2_FIGURES)
+def test_round2_figures_and_codes_are_unchanged(text):
+    from CortexOS.security import redact_port
+    from packs.dms.security import pii
+
+    assert redact_port.default_redact(text) == text
+    assert pii.redact_for_model(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "id,phone\n42,012-345 6789",
+        "3\t012-345 6789",
+        "Total 1500 +60 12-345 6789",
+        "850505-10-5432\n+60 12-345 6789",
+        "(03) 1234 5678",
+    ],
+)
+def test_dms_phone_forms_are_masked(text):
+    from packs.dms.security import pii
+
+    out = pii.redact_for_model(text)
+    assert "[REDACTED:phone]" in out, out
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["GL 01-4000-1000", "GL 03-4000-1000", "Invoice 001-2024-0001 issued", "row: 01 2024 1500", "+1.234.567.890 EUR"],
+)
+def test_dms_codes_are_not_phones(text):
+    from packs.dms.security import pii
+
+    assert pii.redact_for_model(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "IC 850505-10-5432 012-345 6789",
+        "850505-10-5432 4111 1111 1111 1111",
+        "850505 10 5432ali@example.com",
+    ],
+)
+def test_detect_never_masks_less_than_before(text):
+    """Adding MyKad must not drop a phone, card or email the old detect() covered.
+
+    The old algorithm (the module's own patterns, earliest-longest, overlaps
+    dropped) is recomputed here; every character it covered must still be covered.
+    """
+    from packs.dms.security import pii
+
+    old: list[tuple[int, int]] = []
+    found = sorted(
+        ((m.start(), m.end()) for _k, pat in pii._PATTERNS for m in pat.finditer(text)),
+        key=lambda s: (s[0], -(s[1] - s[0])),
+    )
+    cursor = -1
+    for start, end in found:
+        if start >= cursor:
+            old.append((start, end))
+            cursor = end
+    covered_now = {i for sp in pii.detect(text) for i in range(sp.start, sp.end)}
+    covered_old = {i for start, end in old for i in range(start, end)}
+    assert covered_old <= covered_now, sorted(covered_old - covered_now)
+    assert "ali@example.com" not in pii.redact_for_prompt(text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "gamed",
+    [
+        str.swapcase,
+        lambda t: "​".join(t),
+        lambda t: re.sub(r"S0000001I", "[x]", t, count=1).replace("canary.241@example.invalid", "[x]"),
+    ],
+    ids=["swapcase", "zero_width_join", "stops_after_first"],
+)
+async def test_a_gamed_redactor_fails_the_canary(gamed):
+    from CortexOS.security import redact_port
+
+    redact_port.register_redactor(gamed)
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="", prompt=f"Check {NRIC}")
+    assert exc.value.reason == "redactor_ineffective"
+    assert adapter.requests == []
+
+
+@pytest.mark.asyncio
+async def test_trust_is_per_object_and_reset_on_register():
+    from CortexOS.security import redact_port
+
+    def good(text: str) -> str:
+        return redact_port.default_redact(text)
+
+    redact_port.register_redactor(good)
+    await _call(RecordingAdapter(), system="", prompt="hi")
+    redact_port.register_redactor(lambda text: text)  # a new object is checked again
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused):
+        await _call(adapter, system="", prompt=f"Check {NRIC}")
+    assert adapter.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_pack_change_reloads_the_redactor(monkeypatch):
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    pack = {"name": "ruma"}
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": pack["name"]}))
+    redact_port.clear_redactor()
+    adapter = RecordingAdapter()
+    await _call(adapter, system="Reach +60 12-345 6789", prompt="hi")
+    assert adapter.requests[-1].system == "Reach +60 12-345 6789"  # engine default has no phone rule
+    pack["name"] = "dms"
+    await _call(adapter, system="Reach +60 12-345 6789", prompt="hi")
+    assert adapter.requests[-1].system == "Reach [REDACTED:phone]"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_pack_refuses(monkeypatch):
+    import CortexOS.config as cfg
+    from CortexOS.security import redact_port
+
+    real = cfg.get_config()
+    monkeypatch.setattr(cfg, "get_config", lambda: real.model_copy(update={"pack": "no_such_pack_t241"}))
+    redact_port.clear_redactor()
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="", prompt=f"Check {NRIC}")
+    assert exc.value.reason == "pack_redactor_unavailable"
+    assert adapter.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_redactor_that_skips_mykad_and_cards_fails_the_canary():
+    from CortexOS.security import redact_port
+
+    def nric_and_email_only(text: str) -> str:
+        text = re.sub(r"[STFGM]\d{7}[A-Z]", "[x]", text)
+        return re.sub(r"\S+@\S+", "[x]", text)
+
+    redact_port.register_redactor(nric_and_email_only)
+    adapter = RecordingAdapter()
+    with pytest.raises(redact_port.RedactionRefused) as exc:
+        await _call(adapter, system="", prompt=f"IC {MYKAD}")
+    assert exc.value.reason == "redactor_ineffective"
+    assert adapter.requests == []
