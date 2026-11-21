@@ -77,10 +77,14 @@ items are unchanged.
   declared columns alone. The five wrong SQLs are still caught.
 - Re-verify on `138df5c`: REJECTED. Renaming a whole value can take the
   gold's own filter literal (every `CHEMICALS` row): the gold then returns
-  `[(None,)]` and an equal rewrite returns no rows. Fixed: a variant where gold
-  and served both come back empty (no rows, or only NULL and zero) agrees; a
-  served answer with rows where the gold is empty is still a mismatch. 24 of
-  24 equal rewrites score correct.
+  `[(None,)]` and an equal rewrite returns no rows. First fix (`d063c33`):
+  both "empty" (no rows, or only NULL and zero) agrees. Re-verify REJECTED it:
+  `COALESCE(AVG(..), 0)` served a made-up 0.00 where the truth is no data,
+  and a phantom NULL row passed where the gold has none. Final rule: only the
+  gold's single all-NULL row (an aggregate of nothing) against no served rows
+  agrees. A zero is a value; a NULL row where the gold has none is a
+  mismatch. The verifier's 10 constructions are caught; 24 of 24 equal
+  rewrites score correct.
 
 Root-cause class of the round: **sampling only re-weights values the oracle
 already has.** A variant family that only drops rows or scales numbers cannot
