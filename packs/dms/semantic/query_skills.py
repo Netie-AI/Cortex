@@ -28,7 +28,8 @@ from packs.dms.skills.capture import normalize_trigger, text_embedding
 # High bar: avoid false skill hits that would skip a better metric route.
 DEFAULT_THRESHOLD = 0.72
 #: Params ``answer()`` drops when it replays a skill (answer_engine.py, frozen),
-#: and the metrics whose slots it reads again from the question instead.
+#: and the metrics whose slots it reads again from the question instead. Kept
+#: equal to that code; ``_replays_as_captured`` compiles both and compares.
 REPLAY_DROPS = frozenset(
     {"exclude_skus", "offset_clause", "limit", "direction", "days", "location_code", "warehouse"}
 )
@@ -216,14 +217,12 @@ def find(
         except (json.JSONDecodeError, TypeError):
             params = {}
         params = params if isinstance(params, dict) else {}
-        # #426 adversary: ``answer()`` replays a skill with these params dropped
-        # and, for sales ranks, with slots read again from the question, so a
-        # skill captured with any of them replays a different answer ("bottom 3
-        # suppliers by score" served the top 10). It is not replayed; the ask
-        # takes the normal path.
-        if row["metric_id"] in REPLAY_REREADS_SLOTS or any(
-            params.get(key) not in (None, "", [], {}) for key in REPLAY_DROPS
-        ):
+        # #426 adversary: ``answer()`` replays a skill with REPLAY_DROPS taken
+        # out of its params and, for sales ranks, with slots read again from the
+        # question, so a replay can compile a different query from the one the
+        # skill captured ("bottom 3 suppliers by score" served the top 10). Only
+        # a skill whose replay compiles the same SQL is a hit.
+        if not _replays_as_captured(row["metric_id"], params, question):
             return None
         best = {
             "id": row["id"],
@@ -243,6 +242,28 @@ def find(
         return best
     finally:
         con.close()
+
+
+def _replays_as_captured(
+    metric_id: str | None, params: dict[str, Any], question: str
+) -> bool:
+    """Whether ``answer()``'s replay of this skill compiles the query it captured."""
+    if not metric_id:
+        return True
+    from packs.dms.semantic.loader import compile_metric, load_all
+
+    if metric_id in REPLAY_REREADS_SLOTS:
+        from CortexOS.dms.answer_engine import _sales_rank_slots
+
+        replay = _sales_rank_slots(question)
+    else:
+        replay = {k: v for k, v in params.items() if k not in REPLAY_DROPS}
+    try:
+        catalog = load_all()
+        captured = compile_metric(catalog, metric_id, params)
+        return bool(captured == compile_metric(catalog, metric_id, replay))
+    except Exception:  # noqa: BLE001 - a skill that does not compile is not replayed
+        return False
 
 
 def capture(
