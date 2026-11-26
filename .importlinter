@@ -50,14 +50,19 @@ ignore_imports =
 
 [importlinter:contract:2]
 name = packaging helpers stay independent of optional planes
-type = independence
-modules =
+type = forbidden
+source_modules =
     CortexOS.packaging
-independent_from =
+forbidden_modules =
     CortexOS.rag
     CortexOS.execution.dag_runner
     CortexOS.execution.osr
     CortexOS.execution.seeker
+# Was type = independence with an `independent_from` option. Independence has
+# no such option: import-linter up to 2.15 ignored it, so the contract checked
+# one module against nothing; 2.16+ refuses the file and CI's Import linter
+# step fails. `forbidden` is the check the name describes: the packaging
+# helpers never import (directly or transitively) the optional planes.
 
 [importlinter:contract:3]
 name = constructor engine never imports n8n/langchain/langflow/gencfsm as engine
