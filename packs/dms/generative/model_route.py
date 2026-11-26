@@ -8,6 +8,7 @@ does not log the prompt.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import threading
@@ -66,10 +67,18 @@ def _drive(invoke: Any) -> Any:
         return asyncio.run(_call())
 
     box: dict[str, Any] = {}
+    # Flag off: the worker starts a fresh context, as it always did. Flag on:
+    # copy so an explicit count name set by the caller is visible on the call.
+    from CortexOS.integrations.call_deadline import enabled
+
+    ctx = contextvars.copy_context() if enabled() else None
 
     def _worker() -> None:
         try:
-            box["result"] = asyncio.run(_call())
+            if ctx is not None:
+                box["result"] = ctx.run(asyncio.run, _call())
+            else:
+                box["result"] = asyncio.run(_call())
         except BaseException as exc:  # noqa: BLE001 - hop the error back to the caller
             box["error"] = exc
 

@@ -54,13 +54,16 @@ def _ai(prompt: str, max_tokens: int = 2000) -> dict:
     not invent a chart, draft, or analysis.
     """
     _ = max_tokens
-    result = call_freeroute(
-        [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        purpose="think",
-    )
+    from CortexOS.integrations.call_deadline import EXPLICIT_TASKS, count_as
+
+    with count_as(EXPLICIT_TASKS["brain"]):
+        result = call_freeroute(
+            [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            purpose="think",
+        )
     if not result.get("ok"):
         return refusal_body()
     provider, model = served_from(result)

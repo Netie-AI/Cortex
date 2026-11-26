@@ -169,7 +169,7 @@ def create_app() -> Any:
 
         cfg = get_config()
         dense_retriever = getattr(request.app.state, "dense_retriever", None)
-        return {
+        body: dict[str, Any] = {
             "engine_version": engine_version,
             "profile": __import__("os").environ.get("CORTEX_PROFILE", "") or "default",
             "extras": {
@@ -182,6 +182,12 @@ def create_app() -> Any:
                 "qdrant_configured": bool(getattr(cfg, "qdrant_url", None)),
             },
         }
+        from CortexOS.integrations.call_deadline import enabled, snapshot
+
+        # Omitted when the flag is off so this body stays the bytes it was.
+        if enabled():
+            body["call_deadline"] = snapshot()
+        return body
 
     return app
 

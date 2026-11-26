@@ -117,12 +117,62 @@ class EngineBridge:
             return {"ok": False, "url": self.base_url, "detail": str(exc)}
 
     async def ask(self, question: str) -> dict[str, Any]:
+        from CortexOS.integrations.call_deadline import enabled
+
+        if enabled():
+            return await self._ask_bounded(question)
         try:
             async with self._client(self.timeout) as client:
                 resp = await client.post(
                     f"{self.base_url}/dms/query",
                     json={"question": question, "session_id": self.session_id},
                 )
+        except httpx.HTTPError as exc:
+            return {
+                "ok": False,
+                "answer": (
+                    f"Cortex engine unreachable at {self.base_url} ({type(exc).__name__})."
+                    " Start it with START_ENGINE.bat, or set CREW_ENGINE_URL."
+                ),
+                "badge": "engine_offline",
+            }
+        if resp.status_code != 200:
+            detail = resp.text[:300]
+            return {
+                "ok": False,
+                "answer": f"Cortex engine returned {resp.status_code}: {detail}",
+                "badge": "engine_error",
+            }
+        data = resp.json()
+        return flatten_engine_ask(data if isinstance(data, dict) else {})
+
+    async def _ask_bounded(self, question: str) -> dict[str, Any]:
+        """Same ask, with min(deadline, timeout) and a close on client disconnect."""
+        import asyncio
+
+        from CortexOS.integrations.call_deadline import cap, current_cancel
+
+        timeout = cap(self.timeout)
+        cancel = current_cancel()
+        try:
+            async with self._client(timeout) as client:
+                task = asyncio.ensure_future(
+                    client.post(
+                        f"{self.base_url}/dms/query",
+                        json={"question": question, "session_id": self.session_id},
+                    )
+                )
+                try:
+                    while not task.done():
+                        if cancel is not None and cancel.is_set():
+                            await client.aclose()
+                            task.cancel()
+                            raise httpx.RequestError("caller disconnected")
+                        await asyncio.wait({task}, timeout=0.05)
+                    resp = task.result()
+                finally:
+                    if not task.done():
+                        task.cancel()
         except httpx.HTTPError as exc:
             return {
                 "ok": False,

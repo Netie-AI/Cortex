@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX_CALL_DEADLINE -- 2026-11-26
+
+Off unless `CORTEX_CALL_DEADLINE` is `1`, `true`, or `yes`. On, `POST /v1/insights`
+and crew FreeRoute calls (`POST /crew/insights`, `POST /crew/freeroute`,
+`POST /crew/spaces/{id}/messages`) read `X-Deadline-Ms` and pass
+min(remaining, the caller's timeout) into OpenVault FreeRoute `complete()`
+instead of the 180s crew default. A client disconnect closes the in-flight
+httpx call. `/health/features` then reports `call_deadline.tasks` and
+`call_deadline.abandoned`. Improve, brain, and suggest calls stay on the
+`crew-think` pick and are counted as `crew-think-improve`, `crew-brain`, and
+`crew-suggest`. Flag off: the chat body, the timeout, and `/health/features`
+are unchanged.
+
 ## VERIFIED-QUERY (#321, refs #309) -- 2026-10-30
 
 Contract 1.11.0: `Answer.verified_query_ids` (optional, omitted when empty, so

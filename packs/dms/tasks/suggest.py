@@ -132,10 +132,13 @@ def _llm_rank_and_explain(candidates: list[dict], context: str) -> tuple[list[di
         "served_provider": None,
         "served_model": None,
     }
-    result = call_freeroute(
-        [{"role": "user", "content": _rank_prompt(candidates, context)}],
-        purpose="think",
-    )
+    from CortexOS.integrations.call_deadline import EXPLICIT_TASKS, count_as
+
+    with count_as(EXPLICIT_TASKS["suggest"]):
+        result = call_freeroute(
+            [{"role": "user", "content": _rank_prompt(candidates, context)}],
+            purpose="think",
+        )
     if not result.get("ok"):
         return candidates, refused
     provider, model = served_from(result)
