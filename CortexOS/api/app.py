@@ -128,6 +128,12 @@ def create_app() -> Any:
         register_task_routes(app)
         register_skill_routes(app)
         register_sidecar_routes(app)
+        # Studio ontology page. Same api_auth viewer gate as the other /dms reads
+        # (the published demo key still works). Not the engine auth port.
+        from CortexOS.api.ontology_routes import register_ontology_routes
+        from packs.dms.security.api_auth import require_role
+
+        register_ontology_routes(app, require_role("viewer"))
         register_lakehouse_routes(app)
         register_ingest_routes(app)
         register_pipeline_routes(app)
