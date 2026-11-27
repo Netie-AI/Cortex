@@ -74,3 +74,16 @@ def test_starlette_is_a_direct_dependency() -> None:
     names = [d.split(">")[0].split("=")[0].split("[")[0].strip().lower()
              for d in data["project"]["dependencies"]]
     assert "starlette" in names
+
+
+def test_import_linter_stays_on_the_enforcing_line() -> None:
+    """Contract 2 is a no-op below 2.16. A 3.x line can change what a contract means."""
+    import tomllib
+    from packaging.version import Version
+
+    dev = _project()["project"]["optional-dependencies"]["dev"]
+    assert "import-linter>=2.16,<3" in [item.replace(" ", "") for item in dev]
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    versions = [pkg["version"] for pkg in lock["package"] if pkg["name"] == "import-linter"]
+    assert versions, "uv.lock resolved no import-linter"
+    assert all(Version("2.16") <= Version(v) < Version("3") for v in versions), versions
