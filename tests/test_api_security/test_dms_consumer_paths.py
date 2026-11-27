@@ -123,15 +123,34 @@ def test_dms_query_is_served_to_the_dms_key(client):
 
 
 # DMS's Trust page (apps/api/dms_api/routes/trust.py) and ontology proxy
-# (routes/ontology.py) read these. Cortex does not serve them today, so DMS
-# gets 404, as on main. A gate here would turn that into 401.
-@pytest.mark.parametrize(
-    "path",
-    ["/dms/eval/summary", "/dms/eval/runs/nightly", "/dms/ontology", "/dms/ontology/graph"],
-)
+# (routes/ontology.py) read these. Cortex does not serve the Trust reads, so DMS
+# gets 404, as on main; a gate there would turn that into 401. Since #492 Cortex
+# serves the ontology reads behind the pack viewer gate.
+@pytest.mark.parametrize("path", ["/dms/eval/summary", "/dms/eval/runs/nightly"])
 def test_dms_proxied_reads_answer_404_not_401(client, path):
+    """Cortex does not serve the Trust page reads, so DMS gets 404, as on main."""
     res = client.get(path, headers=DMS_HEADERS)
     assert res.status_code == 404, res.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/dms/ontology",
+        "/dms/ontology/objects",
+        "/dms/ontology/links",
+        "/dms/ontology/actions",
+        "/dms/ontology/functions",
+        "/dms/ontology/metrics",
+        "/dms/ontology/graph",
+    ],
+)
+def test_dms_ontology_page_reads_are_served_to_the_dms_key(client, path):
+    """#492 serves these behind the pack viewer gate: the DMS key reads, an anonymous caller does not."""
+    served = client.get(path, headers=DMS_HEADERS)
+    assert served.status_code == 200, served.text
+    assert isinstance(served.json(), dict) and served.json()
+    assert client.get(path).status_code == 401
 
 
 def test_contract_drillthrough_is_untouched_by_263(client):

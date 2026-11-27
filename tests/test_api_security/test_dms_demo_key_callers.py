@@ -47,12 +47,18 @@ DMS_CALLER_ROUTES: list[tuple[str, str, Any, int]] = [
     ("GET", "/v1/insights/ontology?q=stock", None, 200),
     ("POST", "/v1/insights", {"intent": "stock by sku", "generate": False}, 200),
     ("POST", "/dms/query", {"question": "total stock on hand"}, 200),
-    # trust.py and ontology.py read these; Cortex main does not serve them, so
-    # DMS already gets a 404 here. Pinned so a future gate is noticed.
+    # trust.py still reads eval routes Cortex does not serve. Pinned so a future
+    # gate is noticed. The ontology page is served: DMS proxies these with the
+    # published demo viewer key, on the same api_auth gate as other /dms reads.
     ("GET", "/dms/eval/summary", None, 404),
     ("GET", "/dms/eval/runs/x", None, 404),
-    ("GET", "/dms/ontology", None, 404),
-    ("GET", "/dms/ontology/graph", None, 404),
+    ("GET", "/dms/ontology", None, 200),
+    ("GET", "/dms/ontology/objects", None, 200),
+    ("GET", "/dms/ontology/links", None, 200),
+    ("GET", "/dms/ontology/actions", None, 200),
+    ("GET", "/dms/ontology/functions", None, 200),
+    ("GET", "/dms/ontology/metrics", None, 200),
+    ("GET", "/dms/ontology/graph", None, 200),
 ]
 
 

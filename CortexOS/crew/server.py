@@ -505,15 +505,20 @@ def build_router(crew: CrewApp) -> APIRouter:
         return body
 
     @router.post("/spaces/{space_id}/messages")
-    async def post_message(space_id: str, body: MessageIn) -> dict[str, Any]:
+    async def post_message(space_id: str, body: MessageIn, request: Request) -> dict[str, Any]:
+        from CortexOS.integrations.call_deadline import bind_http
+
         if crew.store.get_space(space_id) is None:
             raise HTTPException(404, "unknown space")
-        return await crew.runtime.on_user_message(
-            space_id,
-            body.text,
-            provider=body.provider,
-            model=body.model,
-        )
+        # The agent run is a child task. Binding here copies the deadline into
+        # that task. Flag off, bind_http does not set one.
+        async with bind_http(request):
+            return await crew.runtime.on_user_message(
+                space_id,
+                body.text,
+                provider=body.provider,
+                model=body.model,
+            )
 
     @router.get("/spaces/{space_id}/agents")
     async def agents(space_id: str) -> list[dict[str, Any]]:
@@ -1025,29 +1030,31 @@ def build_router(crew: CrewApp) -> APIRouter:
         """Ontology first, then constrained DMS ask. CERTIFIED|ABSTAIN|REFUSE."""
         from CortexOS.crew import freeroute as freeroute_mod
         from CortexOS.crew import insights as insights_mod
+        from CortexOS.integrations.call_deadline import bind_http
 
-        intent = (body.intent or "").strip()
-        if not intent:
-            raise HTTPException(400, "intent is required")
-        bearer: str | None = None
-        if body.generate:
-            # Unarmed refuses inside run_insights with nothing spent; only an
-            # armed generate needs the caller's own authority to spend.
-            armed = await freeroute_mod.run_core(freeroute_mod.arming)
-            if armed.get("armed"):
-                bearer = _caller_bearer(request)
-                if bearer is None:
-                    return _caller_refused("generative_ask")
-        result = await insights_mod.run_insights(
-            intent,
-            bridge=crew.bridge,
-            ask=body.ask,
-            generate=body.generate,
-            shell_public=crew.shell.public(),
-            bearer=bearer,
-            query_plan=body.query_plan,
-        )
-        return result
+        async with bind_http(request):
+            intent = (body.intent or "").strip()
+            if not intent:
+                raise HTTPException(400, "intent is required")
+            bearer: str | None = None
+            if body.generate:
+                # Unarmed refuses inside run_insights with nothing spent; only an
+                # armed generate needs the caller's own authority to spend.
+                armed = await freeroute_mod.run_core(freeroute_mod.arming)
+                if armed.get("armed"):
+                    bearer = _caller_bearer(request)
+                    if bearer is None:
+                        return _caller_refused("generative_ask")
+            result = await insights_mod.run_insights(
+                intent,
+                bridge=crew.bridge,
+                ask=body.ask,
+                generate=body.generate,
+                shell_public=crew.shell.public(),
+                bearer=bearer,
+                query_plan=body.query_plan,
+            )
+            return result
 
     from CortexOS.crew.liberty_routes import mount_liberty
     from CortexOS.crew.prompt_harness_routes import mount_prompt_harness
@@ -1073,25 +1080,27 @@ def build_router(crew: CrewApp) -> APIRouter:
     async def freeroute_complete(body: FreeRouteIn, request: Request) -> Any:
         """Prompt, think, or act via OpenVault FreeRoute. Fail-closed when unarmed."""
         from CortexOS.crew import freeroute as freeroute_mod
+        from CortexOS.integrations.call_deadline import bind_http
 
-        armed = await freeroute_mod.run_core(freeroute_mod.arming)
-        if not armed.get("armed"):
+        async with bind_http(request):
+            armed = await freeroute_mod.run_core(freeroute_mod.arming)
+            if not armed.get("armed"):
+                result = await freeroute_mod.complete(
+                    body.messages, purpose=body.purpose, prompt=body.prompt
+                )
+                return JSONResponse(result, status_code=409)
+            bearer = _caller_bearer(request)
+            if bearer is None:
+                return _caller_refused(body.purpose)
             result = await freeroute_mod.complete(
-                body.messages, purpose=body.purpose, prompt=body.prompt
+                body.messages,
+                purpose=body.purpose,
+                prompt=body.prompt,
+                bearer=bearer,
             )
-            return JSONResponse(result, status_code=409)
-        bearer = _caller_bearer(request)
-        if bearer is None:
-            return _caller_refused(body.purpose)
-        result = await freeroute_mod.complete(
-            body.messages,
-            purpose=body.purpose,
-            prompt=body.prompt,
-            bearer=bearer,
-        )
-        if not result.get("ok"):
-            return JSONResponse(result, status_code=409)
-        return result
+            if not result.get("ok"):
+                return JSONResponse(result, status_code=409)
+            return result
 
     @router.get("/tickets")
     async def list_tickets() -> dict[str, Any]:

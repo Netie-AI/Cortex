@@ -8,6 +8,11 @@ runtime); the governor is the AI-agent hook that pauses a routine on an
 error streak or a blown daily cost cap instead of letting it burn quietly.
 
 AirGPT's Routines page is a view over this store (data/engine/routines.db).
+
+``CORTEX_ROUTINES_CRON=1`` (default off) adds cron expressions, an IANA time
+zone, exponential retry, and an explicit missed-fire policy. Flag off, the
+15 second poll and the interval/daily/weekly path are unchanged. This module
+does not send mail or post to a group chat; those stay on their existing gates.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -32,6 +38,12 @@ DEPTHS = ("basic", "high", "max")
 GOVERNOR_ERROR_STREAK = 3
 DEFAULT_DAILY_COST_CAP_MYR = 5.0
 DEFAULT_POLL_SECONDS = 15
+# Open WebUI polls a 1 second timer. Used only when CORTEX_ROUTINES_CRON=1,
+# so a fire checked on that poll is at most one second late.
+CRON_POLL_SECONDS = 1.0
+# Older than this, a due time is a missed fire after downtime, not poll lag.
+MISSED_FIRE_GRACE_SECONDS = 60.0
+MAX_RETRY_DELAY_SECONDS = 3600.0
 DEFAULT_TIMEOUT_SECONDS = 300.0
 MAX_PER_TICK = 10
 KEEP_RUNS_PER_ROUTINE = 50
@@ -63,6 +75,10 @@ _UPDATABLE = {
     "schedule",
     "predicates",
     "current_run_id",
+    "retry_max",
+    "retry_base_seconds",
+    "on_missed",
+    "retry_used",
 }
 
 
@@ -110,7 +126,11 @@ def init() -> None:
               running_since REAL,
               timeout_seconds REAL DEFAULT 300,
               schedule TEXT DEFAULT '',
-              predicates TEXT DEFAULT '[]'
+              predicates TEXT DEFAULT '[]',
+              retry_max INTEGER DEFAULT 0,
+              retry_base_seconds REAL DEFAULT 1,
+              on_missed TEXT DEFAULT 'catch_up',
+              retry_used INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS routine_runs (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,7 +141,9 @@ def init() -> None:
               finished_at REAL,
               output TEXT DEFAULT '',
               error TEXT DEFAULT '',
-              cost_myr REAL DEFAULT 0
+              cost_myr REAL DEFAULT 0,
+              attempt INTEGER DEFAULT 1,
+              scheduled_for REAL
             );
             CREATE INDEX IF NOT EXISTS idx_routine_runs ON routine_runs(routine_id, id);
             """
@@ -135,12 +157,95 @@ def init() -> None:
                 "schedule": "TEXT DEFAULT ''",
                 "predicates": "TEXT DEFAULT '[]'",
                 "current_run_id": "TEXT DEFAULT ''",
+                "retry_max": "INTEGER DEFAULT 0",
+                "retry_base_seconds": "REAL DEFAULT 1",
+                "on_missed": "TEXT DEFAULT 'catch_up'",
+                "retry_used": "INTEGER DEFAULT 0",
+            },
+        )
+        _ensure_columns(
+            conn,
+            "routine_runs",
+            {
+                "attempt": "INTEGER DEFAULT 1",
+                "scheduled_for": "REAL",
             },
         )
 
 
 def _today() -> str:
     return time.strftime("%Y-%m-%d")
+
+
+# Key shapes only. A 32-character catch-all would eat ordinary answer text.
+_HISTORY_SECRET = re.compile(
+    r"(?i)bearer\s+\S+"
+    r"|sk-[A-Za-z0-9_\-]{8,}"
+    r"|(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]+"
+    r"|(?:api[_-]?key|secret|token|password)\s*[:=]\s*\S+"
+)
+_HISTORY_ENVS = (
+    "CORTEX_FREEROUTE_TOKEN",
+    "XAI_API_KEY",
+    "GMAIL_APP_PASSWORD",
+    "SMTP_PASS",
+    "SMTP_PASSWORD",
+)
+
+
+def _scrub_history(text: object) -> str:
+    """Drop key shapes and live secret values before a run row is stored."""
+    out = _HISTORY_SECRET.sub("<redacted>", "" if text is None else str(text))
+    for name in _HISTORY_ENVS:
+        value = os.environ.get(name) or ""
+        if len(value) >= 8 and value in out:
+            out = out.replace(value, "<redacted>")
+    return out
+
+
+def _store_run(
+    rid: str,
+    run_id: str,
+    status: str,
+    started: float,
+    finished: float,
+    output: str,
+    error: str,
+    cost: float,
+    *,
+    attempt: int,
+    scheduled_for: float | None,
+) -> None:
+    with _lock, _conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO routine_runs (
+              routine_id, run_id, status, started_at, finished_at, output, error, cost_myr,
+              attempt, scheduled_for
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rid,
+                run_id,
+                status,
+                started,
+                finished,
+                _scrub_history(output)[:20000],
+                _scrub_history(error)[:1000],
+                cost,
+                int(attempt),
+                scheduled_for,
+            ),
+        )
+        conn.execute(
+            """
+            DELETE FROM routine_runs WHERE routine_id = ? AND id NOT IN (
+              SELECT id FROM routine_runs WHERE routine_id = ?
+              ORDER BY id DESC LIMIT ?
+            )
+            """,
+            (rid, rid, int(KEEP_RUNS_PER_ROUTINE)),
+        )
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -180,12 +285,21 @@ def create_routine(
     vars: dict[str, Any] | None = None,
     schedule: dict[str, Any] | None = None,
     predicates: list[dict[str, Any]] | None = None,
+    retry_max: int = 0,
+    retry_base_seconds: float = 1.0,
+    on_missed: str = "catch_up",
 ) -> dict[str, Any]:
     init()
     rid = routine_id or "rt-" + uuid.uuid4().hex[:8]
     now = time.time()
     if depth not in DEPTHS:
         depth = "basic"
+    if on_missed not in ("catch_up", "skip"):
+        on_missed = "catch_up"
+    retry_max = max(0, min(20, int(retry_max)))
+    retry_base_seconds = float(retry_base_seconds)
+    if retry_base_seconds < 0:
+        retry_base_seconds = 1.0
     if schedule:
         schedule = schedule_spec.normalize_spec(schedule)
         interval_seconds = schedule_spec.approx_interval_seconds(schedule)
@@ -198,8 +312,9 @@ def create_routine(
             INSERT INTO routines (
               id, name, prompt, preset, depth, interval_seconds,
               daily_cost_cap_myr, timeout_seconds, vars, next_run_at,
-              created_at, cost_day, schedule, predicates
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              created_at, cost_day, schedule, predicates,
+              retry_max, retry_base_seconds, on_missed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 rid,
@@ -216,6 +331,9 @@ def create_routine(
                 _today(),
                 json.dumps(schedule) if schedule else "",
                 json.dumps(predicates or []),
+                int(retry_max),
+                float(retry_base_seconds),
+                on_missed,
             ),
         )
     return get_routine(rid)  # type: ignore[return-value]
@@ -523,12 +641,32 @@ async def run_once(
     cost_today = float(routine.get("cost_today") or 0.0)
     if routine.get("cost_day") != _today():
         cost_today = 0.0
+    scheduled_for = float(routine["next_run_at"]) if routine.get("next_run_at") is not None else now
     spec = routine.get("schedule")
     next_run_at = (
         schedule_spec.next_occurrence(spec, now)
         if spec
         else now + int(routine["interval_seconds"])
     )
+    error_streak = 0 if ok else int(routine["error_streak"]) + 1
+    attempt = 1
+    extra_updates: dict[str, Any] = {}
+    # Retries exist only behind the flag, and only when this routine configured N.
+    # Until N is spent the error streak (and therefore the governor pause) stays put.
+    if schedule_spec.cron_enabled():
+        retry_max = max(0, min(20, int(routine.get("retry_max") or 0)))
+        used = max(0, int(routine.get("retry_used") or 0))
+        attempt = used + 1
+        if (not ok) and used < retry_max:
+            base = float(routine.get("retry_base_seconds") or 1.0)
+            if base < 0:
+                base = 1.0
+            delay = min(base * (2**used), MAX_RETRY_DELAY_SECONDS)
+            next_run_at = now + delay
+            error_streak = int(routine["error_streak"])
+            extra_updates["retry_used"] = used + 1
+        else:
+            extra_updates["retry_used"] = 0
     update_routine(
         rid,
         status="idle",
@@ -536,49 +674,40 @@ async def run_once(
         current_run_id=None,
         last_run_at=now,
         next_run_at=next_run_at,
-        error_streak=0 if ok else int(routine["error_streak"]) + 1,
+        error_streak=error_streak,
         cost_today=cost_today + cost,
         cost_day=_today(),
+        **extra_updates,
     )
-    with _lock, _conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO routine_runs (
-              routine_id, run_id, status, started_at, finished_at, output, error, cost_myr
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                rid,
-                run_id,
-                "ok" if ok else "error",
-                started,
-                finished,
-                json.dumps(
-                    {
-                        "text": result.get("output"),
-                        "steps": result.get("steps") or [],
-                        "work_kinds": result.get("work_kinds") or [],
-                    },
-                    default=str,
-                )[:20000]
-                if result.get("steps") is not None
-                else json.dumps(result.get("output"), default=str)[:20000],
-                str(result.get("error") or "")[:1000],
-                cost,
-            ),
+    if result.get("steps") is not None:
+        raw_output = json.dumps(
+            {
+                "text": result.get("output"),
+                "steps": result.get("steps") or [],
+                "work_kinds": result.get("work_kinds") or [],
+            },
+            default=str,
         )
-        conn.execute(
-            """
-            DELETE FROM routine_runs WHERE routine_id = ? AND id NOT IN (
-              SELECT id FROM routine_runs WHERE routine_id = ?
-              ORDER BY id DESC LIMIT ?
-            )
-            """,
-            (rid, rid, int(KEEP_RUNS_PER_ROUTINE)),
-        )
+    else:
+        raw_output = json.dumps(result.get("output"), default=str)
+    _store_run(
+        rid,
+        run_id,
+        "ok" if ok else "error",
+        started,
+        finished,
+        raw_output,
+        str(result.get("error") or ""),
+        cost,
+        attempt=attempt,
+        scheduled_for=scheduled_for,
+    )
     _record_action_event(routine, result, ok=ok, cost=cost, started=started, finished=finished)
     governor_action = apply_governor(rid)
-    error = str(result.get("error") or "")
+    error = _scrub_history(str(result.get("error") or ""))[:1000]
+    output = result.get("output")
+    if isinstance(output, str):
+        output = _scrub_history(output)
     return {
         "ok": ok,
         "routine_id": rid,
@@ -590,9 +719,69 @@ async def run_once(
         "cost_myr": cost,
         "governor": governor_action,
         "next_run_at": next_run_at,
-        "output": result.get("output"),
+        "scheduled_for": scheduled_for,
+        "attempt": attempt,
+        "output": output,
         "steps": result.get("steps") or [],
         "work_kinds": result.get("work_kinds") or [],
+    }
+
+
+def _next_after(routine: dict[str, Any], now: float) -> float:
+    spec = routine.get("schedule")
+    if spec:
+        return schedule_spec.next_occurrence(spec, now)
+    interval = int(routine.get("interval_seconds") or 0)
+    if interval <= 0:
+        interval = schedule_spec.MIN_INTERVAL_SECONDS
+    return now + interval
+
+
+def _skip_if_missed(rid: str, now: float) -> dict[str, Any] | None:
+    """Flag on only. A fire later than the grace window is catch-up or skip.
+
+    Catch-up falls through and ``run_once`` runs it a single time, then aims
+    at the next future slot. Skip records the miss and does not dispatch.
+    """
+    routine = get_routine(rid)
+    if routine is None:
+        return None
+    scheduled = float(routine["next_run_at"]) if routine.get("next_run_at") is not None else now
+    if now - scheduled <= MISSED_FIRE_GRACE_SECONDS:
+        return None
+    if str(routine.get("on_missed") or "catch_up") != "skip":
+        return None
+    nxt = _next_after(routine, now)
+    update_routine(rid, next_run_at=nxt, status="idle", retry_used=0)
+    run_id = f"routine:{rid}:skip:{uuid.uuid4().hex[:8]}"
+    _store_run(
+        rid,
+        run_id,
+        "skipped",
+        now,
+        now,
+        "",
+        "",
+        0.0,
+        attempt=0,
+        scheduled_for=scheduled,
+    )
+    return {
+        "ok": True,
+        "routine_id": rid,
+        "run_id": run_id,
+        "status": "skipped",
+        "error": "",
+        "explain": None,
+        "chosen": None,
+        "cost_myr": 0.0,
+        "governor": None,
+        "next_run_at": nxt,
+        "scheduled_for": scheduled,
+        "skipped": True,
+        "output": "",
+        "steps": [],
+        "work_kinds": [],
     }
 
 
@@ -614,6 +803,11 @@ async def tick(now: float | None = None, *, max_runs: int = MAX_PER_TICK) -> lis
         ).fetchall()
     results = []
     for row in rows:
+        if schedule_spec.cron_enabled():
+            skipped = _skip_if_missed(row["id"], now)
+            if skipped is not None:
+                results.append(skipped)
+                continue
         results.append(await run_once(row["id"], now=now))
     return results
 
@@ -657,11 +851,20 @@ def resume_all() -> int:
     return cur.rowcount
 
 
-def start(poll_seconds: int = DEFAULT_POLL_SECONDS) -> bool:
+def default_poll_seconds() -> float:
+    """15 seconds unless the cron flag is on, in which case 1 second."""
+    if schedule_spec.cron_enabled():
+        return CRON_POLL_SECONDS
+    return float(DEFAULT_POLL_SECONDS)
+
+
+def start(poll_seconds: float | None = None) -> bool:
     """Background poll loop — local, daemon, one per process."""
     global _sched_thread, _sched_stop
     if _sched_thread is not None and _sched_thread.is_alive():
         return False
+    if poll_seconds is None:
+        poll_seconds = default_poll_seconds()
     stop_event = threading.Event()
 
     def _loop() -> None:

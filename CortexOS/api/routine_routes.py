@@ -2,16 +2,23 @@
 
 Cortex owns the durable store, tick loop, and governor; this module is a thin
 FastAPI registration in the workflow_routes style.
+
+Cron, time zone, retry, and the missed-fire policy travel in ``vars`` so the
+frozen contract schema stays as published. They are honoured only when
+``CORTEX_ROUTINES_CRON=1``. Flag off, those keys are ordinary vars and the
+interval/daily/weekly schedule is unchanged. ``GET /api/routines/{id}/runs``
+still defaults to 20 rows; ``limit`` up to ``KEEP_RUNS_PER_ROUTINE`` (50)
+returns the retained history, including each retry attempt.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from CortexOS.execution import humanize, routine_scheduler
+from CortexOS.execution import humanize, routine_scheduler, schedule_spec
 from CortexOS.security.auth_port import require_role, require_spend_auth
 
 # #263: every route needs a credential. Reads are viewer, store writes are
@@ -69,6 +76,77 @@ def _found(routine: dict[str, Any] | None) -> dict[str, Any]:
     return routine
 
 
+def _schedule_controls(vars_map: dict[str, Any] | None) -> dict[str, Any]:
+    """Pull cron / tz / retry / on_missed out of vars. Empty when the flag is off.
+
+    ``error`` is a client-facing reason and means the caller should reject the
+    request. Flag off returns nothing, so a cron key cannot change a schedule.
+    """
+    if not schedule_spec.cron_enabled() or not isinstance(vars_map, dict):
+        return {}
+    out: dict[str, Any] = {}
+    cron_text = str(vars_map.get("cron") or "").strip()
+    tz_text = str(vars_map.get("tz") or "").strip()
+    if cron_text:
+        expr = " ".join(cron_text.split())
+        if schedule_spec.parse_cron(expr) is None:
+            return {"error": "invalid cron expression"}
+        tz_name = "UTC"
+        if tz_text:
+            tz_name = schedule_spec.valid_tz(tz_text) or ""
+            if not tz_name:
+                return {"error": "unknown time zone"}
+        out["schedule"] = {"kind": "cron", "expr": expr, "tz": tz_name}
+    elif "cron" in vars_map and not cron_text:
+        return {"error": "invalid cron expression"}
+    elif tz_text:
+        tz_name = schedule_spec.valid_tz(tz_text) or ""
+        if not tz_name:
+            return {"error": "unknown time zone"}
+        out["tz"] = tz_name
+    if "retry_max" in vars_map and vars_map.get("retry_max") is not None:
+        try:
+            retry_max = int(vars_map["retry_max"])
+        except (TypeError, ValueError):
+            return {"error": "retry_max must be an integer"}
+        if isinstance(vars_map["retry_max"], bool) or retry_max < 0 or retry_max > 20:
+            return {"error": "retry_max must be from 0 to 20"}
+        out["retry_max"] = retry_max
+    if "retry_base_seconds" in vars_map and vars_map.get("retry_base_seconds") is not None:
+        try:
+            base = float(vars_map["retry_base_seconds"])
+        except (TypeError, ValueError):
+            return {"error": "retry_base_seconds must be a number"}
+        if isinstance(vars_map["retry_base_seconds"], bool) or base < 0 or base > 3600:
+            return {"error": "retry_base_seconds must be from 0 to 3600"}
+        out["retry_base_seconds"] = base
+    if vars_map.get("on_missed") not in (None, ""):
+        policy = str(vars_map.get("on_missed"))
+        if policy not in ("catch_up", "skip"):
+            return {"error": "on_missed must be catch_up or skip"}
+        out["on_missed"] = policy
+    return out
+
+
+def _reject_controls(controls: dict[str, Any]) -> None:
+    if controls.get("error"):
+        raise HTTPException(status_code=400, detail=str(controls["error"]))
+
+
+def _apply_controls(
+    routine: dict[str, Any], controls: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if controls.get("schedule") is not None:
+        fields["schedule"] = controls["schedule"]
+    elif controls.get("tz") and routine.get("schedule"):
+        sched = dict(routine["schedule"])
+        sched["tz"] = controls["tz"]
+        fields["schedule"] = sched
+    for key in ("retry_max", "retry_base_seconds", "on_missed"):
+        if key in controls:
+            fields[key] = controls[key]
+
+
 def register_routine_routes(app: Any) -> None:
     @app.get("/api/routines", dependencies=_VIEWER)
     async def list_routines() -> dict[str, Any]:
@@ -98,16 +176,22 @@ def register_routine_routes(app: Any) -> None:
 
             raise HTTPException(status_code=400, detail=humanize.explain("goal_required"))
 
+        controls = _schedule_controls(body.vars)
+        _reject_controls(controls)
         routine = routine_scheduler.create_from_goal(
             goal,
             name=body.name or None,
             preset=body.preset,
             depth=body.depth,
-            interval_seconds=body.interval_seconds,
+            interval_seconds=None if controls.get("schedule") else body.interval_seconds,
             daily_cost_cap_myr=body.daily_cost_cap_myr,
         )
+        fields: dict[str, Any] = {}
         if body.vars:
-            routine = routine_scheduler.update_routine(routine["id"], vars=body.vars)
+            fields["vars"] = body.vars
+        _apply_controls(routine, controls, fields)
+        if fields:
+            routine = routine_scheduler.update_routine(routine["id"], **fields)
         return {"ok": True, "routine": routine}
 
     @app.post("/api/routines/tick", dependencies=_SPEND_ADMIN)
@@ -133,8 +217,11 @@ def register_routine_routes(app: Any) -> None:
     @app.patch("/api/routines/{rid}", dependencies=_STEWARD)
     async def patch_routine(rid: str, body: RoutinePatchBody) -> dict[str, Any]:
         routine_scheduler.init()
-        _found(routine_scheduler.get_routine(rid))
+        current = _found(routine_scheduler.get_routine(rid))
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        controls = _schedule_controls(body.vars)
+        _reject_controls(controls)
+        _apply_controls(current, controls, fields)
         return {"ok": True, "routine": routine_scheduler.update_routine(rid, **fields)}
 
     @app.delete("/api/routines/{rid}", dependencies=_STEWARD)
@@ -214,7 +301,10 @@ def register_routine_routes(app: Any) -> None:
         }
 
     @app.get("/api/routines/{rid}/runs", dependencies=_VIEWER)
-    async def routine_runs(rid: str) -> dict[str, Any]:
+    async def routine_runs(
+        rid: str,
+        limit: int = Query(default=20, ge=1, le=routine_scheduler.KEEP_RUNS_PER_ROUTINE),
+    ) -> dict[str, Any]:
         routine_scheduler.init()
         _found(routine_scheduler.get_routine(rid))
-        return {"ok": True, "runs": routine_scheduler.list_runs(rid)}
+        return {"ok": True, "runs": routine_scheduler.list_runs(rid, limit=limit)}

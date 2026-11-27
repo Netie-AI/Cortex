@@ -1,8 +1,35 @@
 # STATUS.md
 
-**Last updated:** 2026-10-09 MYT | **Main:** `f04995bb` (#376 merged, lock-only)
+**Last updated:** 2026-11-27 | **Main:** `f04995bb` (#376 merged, lock-only)
 Rules and merge flow: `AGENTS.md`. Live list: `TASK.md`. AI-first law: `CLAUDE.md` section 9.
 This file records pointers. It does not certify a gate.
+
+## Routine cron
+
+`CORTEX_ROUTINES_CRON` is off by default. On, routines accept a cron expression,
+an IANA time zone, exponential retry, and a catch-up or skip policy for missed
+fires. Interval, daily, and weekly schedules are unchanged while the flag is off.
+This line is a pointer, not a CI result. Tracks AirGPT issue 98.
+
+## FreeRoute role
+
+`CORTEX_FREEROUTE_ROLE` is off by default. On, a chat request sends OpenVault
+`role` from the task so the vault can walk its role policy. That body omits
+`strict`. Flag off, chat body bytes are unchanged.
+This line is a pointer, not a CI result.
+
+## FreeRoute header lock
+
+`complete()` copies Retry-After off a per-call opener. It does not replace
+`urllib.request.build_opener`. Chat body bytes are unchanged.
+This line is a pointer, not a CI result. CORTEX-FREEROUTE-LOCK-01.
+
+## Call deadline
+
+`CORTEX_CALL_DEADLINE` is off by default. On, `X-Deadline-Ms` caps FreeRoute
+timeouts on `/v1/insights` and crew FreeRoute calls, a client disconnect closes
+the upstream httpx call, and `/health/features` reports per-task counts. The
+OpenVault pick task is unchanged.
 
 ## Founder direction
 

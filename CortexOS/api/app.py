@@ -136,6 +136,12 @@ def create_app() -> Any:
         register_task_routes(app, gate_auth=dms_caller_role("viewer"))
         register_skill_routes(app)
         register_sidecar_routes(app)
+        # Studio ontology page. Same api_auth viewer gate as the other /dms reads
+        # (the published demo key still works). Not the engine auth port.
+        from CortexOS.api.ontology_routes import register_ontology_routes
+        from packs.dms.security.api_auth import require_role
+
+        register_ontology_routes(app, require_role("viewer"))
         register_lakehouse_routes(app)
         register_ingest_routes(app)
         register_pipeline_routes(app)
@@ -177,7 +183,7 @@ def create_app() -> Any:
 
         cfg = get_config()
         dense_retriever = getattr(request.app.state, "dense_retriever", None)
-        return {
+        body: dict[str, Any] = {
             "engine_version": engine_version,
             "profile": __import__("os").environ.get("CORTEX_PROFILE", "") or "default",
             "extras": {
@@ -190,6 +196,12 @@ def create_app() -> Any:
                 "qdrant_configured": bool(getattr(cfg, "qdrant_url", None)),
             },
         }
+        from CortexOS.integrations.call_deadline import enabled, snapshot
+
+        # Omitted when the flag is off so this body stays the bytes it was.
+        if enabled():
+            body["call_deadline"] = snapshot()
+        return body
 
     return app
 

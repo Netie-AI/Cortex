@@ -4,7 +4,7 @@ poetry-core
 # python:3.11-slim ships setuptools and wheel outside the lock. Pin the
 # versions the image must install so core and constructor do not keep the
 # slim defaults. setuptools matches uv.lock (full already resolves 83.0.0
-# via torch). wheel is not in uv.lock; 0.46.3 is the wheel the slim base
-# and the full image already ship.
+# via torch). wheel is not in uv.lock; the image locks pin it
+# (scripts/lock_images.py --upgrade-package wheel).
 setuptools==83.0.0
-wheel==0.46.3
+wheel==0.48.0

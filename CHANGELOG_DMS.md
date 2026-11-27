@@ -2,6 +2,44 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-FREEROUTE-ROLE -- 2026-11-27
+
+Off unless `CORTEX_FREEROUTE_ROLE` is `1`, `true`, or `yes`. On, the chat
+body sends OpenVault `role` from the call's task (or an explicit `role=`):
+sql, reason, summarize, tool, grain, ontology. A body that carries `role`
+omits `strict`. Flag off, the chat body bytes are unchanged.
+
+## CORTEX-FREEROUTE-LOCK-01 -- 2026-11-27
+
+FreeRoute copies Retry-After from the response or HTTPError of a per-call
+opener. That opener is not installed as ``urllib.request.build_opener``.
+Concurrent `complete()` calls overlap. Chat request body bytes are unchanged.
+
+## SCHED-01 cron, zone, retry -- 2026-11-27
+
+Off unless `CORTEX_ROUTINES_CRON=1`. On, a routine accepts a five-field cron
+and an IANA zone (Asia/Singapore, and a DST zone such as America/New_York),
+the poll is 1 second, a failed run retries with exponential backoff before
+the existing error-streak governor pauses, and each attempt is a run-history
+row. A fire older than 60 seconds is either caught up once or skipped, per
+`on_missed`. Those controls travel in `vars` so the frozen contract schema
+is unchanged. Flag off, interval/daily/weekly and the 15 second poll stay
+as they were. Run history still keeps 50 rows and redacts key shapes.
+Tracks https://github.com/jian-hong/AirGPT/issues/98
+
+## CORTEX_CALL_DEADLINE -- 2026-11-26
+
+Off unless `CORTEX_CALL_DEADLINE` is `1`, `true`, or `yes`. On, `POST /v1/insights`
+and crew FreeRoute calls (`POST /crew/insights`, `POST /crew/freeroute`,
+`POST /crew/spaces/{id}/messages`) read `X-Deadline-Ms` and pass
+min(remaining, the caller's timeout) into OpenVault FreeRoute `complete()`
+instead of the 180s crew default. A client disconnect closes the in-flight
+httpx call. `/health/features` then reports `call_deadline.tasks` and
+`call_deadline.abandoned`. Improve, brain, and suggest calls stay on the
+`crew-think` pick and are counted as `crew-think-improve`, `crew-brain`, and
+`crew-suggest`. Flag off: the chat body, the timeout, and `/health/features`
+are unchanged.
+
 ## VERIFIED-QUERY (#321, refs #309) -- 2026-10-30
 
 Contract 1.11.0: `Answer.verified_query_ids` (optional, omitted when empty, so

@@ -1071,21 +1071,26 @@ async def climb(
             DECISION_AUDIT_FAIL,
         ):
             critique = last_fed or last_reason
-            think = await _call_runner(
-                runner,
-                purpose="think",
-                prompt=_think_prompt(
-                    text,
-                    ranking,
-                    critique=critique,
-                    ideas=idea_list,
-                    g1=g1,
-                    prior_sql=last_sql,
-                    decision=str(granted),
-                    schema_context=supplied,
-                ),
-                bearer=bearer,
-            )
+            from CortexOS.integrations.call_deadline import EXPLICIT_TASKS, count_as
+
+            # Same purpose and the same pick task. The health count uses a
+            # separate name so an improve call is not hidden inside crew-think.
+            with count_as(EXPLICIT_TASKS["improve"]):
+                think = await _call_runner(
+                    runner,
+                    purpose="think",
+                    prompt=_think_prompt(
+                        text,
+                        ranking,
+                        critique=critique,
+                        ideas=idea_list,
+                        g1=g1,
+                        prior_sql=last_sql,
+                        decision=str(granted),
+                        schema_context=supplied,
+                    ),
+                    bearer=bearer,
+                )
             if not think.get("ok"):
                 return _envelope(
                     ok=False,
