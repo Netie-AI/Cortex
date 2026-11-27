@@ -361,7 +361,7 @@ def test_api_flag_off_ignores_cron_in_vars(monkeypatch):
     from CortexOS.api.routine_routes import register_routine_routes
 
     register_routine_routes(app)
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-API-Key": "pytest-steward-key"})
     created = client.post(
         "/api/routines",
         json={
@@ -385,7 +385,7 @@ async def test_api_cron_round_trip_and_retained_runs(monkeypatch):
     from CortexOS.api.routine_routes import register_routine_routes
 
     register_routine_routes(app)
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-API-Key": "pytest-steward-key"})
     bad = client.post("/api/routines", json={"prompt": "hello", "vars": {"cron": "not a cron"}})
     assert bad.status_code == 400
     bad_zone = client.post(
