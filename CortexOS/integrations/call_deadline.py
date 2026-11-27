@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import threading
 import time
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -171,72 +170,3 @@ async def bind_http(request: Any) -> AsyncIterator[None]:
         _cancel.reset(cancel_token)
         _deadline.reset(deadline_token)
 
-
-def _note_headers(headers: Mapping[str, str] | None) -> None:
-    from CortexOS.integrations.freeroute import note_response_headers
-
-    if not headers:
-        note_response_headers({})
-        return
-    note_response_headers({str(key): str(value) for key, value in headers.items()})
-
-
-def _json_dict(raw: bytes) -> dict[str, Any] | None:
-    try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except (ValueError, UnicodeDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def request_httpx(
-    method: str,
-    path: str,
-    *,
-    body: Mapping[str, Any] | None = None,
-    headers: Mapping[str, str] | None = None,
-    timeout: float = 5.0,
-    base: str | None = None,
-) -> tuple[int, dict[str, Any] | None]:
-    """One OpenVault JSON call that closes when the bound client disconnects.
-
-    Same JSON bytes as the stdlib client. Used only while a cancel event is
-    bound, so the flag-off path never reaches here.
-    """
-    import httpx
-
-    from CortexOS.integrations.openvault_client import is_loopback_url, openvault_base_url
-
-    root = base or openvault_base_url()
-    url = f"{root}{path}"
-    payload = json.dumps(dict(body)).encode("utf-8") if body is not None else None
-    sent = {"Accept": "application/json"}
-    if payload is not None:
-        sent["Content-Type"] = "application/json"
-    sent.update(dict(headers or {}))
-    cancel = current_cancel()
-    client = httpx.Client(timeout=httpx.Timeout(timeout), trust_env=not is_loopback_url(root))
-    done = threading.Event()
-
-    def _abort() -> None:
-        if cancel is None:
-            return
-        while not done.is_set():
-            if cancel.is_set():
-                client.close()
-                return
-            done.wait(0.05)
-
-    closer = threading.Thread(target=_abort, name="cortex-call-cancel", daemon=True)
-    closer.start()
-    try:
-        try:
-            resp = client.request(method.upper(), url, content=payload, headers=sent)
-        except httpx.HTTPError:
-            return 0, None
-        _note_headers(resp.headers)
-        return int(resp.status_code), _json_dict(resp.content)
-    finally:
-        done.set()
-        client.close()
-        closer.join(timeout=1.0)

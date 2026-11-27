@@ -1605,8 +1605,14 @@ def complete(
 
     if call_deadline.enabled():
         timeout = call_deadline.cap(timeout)
+        # Loaded by name. A static import would put httpx on the plan+SQL
+        # graph, which may reach a model only through this module.
         if call_deadline.cancellable() and send is _STDLIB_REQUEST:
-            send = call_deadline.request_httpx
+            import importlib
+
+            send = importlib.import_module(
+                "CortexOS.integrations.call_deadline_http"
+            ).request_httpx
     started = time.monotonic()
     try:
         status, data = _call_noting_headers(
