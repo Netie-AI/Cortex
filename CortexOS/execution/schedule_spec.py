@@ -11,13 +11,21 @@ Specs are one of:
     {"kind": "weekly",   "weekdays": [0,1,2,3,4], "at_hour": 9, "at_minute": 0}
 
 Weekdays follow ``datetime.weekday()`` — Monday is 0.
+
+Cron is off unless ``CORTEX_ROUTINES_CRON=1``. When that flag is on, a spec may
+also be ``{"kind": "cron", "expr": "30 9 * * *", "tz": "Asia/Singapore"}``.
+Five fields, Sunday = 0 (or 7). A ``tz`` on a daily or weekly spec is read in
+that zone. Flag off, both are ignored and the three specs above are unchanged.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import time
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, NamedTuple
+from zoneinfo import ZoneInfo
 
 DEFAULT_HOUR = 9
 DEFAULT_MINUTE = 0
@@ -181,26 +189,220 @@ def parse_schedule(text: str) -> dict[str, Any]:
     }
 
 
+def cron_enabled() -> bool:
+    """True only for the exact value ``CORTEX_ROUTINES_CRON=1``."""
+    return os.getenv("CORTEX_ROUTINES_CRON", "").strip() == "1"
+
+
+class CronFields(NamedTuple):
+    minute: frozenset[int]
+    hour: frozenset[int]
+    dom: frozenset[int]
+    month: frozenset[int]
+    dow: frozenset[int]
+    dom_star: bool
+    dow_star: bool
+
+
+def valid_tz(name: object) -> str | None:
+    """IANA zone name, or None when this host does not know it."""
+    if name is None:
+        return None
+    text = str(name).strip()
+    if not text:
+        return None
+    try:
+        ZoneInfo(text)
+    except Exception:
+        return None
+    return text
+
+
+def _parse_cron_field(part: str, lo: int, hi: int) -> frozenset[int] | None:
+    """One cron field. ``hi == 7`` is day-of-week, where 7 means Sunday."""
+    span_hi = hi
+    store_hi = 6 if hi == 7 else hi
+    values: set[int] = set()
+    for piece in part.split(","):
+        piece = piece.strip()
+        if not piece:
+            return None
+        step = 1
+        base = piece
+        if "/" in piece:
+            base, step_text = piece.split("/", 1)
+            if not step_text.isdigit() or int(step_text) < 1:
+                return None
+            step = int(step_text)
+            base = base.strip()
+        if base == "*":
+            start, end = lo, store_hi
+        elif "-" in base:
+            left, right = base.split("-", 1)
+            if not (left.isdigit() and right.isdigit()):
+                return None
+            start, end = int(left), int(right)
+            if start < lo or end > span_hi or start > end:
+                return None
+        else:
+            if not base.isdigit():
+                return None
+            start = end = int(base)
+            if start < lo or start > span_hi:
+                return None
+        for number in range(start, end + 1, step):
+            stored = 0 if hi == 7 and number == 7 else number
+            if stored < lo or stored > store_hi:
+                return None
+            values.add(stored)
+    return frozenset(values) if values else None
+
+
+def parse_cron(expr: str) -> CronFields | None:
+    """Five-field cron: minute hour day-of-month month day-of-week.
+
+    When both day-of-month and day-of-week are restricted (neither is ``*``),
+    a time matches if either field matches. ``None`` means the expression is
+    not five valid fields.
+    """
+    parts = str(expr or "").split()
+    if len(parts) != 5:
+        return None
+    ranges = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+    parsed: list[frozenset[int]] = []
+    for part, (lo, hi) in zip(parts, ranges, strict=True):
+        field = _parse_cron_field(part, lo, hi)
+        if field is None:
+            return None
+        parsed.append(field)
+    return CronFields(
+        minute=parsed[0],
+        hour=parsed[1],
+        dom=parsed[2],
+        month=parsed[3],
+        dow=parsed[4],
+        dom_star=parts[2] == "*",
+        dow_star=parts[4] == "*",
+    )
+
+
+def _cron_matches(moment: datetime, fields: CronFields) -> bool:
+    if moment.minute not in fields.minute or moment.hour not in fields.hour:
+        return False
+    if moment.month not in fields.month:
+        return False
+    # datetime.weekday() is Monday=0. Cron day-of-week is Sunday=0.
+    cron_dow = (moment.weekday() + 1) % 7
+    dom_ok = moment.day in fields.dom
+    dow_ok = cron_dow in fields.dow
+    if fields.dom_star and fields.dow_star:
+        return True
+    if fields.dom_star:
+        return dow_ok
+    if fields.dow_star:
+        return dom_ok
+    return dom_ok or dow_ok
+
+
+def _localize_wall(naive: datetime, tz: ZoneInfo) -> datetime | None:
+    """First instant of this wall clock, or None if the zone skips that minute.
+
+    A repeated hour (fall back) keeps fold 0, so the schedule fires once.
+    """
+    aware = naive.replace(tzinfo=tz)
+    try:
+        back = datetime.fromtimestamp(aware.timestamp(), tz).replace(tzinfo=None)
+    except (OverflowError, OSError, ValueError):
+        return None
+    if back != naive:
+        return None
+    return aware
+
+
+# Four years so 29 Feb is reachable. A cron that never matches must not turn
+# into a daily fire: the caller gets a far-future instant instead.
+_CRON_SEARCH_MINUTES = 366 * 4 * 24 * 60
+
+
+def _next_cron(expr: str, after: float, tz_name: str) -> float:
+    fields = parse_cron(expr)
+    tz = ZoneInfo(tz_name or "UTC")
+    if fields is None:
+        return after + 86400.0
+    local = datetime.fromtimestamp(after, tz)
+    cursor = local.replace(second=0, microsecond=0, fold=0).replace(tzinfo=None)
+    for _ in range(_CRON_SEARCH_MINUTES):
+        cursor += timedelta(minutes=1)
+        if not _cron_matches(cursor, fields):
+            continue
+        localized = _localize_wall(cursor, tz)
+        if localized is None:
+            continue
+        stamp = localized.timestamp()
+        if stamp > after:
+            return stamp
+    return after + (366 * 4 * 86400.0)
+
+
+def _cron_expr_for_clock(norm: dict[str, Any]) -> str:
+    minute = int(norm["at_minute"])
+    hour = int(norm["at_hour"])
+    if norm["kind"] == "weekly":
+        dows = ",".join(str((int(day) + 1) % 7) for day in norm["weekdays"])
+        return f"{minute} {hour} * * {dows}"
+    return f"{minute} {hour} * * *"
+
+
 def normalize_spec(spec: dict[str, Any] | None) -> dict[str, Any]:
     """Coerce anything into a valid spec — a malformed one must never wedge tick."""
     spec = dict(spec or {})
     kind = str(spec.get("kind") or "daily")
+    if cron_enabled() and kind == "cron":
+        expr = " ".join(str(spec.get("expr") or "").split())
+        if parse_cron(expr) is not None:
+            return {"kind": "cron", "expr": expr, "tz": valid_tz(spec.get("tz")) or "UTC"}
+        kind = "daily"
     if kind == "interval":
         seconds = int(spec.get("seconds") or 3600)
-        return {"kind": "interval", "seconds": max(MIN_INTERVAL_SECONDS, seconds)}
-    hour = int(spec.get("at_hour", DEFAULT_HOUR)) % 24
-    minute = int(spec.get("at_minute", DEFAULT_MINUTE)) % 60
-    if kind == "weekly":
-        days = sorted({int(d) % 7 for d in (spec.get("weekdays") or [0])})
-        return {"kind": "weekly", "weekdays": days or [0], "at_hour": hour, "at_minute": minute}
-    return {"kind": "daily", "at_hour": hour, "at_minute": minute}
+        result: dict[str, Any] = {
+            "kind": "interval",
+            "seconds": max(MIN_INTERVAL_SECONDS, seconds),
+        }
+    else:
+        hour = int(spec.get("at_hour", DEFAULT_HOUR)) % 24
+        minute = int(spec.get("at_minute", DEFAULT_MINUTE)) % 60
+        if kind == "weekly":
+            days = sorted({int(d) % 7 for d in (spec.get("weekdays") or [0])})
+            result = {
+                "kind": "weekly",
+                "weekdays": days or [0],
+                "at_hour": hour,
+                "at_minute": minute,
+            }
+        else:
+            result = {"kind": "daily", "at_hour": hour, "at_minute": minute}
+    if cron_enabled():
+        tz = valid_tz(spec.get("tz"))
+        if tz:
+            result = dict(result)
+            result["tz"] = tz
+    return result
 
 
 def next_occurrence(spec: dict[str, Any] | None, after: float) -> float:
-    """First run strictly after ``after`` (epoch seconds, local time)."""
+    """First run strictly after ``after`` (epoch seconds).
+
+    Without a zone this is local time, the same interval/daily/weekly path as
+    before. The cron and ``tz`` branches run only when ``normalize_spec`` kept
+    them, and it keeps them only while ``CORTEX_ROUTINES_CRON=1``.
+    """
     norm = normalize_spec(spec)
     if norm["kind"] == "interval":
         return after + norm["seconds"]
+    if norm["kind"] == "cron":
+        return _next_cron(norm["expr"], after, str(norm.get("tz") or "UTC"))
+    if norm.get("tz"):
+        return _next_cron(_cron_expr_for_clock(norm), after, str(norm["tz"]))
 
     hour, minute = norm["at_hour"], norm["at_minute"]
     allowed = norm["weekdays"] if norm["kind"] == "weekly" else list(range(7))
@@ -217,11 +419,26 @@ def next_occurrence(spec: dict[str, Any] | None, after: float) -> float:
     return after + 86400  # unreachable for valid specs; never return the past
 
 
+def _approx_cron_seconds(expr: str) -> int:
+    parsed = parse_cron(expr)
+    if parsed is None:
+        return 86400
+    if len(parsed.minute) >= 60:
+        return MIN_INTERVAL_SECONDS
+    if len(parsed.minute) > 1 and len(parsed.hour) >= 24:
+        return max(MIN_INTERVAL_SECONDS, int(3600 / len(parsed.minute)))
+    if len(parsed.hour) >= 24 and parsed.dom_star and parsed.dow_star:
+        return 3600
+    return 86400
+
+
 def approx_interval_seconds(spec: dict[str, Any] | None) -> int:
     """Legacy interval_seconds column stays populated so old readers still work."""
     norm = normalize_spec(spec)
     if norm["kind"] == "interval":
         return int(norm["seconds"])
+    if norm["kind"] == "cron":
+        return _approx_cron_seconds(norm["expr"])
     if norm["kind"] == "daily":
         return 86400
     days = len(norm["weekdays"]) or 1
@@ -234,6 +451,8 @@ _ORDINAL_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturd
 def describe(spec: dict[str, Any] | None) -> str:
     """Human sentence for the UI — never show a user raw seconds."""
     norm = normalize_spec(spec)
+    if norm["kind"] == "cron":
+        return f"Cron {norm['expr']} ({norm.get('tz') or 'UTC'})"
     if norm["kind"] == "interval":
         seconds = norm["seconds"]
         for unit_seconds, label in ((604800, "week"), (86400, "day"), (3600, "hour"), (60, "minute")):
@@ -243,15 +462,16 @@ def describe(spec: dict[str, Any] | None) -> str:
         return f"Every {seconds} seconds"
 
     clock = _format_clock(norm["at_hour"], norm["at_minute"])
+    zone = f" ({norm['tz']})" if norm.get("tz") else ""
     if norm["kind"] == "daily":
-        return f"Every day at {clock}"
+        return f"Every day at {clock}{zone}"
     days = norm["weekdays"]
     if days == [0, 1, 2, 3, 4]:
-        return f"Every weekday at {clock}"
+        return f"Every weekday at {clock}{zone}"
     if days == [5, 6]:
-        return f"Every weekend day at {clock}"
+        return f"Every weekend day at {clock}{zone}"
     names = ", ".join(_ORDINAL_DAYS[d] for d in days)
-    return f"Every {names} at {clock}"
+    return f"Every {names} at {clock}{zone}"
 
 
 def _format_clock(hour: int, minute: int) -> str:
