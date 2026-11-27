@@ -61,7 +61,7 @@ dev = [
     "respx>=0.21",
     "ruff>=0.6",
     "mypy>=1.11",
-    "import-linter>=2.0",
+    "import-linter>=2.16,<3",
     "types-PyYAML>=6",
 ]
 local-inference = ["llama-cpp-python>=0.2"]
