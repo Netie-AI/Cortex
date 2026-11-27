@@ -1,6 +1,6 @@
 # STATUS.md
 
-**Last updated:** 2026-10-09 MYT | **Main:** `f04995bb` (#376 merged, lock-only)
+**Last updated:** 2026-11-27 | **Main:** `f04995bb` (#376 merged, lock-only)
 Rules and merge flow: `AGENTS.md`. Live list: `TASK.md`. AI-first law: `CLAUDE.md` section 9.
 This file records pointers. It does not certify a gate.
 
@@ -10,6 +10,12 @@ This file records pointers. It does not certify a gate.
 an IANA time zone, exponential retry, and a catch-up or skip policy for missed
 fires. Interval, daily, and weekly schedules are unchanged while the flag is off.
 This line is a pointer, not a CI result. Tracks AirGPT issue 98.
+
+## FreeRoute header lock
+
+`complete()` copies Retry-After off the HTTP response the stdlib client
+already holds. Each chat call uses its own opener. Chat body bytes are unchanged.
+This line is a pointer, not a CI result. CORTEX-FREEROUTE-LOCK-01.
 
 ## Call deadline
 

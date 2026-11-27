@@ -41,8 +41,6 @@ import re
 import sqlite3
 import threading
 import time
-import urllib.error
-import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -111,10 +109,6 @@ _REDACT = re.compile(
 
 _log = logging.getLogger(__name__)
 _lock = threading.Lock()
-# Held only while complete() swaps urllib.request.build_opener to read
-# Retry-After. openvault_client.request_json does not return response headers,
-# and that module stays untouched. The swap is restored before the lock drops.
-_header_capture_lock = threading.Lock()
 _response_headers: ContextVar[dict[str, str] | None] = ContextVar(
     "freeroute_ov_response_headers", default=None
 )
@@ -872,8 +866,9 @@ def _as_retry_seconds(value: Any) -> int | None:
 def note_response_headers(headers: Mapping[str, str] | None) -> None:
     """Remember response headers for this task. Empty clears them.
 
-    The real urllib client fills these inside complete(). A test double that
-    replaces request_json can call this with the Retry-After it wants observed.
+    The stdlib client copies these off the response it already holds.
+    A test double that replaces request_json can call this with the
+    Retry-After it wants observed.
     """
     if not headers:
         _response_headers.set({})
@@ -888,49 +883,21 @@ def take_response_headers() -> dict[str, str]:
     return dict(found or {})
 
 
-def _header_map(headers: Any) -> dict[str, str]:
-    if headers is None:
-        return {}
-    try:
-        pairs = list(headers.items())
-    except (AttributeError, TypeError):
-        return {}
-    return {str(key): str(value) for key, value in pairs}
-
-
 def _call_noting_headers(send: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    """Call the chat transport and keep Retry-After from a real urllib response.
+    """Call the chat transport and keep Retry-After from its HTTP response.
 
-    The JSON body is whatever the caller already built. A transport that never
-    builds an opener can note headers itself; those stay when urllib saw nothing.
+    The JSON body is whatever the caller already built. The stdlib client
+    copies headers off the response or HTTPError it already holds, into a
+    list that belongs to this call. ``urllib.request.build_opener`` stays
+    the stdlib function. A transport that notes headers itself keeps them
+    when this client saw no HTTP response.
     """
-    box: dict[str, dict[str, str]] = {}
-    real_build = urllib.request.build_opener
-
-    def build_opener(*opener_args: Any, **opener_kwargs: Any) -> Any:
-        opener = real_build(*opener_args, **opener_kwargs)
-        real_open = opener.open
-
-        def open_and_note(req: Any, *open_args: Any, **open_kwargs: Any) -> Any:
-            try:
-                resp = real_open(req, *open_args, **open_kwargs)
-            except urllib.error.HTTPError as exc:
-                box["headers"] = _header_map(getattr(exc, "headers", None))
-                raise
-            box["headers"] = _header_map(getattr(resp, "headers", None))
-            return resp
-
-        opener.open = open_and_note
-        return opener
-
-    with _header_capture_lock:
-        urllib.request.build_opener = build_opener
-        try:
-            result = send(*args, **kwargs)
-        finally:
-            urllib.request.build_opener = real_build
-    if "headers" in box:
-        note_response_headers(box["headers"])
+    seen: list[dict[str, str]] = []
+    if send is _STDLIB_REQUEST:
+        kwargs["headers_out"] = seen
+    result = send(*args, **kwargs)
+    if seen:
+        note_response_headers(seen[-1])
     return result
 
 
@@ -1595,7 +1562,7 @@ def complete(
         body["strict"] = True
 
     # Clear first so a transport that does not note headers cannot reuse an
-    # older response. A real urllib response replaces this inside the call.
+    # older response. A real HTTP response replaces this from that call.
     note_response_headers({})
     send, impl = _transport()
     # CORTEX_CALL_DEADLINE off: timeout and the stdlib client are untouched,

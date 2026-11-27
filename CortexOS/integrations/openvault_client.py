@@ -79,6 +79,22 @@ def _json_dict(raw: bytes) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _response_header_map(headers: Any) -> dict[str, str]:
+    """Copy response headers before the socket closes. Empty when there are none."""
+    if headers is None:
+        return {}
+    try:
+        pairs = list(headers.items())
+    except (AttributeError, TypeError):
+        return {}
+    return {str(key): str(value) for key, value in pairs}
+
+
+def _keep_response_headers(headers_out: list[dict[str, str]] | None, headers: Any) -> None:
+    if headers_out is not None:
+        headers_out.append(_response_header_map(headers))
+
+
 def request_json(
     method: str,
     path: str,
@@ -87,12 +103,18 @@ def request_json(
     headers: Mapping[str, str] | None = None,
     timeout: float = 5.0,
     base: str | None = None,
+    headers_out: list[dict[str, str]] | None = None,
 ) -> tuple[int, dict[str, Any] | None]:
     """HTTP JSON with the status code; ``(0, None)`` when OpenVault is unreachable.
 
     Error bodies are parsed too, so callers name a 401 / 403 / 429 instead of
     collapsing every refusal into "unreachable". Loopback bases skip proxies:
     a system proxy must never receive a bearer meant for 127.0.0.1. Never raises.
+
+    ``headers_out``, when passed, receives one header dict after an HTTP
+    response or ``HTTPError``. It stays empty when OpenVault is unreachable.
+    The return value is still ``(status, body)``. Request body bytes are
+    ``json.dumps`` of the dict with default separators, same as before.
     """
     root = base or openvault_base_url()
     url = f"{root}{path}"
@@ -108,8 +130,10 @@ def request_json(
         else:
             opener = urllib.request.build_opener()
         with opener.open(req, timeout=timeout) as resp:
+            _keep_response_headers(headers_out, getattr(resp, "headers", None))
             return int(resp.status), _json_dict(resp.read())
     except urllib.error.HTTPError as exc:
+        _keep_response_headers(headers_out, getattr(exc, "headers", None))
         try:
             raw = exc.read()
         except OSError:

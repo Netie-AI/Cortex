@@ -2,6 +2,12 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-FREEROUTE-LOCK-01 -- 2026-11-27
+
+FreeRoute copies Retry-After from the response or HTTPError the stdlib
+client already holds, on that call only. Concurrent `complete()` calls
+overlap. Chat request body bytes are unchanged.
+
 ## SCHED-01 cron, zone, retry -- 2026-11-27
 
 Off unless `CORTEX_ROUTINES_CRON=1`. On, a routine accepts a five-field cron
