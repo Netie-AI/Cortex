@@ -20,8 +20,8 @@ This line is a pointer, not a CI result.
 
 ## FreeRoute header lock
 
-`complete()` copies Retry-After off the HTTP response the stdlib client
-already holds. Each chat call uses its own opener. Chat body bytes are unchanged.
+`complete()` copies Retry-After off a per-call opener. It does not replace
+`urllib.request.build_opener`. Chat body bytes are unchanged.
 This line is a pointer, not a CI result. CORTEX-FREEROUTE-LOCK-01.
 
 ## Call deadline

@@ -11,9 +11,9 @@ omits `strict`. Flag off, the chat body bytes are unchanged.
 
 ## CORTEX-FREEROUTE-LOCK-01 -- 2026-11-27
 
-FreeRoute copies Retry-After from the response or HTTPError the stdlib
-client already holds, on that call only. Concurrent `complete()` calls
-overlap. Chat request body bytes are unchanged.
+FreeRoute copies Retry-After from the response or HTTPError of a per-call
+opener. That opener is not installed as ``urllib.request.build_opener``.
+Concurrent `complete()` calls overlap. Chat request body bytes are unchanged.
 
 ## SCHED-01 cron, zone, retry -- 2026-11-27
 

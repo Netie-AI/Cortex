@@ -35,12 +35,15 @@ refusals are recorded but never scored.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -944,22 +947,79 @@ def take_response_headers() -> dict[str, str]:
     return dict(found or {})
 
 
+def _response_header_map(headers: Any) -> dict[str, str]:
+    """Copy headers before the socket closes. Empty when there are none."""
+    if headers is None:
+        return {}
+    try:
+        pairs = list(headers.items())
+    except (AttributeError, TypeError):
+        return {}
+    return {str(key): str(value) for key, value in pairs}
+
+
+def _json_dict(raw: bytes) -> dict[str, Any] | None:
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _stdlib_request_noting_headers(
+    method: str,
+    path: str,
+    *,
+    body: Mapping[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: float = 5.0,
+    base: str | None = None,
+) -> tuple[int, dict[str, Any] | None]:
+    """One chat HTTP call. Same body bytes as ``request_json``, plus headers.
+
+    ``request_json`` returns ``(status, body)`` and drops Retry-After. This
+    call builds an opener for itself and discards it. It does not assign
+    ``urllib.request.build_opener``, so other calls are not serialized and
+    the stdlib function stays the stdlib function.
+    """
+    root = base or openvault_client.openvault_base_url()
+    url = f"{root}{path}"
+    payload = json.dumps(dict(body)).encode("utf-8") if body is not None else None
+    sent = {"Accept": "application/json"}
+    if payload is not None:
+        sent["Content-Type"] = "application/json"
+    sent.update(dict(headers or {}))
+    try:
+        req = urllib.request.Request(url, data=payload, method=method.upper(), headers=sent)
+        if openvault_client.is_loopback_url(root):
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        else:
+            opener = urllib.request.build_opener()
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                note_response_headers(_response_header_map(getattr(resp, "headers", None)))
+                return int(resp.status), _json_dict(resp.read())
+        except urllib.error.HTTPError as exc:
+            note_response_headers(_response_header_map(getattr(exc, "headers", None)))
+            try:
+                raw = exc.read()
+            except OSError:
+                raw = b""
+            return int(exc.code), _json_dict(raw)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return 0, None
+
+
 def _call_noting_headers(send: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Call the chat transport and keep Retry-After from its HTTP response.
 
     The JSON body is whatever the caller already built. The stdlib client
-    copies headers off the response or HTTPError it already holds, into a
-    list that belongs to this call. ``urllib.request.build_opener`` stays
-    the stdlib function. A transport that notes headers itself keeps them
-    when this client saw no HTTP response.
+    is served by a per-call opener in this module. A replacement transport
+    notes headers itself. ``urllib.request.build_opener`` is not replaced.
     """
-    seen: list[dict[str, str]] = []
     if send is _STDLIB_REQUEST:
-        kwargs["headers_out"] = seen
-    result = send(*args, **kwargs)
-    if seen:
-        note_response_headers(seen[-1])
-    return result
+        return _stdlib_request_noting_headers(*args, **kwargs)
+    return send(*args, **kwargs)
 
 
 def _retry_after_s(data: Any, headers: Mapping[str, str]) -> int | None:
