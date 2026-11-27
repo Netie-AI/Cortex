@@ -86,6 +86,30 @@ UNBOUND = "plan_sql_reading_unbound"
 UNAVAILABLE = "plan_sql_reading_unavailable"
 
 
+#: Every reading id the store minted in the running test (#458).
+_MINTED: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _minted_ids(monkeypatch: pytest.MonkeyPatch):
+    """#458: ids are minted by a counter here, not ``secrets.token_urlsafe``.
+
+    A random id once held "sku" by chance and failed a substring check for
+    table words. The property is that the id is opaque: it is the one the
+    store minted, not text taken from the SQL. A counter makes every check on
+    ids deterministic; ``_assert_readings_offered`` checks the provenance.
+    """
+    _MINTED.clear()
+
+    def mint() -> str:
+        _MINTED.append(f"opaque-{len(_MINTED) + 1:06d}")
+        return _MINTED[-1]
+
+    monkeypatch.setattr(plan_readings, "new_reading_id", mint)
+    yield
+    _MINTED.clear()
+
+
 @pytest.fixture(autouse=True)
 def _readings_on(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(plan_sql_vote.ENABLED_ENV, "1")
@@ -201,9 +225,8 @@ def _assert_readings_offered(body: dict[str, Any], sqls: tuple[str, ...]) -> Non
         count = reading["row_count"]
         shown = f"({i}) {reading['statement']}, {count} {'row' if count == 1 else 'rows'}."
         assert shown in body["answer"], body["answer"]
-        # The id is opaque: no SQL and no table text in it.
-        for word in ("select", "from", "transactions", "txn_type", "sku"):
-            assert word not in reading["reading_id"].lower()
+        # The id is opaque: the one the store minted, not text from the SQL (#458).
+        assert reading["reading_id"] in _MINTED, (reading["reading_id"], _MINTED)
     assert body["answer"] == plan_sql_ask.reconfirm_answer(
         body["reconfirm"]["why"],
         body["reconfirm"]["closest_question"],
@@ -402,8 +425,11 @@ def test_split_offer_never_prints_case_labels(
         assert "/*" not in statement and "--" not in statement
     held = _held(bucket_reading["reading_id"])
     if bucket is BUCKET_SQL_COMMENTED:
-        # The comment reached the SQL describe was given: the channel is real.
-        assert "heavy or light" in held.served_sql
+        # The model wrote the comment. Since JOIN-GRANT-ZW part 2 (#408) the SQL
+        # gate serves SQL without comments, so the SQL describe is given no
+        # longer carries it; the labels above are still never printed.
+        assert "heavy or light" in held.model_text
+        assert "heavy or light" not in held.served_sql
 
     # Picked, the bucket reading is served, and only then do its values appear.
     picked = _json(_pick(dms_http, bucket_reading["reading_id"]))
@@ -1626,3 +1652,68 @@ def test_pick_after_eviction_is_409(
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["code"] == UNBOUND
     assert len(execute_spy) == spied
+
+
+# -- #458: the id check tests provenance, not a random string ------------------------
+
+
+def test_must_fail_an_id_built_from_the_sql_is_caught(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """Put a table name into the id instead of the minted one: the offer check goes red."""
+    sqls = (GOOD_SQL, SKU_SQL, KG_SQL)
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+    body = _offer(dms_http)
+    _assert_readings_offered(body, sqls)
+    leaked = json.loads(json.dumps(body))
+    leaked["reconfirm"]["readings"][1]["reading_id"] = "transactions-sku-1"
+    with pytest.raises(AssertionError):
+        _assert_readings_offered(leaked, sqls)
+
+
+def test_must_pass_a_minted_id_that_happens_to_hold_a_table_word(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The flake's id (#447): random text holding "sku" is still opaque."""
+    sqls = (GOOD_SQL, SKU_SQL, KG_SQL)
+    flake_ids = iter(["-kp7ssku-cdskxa0gdslzw", "yom9qt9qec0eskugkzqpza", "opaque-plain"])
+
+    def mint() -> str:
+        _MINTED.append(next(flake_ids))
+        return _MINTED[-1]
+
+    monkeypatch.setattr(plan_readings, "new_reading_id", mint)
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+    body = _offer(dms_http)
+    _assert_readings_offered(body, sqls)
+    assert {r["reading_id"] for r in _readings(body)} <= set(_MINTED)
+
+
+_REAL_MINTER = plan_readings.new_reading_id
+
+
+def test_the_real_minter_serves_its_own_tokens_one_per_reading(
+    armed_openvault, dms_http, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The counter stands in for the minter elsewhere; this runs the real one.
+
+    Every served id is exactly a ``secrets.token_urlsafe(16)`` output, one call
+    per reading, all distinct: nothing about the SQL reaches the id."""
+    calls: list[int] = []
+    tokens = iter(["tok-a-" + "x" * 16, "tok-b-" + "y" * 16, "tok-c-" + "z" * 16])
+
+    def token_urlsafe(nbytes: int) -> str:
+        calls.append(nbytes)
+        return next(tokens)
+
+    monkeypatch.setattr(plan_readings, "new_reading_id", _REAL_MINTER)
+    monkeypatch.setattr(plan_readings.secrets, "token_urlsafe", token_urlsafe)
+    sqls = (GOOD_SQL, SKU_SQL, KG_SQL)
+    _script_split(armed_openvault, monkeypatch, sqls)
+    dms_http.bind_session(SESSION, GRANT)
+    ids = [r["reading_id"] for r in _readings(_offer(dms_http))]
+    assert len(ids) == len(sqls) == len(set(ids))
+    assert set(ids) <= {"tok-a-" + "x" * 16, "tok-b-" + "y" * 16, "tok-c-" + "z" * 16}
+    assert calls == [16] * len(ids)

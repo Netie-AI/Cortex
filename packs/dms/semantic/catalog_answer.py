@@ -36,7 +36,18 @@ _METADATA = re.compile(r"\b(?:meta\s*data|metadata)\b", re.I)
 
 
 def is_catalog_intent(question: str) -> bool:
-    """True when the user is asking what they can query, not asking for data."""
+    """True when the user is asking what they can query, not asking for data.
+
+    #426: the model that chooses the metric decides, and a second call checks
+    it (``catalog_decision``); the patterns below are not read. Unarmed, that is
+    False: no listing. With ``CORTEX_CATALOG_BY_MODEL=0`` main's patterns decide.
+    """
+    from CortexOS.dms.metric_choice import catalog_by_model_enabled
+
+    if catalog_by_model_enabled():
+        from CortexOS.dms.metric_choice import catalog_decision
+
+        return catalog_decision(question)
     text = question or ""
     return bool(
         _CAPABILITY.search(text)

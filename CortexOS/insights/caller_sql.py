@@ -35,6 +35,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from CortexOS.identifier_fold import fold_identifier
+from CortexOS.sql_codepoints import hidden_codepoint_reason
 
 #: ``code`` on a refusal whose only fault is a column the caller did not declare
 #: (or a column qualifier that binds to nothing). The table check passed.
@@ -298,6 +299,10 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
     text = (sql or "").strip()
     if not text:
         return _refuse("empty sql")
+    hidden = hidden_codepoint_reason(text)
+    if hidden:
+        # Checked before the parse: the tree would not hold what DuckDB reads.
+        return _refuse(hidden)
     try:
         statements = sqlglot.parse(text, read="duckdb")
     except RecursionError:
@@ -379,7 +384,8 @@ def validate_caller_sql(sql: str, declared: Mapping[str, Sequence[str]]) -> dict
         return {**_refuse(refusal, tables), "code": UNDECLARED_COLUMN}
 
     _cap_limit(stmt)
-    out_sql = stmt.sql(dialect="duckdb")
+    # No comments in served SQL: see execution.manifest._served (JOIN-GRANT-ZW part 2).
+    out_sql = stmt.sql(dialect="duckdb", comments=False)
     if checked_any:
         check = "caller catalog: tables and declared columns"
     else:

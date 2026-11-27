@@ -14,6 +14,8 @@ becomes ``NO_CLOSEST``: Yes and No then both answer not found.
 
 from __future__ import annotations
 
+import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -55,6 +57,41 @@ CHECK_INSTRUCTIONS = (
 )
 
 
+# #426: the chooser may answer ``catalog`` (the person asks what exists or what
+# can be asked) and the check confirms it; the catalog word rule is not
+# consulted. On by default. ``CORTEX_CATALOG_BY_MODEL=0`` restores main's rule.
+CATALOG_BY_MODEL_ENV = "CORTEX_CATALOG_BY_MODEL"
+CATALOG_CHOICE = "catalog"
+
+CHOOSE_CATALOG_INSTRUCTIONS = (
+    " One more value is allowed: metric_id is catalog when the person asks "
+    "what data, tables, columns, metrics or questions exist or can be asked, "
+    "in any language, and does not ask for a value, a count or records. A "
+    "question that asks for a metric's result is never catalog, even when it "
+    "uses words such as metrics, tables, columns, list or metadata."
+)
+
+CHECK_CATALOG_INSTRUCTIONS = (
+    "Is the person asking what data, tables, columns, metrics or questions "
+    "exist or can be asked, and not asking for a value, a count or records? "
+    "Return JSON and nothing else, with keys agrees and unsure, both booleans. "
+    "agrees is true only when a list of what can be asked is the answer they "
+    "want. unsure is true when you cannot tell. If unsure, agrees is false."
+)
+
+
+def catalog_by_model_enabled() -> bool:
+    value = (os.environ.get(CATALOG_BY_MODEL_ENV) or "").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def choose_instructions() -> str:
+    """The chooser's system prompt. Flag off, it is ``CHOOSE_INSTRUCTIONS`` unchanged."""
+    if catalog_by_model_enabled():
+        return CHOOSE_INSTRUCTIONS + CHOOSE_CATALOG_INSTRUCTIONS
+    return CHOOSE_INSTRUCTIONS
+
+
 @dataclass(slots=True)
 class MetricSelection:
     metric_id: str = "none"
@@ -77,6 +114,9 @@ class MetricDecision:
     serve: bool
     selection: MetricSelection
     why: str
+    # The model chose the catalog and the check agreed. ``serve`` stays False:
+    # no metric runs, and the selection reads as none to every other caller.
+    catalog: bool = False
 
 
 class MetricChoicePort(Protocol):
@@ -105,12 +145,19 @@ class _UnarmedChoice:
 
 
 _port: MetricChoicePort | None = None
+# #426: ``catalog_decision`` runs the choose-and-check first in an ask; the
+# ``decide_metric`` call that follows for the same question and port takes that
+# decision instead of asking the model again. Read once, then cleared.
+_HANDOFF: ContextVar[tuple[str, object, MetricDecision] | None] = ContextVar(
+    "cortex_metric_handoff", default=None
+)
 
 
 def register_metric_choice(port: MetricChoicePort) -> None:
     """Install the port. A later call replaces it."""
     global _port
     _port = port
+    _HANDOFF.set(None)
 
 
 def register_default_metric_choice(port: MetricChoicePort) -> None:
@@ -123,6 +170,7 @@ def register_default_metric_choice(port: MetricChoicePort) -> None:
 def clear_metric_choice() -> None:
     global _port
     _port = None
+    _HANDOFF.set(None)
 
 
 def resolve_metric_choice() -> MetricChoicePort:
@@ -143,6 +191,18 @@ def _choose_and_check(question: str) -> MetricDecision:
     port = resolve_metric_choice()
     selection = port.choose(question)
     metric_id = (selection.metric_id or "none").strip()
+    if metric_id.lower() == CATALOG_CHOICE:
+        agreed = False
+        if catalog_by_model_enabled():
+            if metric_check_enabled():
+                verdict = port.check(question, selection)
+                agreed = verdict.agrees is True and verdict.unsure is False
+            else:
+                agreed = True
+        # Not agreed is not a refusal: the question goes on to the ladder.
+        selection.metric_id = metric_id = "none"
+        if agreed:
+            return MetricDecision(False, selection, "", catalog=True)
     if metric_id.lower() == "none" or not metric_id:
         why = selection.why or (
             "no declared metric was chosen, so it cannot be served directly"
@@ -185,12 +245,53 @@ def answerable_closest(question: str, closest: str) -> str:
 def decide_metric(question: str) -> MetricDecision:
     """The serve decision: a chosen metric the check accepts, or do not serve.
 
-    Not served, the selection carries the closest answerable question.
+    Not served, the selection carries the closest answerable question. A
+    decision ``catalog_decision`` just made for this question and port is
+    used once instead of a second round of model calls.
     """
+    held = _HANDOFF.get()
+    if held is not None:
+        _HANDOFF.set(None)
+        asked, port, decision = held
+        if asked == question and port is _port:
+            return decision
     decision = _choose_and_check(question)
-    if not decision.serve:
+    if not decision.serve and not decision.catalog:
         selection = decision.selection
         selection.closest_question = answerable_closest(
             question, selection.closest_question
         )
     return decision
+
+
+def catalog_decision(question: str) -> bool:
+    """True when the model chose the catalog and the check agreed (#426).
+
+    ``answer()`` (frozen) asks this before its certified match, so a question
+    a certified query answers is not put to the model here: it keeps its
+    certified serve and costs no model call. A failed decision (a strict
+    FreeRoute refusal, any error) is not the catalog and hands nothing on;
+    the error surfaces where it did before, at the metric choice. Any other
+    decision is handed to the next ``decide_metric`` call for the same
+    question, so the ask makes one choose-and-check, not two. This never
+    reads a held decision: each ask's first call asks the model.
+    """
+    _HANDOFF.set(None)
+    if _certified(question):
+        return False
+    try:
+        decision = decide_metric(question)
+    except Exception:  # noqa: BLE001 - not the catalog; decide_metric raises it again
+        return False
+    if not decision.catalog:
+        _HANDOFF.set((question, _port, decision))
+    return decision.catalog
+
+
+def _certified(question: str) -> bool:
+    from CortexOS.dms.answer_engine import match_certified
+
+    try:
+        return match_certified(question) is not None
+    except Exception:  # noqa: BLE001 - an unreadable registry certifies nothing
+        return False

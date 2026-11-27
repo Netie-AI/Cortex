@@ -1377,7 +1377,13 @@ def plan_sql_answer(
             failures.append(detail)
             return None
         except SqlGateAbstain as exc:
-            steps.append(StepStamp.cortex("execute", "cortex:execute_sql", "refused: EXPLAIN"))
+            # #440: a stage that ran past the limit is named for that, not EXPLAIN.
+            refused = (
+                "refused: STATEMENT_TIMEOUT"
+                if "STATEMENT_TIMEOUT" in exc.violations
+                else "refused: EXPLAIN"
+            )
+            steps.append(StepStamp.cortex("execute", "cortex:execute_sql", refused))
             _audit_raw(served_sql, exc)
             # Redacted at the source: no caret context, no literal, no post-enforce SQL.
             detail = _hint(f"{GATE_REFUSED}: {exc}")

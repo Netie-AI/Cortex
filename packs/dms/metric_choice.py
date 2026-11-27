@@ -10,13 +10,16 @@ import re
 from typing import Any
 
 from CortexOS.dms.metric_choice import (
+    CATALOG_CHOICE,
+    CHECK_CATALOG_INSTRUCTIONS,
     CHECK_INSTRUCTIONS,
     CHECK_TASK,
-    CHOOSE_INSTRUCTIONS,
     CHOOSE_TASK,
     UNARMED_CLOSEST,
     MetricSelection,
     MetricVerdict,
+    catalog_by_model_enabled,
+    choose_instructions,
 )
 
 
@@ -155,7 +158,7 @@ class OpenVaultMetricChoice:
         out = freeroute.complete(
             CHOOSE_TASK,
             [
-                {"role": "system", "content": CHOOSE_INSTRUCTIONS},
+                {"role": "system", "content": choose_instructions()},
                 {
                     "role": "user",
                     "content": (
@@ -180,6 +183,20 @@ class OpenVaultMetricChoice:
                 why="the metric chooser returned nothing usable, so it cannot be served directly",
             )
         metric_id = str(body.get("metric_id") or "none").strip()
+        if metric_id.lower() == CATALOG_CHOICE and catalog_by_model_enabled():
+            # The engine has this checked before the catalog is served. The
+            # closest question rides along for the reconfirm a rejected
+            # catalog choice falls to.
+            stated = _customer_text(body.get("why"))
+            return MetricSelection(
+                metric_id=CATALOG_CHOICE,
+                closest_question=_customer_text(body.get("closest_question")) or UNARMED_CLOSEST,
+                why=(
+                    f"{stated.rstrip('.')}, so it cannot be served directly"
+                    if stated
+                    else "the metric chooser did not accept a declared metric"
+                ),
+            )
         if metric_id.lower() == "none":
             metric_id = "none"
         else:
@@ -230,21 +247,26 @@ class OpenVaultMetricChoice:
                 unsure=True,
                 why="the metric check is not armed, so it cannot be served directly",
             )
-        try:
-            metric = load_all().metric(selection.metric_id)
-        except SemanticError:
-            return MetricVerdict(agrees=False, unsure=True, why="unknown metric")
-        described = (
-            f"metric_id: {metric.id}\n"
-            f"wordings: {'; '.join(metric.synonyms or [])}\n"
-            f"slots: {selection.slots}\n"
-            f"sql: {' '.join(metric.sql.split())}"
-        )
+        is_catalog = selection.metric_id == CATALOG_CHOICE and catalog_by_model_enabled()
+        if is_catalog:
+            system, user = CHECK_CATALOG_INSTRUCTIONS, f"Question: {question}"
+        else:
+            try:
+                metric = load_all().metric(selection.metric_id)
+            except SemanticError:
+                return MetricVerdict(agrees=False, unsure=True, why="unknown metric")
+            described = (
+                f"metric_id: {metric.id}\n"
+                f"wordings: {'; '.join(metric.synonyms or [])}\n"
+                f"slots: {selection.slots}\n"
+                f"sql: {' '.join(metric.sql.split())}"
+            )
+            system, user = CHECK_INSTRUCTIONS, f"Question: {question}\n\n{described}"
         out = freeroute.complete(
             CHECK_TASK,
             [
-                {"role": "system", "content": CHECK_INSTRUCTIONS},
-                {"role": "user", "content": f"Question: {question}\n\n{described}"},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             temperature=0.0,
             max_tokens=200,
@@ -269,7 +291,8 @@ class OpenVaultMetricChoice:
         raw_agrees = body.get("agrees")
         raw_unsure = body.get("unsure")
         if raw_agrees is True and raw_unsure is False:
-            selection.why = _agreed_why(selection.metric_id)
+            if not is_catalog:
+                selection.why = _agreed_why(selection.metric_id)
             return MetricVerdict(agrees=True, unsure=False, why="")
         if raw_agrees is False and raw_unsure is False:
             return MetricVerdict(agrees=False, unsure=False, why="")

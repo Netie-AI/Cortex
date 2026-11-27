@@ -758,6 +758,65 @@
       "technique": "lateral_table_function",
       "why_it_might_slip": "With LATERAL in the FROM position the function is the only relation in the statement, and there is no named table for the grant check to refuse.",
       "expected": "reject_path"
+    },
+    {
+      "name": "join_grant_408_cte_join",
+      "sql": "WITH u AS (SELECT id, email FROM users) SELECT u.email, o.amount FROM u JOIN orders AS o ON o.user_id = u.id",
+      "technique": "cte_join_two_governed_tables",
+      "why_it_might_slip": "JOIN-GRANT-SUBQUERY-01 (#408): the JOIN's left operand is a CTE name, so a walker that pairs named tables sees one table. The manifest has no join grant; what it owes here is the predicate on both physical references, the one inside the CTE included.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "join_grant_408_derived_table_join",
+      "sql": "SELECT d.email, o.amount FROM (SELECT id, email FROM users) AS d JOIN orders AS o ON o.user_id = d.id",
+      "technique": "derived_table_join_two_governed_tables",
+      "why_it_might_slip": "JOIN-GRANT-SUBQUERY-01 (#408): the FROM operand is a subquery with no table name. Both physical references must still carry their predicate.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "join_grant_408_in_subquery",
+      "sql": "SELECT o.id, o.amount FROM orders AS o WHERE o.user_id IN (SELECT u.id FROM users AS u)",
+      "technique": "in_subquery_semi_join",
+      "why_it_might_slip": "JOIN-GRANT-SUBQUERY-01 (#408): IN is a semi-join written in WHERE, with no JOIN clause to inspect. The users reference inside it must be filtered or the probe reads every tenant's ids.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "join_grant_408_exists_correlated",
+      "sql": "SELECT o.id FROM orders AS o WHERE EXISTS (SELECT 1 FROM users AS u WHERE u.id = o.user_id AND u.email IS NOT NULL)",
+      "technique": "exists_correlated_semi_join",
+      "why_it_might_slip": "JOIN-GRANT-SUBQUERY-01 (#408): a correlated EXISTS joins row by row. An unfiltered users reference turns it into a cross-tenant existence oracle.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "join_grant_408_union_in_derived_table",
+      "sql": "SELECT x.id FROM (SELECT id FROM orders UNION ALL SELECT id FROM users) AS x",
+      "technique": "set_operation_inside_derived_table",
+      "why_it_might_slip": "JOIN-GRANT-SUBQUERY-01 (#408): the statement is a SELECT, so a check for a top-level set operation passes it. Each leg reads a governed table and each needs its own predicate.",
+      "expected": "allow_but_predicate_must_apply"
+    },
+    {
+      "name": "zero_width_space_hides_users",
+      "sql": "SELECT * FROM orders AS o\u200bCROSS\u200bJOIN\u200busers WHERE amount > 0",
+      "technique": "invisible_codepoint_token_split",
+      "why_it_might_slip": "sqlglot keeps U+200B inside the alias o and writes it back unquoted; DuckDB reads it as whitespace. Every check sees only orders, so users is read with no predicate and no path check (JOIN-GRANT-ZW, found by the #408 adversary round).",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Refused before the parse by CortexOS.sql_codepoints: a control, format or separator character is a place the two tokenizers may disagree."
+    },
+    {
+      "name": "word_joiner_hides_users",
+      "sql": "SELECT * FROM orders AS o\u2060CROSS\u2060JOIN\u2060users",
+      "technique": "invisible_codepoint_token_split",
+      "why_it_might_slip": "sqlglot keeps U+2060 inside the alias o and writes it back unquoted; DuckDB reads it as whitespace. Every check sees only orders, so users is read with no predicate and no path check (JOIN-GRANT-ZW, found by the #408 adversary round).",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Refused before the parse by CortexOS.sql_codepoints: a control, format or separator character is a place the two tokenizers may disagree."
+    },
+    {
+      "name": "bom_hides_users_in_a_union",
+      "sql": "SELECT amount FROM orders AS o\ufeffUNION\ufeffALL\ufeffSELECT\ufefftenant_id\ufeffFROM\ufeffusers",
+      "technique": "invisible_codepoint_token_split",
+      "why_it_might_slip": "sqlglot keeps U+FEFF inside the alias o and writes it back unquoted; DuckDB reads it as whitespace. Every check sees only orders, so users is read with no predicate and no path check (JOIN-GRANT-ZW, found by the #408 adversary round).",
+      "expected": "reject_predicate_bypass",
+      "enforcer_note": "Refused before the parse by CortexOS.sql_codepoints: a control, format or separator character is a place the two tokenizers may disagree."
     }
   ],
   "_expected_values": {

@@ -212,6 +212,14 @@ def _check_sql(
 
         declared = {t: list(columns.get(t) or []) for t in allowed}
         return validate_caller_sql(sql, declared)
+    # JOIN-GRANT-ZW: a character sqlglot keeps in a name and DuckDB reads as
+    # whitespace hides a table from every check. Refused here, before the frozen
+    # FreeRoute validator, for the same reason as the catalog check below.
+    from CortexOS.sql_codepoints import hidden_codepoint_reason
+
+    hidden = hidden_codepoint_reason(sql or "")
+    if hidden:
+        return {"ok": False, "sql": None, "tables": [], "reason": hidden, "check": "refused"}
     # The pack session names no catalog. A three-part name is another database.
     # Checked here so the frozen FreeRoute validator is not the allowlist for it.
     from CortexOS.dms.sql_guardrail import catalog_outside_caller
@@ -898,6 +906,15 @@ async def climb(
             # would put this SQL back in the next prompt. The reason names the
             # gate and does not include SQL.
             stop = schema_mod.ungranted_reason(extracted, supplied)
+            if stop == schema_mod.UNANALYSABLE_JOIN:
+                # The SQL gate names what it refuses (a table function,
+                # LATERAL). Its name is the one served. With no such name
+                # the join refusal stands: the statement is refused either way.
+                from CortexOS.insights import caller_sql
+
+                named = caller_sql.validate_caller_sql(extracted, declared or {})
+                if not named.get("ok") and named.get("code") != caller_sql.UNDECLARED_COLUMN:
+                    stop = schema_mod.public_sql_reason(str(named.get("reason") or stop))
             if stop:
                 return _envelope(
                     ok=False,

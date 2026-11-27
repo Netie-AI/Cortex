@@ -23,10 +23,17 @@ from pathlib import Path
 from typing import Any
 
 from CortexOS.dms.ask_scope import current_ask_scope, examples_bound
-from packs.dms.skills.capture import cosine_similarity, normalize_trigger, text_embedding
+from packs.dms.skills.capture import normalize_trigger, text_embedding
 
 # High bar: avoid false skill hits that would skip a better metric route.
 DEFAULT_THRESHOLD = 0.72
+#: Params ``answer()`` drops when it replays a skill (answer_engine.py, frozen),
+#: and the metrics whose slots it reads again from the question instead. Kept
+#: equal to that code; ``_replays_as_captured`` compiles both and compares.
+REPLAY_DROPS = frozenset(
+    {"exclude_skus", "offset_clause", "limit", "direction", "days", "location_code", "warehouse"}
+)
+REPLAY_REREADS_SLOTS = frozenset({"sales_by_value", "sales_by_volume"})
 
 _log = logging.getLogger(__name__)
 
@@ -187,51 +194,45 @@ def find(
     text = normalize_trigger(question)
     if not text:
         return None
-    q_emb = text_embedding(text)
     con = _connect()
     try:
         ensure_schema(con)
-        rows = con.execute(
+        # #426: only the same question (case and spacing aside) replays a
+        # skill. Shared words used to serve a stored metric for a different
+        # question: "how many not delayed shipments" got the delayed count.
+        # A different wording is the model's to decide, so it is not a hit
+        # at any ``threshold``.
+        row = None
+        for candidate in con.execute(
             "SELECT * FROM dms_query_skills WHERE active = 1 AND space_id = ?",
             (space,),
-        ).fetchall()
-        best: dict[str, Any] | None = None
-        best_score = 0.0
-        for row in rows:
-            pat = normalize_trigger(row["trigger_text"] or "")
-            if not pat:
-                continue
-            # Exact normalized match only for a perfect score. Substring
-            # containment used to replay a longer stored question (with
-            # exclusions / windows) onto a shorter unrelated top-N ask.
-            if pat == text:
-                score = 1.0
-            else:
-                try:
-                    emb = json.loads(row["embedding"] or "[]")
-                except (json.JSONDecodeError, TypeError):
-                    emb = []
-                cos = cosine_similarity(q_emb, emb) if emb else 0.0
-                pt, tt = set(pat.split()), set(text.split())
-                jaccard = len(pt & tt) / len(pt | tt) if pt | tt else 0.0
-                score = max(cos, jaccard)
-            if score > best_score:
-                best_score = score
-                try:
-                    params = json.loads(row["params_json"] or "{}")
-                except (json.JSONDecodeError, TypeError):
-                    params = {}
-                best = {
-                    "id": row["id"],
-                    "trigger_text": row["trigger_text"],
-                    "metric_id": row["metric_id"],
-                    "params": params if isinstance(params, dict) else {},
-                    "sql_template": row["sql_template"],
-                    "layer": row["layer"] or "query_skill",
-                    "score": score,
-                }
-        if best is None or best_score < threshold:
+        ):
+            if normalize_trigger(candidate["trigger_text"] or "") == text:
+                row = candidate
+                break
+        if row is None:
             return None
+        try:
+            params = json.loads(row["params_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            params = {}
+        params = params if isinstance(params, dict) else {}
+        # #426 adversary: ``answer()`` replays a skill with REPLAY_DROPS taken
+        # out of its params and, for sales ranks, with slots read again from the
+        # question, so a replay can compile a different query from the one the
+        # skill captured ("bottom 3 suppliers by score" served the top 10). Only
+        # a skill whose replay compiles the same SQL is a hit.
+        if not _replays_as_captured(row["metric_id"], params, question):
+            return None
+        best = {
+            "id": row["id"],
+            "trigger_text": row["trigger_text"],
+            "metric_id": row["metric_id"],
+            "params": params,
+            "sql_template": row["sql_template"],
+            "layer": row["layer"] or "query_skill",
+            "score": 1.0,
+        }
         con.execute(
             "UPDATE dms_query_skills SET support_count = support_count + 1, "
             "last_used_at = ? WHERE id = ? AND space_id = ?",
@@ -241,6 +242,32 @@ def find(
         return best
     finally:
         con.close()
+
+
+def _replays_as_captured(
+    metric_id: str | None, params: dict[str, Any], question: str
+) -> bool:
+    """Whether ``answer()``'s replay of this skill keeps every param it captured.
+
+    The replay drops ``REPLAY_DROPS``: the skill replays only when the query
+    compiles the same without them. ``REPLAY_REREADS_SLOTS`` metrics are the
+    exception: ``answer()`` (frozen, #215) reads every one of their params again
+    from the question with ``_sales_rank_slots``, and the pack reaches the engine
+    only through ``ask_scope`` (#340), so it cannot compare against that reading.
+    They replay as on main. Open: QUERY-SKILL-REREAD-WORD-RULE.
+    """
+    del question  # the re-read happens in answer(); kept for the call shape
+    if not metric_id or metric_id in REPLAY_REREADS_SLOTS:
+        return True
+    from packs.dms.semantic.loader import compile_metric, load_all
+
+    replay = {k: v for k, v in params.items() if k not in REPLAY_DROPS}
+    try:
+        catalog = load_all()
+        captured = compile_metric(catalog, metric_id, params)
+        return bool(captured == compile_metric(catalog, metric_id, replay))
+    except Exception:  # noqa: BLE001 - a skill that does not compile is not replayed
+        return False
 
 
 def capture(

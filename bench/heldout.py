@@ -6,6 +6,16 @@ never on generated SQL alone. Classes: correct / abstained / incorrect.
 Empty rows on an answerable item are always incorrect (SKU-BETA / G4 class),
 even if gold SQL also returned nothing.
 
+HELDOUT-PREDICATE (#344): a match on the one demo database cannot tell a
+dropped filter from a correct one (``spider_country_mean_lead_having`` scored
+correct with no HAVING because every country happened to pass it). An item
+with gold SQL is correct only if the served SQL also returns the gold rows on
+every seeded variant of the tables it reads (``VARIANTS``: row samples and
+numeric jitter, deterministic by seed, reported by id). A mismatch is
+``variant_mismatch:<variant id>``; a served answer with no ``sql_used`` cannot be
+checked and is ``variant_unverifiable:no_sql_used``. Abstain scoring is
+unchanged, and items scored by ``expected_rows`` have no gold SQL to vary.
+
 The frozen split is ``bench/heldout/c7_heldout_v1.yaml``. CI invokes
 ``score_fixture`` on a tiny canned envelope set so the gate can go red
 without serving L2 or calling the answer engine. ``score_engine`` is the
@@ -62,6 +72,67 @@ class HeldoutItem:
     @property
     def answerable(self) -> bool:
         return self.expect == "correct_rows"
+
+
+@dataclass(frozen=True, slots=True)
+class Variant:
+    """One seeded copy of the tables an item reads.
+
+    ``keep``: each row stays when its seeded hash falls under ``rate``.
+    ``jitter``: every numeric value is scaled by a seeded factor in
+    ``[1 - rate, 1 + rate]``.
+    ``skew``: of the tables read, sorted by name, table ``i`` is sampled at
+    ``rate`` when bit ``i`` of ``seed`` is set and kept whole otherwise (seeds
+    1 to 6 cover every split of up to three tables), so a predicate that
+    compares one table's counts with another's can change. Uniform sampling
+    keeps their ratio.
+    ``novel``: values the base never holds. For each value whose seeded hash
+    falls under ``rate`` (per column): an enum-like string (at most
+    ``NOVEL_MAX_DISTINCT`` distinct values) becomes a token no SQL names, a
+    date or timestamp moves by up to ``NOVEL_DAYS`` days, and a signed number
+    changes sign. The change is a function of the value, never of the row, so
+    a dependency the base holds (each SKU has one category) still holds, and a
+    column with a declared value domain (#402) is left alone: the engine
+    refuses to serve a lake holding an undeclared value, so a rewrite that is
+    equal on every lake it serves must not score incorrect. Sampling and scaling only keep or scale values that exist, so
+    ``status NOT IN (<every other status>)`` for ``status = 'DELAYED'``, a date
+    cutoff moved inside an empty gap, or a dropped ``x > 0`` matched gold on
+    every one of them.
+    ``edge``: for each value whose seeded hash falls under ``rate`` (per
+    column, a function of the value as for ``novel``), a date or timestamp becomes one of the gold SQL's date literals moved by -1,
+    0 or +1 day, and a signed number becomes one of its numeric literals plus
+    -1, 0 or +1. A cutoff moved by two days, or ``> 31`` for ``> 30``, then
+    has rows between the two. The literals come from the gold only, so how the
+    served SQL is written cannot change the data.
+    All are pure functions of the base rows and the seed, so a variant id names
+    the same data on every run.
+    """
+
+    id: str
+    kind: str
+    rate: float
+    seed: int
+
+
+VARIANTS: tuple[Variant, ...] = tuple(
+    Variant(f"{kind}{rate:g}-s{seed}", kind, rate, seed)
+    for kind, rate in (
+        ("keep", 0.05),
+        ("keep", 0.2),
+        ("keep", 0.5),
+        ("jitter", 0.5),
+        ("novel", 0.3),
+        ("edge", 0.3),
+    )
+    for seed in (1, 2)
+) + tuple(Variant(f"skew0.05-m{mask}", "skew", 0.05, mask) for mask in range(1, 7))
+NOVEL_MAX_DISTINCT = 12
+NOVEL_DAYS = 60
+_SIGNED = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "FLOAT", "DOUBLE", "DECIMAL",
+           "REAL")
+_TEMPORAL = ("DATE", "TIMESTAMP", "TIMESTAMP_NS", "TIMESTAMP_MS", "TIMESTAMP_S")
+_NUMERIC = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "FLOAT", "DOUBLE", "DECIMAL",
+            "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "REAL")
 
 
 @dataclass(slots=True)
@@ -268,8 +339,247 @@ def _gold_rows(item: HeldoutItem) -> list[dict[str, Any]] | str:
         return f"canonical SQL failed: {exc!r}"
 
 
+def _read_tables(*sqls: str) -> list[str]:
+    """Bare names of the real tables these statements read (CTE names left out)."""
+    import sqlglot
+    from sqlglot import exp
+
+    names: set[str] = set()
+    for sql in sqls:
+        for tree in sqlglot.parse(sql, read="duckdb"):
+            if tree is None:
+                continue
+            ctes = {str(c.alias_or_name).lower() for c in tree.find_all(exp.CTE)}
+            names |= {
+                t.name.lower()
+                for t in tree.find_all(exp.Table)
+                if t.name and t.name.lower() not in ctes
+            }
+    return sorted(names)
+
+
+def _variant_connection(
+    variant: Variant,
+    tables: list[str],
+    base: Path,
+    whole: list[str] = (),
+    edges: tuple[list[str], list[str]] = ([], []),
+) -> Any:
+    """An in-memory DuckDB holding ``variant`` of ``tables`` from ``base`` (read only).
+
+    ``tables`` are the ones the gold SQL reads: only they vary, and the skew bit
+    index runs over the ones that exist, so how the served SQL spells or adds a
+    table cannot move it. ``whole`` (tables only the served SQL reads) are
+    copied unchanged, so a join to a dimension the gold does not read keeps
+    every row it matched on the base.
+    """
+    import duckdb
+
+    con = duckdb.connect(":memory:")
+    con.execute(f"ATTACH '{base.as_posix()}' AS base (READ_ONLY)")
+
+    def columns(table: str) -> list[tuple[Any, Any]]:
+        return con.execute(
+            "SELECT column_name, data_type FROM duckdb_columns() "
+            "WHERE database_name = 'base' AND schema_name = 'main' "
+            "AND lower(table_name) = lower(?) ORDER BY column_index",
+            [table],
+        ).fetchall()
+
+    varied = sorted({t.lower() for t in tables if columns(t)})
+    for table in sorted({t.lower() for t in whole} - set(varied)):
+        if columns(table):
+            qt = '"' + table.replace('"', '""') + '"'
+            con.execute(f"CREATE TABLE {qt} AS SELECT * FROM base.main.{qt}")
+    for index, table in enumerate(varied):
+        cols = columns(table)
+        if variant.kind == "novel":
+            select, where = _novel_select(con, table, cols, variant), ""
+        elif variant.kind == "edge":
+            select, where = _edge_select(cols, variant, edges), ""
+        elif variant.kind in ("keep", "skew"):
+            select = "*"
+            cut = int(variant.rate * 1_000_000)
+            where = f"WHERE (hash(rowid, {variant.seed}) % 1000000) < {cut}"
+            if variant.kind == "skew" and not (variant.seed >> index) & 1:
+                where = ""
+        else:
+            parts = []
+            for name, dtype in cols:
+                q = '"' + str(name).replace('"', '""') + '"'
+                if str(dtype).split("(")[0].upper() in _NUMERIC:
+                    factor = (
+                        f"(1 - {variant.rate} + 2 * {variant.rate} * "
+                        f"((hash(rowid, {variant.seed}, '{name}') % 1000) / 1000.0))"
+                    )
+                    parts.append(f"CAST({q} * {factor} AS {dtype}) AS {q}")
+                else:
+                    parts.append(q)
+            select, where = ", ".join(parts), ""
+        qt = '"' + table.replace('"', '""') + '"'
+        con.execute(f"CREATE TABLE {qt} AS SELECT {select} FROM base.main.{qt} {where}")
+    con.execute("DETACH base")
+    return con
+
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _gold_edges(gold_sql: str) -> tuple[list[str], list[str]]:
+    """The date and numeric literals of the gold SQL, as SQL text, for ``edge``."""
+    import sqlglot
+    from sqlglot import exp
+
+    dates: set[str] = set()
+    numbers: set[str] = set()
+    for tree in sqlglot.parse(gold_sql, read="duckdb"):
+        if tree is None:
+            continue
+        for lit in tree.find_all(exp.Literal):
+            text = str(lit.this)
+            if lit.is_string and _ISO_DATE.match(text):
+                dates.add(text[:10])
+            elif lit.is_number:
+                numbers.add(text)
+    return sorted(dates), sorted(numbers)
+
+
+def _edge_select(
+    cols: list[tuple[Any, Any]], variant: Variant, edges: tuple[list[str], list[str]]
+) -> str:
+    """The ``edge`` projection of one base table (see ``Variant``)."""
+    dates = [f"DATE '{d}' + {k}" for d in edges[0] for k in (-1, 0, 1)]
+    numbers = [f"({n}) + {k}" for n in edges[1] for k in (-1, 0, 1)]
+    cut = int(variant.rate * 1_000_000)
+    parts = []
+    for name, dtype in cols:
+        q = '"' + str(name).replace('"', '""') + '"'
+        lit = "'" + str(name).replace("'", "''") + "'"
+        base_type = str(dtype).split("(")[0].upper()
+        pool = dates if base_type in _TEMPORAL else numbers if base_type in _SIGNED else []
+        if not pool:
+            parts.append(q)
+            continue
+        hit = f"{q} IS NOT NULL AND (hash({q}, {variant.seed}, {lit}) % 1000000) < {cut}"
+        pick = f"(hash({q}, {variant.seed}, {lit}, 'e') % {len(pool)})"
+        cases = " ".join(f"WHEN {i} THEN CAST({v} AS {dtype})" for i, v in enumerate(pool))
+        parts.append(f"CASE WHEN {hit} THEN CASE {pick} {cases} END ELSE {q} END AS {q}")
+    return ", ".join(parts)
+
+
+def _declared_columns() -> frozenset[str]:
+    """``table.column`` of every declared value domain, lower case (#402)."""
+    from CortexOS.dms.warehouse_db import serving_value_domains
+
+    return frozenset(f"{d.table}.{d.column}".lower() for d in serving_value_domains())
+
+
+def _novel_select(con: Any, table: str, cols: list[tuple[Any, Any]], variant: Variant) -> str:
+    """The ``novel`` projection of one base table (see ``Variant``)."""
+    qt = '"' + table.replace('"', '""') + '"'
+    cut = int(variant.rate * 1_000_000)
+    declared = _declared_columns()
+    parts = []
+    for name, dtype in cols:
+        q = '"' + str(name).replace('"', '""') + '"'
+        lit = "'" + str(name).replace("'", "''") + "'"
+        base_type = str(dtype).split("(")[0].upper()
+        hit = f"{q} IS NOT NULL AND (hash({q}, {variant.seed}, {lit}) % 1000000) < {cut}"
+        if f"{table}.{name}".lower() in declared:
+            parts.append(q)
+            continue
+        if base_type == "VARCHAR":
+            distinct = con.execute(f"SELECT count(DISTINCT {q}) FROM base.main.{qt}").fetchone()[0]
+            if distinct <= NOVEL_MAX_DISTINCT:
+                token = f"'~novel-{variant.seed}-' || substr(md5({q}), 1, 8)"
+                parts.append(f"CASE WHEN {hit} THEN {token} ELSE {q} END AS {q}")
+                continue
+        elif base_type in _TEMPORAL:
+            days = (
+                f"CAST((hash({q}, {variant.seed}, {lit}, 'd') % {2 * NOVEL_DAYS + 1}) "
+                f"AS INTEGER) - {NOVEL_DAYS}"
+            )
+            parts.append(
+                f"CASE WHEN {hit} THEN CAST({q} + to_days({days}) AS {dtype}) ELSE {q} END AS {q}"
+            )
+            continue
+        elif base_type in _SIGNED:
+            parts.append(f"CASE WHEN {hit} THEN -{q} ELSE {q} END AS {q}")
+            continue
+        parts.append(q)
+    return ", ".join(parts)
+
+
+def _rows(con: Any, sql: str) -> list[dict[str, Any]]:
+    rel = con.execute(sql)
+    cols = [d[0] for d in rel.description] if rel.description else []
+    return [dict(zip(cols, row, strict=False)) for row in rel.fetchall()]
+
+
+def variant_mismatch(
+    item: HeldoutItem,
+    served_sql: str,
+    *,
+    base: Path | None = None,
+    variants: tuple[Variant, ...] = VARIANTS,
+) -> str | None:
+    """The first variant on which the served SQL and the gold SQL disagree, named; else None."""
+    from bench.accuracy import _multiset_equal, _project
+    from CortexOS.dms.warehouse_db import DEFAULT_DB, DMS_PACK
+    from CortexOS.ontology.value_domain import canonical_gold_sql
+
+    gold_sql = canonical_gold_sql(str(item.canonical_sql), DMS_PACK)
+    tables = _read_tables(gold_sql)
+    whole = [t for t in _read_tables(served_sql) if t not in tables]
+    edges = _gold_edges(gold_sql)
+    keys = list(item.key_columns)
+    for variant in variants:
+        con = _variant_connection(variant, tables, Path(base or DEFAULT_DB), whole, edges)
+        try:
+            truth = _project(_rows(con, gold_sql), keys, item.round)
+            try:
+                got = _project(_rows(con, served_sql), keys, item.round)
+            except Exception:  # noqa: BLE001 - served SQL that fails on a variant is wrong there
+                return f"variant_error:{variant.id}"
+        finally:
+            con.close()
+        if isinstance(truth, str):
+            return f"variant_gold_defect:{variant.id}"
+        if isinstance(got, str):
+            return f"variant_mismatch:{variant.id}"
+        if _aggregate_of_nothing(truth) and not got:
+            # A novel value took the gold's own filter literal: the gold's
+            # aggregate over no rows is one NULL row, and a served SQL that
+            # answers "nothing" with no rows says the same. Only that: a zero
+            # is a value, and a NULL row where the gold has none is a phantom.
+            continue
+        if not _multiset_equal(got, truth):
+            return f"variant_mismatch:{variant.id}"
+    return None
+
+
+def _aggregate_of_nothing(rows: list[Any]) -> bool:
+    """Exactly one projected row, every value NULL."""
+    return len(rows) == 1 and all(v is None for v in rows[0])
+
+
+UNVERIFIABLE = "variant_unverifiable:no_sql_used"
+
+
+def _score_or_error(item: HeldoutItem, env: Any) -> HeldoutResult:
+    """One item that raises while scoring is incorrect by name; the report goes on."""
+    try:
+        return score_envelope(item, env)
+    except Exception as exc:  # noqa: BLE001 - one item must not abort the report
+        return HeldoutResult(
+            item.id, item.split, "incorrect",
+            detail=f"score raised {type(exc).__name__}: {exc}",
+        )
+
+
 def score_envelope(item: HeldoutItem, env: Any) -> HeldoutResult:
-    """Score one served envelope. Does not inspect sql_used as a pass condition."""
+    """Score one served envelope. An item with gold SQL also needs ``sql_used``
+    to hold on every variant (#344)."""
     if not isinstance(env, dict):
         return HeldoutResult(
             item.id, item.split, "incorrect",
@@ -374,6 +684,19 @@ def score_envelope(item: HeldoutItem, env: Any) -> HeldoutResult:
                 item.id, item.split, "incorrect",
                 detail=f"scalar {needle!r} missing from answer text",
                 badge=badge, route=route,
+            )
+    if item.canonical_sql and item.expected_rows is None:
+        # #344: the base match can be luck. The served SQL must hold on every variant.
+        served_sql = str(env.get("sql_used") or "").strip()
+        if not served_sql:
+            return HeldoutResult(
+                item.id, item.split, "incorrect",
+                detail=UNVERIFIABLE, badge=badge, route=route,
+            )
+        reason = variant_mismatch(item, served_sql)
+        if reason:
+            return HeldoutResult(
+                item.id, item.split, "incorrect", detail=reason, badge=badge, route=route,
             )
     return HeldoutResult(
         item.id, item.split, "correct", badge=badge, route=route,
@@ -559,6 +882,7 @@ def _shadow_l2_env(rec: dict[str, Any]) -> dict[str, Any]:
         "badge": "abstain" if refused else "L2_VALIDATED",
         "route": "needs_clarification" if refused else "generated",
         "abstained": refused,
+        "sql_used": rec.get("l2_sql"),
     }
 
 
@@ -630,8 +954,13 @@ def summarize_shadow(
             if served_env is None:
                 unscored += 1
                 continue
-            served = score_envelope(item, served_env)
-            shadow = score_envelope(item, _shadow_l2_env(rec))
+            served = _score_or_error(item, served_env)
+            shadow = _score_or_error(item, _shadow_l2_env(rec))
+            if UNVERIFIABLE in (served.detail, shadow.detail):
+                # The shadow line has no served SQL (the producer does not log it), so
+                # its variants cannot run: counted as unscored, not as a loss.
+                unscored += 1
+                continue
             if served.outcome == "correct" and shadow.outcome == "correct":
                 both_correct += 1
             elif served.outcome == "correct":
@@ -752,7 +1081,7 @@ def score_engine(
                 continue
             if not isinstance(env, dict):
                 env = {}
-            results.append(score_envelope(item, env))
+            results.append(_score_or_error(item, env))
     finally:
         if enable_l2:
             if prev is None:
@@ -816,7 +1145,7 @@ def score_fixture(path: Path | str) -> dict[str, Any]:
                 )
             )
             continue
-        results.append(score_envelope(item, env))
+        results.append(_score_or_error(item, env))
     report = _stamp_excluded(summarize(results), excluded)
     report["fixture"] = str(path)
     return report

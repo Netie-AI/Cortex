@@ -26,6 +26,7 @@ import pytest
 from CortexOS.dms import query_service
 from CortexOS.dms.query_service import CONTRACTS_DIR
 from CortexOS.rag import doc_rank, documents
+from tests.dms.reader_reply import confirm_doc_checks, reader_reply  # noqa: F401
 from tests.dms.test_ask_flag_off_golden_340 import VOLATILE_KEYS, _questions
 from tests.dms.test_rag03_answer_routing import (  # noqa: F401
     DOC_HIT_Q,
@@ -156,11 +157,11 @@ def _ask_both(client: Any, fake: Any, question: str, reply: str | None) -> tuple
     """Ask both endpoints; return each body and the doc-answer prompts each sent."""
     before = len(_doc_prompts(fake))
     if reply is not None:
-        fake.reply(reply)
+        fake.reply(reader_reply(reply))
     contract = _contract(client, question)
     mid = len(_doc_prompts(fake))
     if reply is not None:
-        fake.reply(reply)
+        fake.reply(reader_reply(reply))
     dms = _dms(client, question)
     prompts = _doc_prompts(fake)
     return contract, dms, prompts[before:mid], prompts[mid:]
@@ -229,7 +230,8 @@ def test_reranked_passage_is_served(
     _assert_document(contract, dms, answer, ["b.txt", "a.txt", "c.txt"])
     assert "Ranking:" not in contract["answer"]
     assert len(c_prompts) == 1 and len(d_prompts) == 1
-    assert len(armed_openvault.chat_calls) == 2, "one model call per ask"
+    # Per ask: one reader call and one #465 check.
+    assert len(armed_openvault.chat_calls) == 4, "one reader call and one check per ask"
     assert c_prompts[0][1]["content"].startswith(f"Passages:\n[1] (b.txt)\n{PENALTY}")
     assert c_prompts[0] == d_prompts[0] == documents.messages(RANK_Q, top)
     assert emb.calls == 0 and sc.calls == 2
@@ -242,7 +244,7 @@ def test_missing_weights_keep_bm25_order_and_say_so(
     armed_openvault, dms_http, ranked_corpus, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    armed_openvault.reply(REPLY)
+    armed_openvault.reply(reader_reply(REPLY))
     off = _contract(dms_http, RANK_Q)
     [off_prompt] = _doc_prompts(armed_openvault)
     top = _bm25_top(ranked_corpus)
@@ -278,7 +280,7 @@ def _snapshot_tree(hf_home: Path) -> None:
 def test_mock_transformer_is_unusable_and_says_so(
     armed_openvault, dms_http, ranked_corpus, monkeypatch: pytest.MonkeyPatch, tmp_path: Path  # noqa: F811
 ) -> None:
-    armed_openvault.reply(REPLY)
+    armed_openvault.reply(reader_reply(REPLY))
     _contract(dms_http, RANK_Q)
     [off_prompt] = _doc_prompts(armed_openvault)
 
