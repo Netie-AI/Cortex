@@ -66,6 +66,35 @@ LOCAL_ONLY_ENV = "CORTEX_FREEROUTE_LOCAL_ONLY"
 # OpenVault #81: JSON ``strict: true`` pins ``model`` to that catalog id.
 # Default off. Off, the chat body is the same bytes as before this flag.
 STRICT_ENV = "CORTEX_OV_STRICT"
+# OpenVault role policy (Claude first). Default off. Off, the chat body
+# is the same bytes as before this flag. On, the body carries ``role`` and
+# omits ``strict`` (OpenVault returns 422 when both are present).
+ROLE_ENV = "CORTEX_FREEROUTE_ROLE"
+ROLES = frozenset({"sql", "reason", "summarize", "tool", "grain", "ontology"})
+# Task the caller already passes -> OpenVault role. A ``-strong`` suffix is
+# stripped first. Callers pass ``role=`` when this map does not name the job.
+_ROLE_BY_TASK = {
+    "plan-sql-sql": "sql",
+    "gen-ask-sql": "sql",
+    "gen-ask": "sql",
+    "crew-insights-sql": "sql",
+    "plan-sql-reconfirm": "reason",
+    "crew-think": "reason",
+    "crew-think-improve": "reason",
+    "crew-brain": "reason",
+    "crew-suggest": "reason",
+    "crew-prompt": "reason",
+    "crew-chat": "reason",
+    "lane-route": "reason",
+    "lane-answer-check": "reason",
+    "dms-metric-check": "reason",
+    "doc-answer": "summarize",
+    "crew-insights": "summarize",
+    "crew-act": "tool",
+    "dms-metric-choose": "ontology",
+    "ontology": "ontology",
+    "grain": "grain",
+}
 
 ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
@@ -848,6 +877,38 @@ def strict_model_pin_enabled() -> bool:
     return (os.environ.get(STRICT_ENV) or "").strip().lower() in {"1", "true", "yes"}
 
 
+def role_policy_enabled() -> bool:
+    """True only when ``CORTEX_FREEROUTE_ROLE`` is 1, true, or yes. Default off."""
+    return (os.environ.get(ROLE_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def chat_role(task: str, role: str = "", *, tools: bool = False) -> str:
+    """OpenVault role for this call. Empty when the task names none.
+
+    An explicit ``role`` wins when it is one of ``ROLES``. Otherwise the
+    task (the call site's existing name, including a crew purpose already
+    mapped onto a task) selects the role. ``-strong`` is ignored.
+    """
+    named = (role or "").strip().lower()
+    if named in ROLES:
+        return named
+    key = (task or "").strip().lower()
+    if key.endswith("-strong"):
+        key = key[: -len("-strong")]
+    found = _ROLE_BY_TASK.get(key, "")
+    if found:
+        return found
+    if key == "grain" or key.endswith("-grain"):
+        return "grain"
+    if key == "ontology" or key.endswith("-ontology"):
+        return "ontology"
+    if key.endswith("-sql"):
+        return "sql"
+    if tools:
+        return "tool"
+    return ""
+
+
 def _as_retry_seconds(value: Any) -> int | None:
     """A non-negative whole number of seconds, or None when OV did not give one."""
     if isinstance(value, bool) or value is None:
@@ -1456,6 +1517,7 @@ def complete(
     tools: list[dict[str, Any]] | None = None,
     bearer: str | None = None,
     split: str = "",
+    role: str = "",
 ) -> Completion:
     """One FreeRoute call. Refusals are named and stamped.
 
@@ -1473,6 +1535,10 @@ def complete(
     An empty readable store is not that signal. A healthy call that omits
     ``max_tokens`` sends ``HEALTHY_MAX_TOKENS``. The chat body never
     carries ``route_source``.
+
+    ``CORTEX_FREEROUTE_ROLE`` off: ``role`` is not sent and the chat body
+    bytes match the body from before this flag. On: the body carries the
+    role from ``role`` or from the task, and ``strict`` is left off.
     """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
@@ -1558,8 +1624,13 @@ def complete(
         body.update(freeroute_ov_local.local_only_request_fields())
     # OpenVault #81. JSON true only. Omitted when the flag is off so the
     # dumped body matches the bytes this function sent before the flag existed.
-    if strict_model_pin_enabled():
+    # A role and strict together make OpenVault return 422, so a resolved
+    # role leaves strict off. The role flag off never adds ``role``.
+    named_role = chat_role(task, role, tools=bool(tools)) if role_policy_enabled() else ""
+    if strict_model_pin_enabled() and not named_role:
         body["strict"] = True
+    if named_role:
+        body["role"] = named_role
 
     # Clear first so a transport that does not note headers cannot reuse an
     # older response. A real HTTP response replaces this from that call.
@@ -1892,6 +1963,8 @@ __all__ = [
     "FreeRouteFallbackCapInvalid",
     "FreeRouteStrictError",
     "STRICT_ENV",
+    "ROLE_ENV",
+    "ROLES",
     "HEALTHY_MAX_TOKENS",
     "IMPL",
     "LEARN_ENV",
@@ -1931,8 +2004,10 @@ __all__ = [
     "peek",
     "pick",
     "public_status",
+    "chat_role",
     "redact",
     "reset",
+    "role_policy_enabled",
     "router_fingerprint",
     "scoreboard",
     "stamp_router_fingerprint",

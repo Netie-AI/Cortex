@@ -38,6 +38,9 @@ _BUDGET = {"error": {"type": "rate_limited", "message": "budget"}}
 
 
 class _Server(ThreadingHTTPServer):
+    # 50 complete() calls connect at once. The default listen backlog is 5,
+    # which drops the rest before the handler runs.
+    request_queue_size = 128
     sleep_s: float
     chat_status: int
     retry_after: str

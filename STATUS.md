@@ -11,6 +11,13 @@ an IANA time zone, exponential retry, and a catch-up or skip policy for missed
 fires. Interval, daily, and weekly schedules are unchanged while the flag is off.
 This line is a pointer, not a CI result. Tracks AirGPT issue 98.
 
+## FreeRoute role
+
+`CORTEX_FREEROUTE_ROLE` is off by default. On, a chat request sends OpenVault
+`role` from the task so the vault can walk its role policy. That body omits
+`strict`. Flag off, chat body bytes are unchanged.
+This line is a pointer, not a CI result.
+
 ## FreeRoute header lock
 
 `complete()` copies Retry-After off the HTTP response the stdlib client
