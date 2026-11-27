@@ -35,6 +35,7 @@ refusals are recorded but never scored.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -68,6 +69,35 @@ LOCAL_ONLY_ENV = "CORTEX_FREEROUTE_LOCAL_ONLY"
 # OpenVault #81: JSON ``strict: true`` pins ``model`` to that catalog id.
 # Default off. Off, the chat body is the same bytes as before this flag.
 STRICT_ENV = "CORTEX_OV_STRICT"
+# OpenVault role policy (Claude first). Default off. Off, the chat body
+# is the same bytes as before this flag. On, the body carries ``role`` and
+# omits ``strict`` (OpenVault returns 422 when both are present).
+ROLE_ENV = "CORTEX_FREEROUTE_ROLE"
+ROLES = frozenset({"sql", "reason", "summarize", "tool", "grain", "ontology"})
+# Task the caller already passes -> OpenVault role. A ``-strong`` suffix is
+# stripped first. Callers pass ``role=`` when this map does not name the job.
+_ROLE_BY_TASK = {
+    "plan-sql-sql": "sql",
+    "gen-ask-sql": "sql",
+    "gen-ask": "sql",
+    "crew-insights-sql": "sql",
+    "plan-sql-reconfirm": "reason",
+    "crew-think": "reason",
+    "crew-think-improve": "reason",
+    "crew-brain": "reason",
+    "crew-suggest": "reason",
+    "crew-prompt": "reason",
+    "crew-chat": "reason",
+    "lane-route": "reason",
+    "lane-answer-check": "reason",
+    "dms-metric-check": "reason",
+    "doc-answer": "summarize",
+    "crew-insights": "summarize",
+    "crew-act": "tool",
+    "dms-metric-choose": "ontology",
+    "ontology": "ontology",
+    "grain": "grain",
+}
 
 ARMING_TTL_S = 5.0
 REJECT_TTL_S = 60.0
@@ -111,10 +141,6 @@ _REDACT = re.compile(
 
 _log = logging.getLogger(__name__)
 _lock = threading.Lock()
-# Held only while complete() swaps urllib.request.build_opener to read
-# Retry-After. openvault_client.request_json does not return response headers,
-# and that module stays untouched. The swap is restored before the lock drops.
-_header_capture_lock = threading.Lock()
 _response_headers: ContextVar[dict[str, str] | None] = ContextVar(
     "freeroute_ov_response_headers", default=None
 )
@@ -854,6 +880,38 @@ def strict_model_pin_enabled() -> bool:
     return (os.environ.get(STRICT_ENV) or "").strip().lower() in {"1", "true", "yes"}
 
 
+def role_policy_enabled() -> bool:
+    """True only when ``CORTEX_FREEROUTE_ROLE`` is 1, true, or yes. Default off."""
+    return (os.environ.get(ROLE_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def chat_role(task: str, role: str = "", *, tools: bool = False) -> str:
+    """OpenVault role for this call. Empty when the task names none.
+
+    An explicit ``role`` wins when it is one of ``ROLES``. Otherwise the
+    task (the call site's existing name, including a crew purpose already
+    mapped onto a task) selects the role. ``-strong`` is ignored.
+    """
+    named = (role or "").strip().lower()
+    if named in ROLES:
+        return named
+    key = (task or "").strip().lower()
+    if key.endswith("-strong"):
+        key = key[: -len("-strong")]
+    found = _ROLE_BY_TASK.get(key, "")
+    if found:
+        return found
+    if key == "grain" or key.endswith("-grain"):
+        return "grain"
+    if key == "ontology" or key.endswith("-ontology"):
+        return "ontology"
+    if key.endswith("-sql"):
+        return "sql"
+    if tools:
+        return "tool"
+    return ""
+
+
 def _as_retry_seconds(value: Any) -> int | None:
     """A non-negative whole number of seconds, or None when OV did not give one."""
     if isinstance(value, bool) or value is None:
@@ -872,8 +930,9 @@ def _as_retry_seconds(value: Any) -> int | None:
 def note_response_headers(headers: Mapping[str, str] | None) -> None:
     """Remember response headers for this task. Empty clears them.
 
-    The real urllib client fills these inside complete(). A test double that
-    replaces request_json can call this with the Retry-After it wants observed.
+    The stdlib client copies these off the response it already holds.
+    A test double that replaces request_json can call this with the
+    Retry-After it wants observed.
     """
     if not headers:
         _response_headers.set({})
@@ -888,7 +947,8 @@ def take_response_headers() -> dict[str, str]:
     return dict(found or {})
 
 
-def _header_map(headers: Any) -> dict[str, str]:
+def _response_header_map(headers: Any) -> dict[str, str]:
+    """Copy headers before the socket closes. Empty when there are none."""
     if headers is None:
         return {}
     try:
@@ -898,40 +958,68 @@ def _header_map(headers: Any) -> dict[str, str]:
     return {str(key): str(value) for key, value in pairs}
 
 
-def _call_noting_headers(send: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    """Call the chat transport and keep Retry-After from a real urllib response.
+def _json_dict(raw: bytes) -> dict[str, Any] | None:
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
 
-    The JSON body is whatever the caller already built. A transport that never
-    builds an opener can note headers itself; those stay when urllib saw nothing.
+
+def _stdlib_request_noting_headers(
+    method: str,
+    path: str,
+    *,
+    body: Mapping[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: float = 5.0,
+    base: str | None = None,
+) -> tuple[int, dict[str, Any] | None]:
+    """One chat HTTP call. Same body bytes as ``request_json``, plus headers.
+
+    ``request_json`` returns ``(status, body)`` and drops Retry-After. This
+    call builds an opener for itself and discards it. It does not assign
+    ``urllib.request.build_opener``, so other calls are not serialized and
+    the stdlib function stays the stdlib function.
     """
-    box: dict[str, dict[str, str]] = {}
-    real_build = urllib.request.build_opener
-
-    def build_opener(*opener_args: Any, **opener_kwargs: Any) -> Any:
-        opener = real_build(*opener_args, **opener_kwargs)
-        real_open = opener.open
-
-        def open_and_note(req: Any, *open_args: Any, **open_kwargs: Any) -> Any:
-            try:
-                resp = real_open(req, *open_args, **open_kwargs)
-            except urllib.error.HTTPError as exc:
-                box["headers"] = _header_map(getattr(exc, "headers", None))
-                raise
-            box["headers"] = _header_map(getattr(resp, "headers", None))
-            return resp
-
-        opener.open = open_and_note
-        return opener
-
-    with _header_capture_lock:
-        urllib.request.build_opener = build_opener
+    root = base or openvault_client.openvault_base_url()
+    url = f"{root}{path}"
+    payload = json.dumps(dict(body)).encode("utf-8") if body is not None else None
+    sent = {"Accept": "application/json"}
+    if payload is not None:
+        sent["Content-Type"] = "application/json"
+    sent.update(dict(headers or {}))
+    try:
+        req = urllib.request.Request(url, data=payload, method=method.upper(), headers=sent)
+        if openvault_client.is_loopback_url(root):
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        else:
+            opener = urllib.request.build_opener()
         try:
-            result = send(*args, **kwargs)
-        finally:
-            urllib.request.build_opener = real_build
-    if "headers" in box:
-        note_response_headers(box["headers"])
-    return result
+            with opener.open(req, timeout=timeout) as resp:
+                note_response_headers(_response_header_map(getattr(resp, "headers", None)))
+                return int(resp.status), _json_dict(resp.read())
+        except urllib.error.HTTPError as exc:
+            note_response_headers(_response_header_map(getattr(exc, "headers", None)))
+            try:
+                raw = exc.read()
+            except OSError:
+                raw = b""
+            return int(exc.code), _json_dict(raw)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return 0, None
+
+
+def _call_noting_headers(send: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Call the chat transport and keep Retry-After from its HTTP response.
+
+    The JSON body is whatever the caller already built. The stdlib client
+    is served by a per-call opener in this module. A replacement transport
+    notes headers itself. ``urllib.request.build_opener`` is not replaced.
+    """
+    if send is _STDLIB_REQUEST:
+        return _stdlib_request_noting_headers(*args, **kwargs)
+    return send(*args, **kwargs)
 
 
 def _retry_after_s(data: Any, headers: Mapping[str, str]) -> int | None:
@@ -1489,6 +1577,7 @@ def complete(
     tools: list[dict[str, Any]] | None = None,
     bearer: str | None = None,
     split: str = "",
+    role: str = "",
 ) -> Completion:
     """One FreeRoute call. Refusals are named and stamped.
 
@@ -1506,6 +1595,10 @@ def complete(
     An empty readable store is not that signal. A healthy call that omits
     ``max_tokens`` sends ``HEALTHY_MAX_TOKENS``. The chat body never
     carries ``route_source``.
+
+    ``CORTEX_FREEROUTE_ROLE`` off: ``role`` is not sent and the chat body
+    bytes match the body from before this flag. On: the body carries the
+    role from ``role`` or from the task, and ``strict`` is left off.
     """
     task = (task or "unnamed").strip()
     arm = arming(bearer=bearer)
@@ -1591,11 +1684,16 @@ def complete(
         body.update(freeroute_ov_local.local_only_request_fields())
     # OpenVault #81. JSON true only. Omitted when the flag is off so the
     # dumped body matches the bytes this function sent before the flag existed.
-    if strict_model_pin_enabled():
+    # A role and strict together make OpenVault return 422, so a resolved
+    # role leaves strict off. The role flag off never adds ``role``.
+    named_role = chat_role(task, role, tools=bool(tools)) if role_policy_enabled() else ""
+    if strict_model_pin_enabled() and not named_role:
         body["strict"] = True
+    if named_role:
+        body["role"] = named_role
 
     # Clear first so a transport that does not note headers cannot reuse an
-    # older response. A real urllib response replaces this inside the call.
+    # older response. A real HTTP response replaces this from that call.
     note_response_headers({})
     send, impl = _transport()
     # CORTEX_CALL_DEADLINE off: timeout and the stdlib client are untouched,
@@ -1925,6 +2023,8 @@ __all__ = [
     "FreeRouteFallbackCapInvalid",
     "FreeRouteStrictError",
     "STRICT_ENV",
+    "ROLE_ENV",
+    "ROLES",
     "HEALTHY_MAX_TOKENS",
     "IMPL",
     "LEARN_ENV",
@@ -1964,8 +2064,10 @@ __all__ = [
     "peek",
     "pick",
     "public_status",
+    "chat_role",
     "redact",
     "reset",
+    "role_policy_enabled",
     "router_fingerprint",
     "scoreboard",
     "stamp_router_fingerprint",

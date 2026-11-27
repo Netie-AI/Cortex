@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## CORTEX-FREEROUTE-ROLE -- 2026-11-27
+
+Off unless `CORTEX_FREEROUTE_ROLE` is `1`, `true`, or `yes`. On, the chat
+body sends OpenVault `role` from the call's task (or an explicit `role=`):
+sql, reason, summarize, tool, grain, ontology. A body that carries `role`
+omits `strict`. Flag off, the chat body bytes are unchanged.
+
+## CORTEX-FREEROUTE-LOCK-01 -- 2026-11-27
+
+FreeRoute copies Retry-After from the response or HTTPError of a per-call
+opener. That opener is not installed as ``urllib.request.build_opener``.
+Concurrent `complete()` calls overlap. Chat request body bytes are unchanged.
+
 ## SCHED-01 cron, zone, retry -- 2026-11-27
 
 Off unless `CORTEX_ROUTINES_CRON=1`. On, a routine accepts a five-field cron
