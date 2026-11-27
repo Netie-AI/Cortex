@@ -55,6 +55,9 @@ from CortexOS.integrations import freeroute_ov_local, openvault_client
 from CortexOS.integrations.harness import secrets as harness_secrets
 
 IMPL = "openvault-freeroute"
+# The stdlib client as imported. A test that replaces request_json is a
+# different object, so the deadline flag does not swap that replacement.
+_STDLIB_REQUEST = openvault_client.request_json
 TOKEN_ENV = "CORTEX_FREEROUTE_TOKEN"
 MODELS_ENV = "CORTEX_FREEROUTE_MODELS"
 FALLBACK_MAX_TOKENS_ENV = "CORTEX_FREEROUTE_FALLBACK_MAX_TOKENS"
@@ -1595,6 +1598,21 @@ def complete(
     # older response. A real urllib response replaces this inside the call.
     note_response_headers({})
     send, impl = _transport()
+    # CORTEX_CALL_DEADLINE off: timeout and the stdlib client are untouched,
+    # so the chat body is the same bytes as before this flag. On: min(deadline,
+    # the caller's timeout), and a client disconnect closes the httpx call.
+    from CortexOS.integrations import call_deadline
+
+    if call_deadline.enabled():
+        timeout = call_deadline.cap(timeout)
+        # Loaded by name. A static import would put httpx on the plan+SQL
+        # graph, which may reach a model only through this module.
+        if call_deadline.cancellable() and send is _STDLIB_REQUEST:
+            import importlib
+
+            send = importlib.import_module(
+                "CortexOS.integrations.call_deadline_http"
+            ).request_httpx
     started = time.monotonic()
     try:
         status, data = _call_noting_headers(
@@ -1608,6 +1626,10 @@ def complete(
         )
     except Exception as exc:  # noqa: BLE001 - a transport must not crash the ask
         status, data = 0, {"error": {"message": f"transport error: {type(exc).__name__}"}}
+    if call_deadline.enabled():
+        cancel = call_deadline.current_cancel()
+        label = call_deadline.active_label() or task
+        call_deadline.note(label, abandoned=cancel is not None and cancel.is_set())
     response_headers = take_response_headers()
     latency_ms = round((time.monotonic() - started) * 1000.0, 1)
 
@@ -1880,6 +1902,9 @@ def public_status(task: str | None = None) -> dict[str, Any]:
 def reset() -> None:
     """Drop in-process caches (arming, rejections, verification). The store stays."""
     global _learn_failures
+    from CortexOS.integrations.call_deadline import reset_counts
+
+    reset_counts()
     with _lock:
         _arming_cache.clear()
         _vault_cache.clear()

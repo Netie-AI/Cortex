@@ -308,6 +308,20 @@ async def execute_insights(
     consumer: str,
     alias: str | None = None,
 ) -> Any:
+    from CortexOS.integrations.call_deadline import bind_http
+
+    # Flag off: bind_http yields immediately and the ask runs as it did before.
+    async with bind_http(request):
+        return await _execute_insights(body, request, consumer=consumer, alias=alias)
+
+
+async def _execute_insights(
+    body: InsightsAskIn,
+    request: Request,
+    *,
+    consumer: str,
+    alias: str | None = None,
+) -> Any:
     from CortexOS.crew import freeroute as freeroute_mod
     from CortexOS.crew import insights as insights_mod
     from CortexOS.crew.engine_bridge import LocalEngineBridge

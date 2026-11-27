@@ -4,6 +4,13 @@
 Rules and merge flow: `AGENTS.md`. Live list: `TASK.md`. AI-first law: `CLAUDE.md` section 9.
 This file records pointers. It does not certify a gate.
 
+## Call deadline
+
+`CORTEX_CALL_DEADLINE` is off by default. On, `X-Deadline-Ms` caps FreeRoute
+timeouts on `/v1/insights` and crew FreeRoute calls, a client disconnect closes
+the upstream httpx call, and `/health/features` reports per-task counts. The
+OpenVault pick task is unchanged.
+
 ## Founder direction
 
 AI-first, DB-GPT / Genie style. The model writes SQL from ontology, schema, and
