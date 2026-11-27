@@ -4,6 +4,13 @@
 Rules and merge flow: `AGENTS.md`. Live list: `TASK.md`. AI-first law: `CLAUDE.md` section 9.
 This file records pointers. It does not certify a gate.
 
+## Routine cron
+
+`CORTEX_ROUTINES_CRON` is off by default. On, routines accept a cron expression,
+an IANA time zone, exponential retry, and a catch-up or skip policy for missed
+fires. Interval, daily, and weekly schedules are unchanged while the flag is off.
+This line is a pointer, not a CI result. Tracks AirGPT issue 98.
+
 ## Call deadline
 
 `CORTEX_CALL_DEADLINE` is off by default. On, `X-Deadline-Ms` caps FreeRoute

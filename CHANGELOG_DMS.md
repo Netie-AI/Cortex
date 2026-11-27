@@ -2,6 +2,18 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## SCHED-01 cron, zone, retry -- 2026-11-27
+
+Off unless `CORTEX_ROUTINES_CRON=1`. On, a routine accepts a five-field cron
+and an IANA zone (Asia/Singapore, and a DST zone such as America/New_York),
+the poll is 1 second, a failed run retries with exponential backoff before
+the existing error-streak governor pauses, and each attempt is a run-history
+row. A fire older than 60 seconds is either caught up once or skipped, per
+`on_missed`. Those controls travel in `vars` so the frozen contract schema
+is unchanged. Flag off, interval/daily/weekly and the 15 second poll stay
+as they were. Run history still keeps 50 rows and redacts key shapes.
+Tracks https://github.com/jian-hong/AirGPT/issues/98
+
 ## CORTEX_CALL_DEADLINE -- 2026-11-26
 
 Off unless `CORTEX_CALL_DEADLINE` is `1`, `true`, or `yes`. On, `POST /v1/insights`
