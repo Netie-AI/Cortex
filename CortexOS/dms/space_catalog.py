@@ -93,6 +93,8 @@ class BoundCatalog:
     measures: tuple[CatalogMeasure, ...]
     definitions: tuple[CatalogDefinition, ...]
     granted_tables: tuple[str, ...]
+    # Bare names the signature granted. Empty means this catalog was not clipped.
+    signed: frozenset[str] = frozenset()
 
     def measure_ids(self) -> set[str]:
         return {item.name for item in self.measures if item.name}
@@ -223,26 +225,46 @@ def _signed_tables(manifest: Any) -> set[str]:
     return {bare for key in raw if (bare := _bare_table(str(key)))}
 
 
-def _sql_tables(sql: str) -> set[str]:
+def _sql_tables(sql: str) -> set[str] | None:
+    """Tables in ``sql``, or None when non-empty text does not parse.
+
+    Empty text has no tables. A parse failure is not "no tables": the caller
+    drops the measure or definition instead of showing the raw text.
+    """
     text = (sql or "").strip()
     if not text:
         return set()
-    from CortexOS.dms.l2_plausibility import sql_table_names
+    import sqlglot
+    from sqlglot.errors import SqlglotError
 
-    return {_bare_table(name) for name in sql_table_names(text)}
+    try:
+        tree = sqlglot.parse_one(text, read="duckdb")
+    except SqlglotError:
+        return None
+    # Only a SELECT is runnable here. A parsed alias or fragment is not
+    # "no tables"; showing it would keep an unsigned name.
+    if not isinstance(tree, sqlglot.exp.Select):
+        return None
+    names: set[str] = set()
+    for table in tree.find_all(sqlglot.exp.Table):
+        bare = _bare_table(table.name or "")
+        if bare:
+            names.add(bare)
+    return names
 
 
 def _object_is_signed(obj: CatalogObject, signed: set[str]) -> bool:
-    """An object points at its relation, or at its name when it has no relation."""
-    relation = _bare_table(obj.relation)
-    if relation:
-        return relation in signed
-    return _bare_table(obj.name) in signed
+    """Keep an object only when every name it carries is a signed table.
+
+    ``name`` and ``relation`` are both table pointers. One signed side does
+    not admit the other.
+    """
+    pointers = [bare for bare in (_bare_table(obj.name), _bare_table(obj.relation)) if bare]
+    return bool(pointers) and all(bare in signed for bare in pointers)
 
 
-def _end_is_signed(end: str, objects: tuple[CatalogObject, ...], signed: set[str]) -> bool:
-    if any(end == obj.name or end == obj.relation for obj in objects):
-        return True
+def _end_is_signed(end: str, signed: set[str]) -> bool:
+    """A link end or a grain is signed only when that bare name was granted."""
     return _bare_table(end) in signed
 
 
@@ -257,29 +279,35 @@ def _clip_to_signed(catalog: BoundCatalog, signed: set[str]) -> BoundCatalog:
     links = tuple(
         link
         for link in catalog.links
-        if _end_is_signed(link.from_object, objects, signed)
-        and _end_is_signed(link.to_object, objects, signed)
+        if _end_is_signed(link.from_object, signed) and _end_is_signed(link.to_object, signed)
     )
-    measures = tuple(
-        measure
-        for measure in catalog.measures
-        if (not measure.grain or _end_is_signed(measure.grain, objects, signed))
-        and _sql_tables(measure.expression) <= signed
-    )
+    measures_kept: list[CatalogMeasure] = []
+    for measure in catalog.measures:
+        if measure.grain and not _end_is_signed(measure.grain, signed):
+            continue
+        tables = _sql_tables(measure.expression)
+        if tables is None or not tables <= signed:
+            continue
+        measures_kept.append(measure)
+    measures = tuple(measures_kept)
     kept_measures = {measure.name for measure in measures}
-    definitions = tuple(
-        item
-        for item in catalog.definitions
-        if item.name in kept_measures
-        and (not item.grain or _end_is_signed(item.grain, objects, signed))
-        and _sql_tables(item.text) <= signed
-    )
+    definitions_kept: list[CatalogDefinition] = []
+    for item in catalog.definitions:
+        if item.name not in kept_measures:
+            continue
+        if item.grain and not _end_is_signed(item.grain, signed):
+            continue
+        tables = _sql_tables(item.text)
+        if tables is None or not tables <= signed:
+            continue
+        definitions_kept.append(item)
     return BoundCatalog(
         objects=objects,
         links=links,
         measures=measures,
-        definitions=definitions,
+        definitions=tuple(definitions_kept),
         granted_tables=granted,
+        signed=frozenset(signed),
     )
 
 
@@ -345,18 +373,21 @@ def gate_semantic() -> dict[str, Any] | None:
     if catalog is None:
         return None
     tables: dict[str, dict[str, Any]] = {}
+    signed = catalog.signed
+
+    def _add(raw: str, columns: list[str]) -> None:
+        bare = raw.split(".")[-1].strip()
+        # The object name is not a second table. Only a signed bare name enters.
+        if not bare or _bare_table(bare) not in signed:
+            return
+        spec = tables.setdefault(bare, {"columns": [], "row_key": []})
+        if columns:
+            spec["columns"] = list(columns)
+
     for name in catalog.granted_tables:
-        bare = name.split(".")[-1].strip()
-        if bare:
-            tables[bare] = {"columns": [], "row_key": []}
+        _add(name, [])
     for obj in catalog.objects:
-        for raw_name in (obj.relation, obj.name):
-            bare = raw_name.split(".")[-1].strip()
-            if not bare:
-                continue
-            spec = tables.setdefault(bare, {"columns": [], "row_key": []})
-            if obj.key:
-                spec["columns"] = list(obj.key)
+        _add(obj.relation or obj.name, list(obj.key))
     if tables and not any(spec["columns"] for spec in tables.values()):
         for spec in tables.values():
             spec["columns"] = ["_space_catalog"]

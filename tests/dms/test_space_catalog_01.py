@@ -620,3 +620,190 @@ def test_unsigned_granted_tables_cannot_widen_or_name_signed_grants(
         listing = listing_text(bound)
         _assert_absent(listing, (extra,))
         assert "clinic_visit" in listing
+
+
+def _surfaces(verified: VerifiedManifest, result: dict[str, Any], script: _Script) -> str:
+    from CortexOS.dms.space_catalog import (
+        chooser_blocks,
+        current_space_catalog,
+        gate_semantic,
+        listing_text,
+        open_space_catalog,
+    )
+
+    with open_space_catalog(verified):
+        bound = current_space_catalog()
+        assert bound is not None
+        subjects, metrics = chooser_blocks(bound)
+        semantic = gate_semantic()
+        assert semantic is not None
+        listing = listing_text(bound)
+        gate_names = " ".join(semantic["tables"])
+    return "\n".join(
+        (
+            _customer(result),
+            _prompt(script),
+            subjects,
+            metrics,
+            listing,
+            gate_names,
+            str(result.get("answer") or ""),
+            str(result.get("assumptions") or ""),
+            json.dumps(result.get("suggestions") or []),
+            json.dumps(result.get("reconfirm") or {}),
+        )
+    )
+
+
+def test_unsigned_object_name_cannot_enter_gate_or_chooser(
+    monkeypatch: pytest.MonkeyPatch, choice_port: None
+) -> None:
+    """An object name is not a table just because its relation is signed."""
+    from CortexOS.dms.answer_engine import answer
+    from CortexOS.dms.space_catalog import current_space_catalog, gate_semantic, open_space_catalog
+
+    extra = "payroll_secret"
+    catalog = SpaceCatalog(
+        objects=[
+            SpaceObject(name="clinic_visit", relation="clinic_visit", key=["visit_id"]),
+            SpaceObject(name=extra, relation="clinic_visit", key=["emp_id"]),
+        ],
+        measures=[
+            SpaceMeasure(
+                name="visit_count",
+                grain="clinic_visit",
+                expression="SELECT COUNT(*) AS n FROM clinic_visit",
+                description="count of clinic visits",
+            )
+        ],
+        granted_tables=["clinic_visit"],
+    )
+    verified = _verified({"clinic_visit": "TRUE"}, space_id="space-b", catalog=catalog)
+    _flag(monkeypatch, True)
+    script = _Script(
+        {"metric_id": "catalog", "why": "", "closest_question": ""},
+        {"agrees": True, "unsure": False},
+    )
+    _arm(monkeypatch, script)
+    result = answer(
+        QUESTION_B,
+        session_id="object-name",
+        space_id="space-b",
+        verified=verified,
+        require_grounding=True,
+    )
+    shown = _surfaces(verified, result, script)
+    _assert_absent(shown, (extra,))
+    with open_space_catalog(verified):
+        semantic = gate_semantic()
+        assert semantic is not None
+        signed = {name.split(".")[-1].lower() for name in verified.manifest.row_predicates}
+        assert {key.lower() for key in semantic["tables"]} <= signed
+        bound = current_space_catalog()
+        assert bound is not None
+        assert extra not in {obj.name for obj in bound.objects}
+
+
+def test_unsigned_name_in_every_field_stays_out_of_the_answer(
+    monkeypatch: pytest.MonkeyPatch, choice_port: None
+) -> None:
+    """Every catalog field can carry an unsigned name. None of them is shown."""
+    from CortexOS.dms.answer_engine import answer
+
+    planted = {
+        "granted": "u_granted",
+        "object_name": "u_object_name",
+        "relation": "u_relation",
+        "key": "u_key",
+        "link": "u_link",
+        "link_from": "u_link_from",
+        "link_to": "u_link_to",
+        "from_col": "u_from_col",
+        "to_col": "u_to_col",
+        "cardinality": "u_card",
+        "measure": "u_measure",
+        "grain": "u_grain",
+        "expr": "u_expr",
+        "desc": "u_desc",
+        "unparsed": "u_unparsed",
+        "definition": "u_definition",
+        "def_grain": "u_def_grain",
+        "def_text": "u_def_text",
+    }
+    catalog = SpaceCatalog(
+        objects=[
+            SpaceObject(name="clinic_visit", relation="clinic_visit", key=["visit_id"]),
+            SpaceObject(
+                name=planted["object_name"],
+                relation="clinic_visit",
+                key=[planted["key"]],
+            ),
+            SpaceObject(
+                name="clinic_visit",
+                relation=planted["relation"],
+                key=["visit_id"],
+            ),
+        ],
+        links=[
+            SpaceLink(
+                name=planted["link"],
+                from_object=planted["link_from"],
+                from_columns=[planted["from_col"]],
+                to_object=planted["link_to"],
+                to_columns=[planted["to_col"]],
+                cardinality=planted["cardinality"],
+            )
+        ],
+        measures=[
+            SpaceMeasure(
+                name="visit_count",
+                grain="clinic_visit",
+                expression="SELECT COUNT(*) AS n FROM clinic_visit",
+                description="count of clinic visits",
+            ),
+            SpaceMeasure(
+                name=planted["measure"],
+                grain=planted["grain"],
+                expression=f"SELECT COUNT(*) AS n FROM {planted['expr']}",
+                description=planted["desc"],
+            ),
+            SpaceMeasure(
+                name="u_bad_sql",
+                grain="clinic_visit",
+                expression=f"not sql {planted['unparsed']}",
+                description=planted["unparsed"],
+            ),
+        ],
+        definitions=[
+            SpaceDefinition(
+                name="visit_count",
+                grain=planted["def_grain"],
+                text=f"not sql {planted['def_text']}",
+            ),
+            SpaceDefinition(
+                name=planted["definition"],
+                grain="clinic_visit",
+                text=f"SELECT COUNT(*) AS n FROM {planted['definition']}",
+            ),
+        ],
+        granted_tables=["clinic_visit", planted["granted"]],
+    )
+    verified = _verified({"clinic_visit": "TRUE"}, space_id="space-b", catalog=catalog)
+    _flag(monkeypatch, True)
+    script = _Script(
+        {"metric_id": "catalog", "why": "", "closest_question": ""},
+        {"agrees": True, "unsure": False},
+    )
+    _arm(monkeypatch, script)
+    result = answer(
+        QUESTION_B,
+        session_id="every-field",
+        space_id="space-b",
+        verified=verified,
+        require_grounding=True,
+    )
+    shown = _surfaces(verified, result, script)
+    _assert_absent(shown, tuple(planted.values()))
+    assert "clinic_visit" in shown
+    assert result["sql_used"] is None
+    assert not result["rows"]
