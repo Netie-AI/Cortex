@@ -12,8 +12,10 @@ approved measures returns `route: generative` and
 `Answer.space_catalog_handoff: generative` instead of a reconfirm. Reasons
 stay inside that Space's names. Contract 1.12.0, additive. The catalog is
 not signed: `canonical_manifest_bytes` drops it with `signature`, so a
-1.11 signature still verifies. Flag off, a manifest that carries a catalog
-answers the same as one that does not.
+1.11 signature still verifies. The catalog is intersected with the signed
+row_predicates before the chooser, the SQL gate, or any customer text, so
+an unsigned table name cannot widen the grant. Flag off, a manifest that
+carries a catalog answers the same as one that does not.
 
 ## CORTEX-FREEROUTE-ROLE -- 2026-11-27
 

@@ -531,3 +531,92 @@ def test_space_b_serves_its_own_definition(
     assert "clinic_visit" in result["sql_used"]
     assert "rx_fill" not in result["sql_used"]
     assert result["answer"]
+
+
+def test_unsigned_granted_tables_cannot_widen_or_name_signed_grants(
+    monkeypatch: pytest.MonkeyPatch, choice_port: None
+) -> None:
+    """The catalog may not name a table the signature did not grant.
+
+    Signed grant is clinic_visit only. The unsigned catalog also lists
+    payroll_secret and a measure whose SQL reads it. That name must not
+    reach the gate, the listing, the chooser prompt, or the envelope.
+    """
+    from CortexOS.dms.answer_engine import answer
+    from CortexOS.dms.space_catalog import (
+        current_space_catalog,
+        gate_semantic,
+        listing_text,
+        open_space_catalog,
+    )
+
+    extra = "payroll_secret"
+    catalog = SpaceCatalog(
+        objects=[
+            SpaceObject(name="clinic_visit", relation="clinic_visit", key=["visit_id"]),
+            SpaceObject(name=extra, relation=extra, key=["emp_id"]),
+        ],
+        links=[
+            SpaceLink(
+                name="visit_to_pay",
+                from_object="clinic_visit",
+                from_columns=["emp_id"],
+                to_object=extra,
+                to_columns=["emp_id"],
+                cardinality="many_to_one",
+            )
+        ],
+        measures=[
+            SpaceMeasure(
+                name="visit_count",
+                grain="clinic_visit",
+                expression="SELECT COUNT(*) AS n FROM clinic_visit",
+                description="count of clinic visits",
+            ),
+            SpaceMeasure(
+                name="pay_count",
+                grain=extra,
+                expression=f"SELECT COUNT(*) AS n FROM {extra}",
+                description="count of payroll rows",
+            ),
+        ],
+        definitions=[
+            SpaceDefinition(
+                name="pay_count",
+                grain=extra,
+                text=f"SELECT COUNT(*) AS n FROM {extra}",
+            )
+        ],
+        granted_tables=["clinic_visit", extra],
+    )
+    verified = _verified({"clinic_visit": "TRUE"}, space_id="space-b", catalog=catalog)
+    _flag(monkeypatch, True)
+    script = _Script(
+        {"metric_id": "catalog", "why": "", "closest_question": ""},
+        {"agrees": True, "unsure": False},
+    )
+    _arm(monkeypatch, script)
+    result = answer(
+        QUESTION_B,
+        session_id="widen-b",
+        space_id="space-b",
+        verified=verified,
+        require_grounding=True,
+    )
+    assert result["sql_used"] is None
+    assert not result["rows"]
+    _assert_absent(_customer(result), (extra,))
+    _assert_absent(_prompt(script), (extra,))
+    _assert_absent(str(result.get("answer") or ""), (extra,))
+
+    with open_space_catalog(verified):
+        bound = current_space_catalog()
+        assert bound is not None
+        semantic = gate_semantic()
+        assert semantic is not None
+        signed = {name.split(".")[-1].lower() for name in verified.manifest.row_predicates}
+        assert {key.lower() for key in semantic["tables"]} <= signed
+        assert extra not in semantic["tables"]
+        listing = listing_text(bound)
+        _assert_absent(listing, (extra,))
+        assert "clinic_visit" in listing

@@ -5,7 +5,10 @@ default off. Off, nothing here is bound and the demo catalog stays the
 chooser's context. On, a manifest that carries ``space_catalog`` is the only
 context: objects, links, measures, definitions, and granted tables. No
 catalog at all keeps the demo catalog, which is how the demo Space is sent.
-The catalog is not part of the signed bytes.
+The catalog is not part of the signed bytes. Before it is bound, every
+table it names is intersected with the signed ``row_predicates`` keys.
+Anything that points at a table the signature did not grant is dropped,
+so the chooser, the SQL gate, and the answer cannot widen the grant.
 
 A Space with no approved measures does not reconfirm from the demo catalog.
 The ask returns ``space_catalog_handoff`` ``generative`` so DMS runs its generative path.
@@ -208,13 +211,88 @@ def _view_from_raw(raw: Any) -> BoundCatalog | None:
     )
 
 
+def _bare_table(name: str) -> str:
+    return str(name or "").split(".")[-1].strip().lower()
+
+
+def _signed_tables(manifest: Any) -> set[str]:
+    """Bare table names the signature grants. The catalog cannot add to this."""
+    raw = getattr(manifest, "row_predicates", None) or {}
+    if not isinstance(raw, dict):
+        return set()
+    return {bare for key in raw if (bare := _bare_table(str(key)))}
+
+
+def _sql_tables(sql: str) -> set[str]:
+    text = (sql or "").strip()
+    if not text:
+        return set()
+    from CortexOS.dms.l2_plausibility import sql_table_names
+
+    return {_bare_table(name) for name in sql_table_names(text)}
+
+
+def _object_is_signed(obj: CatalogObject, signed: set[str]) -> bool:
+    """An object points at its relation, or at its name when it has no relation."""
+    relation = _bare_table(obj.relation)
+    if relation:
+        return relation in signed
+    return _bare_table(obj.name) in signed
+
+
+def _end_is_signed(end: str, objects: tuple[CatalogObject, ...], signed: set[str]) -> bool:
+    if any(end == obj.name or end == obj.relation for obj in objects):
+        return True
+    return _bare_table(end) in signed
+
+
+def _clip_to_signed(catalog: BoundCatalog, signed: set[str]) -> BoundCatalog:
+    """Drop every catalog part that names a table the signature did not grant.
+
+    The result stays a bound catalog even when nothing remains. Falling
+    through to the demo catalog would be a wider leak than an empty Space.
+    """
+    granted = tuple(name for name in catalog.granted_tables if _bare_table(name) in signed)
+    objects = tuple(obj for obj in catalog.objects if _object_is_signed(obj, signed))
+    links = tuple(
+        link
+        for link in catalog.links
+        if _end_is_signed(link.from_object, objects, signed)
+        and _end_is_signed(link.to_object, objects, signed)
+    )
+    measures = tuple(
+        measure
+        for measure in catalog.measures
+        if (not measure.grain or _end_is_signed(measure.grain, objects, signed))
+        and _sql_tables(measure.expression) <= signed
+    )
+    kept_measures = {measure.name for measure in measures}
+    definitions = tuple(
+        item
+        for item in catalog.definitions
+        if item.name in kept_measures
+        and (not item.grain or _end_is_signed(item.grain, objects, signed))
+        and _sql_tables(item.text) <= signed
+    )
+    return BoundCatalog(
+        objects=objects,
+        links=links,
+        measures=measures,
+        definitions=definitions,
+        granted_tables=granted,
+    )
+
+
 def _view_from_manifest(manifest: Any) -> BoundCatalog | None:
     if not space_catalog_enabled() or manifest is None:
         return None
     raw = getattr(manifest, "space_catalog", None)
     if raw is None:
         return None
-    return _view_from_raw(raw)
+    view = _view_from_raw(raw)
+    if view is None:
+        return None
+    return _clip_to_signed(view, _signed_tables(manifest))
 
 
 @contextmanager
