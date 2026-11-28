@@ -411,7 +411,9 @@ def test_flag_off_answer_is_the_1_4_0_wire_shape(ask_http, monkeypatch: pytest.M
     assert body["plan_sql_rung"] is None
     assert body["model_calls"] is None
     # plan_sql_reading_id (1.10.0, #453) is omitted too: this ask sent no pick.
-    omitted = {"verified_query_ids", "plan_sql_reading_id"}
+    # space_catalog_handoff (1.12.0) is omitted when null, so flag off stays
+    # the prior Answer shape.
+    omitted = {"verified_query_ids", "plan_sql_reading_id", "space_catalog_handoff"}
     assert list(body) == [f for f in Answer.model_fields if f not in omitted]
     _assert_not_verified(body)
     assert body["memory_ids_read"] == []

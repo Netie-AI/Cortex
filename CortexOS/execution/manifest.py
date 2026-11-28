@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import posixpath
 import re
@@ -43,7 +44,11 @@ import sqlglot
 # identity — so `isinstance(manifest, Manifest)` inside canonical_manifest_bytes
 # could be False and silently canonicalise through the Mapping branch. The bytes
 # agreed only because every Manifest field is a string today (CONTRACT-01).
-from cortex_contract.execution import Manifest, canonical_manifest_bytes
+from cortex_contract.execution import (
+    Manifest,
+    canonical_manifest_bytes,
+    canonical_space_catalog_bytes,
+)
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlglot import exp
@@ -67,8 +72,16 @@ __all__ = [
     "JwksCache",
     "ManifestVerifier",
     "VerifiedManifest",
+    "catalog_signature_status",
     "enforce_manifest",
 ]
+
+_LOG = logging.getLogger(__name__)
+
+#: Logged when a catalog is present and ``space_catalog_sig`` is absent.
+CATALOG_SIG_MISSING = "space_catalog_signature_missing"
+#: Logged when ``space_catalog_sig`` does not verify under the issuer key.
+CATALOG_SIG_INVALID = "space_catalog_signature_invalid"
 
 
 # ── errors ───────────────────────────────────────────────────────────────────
@@ -387,6 +400,12 @@ class VerifiedManifest:
     manifest: Manifest
     issuer_kid: str
     verified_at: datetime
+    # True only when space_catalog_sig verified under the issuer key.
+    # Default false so a VerifiedManifest built without the verifier
+    # cannot carry an unsigned catalog into the chooser.
+    catalog_trusted: bool = False
+    catalog_refusal: str = ""
+    issuer_public_key: Ed25519PublicKey | None = None
 
     @property
     def allowed_paths(self) -> tuple[str, ...]:
@@ -398,6 +417,47 @@ class VerifiedManifest:
 
 
 DEFAULT_CLOCK_SKEW_S = 120
+
+
+def _log_catalog_refusal(code: str, manifest: Manifest) -> None:
+    _LOG.warning(
+        "space_catalog refused code=%s space_id=%s session_id=%s",
+        code,
+        manifest.space_id,
+        manifest.session_id,
+    )
+
+
+def catalog_signature_status(
+    manifest: Manifest, public_key: Ed25519PublicKey
+) -> tuple[bool, str]:
+    """Whether ``space_catalog_sig`` verifies under the manifest issuer key.
+
+    Same scheme as the manifest signature: Ed25519 over canonical JSON,
+    unpadded base64url. The signed bytes are
+    :func:`canonical_space_catalog_bytes` (the catalog bound to ``space_id``
+    and ``session_id``), not :func:`canonical_manifest_bytes`. No catalog is
+    not a refusal. A missing or invalid signature is. This never raises:
+    the manifest signature stands, and the catalog is left unused.
+    """
+    if manifest.space_catalog is None:
+        return False, ""
+    raw_sig = (manifest.space_catalog_sig or "").strip()
+    if not raw_sig:
+        _log_catalog_refusal(CATALOG_SIG_MISSING, manifest)
+        return False, CATALOG_SIG_MISSING
+    try:
+        signature = _b64url_decode(raw_sig, what="space_catalog_sig")
+        payload = canonical_space_catalog_bytes(
+            manifest.space_catalog,
+            space_id=manifest.space_id or "",
+            session_id=manifest.session_id,
+        )
+        public_key.verify(signature, payload)
+    except (ManifestError, InvalidSignature, UnicodeEncodeError, ValueError, TypeError):
+        _log_catalog_refusal(CATALOG_SIG_INVALID, manifest)
+        return False, CATALOG_SIG_INVALID
+    return True, ""
 
 
 class ManifestVerifier:
@@ -461,7 +521,15 @@ class ManifestVerifier:
         except InvalidSignature as exc:
             raise ManifestSignatureInvalid(f"signature does not verify under key {kid!r}") from exc
 
-        return VerifiedManifest(manifest=manifest, issuer_kid=kid, verified_at=when)
+        trusted, refusal = catalog_signature_status(manifest, key.public_key)
+        return VerifiedManifest(
+            manifest=manifest,
+            issuer_kid=kid,
+            verified_at=when,
+            catalog_trusted=trusted,
+            catalog_refusal=refusal,
+            issuer_public_key=key.public_key,
+        )
 
 
 # ── enforcement ──────────────────────────────────────────────────────────────

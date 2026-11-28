@@ -227,7 +227,7 @@ supported:
 
   - version: "1.11"
     spec: openapi-1.11.0.json
-    status: current
+    status: supported
     contract_surface: true
     notes: >
       Additive VERIFIED-QUERY (#309). Numbered 1.11, the next free minor when
@@ -241,6 +241,33 @@ supported:
       changes. Additive against 1.10.0, the previous spec published here.
       1.10 and older clients ignore the field and keep their behaviour.
       canonical_manifest_bytes unchanged.
+
+  - version: "1.12"
+    spec: openapi-1.12.0.json
+    status: current
+    contract_surface: true
+    notes: >
+      Additive FDE-CORTEX-SPACE-CATALOG-01. Manifest gains optional
+      space_catalog: objects (name, relation, key), links (name,
+      from_object, from_columns, to_object, to_columns, cardinality),
+      measures (name, grain, expression, description), definitions
+      (name, grain, text), granted_tables. Manifest also gains optional
+      space_catalog_sig: Ed25519, unpadded base64url, over
+      canonical_space_catalog_bytes(catalog, space_id, session_id),
+      the same issuer key as signature. canonical_manifest_bytes removes
+      space_catalog and space_catalog_sig with signature, so a manifest
+      that carries them verifies as the same bytes without them, and a
+      manifest that omits them is unchanged from 1.11. The engine reads
+      the catalog only when that signature verifies and
+      CORTEX_SPACE_CATALOG is on (default off). Absent or invalid means
+      the demo catalog, which is how the demo Space is sent.
+      Answer gains optional space_catalog_handoff (string). It is
+      omitted when null, so an answer that does not hand off serializes
+      as on 1.11. The value generative means this Space has no approved
+      measure and DMS should run its generative path (the AI writes SQL
+      under the gates) instead of showing a reconfirm. route is
+      generative and reconfirm is null. 1.11 and older clients ignore
+      both fields. Link wire name is from_object.
 
 deprecated:
   # Present on the wire, removed at the next major. Consumers should migrate.

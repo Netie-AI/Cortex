@@ -100,6 +100,9 @@ class MetricSelection:
     why: str = ""
     # A rejected metric is not a document question. none still may be.
     allow_documents: bool = True
+    # Approved definition SQL from the asking Space. Empty on the demo path,
+    # so a demo choice still compiles from the pack.
+    sql: str = ""
 
 
 @dataclass(slots=True)

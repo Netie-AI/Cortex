@@ -144,10 +144,79 @@ def _agreed_why(metric_id: str) -> str:
     return f"{_chosen_why(metric_id)} and the meaning check agreed"
 
 
+def _choose_space(question: str, catalog: Any) -> MetricSelection:
+    """Choose from the bound Space catalog. The demo pack is not read."""
+    from CortexOS.dms.space_catalog import (
+        chooser_blocks,
+        confine_closest,
+        confine_why,
+    )
+    from CortexOS.integrations import freeroute
+
+    subjects, metrics = chooser_blocks(catalog)
+    out = freeroute.complete(
+        CHOOSE_TASK,
+        [
+            {"role": "system", "content": choose_instructions()},
+            {
+                "role": "user",
+                "content": (
+                    f"Question: {question}\n\n"
+                    f"Subjects:\n{subjects}\n\n"
+                    f"Metrics:\n{metrics}"
+                ),
+            },
+        ],
+        temperature=0.0,
+        max_tokens=400,
+    )
+    if not out.ok:
+        return MetricSelection(
+            closest_question=UNARMED_CLOSEST,
+            why="the metric chooser is not armed, so it cannot be served directly",
+        )
+    body = _json_object(out.text)
+    if body is None:
+        return MetricSelection(
+            closest_question=UNARMED_CLOSEST,
+            why="the metric chooser returned nothing usable, so it cannot be served directly",
+        )
+    metric_id = str(body.get("metric_id") or "none").strip()
+    closest = confine_closest(str(body.get("closest_question") or ""), catalog, question)
+    why = confine_why(str(body.get("why") or ""), catalog, question)
+    if metric_id.lower() == CATALOG_CHOICE and catalog_by_model_enabled():
+        return MetricSelection(
+            metric_id=CATALOG_CHOICE,
+            closest_question=closest,
+            why=why,
+        )
+    if metric_id not in catalog.measure_ids():
+        metric_id = "none"
+    if metric_id == "none":
+        return MetricSelection(
+            closest_question=closest,
+            why=why,
+        )
+    sql = catalog.definition_sql(metric_id)
+    if not sql:
+        return MetricSelection(
+            closest_question=closest,
+            why=confine_why("", catalog, question),
+        )
+    return MetricSelection(
+        metric_id=metric_id,
+        slots={},
+        closest_question=closest,
+        why=_chosen_why(metric_id),
+        sql=sql,
+    )
+
+
 class OpenVaultMetricChoice:
     """FreeRoute is the only model path. Unarmed or unreadable output is none."""
 
     def choose(self, question: str) -> MetricSelection:
+        from CortexOS.dms.space_catalog import current_space_catalog
         from CortexOS.integrations import freeroute
 
         if not freeroute.arming().armed:
@@ -155,6 +224,9 @@ class OpenVaultMetricChoice:
                 closest_question=UNARMED_CLOSEST,
                 why="the metric chooser is not armed, so it cannot be served directly",
             )
+        catalog = current_space_catalog()
+        if catalog is not None:
+            return _choose_space(question, catalog)
         out = freeroute.complete(
             CHOOSE_TASK,
             [
@@ -251,16 +323,35 @@ class OpenVaultMetricChoice:
         if is_catalog:
             system, user = CHECK_CATALOG_INSTRUCTIONS, f"Question: {question}"
         else:
-            try:
-                metric = load_all().metric(selection.metric_id)
-            except SemanticError:
-                return MetricVerdict(agrees=False, unsure=True, why="unknown metric")
-            described = (
-                f"metric_id: {metric.id}\n"
-                f"wordings: {'; '.join(metric.synonyms or [])}\n"
-                f"slots: {selection.slots}\n"
-                f"sql: {' '.join(metric.sql.split())}"
-            )
+            from CortexOS.dms.space_catalog import current_space_catalog
+
+            catalog = current_space_catalog()
+            if catalog is not None:
+                measure = catalog.measure(selection.metric_id)
+                if measure is None:
+                    return MetricVerdict(agrees=False, unsure=True, why="unknown metric")
+                definition = catalog.definition(selection.metric_id)
+                text = (
+                    definition.text
+                    if definition is not None and definition.text
+                    else measure.description or measure.expression
+                )
+                described = (
+                    f"metric_id: {measure.name}\n"
+                    f"grain: {measure.grain}\n"
+                    f"definition: {text}"
+                )
+            else:
+                try:
+                    metric = load_all().metric(selection.metric_id)
+                except SemanticError:
+                    return MetricVerdict(agrees=False, unsure=True, why="unknown metric")
+                described = (
+                    f"metric_id: {metric.id}\n"
+                    f"wordings: {'; '.join(metric.synonyms or [])}\n"
+                    f"slots: {selection.slots}\n"
+                    f"sql: {' '.join(metric.sql.split())}"
+                )
             system, user = CHECK_INSTRUCTIONS, f"Question: {question}\n\n{described}"
         out = freeroute.complete(
             CHECK_TASK,
