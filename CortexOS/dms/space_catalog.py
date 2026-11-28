@@ -2,13 +2,14 @@
 
 ``CORTEX_SPACE_CATALOG`` (and the DMS producer flag ``DMS_SPACE_CATALOG``)
 default off. Off, nothing here is bound and the demo catalog stays the
-chooser's context. On, a manifest that carries ``space_catalog`` is the only
-context: objects, links, measures, definitions, and granted tables. No
-catalog at all keeps the demo catalog, which is how the demo Space is sent.
-The catalog is not part of the signed bytes. Before it is bound, every
+chooser's context. On, a manifest is the chooser's context only when
+``space_catalog_sig`` verifies under the same issuer key that signed the
+manifest. A missing catalog, or a signature that does not verify, keeps
+the demo catalog (the flag-off path). The catalog is not part of
+``canonical_manifest_bytes``. Before a verified catalog is bound, every
 table it names is intersected with the signed ``row_predicates`` keys.
-Anything that points at a table the signature did not grant is dropped,
-so the chooser, the SQL gate, and the answer cannot widen the grant.
+The SQL gate's tables and columns come from that grant and the warehouse
+schema, not from catalog names or keys.
 
 A Space with no approved measures does not reconfirm from the demo catalog.
 The ask returns ``space_catalog_handoff`` ``generative`` so DMS runs its generative path.
@@ -21,7 +22,7 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 ENABLED_ENV = "CORTEX_SPACE_CATALOG"
@@ -95,6 +96,9 @@ class BoundCatalog:
     granted_tables: tuple[str, ...]
     # Bare names the signature granted. Empty means this catalog was not clipped.
     signed: frozenset[str] = frozenset()
+    # Column names of those tables in the warehouse. Empty means the catalog
+    # could not be read; the gate then uses a sentinel, not a catalog string.
+    schema_columns: tuple[str, ...] = ()
 
     def measure_ids(self) -> set[str]:
         return {item.name for item in self.measures if item.name}
@@ -311,23 +315,40 @@ def _clip_to_signed(catalog: BoundCatalog, signed: set[str]) -> BoundCatalog:
     )
 
 
-def _view_from_manifest(manifest: Any) -> BoundCatalog | None:
-    if not space_catalog_enabled() or manifest is None:
+def _view_from_verified(verified: Any) -> BoundCatalog | None:
+    """Bind a catalog only when its signature just verified.
+
+    Anything else is the flag-off path: no catalog, so the demo layer stays
+    in force. The signature check uses the issuer key the manifest verifier
+    already resolved. A missing key is not a second chance to trust the JSON.
+    """
+    if not space_catalog_enabled() or verified is None:
         return None
-    raw = getattr(manifest, "space_catalog", None)
-    if raw is None:
+    manifest = getattr(verified, "manifest", None)
+    public_key = getattr(verified, "issuer_public_key", None)
+    if manifest is None or getattr(manifest, "space_catalog", None) is None or public_key is None:
         return None
-    view = _view_from_raw(raw)
+    from CortexOS.execution.manifest import catalog_signature_status
+
+    trusted, _refusal = catalog_signature_status(manifest, public_key)
+    if not trusted:
+        return None
+    view = _view_from_raw(manifest.space_catalog)
     if view is None:
         return None
-    return _clip_to_signed(view, _signed_tables(manifest))
+    from CortexOS.execution.submit import granted_column_names
+
+    clipped = _clip_to_signed(view, _signed_tables(manifest))
+    return replace(
+        clipped,
+        schema_columns=tuple(sorted(granted_column_names(verified))),
+    )
 
 
 @contextmanager
 def open_space_catalog(verified: Any) -> Iterator[None]:
-    """Bind the catalog for one ask. Flag off, or no catalog, binds nothing."""
-    manifest = getattr(verified, "manifest", None) if verified is not None else None
-    token: Token[BoundCatalog | None] = _BOUND.set(_view_from_manifest(manifest))
+    """Bind the catalog for one ask. Flag off, or no trusted catalog, binds nothing."""
+    token: Token[BoundCatalog | None] = _BOUND.set(_view_from_verified(verified))
     try:
         yield
     finally:
@@ -366,31 +387,19 @@ def chooser_blocks(catalog: BoundCatalog) -> tuple[str, str]:
 def gate_semantic() -> dict[str, Any] | None:
     """Table allowlist for the SQL gate, or None when the demo layer applies.
 
-    Columns come from the Space's objects. When none are declared, a sentinel
-    column keeps the gate from falling through to the demo column list.
+    Tables are the signed grant. Columns are the warehouse columns of those
+    tables. A catalog key, alias, or name never becomes a column. When the
+    warehouse has no columns for the grant, a sentinel keeps the gate from
+    falling through to the demo column list.
     """
     catalog = current_space_catalog()
     if catalog is None:
         return None
-    tables: dict[str, dict[str, Any]] = {}
-    signed = catalog.signed
-
-    def _add(raw: str, columns: list[str]) -> None:
-        bare = raw.split(".")[-1].strip()
-        # The object name is not a second table. Only a signed bare name enters.
-        if not bare or _bare_table(bare) not in signed:
-            return
-        spec = tables.setdefault(bare, {"columns": [], "row_key": []})
-        if columns:
-            spec["columns"] = list(columns)
-
-    for name in catalog.granted_tables:
-        _add(name, [])
-    for obj in catalog.objects:
-        _add(obj.relation or obj.name, list(obj.key))
-    if tables and not any(spec["columns"] for spec in tables.values()):
-        for spec in tables.values():
-            spec["columns"] = ["_space_catalog"]
+    columns = list(catalog.schema_columns) or ["_space_catalog"]
+    tables = {
+        bare: {"columns": list(columns), "row_key": []}
+        for bare in sorted(catalog.signed)
+    }
     return {"tables": tables, "glossary": [], "sensitive_columns": []}
 
 

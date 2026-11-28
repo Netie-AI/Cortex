@@ -10,14 +10,15 @@ chooser and the SQL gate read the asking Space's `Manifest.space_catalog`
 the demo catalog, which is how the demo Space is sent. A Space with no
 approved measures returns `route: generative` and
 `Answer.space_catalog_handoff: generative` instead of a reconfirm. Reasons
-stay inside that Space's names. Contract 1.12.0, additive. The catalog is
-not signed: `canonical_manifest_bytes` drops it with `signature`, so a
-1.11 signature still verifies. The catalog is intersected with the signed
-row_predicates before the chooser, the SQL gate, or any customer text, so
-an unsigned table name cannot widen the grant. An object is kept only
-when both its name and its relation are signed. A measure or definition
-whose text is not a SELECT, or which reads an unsigned table, is dropped. Flag off, a manifest that
-carries a catalog answers the same as one that does not.
+stay inside that Space's names. Contract 1.12.0, additive. The catalog
+is authenticated by `space_catalog_sig` (Ed25519 over
+`canonical_space_catalog_bytes`, same issuer key as the manifest).
+`canonical_manifest_bytes` drops `space_catalog` and `space_catalog_sig`
+with `signature`, so a 1.11 signature still verifies. A missing or invalid
+catalog signature is ignored and the ask uses the demo path. A verified
+catalog is still intersected with the signed row_predicates. Gate tables
+and columns come from that grant and the warehouse schema. Flag off, a
+manifest that carries a catalog answers the same as one that does not.
 
 ## CORTEX-FREEROUTE-ROLE -- 2026-11-27
 

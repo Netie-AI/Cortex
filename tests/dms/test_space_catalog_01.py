@@ -8,9 +8,12 @@ answers the same as a manifest that does not.
 
 from __future__ import annotations
 
+import base64
 import json
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,9 +25,18 @@ from cortex_contract.execution import (
     SpaceMeasure,
     SpaceObject,
     canonical_manifest_bytes,
+    canonical_space_catalog_bytes,
 )
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from CortexOS.execution.manifest import VerifiedManifest
+from CortexOS.execution.manifest import (
+    CATALOG_SIG_INVALID,
+    CATALOG_SIG_MISSING,
+    JwksCache,
+    ManifestVerifier,
+    VerifiedManifest,
+)
 
 QUESTION_B = "How many clinic visits were recorded?"
 DEMO_NAMES = (
@@ -112,15 +124,48 @@ def _catalog_b(*, measures: bool = True) -> SpaceCatalog:
     )
 
 
-def _verified(
+def _b64u(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _jwk(kid: str, private: Ed25519PrivateKey) -> dict[str, object]:
+    raw = private.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    return {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "alg": "EdDSA",
+        "use": "sig",
+        "kid": kid,
+        "x": _b64u(raw),
+    }
+
+
+_ISSUER: Ed25519PrivateKey | None = None
+_CACHE: JwksCache | None = None
+
+
+def _issuer() -> tuple[Ed25519PrivateKey, JwksCache]:
+    """One ephemeral issuer for this process. The key is not written to the repo."""
+    global _ISSUER, _CACHE
+    if _ISSUER is None or _CACHE is None:
+        _ISSUER = Ed25519PrivateKey.generate()
+        _CACHE = JwksCache(path=Path(tempfile.mkdtemp()) / "jwks.json")
+        _CACHE.install({"keys": [_jwk("int-test", _ISSUER)]})
+    return _ISSUER, _CACHE
+
+
+def _manifest(
     predicates: dict[str, str],
     *,
     space_id: str,
     catalog: SpaceCatalog | None,
-) -> VerifiedManifest:
+    session_id: str | None = None,
+) -> Manifest:
     when = datetime.now(timezone.utc)
-    manifest = Manifest(
-        session_id=f"sess-{uuid.uuid4().hex}",
+    return Manifest(
+        session_id=session_id or f"sess-{uuid.uuid4().hex}",
         org_id="synthetic",
         space_id=space_id,
         pool_id="default",
@@ -129,10 +174,52 @@ def _verified(
         row_predicates=predicates,
         issued_at=when.isoformat(),
         expires_at=(when + timedelta(minutes=5)).isoformat(),
-        signature="not-checked-here",
+        signature="",
         space_catalog=catalog,
     )
-    return VerifiedManifest(manifest=manifest, issuer_kid="int-test", verified_at=when)
+
+
+def _sign(manifest: Manifest, *, catalog: bool = True) -> Manifest:
+    """Sign with the manifest issuer key. ``catalog=False`` leaves the catalog unsigned."""
+    private, _cache = _issuer()
+    if catalog and manifest.space_catalog is not None:
+        manifest.space_catalog_sig = _b64u(
+            private.sign(
+                canonical_space_catalog_bytes(
+                    manifest.space_catalog,
+                    space_id=manifest.space_id or "",
+                    session_id=manifest.session_id,
+                )
+            )
+        )
+    manifest.signature = _b64u(private.sign(canonical_manifest_bytes(manifest)))
+    return manifest
+
+
+def _verify(manifest: Manifest) -> VerifiedManifest:
+    _private, cache = _issuer()
+    return ManifestVerifier(cache).verify(manifest)
+
+
+def _verified(
+    predicates: dict[str, str],
+    *,
+    space_id: str,
+    catalog: SpaceCatalog | None,
+    session_id: str | None = None,
+    sign_catalog: bool = True,
+) -> VerifiedManifest:
+    return _verify(
+        _sign(
+            _manifest(
+                predicates,
+                space_id=space_id,
+                catalog=catalog,
+                session_id=session_id,
+            ),
+            catalog=sign_catalog,
+        )
+    )
 
 
 def _flag(monkeypatch: pytest.MonkeyPatch, on: bool) -> None:
@@ -224,6 +311,16 @@ def test_null_space_catalog_does_not_change_canonical_bytes() -> None:
     assert canonical_manifest_bytes(manifest) == canonical_manifest_bytes(raw)
     carrying = manifest.model_copy(update={"space_catalog": _catalog_b()})
     assert canonical_manifest_bytes(carrying) == canonical_manifest_bytes(raw)
+    signed_beside = carrying.model_copy(update={"space_catalog_sig": "abc"})
+    assert canonical_manifest_bytes(signed_beside) == canonical_manifest_bytes(raw)
+    payload = json.loads(
+        canonical_space_catalog_bytes(
+            _catalog_b(), space_id="space-b", session_id="sess-bytes"
+        )
+    )
+    assert set(payload) == {"session_id", "space_catalog", "space_id"}
+    assert payload["space_id"] == "space-b"
+    assert payload["session_id"] == "sess-bytes"
 
 
 def test_flag_off_envelope_matches_a_manifest_without_a_catalog(
@@ -807,3 +904,173 @@ def test_unsigned_name_in_every_field_stays_out_of_the_answer(
     assert "clinic_visit" in shown
     assert result["sql_used"] is None
     assert not result["rows"]
+
+
+def _kept_row_catalog(extra: str) -> SpaceCatalog:
+    """A catalog intersection would keep, with ``extra`` only in free text."""
+    sql = f"SELECT COUNT(*) AS {extra} FROM clinic_visit /* {extra} */"
+    return SpaceCatalog(
+        objects=[
+            SpaceObject(name="clinic_visit", relation="clinic_visit", key=[extra]),
+        ],
+        links=[
+            SpaceLink(
+                name=extra,
+                from_object="clinic_visit",
+                from_columns=[extra],
+                to_object="clinic_visit",
+                to_columns=[extra],
+                cardinality=extra,
+            )
+        ],
+        measures=[
+            SpaceMeasure(
+                name=extra,
+                grain="clinic_visit",
+                expression=sql,
+                description=extra,
+            )
+        ],
+        definitions=[
+            SpaceDefinition(name=extra, grain="clinic_visit", text=sql),
+        ],
+        granted_tables=["clinic_visit"],
+    )
+
+
+def _resign_manifest(manifest: Manifest) -> Manifest:
+    """Replace the manifest signature. Leaves ``space_catalog_sig`` as it is."""
+    private, _cache = _issuer()
+    manifest.signature = _b64u(private.sign(canonical_manifest_bytes(manifest)))
+    return manifest
+
+
+def test_unsigned_name_on_kept_rows_stays_out_of_the_answer(
+    monkeypatch: pytest.MonkeyPatch, choice_port: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A tampered catalog with no signature is not used at all."""
+    import logging
+
+    from CortexOS.dms.answer_engine import answer
+    from CortexOS.dms.space_catalog import current_space_catalog, gate_semantic, open_space_catalog
+
+    extra = "payroll_secret"
+    caplog.set_level(logging.WARNING)
+    verified = _verified(
+        {"clinic_visit": "TRUE"},
+        space_id="space-b",
+        catalog=_kept_row_catalog(extra),
+        sign_catalog=False,
+    )
+    assert verified.catalog_trusted is False
+    assert verified.catalog_refusal == CATALOG_SIG_MISSING
+    assert CATALOG_SIG_MISSING in caplog.text
+    _flag(monkeypatch, True)
+    script = _Script(
+        {"metric_id": "catalog", "why": extra, "closest_question": extra},
+        {"agrees": True, "unsure": False},
+    )
+    _arm(monkeypatch, script)
+    result = answer(
+        QUESTION_B,
+        session_id="kept-row",
+        space_id="space-b",
+        verified=verified,
+        require_grounding=True,
+    )
+    shown = "\n".join(
+        (
+            _customer(result),
+            _prompt(script),
+            str(result.get("answer") or ""),
+            str(result.get("assumptions") or ""),
+            json.dumps(result.get("suggestions") or []),
+            json.dumps(result.get("reconfirm") or {}),
+        )
+    )
+    _assert_absent(shown, (extra,))
+    with open_space_catalog(verified):
+        assert current_space_catalog() is None
+        assert gate_semantic() is None
+
+
+def test_catalog_signature_tamper_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    """One changed byte, or a catalog signed for another space or session, is refused."""
+    import logging
+
+    caplog.set_level(logging.WARNING)
+    catalog = _kept_row_catalog("payroll_secret")
+    good = _sign(
+        _manifest(
+            {"clinic_visit": "TRUE"},
+            space_id="space-b",
+            catalog=catalog,
+            session_id="sess-good",
+        )
+    )
+    assert _verify(good).catalog_trusted is True
+
+    flipped = good.space_catalog_sig or ""
+    last = "A" if not flipped.endswith("A") else "B"
+    one_byte = good.model_copy(update={"space_catalog_sig": flipped[:-1] + last})
+    refused = _verify(_resign_manifest(one_byte))
+    assert refused.catalog_trusted is False
+    assert refused.catalog_refusal == CATALOG_SIG_INVALID
+
+    other_space = _sign(
+        _manifest(
+            {"clinic_visit": "TRUE"},
+            space_id="space-a",
+            catalog=catalog,
+            session_id="sess-good",
+        ),
+        catalog=False,
+    )
+    other_space.space_catalog_sig = good.space_catalog_sig
+    replayed_space = _verify(_resign_manifest(other_space))
+    assert replayed_space.catalog_trusted is False
+    assert replayed_space.catalog_refusal == CATALOG_SIG_INVALID
+
+    other_session = _sign(
+        _manifest(
+            {"clinic_visit": "TRUE"},
+            space_id="space-b",
+            catalog=catalog,
+            session_id="sess-other",
+        ),
+        catalog=False,
+    )
+    other_session.space_catalog_sig = good.space_catalog_sig
+    replayed_session = _verify(_resign_manifest(other_session))
+    assert replayed_session.catalog_trusted is False
+    assert replayed_session.catalog_refusal == CATALOG_SIG_INVALID
+    assert CATALOG_SIG_INVALID in caplog.text
+
+
+def test_gate_semantic_columns_come_from_the_signed_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signed catalog key is not a column. Columns come from the grant's schema."""
+    from CortexOS.dms.space_catalog import gate_semantic, open_space_catalog
+    from CortexOS.execution.submit import granted_column_names
+
+    extra = "payroll_secret"
+    _flag(monkeypatch, True)
+    verified = _verified(
+        {"clinic_visit": "TRUE"},
+        space_id="space-b",
+        catalog=_kept_row_catalog(extra),
+    )
+    assert verified.catalog_trusted is True
+    real = {name.casefold() for name in granted_column_names(verified)}
+    with open_space_catalog(verified):
+        semantic = gate_semantic()
+    assert semantic is not None
+    assert set(semantic["tables"]) == {"clinic_visit"}
+    for spec in semantic["tables"].values():
+        got = {str(name).casefold() for name in spec["columns"]}
+        assert extra not in got
+        if real:
+            assert got <= real
+        else:
+            assert got == {"_space_catalog"}

@@ -56,10 +56,11 @@ class SpaceDefinition(BaseModel):
 class SpaceCatalog(BaseModel):
     """The asking Space's approved ontology. 1.12.0.
 
-    DMS stamps this beside the signed bytes. It is not part of
-    ``canonical_manifest_bytes`` (removed with ``signature``). Absent means
-    the demo catalog, which is how the demo Space is sent. An empty
-    ``measures`` list means this Space has no approved measure.
+    DMS stamps this beside the manifest signature. Authenticity is
+    ``Manifest.space_catalog_sig`` over :func:`canonical_space_catalog_bytes`,
+    not the manifest signature. Absent means the demo catalog, which is how
+    the demo Space is sent. An empty ``measures`` list means this Space has
+    no approved measure.
     """
 
     objects: list[SpaceObject] = Field(default_factory=list)
@@ -102,10 +103,11 @@ class Manifest(BaseModel):
     # fall back to this only for manifests minted by a 1.0.0 client.
     row_predicate_sql: str | None = None
 
-    # 1.12.0. Optional. Not signed: canonical_manifest_bytes drops it with
-    # signature, so a catalog on the JSON does not change the signature.
-    # Absent on a 1.11 manifest and on the demo Space. The engine reads it
-    # only when CORTEX_SPACE_CATALOG is on (default off).
+    # 1.12.0. Optional. canonical_manifest_bytes drops both keys with
+    # signature, so a 1.11 signature still verifies. Authenticity of the
+    # catalog is space_catalog_sig (same issuer key, separate bytes).
+    # Absent on a 1.11 manifest and on the demo Space. The engine reads the
+    # catalog only when the signature verifies and CORTEX_SPACE_CATALOG is on.
     space_catalog: SpaceCatalog | None = Field(
         default=None,
         description=(
@@ -113,10 +115,22 @@ class Manifest(BaseModel):
             "relation, key), links (from_object, from_columns, to_object, "
             "to_columns, cardinality), measures (name, grain, expression, "
             "description), definitions (name, grain, text), and "
-            "granted_tables. Not signed: removed with signature before the "
-            "canonical bytes, so a 1.11 signature still verifies. Absent "
-            "means the demo catalog. Read only when CORTEX_SPACE_CATALOG is "
-            "on (default off)."
+            "granted_tables. Not part of the manifest signature: removed "
+            "with signature before the canonical bytes, so a 1.11 signature "
+            "still verifies. Authenticity is space_catalog_sig. Absent "
+            "means the demo catalog. Read only when that signature verifies "
+            "and CORTEX_SPACE_CATALOG is on (default off)."
+        ),
+    )
+    space_catalog_sig: str | None = Field(
+        default=None,
+        description=(
+            "1.12.0 Ed25519 signature, unpadded base64url, over "
+            "canonical_space_catalog_bytes(space_catalog, space_id, "
+            "session_id). Same issuer key and scheme as signature. Removed "
+            "with signature before canonical_manifest_bytes, so a 1.11 "
+            "signature still verifies and an older engine ignores this key. "
+            "Missing or invalid means the engine does not read space_catalog."
         ),
     )
 
@@ -142,11 +156,12 @@ def canonical_manifest_bytes(manifest: Manifest | Mapping[str, Any]) -> bytes:
     The rule, stated so a non-Python signer can reimplement it:
 
     1. Render the manifest as a JSON object.
-    2. Remove the ``signature`` key and the ``space_catalog`` key. The catalog
-       rides on the JSON and is not signed (1.12.0). A payload that has no
-       ``space_catalog`` key is unchanged by this removal.
+    2. Remove ``signature``, ``space_catalog``, and ``space_catalog_sig``.
+       The catalog rides beside the manifest signature and is authenticated
+       by ``space_catalog_sig`` (1.12.0). A payload that has neither catalog
+       key is unchanged by this removal.
     3. Recursively remove any key whose value is null, an empty array, or an
-       empty object. Empty strings are kept — an empty string is a value.
+       empty object. Empty strings are kept. An empty string is a value.
     4. Sort object keys by Unicode code point at every level.
     5. Serialise with no whitespace: ``,`` and ``:`` separators, no trailing
        newline, non-ASCII left literal.
@@ -160,10 +175,52 @@ def canonical_manifest_bytes(manifest: Manifest | Mapping[str, Any]) -> bytes:
     else:
         payload = dict(manifest)
     payload.pop("signature", None)
-    # 1.12.0: DMS stamps space_catalog beside the signed bytes and signs the
-    # bytes without it. Dropping a key that is absent leaves every existing
-    # signature unchanged.
+    # 1.12.0: DMS stamps the catalog and its signature beside the manifest
+    # signature and signs the manifest bytes without them. Dropping a key
+    # that is absent leaves every existing signature unchanged.
     payload.pop("space_catalog", None)
+    payload.pop("space_catalog_sig", None)
+    return _canonical_json(payload)
+
+
+def canonical_space_catalog_bytes(
+    catalog: SpaceCatalog | Mapping[str, Any],
+    *,
+    space_id: str,
+    session_id: str,
+) -> bytes:
+    """Bytes ``space_catalog_sig`` covers. Same JSON rules as the manifest.
+
+    The signed object binds the catalog to this grant's space and session::
+
+        {"session_id": <session_id>, "space_catalog": <catalog>, "space_id": <space_id>}
+
+    ``session_id`` is the manifest session, the nonce of this grant. A
+    signature minted for another space or another session does not verify
+    on this manifest. Both keys are always present. An empty string is kept.
+
+    Then the same steps as :func:`canonical_manifest_bytes`: drop null, empty
+    arrays and empty objects; sort keys by Unicode code point; serialise with
+    no whitespace; encode UTF-8. ``space_catalog_sig`` is not inside these
+    bytes. It is Ed25519 over them, unpadded base64url, under the same issuer
+    key that signs the manifest.
+    """
+    if isinstance(catalog, SpaceCatalog):
+        body: Any = catalog.model_dump(mode="json")
+    elif isinstance(catalog, Mapping):
+        body = dict(catalog)
+    else:
+        raise TypeError("space_catalog must be a SpaceCatalog or a mapping")
+    return _canonical_json(
+        {
+            "session_id": session_id,
+            "space_catalog": body,
+            "space_id": space_id,
+        }
+    )
+
+
+def _canonical_json(payload: Any) -> bytes:
     return json.dumps(
         _prune(payload),
         sort_keys=True,

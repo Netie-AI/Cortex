@@ -251,12 +251,16 @@ supported:
       space_catalog: objects (name, relation, key), links (name,
       from_object, from_columns, to_object, to_columns, cardinality),
       measures (name, grain, expression, description), definitions
-      (name, grain, text), granted_tables. The key is not signed.
-      canonical_manifest_bytes removes it with signature, so a manifest
-      that carries it verifies as the same bytes without it, and a
-      manifest that omits it is unchanged from 1.11. The engine reads
-      it only when CORTEX_SPACE_CATALOG is on (default off). Absent
-      means the demo catalog, which is how the demo Space is sent.
+      (name, grain, text), granted_tables. Manifest also gains optional
+      space_catalog_sig: Ed25519, unpadded base64url, over
+      canonical_space_catalog_bytes(catalog, space_id, session_id),
+      the same issuer key as signature. canonical_manifest_bytes removes
+      space_catalog and space_catalog_sig with signature, so a manifest
+      that carries them verifies as the same bytes without them, and a
+      manifest that omits them is unchanged from 1.11. The engine reads
+      the catalog only when that signature verifies and
+      CORTEX_SPACE_CATALOG is on (default off). Absent or invalid means
+      the demo catalog, which is how the demo Space is sent.
       Answer gains optional space_catalog_handoff (string). It is
       omitted when null, so an answer that does not hand off serializes
       as on 1.11. The value generative means this Space has no approved

@@ -7,10 +7,11 @@ This file records pointers. It does not certify a gate.
 ## Space catalog
 
 `CORTEX_SPACE_CATALOG` is off by default (`DMS_SPACE_CATALOG` is the same switch).
-On, the chooser reads `Manifest.space_catalog` for that Space only. A missing
-catalog keeps the demo catalog. No approved measures returns
-`space_catalog_handoff=generative` so DMS runs generative SQL. The catalog
-is not signed. Flag off, the demo path is unchanged.
+On, the chooser reads `Manifest.space_catalog` only when `space_catalog_sig`
+verifies under the manifest issuer key. A missing or invalid signature keeps
+the demo catalog. No approved measures returns
+`space_catalog_handoff=generative` so DMS runs generative SQL. Flag off, the
+demo path is unchanged.
 This line is a pointer, not a CI result. FDE-CORTEX-SPACE-CATALOG-01.
 
 ## Routine cron

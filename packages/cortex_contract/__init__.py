@@ -28,6 +28,7 @@ from .execution import (
     QueryResult,
     SubmitRequest,
     canonical_manifest_bytes,
+    canonical_space_catalog_bytes,
 )
 from .ledger import ChainVerification, LedgerEntry, LedgerWriter
 from .proposal import Diff, GateResult, Proposal, ProposalVersion
@@ -87,6 +88,7 @@ __all__ = [
     "QueryResult",
     "SubmitRequest",
     "canonical_manifest_bytes",
+    "canonical_space_catalog_bytes",
     "ChainVerification",
     "LedgerEntry",
     "LedgerWriter",

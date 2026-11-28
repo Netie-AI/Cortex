@@ -2201,7 +2201,20 @@
               }
             ],
             "default": null,
-            "description": "1.12.0 the asking Space's approved ontology: objects (name, relation, key), links (from_object, from_columns, to_object, to_columns, cardinality), measures (name, grain, expression, description), definitions (name, grain, text), and granted_tables. Not signed: removed with signature before the canonical bytes, so a 1.11 signature still verifies. Absent means the demo catalog. Read only when CORTEX_SPACE_CATALOG is on (default off)."
+            "description": "1.12.0 the asking Space's approved ontology: objects (name, relation, key), links (from_object, from_columns, to_object, to_columns, cardinality), measures (name, grain, expression, description), definitions (name, grain, text), and granted_tables. Not part of the manifest signature: removed with signature before the canonical bytes, so a 1.11 signature still verifies. Authenticity is space_catalog_sig. Absent means the demo catalog. Read only when that signature verifies and CORTEX_SPACE_CATALOG is on (default off)."
+          },
+          "space_catalog_sig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1.12.0 Ed25519 signature, unpadded base64url, over canonical_space_catalog_bytes(space_catalog, space_id, session_id). Same issuer key and scheme as signature. Removed with signature before canonical_manifest_bytes, so a 1.11 signature still verifies and an older engine ignores this key. Missing or invalid means the engine does not read space_catalog.",
+            "title": "Space Catalog Sig"
           },
           "space_id": {
             "anyOf": [
@@ -2520,7 +2533,7 @@
         "type": "object"
       },
       "ContractSpaceCatalog": {
-        "description": "The asking Space's approved ontology. 1.12.0.\n\nDMS stamps this beside the signed bytes. It is not part of\n``canonical_manifest_bytes`` (removed with ``signature``). Absent means\nthe demo catalog, which is how the demo Space is sent. An empty\n``measures`` list means this Space has no approved measure.",
+        "description": "The asking Space's approved ontology. 1.12.0.\n\nDMS stamps this beside the manifest signature. Authenticity is\n``Manifest.space_catalog_sig`` over :func:`canonical_space_catalog_bytes`,\nnot the manifest signature. Absent means the demo catalog, which is how\nthe demo Space is sent. An empty ``measures`` list means this Space has\nno approved measure.",
         "properties": {
           "definitions": {
             "items": {
@@ -4477,7 +4490,19 @@
                 "type": "null"
               }
             ],
-            "description": "1.12.0 the asking Space's approved ontology: objects (name, relation, key), links (from_object, from_columns, to_object, to_columns, cardinality), measures (name, grain, expression, description), definitions (name, grain, text), and granted_tables. Not signed: removed with signature before the canonical bytes, so a 1.11 signature still verifies. Absent means the demo catalog. Read only when CORTEX_SPACE_CATALOG is on (default off)."
+            "description": "1.12.0 the asking Space's approved ontology: objects (name, relation, key), links (from_object, from_columns, to_object, to_columns, cardinality), measures (name, grain, expression, description), definitions (name, grain, text), and granted_tables. Not part of the manifest signature: removed with signature before the canonical bytes, so a 1.11 signature still verifies. Authenticity is space_catalog_sig. Absent means the demo catalog. Read only when that signature verifies and CORTEX_SPACE_CATALOG is on (default off)."
+          },
+          "space_catalog_sig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.12.0 Ed25519 signature, unpadded base64url, over canonical_space_catalog_bytes(space_catalog, space_id, session_id). Same issuer key and scheme as signature. Removed with signature before canonical_manifest_bytes, so a 1.11 signature still verifies and an older engine ignores this key. Missing or invalid means the engine does not read space_catalog.",
+            "title": "Space Catalog Sig"
           },
           "space_id": {
             "anyOf": [
@@ -5602,7 +5627,7 @@
         "type": "object"
       },
       "SpaceCatalog": {
-        "description": "The asking Space's approved ontology. 1.12.0.\n\nDMS stamps this beside the signed bytes. It is not part of\n``canonical_manifest_bytes`` (removed with ``signature``). Absent means\nthe demo catalog, which is how the demo Space is sent. An empty\n``measures`` list means this Space has no approved measure.",
+        "description": "The asking Space's approved ontology. 1.12.0.\n\nDMS stamps this beside the manifest signature. Authenticity is\n``Manifest.space_catalog_sig`` over :func:`canonical_space_catalog_bytes`,\nnot the manifest signature. Absent means the demo catalog, which is how\nthe demo Space is sent. An empty ``measures`` list means this Space has\nno approved measure.",
         "properties": {
           "definitions": {
             "items": {
