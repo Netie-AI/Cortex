@@ -10,7 +10,7 @@
     "test:e2e:reliability": "playwright test e2e/reliability.spec.js"
   },
   "dependencies": {
-    "next": "16.4.3",
+    "next": "16.4.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.1",
     "recharts": "^2.12.0",
