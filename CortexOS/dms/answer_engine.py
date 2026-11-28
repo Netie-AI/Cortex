@@ -1204,7 +1204,61 @@ def _metric_reconfirm(
         "reconfirm": {"why": why, "closest_question": closest},
         "metric_choice": "refused",
         # The plan is built so the NL choke-point still redacts the question.
-        "query_plan": _honest_plan(question, None, layer="reconfirm", assumptions=why),
+        "query_plan": ask_plan(question, None, layer="reconfirm", assumptions=why),
+    }
+
+
+def _generative_handoff(question: str, audit_id: str) -> dict[str, Any]:
+    """No approved measure. DMS runs its generative path. Not a reconfirm."""
+    why = "this Space has no approved measure, so the question goes to the generative path"
+    return {
+        "answer": why,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "generative",
+        "rows": [],
+        "row_count": 0,
+        "source_table": None,
+        "layer": "generative",
+        "badge": "generative",
+        "metric_id": None,
+        "assumptions": why,
+        "total_count": 0,
+        "suggestions": [],
+        "reconfirm": None,
+        "metric_choice": "generative",
+        "space_catalog_handoff": "generative",
+        "query_plan": ask_plan(question, None, layer="generative", assumptions=why),
+    }
+
+
+def _space_catalog_response(question: str, audit_id: str, catalog: Any) -> dict[str, Any]:
+    """What this Space can answer. The demo catalog is not listed."""
+    from CortexOS.dms.space_catalog import listing_text
+
+    text = listing_text(catalog)
+    suggestions = [
+        (measure.description or measure.name)
+        for measure in catalog.measures
+        if (measure.description or measure.name)
+    ][:5]
+    return {
+        "answer": text,
+        "sql_used": None,
+        "chart_spec": None,
+        "audit_id": audit_id,
+        "violations_blocked": [],
+        "route": "sql",
+        "rows": [],
+        "source_table": None,
+        "layer": "catalog",
+        "badge": "catalog",
+        "assumptions": "space catalog (no SQL)",
+        "total_count": 0,
+        "suggestions": suggestions,
+        "query_plan": ask_plan(question, None, layer="catalog", assumptions="space catalog"),
     }
 
 
@@ -1393,7 +1447,7 @@ def _catalog_response(question: str, audit_id: str) -> dict[str, Any]:
         "assumptions": "semantic layer catalog (no SQL)",
         "total_count": 0,
         "suggestions": suggestions,
-        "query_plan": _honest_plan(
+        "query_plan": ask_plan(
             question, None, layer=payload["layer"], assumptions="catalog browse"
         ),
     }
@@ -1808,8 +1862,96 @@ def _honest_plan(
     return base
 
 
+def _source_table_for_answer(sql: str | None) -> str | None:
+    """Table the answer read.
+
+    The demo inferrer falls back to ``inventory``. A bound Space catalog
+    names a table from the SQL instead, and names nothing when the SQL
+    names none.
+    """
+    from CortexOS.dms.space_catalog import current_space_catalog
+
+    if current_space_catalog() is None:
+        from CortexOS.dms.query_service import _infer_source_table
+
+        return _infer_source_table(sql or "")
+    from CortexOS.dms.l2_plausibility import sql_table_names
+
+    named = sorted(sql_table_names(sql or ""))
+    return named[0] if named else None
+
+
+def ask_plan(
+    question: str,
+    sql: str | None,
+    *,
+    layer: str,
+    metric_id: str | None = None,
+    skill_score: float | None = None,
+    assumptions: str = "",
+) -> dict[str, Any]:
+    """The plan on an envelope.
+
+    A bound Space catalog does not run the demo keyword planner, so the plan
+    cannot name the demo catalog. Flag off, this is ``_honest_plan``.
+    """
+    from CortexOS.dms.space_catalog import current_space_catalog
+
+    if current_space_catalog() is None:
+        return _honest_plan(
+            question,
+            sql,
+            layer=layer,
+            metric_id=metric_id,
+            skill_score=skill_score,
+            assumptions=assumptions,
+        )
+    conf = 0.95 if layer in ("certified", "governed_metric") else 0.85
+    return {
+        "intent": metric_id or layer or "unknown",
+        "confidence": round(conf, 3),
+        "limit": None,
+        "source_table": None,
+        "sort": None,
+        "candidates": [],
+        "layer": layer,
+        "metric_id": metric_id,
+        "skill_score": round(skill_score, 3) if skill_score is not None else None,
+        "assumptions": assumptions,
+    }
+
+
 # ── the engine ────────────────────────────────────────────────────────────────
 def answer(
+    question: str,
+    *,
+    session_id: str | None = None,
+    space_id: str | None = None,
+    verified: VerifiedManifest | None = None,
+    require_grounding: bool = False,
+    stamp_l2_route: bool = False,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Bind the Space catalog for this ask, then run the engine.
+
+    The switch defaults off. Off, the binding is empty and ``_answer_bound``
+    is the path this function ran before.
+    """
+    from CortexOS.dms.space_catalog import open_space_catalog
+
+    with open_space_catalog(verified):
+        return _answer_bound(
+            question,
+            session_id=session_id,
+            space_id=space_id,
+            verified=verified,
+            require_grounding=require_grounding,
+            stamp_l2_route=stamp_l2_route,
+            confirm=confirm,
+        )
+
+
+def _answer_bound(
     question: str,
     *,
     session_id: str | None = None,
@@ -1889,7 +2031,7 @@ def answer(
             "audit_id": audit_id, "violations_blocked": ["DDL_ATTEMPT"], "route": "blocked",
             "rows": [], "source_table": None, "layer": "blocked", "badge": "blocked",
             "assumptions": "destructive operation refused", "total_count": 0,
-            "query_plan": _honest_plan(question, None, layer="blocked", assumptions="destructive"),
+            "query_plan": ask_plan(question, None, layer="blocked", assumptions="destructive"),
         })
 
     def _space_doc_rag() -> dict[str, Any] | None:
@@ -1904,7 +2046,7 @@ def answer(
             "violations_blocked": [], "route": "rag", "sources": sources, "rows": [],
             "source_table": None, "layer": "rag", "badge": "document", "assumptions": "",
             "total_count": 0,
-            "query_plan": _honest_plan(question, None, layer="rag"),
+            "query_plan": ask_plan(question, None, layer="rag"),
         }
 
     layer = badge = ""
@@ -1956,50 +2098,83 @@ def answer(
     # Skills run after governed routes so golden/certified paths stay authoritative.
     # A noun the ontology does not define, and a shape no metric can express,
     # are the model's decision. They are not a regex that refuses first.
+    # A bound Space catalog skips the demo certified set and the demo skills.
     if sql is None:
-        from packs.dms.semantic.catalog_answer import is_catalog_intent
+        from CortexOS.dms.space_catalog import current_space_catalog
 
-        if is_catalog_intent(question):
-            return _done(_catalog_response(question, audit_id))
-        cq = match_certified(question)
-        if cq is not None:
-            sql, layer, badge = cq.sql, "certified", "certified"
-            assumptions = f"certified query {cq.id}"
-            metric_id = cq.id
-            planned_tables = tuple(cq.tables)
-            from packs.dms.semantic.loader import normalize_certified_sql
+        space = current_space_catalog()
+        if space is not None and not space.measures:
+            return _done(_generative_handoff(question, audit_id))
+        if space is None:
+            from packs.dms.semantic.catalog_answer import is_catalog_intent
 
-            sql, violations = normalize_certified_sql(cq)
-            if violations:
-                return _abs(f"certified query {cq.id} unresolved literal {violations}")
+            if is_catalog_intent(question):
+                return _done(_catalog_response(question, audit_id))
+            cq = match_certified(question)
+            if cq is not None:
+                sql, layer, badge = cq.sql, "certified", "certified"
+                assumptions = f"certified query {cq.id}"
+                metric_id = cq.id
+                planned_tables = tuple(cq.tables)
+                from packs.dms.semantic.loader import normalize_certified_sql
+
+                sql, violations = normalize_certified_sql(cq)
+                if violations:
+                    return _abs(f"certified query {cq.id} unresolved literal {violations}")
         if sql is None:
             from CortexOS.dms.metric_choice import decide_metric
 
             # The cascade does not choose. A model does, and a second model
             # checks the choice. Unarmed fails closed.
             metric_decision = decide_metric(question)
+            if space is not None and metric_decision.catalog:
+                return _done(_space_catalog_response(question, audit_id, space))
             if metric_decision.serve:
-                from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
-
                 plan_id = metric_decision.selection.metric_id
                 plan_slots = dict(metric_decision.selection.slots)
-                try:
-                    sql = compile_metric(load_all(), plan_id, plan_slots)
+                plan_sql = str(getattr(metric_decision.selection, "sql", "") or "").strip()
+                stated = str(metric_decision.selection.why or "").strip()
+                if plan_sql:
+                    from CortexOS.dms.l2_plausibility import sql_table_names
+
+                    sql = plan_sql
                     layer, badge = "governed_metric", "governed_metric"
-                    stated = str(metric_decision.selection.why or "").strip()
                     assumptions = stated or f"metric choice {plan_id}"
                     metric_id = plan_id
-                    metric_slots = plan_slots
-                    planned_tables = _tables_stated_by_metric(plan_id)
-                except SemanticError:
+                    metric_slots = {}
+                    planned_tables = tuple(sorted(sql_table_names(sql)))
+                elif space is not None:
                     metric_decision = type(metric_decision)(
                         False,
                         metric_decision.selection,
-                        f"could not compile {plan_id}, so it cannot be served directly",
+                        "the approved measure has no definition to run, so it cannot be served directly",
                     )
                     sql = None
+                else:
+                    from packs.dms.semantic.loader import SemanticError, compile_metric, load_all
 
-    if sql is None and not _choice_refused(metric_decision):
+                    try:
+                        sql = compile_metric(load_all(), plan_id, plan_slots)
+                        layer, badge = "governed_metric", "governed_metric"
+                        assumptions = stated or f"metric choice {plan_id}"
+                        metric_id = plan_id
+                        metric_slots = plan_slots
+                        planned_tables = _tables_stated_by_metric(plan_id)
+                    except SemanticError:
+                        metric_decision = type(metric_decision)(
+                            False,
+                            metric_decision.selection,
+                            f"could not compile {plan_id}, so it cannot be served directly",
+                        )
+                        sql = None
+
+    from CortexOS.dms.space_catalog import current_space_catalog
+
+    if (
+        sql is None
+        and current_space_catalog() is None
+        and not _choice_refused(metric_decision)
+    ):
         hit = query_skills.find(question)
         if hit is not None:
             skill_score = float(hit["score"])
@@ -2036,6 +2211,21 @@ def answer(
                 sql = hit["sql_template"]
                 layer, badge = "query_skill", "query_skill"
                 assumptions = f"query skill match score={skill_score:.3f} (stored sql)"
+
+    if sql is None and current_space_catalog() is not None:
+        if metric_decision is not None and not metric_decision.serve:
+            from CortexOS.dms.space_catalog import confine_closest, confine_why
+
+            why = confine_why(metric_decision.why, current_space_catalog(), question)
+            closest = confine_closest(
+                metric_decision.selection.closest_question,
+                current_space_catalog(),
+                question,
+            )
+            return _done(
+                _metric_reconfirm(question, audit_id, why=why, closest=closest)
+            )
+        return _abs("no governed metric or certified query matched")
 
     if sql is None:
         # L2 lives on the engine port module, not here. This file must not
@@ -2134,7 +2324,9 @@ def answer(
                 )
             )
 
-    semantic = load_semantic_layer()
+    from CortexOS.dms.space_catalog import gate_semantic
+
+    semantic = gate_semantic() or load_semantic_layer()
     # Contract live ask: semantic guardrail then C4 submit (enforce_manifest).
     # Legacy callers keep the old connection + guard_and_execute path.
     if verified is not None:
@@ -2275,7 +2467,7 @@ def answer(
     )
 
     # Graduate successful non-session answers into the skill store
-    if layer in ("certified", "governed_metric", "query_skill"):
+    if layer in ("certified", "governed_metric", "query_skill") and current_space_catalog() is None:
         query_skills.capture(
             question,
             metric_id=metric_id if layer != "certified" else None,
@@ -2295,12 +2487,12 @@ def answer(
         "rows": rows,
         "total_count": total_count if total_count is not None else len(rows),
         "truncated": truncated,
-        "source_table": _infer_source_table(sql),
+        "source_table": _source_table_for_answer(sql),
         "layer": layer,
         "badge": badge,
         "assumptions": assumptions,
         "metric_id": metric_id,
-        "query_plan": _honest_plan(
+        "query_plan": ask_plan(
             question,
             guard_result.safe_sql,
             layer=layer,
