@@ -246,7 +246,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(goal_audit, "LEDGER_DB_PATH", tmp_path / "ledger.db")
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    return TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
 
 def test_fire_wraps_before_classifying_and_reports_the_band(client):

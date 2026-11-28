@@ -180,7 +180,7 @@ def test_qr_label_endpoint(ops_db):
     os.environ["PACK"] = "dms"
     netie.config._cached_config = None
     app = create_app()
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-API-Key": "pytest-viewer-key"})
     res = client.get(f"/dms/warehouse/locations/{bin_loc['id']}/qr-label")
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"

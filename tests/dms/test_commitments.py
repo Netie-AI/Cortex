@@ -236,7 +236,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(goal_audit, "LEDGER_DB_PATH", tmp_path / "ledger.db")
     from CortexOS.api.app import create_app
 
-    return TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    return TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
 
 def test_fire_recovers_commitments_while_keeping_the_payload_wrapped(client):

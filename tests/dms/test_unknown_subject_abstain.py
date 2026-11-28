@@ -111,7 +111,7 @@ def dms_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     get_session_registry().bind(verifier.verify(manifest))
     clear_session(WIDE_SESSION)
 
-    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
     yield client
 
     set_verifier_for_tests(None)

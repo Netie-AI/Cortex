@@ -65,6 +65,9 @@ def create_app() -> Any:
     )
     from CortexOS.insights.routes import register_insights_routes
     from CortexOS.packaging import extra_available
+
+    # One pre-existing crossing (allowlisted debt); #263 uses a second name from it.
+    from packs.dms.security.api_auth import require_role as dms_caller_role
     from packs.dms.security.api_auth import require_spend_key
 
     register_contract_routes(app)
@@ -123,9 +126,14 @@ def create_app() -> Any:
         from netie.api.stream_routes import register_stream_routes
         from netie.api.task_routes import register_task_routes
 
-        register_dms_routes(app)
+        # #263: /dms/query is gated with the pack's viewer dependency, which
+        # still accepts the published demo viewer key DMS sends by default.
+        # The engine port refuses that key, so it would break the DMS consumer.
+        register_dms_routes(app, query_auth=dms_caller_role("viewer"))
         register_brain_routes(app)
-        register_task_routes(app)
+        # DMS's F5 compliance gate calls gate/check with its configured key (by
+        # default the demo viewer key), as for /dms/query.
+        register_task_routes(app, gate_auth=dms_caller_role("viewer"))
         register_skill_routes(app)
         register_sidecar_routes(app)
         # Studio ontology page. Same api_auth viewer gate as the other /dms reads

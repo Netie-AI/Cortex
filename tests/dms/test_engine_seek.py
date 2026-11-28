@@ -234,7 +234,7 @@ def test_seek_route_works_with_an_empty_body(monkeypatch, tmp_path):
 
     from CortexOS.api.app import create_app
 
-    client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+    client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
 
     created = client.post(
         "/api/goals",

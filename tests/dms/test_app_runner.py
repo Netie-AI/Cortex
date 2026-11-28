@@ -229,7 +229,7 @@ def test_activity_lists_running(monkeypatch, tmp_path):
     assert started["ok"] is True
 
     try:
-        client = TestClient(create_app(), headers={"X-API-Key": "dms-demo-admin-key"})
+        client = TestClient(create_app(), headers={"X-API-Key": "pytest-admin-key"})
         activity = client.get("/api/engine/activity").json()
         assert activity["ok"] is True
         running = activity["apps"]["running"]

@@ -99,7 +99,9 @@ def test_run_cost_endpoint_returns_total_and_records(monkeypatch):
             headers={"X-API-Key": "sk-steward-dag"},
         )
         assert run.status_code == 200
-        cost = client.get("/api/engine/runs/cost_probe/cost")
+        cost = client.get(
+            "/api/engine/runs/cost_probe/cost", headers={"X-API-Key": "sk-steward-dag"}
+        )
     assert cost.status_code == 200
     body = cost.json()
     assert body["run_id"] == "cost_probe"

@@ -199,7 +199,7 @@ def serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
     from CortexOS.api.app import create_app
 
     client = TestClient(
-        create_app(), client=("127.0.0.1", 5555), headers={"X-API-Key": "dms-demo-admin-key"}
+        create_app(), client=("127.0.0.1", 5555), headers={"X-API-Key": "pytest-admin-key"}
     )
 
     def point(path: Path) -> TestClient:

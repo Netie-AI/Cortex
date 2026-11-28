@@ -37,6 +37,7 @@ _ROLE_RANK: Final[dict[str, int]] = {role: rank for rank, role in enumerate(ROLE
 
 NO_AUTHORIZER_DETAIL: Final[str] = "API authorization is not configured on this engine"
 AUTHORIZER_FAILED_DETAIL: Final[str] = "API authorization is unavailable"
+UNAUTHENTICATED_DETAIL: Final[str] = "Valid API key required (X-API-Key or Bearer)"
 
 
 @runtime_checkable
@@ -162,8 +163,18 @@ def require_role(min_role: str) -> Any:
             raise HTTPException(status_code=503, detail=NO_AUTHORIZER_DETAIL) from None
         try:
             principal = await authorizer.authorize(request, min_role)
-        except HTTPException:
-            raise
+        except HTTPException as exc:
+            # Fixed bodies only (#263): the authorizer's own text can name the
+            # caller's role and actor, an OpenVault deny reason (service token
+            # state, verify reachability) or tell a published key from an
+            # unknown one. The status passes through; the words do not.
+            if exc.status_code == 401:
+                raise HTTPException(status_code=401, detail=UNAUTHENTICATED_DETAIL) from None
+            if exc.status_code == 403:
+                raise HTTPException(
+                    status_code=403, detail=f"Requires role {min_role!r} or higher"
+                ) from None
+            raise HTTPException(status_code=503, detail=AUTHORIZER_FAILED_DETAIL) from None
         except Exception:  # noqa: BLE001 - fail closed, and keep the error text out of the body
             raise HTTPException(status_code=503, detail=AUTHORIZER_FAILED_DETAIL) from None
         role = str(getattr(principal, "role", "") or "")
@@ -225,6 +236,7 @@ __all__ = [
     "RequestAuthorizer",
     "SPEND_REQUIRES_AUTH",
     "SPEND_REQUIRES_AUTH_MESSAGE",
+    "UNAUTHENTICATED_DETAIL",
     "clear_authorizer",
     "log_startup_warnings",
     "register_authorizer",
