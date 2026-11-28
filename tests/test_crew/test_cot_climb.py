@@ -540,6 +540,54 @@ def _is_exact_honor_01_seam(path: str) -> bool:
     return True
 
 
+# FDE-CORTEX-SPACE-CATALOG-01: the ask path and the contract have to move
+# together. The license is this branch and this exact diff, nothing else.
+_SPACE_CATALOG_01_BASE = "6e1b42821ec6aeecc0dcaea6c980945223413f8a"
+_SPACE_CATALOG_01_BRANCH = "cursor/fde-cortex-space-catalog-01-d2fd"
+_SPACE_CATALOG_01_EXACT_DIFF = {
+    "CortexOS/dms/answer_engine.py": (
+        "e6f2be17ac1af563384c9123a623bb0e2ec3fa27edbd1dcf1eafd4f3621f74ff",
+        ("open_space_catalog", "space_catalog_handoff"),
+    ),
+    "packages/cortex_contract/execution.py": (
+        "b3b7b3eec8a26425a52d4fffcf52505a6a77566ac0e11d99a472addefbdac24b",
+        ("canonical_space_catalog_bytes", "space_catalog_sig"),
+    ),
+}
+
+
+def _is_exact_space_catalog_01_seam(path: str) -> bool:
+    """Allow only this branch's catalog diff on the two files it has to edit."""
+    if _branch_name() != _SPACE_CATALOG_01_BRANCH:
+        return False
+    expected = _SPACE_CATALOG_01_EXACT_DIFF.get(path)
+    if expected is None:
+        return False
+    if _git("cat-file", "-e", f"{_SPACE_CATALOG_01_BASE}^{{commit}}").returncode != 0:
+        _git("fetch", "--depth=1", "origin", _SPACE_CATALOG_01_BASE)
+    diff = _git(
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        f"{_SPACE_CATALOG_01_BASE}..HEAD",
+        "--",
+        path,
+    )
+    assert diff.returncode == 0, diff.stderr
+    expected_digest, seam_symbols = expected
+    for symbol in seam_symbols:
+        assert symbol in diff.stdout, f"space catalog seam missing {symbol!r} in {path}"
+    stable_diff = "\n".join(
+        line for line in diff.stdout.splitlines() if not line.startswith("index ")
+    )
+    digest = hashlib.sha256(f"{stable_diff}\n".encode()).hexdigest()
+    assert digest == expected_digest, (
+        f"space catalog exception covers only its exact diff in {path}; "
+        "any other edit needs its own exception"
+    )
+    return True
+
+
 def _held_freeroute_paths(names: set[str]) -> list[str]:
     return sorted(
         path
@@ -552,6 +600,7 @@ def _held_freeroute_paths(names: set[str]) -> list[str]:
             or _is_exact_c7_05_104p2_seam(path)
             or _is_exact_metric_exact_412_seam(path)
             or _is_exact_honor_01_seam(path)
+            or _is_exact_space_catalog_01_seam(path)
         )
     )
 
@@ -591,6 +640,13 @@ def test_branch_does_not_dual_write_freeroute_layer() -> None:
         assert diff.returncode == 0, diff.stderr
         assert "-    async def freeroute_complete" not in diff.stdout
         assert "-    async def freeroute_status" not in diff.stdout
+
+
+def test_other_branch_editing_space_catalog_still_trips_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_HEAD_REF", "cursor/not-space-catalog")
+    assert _is_exact_space_catalog_01_seam("CortexOS/dms/answer_engine.py") is False
 
 
 def test_other_branch_editing_answer_engine_still_trips_guard(
