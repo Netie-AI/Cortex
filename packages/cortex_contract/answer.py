@@ -381,17 +381,34 @@ class Answer(BaseModel):
         ),
     )
 
+    # 1.12.0. "generative" when the asking Space has no approved measure and
+    # DMS should run its generative path. Omitted when null, so an answer
+    # that does not hand off serializes as on 1.11.
+    space_catalog_handoff: str | None = Field(
+        default=None,
+        description=(
+            "1.12.0 generative when this Space has no approved measure and "
+            "DMS should run its generative path, where the AI writes SQL "
+            "under the gates, instead of showing a reconfirm. route is "
+            "generative and reconfirm is null. Omitted when null. Older "
+            "clients ignore it. Set only when CORTEX_SPACE_CATALOG is on "
+            "(default off)."
+        ),
+    )
+
     @model_serializer(mode="wrap")
     def _omit_empty_optional(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
         # No return annotation: the JSON schema stays the model's own. A null
-        # reading echo and an empty verified_query_ids are omitted, so an
-        # answer without either serializes exactly as on 1.9.
+        # reading echo, an empty verified_query_ids, and a null handoff are
+        # omitted, so an answer without them serializes exactly as on 1.11.
         data = handler(self)
         if isinstance(data, dict):
             if data.get("plan_sql_reading_id") is None:
                 data.pop("plan_sql_reading_id", None)
             if not data.get("verified_query_ids"):
                 data.pop("verified_query_ids", None)
+            if not data.get("space_catalog_handoff"):
+                data.pop("space_catalog_handoff", None)
         return data
 
 
