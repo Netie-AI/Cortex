@@ -2,6 +2,19 @@
 
 Agents append one section per shipped feature. Sequential build log.
 
+## FDE-CORTEX-SPACE-CATALOG-01 -- 2026-11-28
+
+Off unless `CORTEX_SPACE_CATALOG` or `DMS_SPACE_CATALOG` is on. On, the metric
+chooser and the SQL gate read the asking Space's `Manifest.space_catalog`
+(objects, links, measures, definitions, granted tables). No catalog keeps
+the demo catalog, which is how the demo Space is sent. A Space with no
+approved measures returns `route: generative` and
+`Answer.space_catalog_handoff: generative` instead of a reconfirm. Reasons
+stay inside that Space's names. Contract 1.12.0, additive. The catalog is
+not signed: `canonical_manifest_bytes` drops it with `signature`, so a
+1.11 signature still verifies. Flag off, a manifest that carries a catalog
+answers the same as one that does not.
+
 ## CORTEX-FREEROUTE-ROLE -- 2026-11-27
 
 Off unless `CORTEX_FREEROUTE_ROLE` is `1`, `true`, or `yes`. On, the chat
