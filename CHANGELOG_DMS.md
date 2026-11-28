@@ -17,8 +17,9 @@ is authenticated by `space_catalog_sig` (Ed25519 over
 with `signature`, so a 1.11 signature still verifies. A missing or invalid
 catalog signature is ignored and the ask uses the demo path. A verified
 catalog is still intersected with the signed row_predicates. Gate tables
-and columns come from that grant and the warehouse schema. Flag off, a
-manifest that carries a catalog answers the same as one that does not.
+and columns come from that grant and the warehouse schema. A reason names
+the catalog's objects and measures, or the code outside_catalog. Flag off,
+a manifest that carries a catalog answers the same as one that does not.
 
 ## CORTEX-FREEROUTE-ROLE -- 2026-11-27
 

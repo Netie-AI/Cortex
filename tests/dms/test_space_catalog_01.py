@@ -486,6 +486,7 @@ def test_space_b_reason_drops_foreign_names(
 ) -> None:
     from CortexOS.dms.answer_engine import answer
     from CortexOS.dms.metric_choice import NO_CLOSEST
+    from CortexOS.dms.space_catalog import CLARIFY_OUTSIDE_CATALOG
 
     _flag(monkeypatch, True)
     script = _Script(
@@ -509,11 +510,45 @@ def test_space_b_reason_drops_foreign_names(
     )
     shown = _customer(result)
     _assert_absent(shown, SPACE_A_NAMES + DEMO_NAMES)
-    assert "clinic visits" in shown
+    assert CLARIFY_OUTSIDE_CATALOG in shown
     assert result["route"] == "reconfirm"
     assert result["suggestions"] == [NO_CLOSEST]
     assert result["reconfirm"]["closest_question"] == NO_CLOSEST
     assert result.get("space_catalog_handoff") is None
+
+
+def test_template_words_cannot_keep_a_reason(
+    monkeypatch: pytest.MonkeyPatch, choice_port: None
+) -> None:
+    """A canned sentence is not kept because its words are on a list."""
+    from CortexOS.dms.answer_engine import answer
+    from CortexOS.dms.space_catalog import CLARIFY_OUTSIDE_CATALOG
+
+    canned = "the metric chooser is not armed, so it cannot be served directly"
+    _flag(monkeypatch, True)
+    script = _Script(
+        {
+            "metric_id": "none",
+            "why": canned,
+            "closest_question": canned,
+        }
+    )
+    _arm(monkeypatch, script)
+    result = answer(
+        QUESTION_B,
+        session_id="template-words",
+        space_id="space-b",
+        verified=_verified(
+            {"clinic_visit": "TRUE", "clinic_room": "TRUE"},
+            space_id="space-b",
+            catalog=_catalog_b(),
+        ),
+        require_grounding=True,
+    )
+    shown = _customer(result)
+    assert "not armed" not in shown
+    assert CLARIFY_OUTSIDE_CATALOG in shown
+    _assert_absent(shown, SPACE_A_NAMES + DEMO_NAMES)
 
 
 def test_space_with_no_measures_hands_off(

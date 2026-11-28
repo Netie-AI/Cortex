@@ -28,21 +28,11 @@ from typing import Any
 ENABLED_ENV = "CORTEX_SPACE_CATALOG"
 PRODUCER_ENV = "DMS_SPACE_CATALOG"
 
-# Words our own sentences use. A token outside this set, the question, and
-# the asking catalog is not shown. This does not choose a metric or write SQL.
-_TEMPLATE_WORDS = frozenset(
-    """
-    the so it cannot be served directly not armed metric chooser is none
-    approved measure measures this space has answers that question closest
-    no of for and was chosen meaning check agreed declared a an to on with
-    from are its only when what which how many per all one goes generative
-    path close confirmed answerable can pick above rephrase using those
-    topics here definition run did accept returned nothing usable does mean
-    same thing
-    """.split()
-)
+# The model named something that is not an object or measure of this catalog.
+# A code, not a rewritten sentence.
+CLARIFY_OUTSIDE_CATALOG = "outside_catalog"
 
-_TOKEN = re.compile(r"[a-z0-9]+")
+_TOKEN = re.compile(r"[a-z0-9_]+")
 
 
 def space_catalog_enabled() -> bool:
@@ -122,30 +112,25 @@ class BoundCatalog:
         item = self.definition(metric_id)
         return (item.text or "").strip() if item is not None else ""
 
-    def tokens(self) -> set[str]:
-        parts: list[str] = []
-        for name in self.granted_tables:
-            parts.append(name)
+    def entity_names(self) -> frozenset[str]:
+        """Object and measure names this catalog declares. Not prose."""
+        names: set[str] = set()
         for obj in self.objects:
-            parts.extend((obj.name, obj.relation, *obj.key))
-        for link in self.links:
-            parts.extend(
-                (
-                    link.name,
-                    link.from_object,
-                    link.to_object,
-                    link.cardinality,
-                    *link.from_columns,
-                    *link.to_columns,
-                )
-            )
+            for raw in (obj.name, obj.relation):
+                if raw:
+                    names.add(raw.casefold())
         for measure in self.measures:
-            parts.extend(
-                (measure.name, measure.description, measure.grain, measure.expression)
-            )
-        for item in self.definitions:
-            parts.extend((item.name, item.grain, item.text))
-        return _tokens(" ".join(parts))
+            if measure.name:
+                names.add(measure.name.casefold())
+        for link in self.links:
+            for raw in (link.from_object, link.to_object):
+                if raw:
+                    names.add(raw.casefold())
+        for raw in self.granted_tables:
+            bare = _bare_table(raw)
+            if bare:
+                names.add(bare)
+        return frozenset(names)
 
 
 _BOUND: ContextVar[BoundCatalog | None] = ContextVar("cortex_space_catalog", default=None)
@@ -403,52 +388,55 @@ def gate_semantic() -> dict[str, Any] | None:
     return {"tables": tables, "glossary": [], "sensitive_columns": []}
 
 
-def _tokens(text: str) -> set[str]:
-    return set(_TOKEN.findall((text or "").casefold()))
-
-
-def text_stays_in_catalog(text: str, catalog: BoundCatalog, question: str) -> bool:
-    """True when every long token is the question, the catalog, or our sentence."""
-    allowed = catalog.tokens() | _tokens(question) | _TEMPLATE_WORDS
-    for token in _tokens(text):
-        if len(token) >= 3 and token not in allowed:
-            return False
-    return True
-
-
-def fallback_why(catalog: BoundCatalog) -> str:
-    """A reason that names only this Space's measures or tables."""
-    labels: list[str] = []
+def structural_why(catalog: BoundCatalog) -> str:
+    """A reason built from this catalog's object and measure names."""
+    names: list[str] = []
+    for obj in catalog.objects:
+        if obj.name and obj.name.casefold() not in {item.casefold() for item in names}:
+            names.append(obj.name)
     for measure in catalog.measures:
-        label = measure.description or measure.name
-        if label:
-            labels.append(label)
-    if not labels:
-        labels = [name for name in catalog.granted_tables if name]
-    shown = ", ".join(labels)
-    if not shown:
-        return "this Space has no approved measure, so it cannot be served directly"
-    return (
-        f"none of the approved measures ({shown}) answers that question, "
-        "so it cannot be served directly"
-    )
+        if measure.name and measure.name.casefold() not in {item.casefold() for item in names}:
+            names.append(measure.name)
+    return ", ".join(names)
+
+
+def _names_outside(text: str, catalog: BoundCatalog) -> bool:
+    """True when ``text`` contains an identifier that is not a catalog entity.
+
+    Membership in the catalog's entity set. Not an allowlist of English words.
+    """
+    allowed = catalog.entity_names()
+    for token in _TOKEN.findall((text or "").casefold()):
+        if token not in allowed:
+            return True
+    return False
 
 
 def confine_why(text: str, catalog: BoundCatalog, question: str) -> str:
-    if text_stays_in_catalog(text, catalog, question):
-        return text
-    return fallback_why(catalog)
+    """The customer reason: catalog entities, or a typed clarify.
+
+    ``question`` is not an allowlist. The model was given only this catalog.
+    A reason that still names something outside it is not rewritten; the
+    caller gets ``CLARIFY_OUTSIDE_CATALOG``.
+    """
+    del question
+    cleaned = " ".join(str(text or "").split())
+    built = structural_why(catalog)
+    if cleaned == built:
+        return built
+    if cleaned and _names_outside(cleaned, catalog):
+        return CLARIFY_OUTSIDE_CATALOG
+    return built
 
 
 def confine_closest(text: str, catalog: BoundCatalog, question: str) -> str:
     from CortexOS.dms.metric_choice import NO_CLOSEST, is_no_closest
 
+    del question
     cleaned = " ".join(str(text or "").split())
-    if not cleaned or is_no_closest(cleaned):
+    if not cleaned or is_no_closest(cleaned) or _names_outside(cleaned, catalog):
         return NO_CLOSEST
-    if text_stays_in_catalog(cleaned, catalog, question):
-        return cleaned
-    return NO_CLOSEST
+    return cleaned
 
 
 def listing_text(catalog: BoundCatalog) -> str:

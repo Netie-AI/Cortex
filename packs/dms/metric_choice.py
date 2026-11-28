@@ -144,17 +144,6 @@ def _agreed_why(metric_id: str) -> str:
     return f"{_chosen_why(metric_id)} and the meaning check agreed"
 
 
-def _space_customer_text(raw: Any, catalog: Any) -> str:
-    """Customer text, blank when it shows one of this Space's measure ids."""
-    text = " ".join(str(raw or "").split())
-    if not text:
-        return ""
-    folded = text.casefold()
-    if any(mid.casefold() in folded for mid in catalog.measure_ids()):
-        return ""
-    return text
-
-
 def _choose_space(question: str, catalog: Any) -> MetricSelection:
     """Choose from the bound Space catalog. The demo pack is not read."""
     from CortexOS.dms.space_catalog import (
@@ -193,45 +182,26 @@ def _choose_space(question: str, catalog: Any) -> MetricSelection:
             why="the metric chooser returned nothing usable, so it cannot be served directly",
         )
     metric_id = str(body.get("metric_id") or "none").strip()
-    closest = confine_closest(
-        _space_customer_text(body.get("closest_question"), catalog) or UNARMED_CLOSEST,
-        catalog,
-        question,
-    )
+    closest = confine_closest(str(body.get("closest_question") or ""), catalog, question)
+    why = confine_why(str(body.get("why") or ""), catalog, question)
     if metric_id.lower() == CATALOG_CHOICE and catalog_by_model_enabled():
-        stated = _space_customer_text(body.get("why"), catalog)
-        why = (
-            f"{stated.rstrip('.')}, so it cannot be served directly"
-            if stated
-            else "the metric chooser did not accept a declared metric"
-        )
         return MetricSelection(
             metric_id=CATALOG_CHOICE,
             closest_question=closest,
-            why=confine_why(why, catalog, question),
+            why=why,
         )
     if metric_id not in catalog.measure_ids():
         metric_id = "none"
     if metric_id == "none":
-        stated = _space_customer_text(body.get("why"), catalog)
-        why = (
-            f"{stated.rstrip('.')}, so it cannot be served directly"
-            if stated
-            else "the metric chooser did not accept a declared metric"
-        )
         return MetricSelection(
             closest_question=closest,
-            why=confine_why(why, catalog, question),
+            why=why,
         )
     sql = catalog.definition_sql(metric_id)
     if not sql:
         return MetricSelection(
             closest_question=closest,
-            why=confine_why(
-                "the approved measure has no definition to run, so it cannot be served directly",
-                catalog,
-                question,
-            ),
+            why=confine_why("", catalog, question),
         )
     return MetricSelection(
         metric_id=metric_id,
